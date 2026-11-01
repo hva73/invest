@@ -23,11 +23,13 @@ def main():
     # Financial UI fixture is confined to this temporary test database.
     import portfolios,portfolio_data
     with app.connect() as c:
-     portfolios.replace_pluto(c,1,[{'id':'portfolios:browser-test','name':'Browser fixture','kind':'portfolio'},{'id':'collections:browser-child','name':'Browser collection fixture','kind':'collection','parent_external_id':'portfolios:browser-test'}]);pid=c.execute("SELECT id FROM portfolios WHERE source='pluto'").fetchone()[0]
-     payload={'observed':'2026-01-01T12:00:00+00:00','value':{'value':{'amount':'1000','currency':'DKK'},'source_time':None},'positions_complete':True,'positions':portfolio_data.normalize_positions([{'name':'Test holding','currency':'USD','quantity':2,'price':None,'value':None}]),'accounts':portfolio_data.normalize_accounts([{'currency':'DKK','balance':'500','reservedForOrders':'100','buyingPower':'400'}]),'errors':[]}
+     portfolios.replace_pluto(c,1,[{'id':'portfolios:browser-test','name':'Browser fixture','kind':'portfolio'},{'id':'collections:browser-child','name':'Browser collection fixture','kind':'collection','parent_external_id':'portfolios:browser-test'}]);pid=c.execute("SELECT id FROM portfolios WHERE source='pluto' AND external_id='portfolios:browser-test'").fetchone()[0]
+     payload={'observed':'2026-01-01T12:00:00+00:00','value':{'value':{'amount':'1000','currency':'DKK'},'source_time':None},'positions_complete':True,'positions':portfolio_data.normalize_positions([{'name':'Test holding','currency':'USD','quantity':2,'price':None,'value':None,'unrealisedPnL':'2.5'},{'name':'Test negative holding','currency':'USD','quantity':1,'price':None,'value':None,'unrealisedPnL':'-1.5'}]),'accounts':portfolio_data.normalize_accounts([{'currency':'DKK','balance':'500','reservedForOrders':'100','buyingPower':'400'}]),'errors':[]}
      portfolio_data.save(c,1,pid,payload)
     page.reload();page.locator('.collection-children').wait_for();assert 'Browser collection fixture' in page.locator('.collection-children').inner_text();page.locator(f'[data-open-portfolio="{pid}"]').click();page.get_by_text('Kontanter pr. konto og valuta',exact=True).wait_for();page.get_by_text('Test holding',exact=False).wait_for()
     assert 'DKK' in page.locator('#content').inner_text()
+    page.locator('.pnl.positive').wait_for();assert '↗' in page.locator('.pnl.positive').inner_text();page.locator('.pnl.negative').wait_for();assert page.locator('.pnl.positive svg').is_visible()
+    page.screenshot(path='/tmp/escape-desktop-design.png',full_page=True)
     page.locator('nav [data-view=settings]').click();page.locator('#invite').click();invitation=page.locator('#invitation input');invitation.wait_for();token=invitation.input_value()
     other=browser.new_context();other_page=other.new_page();other_page.goto(url);other_page.locator('#login details summary').click()
     for name,value in {'invitation':token,'username':'browser-member','password':'member-password-long-enough'}.items():other_page.locator(f'#register-form [name={name}]').fill(value)
@@ -35,7 +37,7 @@ def main():
     mobile=browser.new_context(viewport={'width':390,'height':844},is_mobile=True,has_touch=True);mobile_page=mobile.new_page();mobile_page.goto(url)
     mobile_page.locator('#login-form [name=password]').fill('browser-test-password-long');mobile_page.locator('#login-form button').click();mobile_page.locator('#content .hero').wait_for()
     assert mobile_page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Mobile layout overflows'
-    mobile_page.locator('nav [data-view=reports]').click();mobile_page.get_by_text('Data & kørsler',exact=True).wait_for()
+    mobile_page.screenshot(path='/tmp/escape-mobile-design.png',full_page=True);mobile_page.locator('nav [data-view=reports]').click();mobile_page.get_by_text('Data & kørsler',exact=True).wait_for()
     assert not errors,errors
     browser.close();print('PASS: desktop login, proposal approval, job queue, invitation, account isolation financial snapshot display and 390px mobile navigation')
   finally:server.shutdown();server.server_close();app.DB=previous

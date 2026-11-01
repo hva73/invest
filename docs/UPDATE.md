@@ -85,3 +85,11 @@ Kør først Opdatér værdier og beholdninger på rodporteføljen. Kontantbalanc
 Samme opdateringsprocedure med frisk ZIP og apply_update.py, appen stoppet, derefter start og genindlæsning. Ingen ny konfiguration kræves. Opdatér liste med porteføljer/Collections for at få aktuelle parent-ID'er; opdatér derefter Collection-værdier og beholdninger. Rodporteføljens total skal ikke ændres blot fordi en Collection bliver hentet. En Collection, som ligger i en anden valuta eller har et andet kildetidspunkt, trækkes heller ikke fra for at udlede direkte beholdningers værdi.
 
 Hvis beholdningsformatet stadig er ukendt, del den nye begrænsede strukturtekst. Den indeholder typer og tilladte skemanøgler, ikke kontonøgler eller instrumentnavne. Den fulde rå kontooversigt eller tokens er ikke nødvendige til denne diagnose.
+
+## v0.7: design og sidste observerede Collection-wrapper
+
+Hent frisk ZIP og brug samme apply_update.py-procedure fra en ny mappe under escape_app/opdatering. Stop appen først, kør scriptet, kontroller returncode 0, og start appen. Ingen nye pakker, nøgler, scopes eller miljøvariabler. Genindlæs Safari med Cmd+Shift+R for at hente CSS og JavaScript.
+
+Opdatér værdier og beholdninger på en Collection. Datastatus er nu en fold-ud-sektion under værdien, så tekniske fejl ikke fylder hele oversigten. Hvis fejl stadig forekommer, åbn Datastatus og del den afgrænsede fejltekst. Bekræft instrumenter, antal, valuta, værdi og fortegn mod Pluto. Positive/negative pile i beholdningstabellen angiver urealiseret resultat i instrumentets valuta; de er ikke udvikling over en tidsperiode. Ukendte resultater vises neutralt.
+
+Kontroller både Mac og iPhone, at tabeller kan rulles vandret uden at siden selv løber ud over skærmen, og at Collections stadig står under deres portefølje uden ekstra bidrag til totalen.

@@ -137,3 +137,11 @@ class Data(unittest.TestCase):
  def test_nested_diagnostic_shows_structure_without_private_keys(self):
   text=portfolio_data.nested_shape({'private-key':{'assets':[{'name':'Private instrument','quantity':'123'}]}})
   self.assertIn('assets:list',text);self.assertNotIn('private-key',text);self.assertNotIn('Private instrument',text);self.assertNotIn('123',text)
+ def test_observed_extra_collection_object_wrapper(self):
+  # Structure from the diagnostic; values and wrapper name are synthetic.
+  data={'collection':{'localCurrency':'EUR'},'holdings':{'wrapper':{'accountCurrency':'DKK','localCurrency':'EUR','positions':[{'name':'Test stock','quantity':'1','currency':'USD','value':'25'}],'metadataA':'test','metadataB':'test'}},'accounts':[],'value':{'equity':'25','currency':'EUR'}}
+  rows=portfolio_data.complete_list(data,['positions','holdings','rows','items','data','assets'])
+  self.assertEqual(len(rows),1);self.assertEqual(rows[0]['name'],'Test stock')
+ def test_extra_wrapper_still_rejects_partial_positions(self):
+  data={'holdings':{'wrapper':{'positions':[],'nextToken':'test-more'}}}
+  with self.assertRaises(portfolio_data.PortfolioFormatError):portfolio_data.complete_list(data,['positions','holdings','items'])

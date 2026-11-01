@@ -97,6 +97,10 @@ def complete_list(data,keys):
         values=list(node.values())
         if values and all(holding_record(value) for value in values):
             records=values;break
+        # Observed wrapper: one object containing positions and currency metadata.
+        # Follow only this single unambiguous branch, with the existing depth cap.
+        if len(node)==1 and len(values)==1 and isinstance(values[0],dict):
+            node=values[0];continue
         # An unknown single wrapper is accepted only if its records explicitly
         # have instrument identity and quantity. Target allocations cannot pass.
         if len(node)==1 and len(values)==1 and isinstance(values[0],list) and values[0] and all(holding_record(value) for value in values[0]):

@@ -79,3 +79,13 @@ Ejeren har bekræftet, at Pluto-rodporteføljens værdi omfatter Collections. Op
 Collection-holdings kan nu læses fra et objekt med ID-nøgler, når samtlige værdier er beholdningsposter med instrumentidentitet og quantity. Et enkelt navngivet listeomslag kræver samme postvalidering; allocations/weights uden quantity accepteres ikke som beholdninger. Assets-listeomslag understøttes. Ukendte nøgler vises stadig ikke i diagnosen, men deres værdiers strukturelle typer vises i afgrænset dybde uden private feltværdier.
 
 62 automatiske tests, formatteringstest og Chromium-smoketest består. Browseren kontrollerer nu også, at en Collection placeres inde i forælderens visuelle gruppe. Ejerens faktiske indre holdings-format er endnu ikke verificeret efter rettelsen; fortsat fejl skal diagnosticeres fra den nye strukturtekst. Kontant-/Collection-værdiopslag, som lykkes, bevares som selvstændige sektioner.
+
+## v0.7: Collection-wrapper og visuelt løft
+
+Den nyeste live-diagnose viste en enkelt objektindpakning omkring et objekt med positions:list, localCurrency og accountCurrency. Collection-læseren følger nu også en sådan entydig enkelt-objektgren inden for den eksisterende dybdegrænse. Antalskontrol og afvisning af nextToken/partial-respons bevares. En ny regressionstest dækker den observerede struktur med syntetiske værdier. Faktisk beholdningsimport på Nordicway skal stadig verificeres efter opdatering.
+
+UI opdateret med marineblå flader, diskrete guldtoner, større værdital, instrumentmærker og tydeligere hierarki. Urealiseret positivt resultat vises grønt med opadgående SVG-pil, negativt rødt med nedadgående pil og faktisk nul neutralt. Null giver hverken pil eller falsk nul. Pile angiver urealiseret resultat mod kostpris, ikke dagsmomentum eller en historisk prisudvikling. Der er ingen konstruerede kurver, trendprocenter eller porteføljeafkast fra det uafklarede profitLoss-felt.
+
+Tekniske delvise fejl samles under en fungerende fold-ud datastatus; beskedfarver adskiller information, hentning, succes, advarsel og fejl. Kildetider vises i dansk tid med sekunder, og navigation til nye visninger ruller til toppen. Interne lokale portefølje-ID'er er fjernet fra kortenes tekst. Eksisterende ID-baserede handlinger og brugeradskillelse bevares.
+
+64 Python-tests, Node-formatterings-/piletests og Chromium-flow på desktop/390px mobil består. Desktop-/mobilbilleder fra midlertidige testdatabaser er visuelt kontrolleret; ingen faktiske markedsdata eller private brugerkonti bruges i skærmtesten. Fysisk iPhone/Safari skal stadig afprøves af ejeren.
