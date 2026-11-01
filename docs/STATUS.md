@@ -3,7 +3,7 @@
 | Område | Implementeret | Resterende |
 |---|---|---|
 | Porteføljer | Separate navne, eksplicit manglende kilde og synkronisering | Pluto MCP-kontrakt, autentifikation, beholdninger, reservationer, kurser, ordrer |
-| Global radar | Markeds- og aktivfiltre, ærlig tom tilstand | Dataleverandør, kildeproveniens, katalysatorer, AI-vurdering, Grav dybere |
+| Global radar | Vedvarende manuel observationsliste med HTTPS-kilde, kildetid, egen klassifikation, katalysator, risiko og næste handling; markeds-/aktivfiltre; vis analysegrundlag og overfør symbol til forslag | Dataleverandør, kildeproveniens, katalysatorer, AI-vurdering, Grav dybere |
 | Handelsmotor | Validerede long-forslag, kapitalbehov, FX-antagelse, omkostninger, stoprisiko, lokal godkendelse | Spread, kontantreservation, mæglergodkendelse, idempotent ordreafsendelse, afstemning, afslutning |
 | Journal | Vedvarende oprettelses- og godkendelseshændelser | Verificerede udførelser og afkaststatistik |
 | Rapporter | Tydeligt inaktiv plan i dansk tidszone | Scheduler, nyhedsdeduplikering, børs-kalendere, alarmer og levering |
@@ -19,3 +19,6 @@ Tre HTTP-integrationstests består: adgangskontrol/CSRF/oprettelse/godkendelse/l
 
 ## Eksterne forudsætninger
 Der er ingen Pluto-værktøjer blandt sessionens tilgængelige værktøjer og ingen relevante injicerede credentials. Der må ikke opfindes Pluto-endpoints eller forbindes en vilkårlig MCP-server. Næste integrationsarbejde kræver den officielle forbindelsesdokumentation og godkendt adgang. Nyheder, kurser og AI kræver valg af dokumenterede leverandører, datalicens og serverbaserede credentials. Privat publicering kræver en hostingdestination og TLS. Gem aldrig credentials i chat eller Git.
+
+## Opdatering: observationsliste
+Fem automatiske tests består inklusive HTTP-oprettelse af observationer, adgangskontrol, CSRF, afvisning af usikre links og tidsstempler samt persistens. Ingen virkelige nyheder er indlæst af udvikleren. Ingen ekstern kilde hentes fra brugerens link. Brugerens klassifikation er ikke uafhængigt verificeret. Grav dybere viser gemte noter og starter ikke en AI-analyse. Browser- og hostingtest af opdateringen er udestående.

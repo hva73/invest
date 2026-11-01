@@ -27,6 +27,16 @@ class Workflow(unittest.TestCase):
   self.login();p={'portfolio':'Hovedportefølje','ticker':'TEST','quantity':1,'price':100,'stop':110,'target':120,'costs':0,'fx':1}
   self.assertEqual(self.request('proposals',p)[0],400);p['stop']=90;p['price']=float('nan');self.assertEqual(self.request('proposals',p)[0],400)
   p['price']=100;self.assertEqual(self.request('proposals',p)[0],201);app.init();self.assertEqual(app.connect().execute('SELECT count(*) FROM proposals').fetchone()[0],1)
+ def test_opportunities(self):
+  data={'company':'Testfirma','ticker':'TEST','market':'Danmark','asset':'Aktier','headline':'Test af kildehenvisning','source_url':'https://example.com/source','published':'2020-01-01T12:00:00+00:00','classification':'Spekulation','catalyst':'Afventer dokumentation','risk':'Ukendt','next_action':'Læs originalkilden'}
+  self.assertEqual(self.request('opportunities',data)[0],401);self.login()
+  self.assertEqual(self.request('opportunities',data,False)[0],403)
+  self.assertEqual(self.request('opportunities',data)[0],201)
+  items=self.request('state')[1]['opportunities'];self.assertEqual(len(items),1);self.assertEqual(items[0]['headline'],data['headline'])
+  for invalid in ['javascript:alert(1)','http://example.com','https://user:password@example.com']:
+   data['source_url']=invalid;self.assertEqual(self.request('opportunities',data)[0],400)
+  data['source_url']='https://example.com';data['published']='2020-01-01T12:00:00';self.assertEqual(self.request('opportunities',data)[0],400)
+  app.init();self.assertEqual(len(self.request('state')[1]['opportunities']),1)
  def test_login_rate_limit(self):
   for _ in range(5):self.assertEqual(self.request('login',{'password':'wrong'})[0],401)
   self.assertEqual(self.request('login',{'password':'wrong'})[0],429)
