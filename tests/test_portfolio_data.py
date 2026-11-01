@@ -96,3 +96,8 @@ class Data(unittest.TestCase):
   self.assertNotIn('realized',result);self.assertNotIn('profitLoss',result)
  def test_conflicting_equity_and_value_fail_safely(self):
   with self.assertRaises(portfolio_data.PortfolioFormatError):portfolio_data.normalize_value({'equity':'100','value':'200','currency':'DKK'})
+
+ def test_unknown_cash_fields_report_shape_not_values(self):
+  accounts=portfolio_data.normalize_accounts([{'currency':'DKK','reservedForOrders':'0','unknownCash':'123456.789','unknownPower':'99999.111'}])
+  self.assertIsNone(accounts[0]['balance']['amount']);self.assertIsNone(accounts[0]['buying_power']['amount'])
+  self.assertEqual(accounts[0]['reserved']['amount'],'0');self.assertIn('unknownCash',accounts[0]['diagnostic']);self.assertNotIn('123456',accounts[0]['diagnostic'])

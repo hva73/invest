@@ -55,3 +55,11 @@ Worker kan planlægge pluto_data-jobs hver time for aktive Pluto-enheder med et 
 ## v0.6.1: porteføljeværdi fra equity
 
 Ejerens live-fejltekst på Nordicway viste get_portfolio_value-felterne timestamp:str, equity:str, profitLoss:str og currency:str. normalize_value accepterer nu equity som porteføljeværdi og timestamp som kildetid. profitLoss klassificeres ikke som realiseret/urealiseret afkast uden dokumenteret semantik. Modstridende value/equity-felter afvises. Alle 12 relevante finansielle tests består, herunder to nye regressionstests. Selve beløbet er endnu ikke verificeret i ejerens UI efter rettelsen.
+
+## v0.6.2: samlet billedgennemgang
+
+Ejerens billeder viser beholdningsrækker, men fortsat equity-formatfejl fra et gemt snapshot og ukendte kontantbalance-/købekraftfelter. Equity-rettelsen indgår i den nyeste kode; efter installation kræves et nyt Pluto-opslag for at erstatte gamle snapshotfejl. Kontosektionen giver nu en afgrænset diagnose med feltnavne/datatyper, hvis balance eller købekraft er ukendt, selv når reservationen kan læses. Den gætter ingen beløb og lækker ingen kontoværdier i diagnosen.
+
+Små ikke-nul-beløb bruger nu betydende cifre i visningen og afrundes ikke fejlagtigt til 0,00. Ekstremt små tal under JavaScripts Number-område vises med deres decimale eksponenttekst frem for nul. Antal vises med dansk formatering. Kursens kildetid forbliver ukendt, når Pluto ikke leverer et fortolkeligt tidspunkt. Der udledes ikke en ny kurs fra positionsværdi/antal.
+
+55 Python-tests, formatteringsregression med Node og Chromium-smoketesten består. Kontantbalance/købekraft er fortsat uafklaret for ejerens faktiske kontosvar; næste opslag skal give den nødvendige feltdiagnose. Skærmbilleder med private beløb er ikke gemt i repositoryet.

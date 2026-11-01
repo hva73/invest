@@ -69,3 +69,7 @@ På overblikket vælger ejeren Vis beholdninger og kontanter på én importeret 
 Kontrollér mod Pluto: valuta for hver konto, reservationer, senest registreret værdi, antal beholdninger og at en Collection ikke summeres oven i sin rodportefølje. get_positions totalCount kan være højere end returnerede rækker, når positioner er solgt under pagination; loopet stopper først, når nextToken er væk. Kvittering for et lykkedes API-opslag er ikke dokumentation for friske markedskurser. Sammenhold kildetid og indlæsningstid.
 
 Hvis cron aktiveres, henter worker også Pluto-datasæt timevis for aktive, importerede porteføljer med gyldigt token. Data læses igen; intet handles. Nye porteføljer kræver fortsat opdatering af navnelisten. Genlogin er nødvendigt ved tokenudløb indtil automatisk refresh er implementeret. Automatisk drift er ikke aktiveret blot ved kodeopdatering.
+
+## v0.6.2: samlet rettelse efter skærmbilleder
+
+Frisk ZIP + apply_update.py opdaterer både equity-understøttelse, kontodiagnose og præcision i visningen. Ingen nye pakker, scopes eller nøgler. Efter genstart/genindlæsning skal der klikkes Opdatér værdier og beholdninger på en portefølje; genindlæsning alene genbruger gamle snapshots og kan stadig vise den tidligere equity-fejl. Kopiér den nye kontodiagnose med feltnavne/datatyper til videre tilpasning. Den indeholder ikke balancebeløb eller tokens. Unknown-kildetider må ikke erstattes med indlæsningstiden.

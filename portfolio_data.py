@@ -69,6 +69,8 @@ def normalize_accounts(data):
         if not any(key in item for key in ['balance','cashBalance','reservedForOrders','reservedCash','reservedForOpenOrders','buyingPower']):raise PortfolioFormatError('Ukendte kontofelter og typer: '+shape(item))
         account={'currency':code,'balance':money(item,['balance','cashBalance'],code),'reserved':money(item,['reservedForOrders','reservedCash','reservedForOpenOrders'],code),'buying_power':money(item,['buyingPower'],code),'source_time':date_field(item,['asOf','balanceAsOf'])}
         if code and any(account[key]['currency'] not in (None,code) for key in ['balance','reserved','buying_power']):raise PortfolioFormatError('Kontobeløbets valuta stemmer ikke med kontoens valuta')
+        if account['balance']['amount'] is None or account['buying_power']['amount'] is None:
+            account['diagnostic']='Kontofelter og typer (ingen private værdier): '+shape(item)
         result.append(account)
     return result
 
@@ -128,6 +130,8 @@ def read(connect,user_id,portfolio_id,client_factory=None):
         accounts=field(data,['cashAccounts','accounts'])
         if accounts is None:payload['errors'].append('Collection-kontanter: svarfelt mangler')
         else:payload['accounts']=normalize_accounts(accounts)
+        for account in payload['accounts']:
+            if account.get('diagnostic'):payload['errors'].append((account['currency'] or 'Ukendt valuta')+': '+account['diagnostic'])
         payload['complete']=not payload['errors']
     elif namespace=='portfolios':
         # Keep independently successful sections while reporting failures explicitly.
@@ -163,6 +167,8 @@ def read(connect,user_id,portfolio_id,client_factory=None):
         except PortfolioFormatError as error:payload['errors'].append('positions: '+str(error))
         except Exception:payload['errors'].append('positions: Pluto-opslaget fejlede eller kunne ikke fuldføres')
         if not successful:raise PortfolioFormatError('Ingen datasektion kunne læses. '+'; '.join(payload['errors']))
+        for account in payload['accounts']:
+            if account.get('diagnostic'):payload['errors'].append((account['currency'] or 'Ukendt valuta')+': '+account['diagnostic'])
         payload['complete']=not payload['errors']
     else:raise PortfolioFormatError('Ukendt Pluto-porteføljetype')
     return payload
