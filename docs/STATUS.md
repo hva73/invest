@@ -63,3 +63,11 @@ Ejerens billeder viser beholdningsrækker, men fortsat equity-formatfejl fra et 
 Små ikke-nul-beløb bruger nu betydende cifre i visningen og afrundes ikke fejlagtigt til 0,00. Ekstremt små tal under JavaScripts Number-område vises med deres decimale eksponenttekst frem for nul. Antal vises med dansk formatering. Kursens kildetid forbliver ukendt, når Pluto ikke leverer et fortolkeligt tidspunkt. Der udledes ikke en ny kurs fra positionsværdi/antal.
 
 55 Python-tests, formatteringsregression med Node og Chromium-smoketesten består. Kontantbalance/købekraft er fortsat uafklaret for ejerens faktiske kontosvar; næste opslag skal give den nødvendige feltdiagnose. Skærmbilleder med private beløb er ikke gemt i repositoryet.
+
+## v0.6.3: observerede kontofelter og Collection-indpakning
+
+Ejerens nye billeder bekræfter, at equity/timestamp nu bliver vist som porteføljeværdi og kildetid. Kontodiagnosen viser currency, cash, withdrawalPower og reservedForOrders. Adapteren læser nu cash som kontantbalance og withdrawalPower som særskilt hævbart beløb. Withdrawal power bliver aldrig omdøbt til buying power eller frit investerbare kontanter. Købekraft er fortsat ukendt, hvis buyingPower ikke leveres, og dette alene giver ikke længere en fejl, når de kendte kontofelter kan læses.
+
+Det observerede Collection-svar har collection:dict, holdings:dict, accounts:list og value:dict. Metadata og økonomiske sektioner bevares separat. Indlejrede listeindpakninger understøttes i højst tre niveauer med faste nøgler, ikke gennem vilkårlig søgning efter arrays eller sammenlægning af dict-værdier. Pagination og count-uoverensstemmelser afvises. Ved ukendte holdings bevares de succesfuldt læste værdi-/kontosektioner, og beholdningsfejlen vises. Ny diagnose viser kun tilladte strukturnøgler og typer; ukendte nøgler skjules for ikke at lække eventuelle kontoid'er brugt som dictionary-nøgler.
+
+59 Python-tests, formatteringsregression og Chromium-smoketesten består. De faktiske felter inde i holdings- og value-objekterne er ikke vist i ejerens billeder; understøttelse af den konkrete Collection skal fortsat verificeres på Nordicway efter installation. Ingen private beløb eller kontonavne fra billederne er gemt i repositoryet.

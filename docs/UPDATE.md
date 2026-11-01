@@ -73,3 +73,9 @@ Hvis cron aktiveres, henter worker også Pluto-datasæt timevis for aktive, impo
 ## v0.6.2: samlet rettelse efter skærmbilleder
 
 Frisk ZIP + apply_update.py opdaterer både equity-understøttelse, kontodiagnose og præcision i visningen. Ingen nye pakker, scopes eller nøgler. Efter genstart/genindlæsning skal der klikkes Opdatér værdier og beholdninger på en portefølje; genindlæsning alene genbruger gamle snapshots og kan stadig vise den tidligere equity-fejl. Kopiér den nye kontodiagnose med feltnavne/datatyper til videre tilpasning. Den indeholder ikke balancebeløb eller tokens. Unknown-kildetider må ikke erstattes med indlæsningstiden.
+
+## v0.6.3: cash/withdrawalPower og Collections
+
+Installer frisk ZIP gennem apply_update.py under en ny mappe, mens appen er stoppet. Genstart og genindlæs siden. Ingen nye pakker, scopes eller nøgler er nødvendige.
+
+Kør først Opdatér værdier og beholdninger på rodporteføljen. Kontantbalance skal nu læses fra cash og hævbart beløb fra withdrawalPower. Købekraft må stadig vise —, når buyingPower ikke leveres; det er ikke en fejl og må ikke erstattes af withdrawalPower. Kør derefter samme opdatering på en Collection. Ukendte indre strukturfelter kan stadig kræve tilpasning; del kun den afgrænsede fejltekst. Succesfulde Collection-sektioner kan nu vises trods fejl i en anden sektion.

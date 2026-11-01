@@ -101,3 +101,28 @@ class Data(unittest.TestCase):
   accounts=portfolio_data.normalize_accounts([{'currency':'DKK','reservedForOrders':'0','unknownCash':'123456.789','unknownPower':'99999.111'}])
   self.assertIsNone(accounts[0]['balance']['amount']);self.assertIsNone(accounts[0]['buying_power']['amount'])
   self.assertEqual(accounts[0]['reserved']['amount'],'0');self.assertIn('unknownCash',accounts[0]['diagnostic']);self.assertNotIn('123456',accounts[0]['diagnostic'])
+
+ def test_observed_cash_and_withdrawal_are_separate(self):
+  # Field names from the user's live diagnostic; all amounts are synthetic.
+  rows=portfolio_data.normalize_accounts([{'currency':'DKK','cash':'200','withdrawalPower':'125','reservedForOrders':'75'}])
+  self.assertEqual(rows[0]['balance']['amount'],'200');self.assertEqual(rows[0]['withdrawal_power']['amount'],'125');self.assertEqual(rows[0]['reserved']['amount'],'75')
+  self.assertIsNone(rows[0]['buying_power']['amount']);self.assertNotIn('diagnostic',rows[0])
+ def test_nested_collection_preserves_metadata_and_currency(self):
+  class Client:
+   def __init__(self,token):pass
+   def tools(self):return TOOLS
+   def request(self,method,params):
+    return {'structuredContent':{'collection':{'localCurrency':'EUR','accountCurrency':'DKK'},'holdings':{'positions':[{'name':'Test stock','currency':'USD','quantity':'1','value':'10'}],'totalCount':1},'accounts':[{'currency':'EUR','cash':'20','withdrawalPower':'15','reservedForOrders':'5'}],'value':{'equity':'30','currency':'EUR','timestamp':'2026-01-01T00:00:00Z'}}}
+  result=portfolio_data.read(app.connect,1,self.child,Client)
+  self.assertTrue(result['complete']);self.assertEqual(result['value']['value'],{'amount':'30','currency':'EUR'});self.assertEqual(len(result['positions']),1);self.assertEqual(result['accounts'][0]['balance']['amount'],'20')
+ def test_collection_sections_survive_unknown_holdings(self):
+  class Client:
+   def __init__(self,token):pass
+   def tools(self):return TOOLS
+   def request(self,method,params):return {'structuredContent':{'collection':{'localCurrency':'EUR'},'holdings':{'unknown':'private-value'},'accounts':[{'currency':'EUR','cash':'20','withdrawalPower':'15','reservedForOrders':'5'}],'value':{'equity':'30','currency':'EUR'}}}
+  result=portfolio_data.read(app.connect,1,self.child,Client)
+  self.assertFalse(result['complete']);self.assertEqual(result['value']['value']['amount'],'30');self.assertEqual(result['accounts'][0]['balance']['amount'],'20');self.assertEqual(result['positions'],[])
+  self.assertNotIn('private-value',' '.join(result['errors']))
+ def test_nested_collection_rejects_partial_and_ambiguous_lists(self):
+  for data in [{'holdings':{'items':[],'nextToken':'more'}},{'holdings':{'items':[],'totalCount':1}},{'holdings':{'items':[],'positions':[]}}]:
+   with self.assertRaises(portfolio_data.PortfolioFormatError):portfolio_data.complete_list(data,['holdings','items','positions'])

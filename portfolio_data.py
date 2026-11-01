@@ -42,16 +42,43 @@ def date_field(obj,names):
 def money(obj,names,default_currency=None):
     value=field(obj,names);code=default_currency
     if isinstance(value,dict):
+        if value and not any(key in value for key in ['amount','value']):raise PortfolioFormatError('Ukendt beløbsstruktur; felter og typer: '+shape(value))
         explicit=currency(value.get('currency'))
         code=explicit or code;value=field(value,['amount','value'])
     return {'amount':number(value),'currency':code}
 
-def list_data(data,keys):
+def nested_shape(data,depth=0):
+    if not isinstance(data,dict):return type(data).__name__
+    allowed={'holdings','positions','rows','items','data','totalCount','nextToken','nextCursor','hasMore','collection','metadata','value','amount','equity','currency','localCurrency','accountCurrency','timestamp','asOf'}
+    parts=[]
+    for key in sorted(allowed.intersection(data)):
+        value=data[key]
+        detail=nested_shape(value,depth+1) if depth<2 and isinstance(value,dict) else type(value).__name__
+        parts.append(key+':'+detail)
+    unknown=len(set(data)-allowed)
+    if unknown:parts.append(str(unknown)+' øvrige felter (navne skjult)')
+    return '{'+', '.join(parts)+'}'
+
+def list_data(data,keys,depth=0):
     if isinstance(data,list):return data
-    if isinstance(data,dict):
-        lists=[data[k] for k in keys if isinstance(data.get(k),list)]
-        if len(lists)==1:return lists[0]
-    raise PortfolioFormatError('Ukendt listeformat; felter og typer: '+shape(data))
+    if isinstance(data,dict) and depth<3:
+        candidates=[data[k] for k in keys if isinstance(data.get(k),(list,dict))]
+        if len(candidates)==1:return list_data(candidates[0],keys,depth+1)
+    raise PortfolioFormatError('Ukendt/uklart listeformat; struktur uden private værdier: '+nested_shape(data))
+
+def complete_list(data,keys):
+    node=data;counts=[]
+    for _ in range(4):
+        if not isinstance(node,dict):break
+        if 'totalCount' in node:counts.append(node['totalCount'])
+        if node.get('nextToken') or node.get('nextCursor') or node.get('hasMore') is True:
+            raise PortfolioFormatError('Collection-beholdninger er delvise; ingen delvis liste vises')
+        candidates=[node[k] for k in keys if isinstance(node.get(k),(list,dict))]
+        if len(candidates)!=1:break
+        node=candidates[0]
+    records=list_data(data,keys)
+    if any(isinstance(count,bool) or not isinstance(count,int) or count!=len(records) for count in counts):raise PortfolioFormatError('Collection-beholdningernes antal stemmer ikke; ingen delvis liste vises')
+    return records
 
 def normalize_value(data,default_currency=None):
     if not isinstance(data,dict):raise PortfolioFormatError('Ukendt værdisvar; felter og typer: '+shape(data))
@@ -66,10 +93,10 @@ def normalize_accounts(data):
     for item in records:
         if not isinstance(item,dict):raise PortfolioFormatError('Ugyldig kontopost')
         code=currency(item.get('currency'))
-        if not any(key in item for key in ['balance','cashBalance','reservedForOrders','reservedCash','reservedForOpenOrders','buyingPower']):raise PortfolioFormatError('Ukendte kontofelter og typer: '+shape(item))
-        account={'currency':code,'balance':money(item,['balance','cashBalance'],code),'reserved':money(item,['reservedForOrders','reservedCash','reservedForOpenOrders'],code),'buying_power':money(item,['buyingPower'],code),'source_time':date_field(item,['asOf','balanceAsOf'])}
-        if code and any(account[key]['currency'] not in (None,code) for key in ['balance','reserved','buying_power']):raise PortfolioFormatError('Kontobeløbets valuta stemmer ikke med kontoens valuta')
-        if account['balance']['amount'] is None or account['buying_power']['amount'] is None:
+        if not any(key in item for key in ['balance','cashBalance','cash','reservedForOrders','reservedCash','reservedForOpenOrders','buyingPower','withdrawalPower']):raise PortfolioFormatError('Ukendte kontofelter og typer: '+shape(item))
+        account={'currency':code,'balance':money(item,['balance','cashBalance','cash'],code),'reserved':money(item,['reservedForOrders','reservedCash','reservedForOpenOrders'],code),'withdrawal_power':money(item,['withdrawalPower'],code),'buying_power':money(item,['buyingPower'],code),'source_time':date_field(item,['asOf','balanceAsOf'])}
+        if code and any(account[key]['currency'] not in (None,code) for key in ['balance','reserved','buying_power','withdrawal_power']):raise PortfolioFormatError('Kontobeløbets valuta stemmer ikke med kontoens valuta')
+        if account['balance']['amount'] is None or (account['buying_power']['amount'] is None and account['withdrawal_power']['amount'] is None):
             account['diagnostic']='Kontofelter og typer (ingen private værdier): '+shape(item)
         result.append(account)
     return result
@@ -122,14 +149,29 @@ def read(connect,user_id,portfolio_id,client_factory=None):
         # accountCurrency must never be substituted for it.
         local=currency(data.get('localCurrency')) or currency(metadata.get('localCurrency'))
         payload['currency']=local
-        payload['value']=normalize_value({'value':field(data,['value','totalValue']),'currency':local,'asOf':field(data,['asOf','valuationTime'])})
-        if local and payload['value']['value']['currency'] not in (None,local):raise PortfolioFormatError('Collection-værdiens valuta stemmer ikke med localCurrency')
-        if data.get('nextToken') or data.get('nextCursor') or data.get('hasMore') is True:raise PortfolioFormatError('Collection-svaret er ufuldstændigt')
-        payload['positions']=normalize_positions(data,local)
-        payload['positions_complete']=True
-        accounts=field(data,['cashAccounts','accounts'])
-        if accounts is None:payload['errors'].append('Collection-kontanter: svarfelt mangler')
-        else:payload['accounts']=normalize_accounts(accounts)
+        successful=0
+        try:
+            value=field(data,['value','totalValue'])
+            if isinstance(value,dict) and any(key in value for key in ['totalValue','equity','value']):
+                payload['value']=normalize_value(value,local)
+            else:
+                payload['value']=normalize_value({'value':value,'currency':local,'asOf':field(data,['asOf','valuationTime'])})
+            if local and payload['value']['value']['currency'] not in (None,local):raise PortfolioFormatError('Collection-værdiens valuta stemmer ikke med localCurrency')
+            successful+=1
+        except PortfolioFormatError as error:
+            payload['value']=None;payload['errors'].append('Collection-værdi: '+str(error))
+        try:
+            if data.get('nextToken') or data.get('nextCursor') or data.get('hasMore') is True:raise PortfolioFormatError('Collection-svaret er ufuldstændigt')
+            rows=complete_list(data,['positions','holdings','rows','items','data'])
+            payload['positions']=normalize_positions(rows,local)
+            payload['positions_complete']=True;successful+=1
+        except PortfolioFormatError as error:payload['errors'].append('Collection-beholdninger: '+str(error))
+        try:
+            accounts=field(data,['cashAccounts','accounts'])
+            if accounts is None:raise PortfolioFormatError('Kontofelt mangler')
+            payload['accounts']=normalize_accounts(accounts);successful+=1
+        except PortfolioFormatError as error:payload['errors'].append('Collection-kontanter: '+str(error))
+        if not successful:raise PortfolioFormatError('Ingen Collection-sektion kunne læses. '+'; '.join(payload['errors']))
         for account in payload['accounts']:
             if account.get('diagnostic'):payload['errors'].append((account['currency'] or 'Ukendt valuta')+': '+account['diagnostic'])
         payload['complete']=not payload['errors']
