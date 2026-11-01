@@ -4,7 +4,8 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from http.cookies import SimpleCookie
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit,parse_qs
+import oauth
 ROOT=Path(__file__).parent
 DB=os.environ.get('ESCAPE_DB',str(ROOT/'var/escape.db'))
 SESSIONS={}
@@ -45,6 +46,9 @@ def init():
         c.execute('CREATE TABLE IF NOT EXISTS invitations(token_hash TEXT PRIMARY KEY, created_by INTEGER NOT NULL REFERENCES users(id), expires REAL NOT NULL, used INTEGER NOT NULL DEFAULT 0)')
         c.execute("CREATE TABLE IF NOT EXISTS connections(user_id INTEGER PRIMARY KEY REFERENCES users(id), provider TEXT NOT NULL DEFAULT 'pluto', status TEXT NOT NULL, requested TEXT NOT NULL)")
         c.execute('CREATE TABLE IF NOT EXISTS connection_checks(user_id INTEGER PRIMARY KEY REFERENCES users(id), checked REAL NOT NULL)')
+        import jobs
+        jobs.init(c)
+        oauth.init(c)
         c.execute('DELETE FROM sessions WHERE expires<?',(time.time(),))
 
 def token_hash(token):
@@ -71,8 +75,16 @@ def register(data):
         c.execute('UPDATE invitations SET used=1 WHERE token_hash=?',(invite['token_hash'],))
 
 def connection_state(user_id):
-    with connect() as c: row=c.execute('SELECT status,requested FROM connections WHERE user_id=?',(user_id,)).fetchone()
-    return {'provider':'Pluto Markets','connected':False,'status':row['status'] if row else 'Ikke tilsluttet','requested':row['requested'] if row else None,'can_connect':False,'reason':'Afventer verificeret Pluto-appregistrering, OAuth-klient og tilladelser. Ingen tokens eller porteføljedata er hentet.','requested_access':'Kun læseadgang'}
+    with connect() as c:
+        row=c.execute('SELECT status,requested FROM connections WHERE user_id=?',(user_id,)).fetchone()
+        token=c.execute('SELECT expires FROM oauth_tokens WHERE user_id=?',(user_id,)).fetchone()
+    connected=bool(token and token['expires']>time.time())
+    reason='Ingen Pluto-login er gennemført.'
+    can_connect=True
+    try:oauth.settings();oauth.cipher()
+    except oauth.SetupRequired as error:reason=str(error);can_connect=False
+    if connected:reason='Pluto-login er godkendt. Porteføljehentning afventer verificerede MCP-værktøjskontrakter.'
+    return {'provider':'Pluto Markets','connected':connected,'status':'Login godkendt' if connected else ('Login udløbet' if token else (row['status'] if row else 'Ikke tilsluttet')),'requested':row['requested'] if row else None,'can_connect':can_connect,'reason':reason,'requested_access':'Kun konfigurerede læsescopes','has_tokens':bool(token)}
 
 def save_opportunity(data,user_id):
     fields=['company','ticker','market','asset','headline','source_url','published','classification','catalyst','risk','next_action']
@@ -113,7 +125,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self,fmt,*args): pass
     def send(self,status,data,kind='application/json'):
         body=json.dumps(data,ensure_ascii=False).encode() if kind=='application/json' else data
-        self.send_response(status); self.send_header('Content-Type',kind); self.send_header('Content-Length',str(len(body))); self.send_header('Cache-Control','no-store' if self.path.startswith('/api') else 'no-cache'); self.send_header('X-Content-Type-Options','nosniff'); self.send_header('X-Frame-Options','DENY'); self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'");
+        self.send_response(status); self.send_header('Content-Type',kind); self.send_header('Content-Length',str(len(body))); self.send_header('Cache-Control','no-store' if self.path.startswith('/api') else 'no-cache'); self.send_header('X-Content-Type-Options','nosniff'); self.send_header('X-Frame-Options','DENY'); self.send_header('Referrer-Policy','no-referrer'); self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'");
         if hasattr(self,'cookie'): self.send_header('Set-Cookie',self.cookie)
         self.end_headers(); self.wfile.write(body)
     def session(self):
@@ -133,6 +145,18 @@ class Handler(BaseHTTPRequestHandler):
     def failure(self):
         with connect() as c:c.execute('INSERT INTO login_failures VALUES(?,?)',(self.client_address[0],time.time()))
     def do_GET(self):
+        request=urlsplit(self.path)
+        self.path=request.path
+        if self.path=='/api/pluto/callback':
+            result='failed';s=self.session()
+            try:
+                query=parse_qs(request.query)
+                if not s:raise ValueError('session required')
+                if any(len(values)!=1 for values in query.values()):raise ValueError('duplicate callback values')
+                oauth.finish(connect,s,query.get('state',[''])[0],query.get('code',[''])[0],query.get('error',[None])[0])
+                result='connected'
+            except Exception:pass
+            self.send_response(303);self.send_header('Location','/?pluto='+result);self.send_header('Cache-Control','no-store');self.send_header('Referrer-Policy','no-referrer');self.send_header('Content-Length','0');self.end_headers();return
         if self.path=='/api/health': return self.send(200,{'status':'ok','database':bool(connect().execute('SELECT 1').fetchone())})
         if self.path=='/api/session':
             s=self.session(); return self.send(200,{'authenticated':bool(s),'csrf':s['csrf'] if s else None,'user':{'username':s['username'],'role':s['role']} if s else None})
@@ -140,6 +164,9 @@ class Handler(BaseHTTPRequestHandler):
             s=self.session()
             if not s: return self.send(401,{'error':'Log ind først'})
             user_id=s['user_id']
+            if self.path=='/api/automation':
+                import jobs
+                return self.send(200,jobs.status(connect,user_id))
             if self.path=='/api/connections': return self.send(200,connection_state(user_id))
             if self.path=='/api/state':
                 with connect() as c: p=[dict(r) for r in c.execute('SELECT * FROM proposals WHERE user_id=? ORDER BY id DESC',(user_id,))]; j=[dict(r) for r in c.execute('SELECT * FROM journal WHERE user_id=? ORDER BY id DESC',(user_id,))]
@@ -172,7 +199,7 @@ class Handler(BaseHTTPRequestHandler):
                 token=secrets.token_urlsafe(32)
                 with connect() as c:
                     c.execute('INSERT INTO sessions VALUES(?,?,?,?)',(token_hash(token),u['id'],secrets.token_urlsafe(32),time.time()+28800))
-                self.cookie=f"escape={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800"+('; Secure' if os.environ.get('ESCAPE_SECURE_COOKIE')=='1' else '')
+                self.cookie=f"escape={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800"+('; Secure' if os.environ.get('ESCAPE_SECURE_COOKIE')=='1' else '')
                 return self.send(200,{'ok':True})
             s=self.session()
             if not s:return self.send(401,{'error':'Log ind først'})
@@ -180,20 +207,30 @@ class Handler(BaseHTTPRequestHandler):
             user_id=s['user_id']
             if self.path=='/api/logout':
                 with connect() as c:c.execute('DELETE FROM sessions WHERE token_hash=?',(s['token_hash'],))
-                self.cookie='escape=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'; return self.send(200,{'ok':True})
+                self.cookie='escape=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0'; return self.send(200,{'ok':True})
             if self.path=='/api/invitations':
                 if s['role']!='admin':return self.send(403,{'error':'Kun administratoren kan invitere'})
                 token=secrets.token_urlsafe(32)
                 with connect() as c:
                     c.execute('INSERT INTO invitations VALUES(?,?,?,0)',(token_hash(token),user_id,time.time()+86400))
                 return self.send(201,{'invitation':token,'expires_in_hours':24})
+            if self.path=='/api/jobs/ecb':
+                if s['role']!='admin':return self.send(403,{'error':'Kun administratoren kan starte datakørsel'})
+                import jobs
+                with connect() as c:
+                    jobs.enqueue(c,'ecb',user_id,'ecb:manual:'+str(int(time.time()//60)))
+                    jobs.enqueue(c,'news',user_id,'news:manual:'+str(int(time.time()//60)))
+                return self.send(202,{'ok':True,'message':'Jobbet er sat i kø. Det køres ved næste worker-kørsel.'})
             if self.path=='/api/pluto/request':
                 with connect() as c:
                     c.execute("INSERT INTO connections(user_id,status,requested) VALUES(?,'Adgang ønsket',?) ON CONFLICT(user_id) DO NOTHING",(user_id,now()))
                 return self.send(200,connection_state(user_id))
             if self.path=='/api/pluto/disconnect':
+                oauth.revoke(connect,user_id)
                 with connect() as c:c.execute('DELETE FROM connections WHERE user_id=?',(user_id,))
                 return self.send(200,connection_state(user_id))
+            if self.path=='/api/pluto/start':
+                return self.send(200,oauth.start(connect,s))
             if self.path=='/api/pluto/connect':
                 with connect() as c:
                     c.execute('BEGIN IMMEDIATE')
@@ -212,6 +249,7 @@ class Handler(BaseHTTPRequestHandler):
                     c.execute('INSERT INTO journal(proposal_id,event,created,user_id) VALUES(?,?,?,?)',(data['id'],'Godkendt lokalt • ingen ordre sendt til mægler',now(),user_id))
                 return self.send(200,{'ok':True})
             return self.send(404,{'error':'Ukendt endpoint'})
+        except oauth.SetupRequired as error:self.send(409,{'error':str(error)})
         except (ValueError,KeyError,TypeError,sqlite3.IntegrityError):self.send(400,{'error':'Ugyldige oplysninger eller handling'})
         except Exception:self.send(500,{'error':'Intern fejl. Kontrollér server og database.'})
 LOGIN_FAILURES={}

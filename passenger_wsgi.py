@@ -25,6 +25,7 @@ class WSGIHandler(app.Handler):
 def application(environ, start_response):
     handler = WSGIHandler.__new__(WSGIHandler)
     handler.path = environ.get('PATH_INFO', '/')
+    if environ.get('QUERY_STRING'):handler.path+='?'+environ['QUERY_STRING']
     handler.client_address = (environ.get('REMOTE_ADDR', 'unknown'), 0)
     handler.headers = Message()
     for key, value in environ.items():

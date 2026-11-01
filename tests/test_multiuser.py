@@ -28,6 +28,8 @@ class Accounts(unittest.TestCase):
   self.assertIsNone(state['connection']['requested'])
   self.assertEqual(self.request('approve',{'id':1})[0],400)
   self.assertEqual(self.request('invitations',{})[0],403)
+  self.assertEqual(self.request('jobs/ecb',{})[0],403)
+  self.assertEqual(self.request('pluto/start',{},False)[0],403)
   from unittest.mock import patch
   with patch('pluto.discover',return_value={'connected':False,'discovery_valid':True}):
    self.assertEqual(self.request('pluto/connect',{})[0],200)
@@ -36,6 +38,8 @@ class Accounts(unittest.TestCase):
   self.request('pluto/request',{});self.request('pluto/disconnect',{})
   self.cookie,self.csrf=owner_cookie,owner_csrf
   self.assertIsNotNone(self.request('connections')[1]['requested'])
+  self.assertEqual(self.request('jobs/ecb',{})[0],202)
+  self.assertEqual(len(self.request('automation')[1]['jobs']),2)
   self.assertEqual(len(self.request('state')[1]['proposals']),1)
   self.assertEqual(len(self.request('state')[1]['opportunities']),1)
  def test_invitation_reuse_expiry_and_privacy(self):

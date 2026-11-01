@@ -36,4 +36,7 @@ Vi udvikler en privat investeringswebapp, ESCAPE, hvor hver bruger skal kunne fo
 Beskeden er klargjort, men ikke sendt. Der er ikke indhentet godkendelse fra Pluto.
 
 ## Forbindelsestest
-POST /api/pluto/connect kræver login og CSRF og er begrænset til én test pr. bruger pr. minut. Den henter kun offentlige OAuth-resource-metadata, ikke konto- eller handelsværktøjer. Gyldigt svar giver discovery_valid=true og altid connected=false. OAuth code exchange er ikke implementeret. Udviklingsmiljøets faktiske test kunne ikke hente metadata; test fra Nordicway er stadig udestående. Fejldetaljer returnerer ikke credentials eller rå serversvar.
+POST /api/pluto/connect kræver login og CSRF og er begrænset til én test pr. bruger pr. minut. Den henter kun offentlige OAuth-resource-metadata, ikke konto- eller handelsværktøjer. Gyldigt svar giver discovery_valid=true og altid connected=false. OAuth code exchange/PKCE og AES-GCM-lager er nu implementeret i oauth.py, men kun verificeret med simulerede serversvar. Se STATUS.md og UPDATE.md for den aktuelle aktiveringsstatus. Udviklingsmiljøets faktiske test kunne ikke hente metadata; test fra Nordicway er stadig udestående. Fejldetaljer returnerer ikke credentials eller rå serversvar.
+
+## Aktuel v0.4-kontrakt
+OAuth-koden understøtter kun den annoncerede offentlige PKCE-klienttype, same-host HTTPS-endpoints og eksplicit konfigurerede læsescopes. Ingen faktiske scopes er kendt eller forudfyldt endnu. Oplysningerne ovenfor om forventet design er en plan; STATUS.md angiver implementering og resterende begrænsninger.

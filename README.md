@@ -1,11 +1,12 @@
 # ESCAPE Trading Command Center
 
-En første fungerende lokal version med Python 3.12+ standardbibliotek, SQLite og en responsiv JavaScript-frontend. Ingen eksterne pakker. Dette er ikke den komplette produktionsapp; se [funktionsoversigten](docs/STATUS.md) for præcis dækning og udeståender.
+En første fungerende lokal version med Python 3.12+ standardbibliotek, SQLite og en responsiv JavaScript-frontend. OAuth-tokenkryptering kræver den fastlåste pakke i `requirements.txt`. Dette er ikke den komplette produktionsapp; se [funktionsoversigten](docs/STATUS.md) for præcis dækning og udeståender.
 
 ## Start
 
 ```sh
 cd /workspace/invest
+python -m pip install -r requirements.txt
 python app.py --create-user
 python app.py --port 8000
 ```
@@ -32,10 +33,18 @@ Tag en konsistent SQLite-backup med Python `sqlite3.Connection.backup` til et be
 
 Administratorens Forbindelser-side kan oprette en engangsinvitation med 24 timers gyldighed. Modtageren åbner Har du en invitation? på login-siden, vælger brugernavn og sin egen adgangskode. Ingen offentlig selvregistrering. Hver brugers forslag, observationsliste, journal og Pluto-tilslutningsønske er isoleret på serveren.
 
-Pluto OAuth er endnu ikke aktiveret. Tilslutningsønsker gemmes kun lokalt og sendes ikke til Pluto. Der gemmes ingen Pluto-tokens. Se [integrationsplanen](docs/PLUTO.md). Kontoændringer, sletning, adgangskodegendannelse, 2FA og e-mailinvitationer er endnu ikke implementeret.
+OAuth authorization-code/PKCE og krypteret tokenopbevaring er implementeret og testet med simulerede serversvar. Live-login er ikke verificeret. Login er blokeret, indtil Plutos læsescopes er dokumenteret og konfigureret, appadressen er angivet, tokenkryptering er klargjort, og verificerede metadata understøtter klienttypen. Se [integrationsplanen](docs/PLUTO.md). Kontoændringer, sletning, adgangskodegendannelse, 2FA og e-mailinvitationer er endnu ikke implementeret.
 
 ## Arkitektur
 
 `app.py`: HTTP API, autentifikation, inputvalidering og SQLite. `static/`: frontend og PWA. `tests/`: HTTP-integrationstest. Kun lokale long-forslag understøttes. Samlet kapitalbehov = antal × pris × FX + omkostninger. Hypotetisk stoprisiko = antal × (pris − stop) × FX + omkostninger. Spread, slippage og FX-ændringer modelleres endnu ikke. En stoppris er ikke en garanteret udførelsespris.
 
 Fremtidigt integrationslag skal gemme instrumentidentitet, børs, kilde, observationstid og indlæsningstid; behandle reserverede kontanter særskilt; afstemme ordrer mod mæglerens udførelser; og skelne faktisk, urealiseret og hypotetisk resultat. Rapportjob skal bruge Europe/Copenhagen og verificerede børskalendere. PostgreSQL-migrering og et robust job-/integrationslag anbefales før live drift.
+
+## Baggrundsjob
+
+`worker.py` er en kortvarig cron-worker. Den planlægger ECB-valutareferencer og ECB-pressemeddelelser hver time og lokale datastatusrapporter kl. 08, 14 og 22 i Europe/Copenhagen. Job gemmes i SQLite med deduplikering, leases og højst tre forsøg. Fejl prøves igen efter 15 minutter. Ingen handels-, nyhedsfortolknings- eller betalte AI-kald. Jobkørsler skal faktisk aktiveres i hostingens scheduler; appen viser seneste heartbeat. Se [drift og opdatering](docs/UPDATE.md).
+
+`python worker.py` køres én gang. Gentagen cron-kørsel er nødvendig for automatisk drift. Ingen hemmelig HTTP-cron-URL eller offentlig jobtrigger. Kun administratoren kan sætte manuelle kildeopslag i kø. AI forbliver frakoblet, da ejeren alene har ChatGPT Plus og ikke har valgt en API-tjeneste.
+
+Valgfri browsertest: `python tests/browser_smoke.py` kræver Playwright og Chromium på testmaskinen, ikke på webhotellet. Testen bruger en midlertidig database og ingen eksterne data.

@@ -2,7 +2,7 @@
 import json
 import urllib.request
 import urllib.error
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 MCP_URL = 'https://mcp.prod.pluto.markets/mcp'
 METADATA_URLS = (
@@ -12,6 +12,34 @@ METADATA_URLS = (
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+def authorization_metadata(issuer,opener):
+    parsed=urlsplit(issuer)
+    if parsed.scheme!='https' or parsed.hostname!='mcp.prod.pluto.markets' or parsed.port not in (None,443) or parsed.username or parsed.password or parsed.query or parsed.fragment:
+        return {'verified':False,'reason':'Autorisationsserver kræver særskilt verificering'}
+    path=parsed.path.rstrip('/')
+    metadata_url=urlunsplit(('https',parsed.netloc,'/.well-known/oauth-authorization-server'+path,'',''))
+    try:
+        with opener.open(urllib.request.Request(metadata_url,headers={'Accept':'application/json'}),timeout=5) as response:
+            raw=response.read(65537)
+            if len(raw)>65536:raise ValueError('too large')
+            data=json.loads(raw)
+        if data.get('issuer')!=issuer:raise ValueError('issuer mismatch')
+        safe={'verified':True,'issuer':issuer}
+        for key in ['authorization_endpoint','token_endpoint','registration_endpoint','revocation_endpoint']:
+            value=data.get(key)
+            if value:
+                u=urlsplit(value)
+                if u.scheme!='https' or u.hostname!=parsed.hostname or u.port not in (None,443) or u.username or u.password or u.query or u.fragment:raise ValueError('untrusted endpoint')
+                safe[key]=value
+        for key in ['scopes_supported','code_challenge_methods_supported','grant_types_supported','token_endpoint_auth_methods_supported','response_types_supported']:
+            values=data.get(key,[])
+            if not isinstance(values,list) or not all(isinstance(v,str) and len(v)<200 for v in values):raise ValueError('invalid metadata')
+            safe[key]=values[:100]
+        return safe
+    except (OSError,ValueError,TypeError,AttributeError):
+        return {'verified':False,'reason':'Autorisationsserverens metadata kunne ikke verificeres'}
 
 def discover(opener=None):
     opener=opener or urllib.request.build_opener(NoRedirect())
@@ -35,7 +63,8 @@ def discover(opener=None):
                         raise ValueError('invalid issuer')
                     # Report only the hostname. Never fetch issuer URLs supplied by metadata.
                     hosts.append(parsed.hostname)
-                return {'reachable':True,'discovery_valid':True,'connected':False,'authorization_hosts':hosts,'attempts':attempts+[{'endpoint':url,'http_status':response.status}],'message':'Plutos OAuth-oplysninger er fundet. ESCAPE er endnu ikke registreret som OAuth-klient; derfor er login og porteføljer ikke tilsluttet.'}
+                oauth=authorization_metadata(issuers[0],opener)
+                return {'oauth':oauth,'reachable':True,'discovery_valid':True,'connected':False,'authorization_hosts':hosts,'attempts':attempts+[{'endpoint':url,'http_status':response.status}],'message':'Plutos resource-oplysninger er fundet. Autorisationsmetadata og mulighed for klientregistrering vises nedenfor. Ingen login er gennemført.'}
         except urllib.error.HTTPError as error:
             attempts.append({'endpoint':url,'http_status':error.code})
         except (OSError,ValueError,TypeError):
