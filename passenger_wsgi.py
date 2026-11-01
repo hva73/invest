@@ -32,6 +32,7 @@ def application(environ, start_response):
         if key.startswith('HTTP_'):
             handler.headers[key[5:].replace('_', '-')] = value
     handler.headers['Content-Length'] = environ.get('CONTENT_LENGTH') or '0'
+    if environ.get('CONTENT_TYPE'):handler.headers['Content-Type'] = environ['CONTENT_TYPE']
     handler.rfile = environ['wsgi.input']
     handler.wfile = io.BytesIO()
     method = environ.get('REQUEST_METHOD', 'GET')
