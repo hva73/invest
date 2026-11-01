@@ -4,7 +4,7 @@
 
 - Levering: `POST https://escape.nordic-response.dk/api/reports/ingest`
 - Visning: log ind på `https://escape.nordic-response.dk/`, vælg **Rapporter & alarmer → Åbn rapportindbakke → Hent seneste rapport**.
-- Autentificeret læsning: `GET /api/reports/latest` med normal brugersession. Hver bruger ser kun egne rapporter.
+- Autentificeret læsning: `GET /api/reports/latest` med normal brugersession. Hver bruger ser kun egne rapporter. Standardkaldet læser nu kun driftsrapporter; tilføj `?is_test=true` for testdata. I rapportindbakken vælges Testdata eksplicit.
 
 Endpointet er først tilgængeligt på webhotellet, når denne kodeopdatering er installeret. Det er deaktiveret (HTTP 503), indtil begge servervariabler er konfigureret.
 
@@ -81,3 +81,6 @@ Dette beviser modtagelse og visning i testmiljøet. Det er ikke en levering til 
 Ingen understøttet afsenderintegration er endnu verificeret i denne session. ChatGPT Plus antages ikke at give API-adgang eller vilkårlige udgående HTTP-kald fra planlagte opgaver. Et almindeligt svar eller en notifikation fra en opgave er ikke en webhook-levering.
 
 Før automatisk aktivering skal vi verificere den konkrete automatiserings understøttelse af eksterne handlinger i planlagte kørsler, sikker secret-opbevaring og autentifikation samt JSON-format, tidsplan, genforsøg og leveringskvittering. Hvis den konkrete platform ikke understøtter dette, kræves en separat afsender/connector; modtagerendpointet alene løser ikke det. Ingen ChatGPT-opgave eller Pluto-handel er oprettet eller ændret af denne integrationstest.
+
+## Privat MCP-forbindelse
+Den alternative OAuth-beskyttede MCP-rapportintegration er beskrevet i [MCP_REPORTS.md](MCP_REPORTS.md). Den genbruger disse rapportfunktioner og samme database. API-nøglen ovenfor bruges ikke til MCP. ChatGPT-kompatibilitet og planlagt levering er ikke verificeret i produktion.

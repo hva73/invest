@@ -48,6 +48,8 @@ def init():
         c.execute('CREATE TABLE IF NOT EXISTS connection_checks(user_id INTEGER PRIMARY KEY REFERENCES users(id), checked REAL NOT NULL)')
         import report_ingest
         report_ingest.init(c)
+        import mcp_reports
+        mcp_reports.init(c)
         import jobs
         jobs.init(c)
         oauth.init(c)
@@ -152,7 +154,12 @@ class Handler(BaseHTTPRequestHandler):
         return count>=5
     def failure(self):
         with connect() as c:c.execute('INSERT INTO login_failures VALUES(?,?)',(self.client_address[0],time.time()))
+    def do_DELETE(self):
+        import mcp_reports
+        if not mcp_reports.handle(self,connect,'DELETE'):self.send(405,{'error':'Metoden understøttes ikke'})
     def do_GET(self):
+        import mcp_reports
+        if mcp_reports.handle(self,connect,'GET'):return
         request=urlsplit(self.path)
         self.path=request.path
         if self.path=='/api/pluto/callback':
@@ -174,7 +181,9 @@ class Handler(BaseHTTPRequestHandler):
             user_id=s['user_id']
             if self.path=='/api/reports/latest':
                 import report_ingest
-                return self.send(200,report_ingest.latest(connect,user_id))
+                mode=parse_qs(request.query).get('is_test',['false'])
+                if len(mode)!=1 or mode[0] not in ['true','false']:return self.send(400,{'error':'Ugyldig rapporttype'})
+                return self.send(200,report_ingest.latest(connect,user_id,mode[0]=='true'))
             if self.path=='/api/automation':
                 import jobs
                 return self.send(200,jobs.status(connect,user_id))
@@ -195,6 +204,8 @@ class Handler(BaseHTTPRequestHandler):
         kind={'.html':'text/html; charset=utf-8','.js':'application/javascript','.css':'text/css','.json':'application/manifest+json','.svg':'image/svg+xml'}[Path(path).suffix]
         self.send(200,(ROOT/'static'/path).read_bytes(),kind)
     def do_POST(self):
+        import mcp_reports
+        if mcp_reports.handle(self,connect,'POST'):return
         try:
             if self.path=='/api/reports/ingest':
                 import report_ingest

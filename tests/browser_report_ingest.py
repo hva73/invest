@@ -35,7 +35,7 @@ def main():
     page=browser.new_page(viewport={'width':390,'height':844});errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
     page.goto(f'http://127.0.0.1:{server.server_port}')
     page.locator('#login-form [name=password]').fill('browser-test-password-long');page.locator('#login-form button').click();page.locator('#content .hero').wait_for()
-    page.locator('nav [data-view=reports]').click();page.locator('[data-view=inbox]').click();page.locator('#load-ingested-report').click()
+    page.locator('nav [data-view=reports]').click();page.locator('[data-view=inbox]').click();page.locator('#report-mode').select_option('true');page.locator('#load-ingested-report').click()
     page.get_by_text('TESTDATA · ingen rigtige porteføljeværdier',exact=True).wait_for()
     for text in ['Testportefølje','Testmarked','Testkandidat','TEST-ORDER-001','1.000,00']:
      assert text in page.locator('#ingested-report').inner_text(),text

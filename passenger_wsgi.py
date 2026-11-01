@@ -40,6 +40,8 @@ def application(environ, start_response):
         handler.do_GET()
     elif method == 'POST':
         handler.do_POST()
+    elif method == 'DELETE':
+        handler.do_DELETE()
     else:
         handler.send(405, {'error': 'Metoden understøttes ikke'})
     start_response(handler.response_status, handler.response_headers)

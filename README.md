@@ -52,3 +52,5 @@ Valgfri browsertest: `python tests/browser_smoke.py` kræver Playwright og Chrom
 ## Porteføljedata v0.6
 
 Importerede Pluto-enheder har en detaljevisning med manuel læsning af senest registreret værdi, beholdninger og kontanter. Den bruger kun de fire observerede læseværktøjer i portfolio_data.py og gemmer brugerbundne snapshots. Flere sider med positioner hentes før en liste vises som komplet. Ukendte beløb/pristidspunkter vises som ukendte, og gamle snapshots markeres ved senere læsefejl. Root-porteføljer summeres separat pr. valuta; Collection-værdier lægges ikke oveni. Brokerens økonomiske output kræver fortsat liveverifikation på Nordicway. Se docs/STATUS.md og docs/UPDATE.md for begrænsninger og aktivering.
+
+Privat MCP-rapportindbakke med OAuth/PKCE: se [docs/MCP_REPORTS.md](docs/MCP_REPORTS.md). Forbindelse til ChatGPT og planlagte opgaver kræver separat verifikation.

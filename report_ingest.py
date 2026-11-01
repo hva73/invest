@@ -5,6 +5,13 @@ from datetime import datetime,timezone
 def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS ingested_reports(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),report_id TEXT NOT NULL,received TEXT NOT NULL,payload TEXT NOT NULL,digest TEXT NOT NULL,UNIQUE(user_id,report_id))')
 
+    if 'is_test' not in {row['name'] for row in c.execute('PRAGMA table_info(ingested_reports)')}:
+        c.execute('ALTER TABLE ingested_reports ADD COLUMN is_test INTEGER NOT NULL DEFAULT 1')
+        for row in c.execute('SELECT id,payload FROM ingested_reports').fetchall():
+            data=json.loads(row['payload'])
+            c.execute('UPDATE ingested_reports SET is_test=? WHERE id=?',(int(data.get('is_test',True)),row['id']))
+    c.execute('CREATE INDEX IF NOT EXISTS ingested_reports_mode ON ingested_reports(user_id,is_test,id)')
+
 def recipient(connect,authorization):
     key=os.environ.get('ESCAPE_REPORT_INGEST_KEY','');username=os.environ.get('ESCAPE_REPORT_INGEST_USER','')
     if len(key)<32 or not username:return None,503
@@ -48,9 +55,9 @@ def save(connect,user_id,data):
         if old:
             if old['digest']!=digest:return 409,{'error':'report_id findes allerede med andet indhold'}
             return 200,{'ok':True,'id':old['id'],'duplicate':True}
-        cur=c.execute('INSERT INTO ingested_reports(user_id,report_id,received,payload,digest) VALUES(?,?,?,?,?)',(user_id,data['report_id'],datetime.now(timezone.utc).isoformat(),payload,digest))
+        cur=c.execute('INSERT INTO ingested_reports(user_id,report_id,received,payload,digest,is_test) VALUES(?,?,?,?,?,?)',(user_id,data['report_id'],datetime.now(timezone.utc).isoformat(),payload,digest,int(data['is_test'])))
         return 201,{'ok':True,'id':cur.lastrowid,'duplicate':False}
 
-def latest(connect,user_id):
-    with connect() as c:row=c.execute('SELECT id,received,payload FROM ingested_reports WHERE user_id=? ORDER BY id DESC LIMIT 1',(user_id,)).fetchone()
+def latest(connect,user_id,is_test=False):
+    with connect() as c:row=c.execute('SELECT id,received,payload FROM ingested_reports WHERE user_id=? AND is_test=? ORDER BY id DESC LIMIT 1',(user_id,int(is_test))).fetchone()
     return {'report':{'id':row['id'],'received':row['received'],'data':json.loads(row['payload'])} if row else None}
