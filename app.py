@@ -249,7 +249,7 @@ class Handler(BaseHTTPRequestHandler):
                 with connect() as c:
                     c.execute('BEGIN IMMEDIATE')
                     portfolios.replace_pluto(c,user_id,items)
-                return self.send(200,{'ok':True,'count':len(items),'message':'Porteføljer hentet fra Pluto. Beholdninger og kurser er endnu ikke hentet.'})
+                return self.send(200,{'ok':True,'count':len(items),'message':'Porteføljer og Collections hentet fra Pluto. Beholdninger og kurser er endnu ikke hentet.'})
             if self.path=='/api/pluto/catalog':
                 import mcp_client
                 return self.send(200,mcp_client.catalog(connect,user_id))

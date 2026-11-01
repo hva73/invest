@@ -1,4 +1,4 @@
-"""Fixed-provider MCP discovery only. Never invokes tools/call."""
+"""Fixed-provider MCP client. Only explicit portfolio/collection list tools may run."""
 import json,time,urllib.request
 from pluto import MCP_URL,NoRedirect
 import oauth
@@ -62,22 +62,75 @@ def catalog(connect,user_id):
     token=oauth.unseal(user_id,row['payload'])['token']['access_token']
     return {'tools':MCP(token).tools(),'message':'Kun værktøjsbeskrivelser er hentet. Ingen værktøjer er udført, og ingen handler er oprettet.'}
 
-# Only these list operations, explicitly advertised read-only and with a fully
-# recognized output contract, may be called. Unknown schemas fail closed.
-READ_LISTS={'list_portfolios':'portfolios','get_portfolios':'portfolios','list_collections':'collections','get_collections':'collections'}
+# Names and argument contracts observed in the user's actual Pluto tools/list.
+# readOnlyHint alone is insufficient: some Pluto draft editors also advertise it.
+READ_LISTS={'list_portfolios':'portfolios','list_collections':'collections'}
+
+class PortfolioFormatError(oauth.SetupRequired):pass
+
+def shape(value):
+    # Report field names/types only. Never include account IDs, names or token values.
+    import re
+    if isinstance(value,list):return 'array; første post: '+(shape(value[0]) if value else 'tom')
+    if isinstance(value,dict):return ', '.join(k+':'+type(v).__name__ for k,v in list(value.items())[:25] if isinstance(k,str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,39}',k))
+    return type(value).__name__
 
 def compatible(tool):
     root=READ_LISTS.get(tool.get('name'))
     if not root or tool.get('annotations',{}).get('readOnlyHint') is not True:return None
     inputs=tool.get('inputSchema',{})
-    if inputs.get('required'):return None
-    schema=tool.get('outputSchema',{})
-    props=schema.get('properties',{})
-    if schema.get('type')!='object' or set(props)!={root} or root not in schema.get('required',[]):return None
-    array=props[root];item=array.get('items',{});fields=item.get('properties',{})
-    if array.get('type')!='array' or item.get('type')!='object' or not {'id','name'}.issubset(item.get('required',[])):return None
-    if fields.get('id',{}).get('type')!='string' or fields.get('name',{}).get('type')!='string':return None
+    if inputs.get('type')!='object' or inputs.get('required'):return None
     return root
+
+def decode_result(response,tool_name):
+    if not isinstance(response,dict) or response.get('isError'):
+        raise PortfolioFormatError(tool_name+': Pluto returnerede en fejl; listen er bevaret')
+    if response.get('structuredContent') is not None:return response['structuredContent']
+    blocks=response.get('content')
+    if isinstance(blocks,list):
+        texts=[block.get('text') for block in blocks if isinstance(block,dict) and block.get('type')=='text' and isinstance(block.get('text'),str)]
+        if texts:
+            try:return json.loads(''.join(texts))
+            except (ValueError,TypeError):pass
+    raise PortfolioFormatError(tool_name+': svaret indeholder ikke understøttet JSON. Ingen data er ændret')
+
+def one_field(item,names):
+    values=[item[name] for name in names if name in item and item[name] is not None]
+    if not values:return None
+    if any(value!=values[0] for value in values):raise PortfolioFormatError('Pluto returnerede modstridende identitetsfelter; listen er bevaret')
+    return values[0]
+
+def normalize(data,root):
+    original=data
+    # Only explicit JSON list envelopes; never recursively search arbitrary data.
+    if isinstance(data,dict):
+        if data.get('nextToken') or data.get('nextCursor') or data.get('hasMore') is True:
+            raise PortfolioFormatError('Pluto returnerede en delvis liste; den eksisterende liste er bevaret')
+        arrays=[data[key] for key in [root,'items','data'] if isinstance(data.get(key),list)]
+        if len(arrays)!=1:
+            raise PortfolioFormatError('Ukendt '+root+'-format (felter og typer): '+shape(data))
+        records=arrays[0]
+        if 'totalCount' in data and (not isinstance(data['totalCount'],int) or data['totalCount']!=len(records)):
+            raise PortfolioFormatError('Pluto-listens antal stemmer ikke; eksisterende data er bevaret')
+    elif isinstance(data,list):records=data
+    else:raise PortfolioFormatError('Ukendt '+root+'-format: '+shape(data))
+    normalized=[];seen=set()
+    for item in records:
+        if not isinstance(item,dict):raise PortfolioFormatError('Ugyldig '+root+'-post: '+shape(item))
+        specific='portfolioId' if root=='portfolios' else 'collectionId'
+        identifier=one_field(item,[specific,'id'])
+        name=one_field(item,['name','portfolioName' if root=='portfolios' else 'collectionName'])
+        if not isinstance(identifier,str) or not identifier or identifier in seen:
+            raise PortfolioFormatError('Manglende/gentaget '+specific+'; felter og typer: '+shape(item))
+        if not isinstance(name,str) or not name.strip():
+            raise PortfolioFormatError('Manglende navn i '+root+'; felter og typer: '+shape(item))
+        seen.add(identifier)
+        parent=item.get('portfolioId') if root=='collections' else None
+        if parent is not None and (not isinstance(parent,str) or not parent):raise PortfolioFormatError('Ugyldig Collection-tilknytning')
+        permission=item.get('canTrade')
+        if permission is not None and not isinstance(permission,bool):raise PortfolioFormatError('Ugyldig Pluto-adgangsstatus')
+        normalized.append({'id':root+':'+identifier,'name':name.strip(),'kind':'collection' if root=='collections' else 'portfolio','parent_external_id':'portfolios:'+parent if parent else None,'can_trade':permission})
+    return normalized
 
 def read_portfolios(connect,user_id,client_factory=None):
     with connect() as c:row=c.execute('SELECT payload,expires FROM oauth_tokens WHERE user_id=?',(user_id,)).fetchone()
@@ -95,10 +148,5 @@ def read_portfolios(connect,user_id,client_factory=None):
     items=[]
     for tool,root in selected:
         response=client.request('tools/call',{'name':tool['name'],'arguments':{}})
-        if response.get('isError'):raise ValueError('Pluto returned an error')
-        data=response.get('structuredContent')
-        if not isinstance(data,dict) or set(data)!={root} or not isinstance(data[root],list):raise ValueError('Unsupported or partial portfolio output')
-        for item in data[root]:
-            if not isinstance(item,dict) or not isinstance(item.get('id'),str) or not item['id'] or not isinstance(item.get('name'),str) or not item['name'].strip():raise ValueError('Invalid portfolio record')
-            items.append({'id':root+':'+item['id'],'name':item['name']})
+        items.extend(normalize(decode_result(response,tool['name']),root))
     return items

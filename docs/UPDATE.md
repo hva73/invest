@@ -53,3 +53,9 @@ Samme proces med en frisk ZIP og den medfølgende apply_update.py under escape_a
 Kontrollér Mine porteføljer: tom liste for en ny konto uden forslag og historiske lokale poster for eksisterende forslag. På overblikket: Opdatér porteføljer fra Pluto. Hvis der vises en kontraktfejl, gå til Forbindelser → Undersøg Plutos porteføljeværktøjer. Del værktøjsbeskrivelserne/inputSchema/outputSchema til adaptertilpasning; del aldrig tokens eller krypteringsnøgle. Værktøjsopslag udfører ingen handelsværktøjer. Porteføljer fra Pluto må ikke oprettes ud fra manuelle gæt om deres ID eller svarets betydning.
 
 Synkronisering med et understøttet, komplet svar skal testes for nye, omdøbte og fjernede Collections samt en anden brugers konto. Aktuel implementering er manuel opdatering, ikke automatisk baggrundssync. Alle værdier for beholdninger, kontanter og afkast forbliver ukendte, indtil de er verificeret separat.
+
+## v0.5.1: rettelse af kontraktfejl
+
+Installer med en frisk ZIP og det medfølgende apply_update.py som tidligere. Pakker og eksisterende nøgle skal ikke genoprettes; database-, OAuth- og miljøkonfiguration bevares. Ved genstart tilføjes metadatafelter for porteføljetype, forældreportefølje og visnings-/handelsadgang transaktionelt.
+
+Tryk Opdatér porteføljer fra Pluto. Vent på resultatet; UI viser nu en hentebesked under kørslen. Ved en formatfejl kan den viste tekst med feltnavne og datatyper deles til yderligere adaptertilpasning; der er ikke brug for tokens eller rå kontodata. Forvent ikke beholdningsværdier eller kontanter i denne version.

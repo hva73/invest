@@ -46,3 +46,7 @@ OAuth-koden understøtter kun den annoncerede offentlige PKCE-klienttype, same-h
 Ejerens login er nu vist som godkendt på Nordicway. Scopet mcp:read er observeret i provider-metadata. mcp_client.py tilføjer standard initialize/notifications/initialized/tools/list og en snæver kontraktkontrolleret porteføljelæsning. Det er ikke en generisk tools/call-proxy. Understøttede læseværktøjsnavne og outputkontrakter fremgår af koden. Adapteren kræver både readOnlyHint=true og understøttet schema; navnet alene er utilstrækkeligt. Kontrakter uden outputSchema, med andre identitetsfelter eller med pagination i selve porteføljesvaret kræver en særskilt tilpasning. Ved ukendt format bevares gamle data.
 
 Pluto-identiteter lagres som porteføljetype + provider-ID, uafhængigt af visningsnavn og navnet på det konkrete listeværktøj. Der foretages ingen sammenlægning baseret på ens navne. Der er endnu ingen automatisk porteføljepolling eller beholdningsimport.
+
+## Observeret værktøjskontrakt fra ejeren
+
+Den indsendte metadatafil bekræfter list_portfolios(inputSchema: object, properties: {}) og list_collections(inputSchema: object, valgfri portfolioId:string), begge readOnlyHint=true/openWorldHint=false. Ingen outputSchema er annonceret. Adapteren v0.5.1 bruger derfor denne eksplicitte værktøjsliste og validerer de faktiske svar ved runtime. Fravær af outputSchema er i sig selv ikke længere en fejl. Rå metadatafil med brugerens UI-tekst er ikke committet til repositoryet.

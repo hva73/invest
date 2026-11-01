@@ -41,5 +41,31 @@ class Catalog(unittest.TestCase):
       def request(self,method,params):
        assert method=='tools/call' and params=={'name':'list_collections','arguments':{}}
        return {'structuredContent':{'collections':[{'id':'abc','name':'Any user name'}]}}
-     self.assertEqual(mcp_client.read_portfolios(app.connect,1,Client),[{'id':'collections:abc','name':'Any user name'}])
+     result=mcp_client.read_portfolios(app.connect,1,Client)
+     self.assertEqual(result[0]['id'],'collections:abc');self.assertEqual(result[0]['name'],'Any user name');self.assertEqual(result[0]['kind'],'collection')
    finally:app.DB=previous
+
+ def test_actual_advertised_inputs_without_output_schema(self):
+  from mcp_client import compatible
+  portfolios={'name':'list_portfolios','inputSchema':{'type':'object','properties':{}},'annotations':{'readOnlyHint':True,'openWorldHint':False}}
+  collections={'name':'list_collections','inputSchema':{'type':'object','properties':{'portfolioId':{'type':'string'}}},'annotations':{'readOnlyHint':True,'openWorldHint':False}}
+  self.assertEqual(compatible(portfolios),'portfolios');self.assertEqual(compatible(collections),'collections')
+  self.assertIsNone(compatible({**collections,'name':'edit_collection_weights'}))
+  self.assertIsNone(compatible({**collections,'name':'create_collection'}))
+ def test_text_json_and_identity_variants(self):
+  from mcp_client import normalize,decode_result
+  # Synthetic response fixture; real account payloads are never saved to tests.
+  raw={'content':[{'type':'text','text':json.dumps([{'collectionId':'test-collection','name':'New dynamic name','portfolioId':'test-account','canTrade':False}])}]}
+  items=normalize(decode_result(raw,'list_collections'),'collections')
+  self.assertEqual(items[0]['parent_external_id'],'portfolios:test-account');self.assertFalse(items[0]['can_trade'])
+  self.assertEqual(normalize({'portfolios':[{'id':'test','name':'Anything'}],'totalCount':1},'portfolios')[0]['id'],'portfolios:test')
+ def test_partial_ambiguous_and_error_results_rejected(self):
+  from mcp_client import normalize,decode_result,PortfolioFormatError
+  bad=[{'portfolios':[],'nextToken':'more'},{'portfolios':[],'totalCount':1},{'portfolios':[],'items':[]},[{'id':'a','portfolioId':'b','name':'A'}],[{'id':'a','name':'A'},{'id':'a','name':'B'}]]
+  for data in bad:
+   with self.assertRaises(PortfolioFormatError):normalize(data,'portfolios')
+  with self.assertRaises(PortfolioFormatError):decode_result({'isError':True,'content':[{'type':'text','text':'secret'}]},'list_portfolios')
+ def test_unknown_shape_does_not_disclose_values(self):
+  from mcp_client import normalize,PortfolioFormatError
+  with self.assertRaises(PortfolioFormatError) as result:normalize([{'customId':'private-account-id','customName':'private-name'}],'portfolios')
+  message=str(result.exception);self.assertIn('customId',message);self.assertNotIn('private-account-id',message);self.assertNotIn('private-name',message)

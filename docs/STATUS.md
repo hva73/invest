@@ -31,3 +31,11 @@ MCP-klienten kan initialisere en sessionsbundet forbindelse, læse tools/list in
 Ejerens skærmbillede viser godkendt Pluto-login på Nordicway og provider-metadata med mcp:read, mcp:trade, S256, offentlig klient og dynamisk registrering. Det understøtter loginresultatet, men bekræfter ikke det faktiske tools/list-schema eller porteføljedata. Liveværktøjsliste og import skal afprøves på Nordicway. Der gøres ingen påstand om fungerende portfolio-sync mod et endnu ukendt outputformat.
 
 38 automatiske tests og Chromium-smoketesten består, inklusive brugeradskillelse, vilkårlige navne, ID-bevarelse ved navneændring, arkivering, afviste outputkontrakter og MCP JSON/SSE-opslag. Beholdninger, vægtninger, kontanter og markedsværdier er stadig ikke hentet.
+
+## v0.5.1: observeret Pluto-kontrakt uden outputSchema
+
+Ejerens indsendte tools/list beskriver list_portfolios uden argumenter og list_collections med valgfrit portfolioId, begge readOnlyHint=true og uden outputSchema. Den tidligere obligatoriske outputSchema-gate var årsagen til den viste kontraktfejl. Adapteren tillader nu præcis disse to observerede værktøjer uden at kræve outputSchema. get_portfolios/get_collections er ikke længere mulige aliaser. Andre værktøjer med readOnlyHint, herunder draft-editorer, accepteres ikke.
+
+Svar læses enten fra structuredContent eller JSON i MCP-content-tekstblokke. Direkte arrays og eksplicitte portfolios/collections/items/data-listenøgler valideres; id/portfolioId/collectionId og navne matches uden at opfinde værdier. Modstridende ID'er, dubletter, pagination eller totalCount-afvigelser afviser hele importen. Ukendte svar giver en fejl med feltnavne/typer uden kontoværdier og bevarer eksisterende data. De faktiske porteføljesvar fra Nordicway er endnu ikke modtaget eller verificeret.
+
+Importerede enheder får type portfolio/collection og valgfri forældreportefølje samt canTrade-status, når dette findes i svaret. Collection-værdier lægges ikke til porteføljeværdier; økonomiske totaler er stadig ikke hentet. 42 automatiske tests og Chromium-smoketesten består. Testpayloads er syntetiske og kommer aldrig i brugerens database.
