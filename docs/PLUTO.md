@@ -50,3 +50,9 @@ Pluto-identiteter lagres som porteføljetype + provider-ID, uafhængigt af visni
 ## Observeret værktøjskontrakt fra ejeren
 
 Den indsendte metadatafil bekræfter list_portfolios(inputSchema: object, properties: {}) og list_collections(inputSchema: object, valgfri portfolioId:string), begge readOnlyHint=true/openWorldHint=false. Ingen outputSchema er annonceret. Adapteren v0.5.1 bruger derfor denne eksplicitte værktøjsliste og validerer de faktiske svar ved runtime. Fravær af outputSchema er i sig selv ikke længere en fejl. Rå metadatafil med brugerens UI-tekst er ikke committet til repositoryet.
+
+## Økonomiske læseværktøjer v0.6
+
+Den indsendte værktøjsliste annoncerer get_accounts(portfolioId), get_positions(portfolioId,limit,nextToken), get_portfolio_value(portfolioId) og get_collection(collectionId) med readOnlyHint=true. Disse er den eneste allowlist i portfolio_data.py. De konkrete økonomiske outputfelter mangler stadig livevalidering. Adapterens normalisering viser kun genkendte felter og afviser ugyldige valutaer, tal eller tidsstempler; der er ingen rå kontodata i fejlmeddelelser.
+
+get_accounts beskriver balance, buying power og reservationer per valuta. Adapteren viser dem separat og udleder ikke frit investerbare kontanter, fordi kontosemantik og lokale planreservationer skal afklares. Collection-værdi dokumenteres i localCurrency, kontanter i hver kontos valuta og holdings cost basis i instrumentvaluta; disse adskilles. Root-værdier og Collection-værdier summeres ikke sammen. Pris-null ved manglende kurs forbliver ukendt. Snapshotdata gemmes brugerbundet uden tokens.

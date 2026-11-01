@@ -11,6 +11,7 @@ SOURCE='Den Europæiske Centralbank'
 
 def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS jobs(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id), dedupe TEXT NOT NULL UNIQUE, status TEXT NOT NULL, available REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, lease TEXT, lease_until REAL, result TEXT, created REAL NOT NULL)')
+    if 'portfolio_id' not in {r['name'] for r in c.execute('PRAGMA table_info(jobs)')}:c.execute('ALTER TABLE jobs ADD COLUMN portfolio_id INTEGER REFERENCES portfolios(id)')
     c.execute('CREATE TABLE IF NOT EXISTS fx_snapshots(id INTEGER PRIMARY KEY, source_date TEXT NOT NULL, observed TEXT NOT NULL, payload TEXT NOT NULL, digest TEXT NOT NULL UNIQUE)')
     c.execute('CREATE TABLE IF NOT EXISTS reports(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), slot TEXT NOT NULL, created TEXT NOT NULL, body TEXT NOT NULL, UNIQUE(user_id,slot))')
     c.execute('CREATE TABLE IF NOT EXISTS news_items(id INTEGER PRIMARY KEY,title TEXT NOT NULL,url TEXT NOT NULL,published TEXT NOT NULL,summary TEXT NOT NULL,observed TEXT NOT NULL,digest TEXT NOT NULL UNIQUE)')
@@ -36,9 +37,9 @@ def fetch_ecb():
     with urllib.request.build_opener(NoRedirect()).open(request,timeout=8) as response:
         return parse_ecb(response.read(262145))
 
-def enqueue(c,kind,user_id,dedupe,when=None):
+def enqueue(c,kind,user_id,dedupe,when=None,portfolio_id=None):
     when=time.time() if when is None else when
-    c.execute("INSERT INTO jobs(kind,user_id,dedupe,status,available,created) VALUES(?,?,?,'queued',?,?) ON CONFLICT(dedupe) DO NOTHING",(kind,user_id,dedupe,when,when))
+    c.execute("INSERT INTO jobs(kind,user_id,dedupe,status,available,created,portfolio_id) VALUES(?,?,?,'queued',?,?,?) ON CONFLICT(dedupe) DO NOTHING",(kind,user_id,dedupe,when,when,portfolio_id))
 
 def schedule(connect,at=None):
     at=at or datetime.now(timezone.utc)
@@ -49,6 +50,8 @@ def schedule(connect,at=None):
         if admin:
             enqueue(c,'ecb',admin['id'],'ecb:'+utc.strftime('%Y-%m-%dT%H'),stamp)
             enqueue(c,'news',admin['id'],'news:'+utc.strftime('%Y-%m-%dT%H'),stamp)
+        for portfolio in c.execute("SELECT p.id,p.user_id FROM portfolios p JOIN users u ON u.id=p.user_id JOIN oauth_tokens t ON t.user_id=p.user_id WHERE p.source='pluto' AND p.active=1 AND u.active=1 AND t.expires>?",(stamp,)).fetchall():
+            enqueue(c,'pluto_data',portfolio['user_id'],'pluto:'+str(portfolio['id'])+':'+utc.strftime('%Y-%m-%dT%H'),stamp,portfolio['id'])
         # Reports are factual local status, never fabricated AI market reports.
         if local.hour in (8,14,22):
             slot=local.strftime('%Y-%m-%dT%H:%z')
@@ -64,16 +67,23 @@ def run_one(connect,fetcher=None,at=None):
         row=c.execute("SELECT * FROM jobs WHERE status='queued' AND available<=? ORDER BY available,id LIMIT 1",(stamp,)).fetchone()
         if not row:return False
         job=dict(row)
-        c.execute("UPDATE jobs SET status='running',attempts=attempts+1,lease=?,lease_until=? WHERE id=?",(lease,stamp+120,job['id']))
+        c.execute("UPDATE jobs SET status='running',attempts=attempts+1,lease=?,lease_until=? WHERE id=?",(lease,stamp+(600 if job['kind']=='pluto_data' else 120),job['id']))
     try:
-        if job['kind']=='news':
+        if job['kind']=='pluto_data':
+            import portfolio_data
+            payload=portfolio_data.read(connect,job['user_id'],job['portfolio_id'])
+        elif job['kind']=='news':
             import news
             payload=(fetcher or news.fetch)()
         else:payload=(fetcher or fetch_ecb)() if job['kind']=='ecb' else None
         with connect() as c:
             c.execute('BEGIN IMMEDIATE')
             if not c.execute("SELECT 1 FROM jobs WHERE id=? AND lease=? AND status='running'",(job['id'],lease)).fetchone():return True
-            if job['kind']=='ecb':
+            if job['kind']=='pluto_data':
+                import portfolio_data
+                portfolio_data.save(c,job['user_id'],job['portfolio_id'],payload)
+                result='Pluto-data hentet'+(' med delvise fejl' if payload['errors'] else '')
+            elif job['kind']=='ecb':
                 # Validate supplied adapters as well as actual network responses.
                 if not isinstance(payload,dict) or payload.get('source_url')!=ECB_URL or payload.get('base')!='EUR' or not isinstance(payload.get('rates'),dict):raise ValueError('invalid adapter')
                 for code,value in payload['rates'].items():
@@ -94,7 +104,8 @@ def run_one(connect,fetcher=None,at=None):
                 uid=job['user_id'];snapshot=c.execute('SELECT source_date FROM fx_snapshots ORDER BY source_date DESC,id DESC LIMIT 1').fetchone()
                 ideas=c.execute('SELECT count(*) FROM opportunities WHERE user_id=?',(uid,)).fetchone()[0]
                 proposals=c.execute('SELECT count(*) FROM proposals WHERE user_id=?',(uid,)).fetchone()[0]
-                body=f'Datastatus: {ideas} egne markedsidéer og {proposals} egne handelsforslag. ECB-reference: '+(snapshot['source_date'] if snapshot else 'ikke hentet')+'. Pluto-porteføljedata, aktiekurser og AI-analyse er ikke tilsluttet. ECB-nyheder kan læses i appen efter et vellykket feedopslag. Dette er ikke en markedsanalyse.'
+                saved=c.execute('SELECT count(*) FROM portfolio_snapshots WHERE user_id=?',(uid,)).fetchone()[0]
+                body=f'Datastatus: {ideas} egne markedsidéer og {proposals} egne handelsforslag. {saved} gemte Pluto-datasæt (se dato og fejlstatus i appen). ECB-reference: '+(snapshot['source_date'] if snapshot else 'ikke hentet')+'. Eksternt aktiekursfeed og AI-analyse er ikke tilsluttet. ECB-nyheder kan læses i appen efter et vellykket feedopslag. Dette er ikke en markedsanalyse.'
                 c.execute('INSERT INTO reports(user_id,slot,created,body) VALUES(?,?,?,?) ON CONFLICT(user_id,slot) DO NOTHING',(uid,job['dedupe'],datetime.fromtimestamp(stamp,timezone.utc).isoformat(),body))
                 result='Datastatusrapport gemt'
             else:raise ValueError('unknown job')
@@ -102,6 +113,9 @@ def run_one(connect,fetcher=None,at=None):
     except Exception:
         # Never persist exception text: network/library errors may include credentials.
         with connect() as c:
+            if job['kind']=='pluto_data':
+                import portfolio_data
+                portfolio_data.mark_failed(c,job['user_id'],job['portfolio_id'],'Automatisk Pluto-læsning fejlede; gemte data kan være forældede')
             c.execute("UPDATE jobs SET status=?,result='Kørslen fejlede; kontrollér datakilde og serveropsætning',available=?,lease=NULL,lease_until=NULL WHERE id=? AND lease=?",('failed' if job['attempts']+1>=3 else 'queued',stamp+900,job['id'],lease))
     return True
 

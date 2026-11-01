@@ -39,3 +39,15 @@ Ejerens indsendte tools/list beskriver list_portfolios uden argumenter og list_c
 Svar læses enten fra structuredContent eller JSON i MCP-content-tekstblokke. Direkte arrays og eksplicitte portfolios/collections/items/data-listenøgler valideres; id/portfolioId/collectionId og navne matches uden at opfinde værdier. Modstridende ID'er, dubletter, pagination eller totalCount-afvigelser afviser hele importen. Ukendte svar giver en fejl med feltnavne/typer uden kontoværdier og bevarer eksisterende data. De faktiske porteføljesvar fra Nordicway er endnu ikke modtaget eller verificeret.
 
 Importerede enheder får type portfolio/collection og valgfri forældreportefølje samt canTrade-status, når dette findes i svaret. Collection-værdier lægges ikke til porteføljeværdier; økonomiske totaler er stadig ikke hentet. 42 automatiske tests og Chromium-smoketesten består. Testpayloads er syntetiske og kommer aldrig i brugerens database.
+
+## v0.6: beholdninger, værdi og kontanter
+
+Tilføjet portfolio_data.py med fire snævre, observerede læseværktøjer: get_portfolio_value, get_accounts, get_positions og get_collection. Opslag sker pr. bruger og pr. aktiv, importeret portefølje-ID. Positionssider følger nextToken med samme portfolioId og limit=200; gentagne tokens, uforståelig pagination og sidegrænser afvises. Collection-data bruger localCurrency til Collection-værdi, mens kontanter og instrumentværdier beholder deres egne valutaer. accountCurrency bruges aldrig som erstatning.
+
+Ny detaljevisning med gemt værdi, kildetid, indlæsningstid, beholdningsantal, senest oplyste pris, kostpris, værdi, urealiseret resultat samt kontantbalance, reserveret beløb og købekraft. Null bevares som ukendt, ikke som nul. Manglende pris-/værditidspunkt vises eksplicit. Senest registreret værdi mærkes ikke som live. Realiseret resultat og frit investerbare kontanter beregnes ikke ud fra uverificerede antagelser.
+
+Øverste sum bruger kun aktive rodporteføljer og grupperer pr. valuta. Collections og lokale enheder lægges ikke oveni; der vises antal manglende rodværdier. Dette er en sum af gemte observationer med eventuelt forskellige kildetidspunkter, ikke en samtidige liveværdi. Ved fejl bevares gamle snapshots med fejlstatus; ved delvise fejl vises de lykkede sektioner og de konkrete fejl. En helt mislykket læsning erstatter ikke tidligere tal med nye tomme data.
+
+Worker kan planlægge pluto_data-jobs hver time for aktive Pluto-enheder med et endnu gyldigt token. Dette kræver stadig aktiv cron og ophører ved tokenudløb; automatisk OAuth-refresh er endnu ikke implementeret. Portefølje-/Collection-listen skal fortsat opdateres manuelt, så nye enheder kan komme med i jobs.
+
+52 forskellige automatiske tests består (samlet suite med 51, efterfulgt af målrettet finansregression med ekstra valutaseparationstest). Chromium-smoketesten består også med porteføljedetaljer og finansielle testfelter. Alle finansielle testpayloads er syntetiske og gemmes kun i midlertidige testdatabaser. Ejerens rigtige økonomiske Pluto-svar er ikke modtaget eller verificeret; adapteren kan kræve tilpasning til felterne på Nordicway.

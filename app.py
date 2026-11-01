@@ -51,6 +51,8 @@ def init():
         oauth.init(c)
         import portfolios
         portfolios.init(c)
+        import portfolio_data
+        portfolio_data.init(c)
         c.execute('DELETE FROM sessions WHERE expires<?',(time.time(),))
 
 def token_hash(token):
@@ -174,10 +176,14 @@ class Handler(BaseHTTPRequestHandler):
             if self.path=='/api/connections': return self.send(200,connection_state(user_id))
             if self.path=='/api/state':
                 import portfolios
-                with connect() as c:owned=portfolios.list_owned(c,user_id)
+                with connect() as c:
+                    owned=portfolios.list_owned(c,user_id)
+                    import portfolio_data
+                    snapshots=portfolio_data.snapshots(c,user_id)
+                summary=portfolio_data.summaries(owned,snapshots)
                 with connect() as c: p=[dict(r) for r in c.execute('SELECT * FROM proposals WHERE user_id=? ORDER BY id DESC',(user_id,))]; j=[dict(r) for r in c.execute('SELECT * FROM journal WHERE user_id=? ORDER BY id DESC',(user_id,))]
                 with connect() as c: opportunities=[dict(r) for r in c.execute('SELECT * FROM opportunities WHERE user_id=? ORDER BY id DESC',(user_id,))]
-                return self.send(200,{'portfolios':owned,'user':{'username':s['username'],'role':s['role']},'connection':connection_state(user_id),'opportunities':opportunities,'proposals':p,'journal':j,'time':now(),'integrations':{'Pluto Markets':'Ikke tilsluttet','Markedsdata':'Ikke tilsluttet','Nyheder og AI':'Ikke tilsluttet'},'reports':{'timezone':'Europe/Copenhagen','schedule':['08:00','14:00','22:00'],'status':'Afventer datakilder og scheduler'}})
+                return self.send(200,{'portfolio_snapshots':snapshots,'portfolio_summary':summary,'portfolios':owned,'user':{'username':s['username'],'role':s['role']},'connection':connection_state(user_id),'opportunities':opportunities,'proposals':p,'journal':j,'time':now(),'integrations':{'Pluto Markets':'Ikke tilsluttet','Markedsdata':'Ikke tilsluttet','Nyheder og AI':'Ikke tilsluttet'},'reports':{'timezone':'Europe/Copenhagen','schedule':['08:00','14:00','22:00'],'status':'Afventer datakilder og scheduler'}})
             return self.send(404,{'error':'Ukendt endpoint'})
         path={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/manifest.json':'manifest.json','/sw.js':'sw.js','/icon.svg':'icon.svg'}.get(self.path)
         if not path:return self.send(404,{'error':'Ikke fundet'})
@@ -243,6 +249,18 @@ class Handler(BaseHTTPRequestHandler):
                 import portfolios
                 with connect() as c:portfolios.rename(c,user_id,int(data['id']),data['name'])
                 return self.send(200,{'ok':True})
+            if self.path=='/api/portfolios/data':
+                import portfolio_data
+                pid=int(data['id'])
+                try:payload=portfolio_data.read(connect,user_id,pid)
+                except oauth.SetupRequired:
+                    with connect() as c:portfolio_data.mark_failed(c,user_id,pid,'Seneste læsning fejlede; gemte data kan være forældede')
+                    raise
+                except Exception:
+                    with connect() as c:portfolio_data.mark_failed(c,user_id,pid,'Seneste Pluto-opslag fejlede; gemte data kan være forældede')
+                    return self.send(502,{'error':'Pluto-opslaget fejlede. Tidligere data er bevaret og markeret.'})
+                with connect() as c:portfolio_data.save(c,user_id,pid,payload)
+                return self.send(200,{'ok':True,'complete':payload['complete'],'errors':payload['errors'],'message':'Pluto-data hentet'+(' med delvise fejl' if payload['errors'] else '')})
             if self.path=='/api/portfolios/sync':
                 import mcp_client,portfolios
                 items=mcp_client.read_portfolios(connect,user_id)

@@ -59,3 +59,13 @@ Synkronisering med et understøttet, komplet svar skal testes for nye, omdøbte 
 Installer med en frisk ZIP og det medfølgende apply_update.py som tidligere. Pakker og eksisterende nøgle skal ikke genoprettes; database-, OAuth- og miljøkonfiguration bevares. Ved genstart tilføjes metadatafelter for porteføljetype, forældreportefølje og visnings-/handelsadgang transaktionelt.
 
 Tryk Opdatér porteføljer fra Pluto. Vent på resultatet; UI viser nu en hentebesked under kørslen. Ved en formatfejl kan den viste tekst med feltnavne og datatyper deles til yderligere adaptertilpasning; der er ikke brug for tokens eller rå kontodata. Forvent ikke beholdningsværdier eller kontanter i denne version.
+
+## v0.6: beholdninger, værdier og kontanter
+
+Brug frisk ZIP og apply_update.py fra en ny udpakket mappe under escape_app/opdatering. Scriptets faste fil-liste inkluderer nu portfolio_data.py. Stop appen først. Bevar database, tokennøgle, OAuth-klient og miljøvariabler. Ingen nye pakker eller scopes kræves. Efter returncode 0: start appen og genindlæs Safari.
+
+På overblikket vælger ejeren Vis beholdninger og kontanter på én importeret portefølje og derefter Opdatér værdier og beholdninger. Test først en rodportefølje og derefter én Collection. Opslag kan tage tid, især med flere sider. Delvise fejl vises pr. sektion; ukendte data er ikke nuller. Ved en ukendt felttype kan den viste fejltekst med feltnavne/datatyper deles; tokens er ikke nødvendige. Der er ingen generisk handels- eller MCP-kommandoformular.
+
+Kontrollér mod Pluto: valuta for hver konto, reservationer, senest registreret værdi, antal beholdninger og at en Collection ikke summeres oven i sin rodportefølje. get_positions totalCount kan være højere end returnerede rækker, når positioner er solgt under pagination; loopet stopper først, når nextToken er væk. Kvittering for et lykkedes API-opslag er ikke dokumentation for friske markedskurser. Sammenhold kildetid og indlæsningstid.
+
+Hvis cron aktiveres, henter worker også Pluto-datasæt timevis for aktive, importerede porteføljer med gyldigt token. Data læses igen; intet handles. Nye porteføljer kræver fortsat opdatering af navnelisten. Genlogin er nødvendigt ved tokenudløb indtil automatisk refresh er implementeret. Automatisk drift er ikke aktiveret blot ved kodeopdatering.
