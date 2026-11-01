@@ -11,6 +11,13 @@ class Quotes(unittest.TestCase):
   self.assertEqual(result['price'],{'amount':'500','currency':'USD'});self.assertEqual(result['price_time'],'2026-01-01T00:00:00+00:00')
   with self.assertRaises(portfolio_data.PortfolioFormatError):asset_quotes.parse({'id':'wrong','currency':'USD','price':'500'},'test-id')
   with self.assertRaises(portfolio_data.PortfolioFormatError):asset_quotes.parse({'id':'test-id','currency':'EUR','price':{'amount':'500','currency':'USD'}},'test-id')
+ def test_nested_current_price_observed_contract(self):
+  data={'asset':{'id':'test-id','currency':'USD'},'price':{'assetId':'test-id','currentPrice':502.5,'dailyChange':-1.2,'dailyChangePercent':-0.24}}
+  result=asset_quotes.parse(data,'test-id')
+  self.assertEqual(result['price'],{'amount':'502.5','currency':'USD'})
+  self.assertIsNone(result['price_time'])
+  data['price']['assetId']='foreign'
+  with self.assertRaises(portfolio_data.PortfolioFormatError):asset_quotes.parse(data,'test-id')
  def test_calculated_value_is_labeled_and_same_currency(self):
   row=self.row();row['price']={'amount':'500','currency':'USD'};asset_quotes.calculate(row)
   self.assertEqual(Decimal(row['value']['amount']),Decimal('50'));self.assertEqual(Decimal(row['unrealized']['amount']),Decimal('10'))

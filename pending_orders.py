@@ -36,7 +36,7 @@ def normalize(row,source,active_group=False,index=0):
     for value in [order_id,trade_id]:
         if value is not None and (not isinstance(value,str) or not value):raise PortfolioFormatError('Ugyldig ordreference')
     key='order:'+order_id if order_id else 'trade:'+trade_id if trade_id else source+':observation:'+str(index)
-    return {'key':key,'verified_id':bool(order_id or trade_id),'sources':[source],'status':status or 'ACTIVE (status ikke oplyst)','pending_buy':status=='ACTIVE_BUY' or (active_group and side=='BUY'),'side':side or ('BUY' if status=='ACTIVE_BUY' else None),'name':name,'ticker':ticker,'allocated':money(row,['allocatedAmount','reservedAmount'],currency(row.get('allocationCurrency'))),'order_amount':money(row,['orderAmount','amount'],code),'requested_quantity':number(field(body,['requestedQuantity','quantity'])),'filled_quantity':number(row.get('filledQuantity')),'collection_id':row.get('collectionId'),'portfolio_id':row.get('portfolioId')}
+    return {'key':key,'verified_id':bool(order_id or trade_id),'sources':[source],'status':status or 'ACTIVE (status ikke oplyst)','unconfirmed':status=='ACCEPTED','pending_buy':status=='ACTIVE_BUY' or (active_group and side=='BUY' and status!='ACCEPTED'),'side':side or ('BUY' if status=='ACTIVE_BUY' else None),'name':name,'ticker':ticker,'allocated':money(row,['allocatedAmount','reservedAmount'],currency(row.get('allocationCurrency'))),'order_amount':money(row,['orderAmount','amount'],code),'requested_quantity':number(field(body,['requestedQuantity','quantity'])),'filled_quantity':number(row.get('filledQuantity')),'collection_id':row.get('collectionId'),'portfolio_id':row.get('portfolioId')}
 
 def from_positions(rows,source):
     return [normalize(row,source,index=index) for index,row in enumerate(rows) if active_buy(row)]
@@ -121,5 +121,10 @@ def enrich(client,tools,portfolio,payload,connect,user_id,decode):
     try:records=merge(records)
     except PortfolioFormatError as error:
         records=payload.get('pending_orders',[]);errors.append(str(error));all_complete=False
+    for record in records:
+        if portfolio['kind']=='collection' and not record.get('name') and not record.get('ticker'):
+            record['name']='Køb af Collection · '+portfolio['name']
+    payload['unconfirmed_orders']=[record for record in records if record.get('unconfirmed')]
+    records=[record for record in records if not record.get('unconfirmed')]
     payload['pending_orders']=records;payload['order_errors']=errors;payload['orders_complete']=all_complete
     payload['reservation_note']='reservedForOrders vises én gang pr. konto. Ordrebeløb og ACTIVE_BUY-poster lægges ikke oveni reservationen og trækkes ikke fra saldoen igen. Afstemning af dækning mellem ordrer og reservationer er endnu ikke verificeret; frit investerbart beløb beregnes ikke.'

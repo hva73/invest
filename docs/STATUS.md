@@ -111,3 +111,9 @@ Når antal er positivt og valuta kan matches, beregnes en manglende positionsvæ
 Collection-/portefølje-profitLoss vises særskilt som Plutos oplyste resultat, uden påstand om realiseret/urealiseret opdeling eller afkastperiode. Source equity og profitLoss ændres ikke af de beregnede instrumentbeløb. Ingen FX-konvertering foretages, og Collection-instrumenter lægges ikke til rodporteføljens total.
 
 79 Python-tests, formatteringsregression og Chromium-flow består. Browseren verificerer særskilte mærkater for beregnet værdi, beregnet urealiseret resultat og Plutos oplyste resultat. Testkurser og beløb er syntetiske og ligger kun i midlertidige testdatabaser. Det faktiske get_asset-prissvar mangler endnu liveverifikation på Nordicway og kan kræve felttilpasning; ingen påstand om fungerende aktuelle markedspriser før den kontrol.
+
+### Mobilkort og indlejrede aktivpriser
+- get_asset price.currentPrice understøttes med kontrol af prispostens assetId og aktivets valuta. Dagsændring bruges ikke som urealiseret resultat.
+- ACCEPTED alene flyttes til særskilt uafklaret udførelsesstatus; tælles ikke som afventende eller gennemført. ACTIVE_BUY uden aktivnavn vises som køb af den kendte Collection.
+- Ordrekort på alle skærme; kontanter og beholdninger som kort på mobil. Kompakt navigation med alle funktioner, større trykflader og sekundære oplysninger under detaljer.
+- Validering: 81 Python-tests samt JavaScript-formatering og browserkontrol. Eksterne Pluto-svar er ikke hentet i denne test.

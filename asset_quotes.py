@@ -24,7 +24,11 @@ def parse(data,asset_id):
             if obj.get(key) is not None:candidates.append(obj[key])
     if not candidates:raise PortfolioFormatError('Pris mangler i get_asset; felter og typer: '+shape(data))
     if any(value!=candidates[0] for value in candidates):raise PortfolioFormatError('Modstridende priser i get_asset')
-    raw=candidates[0];quote=money({'price':raw},['price'],code)
+    raw=candidates[0]
+    if isinstance(raw,dict) and 'currentPrice' in raw:
+        if raw.get('assetId') is not None and raw['assetId']!=asset_id:raise PortfolioFormatError('Prisposten tilhører et andet aktiv')
+        quote=money(raw,['currentPrice'],code)
+    else:quote=money({'price':raw},['price'],code)
     if quote['amount'] is None or Decimal(quote['amount'])<=0:raise PortfolioFormatError('Ingen positiv, anvendelig pris i get_asset')
     if code and quote['currency']!=code:raise PortfolioFormatError('Prisens valuta stemmer ikke med aktivet')
     stamp=date_field(data,['priceAsOf','priceTimestamp','quotedAt'])

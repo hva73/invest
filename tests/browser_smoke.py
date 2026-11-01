@@ -44,6 +44,14 @@ def main():
     mobile=browser.new_context(viewport={'width':390,'height':844},is_mobile=True,has_touch=True);mobile_page=mobile.new_page();mobile_page.goto(url)
     mobile_page.locator('#login-form [name=password]').fill('browser-test-password-long');mobile_page.locator('#login-form button').click();mobile_page.locator('#content .hero').wait_for()
     assert mobile_page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Mobile layout overflows'
+    mobile_page.locator(f'[data-open-portfolio="{pid}"]').click()
+    mobile_page.get_by_text('Afventende handler',exact=True).wait_for()
+    for width in [320,375,390,430]:
+     mobile_page.set_viewport_size({'width':width,'height':844})
+     assert mobile_page.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), f'Detail overflows at {width}px'
+     assert mobile_page.locator('.responsive-table thead').first.is_hidden()
+     assert mobile_page.locator('.order-card').count()==2
+    mobile_page.set_viewport_size({'width':390,'height':844})
     mobile_page.screenshot(path='/tmp/escape-mobile-design.png',full_page=True);mobile_page.locator('nav [data-view=reports]').click();mobile_page.get_by_text('Data & kørsler',exact=True).wait_for()
     assert not errors,errors
     browser.close();print('PASS: desktop login, proposal approval, job queue, invitation, account isolation financial snapshot display and 390px mobile navigation')

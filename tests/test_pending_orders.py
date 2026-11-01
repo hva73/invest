@@ -70,3 +70,10 @@ class Pending(unittest.TestCase):
   self.assertTrue(all(call['name']=='get_collection_activity' for call in calls));self.assertEqual(calls[1]['arguments']['nextToken'],'second');self.assertEqual(len(payload['pending_orders']),1);self.assertFalse(payload['orders_complete'])
  def test_mutating_tool_is_not_allowed(self):
   self.assertFalse(pending_orders.allowed(self.tools(),'propose_orders','portfolioId'))
+
+class AcceptedStatus(unittest.TestCase):
+ def test_accepted_does_not_prove_pending_buy(self):
+  record=__import__('pending_orders').normalize({'status':'ACCEPTED','side':'BUY','quantity':'1'},'list_orders',True)
+  self.assertTrue(record['unconfirmed'])
+  self.assertFalse(record['pending_buy'])
+  self.assertIsNone(record['filled_quantity'])
