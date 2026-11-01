@@ -57,9 +57,9 @@ def normalize_value(data,default_currency=None):
     if not isinstance(data,dict):raise PortfolioFormatError('Ukendt værdisvar; felter og typer: '+shape(data))
     # A named envelope, if present, must itself be a monetary observation.
     if isinstance(data.get('portfolioValue'),dict):data=data['portfolioValue']
-    if not any(k in data for k in ['totalValue','value']):raise PortfolioFormatError('Ukendte værdifelter og typer: '+shape(data))
+    if not any(k in data for k in ['totalValue','value','equity']):raise PortfolioFormatError('Ukendte værdifelter og typer: '+shape(data))
     code=currency(field(data,['currency','portfolioCurrency'])) or default_currency
-    return {'value':money(data,['totalValue','value'],code),'source_time':date_field(data,['asOf','recordedAt','timestamp','valuationTime']),'label':'Senest registrerede værdi — ikke livekurs'}
+    return {'value':money(data,['totalValue','value','equity'],code),'source_time':date_field(data,['asOf','recordedAt','timestamp','valuationTime']),'label':'Senest registrerede værdi — ikke livekurs'}
 
 def normalize_accounts(data):
     records=list_data(data,['accounts','cashAccounts','items','data']);result=[]

@@ -87,3 +87,12 @@ class Data(unittest.TestCase):
      code='USD' if row['external_id']=='portfolios:usd' else 'DKK'
      portfolio_data.save(c,1,row['id'],{'observed':'2026-01-01T12:00:00+00:00','value':{'value':{'amount':'100','currency':code}},'errors':[]})
    self.assertEqual(portfolio_data.summaries(rows,portfolio_data.snapshots(c,1))['by_currency'],{'DKK':'100','USD':'100'})
+
+ def test_observed_pluto_equity_value_contract(self):
+  # Field names observed on Nordicway; amounts are synthetic test values.
+  result=portfolio_data.normalize_value({'timestamp':'2026-01-01T12:00:00Z','equity':'1234.50','profitLoss':'99.00','currency':'DKK'})
+  self.assertEqual(result['value'],{'amount':'1234.50','currency':'DKK'})
+  self.assertEqual(result['source_time'],'2026-01-01T12:00:00+00:00')
+  self.assertNotIn('realized',result);self.assertNotIn('profitLoss',result)
+ def test_conflicting_equity_and_value_fail_safely(self):
+  with self.assertRaises(portfolio_data.PortfolioFormatError):portfolio_data.normalize_value({'equity':'100','value':'200','currency':'DKK'})

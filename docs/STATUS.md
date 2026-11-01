@@ -51,3 +51,7 @@ Ny detaljevisning med gemt værdi, kildetid, indlæsningstid, beholdningsantal, 
 Worker kan planlægge pluto_data-jobs hver time for aktive Pluto-enheder med et endnu gyldigt token. Dette kræver stadig aktiv cron og ophører ved tokenudløb; automatisk OAuth-refresh er endnu ikke implementeret. Portefølje-/Collection-listen skal fortsat opdateres manuelt, så nye enheder kan komme med i jobs.
 
 52 forskellige automatiske tests består (samlet suite med 51, efterfulgt af målrettet finansregression med ekstra valutaseparationstest). Chromium-smoketesten består også med porteføljedetaljer og finansielle testfelter. Alle finansielle testpayloads er syntetiske og gemmes kun i midlertidige testdatabaser. Ejerens rigtige økonomiske Pluto-svar er ikke modtaget eller verificeret; adapteren kan kræve tilpasning til felterne på Nordicway.
+
+## v0.6.1: porteføljeværdi fra equity
+
+Ejerens live-fejltekst på Nordicway viste get_portfolio_value-felterne timestamp:str, equity:str, profitLoss:str og currency:str. normalize_value accepterer nu equity som porteføljeværdi og timestamp som kildetid. profitLoss klassificeres ikke som realiseret/urealiseret afkast uden dokumenteret semantik. Modstridende value/equity-felter afvises. Alle 12 relevante finansielle tests består, herunder to nye regressionstests. Selve beløbet er endnu ikke verificeret i ejerens UI efter rettelsen.
