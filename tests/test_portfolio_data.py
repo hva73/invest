@@ -126,3 +126,14 @@ class Data(unittest.TestCase):
  def test_nested_collection_rejects_partial_and_ambiguous_lists(self):
   for data in [{'holdings':{'items':[],'nextToken':'more'}},{'holdings':{'items':[],'totalCount':1}},{'holdings':{'items':[],'positions':[]}}]:
    with self.assertRaises(portfolio_data.PortfolioFormatError):portfolio_data.complete_list(data,['holdings','items','positions'])
+ def test_collection_map_keeps_source_records_without_exposing_keys(self):
+  data={'holdings':{'private-key-a':{'name':'Test one','quantity':'2','currency':'USD','value':'10'},'private-key-b':{'name':'Test two','quantity':'3','currency':'EUR','value':'20'}}}
+  rows=portfolio_data.complete_list(data,['holdings','positions','items','assets'])
+  self.assertEqual(len(rows),2);self.assertEqual(rows[0]['quantity'],'2');self.assertNotIn('private-key-a',str(rows))
+ def test_single_custom_wrapper_requires_quantity(self):
+  rows=portfolio_data.complete_list({'holdings':{'customWrapper':[{'name':'Test','quantity':'2'}]}},['holdings','positions','items'])
+  self.assertEqual(rows[0]['name'],'Test')
+  with self.assertRaises(portfolio_data.PortfolioFormatError):portfolio_data.complete_list({'holdings':{'weights':[{'name':'Test','weight':'0.5'}]}},['holdings','positions','items'])
+ def test_nested_diagnostic_shows_structure_without_private_keys(self):
+  text=portfolio_data.nested_shape({'private-key':{'assets':[{'name':'Private instrument','quantity':'123'}]}})
+  self.assertIn('assets:list',text);self.assertNotIn('private-key',text);self.assertNotIn('Private instrument',text);self.assertNotIn('123',text)

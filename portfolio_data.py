@@ -49,14 +49,22 @@ def money(obj,names,default_currency=None):
 
 def nested_shape(data,depth=0):
     if not isinstance(data,dict):return type(data).__name__
-    allowed={'holdings','positions','rows','items','data','totalCount','nextToken','nextCursor','hasMore','collection','metadata','value','amount','equity','currency','localCurrency','accountCurrency','timestamp','asOf'}
+    allowed={'holdings','positions','rows','items','data','totalCount','nextToken','nextCursor','hasMore','collection','metadata','value','amount','equity','currency','localCurrency','accountCurrency','timestamp','asOf','assets','asset','quantity','ticker','name','assetName'}
     parts=[]
     for key in sorted(allowed.intersection(data)):
         value=data[key]
         detail=nested_shape(value,depth+1) if depth<2 and isinstance(value,dict) else type(value).__name__
         parts.append(key+':'+detail)
     unknown=len(set(data)-allowed)
-    if unknown:parts.append(str(unknown)+' øvrige felter (navne skjult)')
+    if unknown:
+        types=[]
+        for key,value in data.items():
+            if key in allowed:continue
+            if isinstance(value,list):detail='list med '+(type(value[0]).__name__ if value else 'ingen')+' poster'
+            elif isinstance(value,dict) and depth<2:detail=nested_shape(value,depth+1)
+            else:detail=type(value).__name__
+            if detail not in types:types.append(detail)
+        parts.append(str(unknown)+' øvrige felter (navne skjult), typer: '+' / '.join(types[:3]))
     return '{'+', '.join(parts)+'}'
 
 def list_data(data,keys,depth=0):
@@ -66,17 +74,35 @@ def list_data(data,keys,depth=0):
         if len(candidates)==1:return list_data(candidates[0],keys,depth+1)
     raise PortfolioFormatError('Ukendt/uklart listeformat; struktur uden private værdier: '+nested_shape(data))
 
+def holding_record(value):
+    if not isinstance(value,dict) or 'quantity' not in value:return False
+    asset=value.get('asset') if isinstance(value.get('asset'),dict) else {}
+    return any(isinstance(v,str) and bool(v.strip()) for v in [value.get('name'),value.get('ticker'),value.get('assetName'),asset.get('name'),asset.get('ticker')])
+
 def complete_list(data,keys):
     node=data;counts=[]
     for _ in range(4):
-        if not isinstance(node,dict):break
+        if isinstance(node,list):
+            records=node;break
+        if not isinstance(node,dict):raise PortfolioFormatError('Ukendt Collection-liste: '+nested_shape(node))
         if 'totalCount' in node:counts.append(node['totalCount'])
         if node.get('nextToken') or node.get('nextCursor') or node.get('hasMore') is True:
             raise PortfolioFormatError('Collection-beholdninger er delvise; ingen delvis liste vises')
         candidates=[node[k] for k in keys if isinstance(node.get(k),(list,dict))]
-        if len(candidates)!=1:break
-        node=candidates[0]
-    records=list_data(data,keys)
+        if len(candidates)>1:raise PortfolioFormatError('Flere mulige Collection-lister; ingen data gættes')
+        if len(candidates)==1:
+            node=candidates[0];continue
+        # A keyed holdings map is accepted only inside this explicit Collection
+        # holdings section, and only when every value validates as a holding.
+        values=list(node.values())
+        if values and all(holding_record(value) for value in values):
+            records=values;break
+        # An unknown single wrapper is accepted only if its records explicitly
+        # have instrument identity and quantity. Target allocations cannot pass.
+        if len(node)==1 and len(values)==1 and isinstance(values[0],list) and values[0] and all(holding_record(value) for value in values[0]):
+            records=values[0];break
+        raise PortfolioFormatError('Ukendt Collection-beholdningsstruktur: '+nested_shape(node))
+    else:raise PortfolioFormatError('Collection-beholdninger har for mange indpakninger')
     if any(isinstance(count,bool) or not isinstance(count,int) or count!=len(records) for count in counts):raise PortfolioFormatError('Collection-beholdningernes antal stemmer ikke; ingen delvis liste vises')
     return records
 
@@ -162,7 +188,7 @@ def read(connect,user_id,portfolio_id,client_factory=None):
             payload['value']=None;payload['errors'].append('Collection-værdi: '+str(error))
         try:
             if data.get('nextToken') or data.get('nextCursor') or data.get('hasMore') is True:raise PortfolioFormatError('Collection-svaret er ufuldstændigt')
-            rows=complete_list(data,['positions','holdings','rows','items','data'])
+            rows=complete_list(data,['positions','holdings','rows','items','data','assets'])
             payload['positions']=normalize_positions(rows,local)
             payload['positions_complete']=True;successful+=1
         except PortfolioFormatError as error:payload['errors'].append('Collection-beholdninger: '+str(error))

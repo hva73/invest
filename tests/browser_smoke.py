@@ -23,10 +23,10 @@ def main():
     # Financial UI fixture is confined to this temporary test database.
     import portfolios,portfolio_data
     with app.connect() as c:
-     portfolios.replace_pluto(c,1,[{'id':'portfolios:browser-test','name':'Browser fixture','kind':'portfolio'}]);pid=c.execute("SELECT id FROM portfolios WHERE source='pluto'").fetchone()[0]
+     portfolios.replace_pluto(c,1,[{'id':'portfolios:browser-test','name':'Browser fixture','kind':'portfolio'},{'id':'collections:browser-child','name':'Browser collection fixture','kind':'collection','parent_external_id':'portfolios:browser-test'}]);pid=c.execute("SELECT id FROM portfolios WHERE source='pluto'").fetchone()[0]
      payload={'observed':'2026-01-01T12:00:00+00:00','value':{'value':{'amount':'1000','currency':'DKK'},'source_time':None},'positions_complete':True,'positions':portfolio_data.normalize_positions([{'name':'Test holding','currency':'USD','quantity':2,'price':None,'value':None}]),'accounts':portfolio_data.normalize_accounts([{'currency':'DKK','balance':'500','reservedForOrders':'100','buyingPower':'400'}]),'errors':[]}
      portfolio_data.save(c,1,pid,payload)
-    page.reload();page.locator(f'[data-open-portfolio="{pid}"]').click();page.get_by_text('Kontanter pr. konto og valuta',exact=True).wait_for();page.get_by_text('Test holding',exact=False).wait_for()
+    page.reload();page.locator('.collection-children').wait_for();assert 'Browser collection fixture' in page.locator('.collection-children').inner_text();page.locator(f'[data-open-portfolio="{pid}"]').click();page.get_by_text('Kontanter pr. konto og valuta',exact=True).wait_for();page.get_by_text('Test holding',exact=False).wait_for()
     assert 'DKK' in page.locator('#content').inner_text()
     page.locator('nav [data-view=settings]').click();page.locator('#invite').click();invitation=page.locator('#invitation input');invitation.wait_for();token=invitation.input_value()
     other=browser.new_context();other_page=other.new_page();other_page.goto(url);other_page.locator('#login details summary').click()

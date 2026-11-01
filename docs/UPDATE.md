@@ -79,3 +79,9 @@ Frisk ZIP + apply_update.py opdaterer både equity-understøttelse, kontodiagnos
 Installer frisk ZIP gennem apply_update.py under en ny mappe, mens appen er stoppet. Genstart og genindlæs siden. Ingen nye pakker, scopes eller nøgler er nødvendige.
 
 Kør først Opdatér værdier og beholdninger på rodporteføljen. Kontantbalance skal nu læses fra cash og hævbart beløb fra withdrawalPower. Købekraft må stadig vise —, når buyingPower ikke leveres; det er ikke en fejl og må ikke erstattes af withdrawalPower. Kør derefter samme opdatering på en Collection. Ukendte indre strukturfelter kan stadig kræve tilpasning; del kun den afgrænsede fejltekst. Succesfulde Collection-sektioner kan nu vises trods fejl i en anden sektion.
+
+## v0.6.4: hierarki og Collection-beholdninger
+
+Samme opdateringsprocedure med frisk ZIP og apply_update.py, appen stoppet, derefter start og genindlæsning. Ingen ny konfiguration kræves. Opdatér liste med porteføljer/Collections for at få aktuelle parent-ID'er; opdatér derefter Collection-værdier og beholdninger. Rodporteføljens total skal ikke ændres blot fordi en Collection bliver hentet. En Collection, som ligger i en anden valuta eller har et andet kildetidspunkt, trækkes heller ikke fra for at udlede direkte beholdningers værdi.
+
+Hvis beholdningsformatet stadig er ukendt, del den nye begrænsede strukturtekst. Den indeholder typer og tilladte skemanøgler, ikke kontonøgler eller instrumentnavne. Den fulde rå kontooversigt eller tokens er ikke nødvendige til denne diagnose.

@@ -4,3 +4,5 @@ a{color:var(--accent)}summary{cursor:pointer;color:var(--accent);padding:15px 0}
 
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;padding:15px;background:#091820}button:disabled{opacity:.5;cursor:wait}
 h2,h3,td{overflow-wrap:anywhere}.grid>.panel{min-width:0}
+
+.portfolio-group{margin-bottom:24px}.collection-children{margin-left:24px;padding-left:20px;border-left:2px solid #31574f}.collection-children .panel{background:#0d2029}@media(max-width:600px){.collection-children{margin-left:8px;padding-left:12px}}
