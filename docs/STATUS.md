@@ -117,3 +117,7 @@ Collection-/portefølje-profitLoss vises særskilt som Plutos oplyste resultat, 
 - ACCEPTED alene flyttes til særskilt uafklaret udførelsesstatus; tælles ikke som afventende eller gennemført. ACTIVE_BUY uden aktivnavn vises som køb af den kendte Collection.
 - Ordrekort på alle skærme; kontanter og beholdninger som kort på mobil. Kompakt navigation med alle funktioner, større trykflader og sekundære oplysninger under detaljer.
 - Validering: 81 Python-tests samt JavaScript-formatering og browserkontrol. Eksterne Pluto-svar er ikke hentet i denne test.
+
+### Manuel nyhedshentning i Opportunity Radar
+Knappen Opdatér nyheder henter det officielle ECB-feed direkte i den autentificerede forespørgsel uden worker eller cron. CSRF kræves; en fælles 60-sekunders pause begrænser hentninger. Nyheder deduplikeres og tidligere data bevares ved fejl. Offentlige nyheder deles mellem brugere; private markedsidéer er fortsat adskilte. Seneste succes og fejl vises. Ingen AI-analyse, handelssignaler eller betalte datakilder.
+Verifikation: automatisk testpakke og browser; særskilt test for manuel hentning, pause, deduplikering og bevarelse ved fejl. Live ECB-kald fra udviklingsmiljøet blokeres af netværksproxy (403); webhotellets adgang skal verificeres med knappen efter installation.

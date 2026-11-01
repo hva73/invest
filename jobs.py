@@ -10,6 +10,7 @@ ECB_URL='https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml'
 SOURCE='Den Europæiske Centralbank'
 
 def init(c):
+    c.execute('CREATE TABLE IF NOT EXISTS news_refresh(id INTEGER PRIMARY KEY CHECK(id=1),attempted REAL NOT NULL,succeeded REAL,error TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS jobs(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id), dedupe TEXT NOT NULL UNIQUE, status TEXT NOT NULL, available REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, lease TEXT, lease_until REAL, result TEXT, created REAL NOT NULL)')
     if 'portfolio_id' not in {r['name'] for r in c.execute('PRAGMA table_info(jobs)')}:c.execute('ALTER TABLE jobs ADD COLUMN portfolio_id INTEGER REFERENCES portfolios(id)')
     c.execute('CREATE TABLE IF NOT EXISTS fx_snapshots(id INTEGER PRIMARY KEY, source_date TEXT NOT NULL, observed TEXT NOT NULL, payload TEXT NOT NULL, digest TEXT NOT NULL UNIQUE)')
@@ -124,8 +125,9 @@ def status(connect,user_id):
         snapshot=c.execute('SELECT payload FROM fx_snapshots ORDER BY source_date DESC,id DESC LIMIT 1').fetchone()
         fx=json.loads(snapshot['payload']) if snapshot else None
         if fx:fx['age_days']=(datetime.now(timezone.utc).date()-date.fromisoformat(fx['source_date'])).days
+        news_refresh=c.execute('SELECT attempted,succeeded,error FROM news_refresh WHERE id=1').fetchone()
         heartbeat=c.execute('SELECT heartbeat FROM worker_state WHERE id=1').fetchone()
         news=[dict(r) for r in c.execute('SELECT id,title,url,published,summary,observed FROM news_items ORDER BY published DESC,id DESC LIMIT 30')]
         rows=[dict(r) for r in c.execute('SELECT id,kind,status,attempts,result,created FROM jobs WHERE user_id=? ORDER BY id DESC LIMIT 20',(user_id,))]
         reports=[dict(r) for r in c.execute('SELECT created,body FROM reports WHERE user_id=? ORDER BY id DESC LIMIT 20',(user_id,))]
-    return {'news':news,'fx':fx,'jobs':rows,'reports':reports,'worker_last_seen':heartbeat['heartbeat'] if heartbeat else None,'worker_recent':bool(heartbeat and heartbeat['heartbeat']>time.time()-180),'ai_status':'Ikke tilsluttet','schedule_timezone':'Europe/Copenhagen'}
+    return {'news_refresh':dict(news_refresh) if news_refresh else None,'news':news,'fx':fx,'jobs':rows,'reports':reports,'worker_last_seen':heartbeat['heartbeat'] if heartbeat else None,'worker_recent':bool(heartbeat and heartbeat['heartbeat']>time.time()-180),'ai_status':'Ikke tilsluttet','schedule_timezone':'Europe/Copenhagen'}

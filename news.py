@@ -37,3 +37,28 @@ def parse(raw,observed=None):
 def fetch():
     request=urllib.request.Request(URL,headers={'Accept':'application/rss+xml, application/xml','User-Agent':'ESCAPE/0.4'})
     with urllib.request.build_opener(NoRedirect()).open(request,timeout=8) as response:return parse(response.read(1048577))
+
+def refresh(connect,fetcher=None,at=None):
+    """Fetch immediately, with a shared one-minute cooldown; preserve last good news."""
+    import time
+    stamp=time.time() if at is None else at
+    with connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        row=c.execute('SELECT attempted FROM news_refresh WHERE id=1').fetchone()
+        if row and stamp-row['attempted']<60:
+            return {'ok':True,'cached':True,'message':'Nyheder er netop forsøgt opdateret. Viser de senest gemte nyheder; prøv igen om et minut.'}
+        c.execute("INSERT INTO news_refresh(id,attempted) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET attempted=excluded.attempted",(stamp,))
+    try:
+        items=(fetcher or fetch)()
+        if not items:raise ValueError('empty feed')
+        with connect() as c:
+            before=c.execute('SELECT COUNT(*) FROM news_items').fetchone()[0]
+            for item in items:
+                c.execute('INSERT INTO news_items(title,url,published,summary,observed,digest) VALUES(?,?,?,?,?,?) ON CONFLICT(digest) DO UPDATE SET title=excluded.title,summary=excluded.summary',(item['title'],item['url'],item['published'],item['summary'],item['observed'],item['digest']))
+            added=c.execute('SELECT COUNT(*) FROM news_items').fetchone()[0]-before
+            c.execute("UPDATE news_refresh SET succeeded=?,error=NULL WHERE id=1",(stamp,))
+        return {'ok':True,'cached':False,'message':f'ECB-nyheder hentet. {added} nye meddelelser; dubletter er fjernet.'}
+    except Exception:
+        message='ECB-feedet kunne ikke hentes. Tidligere nyheder er bevaret. Prøv igen om et minut.'
+        with connect() as c:c.execute('UPDATE news_refresh SET error=? WHERE id=1',(message,))
+        return {'ok':False,'message':message}

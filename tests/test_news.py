@@ -18,3 +18,23 @@ class News(unittest.TestCase):
      jobs.run_one(app.connect,lambda:news.parse(FEED,datetime(2026,1,3,tzinfo=timezone.utc)),at=0)
     self.assertEqual(len(jobs.status(app.connect,1)['news']),1)
    finally:app.DB=previous
+
+class ManualNews(unittest.TestCase):
+ def test_manual_refresh_cooldown_and_failure_preserves_news(self):
+  previous=app.DB
+  with tempfile.TemporaryDirectory() as d:
+   try:
+    app.DB=d+'/manual.db';app.init()
+    fetcher=lambda:news.parse(FEED,datetime(2026,1,3,tzinfo=timezone.utc))
+    self.assertTrue(news.refresh(app.connect,fetcher,at=100)['ok'])
+    def fail():raise OSError('private transport error')
+    self.assertTrue(news.refresh(app.connect,fail,at=101)['cached'])
+    self.assertFalse(news.refresh(app.connect,fail,at=161)['ok'])
+    with app.connect() as c:
+     self.assertEqual(c.execute('SELECT COUNT(*) FROM news_items').fetchone()[0],1)
+     status=c.execute('SELECT * FROM news_refresh').fetchone()
+     self.assertEqual(status['succeeded'],100)
+     self.assertNotIn('private',status['error'])
+    news.refresh(app.connect,fetcher,at=222)
+    with app.connect() as c:self.assertEqual(c.execute('SELECT COUNT(*) FROM news_items').fetchone()[0],1)
+   finally:app.DB=previous

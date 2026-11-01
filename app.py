@@ -226,6 +226,10 @@ class Handler(BaseHTTPRequestHandler):
                 with connect() as c:
                     c.execute('INSERT INTO invitations VALUES(?,?,?,0)',(token_hash(token),user_id,time.time()+86400))
                 return self.send(201,{'invitation':token,'expires_in_hours':24})
+            if self.path=='/api/news/refresh':
+                import news
+                result=news.refresh(connect)
+                return self.send(200 if result['ok'] else 502,result)
             if self.path=='/api/jobs/ecb':
                 if s['role']!='admin':return self.send(403,{'error':'Kun administratoren kan starte datakørsel'})
                 import jobs
