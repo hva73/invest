@@ -5,7 +5,7 @@ import os,shutil,sqlite3,tempfile
 from datetime import datetime,timezone
 from pathlib import Path
 
-FILES=('app.py','portfolio_data.py','portfolios.py','mcp_client.py','pluto.py','oauth.py','jobs.py','news.py','worker.py','setup_runtime.py','requirements.txt','passenger_wsgi.py','static/app.js','static/index.html','static/style.css','static/manifest.json','static/sw.js','static/icon.svg')
+FILES=('app.py','pending_orders.py','portfolio_data.py','portfolios.py','mcp_client.py','pluto.py','oauth.py','jobs.py','news.py','worker.py','setup_runtime.py','requirements.txt','passenger_wsgi.py','static/app.js','static/index.html','static/style.css','static/manifest.json','static/sw.js','static/icon.svg')
 
 def apply(source,target):
     source=Path(source).resolve();target=Path(target).resolve()

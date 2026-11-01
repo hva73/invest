@@ -82,7 +82,7 @@ def run_one(connect,fetcher=None,at=None):
             if job['kind']=='pluto_data':
                 import portfolio_data
                 portfolio_data.save(c,job['user_id'],job['portfolio_id'],payload)
-                result='Pluto-data hentet'+(' med delvise fejl' if payload['errors'] else '')
+                result='Pluto-data hentet'+(' med delvise fejl' if payload['errors'] or payload.get('order_errors') else '')
             elif job['kind']=='ecb':
                 # Validate supplied adapters as well as actual network responses.
                 if not isinstance(payload,dict) or payload.get('source_url')!=ECB_URL or payload.get('base')!='EUR' or not isinstance(payload.get('rates'),dict):raise ValueError('invalid adapter')

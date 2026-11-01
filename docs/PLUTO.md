@@ -56,3 +56,9 @@ Den indsendte metadatafil bekræfter list_portfolios(inputSchema: object, proper
 Den indsendte værktøjsliste annoncerer get_accounts(portfolioId), get_positions(portfolioId,limit,nextToken), get_portfolio_value(portfolioId) og get_collection(collectionId) med readOnlyHint=true. Disse er den eneste allowlist i portfolio_data.py. De konkrete økonomiske outputfelter mangler stadig livevalidering. Adapterens normalisering viser kun genkendte felter og afviser ugyldige valutaer, tal eller tidsstempler; der er ingen rå kontodata i fejlmeddelelser.
 
 get_accounts beskriver balance, buying power og reservationer per valuta. Adapteren viser dem separat og udleder ikke frit investerbare kontanter, fordi kontosemantik og lokale planreservationer skal afklares. Collection-værdi dokumenteres i localCurrency, kontanter i hver kontos valuta og holdings cost basis i instrumentvaluta; disse adskilles. Root-værdier og Collection-værdier summeres ikke sammen. Pris-null ved manglende kurs forbliver ukendt. Snapshotdata gemmes brugerbundet uden tokens.
+
+## Aktive ordrer og Collection-aktivitet
+
+Den tidligere indsendte tools/list annoncerer list_orders med valgfri portfolioId, statusGroup enum ACTIVE/INACTIVE, scope enum DIRECT/COLLECTION og limit max50. get_collection_activity kræver collectionId og understøtter limit max100 samt nextToken. Begge er readOnlyHint=true. pending_orders.py bruger kun disse to navne og validerer annonceret læsekontrakt. Handels-/annullerings-/forslagsværktøjer kan ikke vælges af klienten.
+
+Ejeren beskriver ACTIVE_BUY som igangværende køb med allokeret kapital. Tolkningen følges ved at vise dem separat, uden at estimere udførelse eller fri kapital. Den konkrete reservation bliver ikke automatisk udledt fra et order amount. Endelig afstemning med kontoernes reservedForOrders er fortsat en livevalideringsopgave.

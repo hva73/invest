@@ -15,3 +15,5 @@ body{background:radial-gradient(ellipse at 85% -10%,#1b3140 0,transparent 47%),l
 
 .trend-arrow{width:16px;height:16px;flex:none}.sr-only{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
 @media(min-width:901px){.detail-heading{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:28px;align-items:center}.detail-heading>button:first-child{grid-column:1/-1;justify-self:start}.detail-heading>h2{grid-column:1;grid-row:2}.detail-heading>p:first-of-type{grid-column:1;grid-row:3;margin-top:0}.detail-heading>.primary{grid-column:2;grid-row:2/4}.detail-heading>p:last-child{grid-column:1/-1;margin-bottom:0}}
+
+.pending-panel{border-top:2px solid #b4935c}.pending-panel>small{color:var(--gold)}

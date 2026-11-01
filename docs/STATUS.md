@@ -89,3 +89,13 @@ UI opdateret med marineblå flader, diskrete guldtoner, større værdital, instr
 Tekniske delvise fejl samles under en fungerende fold-ud datastatus; beskedfarver adskiller information, hentning, succes, advarsel og fejl. Kildetider vises i dansk tid med sekunder, og navigation til nye visninger ruller til toppen. Interne lokale portefølje-ID'er er fjernet fra kortenes tekst. Eksisterende ID-baserede handlinger og brugeradskillelse bevares.
 
 64 Python-tests, Node-formatterings-/piletests og Chromium-flow på desktop/390px mobil består. Desktop-/mobilbilleder fra midlertidige testdatabaser er visuelt kontrolleret; ingen faktiske markedsdata eller private brugerkonti bruges i skærmtesten. Fysisk iPhone/Safari skal stadig afprøves af ejeren.
+
+## v0.8: ACTIVE_BUY og allokeret kapital
+
+ACTIVE_BUY detekteres i positioners status/type og holdes ude af gennemførte beholdninger. Afventende poster vises i en selvstændig sektion med kilde, status, ønsket antal, udtrykkeligt oplyst udført antal, eksplicit allokering og separat ordrebeløb. Der udledes ikke allokering fra cost basis, markedsværdi eller ønsket antal, og et ordrebeløb fortolkes ikke automatisk som reservation.
+
+To yderligere observerede læseværktøjer bruges: list_orders(portfolioId,statusGroup=ACTIVE,limit=50) og get_collection_activity(collectionId,limit=100,nextToken). Collection-ordrer filtreres på eksplicit Collection-ID; manglende forældreportefølje gættes ikke. Den aktive ordrelistes grænse på 50 og manglende/ukendt pagination gør oversigten udtrykkeligt delvis. Activity-sider hentes med tokenkontrol og højst 20 sider. Kun ACTIVE_BUY fra aktivitet behandles som afventende køb; historiske afsluttede aktiviteter bliver ikke nye beholdninger.
+
+Observationer sammenlægges kun, når de deler et eksplicit orderId eller tradeId. Uden sikker fælles reference vises kilderne separat og der beregnes intet samlet ekstra reservationsbeløb. Konflikter markeres. reservedForOrders forbliver brokerens kontoobservation, vises én gang pr. konto og ændres ikke af ordreimporten. Kontantbalance, porteføljeværdi og Collection-værdi reduceres ikke af den nye tabel. Frit investerbart beløb er stadig ukendt, indtil dækningen mellem konkrete allokeringer og reservationer er verificeret.
+
+72 Python-tests, formatteringstest og Chromium-flow består. En ekstra browserkontrol verificerer to syntetiske ACTIVE_BUY-poster i en separat tabel; ingen faktisk ordre er oprettet eller ændret. Ejeren har oplyst to ACTIVE_BUY på sin Collection, men deres faktiske status-/beløbsfelter og referencer skal stadig verificeres efter deployment. Antallet to er aldrig hardcodet i produktkoden.

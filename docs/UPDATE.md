@@ -93,3 +93,11 @@ Hent frisk ZIP og brug samme apply_update.py-procedure fra en ny mappe under esc
 Opdatér værdier og beholdninger på en Collection. Datastatus er nu en fold-ud-sektion under værdien, så tekniske fejl ikke fylder hele oversigten. Hvis fejl stadig forekommer, åbn Datastatus og del den afgrænsede fejltekst. Bekræft instrumenter, antal, valuta, værdi og fortegn mod Pluto. Positive/negative pile i beholdningstabellen angiver urealiseret resultat i instrumentets valuta; de er ikke udvikling over en tidsperiode. Ukendte resultater vises neutralt.
 
 Kontroller både Mac og iPhone, at tabeller kan rulles vandret uden at siden selv løber ud over skærmen, og at Collections stadig står under deres portefølje uden ekstra bidrag til totalen.
+
+## v0.8: design og ACTIVE_BUY samlet
+
+Versionen omfatter designet fra v0.7 plus pending_orders.py. Et allerede downloadet v0.7-arkiv indeholder ikke ordretilpasningen og kan ikke få den ved blot at køre det gamle apply_update.py igen. Hent en frisk ZIP og udpak separat under escape_app/opdatering. Installer med det nye arkivs apply_update.py, mens appen er stoppet. Scriptet bevarer DB, nøgler og OAuth-opsætning og kopierer den nye modulefil. Ingen nye pakker eller scopes kræves.
+
+Efter start/genindlæsning: opdatér porteføljeværdier og derefter Collection-data. Kontrollér Afventende handler. ACTIVE_BUY skal være adskilt fra gennemførte beholdninger. Sammenhold antal, instrument, status og eventuelt beløb med Pluto. Beløb vises kun, når eksplicit oplyst. Rækker uden sikker fælles ordrereference tælles ikke automatisk som entydige separate ordrer eller summeres til ekstra reserverede penge. Ukendt/ufuldstændig ordreadgang fremgår af Datastatus.
+
+Kontantbalance og reservedForOrders skal være uændrede af selve tilføjelsen af pending-tabellen. Ingen nye fradrag foretages, og der vises ikke frit investerbare kontanter ud fra uafstemt kapital. Hvis de to aktuelle ACTIVE_BUY ikke kan identificeres, del den nye datastatus; del ikke tokens, nøgler eller private ordrebekræftelser.

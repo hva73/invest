@@ -135,6 +135,8 @@ def normalize_positions(data,collection_currency=None):
     records=list_data(data,['positions','holdings','rows','items','data']);result=[]
     for item in records:
         if not isinstance(item,dict):raise PortfolioFormatError('Ugyldig beholdningspost')
+        from pending_orders import active_buy
+        if active_buy(item):continue
         wrapper=item
         if isinstance(item.get('holding'),dict):item=item['holding']
         elif isinstance(item.get('collection'),dict):item=item['collection']
@@ -169,7 +171,7 @@ def read(connect,user_id,portfolio_id,client_factory=None):
         if name not in READ_TOOLS or not supported(tools,name):raise PortfolioFormatError('Pluto annoncerer ikke den forventede læsekontrakt for '+name)
         return decode_result(client.request('tools/call',{'name':name,'arguments':args}),name)
     observed=datetime.now(timezone.utc).isoformat()
-    payload={'source':'Pluto Markets','observed':observed,'kind':portfolio['kind'],'positions':[],'accounts':[],'value':None,'errors':[],'complete':False}
+    payload={'source':'Pluto Markets','observed':observed,'kind':portfolio['kind'],'positions':[],'pending_orders':[],'accounts':[],'value':None,'errors':[],'complete':False}
     if namespace=='collections':
         data=call('get_collection',{'collectionId':identifier})
         if not isinstance(data,dict):raise PortfolioFormatError('Ukendt Collection-format: '+shape(data))
@@ -194,6 +196,8 @@ def read(connect,user_id,portfolio_id,client_factory=None):
             if data.get('nextToken') or data.get('nextCursor') or data.get('hasMore') is True:raise PortfolioFormatError('Collection-svaret er ufuldstændigt')
             rows=complete_list(data,['positions','holdings','rows','items','data','assets'])
             payload['positions']=normalize_positions(rows,local)
+            from pending_orders import from_positions
+            payload['pending_orders']=from_positions(rows,'get_collection')
             payload['positions_complete']=True;successful+=1
         except PortfolioFormatError as error:payload['errors'].append('Collection-beholdninger: '+str(error))
         try:
@@ -234,6 +238,8 @@ def read(connect,user_id,portfolio_id,client_factory=None):
             else:raise PortfolioFormatError('Beholdningslisten overstiger sidegrænsen')
             if total is not None and (isinstance(total,bool) or not isinstance(total,int) or total<0 or len(rows)>total):raise PortfolioFormatError('Beholdningslistens antal er ugyldigt')
             payload['positions']=normalize_positions(rows,payload.get('currency'))
+            from pending_orders import from_positions
+            payload['pending_orders']=from_positions(rows,'get_positions')
             payload['positions_complete']=True
             successful+=1
         except PortfolioFormatError as error:payload['errors'].append('positions: '+str(error))
@@ -243,6 +249,8 @@ def read(connect,user_id,portfolio_id,client_factory=None):
             if account.get('diagnostic'):payload['errors'].append((account['currency'] or 'Ukendt valuta')+': '+account['diagnostic'])
         payload['complete']=not payload['errors']
     else:raise PortfolioFormatError('Ukendt Pluto-porteføljetype')
+    from pending_orders import enrich
+    enrich(client,tools,portfolio,payload,connect,user_id,decode_result)
     return payload
 
 def save(c,user_id,portfolio_id,payload):

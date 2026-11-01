@@ -260,7 +260,8 @@ class Handler(BaseHTTPRequestHandler):
                     with connect() as c:portfolio_data.mark_failed(c,user_id,pid,'Seneste Pluto-opslag fejlede; gemte data kan være forældede')
                     return self.send(502,{'error':'Pluto-opslaget fejlede. Tidligere data er bevaret og markeret.'})
                 with connect() as c:portfolio_data.save(c,user_id,pid,payload)
-                return self.send(200,{'ok':True,'complete':payload['complete'],'errors':payload['errors'],'message':'Pluto-data hentet'+(' med delvise fejl' if payload['errors'] else '')})
+                issues=payload['errors']+payload.get('order_errors',[])
+                return self.send(200,{'ok':True,'complete':payload['complete'] and payload.get('orders_complete',False),'errors':issues,'message':'Pluto-data hentet'+(' med delvise fejl' if issues else '')})
             if self.path=='/api/portfolios/sync':
                 import mcp_client,portfolios
                 items=mcp_client.read_portfolios(connect,user_id)
