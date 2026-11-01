@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "report_id": "manual-integration-test-001",
+  "generated_at": "2026-11-01T20:00:00Z",
+  "source": "Manuel integrationstest",
+  "is_test": true,
+  "portfolio_values": [
+    {"name": "Testportefølje", "amount": "1000.00", "currency": "DKK", "includes_collections": true}
+  ],
+  "candidates": [
+    {"symbol": "TEST", "market": "Testmarked", "reason": "Kun et syntetisk eksempel til test af rapportvisning."}
+  ],
+  "assessments": [
+    {"subject": "Testkandidat", "assessment": "Dette er testdata, ikke en investeringsanbefaling."}
+  ],
+  "orders": [
+    {"reference": "TEST-ORDER-001", "status": "TEST_ONLY", "note": "Ingen ordre er sendt til Pluto."}
+  ]
+}

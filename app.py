@@ -46,6 +46,8 @@ def init():
         c.execute('CREATE TABLE IF NOT EXISTS invitations(token_hash TEXT PRIMARY KEY, created_by INTEGER NOT NULL REFERENCES users(id), expires REAL NOT NULL, used INTEGER NOT NULL DEFAULT 0)')
         c.execute("CREATE TABLE IF NOT EXISTS connections(user_id INTEGER PRIMARY KEY REFERENCES users(id), provider TEXT NOT NULL DEFAULT 'pluto', status TEXT NOT NULL, requested TEXT NOT NULL)")
         c.execute('CREATE TABLE IF NOT EXISTS connection_checks(user_id INTEGER PRIMARY KEY REFERENCES users(id), checked REAL NOT NULL)')
+        import report_ingest
+        report_ingest.init(c)
         import jobs
         jobs.init(c)
         oauth.init(c)
@@ -170,6 +172,9 @@ class Handler(BaseHTTPRequestHandler):
             s=self.session()
             if not s: return self.send(401,{'error':'Log ind først'})
             user_id=s['user_id']
+            if self.path=='/api/reports/latest':
+                import report_ingest
+                return self.send(200,report_ingest.latest(connect,user_id))
             if self.path=='/api/automation':
                 import jobs
                 return self.send(200,jobs.status(connect,user_id))
@@ -191,6 +196,23 @@ class Handler(BaseHTTPRequestHandler):
         self.send(200,(ROOT/'static'/path).read_bytes(),kind)
     def do_POST(self):
         try:
+            if self.path=='/api/reports/ingest':
+                import report_ingest
+                recipient,status=report_ingest.recipient(connect,self.headers.get('Authorization'))
+                if status!=200:return self.send(status,{'error':'Rapportmodtagelse er ikke konfigureret' if status==503 else 'Ugyldig rapportnøgle'})
+                if self.headers.get('Content-Type','').split(';')[0].strip().lower()!='application/json':return self.send(415,{'error':'Brug application/json'})
+                length=int(self.headers.get('Content-Length','0'))
+                if not 0<length<=16384:return self.send(413,{'error':'Rapporten må højst fylde 16384 bytes'})
+                raw=self.rfile.read(length)
+                def unique(pairs):
+                    obj={}
+                    for key,value in pairs:
+                        if key in obj:raise ValueError('duplicate key')
+                        obj[key]=value
+                    return obj
+                data=json.loads(raw,object_pairs_hook=unique,parse_constant=lambda value:(_ for _ in ()).throw(ValueError('invalid number')))
+                status,result=report_ingest.save(connect,recipient,data)
+                return self.send(status,result)
             length=int(self.headers.get('Content-Length','0'))
             if length>16384: return self.send(413,{'error':'For stor forespørgsel'})
             data=json.loads(self.rfile.read(length))
