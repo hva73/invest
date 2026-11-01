@@ -16,7 +16,7 @@ def main():
     page=browser.new_page(viewport={'width':1440,'height':1000});errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
     url=f'http://127.0.0.1:{server.server_port}'
     page.goto(url);page.locator('#login-form [name=password]').fill('browser-test-password-long');page.locator('#login-form button').click();page.locator('#content .hero').wait_for()
-    page.locator('nav [data-view=trade]').click()
+    page.locator('nav [data-view=portfolios]').click();page.locator('#portfolio-create [name=name]').fill('Browser test portfolio');page.locator('#portfolio-create button').click();page.get_by_text('Lokal portefølje gemt.',exact=False).wait_for();page.locator('nav [data-view=trade]').click();page.locator('#proposal [name=portfolio_id]').select_option(index=1)
     for name,value in {'ticker':'TEST','quantity':'1','price':'100','stop':'90','target':'120','costs':'0','fx':'1'}.items():page.locator(f'#proposal [name={name}]').fill(value)
     page.locator('#proposal button').click();page.locator('[data-approve]').wait_for();page.locator('[data-approve]').click();page.get_by_text('Godkendt lokalt',exact=True).wait_for()
     page.locator('nav [data-view=reports]').click();page.locator('#queue-ecb').click();page.get_by_text('queued',exact=False).first.wait_for()

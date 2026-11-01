@@ -3,3 +3,4 @@
 a{color:var(--accent)}summary{cursor:pointer;color:var(--accent);padding:15px 0}details{margin-top:15px}details[open]{border-top:1px solid var(--line)}
 
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;padding:15px;background:#091820}button:disabled{opacity:.5;cursor:wait}
+h2,h3,td{overflow-wrap:anywhere}.grid>.panel{min-width:0}

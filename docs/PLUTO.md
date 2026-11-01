@@ -40,3 +40,9 @@ POST /api/pluto/connect kræver login og CSRF og er begrænset til én test pr. 
 
 ## Aktuel v0.4-kontrakt
 OAuth-koden understøtter kun den annoncerede offentlige PKCE-klienttype, same-host HTTPS-endpoints og eksplicit konfigurerede læsescopes. Ingen faktiske scopes er kendt eller forudfyldt endnu. Oplysningerne ovenfor om forventet design er en plan; STATUS.md angiver implementering og resterende begrænsninger.
+
+## Dynamiske porteføljer / Collections
+
+Ejerens login er nu vist som godkendt på Nordicway. Scopet mcp:read er observeret i provider-metadata. mcp_client.py tilføjer standard initialize/notifications/initialized/tools/list og en snæver kontraktkontrolleret porteføljelæsning. Det er ikke en generisk tools/call-proxy. Understøttede læseværktøjsnavne og outputkontrakter fremgår af koden. Adapteren kræver både readOnlyHint=true og understøttet schema; navnet alene er utilstrækkeligt. Kontrakter uden outputSchema, med andre identitetsfelter eller med pagination i selve porteføljesvaret kræver en særskilt tilpasning. Ved ukendt format bevares gamle data.
+
+Pluto-identiteter lagres som porteføljetype + provider-ID, uafhængigt af visningsnavn og navnet på det konkrete listeværktøj. Der foretages ingen sammenlægning baseret på ens navne. Der er endnu ingen automatisk porteføljepolling eller beholdningsimport.

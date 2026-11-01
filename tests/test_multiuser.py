@@ -4,6 +4,8 @@ import passenger_wsgi as wsgi
 class Accounts(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.previous_db=app.DB;app.DB=self.tmp.name+'/db.sqlite';app.init();app.create_user('owner-password-at-least-14');self.cookie='';self.csrf=''
+  import portfolios
+  with app.connect() as c:portfolios.create(c,1,'Testkonto')
  def tearDown(self):app.DB=self.previous_db;self.tmp.cleanup()
  def request(self,path,data=None,csrf=True):
   payload=json.dumps(data).encode() if data is not None else b'';result={}
@@ -17,7 +19,7 @@ class Accounts(unittest.TestCase):
  def test_isolation_and_connection_requests(self):
   self.login();token=self.invite();owner_cookie,owner_csrf=self.cookie,self.csrf
   self.assertEqual(self.request('register',{'username':'other','password':'other-password-at-least-14','invitation':token,'role':'admin'})[0],201)
-  p={'portfolio':'ESCAPE AI Trader','ticker':'TEST','quantity':1,'price':100,'stop':90,'target':120,'costs':0,'fx':1,'user_id':2}
+  p={'portfolio_id':1,'ticker':'TEST','quantity':1,'price':100,'stop':90,'target':120,'costs':0,'fx':1,'user_id':2}
   self.assertEqual(self.request('proposals',p)[0],201)
   opportunity={'company':'Test','ticker':'TEST','market':'USA','asset':'Aktier','headline':'Test only','source_url':'https://example.com','published':'2020-01-01T00:00:00Z','classification':'Spekulation','catalyst':'Unknown','risk':'Unknown','next_action':'Read','user_id':2}
   self.assertEqual(self.request('opportunities',opportunity)[0],201)

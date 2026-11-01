@@ -45,3 +45,11 @@ Rapportjob oprettes kun, når worker kører i timen kl. 08, 14 eller 22 dansk ti
 Kontrollér login, gamle forslag, invitation i en separat browsersession, nye kilder med korrekte tidsstempler, jobfejl ved utilgængelig kilde og et reelt Pluto-login når konfigurationen er verificeret. Test fysisk iPhone og PWA separat.
 
 Ved fejl: stop appen og gem fejltekst uden nøgler/tokens. Gendan kode og tilhørende backupdatabase samlet efter vurdering. Rul aldrig tilbage til den gamle enkeltbrugerversion med en nyere flerbrugerdatabase, da den gamle kode ikke isolerer brugere. Bevar både database og den matchende krypteringsnøgle. Bed om hjælp før rollback med rigtige tilsluttede konti.
+
+## Opdatering v0.5: dynamiske porteføljer
+
+Samme proces med en frisk ZIP og den medfølgende apply_update.py under escape_app/opdatering. Scriptet installerer nu også portfolios.py og mcp_client.py. Stop appen og kør scriptet fra den nye udpakkede mappe. Bevar database, krypteringsnøgle, miljøvariabler og OAuth-klientregistrering. Eksisterende dependency og tokennøgle kræver ikke genoprettelse. Start/genstart derefter appen og genindlæs Safari.
+
+Kontrollér Mine porteføljer: tom liste for en ny konto uden forslag og historiske lokale poster for eksisterende forslag. På overblikket: Opdatér porteføljer fra Pluto. Hvis der vises en kontraktfejl, gå til Forbindelser → Undersøg Plutos porteføljeværktøjer. Del værktøjsbeskrivelserne/inputSchema/outputSchema til adaptertilpasning; del aldrig tokens eller krypteringsnøgle. Værktøjsopslag udfører ingen handelsværktøjer. Porteføljer fra Pluto må ikke oprettes ud fra manuelle gæt om deres ID eller svarets betydning.
+
+Synkronisering med et understøttet, komplet svar skal testes for nye, omdøbte og fjernede Collections samt en anden brugers konto. Aktuel implementering er manuel opdatering, ikke automatisk baggrundssync. Alle værdier for beholdninger, kontanter og afkast forbliver ukendte, indtil de er verificeret separat.

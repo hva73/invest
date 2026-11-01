@@ -21,3 +21,13 @@ En separat Chromium-browsertest består: desktoplogin, oprettelse/godkendelse af
 Pluto og ECB kunne ikke nås fra det aktuelle udviklingsmiljø. Ejeren viste tidligere et HTTP 200 fra Nordicways Pluto-resource-metadataopslag. Dette verificerer ikke authorization-serverens metadata, registrering, læsescopes eller token exchange. OAuth-tests bruger simulerede serversvar. ECB-tests bruger tydeligt mærkede testfixtures, der aldrig indlæses i appens database.
 
 Ingen reelle handler er oprettet, ingen betalte tjenester aktiveret, ingen tokens eller passwords committet. GitHub-opdateringen ændrer ikke Nordicway automatisk.
+
+## v0.5: dynamiske porteføljer
+
+Forudbestemte porteføljekort og formularvalg er fjernet. Hver konto får sin egen porteføljeliste med interne ID'er, kilde og eventuelt provider-ID. Ingen standardnavne oprettes. Lokale enheder kan oprettes/omdøbes; de er udtrykkeligt ikke Pluto-Collections. Eksisterende forslag migreres til lokale porteføljeposter uden at miste deres oprindelige navn. Nye forslag kræver en aktiv portefølje, som tilhører brugeren.
+
+MCP-klienten kan initialisere en sessionsbundet forbindelse, læse tools/list inkl. pagination og vise de faktiske beskrivelser. Synkronisering tillader kun de specifikke read-only-annoncerede listeværktøjer i mcp_client.READ_LISTS, uden obligatoriske argumenter og med et præcist understøttet outputSchema. Ukendte kontrakter afvises før værktøjsudførelse. Understøttede svar valideres før en atomisk afstemning: nye Collections oprettes, omdøbte bevarer ID, fjernede arkiveres. Lokale enheder og andre brugeres data berøres ikke. Listen afstemmes kun ved eksplicit opdatering, ikke endnu automatisk i worker.
+
+Ejerens skærmbillede viser godkendt Pluto-login på Nordicway og provider-metadata med mcp:read, mcp:trade, S256, offentlig klient og dynamisk registrering. Det understøtter loginresultatet, men bekræfter ikke det faktiske tools/list-schema eller porteføljedata. Liveværktøjsliste og import skal afprøves på Nordicway. Der gøres ingen påstand om fungerende portfolio-sync mod et endnu ukendt outputformat.
+
+38 automatiske tests og Chromium-smoketesten består, inklusive brugeradskillelse, vilkårlige navne, ID-bevarelse ved navneændring, arkivering, afviste outputkontrakter og MCP JSON/SSE-opslag. Beholdninger, vægtninger, kontanter og markedsværdier er stadig ikke hentet.

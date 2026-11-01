@@ -49,6 +49,8 @@ def init():
         import jobs
         jobs.init(c)
         oauth.init(c)
+        import portfolios
+        portfolios.init(c)
         c.execute('DELETE FROM sessions WHERE expires<?',(time.time(),))
 
 def token_hash(token):
@@ -116,9 +118,11 @@ def proposal(data,user_id):
     if not (nums['quantity']>0 and nums['price']>nums['stop']>0 and nums['target']>nums['price'] and nums['costs']>=0 and nums['fx']>0): raise ValueError('Kontrollér pris, stop, mål og omkostninger')
     ticker=str(data['ticker']).strip().upper()
     if not ticker or len(ticker)>24: raise ValueError('Ugyldigt symbol')
-    if data['portfolio'] not in ['Hovedportefølje','ESCAPE AI Trader']: raise ValueError('Ukendt portefølje')
     with connect() as c:
-        cur=c.execute('INSERT INTO proposals(portfolio,ticker,quantity,price,stop,target,costs,fx,created,user_id) VALUES(?,?,?,?,?,?,?,?,?,?)',(data['portfolio'],ticker,*[nums[k] for k in ['quantity','price','stop','target','costs','fx']],now(),user_id))
+        portfolio=c.execute('SELECT id,name FROM portfolios WHERE id=? AND user_id=? AND active=1',(int(data['portfolio_id']),user_id)).fetchone()
+    if not portfolio:raise ValueError('Vælg en af dine aktive porteføljer')
+    with connect() as c:
+        cur=c.execute('INSERT INTO proposals(portfolio,ticker,quantity,price,stop,target,costs,fx,created,user_id,portfolio_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(portfolio['name'],ticker,*[nums[k] for k in ['quantity','price','stop','target','costs','fx']],now(),user_id,portfolio['id']))
         c.execute('INSERT INTO journal(proposal_id,event,created,user_id) VALUES(?,?,?,?)',(cur.lastrowid,'Handelsforslag oprettet • hypotetisk beregning',now(),user_id))
     return nums
 class Handler(BaseHTTPRequestHandler):
@@ -169,9 +173,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,jobs.status(connect,user_id))
             if self.path=='/api/connections': return self.send(200,connection_state(user_id))
             if self.path=='/api/state':
+                import portfolios
+                with connect() as c:owned=portfolios.list_owned(c,user_id)
                 with connect() as c: p=[dict(r) for r in c.execute('SELECT * FROM proposals WHERE user_id=? ORDER BY id DESC',(user_id,))]; j=[dict(r) for r in c.execute('SELECT * FROM journal WHERE user_id=? ORDER BY id DESC',(user_id,))]
                 with connect() as c: opportunities=[dict(r) for r in c.execute('SELECT * FROM opportunities WHERE user_id=? ORDER BY id DESC',(user_id,))]
-                return self.send(200,{'user':{'username':s['username'],'role':s['role']},'connection':connection_state(user_id),'opportunities':opportunities,'proposals':p,'journal':j,'time':now(),'integrations':{'Pluto Markets':'Ikke tilsluttet','Markedsdata':'Ikke tilsluttet','Nyheder og AI':'Ikke tilsluttet'},'reports':{'timezone':'Europe/Copenhagen','schedule':['08:00','14:00','22:00'],'status':'Afventer datakilder og scheduler'}})
+                return self.send(200,{'portfolios':owned,'user':{'username':s['username'],'role':s['role']},'connection':connection_state(user_id),'opportunities':opportunities,'proposals':p,'journal':j,'time':now(),'integrations':{'Pluto Markets':'Ikke tilsluttet','Markedsdata':'Ikke tilsluttet','Nyheder og AI':'Ikke tilsluttet'},'reports':{'timezone':'Europe/Copenhagen','schedule':['08:00','14:00','22:00'],'status':'Afventer datakilder og scheduler'}})
             return self.send(404,{'error':'Ukendt endpoint'})
         path={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/manifest.json':'manifest.json','/sw.js':'sw.js','/icon.svg':'icon.svg'}.get(self.path)
         if not path:return self.send(404,{'error':'Ikke fundet'})
@@ -229,6 +235,24 @@ class Handler(BaseHTTPRequestHandler):
                 oauth.revoke(connect,user_id)
                 with connect() as c:c.execute('DELETE FROM connections WHERE user_id=?',(user_id,))
                 return self.send(200,connection_state(user_id))
+            if self.path=='/api/portfolios':
+                import portfolios
+                with connect() as c:pid=portfolios.create(c,user_id,data['name'])
+                return self.send(201,{'id':pid})
+            if self.path=='/api/portfolios/rename':
+                import portfolios
+                with connect() as c:portfolios.rename(c,user_id,int(data['id']),data['name'])
+                return self.send(200,{'ok':True})
+            if self.path=='/api/portfolios/sync':
+                import mcp_client,portfolios
+                items=mcp_client.read_portfolios(connect,user_id)
+                with connect() as c:
+                    c.execute('BEGIN IMMEDIATE')
+                    portfolios.replace_pluto(c,user_id,items)
+                return self.send(200,{'ok':True,'count':len(items),'message':'Porteføljer hentet fra Pluto. Beholdninger og kurser er endnu ikke hentet.'})
+            if self.path=='/api/pluto/catalog':
+                import mcp_client
+                return self.send(200,mcp_client.catalog(connect,user_id))
             if self.path=='/api/pluto/start':
                 return self.send(200,oauth.start(connect,s))
             if self.path=='/api/pluto/connect':
