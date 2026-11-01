@@ -24,7 +24,9 @@ def main():
     import portfolios,portfolio_data
     with app.connect() as c:
      portfolios.replace_pluto(c,1,[{'id':'portfolios:browser-test','name':'Browser fixture','kind':'portfolio'},{'id':'collections:browser-child','name':'Browser collection fixture','kind':'collection','parent_external_id':'portfolios:browser-test'}]);pid=c.execute("SELECT id FROM portfolios WHERE source='pluto' AND external_id='portfolios:browser-test'").fetchone()[0]
-     payload={'observed':'2026-01-01T12:00:00+00:00','value':{'value':{'amount':'1000','currency':'DKK'},'source_time':None},'positions_complete':True,'positions':portfolio_data.normalize_positions([{'name':'Test holding','currency':'USD','quantity':2,'price':None,'value':None,'unrealisedPnL':'2.5'},{'name':'Test negative holding','currency':'USD','quantity':1,'price':None,'value':None,'unrealisedPnL':'-1.5'}]),'accounts':portfolio_data.normalize_accounts([{'currency':'DKK','balance':'500','reservedForOrders':'100','buyingPower':'400'}]),'errors':[]}
+     payload={'observed':'2026-01-01T12:00:00+00:00','value':{'value':{'amount':'1000','currency':'DKK'},'source_time':None},'positions_complete':True,'positions':portfolio_data.normalize_positions([{'name':'Test holding','currency':'USD','quantity':2,'price':'10','value':None,'costBasis':'17.5'},{'name':'Test negative holding','currency':'USD','quantity':1,'price':None,'value':None,'unrealisedPnL':'-1.5'}]),'accounts':portfolio_data.normalize_accounts([{'currency':'DKK','balance':'500','reservedForOrders':'100','buyingPower':'400'}]),'errors':[]}
+     import asset_quotes
+     asset_quotes.calculate(payload['positions'][0]);payload['value']['reported_result']={'amount':'2.5','currency':'DKK'}
      import pending_orders
      payload['pending_orders']=[pending_orders.normalize({'name':'Pending test '+str(i),'status':'ACTIVE_BUY','orderId':'test-'+str(i),'quantity':'1','allocatedAmount':{'amount':'50','currency':'DKK'}},'test fixture') for i in range(2)]
      payload['orders_complete']=True;payload['reservation_note']='Test fixture: no cash arithmetic.'
@@ -32,7 +34,8 @@ def main():
     page.reload();page.locator('.collection-children').wait_for();assert 'Browser collection fixture' in page.locator('.collection-children').inner_text();page.locator(f'[data-open-portfolio="{pid}"]').click();page.get_by_text('Kontanter pr. konto og valuta',exact=True).wait_for();page.get_by_text('Test holding',exact=False).wait_for()
     assert 'DKK' in page.locator('#content').inner_text()
     page.get_by_text('Afventende handler',exact=True).wait_for();assert page.get_by_text('ACTIVE_BUY',exact=True).count()==2
-    page.locator('.pnl.positive').wait_for();assert '↗' in page.locator('.pnl.positive').inner_text();page.locator('.pnl.negative').wait_for();assert page.locator('.pnl.positive svg').is_visible()
+    page.locator('.pnl.positive').first.wait_for();assert '↗' in page.locator('.pnl.positive').first.inner_text();page.locator('.pnl.negative').wait_for();assert page.locator('.pnl.positive svg').first.is_visible()
+    page.get_by_text('Beregnet · antal × pris',exact=True).wait_for();page.get_by_text('Beregnet · værdi − kostpris',exact=True).wait_for();page.get_by_text('Plutos oplyste resultat',exact=True).wait_for()
     page.screenshot(path='/tmp/escape-desktop-design.png',full_page=True)
     page.locator('nav [data-view=settings]').click();page.locator('#invite').click();invitation=page.locator('#invitation input');invitation.wait_for();token=invitation.input_value()
     other=browser.new_context();other_page=other.new_page();other_page.goto(url);other_page.locator('#login details summary').click()

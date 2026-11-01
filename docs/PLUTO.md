@@ -62,3 +62,7 @@ get_accounts beskriver balance, buying power og reservationer per valuta. Adapte
 Den tidligere indsendte tools/list annoncerer list_orders med valgfri portfolioId, statusGroup enum ACTIVE/INACTIVE, scope enum DIRECT/COLLECTION og limit max50. get_collection_activity kræver collectionId og understøtter limit max100 samt nextToken. Begge er readOnlyHint=true. pending_orders.py bruger kun disse to navne og validerer annonceret læsekontrakt. Handels-/annullerings-/forslagsværktøjer kan ikke vælges af klienten.
 
 Ejeren beskriver ACTIVE_BUY som igangværende køb med allokeret kapital. Tolkningen følges ved at vise dem separat, uden at estimere udførelse eller fri kapital. Den konkrete reservation bliver ikke automatisk udledt fra et order amount. Endelig afstemning med kontoernes reservedForOrders er fortsat en livevalideringsopgave.
+
+## Manglende individuelle Collection-priser
+
+Brugerens prøve viser faktisk ingen pris/value/unrealisedPnL på Collection-positioner, kun antal og kostbasis samt asset-identitet. Derfor er fraværet ikke i sig selv en parserfejl. Det annoncerede get_asset(assetId, valgfri period) kan give senest kendte pris; asset_quotes.py bruger netop dette input uden period og uden tickersøgning. Det konkrete outputschema er ikke annonceret og ikke observeret i denne samtale; prisnormaliseringen valideres derfor konservativt ved runtime og testes med mærkede fixtures. Brugeren har kun leveret feltstruktur og enkelte kontoobservationer; private positionstal er ikke kopieret ind i tests.

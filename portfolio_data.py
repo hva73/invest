@@ -116,7 +116,7 @@ def normalize_value(data,default_currency=None):
     if isinstance(data.get('portfolioValue'),dict):data=data['portfolioValue']
     if not any(k in data for k in ['totalValue','value','equity']):raise PortfolioFormatError('Ukendte værdifelter og typer: '+shape(data))
     code=currency(field(data,['currency','portfolioCurrency'])) or default_currency
-    return {'value':money(data,['totalValue','value','equity'],code),'source_time':date_field(data,['asOf','recordedAt','timestamp','valuationTime']),'label':'Senest registrerede værdi — ikke livekurs'}
+    return {'reported_result':money(data,['profitLoss'],code),'value':money(data,['totalValue','value','equity'],code),'source_time':date_field(data,['asOf','recordedAt','timestamp','valuationTime']),'label':'Senest registrerede værdi — ikke livekurs'}
 
 def normalize_accounts(data):
     records=list_data(data,['accounts','cashAccounts','items','data']);result=[]
@@ -148,8 +148,11 @@ def normalize_positions(data,collection_currency=None):
         ticker=item.get('ticker') or asset.get('ticker')
         if not isinstance(name,(str,type(None))) or not isinstance(ticker,(str,type(None))):raise PortfolioFormatError('Ugyldigt instrumentnavn')
         if name is None and ticker is None:raise PortfolioFormatError('Ukendte beholdningsfelter og typer: '+shape(item))
+        identifiers=[value for value in [item.get('assetId'),asset.get('id')] if value is not None]
+        if any(not isinstance(value,str) or not value for value in identifiers) or len(set(identifiers))>1:raise PortfolioFormatError('Manglende/modstridende aktividentitet i beholdningen')
+        aid=identifiers[0] if identifiers else None
         price=money(item,['latestPrice','price'],code)
-        result.append({'kind':'collection' if is_collection else 'holding','name':name,'ticker':ticker,'quantity':number(item.get('quantity')),'currency':code,'price':price,'price_time':date_field(item,['priceAsOf','priceTimestamp','quotedAt']),'value':money(item,['value','marketValue'],code),'cost_basis':money(item,['costBasis'],code),'average_entry':money(item,['averageEntryPrice'],code),'unrealized':money(item,['unrealisedPnL','unrealizedPnL'],code),'value_in_portfolio_currency':money(item,['valueInPortfolioCurrency'],collection_currency),'unrealized_in_portfolio_currency':money(item,['unrealisedPnLInPortfolioCurrency','unrealizedPnLInPortfolioCurrency'],collection_currency)})
+        result.append({'asset_id':aid,'kind':'collection' if is_collection else 'holding','name':name,'ticker':ticker,'quantity':number(item.get('quantity')),'currency':code,'price':price,'price_time':date_field(item,['priceAsOf','priceTimestamp','quotedAt']),'value':money(item,['value','marketValue'],code),'cost_basis':money(item,['costBasis'],code),'average_entry':money(item,['averageEntryPrice'],code),'unrealized':money(item,['unrealisedPnL','unrealizedPnL'],code),'value_in_portfolio_currency':money(item,['valueInPortfolioCurrency'],collection_currency),'unrealized_in_portfolio_currency':money(item,['unrealisedPnLInPortfolioCurrency','unrealizedPnLInPortfolioCurrency'],collection_currency)})
     return result
 
 def supported(tools,name):
@@ -249,6 +252,9 @@ def read(connect,user_id,portfolio_id,client_factory=None):
             if account.get('diagnostic'):payload['errors'].append((account['currency'] or 'Ukendt valuta')+': '+account['diagnostic'])
         payload['complete']=not payload['errors']
     else:raise PortfolioFormatError('Ukendt Pluto-porteføljetype')
+    if namespace=='collections':
+        from asset_quotes import enrich as quote_enrich
+        quote_enrich(client,tools,payload,decode_result)
     from pending_orders import enrich
     enrich(client,tools,portfolio,payload,connect,user_id,decode_result)
     return payload

@@ -112,7 +112,7 @@ class Data(unittest.TestCase):
    def __init__(self,token):pass
    def tools(self):return TOOLS
    def request(self,method,params):
-    return {'structuredContent':{'collection':{'localCurrency':'EUR','accountCurrency':'DKK'},'holdings':{'positions':[{'name':'Test stock','currency':'USD','quantity':'1','value':'10'}],'totalCount':1},'accounts':[{'currency':'EUR','cash':'20','withdrawalPower':'15','reservedForOrders':'5'}],'value':{'equity':'30','currency':'EUR','timestamp':'2026-01-01T00:00:00Z'}}}
+    return {'structuredContent':{'collection':{'localCurrency':'EUR','accountCurrency':'DKK'},'holdings':{'positions':[{'name':'Test stock','currency':'USD','quantity':'1','price':'10','value':'10'}],'totalCount':1},'accounts':[{'currency':'EUR','cash':'20','withdrawalPower':'15','reservedForOrders':'5'}],'value':{'equity':'30','currency':'EUR','timestamp':'2026-01-01T00:00:00Z'}}}
   result=portfolio_data.read(app.connect,1,self.child,Client)
   self.assertTrue(result['complete']);self.assertEqual(result['value']['value'],{'amount':'30','currency':'EUR'});self.assertEqual(len(result['positions']),1);self.assertEqual(result['accounts'][0]['balance']['amount'],'20')
  def test_collection_sections_survive_unknown_holdings(self):

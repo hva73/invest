@@ -101,3 +101,11 @@ Versionen omfatter designet fra v0.7 plus pending_orders.py. Et allerede downloa
 Efter start/genindlæsning: opdatér porteføljeværdier og derefter Collection-data. Kontrollér Afventende handler. ACTIVE_BUY skal være adskilt fra gennemførte beholdninger. Sammenhold antal, instrument, status og eventuelt beløb med Pluto. Beløb vises kun, når eksplicit oplyst. Rækker uden sikker fælles ordrereference tælles ikke automatisk som entydige separate ordrer eller summeres til ekstra reserverede penge. Ukendt/ufuldstændig ordreadgang fremgår af Datastatus.
 
 Kontantbalance og reservedForOrders skal være uændrede af selve tilføjelsen af pending-tabellen. Ingen nye fradrag foretages, og der vises ikke frit investerbare kontanter ud fra uafstemt kapital. Hvis de to aktuelle ACTIVE_BUY ikke kan identificeres, del den nye datastatus; del ikke tokens, nøgler eller private ordrebekræftelser.
+
+## v0.9: prisopslag for Collection-instrumenter
+
+Frisk ZIP + medfølgende apply_update.py som tidligere. asset_quotes.py er tilføjet scriptets faste liste; stop appen ved opdatering, genstart og genindlæs Safari. Ingen nye pakker, scopes eller nøgler. Opdatér selve Collection-værdier og beholdninger, ikke kun porteføljenavnelisten, så aktiv-ID'erne hentes igen.
+
+Kontrollér Microsoft som første instrument: get_asset skal ramme aktiv-ID'et fra den aktuelle Collection og give en anvendelig pris i USD. Mangler valuta, pris eller korrekt ID, bevares — og Datastatus forklarer hvorfor. Ingen handel foretages. Prisopslaget kan tage tid; højst 20 unikke instrumenter behandles pr. opdatering.
+
+En afledt markedsværdi skal være mærket Beregnet · antal × pris. Afledt urealiseret resultat skal være mærket Beregnet · værdi − kostpris. Det er en beregning ud fra senest kendte pris, ikke et garanteret realiserbart salgsbeløb eller brokerens officielle performanceberegning. Sammenhold valuta og tidspunkt før vurdering. Collectionens egen equity/profitLoss og rodporteføljens total bevares særskilt.
