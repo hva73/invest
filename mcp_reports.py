@@ -9,6 +9,7 @@ VERSIONS=['2025-06-18','2025-03-26']
 SCOPES={'reports:read','reports:write'}
 
 def init(c):
+    c.execute('CREATE TABLE IF NOT EXISTS mcp_registration_diagnostic(id INTEGER PRIMARY KEY CHECK(id=1),observed REAL NOT NULL,payload TEXT NOT NULL)')
     c.execute('CREATE TABLE IF NOT EXISTS mcp_clients(id TEXT PRIMARY KEY,redirects TEXT NOT NULL,created REAL NOT NULL)')
     c.execute('CREATE TABLE IF NOT EXISTS mcp_requests(id TEXT PRIMARY KEY,client_id TEXT NOT NULL REFERENCES mcp_clients(id),redirect_uri TEXT NOT NULL,state TEXT NOT NULL,challenge TEXT NOT NULL,scope TEXT NOT NULL,resource TEXT NOT NULL,expires REAL NOT NULL,user_id INTEGER REFERENCES users(id))')
     c.execute('CREATE TABLE IF NOT EXISTS mcp_codes(hash TEXT PRIMARY KEY,client_id TEXT NOT NULL,user_id INTEGER NOT NULL REFERENCES users(id),redirect_uri TEXT NOT NULL,challenge TEXT NOT NULL,scope TEXT NOT NULL,resource TEXT NOT NULL,expires REAL NOT NULL)')
@@ -46,11 +47,29 @@ def redirect_allowed(url):
     allowed=set(filter(None,(x.strip() for x in os.environ.get('ESCAPE_MCP_REDIRECT_URIS','').split(','))))
     return url in allowed and p.scheme=='https' and bool(p.hostname) and not p.username and not p.password and not p.fragment
 
+def registration_diagnostic(connect,redirects):
+    # Diagnostic only: never authorize or fetch a supplied URL. No bodies, tokens or query strings.
+    safe=[];hosts=[]
+    for value in redirects if isinstance(redirects,list) else []:
+        if not isinstance(value,str) or len(value)>1000:continue
+        try:
+            parsed=urlsplit(value)
+            if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password:continue
+            host=parsed.hostname
+            if host in ['chatgpt.com','chat.openai.com'] and parsed.port in [None,443] and not parsed.query and not parsed.fragment:
+                if value not in safe:safe.append(value)
+            elif re.fullmatch(r'[A-Za-z0-9.-]{1,253}',host) and host not in hosts:hosts.append(host)
+        except ValueError:continue
+    payload={'reason':'invalid_redirect_uri','redirect_uris':safe[:5],'other_hosts':hosts[:5],'warning':'Observeret anmodning, ikke bevis for afsenderens identitet. Ingen adresse er automatisk tilladt.'}
+    with connect() as c:c.execute('INSERT INTO mcp_registration_diagnostic VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET observed=excluded.observed,payload=excluded.payload',(time.time(),json.dumps(payload)))
+
 def register(connect,data,address):
     limit(connect,'register:'+address,10,3600)
     if not isinstance(data,dict):raise OAuthError('invalid_client_metadata')
     redirects=data.get('redirect_uris')
-    if not isinstance(redirects,list) or not 1<=len(redirects)<=5 or not all(isinstance(u,str) and len(u)<=1000 and redirect_allowed(u) for u in redirects):raise OAuthError('invalid_redirect_uri')
+    if not isinstance(redirects,list) or not 1<=len(redirects)<=5 or not all(isinstance(u,str) and len(u)<=1000 and redirect_allowed(u) for u in redirects):
+        registration_diagnostic(connect,redirects)
+        raise OAuthError('invalid_redirect_uri')
     grants=data.get('grant_types',['authorization_code','refresh_token'])
     if data.get('token_endpoint_auth_method','none')!='none' or not isinstance(grants,list) or 'authorization_code' not in grants or not all(g in ['authorization_code','refresh_token'] for g in grants) or data.get('response_types',['code'])!=['code']:raise OAuthError('invalid_client_metadata')
     cid=secrets.token_urlsafe(32)
@@ -243,6 +262,9 @@ def handle(h,connect,method):
                 if method not in ['GET','POST']:raise OAuthError('method_not_allowed',405)
                 if method=='POST' and data!={'revoke_all':True}:raise OAuthError('invalid_request')
                 result=connections(connect,session['user_id'],method=='POST')
+                if session['role']=='admin':
+                    with connect() as c:diagnostic=c.execute('SELECT observed,payload FROM mcp_registration_diagnostic WHERE id=1').fetchone()
+                    result['registration_diagnostic']={'observed':diagnostic['observed'],**json.loads(diagnostic['payload'])} if diagnostic else None
             send(200,result);return True
         if path=='/oauth/authorize':
             if method!='GET':raise OAuthError('method_not_allowed',405)

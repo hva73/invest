@@ -136,3 +136,20 @@ class McpReports(unittest.TestCase):
    report_ingest.init(c)
   self.assertTrue(report_ingest.latest(connection,1,True)['report']['data']['is_test'])
   self.assertFalse(report_ingest.latest(connection,1)['report']['data']['is_test'])
+ def test_registration_diagnostic_is_admin_only_and_never_authorizes(self):
+  callback='https://chatgpt.com/observed-callback'
+  self.assertEqual(self.request('/oauth/register',{'redirect_uris':[callback,'https://attacker.example/secret-path?token=private','https://chatgpt.com/callback?code=private'],'client_secret':'private'})[0],400)
+  headers=self.login();status,result,_=self.request('/api/mcp/connections',headers=headers)
+  self.assertEqual(status,200)
+  diagnostic=result['registration_diagnostic']
+  self.assertEqual(diagnostic['redirect_uris'],[callback])
+  self.assertIn('attacker.example',diagnostic['other_hosts'])
+  self.assertNotIn('private',json.dumps(diagnostic))
+  self.assertFalse(mcp_reports.redirect_allowed(callback))
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT COUNT(*) FROM mcp_clients').fetchone()[0],0)
+   owner=c.execute('SELECT * FROM users WHERE id=1').fetchone()
+   c.execute("INSERT INTO users(username,salt,hash,role,active) VALUES(?,?,?,'member',1)",('member',owner['salt'],owner['hash']))
+  _,_,login=self.request('/api/login',{'username':'member','password':'test-password-long-enough'})
+  status,result,_=self.request('/api/mcp/connections',headers={'Cookie':login['Set-Cookie'].split(';')[0]})
+  self.assertEqual(status,200);self.assertNotIn('registration_diagnostic',result)

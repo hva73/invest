@@ -127,3 +127,9 @@ HTTP-tests dækker forkert callback/resource/klient/PKCE, kodereplay, refreshrot
 En manuel samtales værktøjsadgang beviser ikke, at planlagte ChatGPT-opgaver kan bruge samme app, OAuth-forbindelse eller skriveværktøj. Der er ikke oprettet en opgave i denne ændring. Før automatisk levering loves, kræves en understøttet kontofunktion og en planlagt test med `is_test:true`, som leverer uden manuel værktøjsgodkendelse **hvis platformen tillader det**, efterfulgt af kontrol i ESCAPE. Sikkerhedsgodkendelser må ikke omgås.
 
 Indtil dette er verificeret, er anvendelsen en manuelt startet ChatGPT-analyse med mulig værktøjslevering efter godkendelse. MCP-serveren kalder ikke en AI-tjeneste og medfører ingen ekstra AI-motorbetaling, men ChatGPTs plan-/kvoteregler er stadig platformens egne.
+
+## Find manglende callback uden at gætte
+
+Hvis `ESCAPE_MCP_REDIRECT_URIS` mangler, afviser serveren registrering. En afvist registrering gemmer nu en begrænset diagnosticering: højst fem observerede HTTPS-callbacks uden query/fragment på de præcise værter chatgpt.com eller chat.openai.com, samt øvrige værtsnavne uden stier. Dette er ubetroede forespørgselsdata og ikke bevis for afsenderidentitet; intet tillades automatisk. Tokens, hemmeligheder, queryværdier og request bodies gemmes ikke.
+
+Efter installation: Start et nyt Tilslut-forsøg i ChatGPT. Åbn derpå ESCAPE som administrator → Forbindelser → Rapportforbindelser → Vis rapportforbindelser. Den seneste afviste callback vises sammen med tidspunkt. Sammenhold den med dit netop startede forsøg og klientens opsætning. Tilføj kun den verificerede, præcise adresse som `ESCAPE_MCP_REDIRECT_URIS` i cPanel, gem og genstart. Forsøg derefter igen. Hvis callbacken ikke kan verificeres, skal den afklares før godkendelse. Andre brugere kan ikke se registreringsdiagnosticeringen.
