@@ -10,7 +10,7 @@ python app.py --create-user
 python app.py --port 8000
 ```
 
-Brugeroprettelse foregår interaktivt og skjuler adgangskoden. Mindst 14 tegn. Serveren lytter kun på loopback. Der leveres ingen standardkonto eller standardkode. Database oprettes i `var/escape.db` og må aldrig committes. `ESCAPE_DB` kan pege på en anden vedvarende sti. Sessioner findes kun i hukommelsen og bortfalder ved genstart.
+Brugeroprettelse foregår interaktivt og skjuler adgangskoden. Mindst 14 tegn. Serveren lytter kun på loopback. Der leveres ingen standardkonto eller standardkode. Database oprettes i `var/escape.db` og må aldrig committes. `ESCAPE_DB` kan pege på en anden vedvarende sti. Eksisterende konto får brugernavnet `owner` ved opgradering og beholder adgangskoden. Sessioner gemmes som token-hashes i SQLite og deles af cPanels app-processer; de udløber efter otte timer.
 
 ## Test
 
@@ -24,9 +24,15 @@ Tests bruger midlertidige databaser og en lokal HTTP-server. De opretter aldrig 
 
 ## Produktion og backup
 
-Python-standardserveren er til lokal udvikling. Før privat publicering: brug en produktionsklar applikationsserver/reverse proxy, TLS, `ESCAPE_SECURE_COOKIE=1`, vedvarende sessionslager, distribueret loginbegrænsning og begrænset adgang. Aktivér ikke reelle handler uden separat verificeret integration og godkendelsesproces. Udfør browser- og iPhone-test før release. PWA-serviceworkeren gemmer ingen private data og giver ikke offlinehandel.
+Python-standardserveren er til lokal udvikling. Før privat publicering: brug en produktionsklar applikationsserver/reverse proxy, TLS, `ESCAPE_SECURE_COOKIE=1`, begrænset adgang, verifikation af serveropsætning og sikkerhedsrevision. Aktivér ikke reelle handler uden separat verificeret integration og godkendelsesproces. Udfør browser- og iPhone-test før release. PWA-serviceworkeren gemmer ingen private data og giver ikke offlinehandel.
 
 Tag en konsistent SQLite-backup med Python `sqlite3.Connection.backup` til et beskyttet lager uden for checkoutet. Krypter og begræns adgang til backups. Planlæg automatisering og gendannelsestest hos den valgte host; ingen automatisk backup er aktiveret endnu. Overvåg health-endpoint og diskforbrug. Database indeholder private handelsidéer.
+
+## Flere brugere og Pluto
+
+Administratorens Forbindelser-side kan oprette en engangsinvitation med 24 timers gyldighed. Modtageren åbner Har du en invitation? på login-siden, vælger brugernavn og sin egen adgangskode. Ingen offentlig selvregistrering. Hver brugers forslag, observationsliste, journal og Pluto-tilslutningsønske er isoleret på serveren.
+
+Pluto OAuth er endnu ikke aktiveret. Tilslutningsønsker gemmes kun lokalt og sendes ikke til Pluto. Der gemmes ingen Pluto-tokens. Se [integrationsplanen](docs/PLUTO.md). Kontoændringer, sletning, adgangskodegendannelse, 2FA og e-mailinvitationer er endnu ikke implementeret.
 
 ## Arkitektur
 

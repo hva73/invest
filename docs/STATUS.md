@@ -22,3 +22,11 @@ Der er ingen Pluto-værktøjer blandt sessionens tilgængelige værktøjer og in
 
 ## Opdatering: observationsliste
 Fem automatiske tests består inklusive HTTP-oprettelse af observationer, adgangskontrol, CSRF, afvisning af usikre links og tidsstempler samt persistens. Ingen virkelige nyheder er indlæst af udvikleren. Ingen ekstern kilde hentes fra brugerens link. Brugerens klassifikation er ikke uafhængigt verificeret. Grav dybere viser gemte noter og starter ikke en AI-analyse. Browser- og hostingtest af opdateringen er udestående.
+
+## Version 0.3: separate brugere
+
+Invitationsbaserede konti med administrator/member-roller; engangskoder lagres hashed og udløber efter 24 timer. Brugere ser kun egne forslag, markedsidéer og journal og kan kun godkende egne forslag. Sessioner lagres hashed i databasen og er brugerbundne, tidsbegrænsede og kan logges ud på tværs af workers. Loginbegrænsning er delt via SQLite. Den tidligere enkeltbrugerkonto migreres til owner/admin uden ændring af password-hash; gamle data tildeles kun ved entydigt ejerskab.
+
+Forbindelser viser brugerens egen status og kan registrere eller fjerne et lokalt tilslutningsønske. Det er ikke en ansøgning hos Pluto, og OAuth er ikke implementeret. Tokenkryptering bygges først efter verificeret provider-kontrakt og valg af kryptografibibliotek. Ingen Pluto-tokens gemmes nu. Ti automatiske tests består, inklusive migration, invitationers udløb/engangsbrug, HTTP/WSGI CSRF, brugeradskillelse og sessionspersistens. Live deployment og browsertest er ikke udført af agenten.
+
+Forbindelsesknap til Pluto er tilføjet: offentligt standard-metadataopslag, tidsgrænser, afvist redirect, ressourcevalidering og brugerbaseret rate limit. Fjorten tests består. OAuth-login, krypteret tokenlager og porteføljehentning afventer fortsat verificeret provider-kontrakt.

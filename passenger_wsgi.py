@@ -1,7 +1,8 @@
 """WSGI entry point for a dedicated HTTPS subdomain on cPanel/Passenger.
 
-Use a single process until sessions and login throttling use a shared store.
+Sessions and login throttling are stored in the shared SQLite database.
 """
+from email.message import Message
 import io
 import os
 import sys
@@ -25,7 +26,10 @@ def application(environ, start_response):
     handler = WSGIHandler.__new__(WSGIHandler)
     handler.path = environ.get('PATH_INFO', '/')
     handler.client_address = (environ.get('REMOTE_ADDR', 'unknown'), 0)
-    handler.headers = {key[5:].replace('_', '-').title(): value for key, value in environ.items() if key.startswith('HTTP_')}
+    handler.headers = Message()
+    for key, value in environ.items():
+        if key.startswith('HTTP_'):
+            handler.headers[key[5:].replace('_', '-')] = value
     handler.headers['Content-Length'] = environ.get('CONTENT_LENGTH') or '0'
     handler.rfile = environ['wsgi.input']
     handler.wfile = io.BytesIO()

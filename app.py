@@ -12,14 +12,69 @@ def connect():
     Path(DB).parent.mkdir(parents=True,exist_ok=True)
     c=sqlite3.connect(DB); c.row_factory=sqlite3.Row; c.execute('PRAGMA foreign_keys=ON'); return c
 def init():
-    init_content()
+    # Migrate under a write lock so Passenger workers cannot race the upgrade.
     with connect() as c:
-        c.executescript('''CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, salt TEXT, hash TEXT); CREATE TABLE IF NOT EXISTS proposals(id INTEGER PRIMARY KEY, portfolio TEXT, ticker TEXT, quantity REAL, price REAL, stop REAL, target REAL, costs REAL, fx REAL, status TEXT DEFAULT 'Forslag', created TEXT); CREATE TABLE IF NOT EXISTS journal(id INTEGER PRIMARY KEY, proposal_id INTEGER, event TEXT, created TEXT);''')
-def init_content():
-    with connect() as c:
-        c.execute("""CREATE TABLE IF NOT EXISTS opportunities(id INTEGER PRIMARY KEY, company TEXT NOT NULL, ticker TEXT NOT NULL, market TEXT NOT NULL, asset TEXT NOT NULL, headline TEXT NOT NULL, source_url TEXT NOT NULL, published TEXT NOT NULL, classification TEXT NOT NULL, catalyst TEXT NOT NULL, risk TEXT NOT NULL, next_action TEXT NOT NULL, created TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'OVERVÅG')""")
+        c.execute('BEGIN IMMEDIATE')
+        c.execute("CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, salt TEXT, hash TEXT)")
+        for name, definition in [('username','TEXT'),('role',"TEXT NOT NULL DEFAULT 'member'"),('active','INTEGER NOT NULL DEFAULT 1')]:
+            if name not in {r['name'] for r in c.execute('PRAGMA table_info(users)')}:
+                c.execute(f'ALTER TABLE users ADD COLUMN {name} {definition}')
+        legacy=c.execute('SELECT id FROM users WHERE username IS NULL').fetchall()
+        if legacy:
+            if len(legacy)!=1 or c.execute('SELECT count(*) FROM users').fetchone()[0]!=1:
+                raise RuntimeError('Ambiguous legacy ownership; migration requires manual review')
+            c.execute("UPDATE users SET username='owner',role='admin' WHERE id=?",(legacy[0]['id'],))
+        c.execute('CREATE UNIQUE INDEX IF NOT EXISTS users_username ON users(username COLLATE NOCASE)')
+        schemas={
+            'proposals': "id INTEGER PRIMARY KEY, portfolio TEXT, ticker TEXT, quantity REAL, price REAL, stop REAL, target REAL, costs REAL, fx REAL, status TEXT DEFAULT 'Forslag', created TEXT",
+            'journal': 'id INTEGER PRIMARY KEY, proposal_id INTEGER, event TEXT, created TEXT',
+            'opportunities': "id INTEGER PRIMARY KEY, company TEXT NOT NULL, ticker TEXT NOT NULL, market TEXT NOT NULL, asset TEXT NOT NULL, headline TEXT NOT NULL, source_url TEXT NOT NULL, published TEXT NOT NULL, classification TEXT NOT NULL, catalyst TEXT NOT NULL, risk TEXT NOT NULL, next_action TEXT NOT NULL, created TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'OVERVÅG'"
+        }
+        for table, definition in schemas.items():
+            c.execute(f'CREATE TABLE IF NOT EXISTS {table}({definition})')
+            if 'user_id' not in {r['name'] for r in c.execute(f'PRAGMA table_info({table})')}:
+                c.execute(f'ALTER TABLE {table} ADD COLUMN user_id INTEGER REFERENCES users(id)')
+            if c.execute(f'SELECT 1 FROM {table} WHERE user_id IS NULL').fetchone():
+                owners=c.execute('SELECT id FROM users').fetchall()
+                if len(owners)!=1: raise RuntimeError('Cannot safely assign legacy data')
+                c.execute(f'UPDATE {table} SET user_id=? WHERE user_id IS NULL',(owners[0]['id'],))
+            c.execute(f'CREATE INDEX IF NOT EXISTS {table}_owner ON {table}(user_id)')
+            c.execute(f"CREATE TRIGGER IF NOT EXISTS {table}_require_owner BEFORE INSERT ON {table} WHEN NEW.user_id IS NULL BEGIN SELECT RAISE(ABORT, 'Owner required'); END")
+        c.execute('CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), csrf TEXT NOT NULL, expires REAL NOT NULL)')
+        c.execute('CREATE TABLE IF NOT EXISTS login_failures(address TEXT NOT NULL, created REAL NOT NULL)')
+        c.execute('CREATE TABLE IF NOT EXISTS invitations(token_hash TEXT PRIMARY KEY, created_by INTEGER NOT NULL REFERENCES users(id), expires REAL NOT NULL, used INTEGER NOT NULL DEFAULT 0)')
+        c.execute("CREATE TABLE IF NOT EXISTS connections(user_id INTEGER PRIMARY KEY REFERENCES users(id), provider TEXT NOT NULL DEFAULT 'pluto', status TEXT NOT NULL, requested TEXT NOT NULL)")
+        c.execute('CREATE TABLE IF NOT EXISTS connection_checks(user_id INTEGER PRIMARY KEY REFERENCES users(id), checked REAL NOT NULL)')
+        c.execute('DELETE FROM sessions WHERE expires<?',(time.time(),))
 
-def save_opportunity(data):
+def token_hash(token):
+    return hashlib.sha256(token.encode()).hexdigest()
+
+def username(value):
+    import re
+    value=str(value).strip().lower()
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_.-]{2,39}',value):
+        raise ValueError('Brugernavnet skal have 3–40 tegn: a–z, 0–9, punktum, bindestreg eller understregning')
+    return value
+
+def register(data):
+    name=username(data['username']);password=str(data['password'])
+    if not 14<=len(password)<=1024: raise ValueError('Adgangskoden skal have 14–1024 tegn')
+    salt=secrets.token_hex(16);digest=password_hash(password,salt)
+    with connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        invite=c.execute('SELECT * FROM invitations WHERE token_hash=? AND used=0 AND expires>?',(token_hash(str(data['invitation'])),time.time())).fetchone()
+        if not invite: raise ValueError('Invitationen er ugyldig, udløbet eller allerede brugt')
+        if c.execute('SELECT 1 FROM users WHERE username=? COLLATE NOCASE',(name,)).fetchone():
+            raise ValueError('Brugernavnet er allerede i brug')
+        c.execute("INSERT INTO users(username,salt,hash,role) VALUES(?,?,?,'member')",(name,salt,digest))
+        c.execute('UPDATE invitations SET used=1 WHERE token_hash=?',(invite['token_hash'],))
+
+def connection_state(user_id):
+    with connect() as c: row=c.execute('SELECT status,requested FROM connections WHERE user_id=?',(user_id,)).fetchone()
+    return {'provider':'Pluto Markets','connected':False,'status':row['status'] if row else 'Ikke tilsluttet','requested':row['requested'] if row else None,'can_connect':False,'reason':'Afventer verificeret Pluto-appregistrering, OAuth-klient og tilladelser. Ingen tokens eller porteføljedata er hentet.','requested_access':'Kun læseadgang'}
+
+def save_opportunity(data,user_id):
     fields=['company','ticker','market','asset','headline','source_url','published','classification','catalyst','risk','next_action']
     values={k:str(data[k]).strip() for k in fields}
     if len(values['ticker'])>24: raise ValueError('Symbol og børs må højst fylde 24 tegn')
@@ -32,17 +87,18 @@ def save_opportunity(data):
     if values['market'] not in ['USA','Canada','Danmark','Norden','Europa','Asien']: raise ValueError('Ukendt marked')
     if values['asset'] not in ['Aktier','ETF','Krypto','Metaller','Råvarer','Mineselskaber']: raise ValueError('Ukendt aktivklasse')
     with connect() as c:
-        c.execute('INSERT INTO opportunities('+','.join(fields)+',created) VALUES('+','.join('?' for _ in range(len(fields)+1))+')',(*[values[k] for k in fields],now()))
+        c.execute('INSERT INTO opportunities('+','.join(fields)+',created,user_id) VALUES('+','.join('?' for _ in range(len(fields)+2))+')',(*[values[k] for k in fields],now(),user_id))
 
 def password_hash(password,salt): return hashlib.scrypt(password.encode(),salt=bytes.fromhex(salt),n=16384,r=8,p=1).hex()
 def create_user(password):
-    if len(password)<14: raise ValueError('Adgangskoden skal have mindst 14 tegn')
+    if not 14<=len(password)<=1024: raise ValueError('Adgangskoden skal have 14–1024 tegn')
     salt=secrets.token_hex(16)
     with connect() as c:
+        c.execute('BEGIN IMMEDIATE')
         if c.execute('SELECT id FROM users').fetchone(): raise ValueError('Bruger findes allerede')
-        c.execute('INSERT INTO users(salt,hash) VALUES(?,?)',(salt,password_hash(password,salt)))
+        c.execute("INSERT INTO users(username,salt,hash,role) VALUES('owner',?,?,'admin')",(salt,password_hash(password,salt)))
 def now(): return datetime.now(ZoneInfo('Europe/Copenhagen')).isoformat()
-def proposal(data):
+def proposal(data,user_id):
     nums={k:float(data[k]) for k in ['quantity','price','stop','target','costs','fx']}
     if not all(math.isfinite(v) for v in nums.values()): raise ValueError('Ugyldige tal')
     if not (nums['quantity']>0 and nums['price']>nums['stop']>0 and nums['target']>nums['price'] and nums['costs']>=0 and nums['fx']>0): raise ValueError('Kontrollér pris, stop, mål og omkostninger')
@@ -50,8 +106,8 @@ def proposal(data):
     if not ticker or len(ticker)>24: raise ValueError('Ugyldigt symbol')
     if data['portfolio'] not in ['Hovedportefølje','ESCAPE AI Trader']: raise ValueError('Ukendt portefølje')
     with connect() as c:
-        cur=c.execute('INSERT INTO proposals(portfolio,ticker,quantity,price,stop,target,costs,fx,created) VALUES(?,?,?,?,?,?,?,?,?)',(data['portfolio'],ticker,*[nums[k] for k in ['quantity','price','stop','target','costs','fx']],now()))
-        c.execute('INSERT INTO journal(proposal_id,event,created) VALUES(?,?,?)',(cur.lastrowid,'Handelsforslag oprettet • hypotetisk beregning',now()))
+        cur=c.execute('INSERT INTO proposals(portfolio,ticker,quantity,price,stop,target,costs,fx,created,user_id) VALUES(?,?,?,?,?,?,?,?,?,?)',(data['portfolio'],ticker,*[nums[k] for k in ['quantity','price','stop','target','costs','fx']],now(),user_id))
+        c.execute('INSERT INTO journal(proposal_id,event,created,user_id) VALUES(?,?,?,?)',(cur.lastrowid,'Handelsforslag oprettet • hypotetisk beregning',now(),user_id))
     return nums
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,fmt,*args): pass
@@ -61,18 +117,34 @@ class Handler(BaseHTTPRequestHandler):
         if hasattr(self,'cookie'): self.send_header('Set-Cookie',self.cookie)
         self.end_headers(); self.wfile.write(body)
     def session(self):
-        cookie=SimpleCookie(); cookie.load(self.headers.get('Cookie','')); token=cookie.get('escape'); s=SESSIONS.get(token.value) if token else None
-        return s if s and s['expires']>time.time() else None
+        cookie=SimpleCookie()
+        try: cookie.load(self.headers.get('Cookie',''))
+        except Exception: return None
+        token=cookie.get('escape')
+        if not token: return None
+        with connect() as c:
+            row=c.execute('SELECT sessions.*,users.username,users.role FROM sessions JOIN users ON users.id=sessions.user_id WHERE token_hash=? AND expires>? AND users.active=1',(token_hash(token.value),time.time())).fetchone()
+        return dict(row) if row else None
+    def throttled(self):
+        with connect() as c:
+            c.execute('DELETE FROM login_failures WHERE created<?',(time.time()-300,))
+            count=c.execute('SELECT count(*) FROM login_failures WHERE address=?',(self.client_address[0],)).fetchone()[0]
+        return count>=5
+    def failure(self):
+        with connect() as c:c.execute('INSERT INTO login_failures VALUES(?,?)',(self.client_address[0],time.time()))
     def do_GET(self):
         if self.path=='/api/health': return self.send(200,{'status':'ok','database':bool(connect().execute('SELECT 1').fetchone())})
         if self.path=='/api/session':
-            s=self.session(); return self.send(200,{'authenticated':bool(s),'csrf':s['csrf'] if s else None})
+            s=self.session(); return self.send(200,{'authenticated':bool(s),'csrf':s['csrf'] if s else None,'user':{'username':s['username'],'role':s['role']} if s else None})
         if self.path.startswith('/api/'):
-            if not self.session(): return self.send(401,{'error':'Log ind først'})
+            s=self.session()
+            if not s: return self.send(401,{'error':'Log ind først'})
+            user_id=s['user_id']
+            if self.path=='/api/connections': return self.send(200,connection_state(user_id))
             if self.path=='/api/state':
-                with connect() as c: p=[dict(r) for r in c.execute('SELECT * FROM proposals ORDER BY id DESC')]; j=[dict(r) for r in c.execute('SELECT * FROM journal ORDER BY id DESC')]
-                with connect() as c: opportunities=[dict(r) for r in c.execute('SELECT * FROM opportunities ORDER BY id DESC')]
-                return self.send(200,{'opportunities':opportunities,'proposals':p,'journal':j,'time':now(),'integrations':{'Pluto Markets':'Ikke tilsluttet','Markedsdata':'Ikke tilsluttet','Nyheder og AI':'Ikke tilsluttet'},'reports':{'timezone':'Europe/Copenhagen','schedule':['08:00','14:00','22:00'],'status':'Afventer datakilder og scheduler'}})
+                with connect() as c: p=[dict(r) for r in c.execute('SELECT * FROM proposals WHERE user_id=? ORDER BY id DESC',(user_id,))]; j=[dict(r) for r in c.execute('SELECT * FROM journal WHERE user_id=? ORDER BY id DESC',(user_id,))]
+                with connect() as c: opportunities=[dict(r) for r in c.execute('SELECT * FROM opportunities WHERE user_id=? ORDER BY id DESC',(user_id,))]
+                return self.send(200,{'user':{'username':s['username'],'role':s['role']},'connection':connection_state(user_id),'opportunities':opportunities,'proposals':p,'journal':j,'time':now(),'integrations':{'Pluto Markets':'Ikke tilsluttet','Markedsdata':'Ikke tilsluttet','Nyheder og AI':'Ikke tilsluttet'},'reports':{'timezone':'Europe/Copenhagen','schedule':['08:00','14:00','22:00'],'status':'Afventer datakilder og scheduler'}})
             return self.send(404,{'error':'Ukendt endpoint'})
         path={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/manifest.json':'manifest.json','/sw.js':'sw.js','/icon.svg':'icon.svg'}.get(self.path)
         if not path:return self.send(404,{'error':'Ikke fundet'})
@@ -83,32 +155,64 @@ class Handler(BaseHTTPRequestHandler):
             length=int(self.headers.get('Content-Length','0'))
             if length>16384: return self.send(413,{'error':'For stor forespørgsel'})
             data=json.loads(self.rfile.read(length))
-            if self.path=='/api/login':
-                address=self.client_address[0]; failures=LOGIN_FAILURES.get(address,[]); failures=[t for t in failures if t>time.time()-300]
-                if len(failures)>=5:return self.send(429,{'error':'Prøv igen om fem minutter'})
-                with connect() as c: u=c.execute('SELECT * FROM users').fetchone()
-                if not u or not hmac.compare_digest(password_hash(str(data.get('password','')),u['salt']),u['hash']):
-                    LOGIN_FAILURES[address]=failures+[time.time()]; return self.send(401,{'error':'Forkert adgangskode eller bruger ikke oprettet'})
-                token=secrets.token_urlsafe(32); SESSIONS[token]={'csrf':secrets.token_urlsafe(32),'expires':time.time()+28800}
+            if not isinstance(data,dict): raise ValueError('Ugyldig forespørgsel')
+            if self.path in ['/api/login','/api/register']:
+                if self.throttled():return self.send(429,{'error':'Prøv igen om fem minutter'})
+                if self.path=='/api/register':
+                    self.failure()
+                    register(data)
+                    return self.send(201,{'ok':True})
+                name=str(data.get('username','owner')).strip().lower()
+                password=str(data.get('password',''))
+                with connect() as c: u=c.execute('SELECT * FROM users WHERE username=? COLLATE NOCASE AND active=1',(name,)).fetchone()
+                salt=u['salt'] if u else '00'*16
+                digest=password_hash(password[:1024],salt)
+                if not u or len(password)>1024 or not hmac.compare_digest(digest,u['hash']):
+                    self.failure(); return self.send(401,{'error':'Forkert brugernavn eller adgangskode'})
+                token=secrets.token_urlsafe(32)
+                with connect() as c:
+                    c.execute('INSERT INTO sessions VALUES(?,?,?,?)',(token_hash(token),u['id'],secrets.token_urlsafe(32),time.time()+28800))
                 self.cookie=f"escape={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800"+('; Secure' if os.environ.get('ESCAPE_SECURE_COOKIE')=='1' else '')
                 return self.send(200,{'ok':True})
             s=self.session()
             if not s:return self.send(401,{'error':'Log ind først'})
             if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),s['csrf']):return self.send(403,{'error':'Ugyldigt sikkerhedstoken'})
+            user_id=s['user_id']
             if self.path=='/api/logout':
-                for key,value in list(SESSIONS.items()):
-                    if value is s:del SESSIONS[key]
+                with connect() as c:c.execute('DELETE FROM sessions WHERE token_hash=?',(s['token_hash'],))
                 self.cookie='escape=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'; return self.send(200,{'ok':True})
-            if self.path=='/api/opportunities': save_opportunity(data); return self.send(201,{'ok':True})
-            if self.path=='/api/proposals': proposal(data); return self.send(201,{'ok':True})
+            if self.path=='/api/invitations':
+                if s['role']!='admin':return self.send(403,{'error':'Kun administratoren kan invitere'})
+                token=secrets.token_urlsafe(32)
+                with connect() as c:
+                    c.execute('INSERT INTO invitations VALUES(?,?,?,0)',(token_hash(token),user_id,time.time()+86400))
+                return self.send(201,{'invitation':token,'expires_in_hours':24})
+            if self.path=='/api/pluto/request':
+                with connect() as c:
+                    c.execute("INSERT INTO connections(user_id,status,requested) VALUES(?,'Adgang ønsket',?) ON CONFLICT(user_id) DO NOTHING",(user_id,now()))
+                return self.send(200,connection_state(user_id))
+            if self.path=='/api/pluto/disconnect':
+                with connect() as c:c.execute('DELETE FROM connections WHERE user_id=?',(user_id,))
+                return self.send(200,connection_state(user_id))
+            if self.path=='/api/pluto/connect':
+                with connect() as c:
+                    c.execute('BEGIN IMMEDIATE')
+                    previous=c.execute('SELECT checked FROM connection_checks WHERE user_id=?',(user_id,)).fetchone()
+                    if previous and previous['checked']>time.time()-60:
+                        return self.send(429,{'error':'Vent et minut mellem forbindelsestests'})
+                    c.execute('INSERT INTO connection_checks VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET checked=excluded.checked',(user_id,time.time()))
+                from pluto import discover
+                return self.send(200,discover())
+            if self.path=='/api/opportunities': save_opportunity(data,user_id); return self.send(201,{'ok':True})
+            if self.path=='/api/proposals': proposal(data,user_id); return self.send(201,{'ok':True})
             if self.path=='/api/approve':
                 with connect() as c:
-                    r=c.execute("UPDATE proposals SET status='Godkendt lokalt' WHERE id=? AND status='Forslag'",(int(data['id']),))
+                    r=c.execute("UPDATE proposals SET status='Godkendt lokalt' WHERE id=? AND user_id=? AND status='Forslag'",(int(data['id']),user_id))
                     if r.rowcount!=1:raise ValueError('Forslaget findes ikke eller er allerede behandlet')
-                    c.execute('INSERT INTO journal(proposal_id,event,created) VALUES(?,?,?)',(data['id'],'Godkendt lokalt • ingen ordre sendt til mægler',now()))
+                    c.execute('INSERT INTO journal(proposal_id,event,created,user_id) VALUES(?,?,?,?)',(data['id'],'Godkendt lokalt • ingen ordre sendt til mægler',now(),user_id))
                 return self.send(200,{'ok':True})
             return self.send(404,{'error':'Ukendt endpoint'})
-        except (ValueError,KeyError,TypeError):self.send(400,{'error':'Ugyldige oplysninger eller handling'})
+        except (ValueError,KeyError,TypeError,sqlite3.IntegrityError):self.send(400,{'error':'Ugyldige oplysninger eller handling'})
         except Exception:self.send(500,{'error':'Intern fejl. Kontrollér server og database.'})
 LOGIN_FAILURES={}
 if __name__=='__main__':
