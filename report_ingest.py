@@ -1,6 +1,7 @@
 """Isolated, authenticated report inbox. Reports never execute broker actions."""
 import hashlib,hmac,json,os,re
 from datetime import datetime,timezone
+from decimal import Decimal,localcontext
 
 def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS ingested_reports(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),report_id TEXT NOT NULL,received TEXT NOT NULL,payload TEXT NOT NULL,digest TEXT NOT NULL,UNIQUE(user_id,report_id))')
@@ -123,14 +124,44 @@ def analysis_package(connect,user_id,request):
     prompt+='Bevar candidate_id og is_test. Hvis ESCAPE-pluginet faktisk er tilgængeligt, kan resultatet efter min godkendelse sendes med send_report som JSON v2, report_type=deep_analysis og analysis_for med candidate_id og report_id fra pakken. Brug et nyt stabilt report_id. Ellers giv JSON v2 til manuel import; påstå ikke at noget er gemt. For v1 mangler stabilt kandidat-ID: opret først et nyt eksplicit ID i v2 og oplys at v1-historikken ikke automatisk kan sammenkædes.\nKontrakt: https://github.com/hva73/invest/blob/codex/escape-development/docs/REPORT_V2.md\n\n'+json.dumps(package,ensure_ascii=False,indent=2)
     return {'package':package,'prompt':prompt,'chatgpt_url':'https://chatgpt.com/'}
 
+def overview_changes(current,previous):
+    """Comparable report balances only; not returns or daily performance."""
+    if not current or not previous or current['data']['schema_version']!=2 or previous['data']['schema_version']!=2:return {}
+    from report_validation import stamp
+    old={p['portfolio_id']:p for p in previous['data']['portfolios']};result={}
+    for p in current['data']['portfolios']:
+        before=old.get(p['portfolio_id'])
+        if not before or any(p[k]!=before[k] for k in ['kind','parent_portfolio_id','includes_collections']):continue
+        try:
+            if stamp(p['as_of'])<=stamp(before['as_of']):continue
+        except (ValueError,TypeError):continue
+        def change(value,prior):
+            if not value or not prior or value['currency']!=prior['currency']:return None
+            with localcontext() as context:
+                context.prec=60
+                delta=Decimal(value['amount'])-Decimal(prior['amount'])
+            return {'amount':format(delta,'f'),'previous_amount':prior['amount'],'currency':value['currency'],'from':before['as_of'],'to':p['as_of'],'report_id':previous['data']['report_id']}
+        fields={'value':change(p['value'],before['value']),'cash':{},'earmarked':{}}
+        for key in ['cash','earmarked']:
+            for value in p[key]:
+                if not value:continue
+                currency=value['currency'];prior=[v for v in before[key] if v and v['currency']==currency]
+                if sum(1 for v in p[key] if v and v['currency']==currency)!=1 or len(prior)!=1:continue
+                delta=change(value,prior[0])
+                if delta:fields[key][currency]=delta
+        result[p['portfolio_id']]=fields
+    return result
+
 def desk(connect,user_id):
     """Read-only production projection ordered by analysis time, never receipt time."""
     with connect() as c:
         recent=c.execute('SELECT id,received,payload FROM ingested_reports WHERE user_id=? AND is_test=0 ORDER BY generated_epoch DESC,id DESC LIMIT 1',(user_id,)).fetchone()
         root=c.execute("SELECT id,received,payload FROM ingested_reports WHERE user_id=? AND is_test=0 AND report_type!='deep_analysis' ORDER BY generated_epoch DESC,id DESC LIMIT 1",(user_id,)).fetchone()
         main=row_view(root) if root else None
-        candidates=[]
+        candidates=[];previous=None
         if main:
+            prior=c.execute("SELECT id,received,payload FROM ingested_reports WHERE user_id=? AND is_test=0 AND report_type!='deep_analysis' AND generated_epoch<? ORDER BY generated_epoch DESC,id DESC LIMIT 1",(user_id,datetime.fromisoformat(main['data']['generated_at'].upper().replace('Z','+00:00')).timestamp())).fetchone()
+            previous=row_view(prior) if prior else None
             base=main['data']
             for index,candidate in enumerate(base['candidates']):
                 source=main;chosen=candidate
@@ -149,4 +180,4 @@ def desk(connect,user_id):
                 seen.add(identity)
                 journal.append({'entry':entry,'report_id':data['report_id'],'source':data['source'],'generated_at':data['generated_at']})
         journal.sort(key=lambda e:datetime.fromisoformat((e['entry'].get('occurred_at') or e['generated_at']).upper().replace('Z','+00:00')).timestamp(),reverse=True)
-    return {'journal_events':journal[:100],'report':row_view(recent) if recent else None,'main_report':main,'candidates':candidates,'portfolio_report':main if main and (main['data'].get('portfolios') or main['data'].get('portfolio_values')) else None,'order_report':main if main and main['data'].get('orders') else None,'journal_report':main if main and main['data'].get('journal') else None}
+    return {'overview_changes':overview_changes(main,previous),'journal_events':journal[:100],'report':row_view(recent) if recent else None,'main_report':main,'candidates':candidates,'portfolio_report':main if main and (main['data'].get('portfolios') or main['data'].get('portfolio_values')) else None,'order_report':main if main and main['data'].get('orders') else None,'journal_report':main if main and main['data'].get('journal') else None}

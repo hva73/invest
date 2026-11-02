@@ -189,3 +189,12 @@ Installér frisk ZIP i en ny mappe, fx `escape_app/opdatering/pluto-estimat/`, m
 Denne samlede ZIP inkluderer også den tidligere, endnu ikke installerede estimatfejlrettelse. Nyt read-only-værktøj `validate_report` kontrollerer samme komplette v1/v2-struktur som `send_report`, med alle feltfejl, referencer, advarsler og antal poster. Send afviser hele ugyldige rapporter og returnerer konkrete fejl; ved succes bekræftes rapport-ID, version og antal uden at fjerne kandidater, kilder eller analyse. Se [REPORT_VALIDATION.md](REPORT_VALIDATION.md).
 
 Udpak en frisk ZIP i en ny mappe, fx `escape_app/opdatering/rapport-validering/`. Stop appen, kør pakkens `apply_update.py`, start og genindlæs. `report_validation.py` indgår i updaterens filliste. Ingen nye runtime-afhængigheder, nøgler, OAuth-scopes eller databaseændringer. Genindlæs derefter ESCAPE-pluginets værktøjer i ChatGPT og kontrollér `validate_report` samt MCP-version 2.2.0. Produktionsrapporten er ikke ændret eller sendt under udviklingen.
+
+
+## Klikbart analyseoverblik og tydelige ændringer
+
+Tal for rapporteret porteføljeværdi, kontanter, øremærkninger, positioner, ordrer og kandidater åbner nu et læsbart datagrundlag. Statusantal filtrerer kandidaterne, også ved nul. Opmærksomhedskort viser vurdering, katalysator, risiko, direkte analyseadgang og et kompakt Pluto-kursopslag med faktisk dagsændring. Uden røde signaler står der Hold øje frem for en opfordring til stillingtagen.
+
+Rapporterede beløb sammenlignes kun med en tidligere hovedrapport ved samme portefølje-ID, valuta, overlapgrundlag og en tidligere kendt datatid. Grøn/rød pil viser værdiændringen, som også kan skyldes ind-/udbetalinger, ikke dagsafkast. Manglende sammenligning forbliver neutral. Detaljer viser den oprindelige tidligere værdi og link til sammenligningsrapporten. Optællinger får navigationspile, ikke en opdigtet kursretning. Se [OVERVIEW.md](OVERVIEW.md).
+
+Installér frisk ZIP under fx `escape_app/opdatering/overblik-detaljer/` med appen stoppet; kør pakkens `apply_update.py`, start og genindlæs. Den nye `static/overview-ui.js` er bundlet i app.js og med i updaterens filliste. Ingen nye afhængigheder, nøgler, skemaversioner eller databaseændringer. ESCAPE-pluginet skal ikke ændres for denne UI-opdatering.
