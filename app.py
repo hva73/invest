@@ -213,7 +213,9 @@ class Handler(BaseHTTPRequestHandler):
         path={'/':'index.html','/app.js':'app.js','/report-ui.js':'report-ui.js','/style.css':'style.css','/manifest.json':'manifest.json','/sw.js':'sw.js','/icon.svg':'icon.svg'}.get(self.path)
         if not path:return self.send(404,{'error':'Ikke fundet'})
         kind={'.html':'text/html; charset=utf-8','.js':'application/javascript','.css':'text/css','.json':'application/manifest+json','.svg':'image/svg+xml'}[Path(path).suffix]
-        self.send(200,(ROOT/'static'/path).read_bytes(),kind)
+        body=(ROOT/'static'/path).read_bytes()
+        if path=='app.js':body=(ROOT/'static/report-ui.js').read_bytes()+b'\n'+body
+        self.send(200,body,kind)
     def do_POST(self):
         import mcp_reports
         if mcp_reports.handle(self,connect,'POST'):return

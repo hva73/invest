@@ -26,7 +26,7 @@ def main():
     browser=p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
     context=browser.new_context(viewport={'width':1440,'height':1000},permissions=['clipboard-read','clipboard-write'])
     context.route('https://chatgpt.com/**',lambda route:route.fulfill(status=200,body='ChatGPT destination stub; no plugin selection or delivery.'))
-    page=context.new_page();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+    page=context.new_page();page.route('**/report-ui.js',lambda route:route.abort());errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(f'http://127.0.0.1:{server.server_port}')
     page.locator('#login-form [name=password]').fill('browser-test-password-long');page.locator('#login-form button').click();page.locator('#content .hero').wait_for()
     page.locator('nav [data-view=reports]').click();page.locator('[data-view=inbox]').click();page.locator('#report-mode').select_option('true');page.locator('#load-ingested-report').click()
