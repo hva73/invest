@@ -129,3 +129,12 @@ Installer med en frisk ZIP og `apply_update.py` som beskrevet ovenfor. Opdaterin
 - Pluto-adgang fornyes ved læseopslag, hvis den er ved at udløbe eller er udløbet, og en fornyelsesnøgle findes. Plutos udløb respekteres; der ændres ikke på ESCAPE-loginets otte timer. Uden gyldig fornyelsesmulighed skal brugeren logge ind hos Pluto igen. Der udvides ingen scopes.
 
 Installér den friske ZIP med `apply_update.py`. Foreslået udpakningsmappe: `escape_app/opdatering/mobil-datatid/`. Der er ingen nye afhængigheder eller miljøvariabler. Database, eksisterende rapporter og planlagte opgaver bevares. Efter installation: start appen, genindlæs siden, træk ned på Overblik og kontrollér status samt kilde- og hentetider. Automatisk fornyelse er testet med simulerede providersvar; produktionsadgang skal bekræftes på webhotellet.
+
+
+## Automatisk Pluto-opdatering i den åbne app
+
+Efter denne opdatering kræver de første Pluto-tal ikke længere besøg i porteføljedetaljer. Ved åbning/login hentes Pluto-listen samt værdier, beholdninger, kontanter og understøttede ordreobservationer for alle aktive Pluto-enheder, hvis adgangen er gyldig eller kan forsøges fornyet. Der forsøges igen hvert femte minut efter afsluttet læsning, mens appen er synlig, samt ved tilbagevenden efter pausen. Dette gælder også, når man ser almindelige rapportsider. Rapportarkiv, testvisning, samtykkedialoger og igangværende formularer skånes.
+
+Automatiske læseforsøg deles pr. konto og ressource i databasen, så flere faner ikke gentager de samme Pluto-opslag inden for fem minutter. Et cachetræf ændrer ingen kilde- eller hentetider og beskrives som genindlæsning af gemte data. Den manuelle knap og træk ned kan fortsat anmode om et nyt opslag. Et nyt officielt Pluto-login nulstiller læsepausen, så en tidligere loginfejl ikke forsinker den første læsning. Fejl bevarer tidligere snapshots og deres advarsler.
+
+Appen henter ikke i lukkede eller skjulte faner; eksisterende cron og planlagte opgaver ændres ikke. Kildealder er stadig uafhængig af det automatiske hentetidspunkt. Ingen nye afhængigheder, miljøvariabler eller rettigheder kræves. Installér en frisk ZIP med `apply_update.py` under eksempelvis `escape_app/opdatering/auto-pluto/`. Start appen og genindlæs siden. Kontrollér, at status bliver til »Pluto opdateret automatisk« uden først at åbne en portefølje. Ældre afsnits krav om første manuelle opdatering gælder ikke længere.

@@ -117,9 +117,11 @@ class OAuth(unittest.TestCase):
   with app.connect() as c:
    c.execute('INSERT INTO sessions VALUES(?,?,?,?)',(app.token_hash(cookie),1,'csrf',time.time()+100))
    c.execute('UPDATE oauth_flows SET session_hash=?',(app.token_hash(cookie),))
+   c.execute('INSERT INTO pluto_refresh_checks VALUES(?,?,?)',(1,'list',time.time()))
   response={}
   def start(status,headers):response.update(status=status,headers=dict(headers))
   fake={'access_token':'test-access','token_type':'bearer','expires_in':300}
   with patch('oauth.post_json',return_value=fake):
    passenger_wsgi.application({'PATH_INFO':'/api/pluto/callback','QUERY_STRING':'state='+state+'&code=test-code','REQUEST_METHOD':'GET','HTTP_COOKIE':'escape='+cookie,'wsgi.input':io.BytesIO()},start)
   self.assertTrue(response['status'].startswith('303'));self.assertEqual(response['headers']['Location'],'/?pluto=connected')
+  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM pluto_refresh_checks WHERE user_id=1').fetchone()[0],0)

@@ -68,6 +68,23 @@ class Accounts(unittest.TestCase):
   self.assertEqual(self.request('register',data)[0],201)
   data['username']='another-member'
   status,result=self.request('register',data);self.assertEqual(status,400);self.assertIn('ny invitation',result['error'])
+ def test_auto_refresh_endpoints_cache_reads_and_preserve_snapshot_time(self):
+  from unittest.mock import patch
+  import portfolio_data,portfolios
+  self.login()
+  with app.connect() as c:
+   portfolios.replace_pluto(c,1,[{'id':'portfolios:synthetic','name':'Synthetic root','kind':'portfolio'}]);pid=c.execute("SELECT id FROM portfolios WHERE source='pluto'").fetchone()[0]
+  payload={'observed':'2026-01-01T00:00:00Z','value':None,'positions':[],'accounts':[],'pending_orders':[],'errors':[],'complete':True,'orders_complete':True}
+  with patch('portfolio_data.read',return_value=payload) as read:
+   self.assertEqual(self.request('portfolios/data',{'id':pid,'automatic':True})[0],200)
+   self.assertTrue(self.request('portfolios/data',{'id':pid,'automatic':True})[1]['cached']);self.assertEqual(read.call_count,1)
+   self.assertEqual(self.request('portfolios/data',{'id':pid})[0],200);self.assertEqual(read.call_count,2)
+   with app.connect() as c:self.assertEqual(portfolio_data.snapshots(c,1)[str(pid)]['data']['observed'],'2026-01-01T00:00:00Z')
+   self.assertEqual(self.request('portfolios/data',{'id':999,'automatic':True})[0],400);self.assertEqual(read.call_count,2)
+  with patch('mcp_client.read_portfolios',return_value=[{'id':'portfolios:synthetic','name':'Synthetic root','kind':'portfolio'}]) as read:
+   self.assertEqual(self.request('portfolios/sync',{'automatic':True})[0],200)
+   self.assertTrue(self.request('portfolios/sync',{'automatic':True})[1]['cached']);self.assertEqual(read.call_count,1)
+  self.assertEqual(self.request('portfolios/data',{'id':pid,'automatic':True},csrf=False)[0],403)
  def test_shared_sessions_expiry_logout(self):
   self.login();cookie=self.cookie
   app.SESSIONS.clear();app.init()

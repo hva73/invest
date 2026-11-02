@@ -8,7 +8,17 @@ from mcp_client import MCP,decode_result,PortfolioFormatError,shape
 READ_TOOLS={'get_accounts':'portfolioId','get_positions':'portfolioId','get_portfolio_value':'portfolioId','get_collection':'collectionId'}
 
 def init(c):
+    c.execute('CREATE TABLE IF NOT EXISTS pluto_refresh_checks(user_id INTEGER NOT NULL REFERENCES users(id),resource TEXT NOT NULL,attempted REAL NOT NULL,PRIMARY KEY(user_id,resource))')
     c.execute('CREATE TABLE IF NOT EXISTS portfolio_snapshots(portfolio_id INTEGER PRIMARY KEY REFERENCES portfolios(id),user_id INTEGER NOT NULL REFERENCES users(id),observed TEXT NOT NULL,payload TEXT NOT NULL,last_error TEXT,last_attempt TEXT NOT NULL)')
+
+def claim_refresh(connect,user_id,resource,automatic=False):
+    """Share a five-minute read budget across tabs and Passenger processes."""
+    with connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        previous=c.execute('SELECT attempted FROM pluto_refresh_checks WHERE user_id=? AND resource=?',(user_id,resource)).fetchone()
+        if automatic and previous and previous['attempted']>time.time()-300:return False
+        c.execute('INSERT INTO pluto_refresh_checks VALUES(?,?,?) ON CONFLICT(user_id,resource) DO UPDATE SET attempted=excluded.attempted',(user_id,resource,time.time()))
+    return True
 
 def number(value):
     if value is None:return None

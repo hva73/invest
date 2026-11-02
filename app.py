@@ -183,6 +183,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not s:raise ValueError('session required')
                 if any(len(values)!=1 for values in query.values()):raise ValueError('duplicate callback values')
                 oauth.finish(connect,s,query.get('state',[''])[0],query.get('code',[''])[0],query.get('error',[None])[0])
+                with connect() as c:c.execute('DELETE FROM pluto_refresh_checks WHERE user_id=?',(s['user_id'],))
                 result='connected'
             except Exception:pass
             self.send_response(303);self.send_header('Location','/?pluto='+result);self.send_header('Cache-Control','no-store');self.send_header('Referrer-Policy','no-referrer');self.send_header('Content-Length','0');self.end_headers();return
@@ -327,6 +328,9 @@ class Handler(BaseHTTPRequestHandler):
             if self.path=='/api/portfolios/data':
                 import portfolio_data
                 pid=int(data['id'])
+                with connect() as c:
+                    if not c.execute("SELECT 1 FROM portfolios WHERE id=? AND user_id=? AND source='pluto' AND active=1",(pid,user_id)).fetchone():return self.send(400,{'error':'Porteføljen findes ikke på din aktive Pluto-liste'})
+                if not portfolio_data.claim_refresh(connect,user_id,'data:'+str(pid),data.get('automatic') is True):return self.send(200,{'cached':True,'complete':None,'errors':[],'message':'Seneste læseforsøg er under fem minutter gammelt. Gemte data bevares.'})
                 try:payload=portfolio_data.read(connect,user_id,pid)
                 except oauth.SetupRequired:
                     with connect() as c:portfolio_data.mark_failed(c,user_id,pid,'Seneste læsning fejlede; gemte data kan være forældede')
@@ -338,7 +342,8 @@ class Handler(BaseHTTPRequestHandler):
                 issues=payload['errors']+payload.get('order_errors',[])
                 return self.send(200,{'ok':True,'complete':payload['complete'] and payload.get('orders_complete',False),'errors':issues,'message':'Pluto-data hentet'+(' med delvise fejl' if issues else '')})
             if self.path=='/api/portfolios/sync':
-                import mcp_client,portfolios
+                import mcp_client,portfolios,portfolio_data
+                if not portfolio_data.claim_refresh(connect,user_id,'list',data.get('automatic') is True):return self.send(200,{'cached':True,'message':'Pluto-listen er allerede forsøgt opdateret inden for fem minutter.'})
                 items=mcp_client.read_portfolios(connect,user_id)
                 with connect() as c:
                     c.execute('BEGIN IMMEDIATE')

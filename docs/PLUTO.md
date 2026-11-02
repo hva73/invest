@@ -74,3 +74,9 @@ Alle tre indgange (værktøjskatalog, porteføljeliste og porteføljedata) bruge
 Fornyelse, callback-lagring og afbrydelse serialiseres pr. bruger med en privat Linux-fil-lås i databasemappens `oauth-locks/`, også på tværs af Passenger-processer. Netværksopslag holder ingen database-skrivelås. Låsefilerne skal blive liggende, så aktive processer altid låser samme fil. Udbyderopslag har fortsat ti sekunders timeout.
 
 Midlertidige fejl giver et minuts pause mellem fornyelsesforsøg; en stadig gyldig adgangsnøgle kan bruges i mellemtiden. `invalid_grant`/`invalid_client` kræver nyt login. Ingen tokens eller provider-fejltekster sendes til browseren. GET af forbindelsesstatus hverken fornyer eller henter brokerdata. Ingen keepalive-job, cronændringer eller udvidede rettigheder tilføjes. En nøgle kan ikke holdes i live længere end Pluto tillader.
+
+
+### Automatisk hentning i den synlige app
+Browseren starter læseopslag efter login/åbning, derefter hvert femte minut efter afsluttet opdatering og ved tilbagevenden, hvis intervallet er udløbet. Den fælles læsevej genbruger tokenfornyelsen. API-kald med `automatic: true` koordineres i `pluto_refresh_checks` via en kort SQLite-transaktion før netværket. Bruger og datakilde indgår i nøglen. Kun ejerens aktive Pluto-enheder kan få en læsepost; session og CSRF kræves som før. Cachetræf returnerer `cached: true` uden at gemme snapshots eller fremrykke datatider. Både vellykkede og fejlede forsøg har fem minutters pause; en eksplicit manuel læsning kan forsøge igen straks. Ved gennemført Pluto-login slettes brugerens læsepauser.
+
+Automatisk visningsopdatering udsættes ved formularindtastning, så uafsluttede kladder ikke forsvinder. Der tilføjes ingen cronjob, handel, baggrundsbetaling eller automatisk AI-bestilling. Dette afløser tidligere beskrivelser af udelukkende manuel hentning.

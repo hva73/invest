@@ -14,6 +14,15 @@ class Data(unittest.TestCase):
    self.root=c.execute("SELECT id FROM portfolios WHERE external_id='portfolios:test'").fetchone()[0];self.child=c.execute("SELECT id FROM portfolios WHERE external_id='collections:test-child'").fetchone()[0]
    c.execute('INSERT INTO oauth_tokens VALUES(?,?,?,?)',(1,oauth.seal(1,{'token':{'access_token':'test-token'}}),time.time()+1000,time.time()))
  def tearDown(self):self.env.stop();app.DB=self.previous;self.tmp.cleanup()
+ def test_auto_refresh_budget_is_shared_and_user_scoped(self):
+  import concurrent.futures,threading
+  gate=threading.Barrier(2)
+  def claim():gate.wait();return portfolio_data.claim_refresh(app.connect,1,'list',True)
+  with concurrent.futures.ThreadPoolExecutor(2) as pool:results=list(pool.map(lambda _:claim(),range(2)))
+  self.assertEqual(sorted(results),[False,True]);self.assertTrue(portfolio_data.claim_refresh(app.connect,2,'list',True));self.assertTrue(portfolio_data.claim_refresh(app.connect,1,'data:'+str(self.root),True))
+  self.assertTrue(portfolio_data.claim_refresh(app.connect,1,'list',False));self.assertFalse(portfolio_data.claim_refresh(app.connect,1,'list',True))
+  with app.connect() as c:c.execute('UPDATE pluto_refresh_checks SET attempted=0 WHERE user_id=1')
+  self.assertTrue(portfolio_data.claim_refresh(app.connect,1,'list',True))
  def test_pagination_and_cash_fields(self):
   calls=[]
   class Client:
