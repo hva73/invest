@@ -1,0 +1,217 @@
+{
+  "schema_version": 2,
+  "report_id": "escape-v2-synthetic-001",
+  "generated_at": "2026-01-02T12:00:00Z",
+  "source": "Syntetisk v2-integrationstest",
+  "is_test": true,
+  "report_type": "evening",
+  "data_quality": {
+    "status": "historical",
+    "as_of": "2026-01-02T12:00:00Z",
+    "note": "Alle beløb, selskaber og begivenheder er syntetiske testdata. Ingen markedsopslag er foretaget."
+  },
+  "summary": {
+    "overview": "Test af et roligt markedsresumé med klare kilder og ingen automatisk handel.",
+    "regions": [
+      {
+        "region": "Europa",
+        "summary": "Syntetisk geografisk sektion.",
+        "source_ids": [
+          "synthetic-source"
+        ]
+      },
+      {
+        "region": "USA",
+        "summary": null,
+        "source_ids": []
+      }
+    ]
+  },
+  "sources": [
+    {
+      "source_id": "synthetic-source",
+      "url": "https://example.com/synthetic-report",
+      "publisher": "Syntetisk testkilde",
+      "published_at": "2026-01-02T12:00:00Z",
+      "verified_at": null,
+      "verification": "unverified"
+    }
+  ],
+  "portfolios": [
+    {
+      "portfolio_id": "test-main",
+      "name": "Syntetisk hovedportefølje",
+      "role": "main",
+      "kind": "portfolio",
+      "parent_portfolio_id": null,
+      "includes_collections": true,
+      "value": {
+        "amount": "1000.00",
+        "currency": "DKK"
+      },
+      "cash": [
+        {
+          "amount": "200.00",
+          "currency": "DKK"
+        }
+      ],
+      "earmarked": [
+        {
+          "amount": "100.00",
+          "currency": "DKK"
+        }
+      ],
+      "as_of": "2026-01-02T12:00:00Z",
+      "source_ids": [
+        "synthetic-source"
+      ]
+    },
+    {
+      "portfolio_id": "test-child",
+      "name": "Syntetisk AI Trader",
+      "role": "ai_trader",
+      "kind": "collection",
+      "parent_portfolio_id": "test-main",
+      "includes_collections": null,
+      "value": {
+        "amount": "500.00",
+        "currency": "DKK"
+      },
+      "cash": [],
+      "earmarked": [],
+      "as_of": "2026-01-02T12:00:00Z",
+      "source_ids": [
+        "synthetic-source"
+      ]
+    }
+  ],
+  "consolidation": {
+    "status": "unknown",
+    "value": null,
+    "portfolio_ids": [],
+    "method": null,
+    "source_ids": [],
+    "note": "Collection-overlap er illustreret; intet verificeret samlet beløb beregnes."
+  },
+  "positions": [
+    {
+      "position_id": "test-position",
+      "portfolio_id": "test-child",
+      "candidate_id": "test-candidate-alpha",
+      "ticker": "TEST-A",
+      "quantity": "2.5",
+      "value": null,
+      "cost_basis": {
+        "amount": "100",
+        "currency": "DKK"
+      },
+      "as_of": "2026-01-02T12:00:00Z",
+      "source_ids": [
+        "synthetic-source"
+      ]
+    }
+  ],
+  "orders": [
+    {
+      "order_id": "test-pending",
+      "portfolio_id": "test-child",
+      "candidate_id": "test-candidate-alpha",
+      "ticker": "TEST-A",
+      "status": "ACTIVE_BUY",
+      "lifecycle": "pending",
+      "requested_quantity": null,
+      "filled_quantity": null,
+      "allocated": {
+        "amount": "100",
+        "currency": "DKK"
+      },
+      "as_of": "2026-01-02T12:00:00Z",
+      "source_ids": [
+        "synthetic-source"
+      ],
+      "note": "Afventende syntetisk Collection-køb. Reservationen er ikke en ekstra omkostning."
+    },
+    {
+      "order_id": "test-unclear",
+      "portfolio_id": "test-main",
+      "candidate_id": null,
+      "ticker": null,
+      "status": "ACCEPTED",
+      "lifecycle": "unknown",
+      "requested_quantity": null,
+      "filled_quantity": null,
+      "allocated": null,
+      "as_of": null,
+      "source_ids": [],
+      "note": "ACCEPTED alene afgør ikke, om ordren er gennemført."
+    }
+  ],
+  "candidates": [
+    {
+      "candidate_id": "test-candidate-alpha",
+      "ticker": "TEST-A",
+      "company_name": "Syntetisk selskab A",
+      "region": "Europa",
+      "sector": "Testsektor",
+      "signal": "OVERVÅG",
+      "assessment": "Syntetisk vurdering. Afvent dokumenterede oplysninger før en beslutning.",
+      "catalysts": [
+        {
+          "date": "2026-01-05",
+          "expectation": "Fiktiv testbegivenhed til validering af layout.",
+          "risks": "Oplysningerne er syntetiske og må ikke bruges til handel.",
+          "source_ids": [
+            "synthetic-source"
+          ]
+        }
+      ],
+      "risks": [
+        "Kun testdata. Ingen verificering af en virkelig virksomhed."
+      ],
+      "next_action": "Kontrollér kilderne og udarbejd en uddybende analyse.",
+      "source_ids": [
+        "synthetic-source"
+      ],
+      "tradability": {
+        "status": "unknown",
+        "checked_at": null,
+        "source_ids": []
+      },
+      "market": {
+        "price": null,
+        "volume": null,
+        "currency": null,
+        "spread": null,
+        "fees": null,
+        "as_of": null,
+        "verification": "unknown",
+        "source_ids": []
+      },
+      "exit_plan": {
+        "strategy": null,
+        "stop_price": null,
+        "target_price": null,
+        "max_loss": null,
+        "note": "Ingen handelsplan i dette testeksempel."
+      },
+      "analysis_urls": [
+        "https://example.com/analysis"
+      ]
+    }
+  ],
+  "journal": [
+    {
+      "entry_id": "test-note",
+      "candidate_id": "test-candidate-alpha",
+      "position_id": null,
+      "order_id": null,
+      "occurred_at": "2026-01-02T12:00:00Z",
+      "kind": "observation",
+      "text": "Første syntetiske observation. Ingen handel udført.",
+      "source_ids": [
+        "synthetic-source"
+      ]
+    }
+  ],
+  "analysis_for": null
+}

@@ -179,6 +179,17 @@ class Handler(BaseHTTPRequestHandler):
             s=self.session()
             if not s: return self.send(401,{'error':'Log ind først'})
             user_id=s['user_id']
+            if self.path=='/api/reports/schema':
+                import report_v2
+                return self.send(200,report_v2.SCHEMA)
+            if self.path in ['/api/reports/history','/api/reports/item','/api/reports/candidate-history']:
+                import report_ingest
+                q=parse_qs(request.query);mode=q.get('is_test',['false'])
+                if len(mode)!=1 or mode[0] not in ['true','false']:return self.send(400,{'error':'Ugyldig rapporttype'})
+                test=mode[0]=='true'
+                if self.path.endswith('/history'):return self.send(200,report_ingest.history(connect,user_id,test))
+                if self.path.endswith('/item'):return self.send(200,report_ingest.item(connect,user_id,q.get('report_id',[''])[0],test))
+                return self.send(200,report_ingest.candidate_history(connect,user_id,q.get('candidate_id',[''])[0],test))
             if self.path=='/api/reports/latest':
                 import report_ingest
                 mode=parse_qs(request.query).get('is_test',['false'])
@@ -199,7 +210,7 @@ class Handler(BaseHTTPRequestHandler):
                 with connect() as c: opportunities=[dict(r) for r in c.execute('SELECT * FROM opportunities WHERE user_id=? ORDER BY id DESC',(user_id,))]
                 return self.send(200,{'portfolio_snapshots':snapshots,'portfolio_summary':summary,'portfolios':owned,'user':{'username':s['username'],'role':s['role']},'connection':connection_state(user_id),'opportunities':opportunities,'proposals':p,'journal':j,'time':now(),'integrations':{'Pluto Markets':'Ikke tilsluttet','Markedsdata':'Ikke tilsluttet','Nyheder og AI':'Ikke tilsluttet'},'reports':{'timezone':'Europe/Copenhagen','schedule':['08:00','14:00','22:00'],'status':'Afventer datakilder og scheduler'}})
             return self.send(404,{'error':'Ukendt endpoint'})
-        path={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/manifest.json':'manifest.json','/sw.js':'sw.js','/icon.svg':'icon.svg'}.get(self.path)
+        path={'/':'index.html','/app.js':'app.js','/report-ui.js':'report-ui.js','/style.css':'style.css','/manifest.json':'manifest.json','/sw.js':'sw.js','/icon.svg':'icon.svg'}.get(self.path)
         if not path:return self.send(404,{'error':'Ikke fundet'})
         kind={'.html':'text/html; charset=utf-8','.js':'application/javascript','.css':'text/css','.json':'application/manifest+json','.svg':'image/svg+xml'}[Path(path).suffix]
         self.send(200,(ROOT/'static'/path).read_bytes(),kind)
@@ -213,7 +224,7 @@ class Handler(BaseHTTPRequestHandler):
                 if status!=200:return self.send(status,{'error':'Rapportmodtagelse er ikke konfigureret' if status==503 else 'Ugyldig rapportnøgle'})
                 if self.headers.get('Content-Type','').split(';')[0].strip().lower()!='application/json':return self.send(415,{'error':'Brug application/json'})
                 length=int(self.headers.get('Content-Length','0'))
-                if not 0<length<=16384:return self.send(413,{'error':'Rapporten må højst fylde 16384 bytes'})
+                if not 0<length<=262144:return self.send(413,{'error':'Rapporten er for stor'})
                 raw=self.rfile.read(length)
                 def unique(pairs):
                     obj={}
@@ -221,11 +232,13 @@ class Handler(BaseHTTPRequestHandler):
                         if key in obj:raise ValueError('duplicate key')
                         obj[key]=value
                     return obj
-                data=json.loads(raw,object_pairs_hook=unique,parse_constant=lambda value:(_ for _ in ()).throw(ValueError('invalid number')))
+                try:data=json.loads(raw,object_pairs_hook=unique,parse_constant=lambda value:(_ for _ in ()).throw(ValueError('invalid number')))
+                except ValueError:return self.send(413 if length>16384 else 400,{'error':'Ugyldig eller for stor rapport'})
+                if length>16384 and (not isinstance(data,dict) or data.get('schema_version')!=2):return self.send(413,{'error':'v1 må højst fylde 16384 bytes'})
                 status,result=report_ingest.save(connect,recipient,data)
                 return self.send(status,result)
             length=int(self.headers.get('Content-Length','0'))
-            if length>16384: return self.send(413,{'error':'For stor forespørgsel'})
+            if length>(262144 if self.path=='/api/reports/import' else 16384): return self.send(413,{'error':'For stor forespørgsel'})
             data=json.loads(self.rfile.read(length))
             if not isinstance(data,dict): raise ValueError('Ugyldig forespørgsel')
             if self.path in ['/api/login','/api/register']:
@@ -250,6 +263,11 @@ class Handler(BaseHTTPRequestHandler):
             if not s:return self.send(401,{'error':'Log ind først'})
             if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),s['csrf']):return self.send(403,{'error':'Ugyldigt sikkerhedstoken'})
             user_id=s['user_id']
+            if self.path in ['/api/reports/import','/api/reports/analysis-package']:
+                import report_ingest
+                if self.path.endswith('/analysis-package'):return self.send(200,report_ingest.analysis_package(connect,user_id,data))
+                status,result=report_ingest.save(connect,user_id,data)
+                return self.send(status,result)
             if self.path=='/api/logout':
                 with connect() as c:c.execute('DELETE FROM sessions WHERE token_hash=?',(s['token_hash'],))
                 self.cookie='escape=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0'; return self.send(200,{'ok':True})
@@ -330,7 +348,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,{'ok':True})
             return self.send(404,{'error':'Ukendt endpoint'})
         except oauth.SetupRequired as error:self.send(409,{'error':str(error)})
-        except (ValueError,KeyError,TypeError,sqlite3.IntegrityError):self.send(400,{'error':'Ugyldige oplysninger eller handling'})
+        except (ValueError,KeyError,TypeError,RecursionError,OverflowError,sqlite3.IntegrityError):self.send(400,{'error':'Ugyldige oplysninger eller handling'})
         except Exception:self.send(500,{'error':'Intern fejl. Kontrollér server og database.'})
 LOGIN_FAILURES={}
 if __name__=='__main__':

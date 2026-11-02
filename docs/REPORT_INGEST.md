@@ -84,3 +84,6 @@ Før automatisk aktivering skal vi verificere den konkrete automatiserings under
 
 ## Privat MCP-forbindelse
 Den alternative OAuth-beskyttede MCP-rapportintegration er beskrevet i [MCP_REPORTS.md](MCP_REPORTS.md). Den genbruger disse rapportfunktioner og samme database. API-nøglen ovenfor bruges ikke til MCP. ChatGPT-kompatibilitet og planlagt levering er ikke verificeret i produktion.
+
+## JSON v2
+Endpointet accepterer nu også version 2 op til 256 KiB. V1-formatet og grænsen på 16 KiB bevares. Se [REPORT_V2.md](REPORT_V2.md) for fuld kontrakt, null-værdier, kildekrav, historik og uddybninger. Eksisterende gemte rapporter omskrives ikke.

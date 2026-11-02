@@ -2,7 +2,7 @@
 
 ## Status og grænser
 
-MCP-modtagersiden er implementeret og testes lokalt gennem den faktiske Passenger/WSGI-adapter. Der er endnu **ingen verificeret ChatGPT-forbindelse eller planlagt levering i produktion**. Dette er en privat rapportintegration; ikke en ny AI-motor, ingen ekstra AI-API og ingen Pluto-værktøjer.
+MCP-modtagersiden er implementeret og testes lokalt gennem den faktiske Passenger/WSGI-adapter. Brugeren har nu bekræftet manuel levering og tilbagekontrol fra ChatGPT i produktion; se [REPORT_V2.md](REPORT_V2.md) for kvittering og afgrænsning. **Planlagt automatisk levering er fortsat ikke verificeret**. Dette er en privat rapportintegration; ikke en ny AI-motor, ingen ekstra AI-API og ingen Pluto-værktøjer.
 
 Forsøg på at læse de officielle dokumentationssider fra udviklingsmiljøet blev blokeret af netværksproxyen med HTTP 403. Implementeringen bruger MCP Streamable HTTP/JSON og OAuth authorization-code med PKCE. ChatGPTs aktuelle kontoadgang, udviklertilstand, OAuth-klientmetoder, callback og evne til at køre skriveværktøjer i planlagte opgaver skal verificeres i den konkrete ChatGPT-konto. En vellykket lokal protokoltest er ikke bevis for disse produktfunktioner.
 
@@ -26,7 +26,7 @@ Officielle kilder til den efterfølgende kontrol:
 | Token | `https://escape.nordic-response.dk/oauth/token` |
 | Tilbagekaldelse | `https://escape.nordic-response.dk/oauth/revoke` |
 
-Stateless Streamable HTTP: JSON-RPC 2.0 i POST `/mcp`, JSON-svar; GET/DELETE returnerer 405. Ingen langvarige processer, SSE-stream eller session-affinitet er nødvendig på cPanel. Understøttede versioner: `2025-06-18` og `2025-03-26`; klienten skal acceptere en understøttet version ved initialize-forhandling. Initialiseret-notifikation giver 202 uden indhold. JSON-RPC-batches understøttes ikke. Requesten begrænses til 32 KiB og selve rapporten til 16 KiB. Forkert Origin afvises; server-til-server-klienter kan udelade Origin.
+Stateless Streamable HTTP: JSON-RPC 2.0 i POST `/mcp`, JSON-svar; GET/DELETE returnerer 405. Ingen langvarige processer, SSE-stream eller session-affinitet er nødvendig på cPanel. Understøttede versioner: `2025-06-18` og `2025-03-26`; klienten skal acceptere en understøttet version ved initialize-forhandling. Initialiseret-notifikation giver 202 uden indhold. JSON-RPC-batches understøttes ikke. Requesten begrænses til 300 KiB; v1-rapporten til 16 KiB og v2 til 256 KiB. Se REPORT_V2.md. Forkert Origin afvises; server-til-server-klienter kan udelade Origin.
 
 ## Sikker opsætning i cPanel
 
@@ -70,7 +70,7 @@ Hvis ChatGPTs forbindelse fejler, registrér status/fejltekst uden tokens. `503`
 
 ### `send_report`
 
-Argumenterne er **direkte det eksisterende JSON v1-rapportobjekt**, ingen ekstra `report`-wrapper. Se [REPORT_INGEST.md](REPORT_INGEST.md) og `examples/report-ingest-test.json` for alle felter og grænser. `schema_version`, `report_id`, `generated_at`, `source`, `is_test`, `portfolio_values`, `candidates`, `assessments`, `orders` er obligatoriske. Ukendte felter afvises; skrivning kræver `reports:write`.
+Argumenterne er **direkte et JSON v1- eller v2-rapportobjekt**, ingen ekstra `report`-wrapper. Se [REPORT_INGEST.md](REPORT_INGEST.md) og `examples/report-ingest-test.json` for alle felter og grænser. `schema_version`, `report_id`, `generated_at`, `source`, `is_test`, `portfolio_values`, `candidates`, `assessments`, `orders` er obligatoriske. Ukendte felter afvises; skrivning kræver `reports:write`.
 
 Eksempel på MCP-request (OAuth-token må kun håndteres af klientens sikre integrationslag):
 
@@ -133,3 +133,6 @@ Indtil dette er verificeret, er anvendelsen en manuelt startet ChatGPT-analyse m
 Hvis `ESCAPE_MCP_REDIRECT_URIS` mangler, afviser serveren registrering. En afvist registrering gemmer nu en begrænset diagnosticering: højst fem observerede HTTPS-callbacks uden query/fragment på de præcise værter chatgpt.com eller chat.openai.com, samt øvrige værtsnavne uden stier. Dette er ubetroede forespørgselsdata og ikke bevis for afsenderidentitet; intet tillades automatisk. Tokens, hemmeligheder, queryværdier og request bodies gemmes ikke.
 
 Efter installation: Start et nyt Tilslut-forsøg i ChatGPT. Åbn derpå ESCAPE som administrator → Forbindelser → Rapportforbindelser → Vis rapportforbindelser. Den seneste afviste callback vises sammen med tidspunkt. Sammenhold den med dit netop startede forsøg og klientens opsætning. Tilføj kun den verificerede, præcise adresse som `ESCAPE_MCP_REDIRECT_URIS` i cPanel, gem og genstart. Forsøg derefter igen. Hvis callbacken ikke kan verificeres, skal den afklares før godkendelse. Andre brugere kan ikke se registreringsdiagnosticeringen.
+
+## Rapportvisning v2
+V2 tilføjer struktureret Intelligence-rapport, kilder, kandidathistorik, dokumenteret konsolidering og uddybende analysepakker. Eksisterende v1-kald og OAuth-forbindelser bevares. Se [REPORT_V2.md](REPORT_V2.md). Brugerbekræftet manuel tovejslevering er dokumenteret dér; det ændrer ikke status for planlagte opgaver.
