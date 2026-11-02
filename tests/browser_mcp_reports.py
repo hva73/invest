@@ -7,6 +7,7 @@ from wsgiref.simple_server import make_server,WSGIRequestHandler
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import app
 from playwright.sync_api import sync_playwright
+from test_report_delivery import synthetic
 
 BASE='https://escape.example'
 CALLBACK='https://client.example/callback'
@@ -68,11 +69,20 @@ def main():
     assert '1.000,00' in page.locator('#ingested-report').inner_text()
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
     page.screenshot(path='/tmp/escape-mcp-report-test.png',full_page=True)
+    # Same real Passenger adapter and OAuth grant, isolated synthetic production report.
+    production=synthetic(False)
+    with app.connect() as c:original=[tuple(r) for r in c.execute('SELECT id,payload,digest FROM ingested_reports ORDER BY id')]
+    assert rpc('tools/call',{'name':'validate_report','arguments':production})['structuredContent']['valid']
+    saved_production=rpc('tools/call',{'name':'send_report','arguments':production});assert not saved_production['isError'];assert saved_production['structuredContent']['counts']=={'portfolios':2,'positions':11,'orders':15,'candidates':12,'sources':11,'regions':4}
+    assert rpc('tools/call',{'name':'get_latest_report','arguments':{'is_test':False}})['structuredContent']['report']['data']==production
+    assert rpc('tools/call',{'name':'send_report','arguments':production})['structuredContent']['duplicate']
+    page.locator('#report-mode').select_option('false');page.get_by_text('SYNTHETISK INTEGRATIONSTEST – ingen investeringsrapport',exact=True).wait_for()
+    with app.connect() as c:assert [tuple(r) for r in c.execute('SELECT id,payload,digest FROM ingested_reports ORDER BY id LIMIT 2')]==original
     assert not errors,errors
     browser.close()
    with app.connect() as c:
-    assert c.execute('SELECT COUNT(*) FROM ingested_reports').fetchone()[0]==2
+    assert c.execute('SELECT COUNT(*) FROM ingested_reports').fetchone()[0]==3
     assert c.execute('SELECT COUNT(*) FROM proposals').fetchone()[0]==0
-   print('PASS: WSGI → OAuth PKCE → browser login/consent → token → MCP tools/list v1+v2 → send/read both versions → separate test inbox at 390px; no broker calls')
+   print('PASS: WSGI → OAuth PKCE → browser login/consent → token → MCP tools/list v1+v2 → send/read both versions → separate test inbox and full 12-candidate synthetic production delivery/readback/idempotency at 390px; original reports unchanged; no broker calls')
   finally:server.shutdown();server.server_close();app.DB=previous
 if __name__=='__main__':main()

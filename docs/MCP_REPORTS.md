@@ -141,3 +141,8 @@ V2 tilføjer struktureret Intelligence-rapport, kilder, kandidathistorik, dokume
 ## Rapportvalidering fra server 2.2.0
 
 Se [REPORT_VALIDATION.md](REPORT_VALIDATION.md). `validate_report` er et separat læseværktøj med samme inputskema og centrale validator som `send_report`. Det er tilgængeligt med reports:read eller reports:write; send_report kræver fortsat reports:write. Genindlæs ESCAPE-pluginets værktøjer efter installation. Ingen ændring af OAuth-scopes eller nøgler. Valideringskald bruger afgrænset ratebegrænsning i proceshukommelsen (pr. Passenger-worker), så selv transportens tællere ikke skriver til SQLite. Øvrige MCP-kald beholder deres fælles databasetællere og har også procesbeskyttelse.
+
+
+## Leveringsdiagnostik fra 2.2.1
+
+Se [MCP_DELIVERY.md](MCP_DELIVERY.md). send_report bevarer skriveklassifikation og rettigheder. Kvitteringer har nu delivery_trace_id og X-ESCAPE-Request-Id; privat Passenger-log kan skelne modtagelse, lagring, dublet og afvisning uden rapporttekst eller tokens. Bevar eksisterende timekørsel. En OpenAI-sikkerhedsafgørelse kan ikke forklares eller omgås af servermetadata.

@@ -198,3 +198,10 @@ Tal for rapporteret porteføljeværdi, kontanter, øremærkninger, positioner, o
 Rapporterede beløb sammenlignes kun med en tidligere hovedrapport ved samme portefølje-ID, valuta, overlapgrundlag og en tidligere kendt datatid. Grøn/rød pil viser værdiændringen, som også kan skyldes ind-/udbetalinger, ikke dagsafkast. Manglende sammenligning forbliver neutral. Detaljer viser den oprindelige tidligere værdi og link til sammenligningsrapporten. Optællinger får navigationspile, ikke en opdigtet kursretning. Se [OVERVIEW.md](OVERVIEW.md).
 
 Installér frisk ZIP under fx `escape_app/opdatering/overblik-detaljer/` med appen stoppet; kør pakkens `apply_update.py`, start og genindlæs. Den nye `static/overview-ui.js` er bundlet i app.js og med i updaterens filliste. Ingen nye afhængigheder, nøgler, skemaversioner eller databaseændringer. ESCAPE-pluginet skal ikke ændres for denne UI-opdatering.
+
+
+## Sikker MCP-leveringsdiagnostik (2.2.1)
+
+Den fungerende rapportlevering, v1/v2-validator, test-/driftsregler og timeautomatisering bevares. send_report beskriver nu tydeligt, at begge kategorier gemmer analyserapporter og ingen Pluto-handler udfører; skriveklassifikationen er uændret. Autentificerede MCP-leveringer får et sporings-ID og privat metadata-log til Passenger wsgi.errors uden tokens eller rapporttekst. Se [MCP_DELIVERY.md](MCP_DELIVERY.md) for evidens, afgrænsning og test. Historiske webhotellogs og OpenAI's interne blokering er ikke tilgængelige i udviklingssessionen.
+
+Installér frisk ZIP under fx `escape_app/opdatering/mcp-leveringslog/` med appen stoppet; kør apply_update.py, start og genindlæs. Ingen databaseændringer, nye nøgler eller afhængigheder. Pluginets beskrivelser kan genindlæses; ingen opgaver, scopes eller værktøjsnavne skal ændres. Diagnostik virker først efter installation og kan ikke genskabe tidligere events.

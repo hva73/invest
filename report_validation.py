@@ -29,6 +29,8 @@ def transport_schema():
         return {'anyOf':[a,b]}
     versions=[schema_v1(),report_v2.SCHEMA];schema=merge(*versions)
     schema['properties']['schema_version']={'type':'integer','enum':[1,2]}
+    schema['properties']['is_test']={'type':'boolean','description':'Report storage category only: true=test inbox, false=production report overview. Neither value authorizes or triggers trading, order changes or automation. validate_report never stores either category.'}
+    schema['properties']['report_id']=dict(schema['properties']['report_id'],description='Immutable report ID unique per ESCAPE user across test and production. New content or category requires a new ID; identical retries keep the same ID.')
     schema['allOf']=[{'if':{'properties':{'schema_version':{'const':i}},'required':['schema_version']},'then':s} for i,s in enumerate(versions,1)]
     schema['description']='Exact v1/v2 structure. Use validate_report before send_report. All nullable fields remain required; use null for unknown values. Semantic/reference and canonical UTF-8 size checks are reported by the shared validator. No records are removed.'
     return schema
