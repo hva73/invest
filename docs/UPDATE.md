@@ -147,3 +147,9 @@ Træk ned fra sidens top opdaterer nu hele den aktive Pluto-liste og rapporterne
 Hvis en fuld automatisk læsning allerede kører, vises dens fremdrift og resultat uden at gentage opslagene. Hvis der kun kører en afgrænset manuel læsning, udføres den fulde læsning bagefter. Formularindtastning og åbne dialoger beskyttes. Native browsergenindlæsning behandles ved åbning som en eksplicit fuld opdatering og springer den automatiske femminutters læsepause over. Kildetider, datamærker, scopes og planlagte opgaver ændres ikke.
 
 Valideret med CDP-touch i Chromium med mobilvisning: træk fra knapper, skråt træk, kort træk, rapportside, Collection-detaljer, fuld læsning af to aktive enheder og tilslutning til igangværende automatisk læsning. Browsergenindlæsning og beskyttelse af kladder er også testet. Fysisk iPhone/Safari er ikke tilgængelig i testmiljøet. Installér frisk ZIP via `apply_update.py`, eksempelvis under `escape_app/opdatering/mobil-traek/`, og genindlæs siden efter start.
+
+## Handelsforslag til godkendelse i Pluto
+
+Handelsmotoren kan nu forbinde KØB/SÆLG-kandidater fra v2-driftsrapporter med et eksplicit valgt Pluto-aktiv eller en ejet Collection. Der hentes estimat og aktuelle observationer før gennemgang. **Send forslag til Pluto** opretter kun et forslag; den endelige godkendelse sker i Pluto-appen. Ingen baggrundsopgaver sender forslag, og eksisterende scopes/planlagte opgaver ændres ikke.
+
+Se [TRADING.md](TRADING.md) for forløb, begrænsninger og test. Installér en frisk ZIP under `escape_app/opdatering/handelsforslag/`, stop appen og kør pakkens `apply_update.py`; start og genindlæs. Updateren inkluderer den nye service, den strukturelle inputkontrakt og UI-modulet. Første kontrol på webhotellet er søgning og hentning af et estimat, uden at trykke Send. Produktionssvar og Plutos faktiske adgang skal stadig bekræftes.

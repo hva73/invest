@@ -1,0 +1,395 @@
+{
+  "search_assets": {
+    "readOnlyHint": true,
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1
+        },
+        "assetType": {
+          "type": "string",
+          "enum": [
+            "ALL",
+            "CS",
+            "ETF",
+            "CRYPTO"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 25
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  "get_asset": {
+    "readOnlyHint": true,
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "assetId": {
+          "type": "string"
+        },
+        "period": {
+          "type": "string",
+          "enum": [
+            "ONE_WEEK",
+            "ONE_MONTH",
+            "ONE_YEAR",
+            "FIVE_YEARS",
+            "MAX"
+          ]
+        }
+      },
+      "required": [
+        "assetId"
+      ]
+    }
+  },
+  "estimate_buy_collection": {
+    "readOnlyHint": true,
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "collectionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "portfolioId": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "string",
+          "pattern": "^\\d+(?:\\.\\d{1,8})?$"
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string",
+          "enum": [
+            "DKK",
+            "EUR",
+            "USD"
+          ]
+        }
+      },
+      "required": [
+        "collectionId",
+        "amount"
+      ]
+    }
+  },
+  "propose_buy_collection": {
+    "readOnlyHint": false,
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "collectionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "portfolioId": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "string",
+          "pattern": "^\\d+(?:\\.\\d{1,8})?$"
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string",
+          "enum": [
+            "DKK",
+            "EUR",
+            "USD"
+          ]
+        }
+      },
+      "required": [
+        "collectionId",
+        "amount"
+      ]
+    }
+  },
+  "estimate_sell_collection": {
+    "readOnlyHint": true,
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "collectionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "percentage": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string",
+          "enum": [
+            "DKK",
+            "EUR",
+            "USD"
+          ]
+        }
+      },
+      "required": [
+        "collectionId",
+        "percentage"
+      ]
+    }
+  },
+  "propose_sell_collection": {
+    "readOnlyHint": false,
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "collectionId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "percentage": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "currency": {
+          "type": "string",
+          "enum": [
+            "DKK",
+            "EUR",
+            "USD"
+          ]
+        }
+      },
+      "required": [
+        "collectionId",
+        "percentage"
+      ]
+    }
+  },
+  "estimate_order": {
+    "readOnlyHint": true,
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "portfolioId": {
+          "type": "string"
+        },
+        "assetId": {
+          "type": "string"
+        },
+        "side": {
+          "type": "string",
+          "enum": [
+            "BUY",
+            "SELL"
+          ]
+        },
+        "currency": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "string"
+        },
+        "shares": {
+          "type": "string"
+        },
+        "orderType": {
+          "type": "string",
+          "enum": [
+            "MARKET",
+            "LIMIT",
+            "STOP",
+            "STOP_LIMIT"
+          ]
+        },
+        "limitPrice": {
+          "type": "string"
+        },
+        "stopPrice": {
+          "type": "string"
+        },
+        "timeInForce": {
+          "type": "string",
+          "enum": [
+            "DAY",
+            "GTC"
+          ]
+        },
+        "extendedHours": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            }
+          ]
+        }
+      },
+      "required": [
+        "assetId",
+        "side"
+      ]
+    }
+  },
+  "propose_orders": {
+    "readOnlyHint": false,
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "portfolioId": {
+          "type": "string"
+        },
+        "orders": {
+          "minItems": 1,
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "assetId": {
+                "type": "string"
+              },
+              "side": {
+                "type": "string",
+                "enum": [
+                  "BUY",
+                  "SELL"
+                ]
+              },
+              "currency": {
+                "type": "string"
+              },
+              "amount": {
+                "type": "string"
+              },
+              "shares": {
+                "type": "string"
+              },
+              "orderType": {
+                "type": "string",
+                "enum": [
+                  "MARKET",
+                  "LIMIT",
+                  "STOP",
+                  "STOP_LIMIT"
+                ]
+              },
+              "limitPrice": {
+                "type": "string"
+              },
+              "stopPrice": {
+                "type": "string"
+              },
+              "timeInForce": {
+                "type": "string",
+                "enum": [
+                  "DAY",
+                  "GTC"
+                ]
+              },
+              "extendedHours": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "true",
+                      "false"
+                    ]
+                  }
+                ]
+              }
+            },
+            "required": [
+              "assetId",
+              "side"
+            ]
+          }
+        }
+      },
+      "required": [
+        "orders"
+      ]
+    }
+  },
+  "get_order_intent": {
+    "readOnlyHint": true,
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "orderIntentId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "orderIntentId"
+      ]
+    }
+  },
+  "get_accounts": {
+    "readOnlyHint": true,
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "portfolioId": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "list_orders": {
+    "readOnlyHint": true,
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "portfolioId": {
+          "type": "string"
+        },
+        "statusGroup": {
+          "type": "string",
+          "enum": [
+            "ACTIVE",
+            "INACTIVE"
+          ]
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "DIRECT",
+            "COLLECTION"
+          ]
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        }
+      }
+    }
+  }
+}

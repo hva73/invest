@@ -53,7 +53,7 @@ def main():
     page.evaluate("()=>{Object.defineProperty(document,'hidden',{get:()=>true,configurable:true});nextAutomaticAt=0;return maybeAutoRefresh()}");assert len(calls)==before+1
     page.evaluate("()=>{Object.defineProperty(document,'hidden',{get:()=>false,configurable:true});return maybeAutoRefresh()}");assert len(calls)==before+2
     # A form started during a provider read must survive the response unchanged.
-    page.locator('nav [data-view=trade]').click();edit_during_read[0]=True
+    page.locator('nav [data-view=trade]').click();page.locator('.legacy-trade>summary').click();edit_during_read[0]=True
     page.evaluate('()=>{document.activeElement.blur();nextAutomaticAt=0;return maybeAutoRefresh()}');assert len(calls)==before+3
     assert page.locator('#proposal [name=ticker]').input_value()=='UNSAVED-DRAFT'
     page.evaluate('()=>{nextAutomaticAt=0;return maybeAutoRefresh()}');assert len(calls)==before+3  # dirty draft pauses the next cycle

@@ -53,7 +53,7 @@ def main():
     for route in held:complete(route)
     held.clear();page.locator('#pull-refresh-status').filter(has_text='Pluto opdateret automatisk').wait_for();assert calls[before-1:]==refresh_order
     # Dirty forms are protected from gesture refresh.
-    page.locator('nav [data-view=trade]').tap();page.locator('#proposal [name=ticker]').fill('UNSAVED');page.locator('#proposal button').focus();before=len(calls);pull('nav [data-view=trade]',dx=0);assert len(calls)==before;assert page.locator('#proposal [name=ticker]').input_value()=='UNSAVED'
+    page.locator('nav [data-view=trade]').tap();page.locator('.legacy-trade>summary').click();page.locator('#proposal [name=ticker]').fill('UNSAVED');page.locator('#proposal button').focus();before=len(calls);pull('nav [data-view=trade]',dx=0);assert len(calls)==before;assert page.locator('#proposal [name=ticker]').input_value()=='UNSAVED'
     assert not errors,errors;browser.close()
    print('PASS: trusted mobile touch, diagonal drag from navigation button, short drag, Reports and detail refresh all portfolios, in-flight automatic refresh joins without duplicates, draft preserved')
   finally:server.shutdown();server.server_close();app.DB=previous

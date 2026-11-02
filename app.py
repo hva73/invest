@@ -57,6 +57,8 @@ def init():
         portfolios.init(c)
         import portfolio_data
         portfolio_data.init(c)
+        import trade_service
+        trade_service.init(c)
         c.execute('DELETE FROM sessions WHERE expires<?',(time.time(),))
 
 def token_hash(token):
@@ -226,13 +228,14 @@ class Handler(BaseHTTPRequestHandler):
                 summary=portfolio_data.summaries(owned,snapshots)
                 with connect() as c: p=[dict(r) for r in c.execute('SELECT * FROM proposals WHERE user_id=? ORDER BY id DESC',(user_id,))]; j=[dict(r) for r in c.execute('SELECT * FROM journal WHERE user_id=? ORDER BY id DESC',(user_id,))]
                 with connect() as c: opportunities=[dict(r) for r in c.execute('SELECT * FROM opportunities WHERE user_id=? ORDER BY id DESC',(user_id,))]
-                return self.send(200,{'portfolio_snapshots':snapshots,'portfolio_summary':summary,'portfolios':owned,'user':{'username':s['username'],'role':s['role']},'connection':connection_state(user_id),'opportunities':opportunities,'proposals':p,'journal':j,'time':now(),'integrations':{'Pluto Markets':'Ikke tilsluttet','Markedsdata':'Ikke tilsluttet','Nyheder og AI':'Ikke tilsluttet'},'reports':{'timezone':'Europe/Copenhagen','schedule':['08:00','14:00','22:00'],'status':'Afventer datakilder og scheduler'}})
+                import trade_service
+                return self.send(200,{'broker_proposals':trade_service.summaries(connect,user_id),'portfolio_snapshots':snapshots,'portfolio_summary':summary,'portfolios':owned,'user':{'username':s['username'],'role':s['role']},'connection':connection_state(user_id),'opportunities':opportunities,'proposals':p,'journal':j,'time':now(),'integrations':{'Pluto Markets':'Ikke tilsluttet','Markedsdata':'Ikke tilsluttet','Nyheder og AI':'Ikke tilsluttet'},'reports':{'timezone':'Europe/Copenhagen','schedule':['08:00','14:00','22:00'],'status':'Afventer datakilder og scheduler'}})
             return self.send(404,{'error':'Ukendt endpoint'})
         path={'/':'index.html','/app.js':'app.js','/report-ui.js':'report-ui.js','/style.css':'style.css','/manifest.json':'manifest.json','/sw.js':'sw.js','/icon.svg':'icon.svg'}.get(self.path)
         if not path:return self.send(404,{'error':'Ikke fundet'})
         kind={'.html':'text/html; charset=utf-8','.js':'application/javascript','.css':'text/css','.json':'application/manifest+json','.svg':'image/svg+xml'}[Path(path).suffix]
         body=(ROOT/'static'/path).read_bytes()
-        if path=='app.js':body=(ROOT/'static/report-ui.js').read_bytes()+b'\n'+body
+        if path=='app.js':body=(ROOT/'static/report-ui.js').read_bytes()+b'\n'+(ROOT/'static/trade-ui.js').read_bytes()+b'\n'+body
         self.send(200,body,kind)
     def do_POST(self):
         import mcp_reports
@@ -363,6 +366,20 @@ class Handler(BaseHTTPRequestHandler):
                     c.execute('INSERT INTO connection_checks VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET checked=excluded.checked',(user_id,time.time()))
                 from pluto import discover
                 return self.send(200,discover())
+            if self.path.startswith('/api/trade/'):
+                import trade_service
+                try:
+                    action=self.path.rsplit('/',1)[1]
+                    if action=='history':result={'proposals':trade_service.history(connect,user_id)}
+                    elif action=='search':result=trade_service.search(connect,user_id,data.get('query'))
+                    elif action=='estimate':result=trade_service.estimate(connect,user_id,data)
+                    elif action=='send':result=trade_service.send(connect,user_id,data)
+                    elif action=='status':result=trade_service.check(connect,user_id,data.get('id'))
+                    else:return self.send(404,{'error':'Ukendt handelsfunktion'})
+                    return self.send(200,result)
+                except trade_service.TradeError as error:return self.send(400,{'error':str(error)})
+                except oauth.SetupRequired:raise
+                except Exception:return self.send(502,{'error':'Pluto-opslaget kunne ikke gennemføres. Kontrollér forbindelsen, instrumentets begrænsninger og Plutos adgangskrav. Intet forslag er automatisk genafsendt.'})
             if self.path=='/api/opportunities': save_opportunity(data,user_id); return self.send(201,{'ok':True})
             if self.path=='/api/proposals': proposal(data,user_id); return self.send(201,{'ok':True})
             if self.path=='/api/approve':
