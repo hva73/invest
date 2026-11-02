@@ -118,3 +118,14 @@ Denne opdatering giver strukturerede rapporttal og tre prioriterede næste handl
 Registrering accepterer store bogstaver i brugernavnet (gemmes som små), fjerner utilsigtede mellemrum og linjeskift i invitationskoden og viser konkrete fejl ved oprettelsesknappen. Adgangskoden skal stadig have mindst 14 tegn. Engangsinvitationer udløber stadig efter 24 timer; opret en frisk invitation, hvis den gamle er udløbet eller brugt. Eksisterende brugere skal logge ind, ikke oprette sig igen.
 
 Installer med en frisk ZIP og `apply_update.py` som beskrevet ovenfor. Opdateringen er ikke installeret på webhotellet alene ved at hente ZIP-filen. Efter installation: start appen, genindlæs siden og test invitationen i et privat vindue.
+
+
+## Mobilopdatering, datatid og Pluto-fornyelse
+
+- På mobilen kan man trække ned fra sidens top og slippe for at opdatere. Knappen **Opdatér** gør det samme på alle skærmstørrelser. Aktive felter og åbne dialoger beskyttes mod utilsigtet genindlæsning.
+- Fra Overblik og Porteføljer hentes den aktuelle Pluto-liste og data for de aktive Pluto-enheder. På en porteføljes detaljeside opdateres kun den valgte enhed. Fra rapportsider genindlæses rapporterne; status siger udtrykkeligt, at Pluto-kontodata ikke blev hentet. Ingen handel eller ny AI-analyse bestilles.
+- Aldersmærker bruger kildetid, når den er kendt, og bevarer særskilt hentetid. Under 10 minutter: normal visning. Fra 10 minutter: gul. Fra 30 minutter: rød advarsel og nedtonede tal. Manglende eller fremtidigt kildetidspunkt giver en ukendt-markering, aldrig frisk status. Gamle hentetider og fejlede opslag advares også. Mærker genberegnes hvert halve minut og ved tilbagevenden til fanen.
+- ChatGPT-tal er rapportøjebliksbilleder. De vises med rapporttid og strukturerede porteføljers eget datatidspunkt; en ny rapport ændrer aldrig alderen på Pluto-kontodata.
+- Pluto-adgang fornyes ved læseopslag, hvis den er ved at udløbe eller er udløbet, og en fornyelsesnøgle findes. Plutos udløb respekteres; der ændres ikke på ESCAPE-loginets otte timer. Uden gyldig fornyelsesmulighed skal brugeren logge ind hos Pluto igen. Der udvides ingen scopes.
+
+Installér den friske ZIP med `apply_update.py`. Foreslået udpakningsmappe: `escape_app/opdatering/mobil-datatid/`. Der er ingen nye afhængigheder eller miljøvariabler. Database, eksisterende rapporter og planlagte opgaver bevares. Efter installation: start appen, genindlæs siden, træk ned på Overblik og kontrollér status samt kilde- og hentetider. Automatisk fornyelse er testet med simulerede providersvar; produktionsadgang skal bekræftes på webhotellet.

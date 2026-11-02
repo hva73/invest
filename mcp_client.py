@@ -57,9 +57,7 @@ class MCP:
         raise ValueError('Incomplete tool listing')
 
 def catalog(connect,user_id):
-    with connect() as c:row=c.execute('SELECT payload,expires FROM oauth_tokens WHERE user_id=?',(user_id,)).fetchone()
-    if not row or row['expires']<=time.time():raise oauth.SetupRequired('Log ind hos Pluto igen før værktøjsopslag')
-    token=oauth.unseal(user_id,row['payload'])['token']['access_token']
+    token=oauth.access_token(connect,user_id)
     return {'tools':MCP(token).tools(),'message':'Kun værktøjsbeskrivelser er hentet. Ingen værktøjer er udført, og ingen handler er oprettet.'}
 
 # Names and argument contracts observed in the user's actual Pluto tools/list.
@@ -133,9 +131,7 @@ def normalize(data,root):
     return normalized
 
 def read_portfolios(connect,user_id,client_factory=None):
-    with connect() as c:row=c.execute('SELECT payload,expires FROM oauth_tokens WHERE user_id=?',(user_id,)).fetchone()
-    if not row or row['expires']<=time.time():raise oauth.SetupRequired('Log ind hos Pluto igen før porteføljeopslag')
-    token=oauth.unseal(user_id,row['payload'])['token']['access_token']
+    token=oauth.access_token(connect,user_id)
     client=(client_factory or MCP)(token);tools=client.tools();by_root={}
     for tool in sorted(tools,key=lambda t:(not t['name'].startswith('list_'),t['name'])):
         root=compatible(tool)

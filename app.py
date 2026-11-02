@@ -89,14 +89,24 @@ def register(data):
 def connection_state(user_id):
     with connect() as c:
         row=c.execute('SELECT status,requested FROM connections WHERE user_id=?',(user_id,)).fetchone()
-        token=c.execute('SELECT expires FROM oauth_tokens WHERE user_id=?',(user_id,)).fetchone()
-    connected=bool(token and token['expires']>time.time())
+        token=c.execute('SELECT expires,payload FROM oauth_tokens WHERE user_id=?',(user_id,)).fetchone()
+    connected=bool(token and token['expires']>time.time());renewable=False;refresh_error=None
+    if token:
+        try:
+            stored=oauth.unseal(user_id,token['payload'])
+            renewable=bool(stored['token'].get('refresh_token') and stored.get('server',{}).get('verified'))
+            refresh_error=stored.get('refresh_error')
+        except Exception:pass
     reason='Ingen Pluto-login er gennemført.'
     can_connect=True
     try:oauth.settings();oauth.cipher()
     except oauth.SetupRequired as error:reason=str(error);can_connect=False
-    if connected:reason='Pluto-login er godkendt. Porteføljehentning afventer verificerede MCP-værktøjskontrakter.'
-    return {'provider':'Pluto Markets','connected':connected,'status':'Login godkendt' if connected else ('Login udløbet' if token else (row['status'] if row else 'Ikke tilsluttet')),'requested':row['requested'] if row else None,'can_connect':can_connect,'reason':reason,'requested_access':'Kun konfigurerede læsescopes','has_tokens':bool(token)}
+    if connected:reason='Pluto-adgangen er gyldig.'+(' Fornyes automatisk ved dataopslag, når Pluto tillader det.' if renewable else ' Pluto har ikke givet en anvendelig fornyelsesnøgle; nyt login kræves ved udløb.')
+    elif token:reason='Pluto-adgangen er udløbet. Log ind hos Pluto igen.'
+    if not connected and renewable:reason='Pluto-adgangen skal fornyes. Vi forsøger automatisk ved næste dataopslag.'
+    if refresh_error=='temporary':reason='Seneste fornyelse fejlede midlertidigt. Prøv et dataopslag igen om et minut.'
+    elif refresh_error=='reconnect':reason='Pluto kræver et nyt login.'
+    return {'provider':'Pluto Markets','connected':connected,'expires_at':token['expires'] if token else None,'can_renew':renewable,'status':'Login godkendt' if connected else ('Fornyelse afventer' if renewable else ('Login udløbet' if token else (row['status'] if row else 'Ikke tilsluttet'))),'requested':row['requested'] if row else None,'can_connect':can_connect,'reason':reason,'requested_access':'Kun konfigurerede læsescopes','has_tokens':bool(token)}
 
 def save_opportunity(data,user_id):
     fields=['company','ticker','market','asset','headline','source_url','published','classification','catalyst','risk','next_action']

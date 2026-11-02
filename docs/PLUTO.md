@@ -66,3 +66,11 @@ Ejeren beskriver ACTIVE_BUY som igangværende køb med allokeret kapital. Tolkni
 ## Manglende individuelle Collection-priser
 
 Brugerens prøve viser faktisk ingen pris/value/unrealisedPnL på Collection-positioner, kun antal og kostbasis samt asset-identitet. Derfor er fraværet ikke i sig selv en parserfejl. Det annoncerede get_asset(assetId, valgfri period) kan give senest kendte pris; asset_quotes.py bruger netop dette input uden period og uden tickersøgning. Det konkrete outputschema er ikke annonceret og ikke observeret i denne samtale; prisnormaliseringen valideres derfor konservativt ved runtime og testes med mærkede fixtures. Brugeren har kun leveret feltstruktur og enkelte kontoobservationer; private positionstal er ikke kopieret ind i tests.
+
+
+## Automatisk fornyelse ved læseopslag
+Alle tre indgange (værktøjskatalog, porteføljeliste og porteføljedata) bruger `oauth.access_token`. Med højst 60 sekunders levetid tilbage forsøges `refresh_token` mod det tidligere verificerede token-endpoint, hvis Pluto har udstedt en nøgle. Den eksisterende klientidentitet, ressource og læsescopes bevares. Et roteret refresh-token gemmes krypteret; ved udeladt refresh-token beholdes det tidligere. Svar med ændrede scopes, ugyldig type eller levetid accepteres ikke.
+
+Fornyelse, callback-lagring og afbrydelse serialiseres pr. bruger med en privat Linux-fil-lås i databasemappens `oauth-locks/`, også på tværs af Passenger-processer. Netværksopslag holder ingen database-skrivelås. Låsefilerne skal blive liggende, så aktive processer altid låser samme fil. Udbyderopslag har fortsat ti sekunders timeout.
+
+Midlertidige fejl giver et minuts pause mellem fornyelsesforsøg; en stadig gyldig adgangsnøgle kan bruges i mellemtiden. `invalid_grant`/`invalid_client` kræver nyt login. Ingen tokens eller provider-fejltekster sendes til browseren. GET af forbindelsesstatus hverken fornyer eller henter brokerdata. Ingen keepalive-job, cronændringer eller udvidede rettigheder tilføjes. En nøgle kan ikke holdes i live længere end Pluto tillader.

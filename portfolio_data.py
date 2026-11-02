@@ -165,11 +165,9 @@ def supported(tools,name):
 def read(connect,user_id,portfolio_id,client_factory=None):
     with connect() as c:
         owned=c.execute("SELECT * FROM portfolios WHERE id=? AND user_id=? AND source='pluto' AND active=1",(portfolio_id,user_id)).fetchone()
-        token=c.execute('SELECT payload,expires FROM oauth_tokens WHERE user_id=?',(user_id,)).fetchone()
     if not owned:raise PortfolioFormatError('Porteføljen findes ikke på din aktive Pluto-liste')
-    if not token or token['expires']<=time.time():raise oauth.SetupRequired('Log ind hos Pluto igen før dataopslag')
     portfolio=dict(owned);namespace,identifier=portfolio['external_id'].split(':',1)
-    client=(client_factory or MCP)(oauth.unseal(user_id,token['payload'])['token']['access_token']);tools=client.tools()
+    client=(client_factory or MCP)(oauth.access_token(connect,user_id));tools=client.tools()
     def call(name,args):
         if name not in READ_TOOLS or not supported(tools,name):raise PortfolioFormatError('Pluto annoncerer ikke den forventede læsekontrakt for '+name)
         return decode_result(client.request('tools/call',{'name':name,'arguments':args}),name)
