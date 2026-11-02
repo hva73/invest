@@ -70,17 +70,21 @@ def username(value):
     return value
 
 def register(data):
-    name=username(data['username']);password=str(data['password'])
+    if any(not isinstance(data.get(key),str) for key in ['username','password','invitation']):raise ValueError('Udfyld invitationskode, brugernavn og adgangskode')
+    name=username(data['username']);password=data['password']
+    invitation=''.join(data['invitation'].split())
+    if not 20<=len(invitation)<=200:raise ValueError('Invitationskoden er ugyldig. Kopiér hele koden fra invitationen.')
     if not 14<=len(password)<=1024: raise ValueError('Adgangskoden skal have 14–1024 tegn')
     salt=secrets.token_hex(16);digest=password_hash(password,salt)
     with connect() as c:
         c.execute('BEGIN IMMEDIATE')
-        invite=c.execute('SELECT * FROM invitations WHERE token_hash=? AND used=0 AND expires>?',(token_hash(str(data['invitation'])),time.time())).fetchone()
-        if not invite: raise ValueError('Invitationen er ugyldig, udløbet eller allerede brugt')
+        invite=c.execute('SELECT * FROM invitations WHERE token_hash=? AND used=0 AND expires>?',(token_hash(invitation),time.time())).fetchone()
+        if not invite: raise ValueError('Invitationen er ugyldig, udløbet eller allerede brugt. Bed om en ny invitation.')
         if c.execute('SELECT 1 FROM users WHERE username=? COLLATE NOCASE',(name,)).fetchone():
             raise ValueError('Brugernavnet er allerede i brug')
         c.execute("INSERT INTO users(username,salt,hash,role) VALUES(?,?,?,'member')",(name,salt,digest))
         c.execute('UPDATE invitations SET used=1 WHERE token_hash=?',(invite['token_hash'],))
+    return name
 
 def connection_state(user_id):
     with connect() as c:
@@ -249,9 +253,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.path in ['/api/login','/api/register']:
                 if self.throttled():return self.send(429,{'error':'Prøv igen om fem minutter'})
                 if self.path=='/api/register':
-                    self.failure()
-                    register(data)
-                    return self.send(201,{'ok':True})
+                    try:name=register(data)
+                    except ValueError as error:
+                        self.failure();return self.send(400,{'error':str(error)})
+                    return self.send(201,{'ok':True,'username':name})
                 name=str(data.get('username','owner')).strip().lower()
                 password=str(data.get('password',''))
                 with connect() as c: u=c.execute('SELECT * FROM users WHERE username=? COLLATE NOCASE AND active=1',(name,)).fetchone()

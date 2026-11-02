@@ -109,3 +109,12 @@ Frisk ZIP + medfølgende apply_update.py som tidligere. asset_quotes.py er tilf�
 Kontrollér Microsoft som første instrument: get_asset skal ramme aktiv-ID'et fra den aktuelle Collection og give en anvendelig pris i USD. Mangler valuta, pris eller korrekt ID, bevares — og Datastatus forklarer hvorfor. Ingen handel foretages. Prisopslaget kan tage tid; højst 20 unikke instrumenter behandles pr. opdatering.
 
 En afledt markedsværdi skal være mærket Beregnet · antal × pris. Afledt urealiseret resultat skal være mærket Beregnet · værdi − kostpris. Det er en beregning ud fra senest kendte pris, ikke et garanteret realiserbart salgsbeløb eller brokerens officielle performanceberegning. Sammenhold valuta og tidspunkt før vurdering. Collectionens egen equity/profitLoss og rodporteføljens total bevares særskilt.
+
+
+## Overblik, journal og invitationer (november 2026)
+
+Denne opdatering giver strukturerede rapporttal og tre prioriterede næste handlinger på forsiden. Det fulde markedsresumé er foldet sammen. Journalen viser hændelser på tværs af op til 50 driftsrapporter, med kilde og adgang til originalrapporten. Der ændres ingen rapporter, handler, nøgler, plugin-kontrakter eller planlagte opgaver.
+
+Registrering accepterer store bogstaver i brugernavnet (gemmes som små), fjerner utilsigtede mellemrum og linjeskift i invitationskoden og viser konkrete fejl ved oprettelsesknappen. Adgangskoden skal stadig have mindst 14 tegn. Engangsinvitationer udløber stadig efter 24 timer; opret en frisk invitation, hvis den gamle er udløbet eller brugt. Eksisterende brugere skal logge ind, ikke oprette sig igen.
+
+Installer med en frisk ZIP og `apply_update.py` som beskrevet ovenfor. Opdateringen er ikke installeret på webhotellet alene ved at hente ZIP-filen. Efter installation: start appen, genindlæs siden og test invitationen i et privat vindue.

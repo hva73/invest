@@ -100,6 +100,17 @@ class ReportsV2(unittest.TestCase):
   report_ingest.validate(d)
   second['value']['currency']='USD'
   with self.assertRaises(ValueError):report_ingest.validate(d)
+ def test_desk_journal_chronology_deduplication_and_isolation(self):
+  first=copy.deepcopy(self.data);first.update(report_id='journal-first',is_test=False,generated_at='2026-02-01T12:00:00Z')
+  first['journal'][0].update(text='First observation',occurred_at='2026-02-01T12:00:00Z')
+  self.assertEqual(self.save(first)[0],201)
+  second=copy.deepcopy(first);second.update(report_id='journal-second',generated_at='2026-02-02T12:00:00Z')
+  event=copy.deepcopy(second['journal'][0]);event.update(entry_id='new-event',text='Second observation',occurred_at='2026-02-02T12:00:00Z');second['journal'].append(event)
+  self.assertEqual(self.save(second)[0],201)
+  test=copy.deepcopy(second);test.update(report_id='journal-test-hidden',is_test=True);test['journal'][0]['text']='Hidden test';self.save(test)
+  result=report_ingest.desk(app.connect,1)['journal_events']
+  self.assertEqual([e['entry']['text'] for e in result],['Second observation','First observation'])
+  self.assertEqual(result[0]['report_id'],'journal-second');self.assertEqual(report_ingest.desk(app.connect,999)['journal_events'],[])
  def test_desk_excludes_test_and_older_imports_and_overlays_deep(self):
   self.save();self.assertIsNone(report_ingest.desk(app.connect,1)['report'])
   base=copy.deepcopy(self.data);base.update(report_id='desk-main',is_test=False,generated_at='2026-02-01T12:00:00Z');self.save(base)

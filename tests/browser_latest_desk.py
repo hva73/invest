@@ -21,7 +21,9 @@ def main():
    with sync_playwright() as p:
     browser=p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':1440,'height':1000});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('browser-test-password-long');page.locator('#login-form button').click()
-    page.locator('.desk-summary').wait_for();assert 'Syntetisk aktuel analyse' in page.locator('.desk-summary').inner_text()
+    page.locator('.desk-summary').wait_for();assert 'Syntetisk hovedportefølje' in page.locator('.overview-metrics').inner_text();assert not page.get_by_text('Syntetisk aktuel analyse til test af fordeling i appen.',exact=True).is_visible()
+    page.screenshot(path='/tmp/escape-overview-desktop.png',full_page=True)
+    page.set_viewport_size({'width':390,'height':844});page.screenshot(path='/tmp/escape-overview-mobile.png',full_page=True);page.set_viewport_size({'width':1440,'height':1000})
     page.locator('nav [data-view=radar]').click();page.locator('.desk-candidate').first.wait_for();assert 'KØB' in page.locator('.desk-candidate').first.inner_text();assert page.locator('.desk-candidate').evaluate_all('(rows)=>rows.map(r=>r.dataset.attention)')==['red','red','yellow','yellow','green'];assert 'test-must-stay-hidden' not in page.locator('#content').inner_text()
     page.screenshot(path='/tmp/escape-latest-radar-desktop.png')
     for width in [320,390,430]:
@@ -30,7 +32,7 @@ def main():
     page.locator('.desk-candidate [data-deep]').first.click();page.locator('#analysis-dialog').wait_for(state='visible');assert 'desk-latest-deep' in page.locator('#analysis-prompt').input_value();page.locator('[data-close-analysis]').click()
     page.locator('nav [data-view=portfolios]').click();page.locator('.desk-portfolio').wait_for();assert 'Syntetisk hovedportefølje' in page.locator('.desk-portfolio').inner_text()
     page.locator('nav [data-view=trade]').click();page.get_by_text('Rapporteret ordrestatus',exact=True).wait_for();assert page.locator('#proposal').is_visible()
-    page.locator('nav [data-view=journal]').click();page.get_by_text('Journal fra seneste hovedanalyse',exact=True).wait_for();assert 'Beslutningsjournal' in page.locator('#content').inner_text()
+    page.locator('nav [data-view=journal]').click();page.get_by_text('Hændelser fra dine analyser',exact=True).wait_for();assert 'Beslutningsjournal' in page.locator('#content').inner_text()
     page.locator('nav [data-view=reports]').click();page.locator('.intel-header').wait_for();assert 'desk-latest-deep' in page.locator('.intel-header').inner_text();assert page.locator('.intel-candidate').evaluate_all('(rows)=>rows.map(r=>r.dataset.attention)')==['red','red','yellow','yellow','green'];assert not page.locator('#report-history').is_visible()
     page.locator('.intel-toolbar [data-view=report-archive]').click();page.locator('#report-history').wait_for(state='visible');page.locator('#report-history option[value=desk-old-late-receipt]').wait_for(state='attached');page.locator('#report-history').select_option('desk-old-late-receipt');page.get_by_text('Ældre testanalyse, indsendt senere.',exact=True).wait_for()
     page.locator('.intel-toolbar [data-view=inbox]').click();page.locator('.intel-header').wait_for();assert 'desk-latest-deep' in page.locator('.intel-header').inner_text()

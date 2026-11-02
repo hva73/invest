@@ -162,4 +162,14 @@ def desk(connect,user_id):
                     if row:
                         source=row_view(row);chosen=next(c for c in source['data']['candidates'] if c['candidate_id']==candidate['candidate_id'])
                 candidates.append({'candidate':chosen,'report_id':source['data']['report_id'],'generated_at':source['data']['generated_at'],'received':source['received'],'schema_version':source['data']['schema_version'],'quality':source['data'].get('data_quality',{}).get('status','unknown'),'index':index})
-    return {'report':row_view(recent) if recent else None,'main_report':main,'candidates':candidates,'portfolio_report':main if main and (main['data'].get('portfolios') or main['data'].get('portfolio_values')) else None,'order_report':main if main and main['data'].get('orders') else None,'journal_report':main if main and main['data'].get('journal') else None}
+        journal=[];seen=set()
+        rows=c.execute('SELECT id,received,payload FROM ingested_reports WHERE user_id=? AND is_test=0 ORDER BY generated_epoch DESC,id DESC LIMIT 50',(user_id,)).fetchall()
+        for row in rows:
+            report=row_view(row);data=report['data']
+            for entry in data.get('journal',[]):
+                identity=(entry['kind'],entry['text'],entry.get('occurred_at'),entry.get('candidate_id'),entry.get('position_id'),entry.get('order_id'))
+                if identity in seen:continue
+                seen.add(identity)
+                journal.append({'entry':entry,'report_id':data['report_id'],'source':data['source'],'generated_at':data['generated_at']})
+        journal.sort(key=lambda e:datetime.fromisoformat((e['entry'].get('occurred_at') or e['generated_at']).replace('Z','+00:00')).timestamp(),reverse=True)
+    return {'journal_events':journal[:100],'report':row_view(recent) if recent else None,'main_report':main,'candidates':candidates,'portfolio_report':main if main and (main['data'].get('portfolios') or main['data'].get('portfolio_values')) else None,'order_report':main if main and main['data'].get('orders') else None,'journal_report':main if main and main['data'].get('journal') else None}

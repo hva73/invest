@@ -208,3 +208,9 @@ Rød på et KØB-signal er handlingsbehov, ikke et negativt kursafkast. Grøn er
 Sortering er stabil inden for hver farve og ændrer kun kopier til visningen. V1 læser kun eksplicitte signalpræfikser, ikke fri fortolkning af risikotekst. Oprindelige v1-indekser og v2-kandidat-ID'er bevares, så Grav dybere peger på samme kandidat efter sortering. Rapportpayloads og brokerdata omskrives ikke.
 
 Verifikation: `node tests/test_attention.js` kontrollerer alle signaler, ukendt fallback, stabil rækkefølge, uændrede input og legacy-indekser. Browserflows afprøver faktisk DOM-rækkefølge for fem blandede v2-signaler samt en v1-rækkefølge med korrekt analysepakke efter sortering. Alle syv hovedsider kontrolleres ved 320, 390 og 430 px; v2-flowet dækker desuden op til 768 px. Testdata er syntetiske i midlertidige databaser.
+
+
+### Hurtigt overblik og journal
+Forsiden bruger strukturerede porteføljer, kontanter, øremærkninger, positioner, ordreposter og kandidater. Der udledes ingen beløb af `summary.overview`. Hold gerne resuméet til 1–2 sætninger om markedet; tal hører hjemme i deres strukturerede felter. `next_action` bør beskrive ét kort, konkret næste skridt.
+
+Send journalen som selvstændige hændelser med stabilt `entry_id`, reelt `occurred_at`, relevant `kind` og kort tekst. Undgå at kopiere hele markedsresuméet til en observation. Journalvisningen læser op til 100 hændelser fra brugerens seneste 50 driftsrapporter, nyeste hændelsestid først. Identiske poster (samme type, tekst, tidspunkt og referencer) vises én gang; originalrapporterne ændres aldrig. Ingen ændring af v2-kontrakten eller planlagte opgaver er nødvendig.

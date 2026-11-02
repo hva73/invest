@@ -55,6 +55,19 @@ class Accounts(unittest.TestCase):
   token=self.invite()
   with app.connect() as c:c.execute('UPDATE invitations SET expires=0 WHERE token_hash=?',(app.token_hash(token),))
   data['invitation']=token;self.assertEqual(self.request('register',data)[0],400)
+ def test_registration_normalizes_copied_code_and_explains_failures(self):
+  self.login();token=self.invite()
+  data={'username':'  Mixed.Case  ','password':'short','invitation':' '+token[:15]+' \n'+token[15:]+' '}
+  status,result=self.request('register',data);self.assertEqual(status,400);self.assertIn('14',result['error'])
+  data['password']='a-valid-long-password'
+  status,result=self.request('register',data);self.assertEqual(status,201);self.assertEqual(result['username'],'mixed.case')
+  self.login('MIXED.CASE','a-valid-long-password');self.assertEqual(self.request('state')[1]['user']['role'],'member')
+  self.login();data['invitation']=self.invite()
+  status,result=self.request('register',data);self.assertEqual(status,400);self.assertIn('allerede i brug',result['error'])
+  data['username']='fresh-member'
+  self.assertEqual(self.request('register',data)[0],201)
+  data['username']='another-member'
+  status,result=self.request('register',data);self.assertEqual(status,400);self.assertIn('ny invitation',result['error'])
  def test_shared_sessions_expiry_logout(self):
   self.login();cookie=self.cookie
   app.SESSIONS.clear();app.init()
