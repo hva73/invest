@@ -31,3 +31,12 @@ Testene bruger midlertidige databaser og simulerede brokersvar; de kontakter ikk
 Værktøjslisten dokumenterer inputfelterne, men indeholder ikke outputskemaer. Søgeresultater understøtter entydige lister i root, `assets`, `results` eller `items`; aktivdetaljer skal returnere matchende `id`/`assetId` i root eller `asset`. Forslagsreferencen forventes som `orderIntentId` i root, sådan som værktøjsbeskrivelsen angiver. Ukendte formater blokeres eller markeres uafklarede; de må ikke gættes. Estimat og provider-svar vises som originaldata, indtil de konkrete produktionsformater er bekræftet.
 
 Installer frisk ZIP med `apply_update.py` under fx `escape_app/opdatering/handelsforslag/`. Der er ingen nye Python-afhængigheder eller plugin-skemaændringer. Start appen og genindlæs siden. Første produktionskontrol bør være søgning og **Hent Pluto-estimat**; det validerer de faktiske svar uden at oprette et forslag. En reel afsendelse kræver derefter brugerens eksplicitte gennemgang og endelig godkendelse i Pluto.
+
+
+## Test uden KØB/SÆLG-signal
+
+**Handelsmotor → Test Pluto-forbindelsen** er tilgængelig, selv når rapporterne kun har AFVENT, OVERVÅG eller BEHOLD. Søg efter aktivet, vælg en hovedportefølje, testretning, valuta, størrelse, ordretype og gyldighed, og vælg **Hent testestimat**. Ved tom forslagsliste er testsektionen allerede foldet ud.
+
+`POST /api/trade/preview` bruger en separat læsevej uden rapportkrav. Den validerer brugerens aktive enhed og de samme tal- og ordretypefelter og kalder alene portefølje-, konto-, ordre-, aktiv- og estimatopslag. Den gemmer ingen brokerkladde, genererer ingen gennemgangsnøgle og returnerer intet forslags-ID. Testresultatet kan ikke sendes. `/trade/estimate` og `/trade/send` kræver fortsat et aktuelt KØB/SÆLG-signal og et gyldigt, gennemgået estimat som før. Session, CSRF og brugeradskillelse gælder også for testen.
+
+Den nye browserprøve `browser_layout_preview.py` gennemfører et testestimat med kun et OVERVÅG-signal og kontrollerer, at ingen forslagsværktøjer er kaldt, og at forslagstabellen er tom. Testen dækker også alle syv hovedskærme og porteføljedetaljer ved 320–1920 pixels med lange navne, delvise/ukendte kildetider, forskellige valutaer og meget små kryptopriser.

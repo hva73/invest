@@ -97,5 +97,19 @@ class Trading(unittest.TestCase):
   with concurrent.futures.ThreadPoolExecutor(2) as pool:results=list(pool.map(lambda _:self.send(q),range(2)))
   self.assertEqual(len(self.writes()),1);self.assertTrue(all(r['status'] in ['sending','sent'] for r in results))
   self.assertEqual(trade.summaries(app.connect,2),[]);self.assertEqual(trade.summaries(app.connect,1)[0]['report_id'],'trade-source')
+ def test_standalone_preview_needs_no_signal_and_creates_no_draft(self):
+  watch=copy.deepcopy(self.report);watch.update(report_id='watch-only',generated_at='2027-01-01T00:00:00Z');watch['candidates'][0]['signal']='OVERVÅG';report_ingest.save(app.connect,1,watch)
+  request={k:v for k,v in self.request.items() if k not in ['report_id','candidate_id']};request.update(side='BUY',confirm=True,method='propose_orders')
+  result=trade.preview(app.connect,1,request,self.factory)
+  self.assertTrue(result['read_only']);self.assertNotIn('id',result);self.assertNotIn('review_token',result);self.assertEqual(result['payload']['orders'][0]['side'],'BUY');self.assertEqual(trade.history(app.connect,1),[]);self.assertFalse(self.writes())
+  with self.assertRaises(trade.TradeError):trade.send(app.connect,1,{'id':0,'confirm':True,'review_token':'none'},self.factory)
+  with self.assertRaises(trade.TradeError):self.estimate(request)
+  self.assertEqual(trade.history(app.connect,1),[])
+ def test_preview_validates_ownership_kind_and_size(self):
+  req=dict(self.request,side='SELL')
+  for change in [{'portfolio_id':''},{'size_mode':'amount'},{'side':'EXECUTE'},{'kind':'collection_buy','portfolio_id':self.child},{'size':'-1'}]:
+   with self.assertRaises(trade.TradeError):trade.preview(app.connect,1,dict(req,**change),self.factory)
+  with self.assertRaises(trade.TradeError):trade.preview(app.connect,2,req,self.factory)
+  self.assertEqual(trade.history(app.connect,1),[]);self.assertFalse(self.writes())
  def test_search_is_read_only(self):
   self.assertEqual(trade.search(app.connect,1,'TEST',self.factory)['assets'][0]['asset_id'],'asset-test');self.assertFalse(self.writes())

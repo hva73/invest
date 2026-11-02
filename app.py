@@ -372,6 +372,7 @@ class Handler(BaseHTTPRequestHandler):
                     action=self.path.rsplit('/',1)[1]
                     if action=='history':result={'proposals':trade_service.history(connect,user_id)}
                     elif action=='search':result=trade_service.search(connect,user_id,data.get('query'))
+                    elif action=='preview':result=trade_service.preview(connect,user_id,data)
                     elif action=='estimate':result=trade_service.estimate(connect,user_id,data)
                     elif action=='send':result=trade_service.send(connect,user_id,data)
                     elif action=='status':result=trade_service.check(connect,user_id,data.get('id'))

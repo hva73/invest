@@ -153,3 +153,12 @@ Valideret med CDP-touch i Chromium med mobilvisning: træk fra knapper, skråt t
 Handelsmotoren kan nu forbinde KØB/SÆLG-kandidater fra v2-driftsrapporter med et eksplicit valgt Pluto-aktiv eller en ejet Collection. Der hentes estimat og aktuelle observationer før gennemgang. **Send forslag til Pluto** opretter kun et forslag; den endelige godkendelse sker i Pluto-appen. Ingen baggrundsopgaver sender forslag, og eksisterende scopes/planlagte opgaver ændres ikke.
 
 Se [TRADING.md](TRADING.md) for forløb, begrænsninger og test. Installér en frisk ZIP under `escape_app/opdatering/handelsforslag/`, stop appen og kør pakkens `apply_update.py`; start og genindlæs. Updateren inkluderer den nye service, den strukturelle inputkontrakt og UI-modulet. Første kontrol på webhotellet er søgning og hentning af et estimat, uden at trykke Send. Produktionssvar og Plutos faktiske adgang skal stadig bekræftes.
+
+
+## Testestimat og kompakte porteføljevisninger
+
+Denne opdatering tilføjer **Test Pluto-forbindelsen** i Handelsmotoren. Søgning og estimat virker uden KØB/SÆLG, og testen opretter eller sender ingen forslag. Den faktiske afsendelse kræver stadig et aktuelt handelssignal, brugerens gennemgang og endelig godkendelse i Pluto.
+
+Beholdninger og kontanter har nu kompakte datomærker med detaljer ved tryk. De lange kildeadvarsler fylder ikke længere en fast tabelkolonne. Brede skærme viser en afstemt tabel; smalle paneler, tablet og mobil viser kort med navn og talfelter. Datomærker opdaterer fortsat deres alder. Ukendte eller gamle tider markeres som før, og finansielle værdier, valutaer og beregningsgrundlag ændres ikke. Urealiserede resultater holder deres egne linjer på mobil, så beløb ikke klemmes sammen med forklaringer.
+
+Installér frisk ZIP i en ny mappe, fx `escape_app/opdatering/estimat-design/`, og kør `apply_update.py` med appen stoppet. Start og genindlæs derefter siden. Der er ingen nye afhængigheder, nøgler, plugin-skemaer eller planlagte opgaver. Første kontrol er **Handelsmotor → Test Pluto-forbindelsen → Hent testestimat** og visning af en Collection med flere beholdninger. De konkrete Pluto-svar skal stadig bekræftes på webhotellet; udviklingstestene bruger simulerede providersvar.

@@ -44,9 +44,16 @@ def owned(connect,user_id,pid):
     if not row:raise TradeError('Vælg en aktiv Pluto-enhed på din egen konto.')
     return dict(row)
 
-def build(connect,user_id,data):
-    c=candidate(connect,user_id,str(data.get('report_id','')),str(data.get('candidate_id','')))
-    p=owned(connect,user_id,int(data['portfolio_id']));kind=data.get('kind');side='BUY' if c['signal']=='KØB' else 'SELL'
+def build(connect,user_id,data,preview=False):
+    if preview:
+        if data.get('kind')!='direct' or data.get('side') not in ['BUY','SELL']:raise TradeError('Testestimatet kræver et direkte aktiv og en valgt køb/salg-retning.')
+        side=data['side']
+    else:
+        c=candidate(connect,user_id,str(data.get('report_id','')),str(data.get('candidate_id','')))
+        side='BUY' if c['signal']=='KØB' else 'SELL'
+    try:pid=int(data.get('portfolio_id'))
+    except (ValueError,TypeError):raise TradeError('Vælg en aktiv Pluto-enhed før beregningen.')
+    p=owned(connect,user_id,pid);kind=data.get('kind')
     currency=data.get('currency')
     if currency not in ['DKK','EUR','USD']:raise TradeError('Vælg afregningsvaluta: DKK, EUR eller USD.')
     if kind=='direct':
@@ -126,6 +133,24 @@ def search(connect,user_id,query,factory=None):
     if not choices:raise TradeError('Ingen entydige søgeresultater i det understøttede Pluto-format. Ingen handel er oprettet.')
     return {'assets':choices}
 
+def read_estimate(connect,user_id,p,payload,kind,factory=None):
+    cl,tools=client(connect,user_id,factory);fresh_permission(cl,tools,connect,user_id,p);context=preflight(cl,tools,p);asset=None
+    if kind=='direct':
+        order=payload['orders'][0];asset=call(cl,tools,'get_asset',{'assetId':order['assetId']})
+        node=asset.get('asset',asset) if isinstance(asset,dict) else {}
+        ids=[node[k] for k in ['id','assetId'] if k in node]
+        if not ids or any(v!=order['assetId'] for v in ids):raise TradeError('Plutos aktivsvar har ikke en entydig matchende identitet.')
+        raw=call(cl,tools,'estimate_order',{'portfolioId':payload['portfolioId'],**order})
+    else:raw=call(cl,tools,'estimate_buy_collection' if kind=='collection_buy' else 'estimate_sell_collection',payload)
+    if not isinstance(raw,dict) or not raw or raw.get('error') or raw.get('success') is False:raise TradeError('Pluto har ikke returneret et anvendeligt estimat. Intet forslag er sendt.')
+    return {'quote':raw,**context},asset
+
+def preview(connect,user_id,data,factory=None):
+    """Read-only probe: no report needed, no draft/review token and no proposal call."""
+    p,payload=build(connect,user_id,data,preview=True)
+    result,asset=read_estimate(connect,user_id,p,payload,'direct',factory)
+    return {'read_only':True,'kind':'direct','portfolio_id':p['id'],'payload':payload,'estimate':result,'asset':asset,'estimated':time.time()}
+
 def estimate(connect,user_id,data,factory=None):
     p,payload=build(connect,user_id,data);kind=data['kind'];fingerprint=hashlib.sha256(json.dumps({'report':data['report_id'],'candidate':data['candidate_id'],'kind':kind,'payload':payload},sort_keys=True).encode()).hexdigest()
     with connect() as c:
@@ -136,17 +161,9 @@ def estimate(connect,user_id,data,factory=None):
         row=c.execute('SELECT * FROM broker_proposals WHERE user_id=? AND fingerprint=?',(user_id,fingerprint)).fetchone()
         if row['status'] not in ['draft','estimated']:return {'proposal':view(row)}
         pid=row['id']
-    cl,tools=client(connect,user_id,factory);fresh_permission(cl,tools,connect,user_id,p);context=preflight(cl,tools,p);asset=None
-    if kind=='direct':
-        order=payload['orders'][0];asset=call(cl,tools,'get_asset',{'assetId':order['assetId']})
-        node=asset.get('asset',asset) if isinstance(asset,dict) else {}
-        ids=[node[k] for k in ['id','assetId'] if k in node]
-        if not ids or any(v!=order['assetId'] for v in ids):raise TradeError('Plutos aktivsvar har ikke en entydig matchende identitet.')
-        raw=call(cl,tools,'estimate_order',{'portfolioId':payload['portfolioId'],**order})
-    else:raw=call(cl,tools,'estimate_buy_collection' if kind=='collection_buy' else 'estimate_sell_collection',payload)
-    if not isinstance(raw,dict) or not raw or raw.get('error') or raw.get('success') is False:raise TradeError('Pluto har ikke returneret et anvendeligt estimat. Intet forslag er sendt.')
+    result,asset=read_estimate(connect,user_id,p,payload,kind,factory)
     with connect() as c:
-        c.execute("UPDATE broker_proposals SET status='estimated',estimated=?,review_token=?,estimate=?,asset=?,error=NULL WHERE id=? AND user_id=? AND status IN ('draft','estimated')",(time.time(),secrets.token_urlsafe(24),json.dumps({'quote':raw,**context}),json.dumps(asset),pid,user_id))
+        c.execute("UPDATE broker_proposals SET status='estimated',estimated=?,review_token=?,estimate=?,asset=?,error=NULL WHERE id=? AND user_id=? AND status IN ('draft','estimated')",(time.time(),secrets.token_urlsafe(24),json.dumps(result),json.dumps(asset),pid,user_id))
     return {'proposal':view(get(connect,user_id,pid))}
 
 def send(connect,user_id,data,factory=None):
