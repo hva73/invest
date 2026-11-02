@@ -52,11 +52,15 @@ def main():
     def rpc(method,params):
      status,result,_=request('/mcp',{'jsonrpc':'2.0','id':1,'method':method,'params':params},tokens['access_token']);assert status==200,(status,result);return result['result']
     assert rpc('initialize',{'protocolVersion':'2025-06-18'})['serverInfo']['name']=='escape-reports'
-    assert len(rpc('tools/list',{})['tools'])==2
+    advertised=rpc('tools/list',{})['tools'];assert len(advertised)==2
+    send_schema=next(t['inputSchema'] for t in advertised if t['name']=='send_report');assert send_schema['properties']['schema_version']['enum']==[1,2]
     sample=json.loads((Path(__file__).resolve().parents[1]/'examples/report-ingest-test.json').read_text())
     result=rpc('tools/call',{'name':'send_report','arguments':sample});assert not result['isError']
     saved=rpc('tools/call',{'name':'get_latest_report','arguments':{'is_test':True}})['structuredContent']['report'];assert saved['data']==sample
     assert rpc('tools/call',{'name':'get_latest_report','arguments':{}})['structuredContent']['report'] is None
+    v2=json.loads((Path(__file__).resolve().parents[1]/'examples/report-v2-test.json').read_text())
+    result=rpc('tools/call',{'name':'send_report','arguments':v2});assert not result['isError']
+    latest=rpc('tools/call',{'name':'get_latest_report','arguments':{'is_test':True}})['structuredContent']['report'];assert latest['data']==v2
     page.goto(BASE+'/');page.locator('#content .hero').wait_for();page.locator('nav [data-view=reports]').click();page.locator('[data-view=inbox]').click()
     page.locator('#load-ingested-report').click();page.get_by_text('Ingen rapport modtaget',exact=True).wait_for()
     page.locator('#report-mode').select_option('true');page.locator('#load-ingested-report').click();page.get_by_text('TESTDATA · ingen rigtige porteføljeværdier',exact=True).wait_for()
@@ -66,8 +70,8 @@ def main():
     assert not errors,errors
     browser.close()
    with app.connect() as c:
-    assert c.execute('SELECT COUNT(*) FROM ingested_reports').fetchone()[0]==1
+    assert c.execute('SELECT COUNT(*) FROM ingested_reports').fetchone()[0]==2
     assert c.execute('SELECT COUNT(*) FROM proposals').fetchone()[0]==0
-   print('PASS: WSGI → OAuth PKCE → browser login/consent → token → MCP send/read → separate test inbox at 390px; no broker calls')
+   print('PASS: WSGI → OAuth PKCE → browser login/consent → token → MCP tools/list v1+v2 → send/read both versions → separate test inbox at 390px; no broker calls')
   finally:server.shutdown();server.server_close();app.DB=previous
 if __name__=='__main__':main()

@@ -58,7 +58,7 @@ def main():
     page.get_by_text('Rapporten er importeret.',exact=True).wait_for();page.get_by_text('Uddybning modtaget fra syntetisk import.',exact=True).first.wait_for()
     first=page.locator('.intel-candidate').first;first.locator('[data-candidate-history]').click();page.locator('.intel-candidate-history').first.get_by_text('escape-v2-synthetic-002',exact=False).wait_for();assert 'escape-v2-synthetic-002' in page.locator('.intel-candidate-history').first.inner_text()
     # Legacy DB id 3 is preserved and uncertainty is explicit.
-    page.locator('#report-history').select_option(legacy['report_id']);page.get_by_text('Collection-overlap er ikke dokumenteret;',exact=False).wait_for()
+    page.locator('[data-view=report-archive]').first.click();page.locator('#report-mode').select_option('true');page.locator('#report-history option[value="'+legacy['report_id']+'"]').wait_for(state='attached');page.locator('#report-history').select_option(legacy['report_id']);page.get_by_text('Collection-overlap er ikke dokumenteret;',exact=False).wait_for()
     assert page.locator('[data-deep-legacy]').count()==1
     page.locator('[data-deep-legacy]').click();page.locator('#analysis-dialog').wait_for(state='visible');assert '"candidate_id": null' in page.locator('#analysis-prompt').input_value();page.locator('[data-close-analysis]').click()
     page.locator('#report-mode').select_option('false');page.locator('#load-ingested-report').click();page.get_by_text('Ingen rapport modtaget',exact=True).wait_for()

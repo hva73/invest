@@ -100,3 +100,22 @@ class ReportsV2(unittest.TestCase):
   report_ingest.validate(d)
   second['value']['currency']='USD'
   with self.assertRaises(ValueError):report_ingest.validate(d)
+ def test_desk_excludes_test_and_older_imports_and_overlays_deep(self):
+  self.save();self.assertIsNone(report_ingest.desk(app.connect,1)['report'])
+  base=copy.deepcopy(self.data);base.update(report_id='desk-main',is_test=False,generated_at='2026-02-01T12:00:00Z');self.save(base)
+  old=copy.deepcopy(base);old.update(report_id='late-historical',generated_at='2026-01-01T12:00:00Z');self.save(old)
+  deep=copy.deepcopy(base);deep.update(report_id='desk-deep',report_type='deep_analysis',generated_at='2026-02-02T12:00:00Z',analysis_for={'candidate_id':'test-candidate-alpha','report_id':'desk-main'});deep['candidates'][0]['signal']='AFVENT';self.save(deep)
+  result=report_ingest.desk(app.connect,1)
+  self.assertEqual(result['report']['data']['report_id'],'desk-deep');self.assertEqual(result['main_report']['data']['report_id'],'desk-main')
+  self.assertEqual(result['candidates'][0]['candidate']['signal'],'AFVENT');self.assertEqual(result['candidates'][0]['report_id'],'desk-deep')
+  self.assertEqual(result['portfolio_report']['data']['report_id'],'desk-main')
+  self.assertIsNone(report_ingest.desk(app.connect,999)['report'])
+ def test_advertised_tool_schema_exposes_both_versions(self):
+  schema=mcp_reports.report_schema()
+  try:import jsonschema
+  except ImportError:self.skipTest('Optional development dependency jsonschema is unavailable')
+  self.assertEqual(schema['properties']['schema_version']['enum'],[1,2]);self.assertNotIn('oneOf',schema)
+  jsonschema.Draft202012Validator.check_schema(schema)
+  jsonschema.validate(self.data,schema)
+  v1=json.loads((EXAMPLE.parent/'report-ingest-test.json').read_text());jsonschema.validate(v1,schema)
+  with self.assertRaises(jsonschema.ValidationError):jsonschema.validate(dict(v1,schema_version=3),schema)

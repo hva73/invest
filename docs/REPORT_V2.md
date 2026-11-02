@@ -163,3 +163,31 @@ Screenshots viser kun syntetiske data:
 ![Grav dybere med manuel kopieringsfallback](screenshots/report-v2-fallback.png)
 
 Se den afsluttende teststatus i [STATUS.md](STATUS.md). Produktionsrapport nr. 3 er ikke hentet eller ændret under disse tests. Dens visning dækkes med syntetiske data med samme rapport-ID; den faktiske produktion kontrolleres efter brugerens installation.
+
+## Seneste data på tværs af appen og separat arkiv
+
+- **Overblik:** markedsresumé og vej til analysens kandidater. Den generelle velkomsthero skjules, når en driftsanalyse findes.
+- **Opportunity Radar:** kompakte kandidatkort fra seneste hovedanalyse med kilde-/analysetid, eksplicit signal, katalysator, næste handling og direkte Grav dybere. Senere v2-uddybninger med samme kandidat-ID lægges oven på den seneste hovedanalyses kandidatgruppe. Kandidater, som mangler i den nyeste hovedanalyse, genoplives ikke fra ældre rapporter.
+- **Porteføljer:** rapportens porteføljetal og cash/earmarked vises som et særskilt analyseafsnit. Ingen navnebaseret sammenkobling med Pluto-konti, ingen overskrivning af broker-snapshots og ingen sammenlægning af kilder.
+- **Handelsmotor:** afsenderens ordreobservationer vises separat fra lokale forslag. Ingen forslag oprettes automatisk.
+- **Handelsjournal:** afsenderens journal fra hovedanalysen vises særskilt fra ESCAPEs lokale beslutningsjournal.
+- **Rapporter / Analyseindbakke:** henter og viser automatisk seneste analyse ved åbning. Opdatér-knappen er valgfri.
+- **Rapportarkiv:** separat side til at vælge ældre rapporter og testdata. Åbn en konkret rapport fra et kandidat-/porteføljekort for at se præcis den kildes indhold i arkivet.
+
+`GET /api/reports/desk` er en autentificeret, skrivebeskyttet projektion af **driftsrapporter**. Seneste vælges efter genereringstid, ikke modtagelsestid. En sent importeret historisk rapport fortrænger dermed ikke nyere analyser. `get_latest_report` og `/api/reports/latest` bevarer derimod deres oprindelige betydning: senest modtaget, så leveringskvitteringer kan kontrolleres uændret.
+
+Databasen tilføjer indekseret genereringstid og rapporttype som metadata. Eksisterende payload/digest/ID/testmarkering bevares. På en synlig side læses nye rapportdata hvert 90. sekund, uden kildehentning, AI-kald, cron eller ændring af opgaver. Arkivet opdateres ikke automatisk; formularinput, åbne analysedialoger og testkategori afbrydes ikke.
+
+Historiske og ubekræftede oplysninger forbliver mærket med kilde og tidspunkt, også når de er de seneste tilgængelige. Rapportoverskrifter og farver lover ingen aktuelle kurser eller broker-verificering.
+
+### MCP-skemaopdatering ved cachet v1-definition
+
+`send_report` annoncerer nu `schema_version` direkte på øverste niveau som `enum: [1,2]`, med synlige felter fra begge versioner. Et topniveau-oneOf med v1 som første gren bruges ikke længere. Den eksakte versionsvalidering sker fortsat strengt på serveren; det bredere transportskema tillader ikke blandede/ugyldige rapporter i databasen.
+
+Serverversionen er `2.1.0`. **Forbindelser → Vis rapportforbindelser** viser administratoren serverens annoncerede versioner og en skemafingerprint. Efter installation skal ChatGPTs eksisterende ESCAPE-plugin genindlæse værktøjerne; start eventuelt en ny samtale med pluginet. Hvis klienten stadig viser `schema_version: const 1`, er den konkrete definition stadig gammel. Undlad at oprette et nyt plugin som første løsning, da en ny pluginidentitet kan kræve en ny præcis callback-allowlist. Ingen nøgler eller eksisterende OAuth-scopes ændres i opdateringen.
+
+Regressionstesten `browser_mcp_reports.py` kontrollerer det faktisk annoncerede tools/list-skema gennem WSGI og sender/læser både v1 og v2. Den beviser serverkontrakten, ikke at ChatGPT har tømt sin cache. `browser_latest_desk.py` kontrollerer automatisk visning, sent importeret historik, v2-uddybning, testadskillelse, rapportprojektionerne og mobilvisning.
+
+![Kompakte kandidatkort på desktop](screenshots/latest-radar-desktop.png)
+
+![Kandidatkort på mobil](screenshots/latest-radar-mobile.png)

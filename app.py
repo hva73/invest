@@ -179,6 +179,9 @@ class Handler(BaseHTTPRequestHandler):
             s=self.session()
             if not s: return self.send(401,{'error':'Log ind først'})
             user_id=s['user_id']
+            if self.path=='/api/reports/desk':
+                import report_ingest
+                return self.send(200,report_ingest.desk(connect,user_id))
             if self.path=='/api/reports/schema':
                 import report_v2
                 return self.send(200,report_v2.SCHEMA)
