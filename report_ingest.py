@@ -15,7 +15,7 @@ def init(c):
     if 'report_type' not in columns:c.execute('ALTER TABLE ingested_reports ADD COLUMN report_type TEXT')
     for row in c.execute('SELECT id,payload FROM ingested_reports WHERE generated_epoch IS NULL OR report_type IS NULL').fetchall():
         data=json.loads(row['payload'])
-        c.execute('UPDATE ingested_reports SET generated_epoch=?,report_type=? WHERE id=?',(datetime.fromisoformat(data['generated_at'].replace('Z','+00:00')).timestamp(),data.get('report_type','legacy'),row['id']))
+        c.execute('UPDATE ingested_reports SET generated_epoch=?,report_type=? WHERE id=?',(datetime.fromisoformat(data['generated_at'].upper().replace('Z','+00:00')).timestamp(),data.get('report_type','legacy'),row['id']))
     c.execute('CREATE INDEX IF NOT EXISTS report_generated_order ON ingested_reports(user_id,is_test,generated_epoch,id)')
     c.execute('CREATE TABLE IF NOT EXISTS report_candidate_links(user_id INTEGER NOT NULL REFERENCES users(id),is_test INTEGER NOT NULL,candidate_id TEXT NOT NULL,report_row_id INTEGER NOT NULL REFERENCES ingested_reports(id),generated REAL NOT NULL,PRIMARY KEY(user_id,is_test,candidate_id,report_row_id))')
     c.execute('CREATE INDEX IF NOT EXISTS report_candidate_history ON report_candidate_links(user_id,is_test,candidate_id,generated)')
@@ -29,61 +29,38 @@ def recipient(connect,authorization):
     with connect() as c:row=c.execute('SELECT id FROM users WHERE username=? COLLATE NOCASE AND active=1',(username,)).fetchone()
     return (row['id'],200) if row else (None,503)
 
-def fields(obj,required):
-    if not isinstance(obj,dict) or set(obj)!=set(required):raise ValueError('Felter matcher ikke rapportformat v1')
-
-def text(value,limit=2000):
-    if not isinstance(value,str) or not value.strip() or len(value)>limit:raise ValueError('Ugyldigt tekstfelt')
-
 def validate(data):
-    if isinstance(data,dict) and type(data.get('schema_version')) is int and data['schema_version']==2:
-        import report_v2
-        return report_v2.validate(data)
-    fields(data,['schema_version','report_id','generated_at','source','is_test','portfolio_values','candidates','assessments','orders'])
-    if type(data['schema_version']) is not int or data['schema_version']!=1 or type(data['is_test']) is not bool:raise ValueError('Ugyldig version eller testmarkering')
-    if not isinstance(data['report_id'],str) or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,100}',data['report_id']):raise ValueError('Ugyldigt report_id')
-    text(data['source'],100);text(data['generated_at'],50)
-    stamp=datetime.fromisoformat(data['generated_at'].replace('Z','+00:00'))
-    if stamp.tzinfo is None:raise ValueError('generated_at skal indeholde tidszone')
-    for key,keys in [('portfolio_values',['name','amount','currency','includes_collections']),('candidates',['symbol','market','reason']),('assessments',['subject','assessment']),('orders',['reference','status','note'])]:
-        if not isinstance(data[key],list) or len(data[key])>30:raise ValueError('Højst 30 poster pr. liste')
-        for row in data[key]:
-            fields(row,keys)
-            for name in keys:
-                if name=='includes_collections':
-                    if type(row[name]) is not bool:raise ValueError('Ugyldig Collection-markering')
-                elif name=='amount':
-                    if not isinstance(row[name],str) or not re.fullmatch(r'-?\d{1,18}(\.\d{1,10})?',row[name]):raise ValueError('Beløb skal være en decimalstreng')
-                else:text(row[name],2000 if name in ['reason','assessment','note'] else 100)
-            if key=='portfolio_values' and not re.fullmatch('[A-Z]{3}',row['currency']):raise ValueError('Valuta skal have tre store bogstaver')
+    from report_validation import require
+    require(data)
     return data
 
+def validation(connect,user_id,data):
+    """Same validator as save, on a SELECT-only connection."""
+    from report_validation import validate
+    with connect() as c:return validate(data,c,user_id)
+
 def save(connect,user_id,data):
-    validate(data)
-    payload=json.dumps(data,ensure_ascii=False,sort_keys=True,separators=(',',':'))
-    if len(payload.encode())>(262144 if data['schema_version']==2 else 16384):raise ValueError('Rapporten er for stor')
-    digest=hashlib.sha256(payload.encode()).hexdigest()
+    from report_validation import validate as inspect,ReportValidationError
+    # The complete validator runs inside the insertion transaction, including
+    # account/category references. No normalization or record removal occurs.
     with connect() as c:
         c.execute('BEGIN IMMEDIATE')
+        checked=inspect(data,c,user_id)
+        if not checked['valid']:
+            if any(e['code']=='report_id_conflict' for e in checked['errors']):return 409,{'ok':False,'error':'report_id findes allerede med andet indhold','report_id':data['report_id'],**checked}
+            raise ReportValidationError(checked)
+        payload=json.dumps(data,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False)
+        digest=hashlib.sha256(payload.encode()).hexdigest()
+        receipt={'ok':True,'valid':True,'report_id':data['report_id'],'schema_version':data['schema_version'],'counts':checked['counts'],'warnings':checked['warnings']}
         old=c.execute('SELECT id,digest FROM ingested_reports WHERE user_id=? AND report_id=?',(user_id,data['report_id'])).fetchone()
         if old:
-            if old['digest']!=digest:return 409,{'error':'report_id findes allerede med andet indhold'}
-            return 200,{'ok':True,'id':old['id'],'duplicate':True}
-        if data['schema_version']==2:
-            ids={x['candidate_id'] for x in data['candidates']}
-            linked=data['analysis_for']
-            if linked:
-                parent=c.execute('SELECT r.payload FROM ingested_reports r JOIN report_candidate_links l ON l.report_row_id=r.id WHERE l.user_id=? AND l.is_test=? AND l.candidate_id=? AND r.report_id=?',(user_id,int(data['is_test']),linked['candidate_id'],linked['report_id'])).fetchone()
-                if not parent or linked['candidate_id'] not in ids or data['report_type']!='deep_analysis':raise ValueError('Uddybning kræver kandidat og originalrapport i samme kategori og konto')
-            for entry in data['positions']+data['orders']+data['journal']:
-                cid=entry['candidate_id']
-                if cid is not None and cid not in ids and not c.execute('SELECT 1 FROM report_candidate_links WHERE user_id=? AND is_test=? AND candidate_id=?',(user_id,int(data['is_test']),cid)).fetchone():raise ValueError('Ukendt kandidat-ID')
-        cur=c.execute('INSERT INTO ingested_reports(user_id,report_id,received,payload,digest,is_test,generated_epoch,report_type) VALUES(?,?,?,?,?,?,?,?)',(user_id,data['report_id'],datetime.now(timezone.utc).isoformat(),payload,digest,int(data['is_test']),datetime.fromisoformat(data['generated_at'].replace('Z','+00:00')).timestamp(),data.get('report_type','legacy')))
+            return 200,{**receipt,'id':old['id'],'duplicate':True}
+        cur=c.execute('INSERT INTO ingested_reports(user_id,report_id,received,payload,digest,is_test,generated_epoch,report_type) VALUES(?,?,?,?,?,?,?,?)',(user_id,data['report_id'],datetime.now(timezone.utc).isoformat(),payload,digest,int(data['is_test']),datetime.fromisoformat(data['generated_at'].upper().replace('Z','+00:00')).timestamp(),data.get('report_type','legacy')))
         row_id=cur.lastrowid
         if data['schema_version']==2:
             for candidate in data['candidates']:
-                c.execute('INSERT INTO report_candidate_links VALUES(?,?,?,?,?)',(user_id,int(data['is_test']),candidate['candidate_id'],row_id,datetime.fromisoformat(data['generated_at'].replace('Z','+00:00')).timestamp()))
-        return 201,{'ok':True,'id':row_id,'duplicate':False}
+                c.execute('INSERT INTO report_candidate_links VALUES(?,?,?,?,?)',(user_id,int(data['is_test']),candidate['candidate_id'],row_id,datetime.fromisoformat(data['generated_at'].upper().replace('Z','+00:00')).timestamp()))
+        return 201,{**receipt,'id':row_id,'duplicate':False}
 
 def latest(connect,user_id,is_test=False):
     with connect() as c:row=c.execute('SELECT id,received,payload FROM ingested_reports WHERE user_id=? AND is_test=? ORDER BY id DESC LIMIT 1',(user_id,int(is_test))).fetchone()
@@ -171,5 +148,5 @@ def desk(connect,user_id):
                 if identity in seen:continue
                 seen.add(identity)
                 journal.append({'entry':entry,'report_id':data['report_id'],'source':data['source'],'generated_at':data['generated_at']})
-        journal.sort(key=lambda e:datetime.fromisoformat((e['entry'].get('occurred_at') or e['generated_at']).replace('Z','+00:00')).timestamp(),reverse=True)
+        journal.sort(key=lambda e:datetime.fromisoformat((e['entry'].get('occurred_at') or e['generated_at']).upper().replace('Z','+00:00')).timestamp(),reverse=True)
     return {'journal_events':journal[:100],'report':row_view(recent) if recent else None,'main_report':main,'candidates':candidates,'portfolio_report':main if main and (main['data'].get('portfolios') or main['data'].get('portfolio_values')) else None,'order_report':main if main and main['data'].get('orders') else None,'journal_report':main if main and main['data'].get('journal') else None}

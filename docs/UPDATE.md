@@ -182,3 +182,10 @@ Installér en frisk ZIP i en ny mappe, fx `escape_app/opdatering/kursgraf-rettel
 MCP-fejl fra estimatværktøjerne viser nu Plutos begrundelse i stedet for den misvisende listebesked. Fejltekst begrænses, loginfelter skjules, og aktuelle token-/sessionsværdier fjernes. Aktiver, der eksplicit afviser beløbskøb eller valgt ordretype, stoppes før estimatkaldet. Manglende kapabilitetsfelter gættes ikke. Ingen automatisk ændring af beløb, antal, valuta eller ordretype.
 
 Installér frisk ZIP i en ny mappe, fx `escape_app/opdatering/pluto-estimat/`, med appen stoppet. Kør pakkens `apply_update.py`, start og genindlæs. Gentag samme testestimat og kontrollér Plutos konkrete begrundelse; den oprindelige afvisningsårsag kan ikke fastslås fra den gamle generiske besked. Ingen nye afhængigheder.
+
+
+## Fælles rapportvalidering og fuldstændige kvitteringer (MCP 2.2.0)
+
+Denne samlede ZIP inkluderer også den tidligere, endnu ikke installerede estimatfejlrettelse. Nyt read-only-værktøj `validate_report` kontrollerer samme komplette v1/v2-struktur som `send_report`, med alle feltfejl, referencer, advarsler og antal poster. Send afviser hele ugyldige rapporter og returnerer konkrete fejl; ved succes bekræftes rapport-ID, version og antal uden at fjerne kandidater, kilder eller analyse. Se [REPORT_VALIDATION.md](REPORT_VALIDATION.md).
+
+Udpak en frisk ZIP i en ny mappe, fx `escape_app/opdatering/rapport-validering/`. Stop appen, kør pakkens `apply_update.py`, start og genindlæs. `report_validation.py` indgår i updaterens filliste. Ingen nye runtime-afhængigheder, nøgler, OAuth-scopes eller databaseændringer. Genindlæs derefter ESCAPE-pluginets værktøjer i ChatGPT og kontrollér `validate_report` samt MCP-version 2.2.0. Produktionsrapporten er ikke ændret eller sendt under udviklingen.

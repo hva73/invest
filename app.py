@@ -6,6 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from urllib.parse import urlsplit,parse_qs
 import oauth
+from report_validation import ReportValidationError,unique_object
 ROOT=Path(__file__).parent
 DB=os.environ.get('ESCAPE_DB',str(ROOT/'var/escape.db'))
 SESSIONS={}
@@ -264,7 +265,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(status,result)
             length=int(self.headers.get('Content-Length','0'))
             if length>(262144 if self.path=='/api/reports/import' else 16384): return self.send(413,{'error':'For stor forespørgsel'})
-            data=json.loads(self.rfile.read(length))
+            data=json.loads(self.rfile.read(length),object_pairs_hook=unique_object) if self.path=='/api/reports/import' else json.loads(self.rfile.read(length))
             if not isinstance(data,dict): raise ValueError('Ugyldig forespørgsel')
             if self.path in ['/api/login','/api/register']:
                 if self.throttled():return self.send(429,{'error':'Prøv igen om fem minutter'})
@@ -398,6 +399,7 @@ class Handler(BaseHTTPRequestHandler):
                     c.execute('INSERT INTO journal(proposal_id,event,created,user_id) VALUES(?,?,?,?)',(data['id'],'Godkendt lokalt • ingen ordre sendt til mægler',now(),user_id))
                 return self.send(200,{'ok':True})
             return self.send(404,{'error':'Ukendt endpoint'})
+        except ReportValidationError as error:self.send(400,{'error':'Rapportvalidering fejlede',**error.result})
         except oauth.SetupRequired as error:self.send(409,{'error':str(error)})
         except (ValueError,KeyError,TypeError,RecursionError,OverflowError,sqlite3.IntegrityError):self.send(400,{'error':'Ugyldige oplysninger eller handling'})
         except Exception:self.send(500,{'error':'Intern fejl. Kontrollér server og database.'})

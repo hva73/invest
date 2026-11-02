@@ -180,11 +180,13 @@ Databasen tilføjer indekseret genereringstid og rapporttype som metadata. Eksis
 
 Historiske og ubekræftede oplysninger forbliver mærket med kilde og tidspunkt, også når de er de seneste tilgængelige. Rapportoverskrifter og farver lover ingen aktuelle kurser eller broker-verificering.
 
-### MCP-skemaopdatering ved cachet v1-definition
+### MCP-skema og versionsvalidering fra server 2.2.0
 
-`send_report` annoncerer nu `schema_version` direkte på øverste niveau som `enum: [1,2]`, med synlige felter fra begge versioner. Et topniveau-oneOf med v1 som første gren bruges ikke længere. Den eksakte versionsvalidering sker fortsat strengt på serveren; det bredere transportskema tillader ikke blandede/ugyldige rapporter i databasen.
+`send_report` og `validate_report` annoncerer identiske inputskemaer med `schema_version: enum [1,2]` synligt på øverste niveau. Versionsbetingelser (`allOf`/`if`/`then`) kræver den eksakte v1- eller v2-struktur, inklusive nullable felter og afvisning af felter fra den anden version. Den tidligere sammenflettede kontrakt tillod strukturer, som backend afviste; det er nu rettet. Der tilføjes ingen nye rapportfelter eller enum-værdier.
 
-Serverversionen er `2.1.0`. **Forbindelser → Vis rapportforbindelser** viser administratoren serverens annoncerede versioner og en skemafingerprint. Efter installation skal ChatGPTs eksisterende ESCAPE-plugin genindlæse værktøjerne; start eventuelt en ny samtale med pluginet. Hvis klienten stadig viser `schema_version: const 1`, er den konkrete definition stadig gammel. Undlad at oprette et nyt plugin som første løsning, da en ny pluginidentitet kan kræve en ny præcis callback-allowlist. Ingen nøgler eller eksisterende OAuth-scopes ændres i opdateringen.
+Strukturskemaer og feltregler har én autoritativ definition; samme centrale validator bruges ved validering, MCP-levering og HTTP-import. Konto-/kategoriopslag og referentiel integritet kontrolleres af validatoren, ikke af klientens JSON Schema alene. Se [REPORT_VALIDATION.md](REPORT_VALIDATION.md) for præcise fejl, kvitteringer og begrænsninger.
+
+**Forbindelser → Vis rapportforbindelser** viser serverversion 2.2.0, versionerne [1,2] og skemafingerprint. Efter installation skal ESCAPE-pluginets værktøjer genindlæses. Kontrollér at validate_report er synligt. En ny klientidentitet eller nye nøgler er ikke nødvendige.
 
 Regressionstesten `browser_mcp_reports.py` kontrollerer det faktisk annoncerede tools/list-skema gennem WSGI og sender/læser både v1 og v2. Den beviser serverkontrakten, ikke at ChatGPT har tømt sin cache. `browser_latest_desk.py` kontrollerer automatisk visning, sent importeret historik, v2-uddybning, testadskillelse, rapportprojektionerne og mobilvisning.
 

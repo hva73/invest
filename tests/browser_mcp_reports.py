@@ -52,13 +52,14 @@ def main():
     def rpc(method,params):
      status,result,_=request('/mcp',{'jsonrpc':'2.0','id':1,'method':method,'params':params},tokens['access_token']);assert status==200,(status,result);return result['result']
     assert rpc('initialize',{'protocolVersion':'2025-06-18'})['serverInfo']['name']=='escape-reports'
-    advertised=rpc('tools/list',{})['tools'];assert len(advertised)==2
+    advertised=rpc('tools/list',{})['tools'];assert len(advertised)==3
     send_schema=next(t['inputSchema'] for t in advertised if t['name']=='send_report');assert send_schema['properties']['schema_version']['enum']==[1,2]
     sample=json.loads((Path(__file__).resolve().parents[1]/'examples/report-ingest-test.json').read_text())
     result=rpc('tools/call',{'name':'send_report','arguments':sample});assert not result['isError']
     saved=rpc('tools/call',{'name':'get_latest_report','arguments':{'is_test':True}})['structuredContent']['report'];assert saved['data']==sample
     assert rpc('tools/call',{'name':'get_latest_report','arguments':{}})['structuredContent']['report'] is None
     v2=json.loads((Path(__file__).resolve().parents[1]/'examples/report-v2-test.json').read_text())
+    preflight=rpc('tools/call',{'name':'validate_report','arguments':v2});assert not preflight['isError'];assert preflight['structuredContent']['valid']
     result=rpc('tools/call',{'name':'send_report','arguments':v2});assert not result['isError']
     latest=rpc('tools/call',{'name':'get_latest_report','arguments':{'is_test':True}})['structuredContent']['report'];assert latest['data']==v2
     page.goto(BASE+'/');page.locator('#content .hero').wait_for();page.locator('nav [data-view=reports]').click();page.locator('[data-view=inbox]').click()

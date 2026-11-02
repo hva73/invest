@@ -1,5 +1,4 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
     "schema_version": {
@@ -8,18 +7,20 @@
     },
     "report_id": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+      "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
     },
     "generated_at": {
       "type": "string",
       "minLength": 1,
       "maxLength": 50,
+      "pattern": "\\S",
       "format": "date-time"
     },
     "source": {
       "type": "string",
       "minLength": 1,
-      "maxLength": 200
+      "maxLength": 200,
+      "pattern": "\\S"
     },
     "is_test": {
       "type": "boolean"
@@ -54,6 +55,7 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 50,
+              "pattern": "\\S",
               "format": "date-time"
             },
             {
@@ -66,7 +68,8 @@
             {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4000
+              "maxLength": 4000,
+              "pattern": "\\S"
             },
             {
               "type": "null"
@@ -79,7 +82,37 @@
         "as_of",
         "note"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "verified"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "as_of": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50,
+                "pattern": "\\S",
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      ]
     },
     "summary": {
       "type": "object",
@@ -89,7 +122,8 @@
             {
               "type": "string",
               "minLength": 1,
-              "maxLength": 12000
+              "maxLength": 12000,
+              "pattern": "\\S"
             },
             {
               "type": "null"
@@ -104,14 +138,16 @@
               "region": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 100
+                "maxLength": 100,
+                "pattern": "\\S"
               },
               "summary": {
                 "anyOf": [
                   {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 12000
+                    "maxLength": 12000,
+                    "pattern": "\\S"
                   },
                   {
                     "type": "null"
@@ -122,9 +158,10 @@
                 "type": "array",
                 "items": {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+                  "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
                 },
-                "maxItems": 80
+                "maxItems": 80,
+                "uniqueItems": true
               }
             },
             "required": [
@@ -150,12 +187,13 @@
         "properties": {
           "source_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
           },
           "url": {
             "type": "string",
             "minLength": 1,
             "maxLength": 2000,
+            "pattern": "\\S",
             "format": "https-url"
           },
           "publisher": {
@@ -163,7 +201,8 @@
               {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 200
+                "maxLength": 200,
+                "pattern": "\\S"
               },
               {
                 "type": "null"
@@ -176,6 +215,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 50,
+                "pattern": "\\S",
                 "format": "date-time"
               },
               {
@@ -189,6 +229,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 50,
+                "pattern": "\\S",
                 "format": "date-time"
               },
               {
@@ -214,7 +255,37 @@
           "verified_at",
           "verification"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "type": "object",
+              "properties": {
+                "verification": {
+                  "type": "string",
+                  "enum": [
+                    "verified"
+                  ]
+                }
+              },
+              "required": [
+                "verification"
+              ]
+            },
+            "then": {
+              "type": "object",
+              "properties": {
+                "verified_at": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 50,
+                  "pattern": "\\S",
+                  "format": "date-time"
+                }
+              }
+            }
+          }
+        ]
       },
       "maxItems": 150
     },
@@ -225,12 +296,13 @@
         "properties": {
           "portfolio_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
           },
           "name": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 200
+            "maxLength": 200,
+            "pattern": "\\S"
           },
           "role": {
             "type": "string",
@@ -251,7 +323,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+                "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
               },
               {
                 "type": "null"
@@ -271,11 +343,11 @@
                 "properties": {
                   "amount": {
                     "type": "string",
-                    "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$"
+                    "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
                   },
                   "currency": {
                     "type": "string",
-                    "pattern": "^[A-Z]{3}$"
+                    "pattern": "^[A-Z]{3}$(?![\\s\\S])"
                   }
                 },
                 "required": [
@@ -298,11 +370,11 @@
                   "properties": {
                     "amount": {
                       "type": "string",
-                      "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$"
+                      "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
                     },
                     "currency": {
                       "type": "string",
-                      "pattern": "^[A-Z]{3}$"
+                      "pattern": "^[A-Z]{3}$(?![\\s\\S])"
                     }
                   },
                   "required": [
@@ -327,11 +399,11 @@
                   "properties": {
                     "amount": {
                       "type": "string",
-                      "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$"
+                      "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
                     },
                     "currency": {
                       "type": "string",
-                      "pattern": "^[A-Z]{3}$"
+                      "pattern": "^[A-Z]{3}$(?![\\s\\S])"
                     }
                   },
                   "required": [
@@ -353,6 +425,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 50,
+                "pattern": "\\S",
                 "format": "date-time"
               },
               {
@@ -364,9 +437,10 @@
             "type": "array",
             "items": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
             },
-            "maxItems": 80
+            "maxItems": 80,
+            "uniqueItems": true
           }
         },
         "required": [
@@ -403,11 +477,11 @@
               "properties": {
                 "amount": {
                   "type": "string",
-                  "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$"
+                  "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
                 },
                 "currency": {
                   "type": "string",
-                  "pattern": "^[A-Z]{3}$"
+                  "pattern": "^[A-Z]{3}$(?![\\s\\S])"
                 }
               },
               "required": [
@@ -425,7 +499,7 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
           },
           "maxItems": 30
         },
@@ -446,16 +520,18 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
           },
-          "maxItems": 80
+          "maxItems": 80,
+          "uniqueItems": true
         },
         "note": {
           "anyOf": [
             {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4000
+              "maxLength": 4000,
+              "pattern": "\\S"
             },
             {
               "type": "null"
@@ -471,7 +547,101 @@
         "source_ids",
         "note"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "method": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "documented"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              "method": {
+                "type": "string",
+                "enum": [
+                  "root_totals_including_collections"
+                ]
+              },
+              "portfolio_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+                },
+                "maxItems": 30,
+                "minItems": 1,
+                "uniqueItems": true
+              },
+              "source_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+                },
+                "maxItems": 80,
+                "uniqueItems": true,
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
     },
     "positions": {
       "type": "array",
@@ -480,17 +650,17 @@
         "properties": {
           "position_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
           },
           "portfolio_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
           },
           "candidate_id": {
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+                "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
               },
               {
                 "type": "null"
@@ -502,7 +672,8 @@
               {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 60
+                "maxLength": 60,
+                "pattern": "\\S"
               },
               {
                 "type": "null"
@@ -513,7 +684,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "^\\d{1,18}(\\.\\d{1,12})?$"
+                "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
               },
               {
                 "type": "null"
@@ -527,11 +698,11 @@
                 "properties": {
                   "amount": {
                     "type": "string",
-                    "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$"
+                    "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
                   },
                   "currency": {
                     "type": "string",
-                    "pattern": "^[A-Z]{3}$"
+                    "pattern": "^[A-Z]{3}$(?![\\s\\S])"
                   }
                 },
                 "required": [
@@ -552,11 +723,11 @@
                 "properties": {
                   "amount": {
                     "type": "string",
-                    "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$"
+                    "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
                   },
                   "currency": {
                     "type": "string",
-                    "pattern": "^[A-Z]{3}$"
+                    "pattern": "^[A-Z]{3}$(?![\\s\\S])"
                   }
                 },
                 "required": [
@@ -576,6 +747,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 50,
+                "pattern": "\\S",
                 "format": "date-time"
               },
               {
@@ -587,9 +759,10 @@
             "type": "array",
             "items": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
             },
-            "maxItems": 80
+            "maxItems": 80,
+            "uniqueItems": true
           }
         },
         "required": [
@@ -614,17 +787,17 @@
         "properties": {
           "order_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
           },
           "portfolio_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
           },
           "candidate_id": {
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+                "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
               },
               {
                 "type": "null"
@@ -636,7 +809,8 @@
               {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 60
+                "maxLength": 60,
+                "pattern": "\\S"
               },
               {
                 "type": "null"
@@ -646,7 +820,8 @@
           "status": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 100
+            "maxLength": 100,
+            "pattern": "\\S"
           },
           "lifecycle": {
             "type": "string",
@@ -663,7 +838,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "^\\d{1,18}(\\.\\d{1,12})?$"
+                "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
               },
               {
                 "type": "null"
@@ -674,7 +849,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "^\\d{1,18}(\\.\\d{1,12})?$"
+                "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
               },
               {
                 "type": "null"
@@ -688,11 +863,11 @@
                 "properties": {
                   "amount": {
                     "type": "string",
-                    "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$"
+                    "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
                   },
                   "currency": {
                     "type": "string",
-                    "pattern": "^[A-Z]{3}$"
+                    "pattern": "^[A-Z]{3}$(?![\\s\\S])"
                   }
                 },
                 "required": [
@@ -712,6 +887,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 50,
+                "pattern": "\\S",
                 "format": "date-time"
               },
               {
@@ -723,16 +899,18 @@
             "type": "array",
             "items": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
             },
-            "maxItems": 80
+            "maxItems": 80,
+            "uniqueItems": true
           },
           "note": {
             "anyOf": [
               {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 4000
+                "maxLength": 4000,
+                "pattern": "\\S"
               },
               {
                 "type": "null"
@@ -765,19 +943,21 @@
         "properties": {
           "candidate_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
           },
           "ticker": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 60
+            "maxLength": 60,
+            "pattern": "\\S"
           },
           "company_name": {
             "anyOf": [
               {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 200
+                "maxLength": 200,
+                "pattern": "\\S"
               },
               {
                 "type": "null"
@@ -789,7 +969,8 @@
               {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 100
+                "maxLength": 100,
+                "pattern": "\\S"
               },
               {
                 "type": "null"
@@ -801,7 +982,8 @@
               {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 100
+                "maxLength": 100,
+                "pattern": "\\S"
               },
               {
                 "type": "null"
@@ -823,7 +1005,8 @@
               {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 12000
+                "maxLength": 12000,
+                "pattern": "\\S"
               },
               {
                 "type": "null"
@@ -841,6 +1024,7 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 10,
+                      "pattern": "\\S",
                       "format": "date"
                     },
                     {
@@ -853,7 +1037,8 @@
                     {
                       "type": "string",
                       "minLength": 1,
-                      "maxLength": 4000
+                      "maxLength": 4000,
+                      "pattern": "\\S"
                     },
                     {
                       "type": "null"
@@ -865,7 +1050,8 @@
                     {
                       "type": "string",
                       "minLength": 1,
-                      "maxLength": 4000
+                      "maxLength": 4000,
+                      "pattern": "\\S"
                     },
                     {
                       "type": "null"
@@ -876,9 +1062,10 @@
                   "type": "array",
                   "items": {
                     "type": "string",
-                    "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+                    "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
                   },
-                  "maxItems": 80
+                  "maxItems": 80,
+                  "uniqueItems": true
                 }
               },
               "required": [
@@ -896,7 +1083,8 @@
             "items": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 12000
+              "maxLength": 12000,
+              "pattern": "\\S"
             },
             "maxItems": 20
           },
@@ -905,7 +1093,8 @@
               {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 4000
+                "maxLength": 4000,
+                "pattern": "\\S"
               },
               {
                 "type": "null"
@@ -916,9 +1105,10 @@
             "type": "array",
             "items": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
             },
-            "maxItems": 80
+            "maxItems": 80,
+            "uniqueItems": true
           },
           "tradability": {
             "type": "object",
@@ -937,6 +1127,7 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 50,
+                    "pattern": "\\S",
                     "format": "date-time"
                   },
                   {
@@ -948,9 +1139,10 @@
                 "type": "array",
                 "items": {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+                  "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
                 },
-                "maxItems": 80
+                "maxItems": 80,
+                "uniqueItems": true
               }
             },
             "required": [
@@ -958,7 +1150,48 @@
               "checked_at",
               "source_ids"
             ],
-            "additionalProperties": false
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "available",
+                        "unavailable"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                },
+                "then": {
+                  "type": "object",
+                  "properties": {
+                    "checked_at": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 50,
+                      "pattern": "\\S",
+                      "format": "date-time"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+                      },
+                      "maxItems": 80,
+                      "uniqueItems": true,
+                      "minItems": 1
+                    }
+                  }
+                }
+              }
+            ]
           },
           "market": {
             "type": "object",
@@ -970,11 +1203,11 @@
                     "properties": {
                       "amount": {
                         "type": "string",
-                        "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$"
+                        "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
                       },
                       "currency": {
                         "type": "string",
-                        "pattern": "^[A-Z]{3}$"
+                        "pattern": "^[A-Z]{3}$(?![\\s\\S])"
                       }
                     },
                     "required": [
@@ -992,7 +1225,7 @@
                 "anyOf": [
                   {
                     "type": "string",
-                    "pattern": "^\\d{1,18}(\\.\\d{1,12})?$"
+                    "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
                   },
                   {
                     "type": "null"
@@ -1003,7 +1236,7 @@
                 "anyOf": [
                   {
                     "type": "string",
-                    "pattern": "^[A-Z]{3}$"
+                    "pattern": "^[A-Z]{3}$(?![\\s\\S])"
                   },
                   {
                     "type": "null"
@@ -1017,11 +1250,11 @@
                     "properties": {
                       "amount": {
                         "type": "string",
-                        "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$"
+                        "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
                       },
                       "currency": {
                         "type": "string",
-                        "pattern": "^[A-Z]{3}$"
+                        "pattern": "^[A-Z]{3}$(?![\\s\\S])"
                       }
                     },
                     "required": [
@@ -1042,11 +1275,11 @@
                     "properties": {
                       "amount": {
                         "type": "string",
-                        "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$"
+                        "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
                       },
                       "currency": {
                         "type": "string",
-                        "pattern": "^[A-Z]{3}$"
+                        "pattern": "^[A-Z]{3}$(?![\\s\\S])"
                       }
                     },
                     "required": [
@@ -1066,6 +1299,7 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 50,
+                    "pattern": "\\S",
                     "format": "date-time"
                   },
                   {
@@ -1085,9 +1319,10 @@
                 "type": "array",
                 "items": {
                   "type": "string",
-                  "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+                  "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
                 },
-                "maxItems": 80
+                "maxItems": 80,
+                "uniqueItems": true
               }
             },
             "required": [
@@ -1100,7 +1335,81 @@
               "verification",
               "source_ids"
             ],
-            "additionalProperties": false
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "type": "object",
+                  "properties": {
+                    "verification": {
+                      "type": "string",
+                      "enum": [
+                        "verified"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "verification"
+                  ]
+                },
+                "then": {
+                  "type": "object",
+                  "properties": {
+                    "as_of": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 50,
+                      "pattern": "\\S",
+                      "format": "date-time"
+                    },
+                    "source_ids": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+                      },
+                      "maxItems": 80,
+                      "uniqueItems": true,
+                      "minItems": 1
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "type": "object",
+                  "properties": {
+                    "verification": {
+                      "type": "string",
+                      "enum": [
+                        "unknown",
+                        "unverified"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "verification"
+                  ]
+                },
+                "then": {
+                  "type": "object",
+                  "properties": {
+                    "price": {
+                      "type": "null"
+                    },
+                    "volume": {
+                      "type": "null"
+                    },
+                    "spread": {
+                      "type": "null"
+                    },
+                    "fees": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            ]
           },
           "exit_plan": {
             "type": "object",
@@ -1110,7 +1419,8 @@
                   {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 4000
+                    "maxLength": 4000,
+                    "pattern": "\\S"
                   },
                   {
                     "type": "null"
@@ -1124,11 +1434,11 @@
                     "properties": {
                       "amount": {
                         "type": "string",
-                        "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$"
+                        "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
                       },
                       "currency": {
                         "type": "string",
-                        "pattern": "^[A-Z]{3}$"
+                        "pattern": "^[A-Z]{3}$(?![\\s\\S])"
                       }
                     },
                     "required": [
@@ -1149,11 +1459,11 @@
                     "properties": {
                       "amount": {
                         "type": "string",
-                        "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$"
+                        "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
                       },
                       "currency": {
                         "type": "string",
-                        "pattern": "^[A-Z]{3}$"
+                        "pattern": "^[A-Z]{3}$(?![\\s\\S])"
                       }
                     },
                     "required": [
@@ -1174,11 +1484,11 @@
                     "properties": {
                       "amount": {
                         "type": "string",
-                        "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$"
+                        "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
                       },
                       "currency": {
                         "type": "string",
-                        "pattern": "^[A-Z]{3}$"
+                        "pattern": "^[A-Z]{3}$(?![\\s\\S])"
                       }
                     },
                     "required": [
@@ -1197,7 +1507,8 @@
                   {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 4000
+                    "maxLength": 4000,
+                    "pattern": "\\S"
                   },
                   {
                     "type": "null"
@@ -1220,6 +1531,7 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 2000,
+              "pattern": "\\S",
               "format": "https-url"
             },
             "maxItems": 10
@@ -1253,13 +1565,13 @@
         "properties": {
           "entry_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+            "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
           },
           "candidate_id": {
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+                "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
               },
               {
                 "type": "null"
@@ -1270,7 +1582,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+                "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
               },
               {
                 "type": "null"
@@ -1281,7 +1593,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+                "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
               },
               {
                 "type": "null"
@@ -1294,6 +1606,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 50,
+                "pattern": "\\S",
                 "format": "date-time"
               },
               {
@@ -1314,15 +1627,17 @@
           "text": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 12000
+            "maxLength": 12000,
+            "pattern": "\\S"
           },
           "source_ids": {
             "type": "array",
             "items": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
             },
-            "maxItems": 80
+            "maxItems": 80,
+            "uniqueItems": true
           }
         },
         "required": [
@@ -1346,11 +1661,11 @@
           "properties": {
             "candidate_id": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
             },
             "report_id": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9_.:-]{1,100}$"
+              "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
             }
           },
           "required": [
@@ -1383,5 +1698,75 @@
     "journal",
     "analysis_for"
   ],
-  "additionalProperties": false
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "analysis_for": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "analysis_for"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "report_type": {
+            "type": "string",
+            "enum": [
+              "deep_analysis"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "data_quality": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "verified"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        },
+        "required": [
+          "data_quality"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "verification": {
+                  "type": "string",
+                  "enum": [
+                    "verified"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

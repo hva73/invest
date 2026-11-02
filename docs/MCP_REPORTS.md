@@ -59,7 +59,7 @@ Den eksisterende nøgle til `/api/reports/ingest` er separat og kan **ikke** bru
 3. Start oprettelse af en privat app/connector med navnet **ESCAPE Reports**, URL `https://escape.nordic-response.dk/mcp`, transport Streamable HTTP og OAuth. Vælg dynamisk klientregistrering/public PKCE, hvis denne valgmulighed understøttes.
 4. Find den præcise callback-URL i klientens aktuelle opsætning eller officielle dokumentation. Sæt denne som `ESCAPE_MCP_REDIRECT_URIS` i cPanel, sæt `ESCAPE_MCP_ENABLED=1`, gem og genstart appen. Hvis callback ikke kan findes, skal den afklares; gæt ikke og del ikke en hemmelig nøgle for at komme videre.
 5. Start/genstart **Connect** fra ChatGPT. ESCAPE skal åbne sin egen HTTPS-login-side. Log ind på den konto, der skal modtage rapporterne. Godkend de viste rapportrettigheder. En ukendt callback eller en godkendelse du ikke selv startede, skal afvises.
-6. Kontrollér at ChatGPT viser præcis værktøjerne `send_report` og `get_latest_report`. Ingen broker-/handelsværktøjer skal være tilgængelige gennem denne app.
+6. Kontrollér at ChatGPT viser værktøjerne `validate_report`, `send_report` og `get_latest_report`. Ingen broker-/handelsværktøjer skal være tilgængelige gennem denne app.
 7. Bed først om `get_latest_report` med `{"is_test":true}`. Tomt resultat er tilladt. Bed derefter om at sende eksemplet nedenfor som testdata; godkend eventuel skrivehandling i ChatGPT.
 8. Bed om `get_latest_report` med `{"is_test":true}` og sammenlign `report_id`, `received` og indholdet. Se samme rapport i ESCAPE under **Rapporter & alarmer → Åbn rapportindbakke → Rapporttype: Testdata → Hent seneste rapport**.
 9. Gentag `send_report` med helt samme ID og indhold: `duplicate:true` forventes. Standardkald `get_latest_report` uden argument læser kun driftsrapporter og skal ikke returnere denne test.
@@ -136,3 +136,8 @@ Efter installation: Start et nyt Tilslut-forsøg i ChatGPT. Åbn derpå ESCAPE s
 
 ## Rapportvisning v2
 V2 tilføjer struktureret Intelligence-rapport, kilder, kandidathistorik, dokumenteret konsolidering og uddybende analysepakker. Eksisterende v1-kald og OAuth-forbindelser bevares. Se [REPORT_V2.md](REPORT_V2.md). Brugerbekræftet manuel tovejslevering er dokumenteret dér; det ændrer ikke status for planlagte opgaver.
+
+
+## Rapportvalidering fra server 2.2.0
+
+Se [REPORT_VALIDATION.md](REPORT_VALIDATION.md). `validate_report` er et separat læseværktøj med samme inputskema og centrale validator som `send_report`. Det er tilgængeligt med reports:read eller reports:write; send_report kræver fortsat reports:write. Genindlæs ESCAPE-pluginets værktøjer efter installation. Ingen ændring af OAuth-scopes eller nøgler. Valideringskald bruger afgrænset ratebegrænsning i proceshukommelsen (pr. Passenger-worker), så selv transportens tællere ikke skriver til SQLite. Øvrige MCP-kald beholder deres fælles databasetællere og har også procesbeskyttelse.

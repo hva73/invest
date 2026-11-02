@@ -9,6 +9,7 @@ BASE='https://escape.example'
 REDIRECT='https://client.example/oauth/callback'
 class McpReports(unittest.TestCase):
  def setUp(self):
+  mcp_reports._MEMORY_LIMITS.clear()
   self.previous=app.DB;self.tmp=tempfile.TemporaryDirectory();app.DB=self.tmp.name+'/db'
   self.env=patch.dict(os.environ,{'ESCAPE_MCP_ENABLED':'1','ESCAPE_PUBLIC_URL':BASE,'ESCAPE_MCP_REDIRECT_URIS':REDIRECT});self.env.start()
   app.init();app.create_user('test-password-long-enough')
@@ -44,6 +45,25 @@ class McpReports(unittest.TestCase):
   status,tokens,_=self.request('/oauth/token',params,form=True);self.assertEqual(status,200,(status,tokens))
   return client,tokens,params
  def call(self,token,name,args):return self.request('/mcp',{'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':name,'arguments':args}},{'Authorization':'Bearer '+token})
+ def test_validate_http_never_changes_database_and_reports_all_errors(self):
+  _,tokens,_=self.granted()
+  with app.connect() as c:before=list(c.iterdump())
+  data=json.loads((Path(__file__).resolve().parents[1]/'examples/report-v2-test.json').read_text())
+  data['candidates'][0]['source_ids']=['absent'];data['positions'][0]['quantity']='NaN';del data['candidates'][0]['exit_plan']
+  status,response,_=self.call(tokens['access_token'],'validate_report',data)
+  self.assertEqual(status,200);result=response['result'];self.assertFalse(result['isError']);self.assertFalse(result['structuredContent']['valid'])
+  self.assertGreaterEqual(len(result['structuredContent']['errors']),3)
+  with app.connect() as c:self.assertEqual(before,list(c.iterdump()))
+  rejected=self.call(tokens['access_token'],'send_report',data)[1]['result'];self.assertTrue(rejected['isError']);self.assertEqual(rejected['structuredContent']['errors'],result['structuredContent']['errors'])
+  with app.connect() as c:self.assertEqual(c.execute('SELECT COUNT(*) FROM ingested_reports').fetchone()[0],0)
+ def test_import_returns_structured_validation_errors(self):
+  headers=self.login();data=json.loads((Path(__file__).resolve().parents[1]/'examples/report-v2-test.json').read_text())
+  data['positions'][0]['quantity']=123;del data['candidates'][0]['market']['fees']
+  status,result,_=self.request('/api/reports/import',data,headers)
+  self.assertEqual(status,400);self.assertFalse(result['valid']);self.assertIn('positions[0].quantity',{e['path'] for e in result['errors']});self.assertIn('candidates[0].market.fees',{e['path'] for e in result['errors']})
+  raw=json.dumps(data)[:-1]+',"report_id":"silently-replaced"}'
+  c=http.client.HTTPConnection('127.0.0.1',self.server.server_port);c.request('POST','/api/reports/import',raw.encode(),{'Content-Type':'application/json',**headers});r=c.getresponse();body=json.loads(r.read());c.close()
+  self.assertEqual(r.status,400);self.assertEqual(body['errors'][0]['code'],'duplicate_key')
  def test_metadata_requires_config_and_exact_redirect(self):
   status,meta,_=self.request('/.well-known/oauth-protected-resource/mcp');self.assertEqual(status,200);self.assertEqual(meta['resource'],BASE+'/mcp')
   self.assertEqual(self.request('/oauth/register',{'redirect_uris':['https://evil.example/callback']})[0],400)
@@ -54,7 +74,7 @@ class McpReports(unittest.TestCase):
   self.assertEqual(result['result']['protocolVersion'],'2025-06-18')
   self.assertEqual(self.request('/mcp',{'jsonrpc':'2.0','method':'notifications/initialized'},auth)[0],202)
   status,result,_=self.request('/mcp',{'jsonrpc':'2.0','id':2,'method':'tools/list'},auth)
-  self.assertEqual({x['name'] for x in result['result']['tools']},{'send_report','get_latest_report'})
+  self.assertEqual({x['name'] for x in result['result']['tools']},{'send_report','validate_report','get_latest_report'})
   status,result,_=self.call(tokens['access_token'],'send_report',self.sample);self.assertFalse(result['result']['isError'])
   self.assertTrue(self.call(tokens['access_token'],'send_report',self.sample)[1]['result']['structuredContent']['duplicate'])
   self.assertIsNone(self.call(tokens['access_token'],'get_latest_report',{})[1]['result']['structuredContent']['report'])
