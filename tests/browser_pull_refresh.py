@@ -42,7 +42,7 @@ def main():
     before=len(calls);pull(dx=0,dy=35);assert len(calls)==before;page.locator('nav [data-view=reports]').tap();page.locator('.intel-shell').wait_for()
     pull('nav [data-view=reports]');page.locator('#pull-refresh-status').filter(has_text='Pluto hentet').wait_for();assert calls[before:]==refresh_order
     # Even when viewing one child, a pull refreshes the whole active account list.
-    page.locator('nav [data-view=portfolios]').tap();page.locator(f'[data-open-portfolio="{ids[1]}"]').click();before=len(calls)
+    page.locator('nav [data-view=portfolios]').tap();page.locator(f'[data-open-portfolio="{ids[1]}"]').first.click();before=len(calls)
     pull('nav [data-view=portfolios]');page.locator('#pull-refresh-status').filter(has_text='Pluto hentet').wait_for();assert calls[before:]==refresh_order
     # Native browser pull/reload is also an explicit full fetch, not the automatic cache path.
     before=len(calls);page.reload();page.locator('#refresh-status[data-kind=success]').wait_for();assert calls[before:]==refresh_order;assert modes[before:]==[False,False]

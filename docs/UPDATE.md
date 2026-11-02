@@ -205,3 +205,12 @@ Installér frisk ZIP under fx `escape_app/opdatering/overblik-detaljer/` med app
 Den fungerende rapportlevering, v1/v2-validator, test-/driftsregler og timeautomatisering bevares. send_report beskriver nu tydeligt, at begge kategorier gemmer analyserapporter og ingen Pluto-handler udfører; skriveklassifikationen er uændret. Autentificerede MCP-leveringer får et sporings-ID og privat metadata-log til Passenger wsgi.errors uden tokens eller rapporttekst. Se [MCP_DELIVERY.md](MCP_DELIVERY.md) for evidens, afgrænsning og test. Historiske webhotellogs og OpenAI's interne blokering er ikke tilgængelige i udviklingssessionen.
 
 Installér frisk ZIP under fx `escape_app/opdatering/mcp-leveringslog/` med appen stoppet; kør apply_update.py, start og genindlæs. Ingen databaseændringer, nye nøgler eller afhængigheder. Pluginets beskrivelser kan genindlæses; ingen opgaver, scopes eller værktøjsnavne skal ændres. Diagnostik virker først efter installation og kan ikke genskabe tidligere events.
+
+
+## Samlet oprydning: klikbare kontotal og et fokuseret overblik
+
+Forsiden viser kompakte Pluto-kontotal og analyseoverblik. Det overflødige afsnit Dine porteføljer / Collections, det ekstra kontoresumé og den generiske Næste handling-blok er fjernet fra forsiden. Porteføljetræ og Collections findes på Porteføljer. Beløb åbner det relevante datagrundlag; kurs- og dagsændringstal åbner grafen. Kendte resultater/ændringer har grøn/rød pil, mens ukendte ændringer forbliver neutrale og navigationspile betyder Åbn detaljer.
+
+Der er også ryddet op i Porteføljer, Radar, Analyser og Journal: statusantal filtrerer kandidater, den manuelle idéformular og tekniske joboplysninger kan foldes ud, dobbelt analyseindbakke og tomme resultatbokse er fjernet. Brugeråbnede afsnit bevares ved opdatering. Kildetider, automatisk opdatering og træk-opdatering bevares. Se [OVERVIEW.md](OVERVIEW.md).
+
+Denne ZIP samler også den tidligere endnu ikke installerede MCP-leveringsdiagnostik (2.2.1). Hent én frisk ZIP og pak den ud under fx `escape_app/opdatering/overblik-oprydning/`. Stop appen, kør pakkens apply_update.py, start og genindlæs med Cmd+Shift+R. Ingen nye nøgler, afhængigheder eller databaseændringer. Eksisterende rapporter, Pluto-handler og timeautomatisering bevares; der skal ikke installeres særskilte mellemliggende opdateringer.

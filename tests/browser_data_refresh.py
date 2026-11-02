@@ -38,7 +38,7 @@ def main():
     # Pull gesture at the top must execute the same broker refresh, exactly once.
     page.evaluate('''()=>{window.scrollTo(0,0);document.activeElement.blur();const target=document.querySelector('h1');const touch=y=>new Touch({identifier:1,target,clientX:180,clientY:y});target.dispatchEvent(new TouchEvent('touchstart',{bubbles:true,touches:[touch(240)]}));target.dispatchEvent(new TouchEvent('touchmove',{bubbles:true,cancelable:true,touches:[touch(360)]}));target.dispatchEvent(new TouchEvent('touchend',{bubbles:true,touches:[]}));}''')
     page.locator('#refresh-status[data-kind=success]').wait_for();assert len(calls)==3
-    page.locator(f'[data-open-portfolio="{pid}"]').click();page.locator('.pluto-detail-data').wait_for();assert page.locator('.pluto-detail-data>.freshness-stale').count()==1
+    page.locator(f'[data-open-portfolio="{pid}"]').first.click();page.locator('.pluto-detail-data').wait_for();assert page.locator('.pluto-detail-data>.freshness-stale').count()==1
     # Bad fetch preserves source time and shows an error, not a success timestamp.
     fail[0]=True;page.locator('#refresh-current').click();page.locator('#refresh-status[data-kind=warning]').wait_for();page.get_by_text('Seneste opslag fejlede · tidligere data',exact=True).first.wait_for()
     assert '1.000,00' in page.locator('.detail-value').inner_text()

@@ -216,3 +216,8 @@ Verifikation: `node tests/test_attention.js` kontrollerer alle signaler, ukendt 
 Forsiden bruger strukturerede porteføljer, kontanter, øremærkninger, positioner, ordreposter og kandidater. Der udledes ingen beløb af `summary.overview`. Hold gerne resuméet til 1–2 sætninger om markedet; tal hører hjemme i deres strukturerede felter. `next_action` bør beskrive ét kort, konkret næste skridt.
 
 Send journalen som selvstændige hændelser med stabilt `entry_id`, reelt `occurred_at`, relevant `kind` og kort tekst. Undgå at kopiere hele markedsresuméet til en observation. Journalvisningen læser op til 100 hændelser fra brugerens seneste 50 driftsrapporter, nyeste hændelsestid først. Identiske poster (samme type, tekst, tidspunkt og referencer) vises én gang; originalrapporterne ændres aldrig. Ingen ændring af v2-kontrakten eller planlagte opgaver er nødvendig.
+
+
+## Fokuseret forside og navigation
+
+Overblikket viser Pluto-kontotal først og analyseoverblikket separat nedenunder. Rapportens porteføljetal kan foldes ud som datagrundlag, og er åbne som udgangspunkt, hvis Pluto-værdier mangler. Klik på beløb og optællinger åbner kilder og underliggende poster; klik på dagskurser åbner grafen. Portefølje-/Collection-træet er flyttet til Porteføljer. Statusantal fungerer også som filtre i Radar og den fulde analyse. Se [OVERVIEW.md](OVERVIEW.md) for farver, kildeadskillelse og verificerede klikveje. Rapportformatet og eksisterende rapporter ændres ikke.

@@ -25,12 +25,15 @@ def main():
     page.screenshot(path='/tmp/escape-overview-desktop.png',full_page=True)
     page.set_viewport_size({'width':390,'height':844});page.screenshot(path='/tmp/escape-overview-mobile.png',full_page=True);page.set_viewport_size({'width':1440,'height':1000})
     page.locator('nav [data-view=radar]').click();page.locator('.desk-candidate').first.wait_for();assert 'KØB' in page.locator('.desk-candidate').first.inner_text();assert page.locator('.desk-candidate').evaluate_all('(rows)=>rows.map(r=>r.dataset.attention)')==['red','red','yellow','yellow','green'];assert 'test-must-stay-hidden' not in page.locator('#content').inner_text()
+    page.locator('.desk-radar [data-attention-filter=red]').click();assert page.locator('.desk-candidate:visible').count()==2
+    page.locator('.desk-radar [data-attention-filter=green]').click();assert page.locator('.desk-candidate:visible').count()==1
+    page.locator('.desk-radar [data-attention-filter=all]').click();assert page.locator('.desk-candidate:visible').count()==5
     page.screenshot(path='/tmp/escape-latest-radar-desktop.png')
     for width in [320,390,430]:
      page.set_viewport_size({'width':width,'height':844});assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),width
     page.set_viewport_size({'width':390,'height':844});page.locator('.desk-candidate').first.scroll_into_view_if_needed();page.screenshot(path='/tmp/escape-latest-radar-mobile.png')
     page.locator('.desk-candidate [data-deep]').first.click();page.locator('#analysis-dialog').wait_for(state='visible');assert 'desk-latest-deep' in page.locator('#analysis-prompt').input_value();page.locator('[data-close-analysis]').click()
-    page.locator('nav [data-view=portfolios]').click();page.locator('.desk-portfolio').wait_for();assert 'Syntetisk hovedportefølje' in page.locator('.desk-portfolio').inner_text()
+    page.locator('nav [data-view=portfolios]').click();page.locator('.portfolio-report-context>summary').click();page.locator('.desk-portfolio').wait_for();assert 'Syntetisk hovedportefølje' in page.locator('.desk-portfolio').inner_text()
     page.locator('nav [data-view=trade]').click();page.locator('.legacy-trade>summary').click();page.get_by_text('Rapporteret ordrestatus',exact=True).wait_for();assert page.locator('#proposal').is_visible()
     page.locator('nav [data-view=journal]').click();page.get_by_text('Hændelser fra dine analyser',exact=True).wait_for();assert 'Beslutningsjournal' in page.locator('#content').inner_text()
     page.locator('nav [data-view=reports]').click();page.locator('.intel-header').wait_for();assert 'desk-latest-deep' in page.locator('.intel-header').inner_text();assert page.locator('.intel-candidate').evaluate_all('(rows)=>rows.map(r=>r.dataset.attention)')==['red','red','yellow','yellow','green'];assert not page.locator('#report-history').is_visible()

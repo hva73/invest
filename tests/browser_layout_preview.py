@@ -20,12 +20,17 @@ def main():
   {'name':'Et meget langt instrumentnavn med '+('langtidentifikationsnavn'*4),'ticker':'UNAVAILABLE','quantity':'1','currency':'DKK'}])
  for row in positions:
   row['price_source']='Pluto get_asset · senest kendte pris';row['price_observed']=stamp(0);asset_quotes.calculate(row)
- payload={'source':'Synthetic Pluto','kind':'collection','observed':stamp(0),'value':{'value':{'amount':'1000','currency':'DKK'},'source_time':stamp(0)},'positions':positions,'positions_complete':True,'pending_orders':[],'accounts':portfolio_data.normalize_accounts([{'currency':'DKK','balance':'300','reservedForOrders':'100','withdrawalPower':'200','buyingPower':'200'},{'currency':'USD','balance':'20.1234','reservedForOrders':'0','buyingPower':'20.1234','asOf':stamp(5)}]),'errors':[],'complete':True,'orders_complete':True}
+ payload={'source':'Synthetic Pluto','kind':'collection','observed':stamp(0),'value':{'value':{'amount':'1000','currency':'DKK'},'source_time':stamp(0),'reported_result':{'amount':'25.50','currency':'DKK'}},'positions':positions,'positions_complete':True,'pending_orders':[],'accounts':portfolio_data.normalize_accounts([{'currency':'DKK','balance':'300','reservedForOrders':'100','withdrawalPower':'200','buyingPower':'200'},{'currency':'USD','balance':'20.1234','reservedForOrders':'0','buyingPower':'20.1234','asOf':stamp(5)}]),'errors':[],'complete':True,'orders_complete':True}
  server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
  try:
   with patch('trade_service.MCP',case.factory),patch('mcp_client.read_portfolios',return_value=items),patch('portfolio_data.read',return_value=payload),sync_playwright() as p:
    browser=p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':1600,'height':1000});errors=[];page.on('pageerror',lambda e:errors.append(str(e)));url=f'http://127.0.0.1:{server.server_port}'
    page.goto(url);page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();page.locator('#refresh-status[data-kind=success]').wait_for()
+   page.locator('.account-overview-card .account-value').first.wait_for();page.locator('#refresh-status[data-kind=success]').wait_for()
+   assert page.locator('.account-overview-card').count()==1;assert page.locator('.collection-children').count()==0
+   assert page.locator('.account-result .pnl.positive').count()==1;assert not page.locator('.overview-report-values').evaluate('(n)=>n.open')
+   page.locator('.overview-report-values>summary').click();page.locator('#refresh-current').click();page.locator('#refresh-status[data-kind=success]').wait_for();assert page.locator('.overview-report-values').evaluate('(n)=>n.open')
+   page.locator('.account-overview-card [data-detail-section=cash]').first.click();page.locator('.cash-panel').wait_for();assert page.evaluate('document.activeElement.dataset.portfolioSection')=='cash';assert 0<=page.locator('.cash-panel').bounding_box()['y']<page.viewport_size['height']-80
    page.locator('nav [data-view=trade]').click();assert page.locator('[data-trade-source]').count()==0;assert page.locator('#preview-form').is_visible()
    page.locator('#preview-query').fill('TEST');page.locator('#preview-search').click();page.locator('#preview-assets option[value=asset-test]').wait_for(state='attached');page.locator('#preview-assets').select_option('asset-test')
    for name,value in {'portfolio_id':str(case.root),'side':'BUY','currency':'DKK','order_type':'MARKET','time_in_force':'DAY'}.items():page.locator(f'#preview-form [name={name}]').select_option(value)
@@ -37,7 +42,7 @@ def main():
     page.set_viewport_size({'width':width,'height':1000})
     for target in ['overview','portfolios','radar','trade','journal','reports','settings']:
      page.locator('nav [data-view='+target+']').click();assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),(width,target)
-    page.locator('nav [data-view=portfolios]').click();page.locator(f'[data-open-portfolio="{case.child}"]').click();page.locator('.holdings-table').wait_for()
+    page.locator('nav [data-view=portfolios]').click();page.locator(f'[data-open-portfolio="{case.child}"]').first.click();page.locator('.holdings-table').wait_for()
     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),('detail',width)
     for selector in ['.holdings-table','.cash-table']:
      assert page.locator(selector).evaluate('(t)=>t.scrollWidth<=t.clientWidth+1'),(selector,width)

@@ -63,7 +63,7 @@ def main():
     preflight=rpc('tools/call',{'name':'validate_report','arguments':v2});assert not preflight['isError'];assert preflight['structuredContent']['valid']
     result=rpc('tools/call',{'name':'send_report','arguments':v2});assert not result['isError']
     latest=rpc('tools/call',{'name':'get_latest_report','arguments':{'is_test':True}})['structuredContent']['report'];assert latest['data']==v2
-    page.goto(BASE+'/');page.locator('#content .hero').wait_for();page.locator('nav [data-view=reports]').click();page.locator('[data-view=inbox]').click()
+    page.goto(BASE+'/');page.locator('#content .hero').wait_for();page.locator('nav [data-view=reports]').click()
     page.locator('#load-ingested-report').click();page.get_by_text('Ingen rapport modtaget',exact=True).wait_for()
     page.locator('#report-mode').select_option('true');page.locator('#load-ingested-report').click();page.get_by_text('TESTDATA · ingen rigtige porteføljeværdier',exact=True).wait_for()
     assert '1.000,00' in page.locator('#ingested-report').inner_text()
