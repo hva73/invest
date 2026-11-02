@@ -138,3 +138,12 @@ Efter denne opdatering kræver de første Pluto-tal ikke længere besøg i porte
 Automatiske læseforsøg deles pr. konto og ressource i databasen, så flere faner ikke gentager de samme Pluto-opslag inden for fem minutter. Et cachetræf ændrer ingen kilde- eller hentetider og beskrives som genindlæsning af gemte data. Den manuelle knap og træk ned kan fortsat anmode om et nyt opslag. Et nyt officielt Pluto-login nulstiller læsepausen, så en tidligere loginfejl ikke forsinker den første læsning. Fejl bevarer tidligere snapshots og deres advarsler.
 
 Appen henter ikke i lukkede eller skjulte faner; eksisterende cron og planlagte opgaver ændres ikke. Kildealder er stadig uafhængig af det automatiske hentetidspunkt. Ingen nye afhængigheder, miljøvariabler eller rettigheder kræves. Installér en frisk ZIP med `apply_update.py` under eksempelvis `escape_app/opdatering/auto-pluto/`. Start appen og genindlæs siden. Kontrollér, at status bliver til »Pluto opdateret automatisk« uden først at åbne en portefølje. Ældre afsnits krav om første manuelle opdatering gælder ikke længere.
+
+
+## Rettelse af træk ned på mobilen
+
+Træk ned fra sidens top opdaterer nu hele den aktive Pluto-liste og rapporterne, også fra rapport- og porteføljedetaljesider. Den globale **Opdatér**-knap gør det samme. Trækket kan begynde på navigationens knapper eller links, og almindeligt skrå bevægelser accepteres; korte træk og vandrette bevægelser starter ingen opdatering. En tydelig meddelelse øverst i skærmen viser, hvornår man kan slippe, fremdrift og resultat.
+
+Hvis en fuld automatisk læsning allerede kører, vises dens fremdrift og resultat uden at gentage opslagene. Hvis der kun kører en afgrænset manuel læsning, udføres den fulde læsning bagefter. Formularindtastning og åbne dialoger beskyttes. Native browsergenindlæsning behandles ved åbning som en eksplicit fuld opdatering og springer den automatiske femminutters læsepause over. Kildetider, datamærker, scopes og planlagte opgaver ændres ikke.
+
+Valideret med CDP-touch i Chromium med mobilvisning: træk fra knapper, skråt træk, kort træk, rapportside, Collection-detaljer, fuld læsning af to aktive enheder og tilslutning til igangværende automatisk læsning. Browsergenindlæsning og beskyttelse af kladder er også testet. Fysisk iPhone/Safari er ikke tilgængelig i testmiljøet. Installér frisk ZIP via `apply_update.py`, eksempelvis under `escape_app/opdatering/mobil-traek/`, og genindlæs siden efter start.

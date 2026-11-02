@@ -45,7 +45,7 @@ def main():
     page.screenshot(path='/tmp/escape-data-age-mobile.png',full_page=True)
     for width in [320,390,430,768,1440]:
      page.set_viewport_size({'width':width,'height':900});assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),width
-    before=len(calls);page.locator('nav [data-view=reports]').click();page.locator('.intel-header').wait_for();page.locator('#refresh-current').click();page.locator('#refresh-status[data-kind=success]').wait_for();assert len(calls)==before;assert 'Pluto-kontodata er ikke hentet' in page.locator('#refresh-status').inner_text()
+    fail[0]=False;before=len(calls);page.locator('nav [data-view=reports]').click();page.locator('.intel-header').wait_for();page.locator('#refresh-current').click();page.locator('#refresh-status[data-kind=success]').wait_for();assert len(calls)==before+1;assert 'Pluto hentet' in page.locator('#refresh-status').inner_text();before=len(calls)
     # Automatic updates work from Reports too, without navigating to a portfolio.
     fail[0]=False;page.evaluate('()=>{nextAutomaticAt=0;return maybeAutoRefresh()}');assert len(calls)==before+1
     page.evaluate('()=>maybeAutoRefresh()');assert len(calls)==before+1  # five-minute browser cooldown

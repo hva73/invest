@@ -49,3 +49,8 @@ body{font-size:14px}aside{padding:16px 14px 10px}.brand{font-size:24px}.brand sp
 @media(max-width:700px){.header-actions{flex-direction:column;align-items:stretch}.header-actions button{font-size:11px;padding:10px;min-height:40px}.data-freshness{font-size:11px}.refresh-status{font-size:12px}td .data-freshness{min-width:0;width:100%}}
 
 @media(max-width:700px){.responsive-table td:has(.data-freshness){grid-column:1/-1}.responsive-table td .data-freshness{width:100%}}
+
+.pull-refresh-status{position:fixed;z-index:2000;top:calc(env(safe-area-inset-top,0px) + 12px);left:50%;transform:translateX(-50%);max-width:calc(100vw - 24px);width:max-content;padding:12px 18px;border:1px solid #79bfb4;border-radius:18px;background:#14313a;color:#e2f5ee;box-shadow:0 8px 30px #0008;font-size:13px;line-height:1.5;text-align:center;pointer-events:none;overflow-wrap:anywhere}.pull-refresh-status[hidden]{display:none}
+
+/* Safari may use body as its root scroller. Keep custom pull ownership on both. */
+html,body{overscroll-behavior-y:contain}
