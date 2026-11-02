@@ -59,6 +59,8 @@ def init():
         portfolio_data.init(c)
         import trade_service
         trade_service.init(c)
+        import market_data
+        market_data.init(c)
         c.execute('DELETE FROM sessions WHERE expires<?',(time.time(),))
 
 def token_hash(token):
@@ -235,7 +237,7 @@ class Handler(BaseHTTPRequestHandler):
         if not path:return self.send(404,{'error':'Ikke fundet'})
         kind={'.html':'text/html; charset=utf-8','.js':'application/javascript','.css':'text/css','.json':'application/manifest+json','.svg':'image/svg+xml'}[Path(path).suffix]
         body=(ROOT/'static'/path).read_bytes()
-        if path=='app.js':body=(ROOT/'static/report-ui.js').read_bytes()+b'\n'+(ROOT/'static/trade-ui.js').read_bytes()+b'\n'+body
+        if path=='app.js':body=(ROOT/'static/market-ui.js').read_bytes()+b'\n'+(ROOT/'static/report-ui.js').read_bytes()+b'\n'+(ROOT/'static/trade-ui.js').read_bytes()+b'\n'+body
         self.send(200,body,kind)
     def do_POST(self):
         import mcp_reports
@@ -366,6 +368,12 @@ class Handler(BaseHTTPRequestHandler):
                     c.execute('INSERT INTO connection_checks VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET checked=excluded.checked',(user_id,time.time()))
                 from pluto import discover
                 return self.send(200,discover())
+            if self.path=='/api/market/quote':
+                import market_data
+                try:return self.send(200,market_data.quote(connect,user_id,data))
+                except (market_data.MarketError,market_data.trade_service.TradeError) as error:return self.send(409,{'error':str(error)})
+                except oauth.SetupRequired:raise
+                except Exception:return self.send(502,{'error':'Pluto-kursopslaget kunne ikke gennemføres. Prøv igen om lidt.'})
             if self.path.startswith('/api/trade/'):
                 import trade_service
                 try:
