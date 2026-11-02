@@ -43,6 +43,34 @@ class Trading(unittest.TestCase):
  def estimate(self,request=None):return trade.estimate(app.connect,1,request or self.request,self.factory)['proposal']
  def send(self,proposal):return trade.send(app.connect,1,{'id':proposal['id'],'review_token':proposal['review_token'],'confirm':True},self.factory)['proposal']
  def writes(self):return [c for c in self.calls if c['name'].startswith('propose_')]
+ def test_preview_provider_error_and_credentials(self):
+  original=self.factory
+  class Failed(original):
+   token='synthetic-secret-token'
+   def request(client,method,args):
+    if args['name']=='estimate_order':return {'isError':True,'content':[{'type':'text','text':'Amount orders are not supported for this asset. Bearer synthetic-secret-token'}]}
+    return super().request(method,args)
+  request=dict(self.request,side='BUY',size_mode='amount',size='100',order_type='MARKET')
+  with self.assertRaises(trade.TradeError) as caught:trade.preview(app.connect,1,request,Failed)
+  message=str(caught.exception);self.assertIn('Amount orders are not supported',message);self.assertNotIn('synthetic-secret-token',message);self.assertNotIn('listen er bevaret',message)
+  self.assertFalse(self.writes());self.assertEqual(trade.history(app.connect,1),[])
+  hidden=trade.estimate_error({'structuredContent':{'error':{'message':'password="two secret words"'}}},Failed('synthetic'))
+  self.assertNotIn('secret words',hidden)
+ def test_preview_structured_rejection_and_asset_capabilities(self):
+  original=self.factory
+  class Failed(original):
+   def request(client,method,args):
+    if args['name']=='estimate_order':return {'structuredContent':{'success':False,'error':{'message':'Insufficient buying power'}}}
+    return super().request(method,args)
+  request=dict(self.request,side='BUY')
+  with self.assertRaisesRegex(trade.TradeError,'Insufficient buying power'):trade.preview(app.connect,1,request,Failed)
+  class Unsupported(original):
+   def request(client,method,args):
+    if args['name']=='get_asset':return {'structuredContent':{'asset':{'id':'asset-test'},'buyBy':{'amount':False,'shares':True}}}
+    if args['name']=='estimate_order':raise AssertionError('Unsupported sizing must stop before estimate')
+    return super().request(method,args)
+  with self.assertRaisesRegex(trade.TradeError,'størrelsestype'):trade.preview(app.connect,1,dict(request,size_mode='amount'),Unsupported)
+  self.assertFalse(self.writes());self.assertEqual(trade.history(app.connect,1),[])
  def test_quote_review_send_and_no_execution(self):
   q=self.estimate();self.assertEqual(q['status'],'estimated');self.assertFalse(self.writes());self.assertEqual(q['payload']['orders'][0]['limitPrice'],'100.5')
   result=self.send(q);self.assertEqual(result['status'],'sent');self.assertEqual(result['intent_id'],'synthetic-intent');self.assertEqual(len(self.writes()),1)

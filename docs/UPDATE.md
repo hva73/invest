@@ -175,3 +175,10 @@ Se [MARKET_CHARTS.md](MARKET_CHARTS.md) for kilde, cache, identitetsvalg og test
 Grafens farve følger nu første til sidste viste punkt, mens dagens tal stadig følger Plutos dagsændring. Dag viser nu et rullende døgn frem til seneste observation, inklusive eventuelle punkter fra dagen før. Antal punkter, udsnittets ændring og prisskala vises. Små bevægelser fylder ikke længere automatisk hele grafhøjden. API-kontrakten tilbyder ingen minutopløsning; manglende bevægelser opfindes ikke.
 
 Installér en frisk ZIP i en ny mappe, fx `escape_app/opdatering/kursgraf-rettelse/`, med appen stoppet; kør pakkens `apply_update.py`, start og genindlæs. Ingen nye afhængigheder.
+
+
+## Brugbar fejlbesked ved Pluto-estimat
+
+MCP-fejl fra estimatværktøjerne viser nu Plutos begrundelse i stedet for den misvisende listebesked. Fejltekst begrænses, loginfelter skjules, og aktuelle token-/sessionsværdier fjernes. Aktiver, der eksplicit afviser beløbskøb eller valgt ordretype, stoppes før estimatkaldet. Manglende kapabilitetsfelter gættes ikke. Ingen automatisk ændring af beløb, antal, valuta eller ordretype.
+
+Installér frisk ZIP i en ny mappe, fx `escape_app/opdatering/pluto-estimat/`, med appen stoppet. Kør pakkens `apply_update.py`, start og genindlæs. Gentag samme testestimat og kontrollér Plutos konkrete begrundelse; den oprindelige afvisningsårsag kan ikke fastslås fra den gamle generiske besked. Ingen nye afhængigheder.

@@ -19,11 +19,50 @@ def structural(v):
 def client(connect,user_id,factory=None):
     result=(factory or MCP)(oauth.access_token(connect,user_id));return result,{t['name']:t for t in result.tools()}
 
+def estimate_error(response,client):
+    """Display only bounded provider error messages, never the response or credentials."""
+    messages=[]
+    def collect(value,depth=0):
+        if depth>3:return
+        if isinstance(value,str):
+            try:parsed=json.loads(value)
+            except (ValueError,TypeError):messages.append(value);return
+            if isinstance(parsed,(dict,list)):collect(parsed,depth+1)
+            else:messages.append(value)
+        elif isinstance(value,dict):
+            for key in ['error','message','error_description','detail','reason']:
+                if key in value:collect(value[key],depth+1)
+        elif isinstance(value,list):
+            for item in value[:5]:collect(item,depth+1)
+    if isinstance(response,dict):
+        collect(response.get('structuredContent'))
+        for block in response.get('content',[]) if isinstance(response.get('content'),list) else []:
+            if isinstance(block,dict) and block.get('type')=='text':collect(block.get('text'))
+        collect(response.get('error'))
+    text=' · '.join(dict.fromkeys(messages))
+    for attr in ['token','session']:
+        secret=getattr(client,attr,None)
+        if isinstance(secret,str) and secret:text=text.replace(secret,'[skjult]')
+    if re.search(r'(?i)access_token|refresh_token|authorization|client_secret|password|api_key',text):
+        text='[Fejltekst med loginfelter skjult]'
+    text=re.sub(r'(?i)bearer\s+[^\s,;]+','Bearer [skjult]',text)
+    text=re.sub(r'(?i)(access_token|refresh_token|authorization|client_secret|password|api_key)[\s"\']*[:=][\s"\']*[^\s,;}]+',r'\1=[skjult]',text)
+    text=re.sub(r'https?://[^\s]+','[adresse skjult]',text)
+    text=re.sub(r'[A-Za-z0-9_.+/-]{32,}','[id skjult]',text)
+    text=' '.join(text.split())[:600]
+    return 'Pluto afviste estimatet'+(': '+text if text else '; ingen nærmere begrundelse blev leveret')+'. Intet handelsforslag er oprettet eller sendt hos Pluto af dette opslag.'
+
 def call(client,tools,name,args):
     expected=CONTRACT.get(name);actual=tools.get(name,{})
     if not expected or actual.get('annotations',{}).get('readOnlyHint') is not expected['readOnlyHint'] or structural(actual.get('inputSchema'))!=expected['inputSchema']:
         raise TradeError('Plutos værktøjskontrakt for '+name+' skal gennemgås før brug.')
-    return decode_result(client.request('tools/call',{'name':name,'arguments':args}),name)
+    response=client.request('tools/call',{'name':name,'arguments':args})
+    if name.startswith('estimate_') and isinstance(response,dict) and response.get('isError'):
+        raise TradeError(estimate_error(response,client))
+    result=decode_result(response,name)
+    if name.startswith('estimate_') and isinstance(result,dict) and (result.get('error') or result.get('success') is False):
+        raise TradeError(estimate_error({'structuredContent':result},client))
+    return result
 
 def positive(value,places=8,maximum='1000000000000'):
     if not isinstance(value,str) or not re.fullmatch(r'\d+(?:\.\d{1,'+str(places)+r'})?',value):raise TradeError('Brug positive tal med punktum og højst '+str(places)+' decimaler.')
@@ -140,6 +179,14 @@ def read_estimate(connect,user_id,p,payload,kind,factory=None):
         node=asset.get('asset',asset) if isinstance(asset,dict) else {}
         ids=[node[k] for k in ['id','assetId'] if k in node]
         if not ids or any(v!=order['assetId'] for v in ids):raise TradeError('Plutos aktivsvar har ikke en entydig matchende identitet.')
+        side=order['side'].lower()
+        buy_by=asset.get('buyBy',{})
+        if order['side']=='BUY' and isinstance(buy_by,dict) and buy_by.get('amount' if 'amount' in order else 'shares') is False:
+            raise TradeError('Pluto understøtter ikke den valgte størrelsestype for aktivet. Vælg antal i stedet for beløb, hvis aktivet tillader det. Intet forslag er sendt.')
+        types=asset.get('orderTypes',{})
+        allowed=types.get(side) if isinstance(types,dict) else None
+        if isinstance(allowed,list) and order['orderType'] not in allowed:
+            raise TradeError('Pluto understøtter ikke den valgte ordretype for dette aktiv og denne retning. Intet forslag er sendt.')
         raw=call(cl,tools,'estimate_order',{'portfolioId':payload['portfolioId'],**order})
     else:raw=call(cl,tools,'estimate_buy_collection' if kind=='collection_buy' else 'estimate_sell_collection',payload)
     if not isinstance(raw,dict) or not raw or raw.get('error') or raw.get('success') is False:raise TradeError('Pluto har ikke returneret et anvendeligt estimat. Intet forslag er sendt.')
