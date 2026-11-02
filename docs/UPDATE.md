@@ -168,3 +168,10 @@ Installér frisk ZIP i en ny mappe, fx `escape_app/opdatering/estimat-design/`, 
 Dag er standard; Uge er et tilvalg. Kurser og dagsændringer hentes fra Pluto, mens kandidatens signal fortsat kommer fra rapporten. Plus vises grønt og minus rødt med pil og tal. Førmarked, manglende kurstid og en begrænset serie markeres. En uges udvikling bruges ikke som dagsændring, og sidste historikpunkt bliver ikke til et opfundet kurstidspunkt. På brede kort ligger grafen mellem navn og status; på smalle kort ligger den under navnet.
 
 Se [MARKET_CHARTS.md](MARKET_CHARTS.md) for kilde, cache, identitetsvalg og test. Installér frisk ZIP under `escape_app/opdatering/kursgraf/`, kør `apply_update.py` med appen stoppet, og start/genindlæs. Ingen nye afhængigheder, nøgler eller plugin-skemaer. Første kontrol er et kandidatkort i Radar eller Seneste analyse; vælg korrekt Pluto-aktiv ved eventuel tvetydighed. Kurserne skal hentes fra den faktiske Pluto-forbindelse, ikke fra udviklingens syntetiske testdata.
+
+
+## Tydeligere kursudsnit og prisskala
+
+Grafens farve følger nu første til sidste viste punkt, mens dagens tal stadig følger Plutos dagsændring. Dag viser nu et rullende døgn frem til seneste observation, inklusive eventuelle punkter fra dagen før. Antal punkter, udsnittets ændring og prisskala vises. Små bevægelser fylder ikke længere automatisk hele grafhøjden. API-kontrakten tilbyder ingen minutopløsning; manglende bevægelser opfindes ikke.
+
+Installér en frisk ZIP i en ny mappe, fx `escape_app/opdatering/kursgraf-rettelse/`, med appen stoppet; kør pakkens `apply_update.py`, start og genindlæs. Ingen nye afhængigheder.

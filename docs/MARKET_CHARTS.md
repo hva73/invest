@@ -6,9 +6,9 @@ Kandidatkort i Opportunity Radar og v2-rapportvisningen viser et aktuelt Pluto-o
 
 - Senest kendte `price.currentPrice` vises i aktivets valuta.
 - `price.dailyChange` og `price.dailyChangePercent` vises direkte med grøn ↑ ved plus, rød ↓ ved minus og neutral visning ved nul/ukendt. Der omregnes ikke fra procent til beløb eller omvendt.
-- **Dag** er standard. Den viser alene punkter fra seneste dato i `performance.series`, målt i dansk kalendertid. Hvis datoen er ældre, står der »Seneste grafdag« og den faktiske dato. Ét punkt giver ét punkt, ingen konstrueret kurve.
+- **Dag** er standard. Den viser leverede punkter i det rullende døgn frem til seneste observation i `performance.series` (start eksklusiv, slut inklusiv; 24 punkter ved ubrudte timedata). Intervallet følger tidsstemplerne, ikke kalenderdagen. Ved en ældre slutdato vises »Døgn frem til« og datoen. Timer uden observationer udfyldes ikke. Ét punkt giver ét punkt, ingen konstrueret kurve.
 - **Uge** er et tilvalg og viser de observerede punkter fra `ONE_WEEK` med Plutos separate `performance.returnPct`.
-- Dagfarven følger Plutos dagsændring, som kan være positiv, selv om de sidste to viste punkter falder. Handlingsstatus AFVENT/KØB/SÆLG beholder sin egen betydning og farve.
+- Grafens farve og mærket **Udsnit** følger første til sidste viste observation. Dagsændringen ovenover følger fortsat Plutos separate dagstal. Grafen viser antal punkter og betegnes som et udsnit. Prisskalaens grænser vises i aktivets valuta, og skalaen spænder over mindst 1 % af udsnittets midterkurs. Ingen ekstra kurspunkter eller lukkekurs konstrueres. Handlingsstatus AFVENT/KØB/SÆLG beholder sin egen betydning og farve.
 - For NASDAQ/NYSE-aktier og ETF'er markeres punkter mellem normal førmarkedsstart kl. 04.00 og ordinær åbning kl. 09.30 i New York som førmarked. IANA-tidszonen håndterer sommertid. Børshelligdage og særlige kalenderændringer er ikke verificeret. Grafen hævdes aldrig at være en komplet handelsdag.
 - Grafens tidspunkter og akse vises i Europe/Copenhagen. Plutos tidsstempler med `Z` læses som UTC, også med nanosekundpræcision i inddata. Originalt tidsstempel bevares; webvisningen bruger normaliseret millisekundformat.
 

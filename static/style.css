@@ -87,3 +87,5 @@ main,#content,.panel,.grid>*,.formgrid>*,.actions>*{min-width:0}.financial-panel
 .market-fetch{display:block;font-size:8px!important;letter-spacing:0!important;color:#97adba;margin-top:2px}.market-time-unknown{color:#d7bd87!important}.market-stale .market-price{opacity:.7}.market-stale{border-color:#8b5968}.market-about[open]>div button{min-width:0;width:100%;margin-top:8px;font-size:10px}
 
 .market-test-note{display:block;grid-column:1/-1;font-size:9px!important;letter-spacing:0!important;color:#d7be8b;margin-top:7px}.market-selection>button{margin:4px 4px 0 0}
+
+.market-sample-change{font-size:9px;line-height:1.5}.market-scale{font-size:8px;line-height:1.5;color:#93a9b8;overflow-wrap:anywhere}
