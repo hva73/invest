@@ -1,0 +1,14 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const source=fs.readFileSync('static/report-ui.js','utf8');
+const a=source.indexOf(' const attention='),b=source.indexOf(' const statusMarkup=',a);
+const context={};vm.createContext(context);vm.runInContext(source.slice(a,b)+';globalThis.helpers={attention,signalOf,ordered}',context);
+const {attention,signalOf,ordered}=context.helpers;
+assert.equal(attention('SÆLG').tone,'red');assert.equal(attention('KØB').tone,'red');
+assert.equal(attention('AFVENT').tone,'yellow');assert.equal(attention('OVERVÅG').tone,'yellow');
+assert.equal(attention('BEHOLD').tone,'green');assert.equal(attention('unrecognized').tone,'yellow');
+assert.equal(signalOf({reason:'AFVENT: læs kilden'}),'AFVENT');assert.equal(signalOf({reason:'Ukendt tekst'}),'UAFKLARET');
+const rows=[{signal:'BEHOLD',id:0},{signal:'OVERVÅG',id:1},{signal:'SÆLG',id:2},{signal:'AFVENT',id:3},{signal:'KØB',id:4}];
+assert.equal(ordered(rows).map(x=>x.id).join(','),'2,4,1,3,0');assert.equal(rows.map(x=>x.id).join(','),'0,1,2,3,4');
+const legacy=rows.map((x,index)=>({c:{reason:x.signal+': test'},index}));
+assert.equal(ordered(legacy,x=>x.c).map(x=>x.index).join(','),'2,4,1,3,0');
+console.log('PASS: red/yellow/green priorities, unknown fallback, stable sorting, immutable data and legacy indices');

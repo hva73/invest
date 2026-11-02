@@ -10,6 +10,7 @@ def main():
  with tempfile.TemporaryDirectory() as directory:
   app.DB=directory+'/db';app.init();app.create_user('browser-test-password-long')
   legacy=json.loads((ROOT/'examples/report-ingest-test.json').read_text());legacy.update(report_id='escape-historical-20261101-2200-v1',is_test=True)
+  legacy['candidates']=[{'symbol':'LEGACY-GREEN','market':'Testmarked','reason':'BEHOLD: syntetisk test'},{'symbol':'LEGACY-YELLOW','market':'Testmarked','reason':'AFVENT: syntetisk test'},{'symbol':'LEGACY-RED','market':'Testmarked','reason':'SÆLG: syntetisk test'}]
   # All fixtures stay in the test partition, including the synthetic legacy-id regression.
   for i in range(2):report_ingest.save(app.connect,1,dict(legacy,report_id='legacy-dummy-'+str(i)))
   assert report_ingest.save(app.connect,1,legacy)[1]['id']==3
@@ -59,8 +60,9 @@ def main():
     first=page.locator('.intel-candidate').first;first.locator('[data-candidate-history]').click();page.locator('.intel-candidate-history').first.get_by_text('escape-v2-synthetic-002',exact=False).wait_for();assert 'escape-v2-synthetic-002' in page.locator('.intel-candidate-history').first.inner_text()
     # Legacy DB id 3 is preserved and uncertainty is explicit.
     page.locator('[data-view=report-archive]').first.click();page.locator('#report-mode').select_option('true');page.locator('#report-history option[value="'+legacy['report_id']+'"]').wait_for(state='attached');page.locator('#report-history').select_option(legacy['report_id']);page.get_by_text('Collection-overlap er ikke dokumenteret;',exact=False).wait_for()
-    assert page.locator('[data-deep-legacy]').count()==1
-    page.locator('[data-deep-legacy]').click();page.locator('#analysis-dialog').wait_for(state='visible');assert '"candidate_id": null' in page.locator('#analysis-prompt').input_value();page.locator('[data-close-analysis]').click()
+    assert page.locator('[data-deep-legacy]').count()==3
+    assert page.locator('.intel-candidate').evaluate_all('(rows)=>rows.map(r=>r.dataset.attention)')==['red','yellow','green']
+    page.locator('[data-deep-legacy]').first.click();page.locator('#analysis-dialog').wait_for(state='visible');assert '"candidate_id": null' in page.locator('#analysis-prompt').input_value();assert '"symbol": "LEGACY-RED"' in page.locator('#analysis-prompt').input_value();page.locator('[data-close-analysis]').click()
     page.locator('#report-mode').select_option('false');page.locator('#load-ingested-report').click();page.get_by_text('Ingen rapport modtaget',exact=True).wait_for()
     assert not errors,errors
     browser.close()

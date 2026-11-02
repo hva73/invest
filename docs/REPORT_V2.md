@@ -191,3 +191,20 @@ Regressionstesten `browser_mcp_reports.py` kontrollerer det faktisk annoncerede 
 ![Kompakte kandidatkort på desktop](screenshots/latest-radar-desktop.png)
 
 ![Kandidatkort på mobil](screenshots/latest-radar-mobile.png)
+
+## Statusfarver og prioritering
+
+Kandidatkort bruger nu samme opmærksomhedsmodel i Radar samt v1- og v2-rapporter:
+
+| Signal | Farve og betydning | Rækkefølge |
+| --- | --- | --- |
+| KØB, SÆLG | Rød: kræver vurdering/stillingtagen | Først |
+| AFVENT, OVERVÅG | Gul: hold øje | Derefter |
+| BEHOLD | Grøn: ingen ny handling foreslået | Sidst |
+| Ukendt/ikke angivet | Gul: uafklaret status | Sammen med gule |
+
+Rød på et KØB-signal er handlingsbehov, ikke et negativt kursafkast. Grøn er ikke et kvalitetsstempel, en liveverificering eller en garanti for investeringen. Farver ledsages af symbol og tekst, og oversigten tæller de faktiske kort pr. farve.
+
+Sortering er stabil inden for hver farve og ændrer kun kopier til visningen. V1 læser kun eksplicitte signalpræfikser, ikke fri fortolkning af risikotekst. Oprindelige v1-indekser og v2-kandidat-ID'er bevares, så Grav dybere peger på samme kandidat efter sortering. Rapportpayloads og brokerdata omskrives ikke.
+
+Verifikation: `node tests/test_attention.js` kontrollerer alle signaler, ukendt fallback, stabil rækkefølge, uændrede input og legacy-indekser. Browserflows afprøver faktisk DOM-rækkefølge for fem blandede v2-signaler samt en v1-rækkefølge med korrekt analysepakke efter sortering. Alle syv hovedsider kontrolleres ved 320, 390 og 430 px; v2-flowet dækker desuden op til 768 px. Testdata er syntetiske i midlertidige databaser.
