@@ -1,10 +1,11 @@
 """Synthetic Radar -> actual MCP -> persistence -> engine -> signal -> stop/history.
 No live provider, broker write, scheduler change or algorithm mock.
 """
-import copy,unittest
+import copy,unittest,time
 from datetime import datetime,timezone,timedelta
 from unittest.mock import patch
 import app,hotwatch_engine as engine,report_ingest
+import os
 import test_mcp_reports
 from test_intel_workflows import merc_report
 from test_hotwatch_engine import request,tick
@@ -16,7 +17,30 @@ class EngineContract(unittest.TestCase):
   with patch('hotwatch_engine.utc',return_value=self.base):self.call('start_hot_watch',self.req)
  def tearDown(self):self.http.tearDown()
  def call(self,name,args):
-  result=self.http.call(self.token,name,args)[1]['result'];self.assertFalse(result.get('isError'),result);return result['structuredContent']
+  status,response,_=self.http.call(self.token,name,args)
+  if 'result' not in response:self.fail(f'{name} returned JSON-RPC error: {response}')
+  result=response['result'];self.assertFalse(result.get('isError'),result);return result['structuredContent']
+ def batch_request(self,request_id='batch-test-1'):
+  report=copy.deepcopy(self.report);report['candidates']=report['candidates'][:1]+[copy.deepcopy(report['candidates'][0]) for _ in range(19)];report['report_id']='batch-source-report';report['generated_at']=(self.base+timedelta(seconds=21)).isoformat();sessions=[]
+  for index,candidate in enumerate(report['candidates']):
+   cid=f'batch-candidate-{index:02d}';ticker='MERC' if index==0 else f'X{index:02d}';candidate['candidate_id']=cid;candidate['ticker']=ticker;candidate['lifecycle']=copy.deepcopy(candidate.get('lifecycle') or {'status':'HOT_WATCH','changed_at':self.base.isoformat(),'reason':'SYNTHETIC explicit test candidate','source_ids':['synthetic-source'],'trade_cycle_id':None});candidate['lifecycle']['changed_at']=(self.base+timedelta(seconds=index+1)).isoformat()
+   item=copy.deepcopy(self.req);item.update(watch_id=f'batch-watch-{index:02d}',candidate_id=cid,ticker=ticker,purpose=f'batch-{index:02d}',report_id=report['report_id']);sessions.append(item)
+  self.call('send_report',report)
+  return {'request_id':request_id,'is_test':True,'sessions':sessions}
+ def test_H09_twenty_candidate_batch_is_fast_idempotent_and_explicit(self):
+  engine.control(app.connect,1,self.req['watch_id'],True,'stop',self.base)
+  with patch.dict(os.environ,{'ESCAPE_HW_CAPACITY':'20'}):
+   req=self.batch_request();started=time.perf_counter();created=engine.create_batch(app.connect,1,req)
+   measured=(time.perf_counter()-started)*1000;self.assertEqual(len(created['results']),20);self.assertEqual([x['outcome'] for x in created['results']],['created']*20);self.assertEqual(created['created_count'],20);self.assertLess(measured,5000)
+   retry=engine.create_batch(app.connect,1,req);self.assertTrue(retry['duplicate']);self.assertEqual(len(retry['results']),20)
+   mcp_retry=self.call('activate_hot_watch_batch',req)
+   self.assertTrue(mcp_retry['duplicate']);self.assertEqual(len(mcp_retry['results']),20)
+  with app.connect() as c:self.assertEqual(c.execute("SELECT count(*) FROM hw_sessions WHERE user_id=1 AND watch_id LIKE 'batch-watch-%'").fetchone()[0],20)
+  print(f'BATCH_METRICS candidates=20 elapsed_ms={measured:.2f} internal_ms={created["batch_elapsed_ms"]:.3f} retries=1 provider_scans=0')
+  changed=copy.deepcopy(self.report);changed['report_id']='ordinary-hot-watch-report';changed['generated_at']=(self.base+timedelta(seconds=5)).isoformat();changed['candidates']=[];self.call('send_report',changed)
+  with app.connect() as c:self.assertEqual(c.execute("SELECT count(*) FROM hw_sessions WHERE user_id=1 AND watch_id LIKE 'batch-watch-%'").fetchone()[0],20)
+  conflict=copy.deepcopy(req);conflict['sessions'][0]['activation_reason']='different payload'
+  with self.assertRaises(engine.EngineError):engine.create_batch(app.connect,1,conflict)
  def session(self):return self.call('get_hot_watch_engine',{'watch_id':self.req['watch_id'],'is_test':True})['session']
  def feed(self):
   prices=['100' if i%2==0 else '100.5' for i in range(34)]+['100.55','100.70','100.90','101.15','101.45','101.80']

@@ -46,7 +46,9 @@ def handle(h,connect,method):
    if not isinstance(data,dict):raise EngineError('object_required')
   if method not in ['GET','POST']:raise EngineError('method_not_allowed',405)
   result=None;status=200
-  if method=='GET' and parts==['schema']:result={'session':SESSION,'sample':SAMPLE,'engine_version':'1.0-phase1-2','deferred':['backtest','shadow','qualified strategy activation/rollback']}
+  if method=='GET' and parts==['schema']:
+   from hotwatch_contract import ACTIVATION_BATCH
+   result={'session':SESSION,'sample':SAMPLE,'activation_batch':ACTIVATION_BATCH,'engine_version':'1.0-phase1-2','deferred':['backtest','shadow','qualified strategy activation/rollback']}
   elif method=='GET' and parts==['providers']:
    from hotwatch_adapters import providers
    result={'providers':providers(connect,uid,mode)}
@@ -68,6 +70,9 @@ def handle(h,connect,method):
      result=dashboard_projection.engine_session_view(connect,uid,mode,view,limit,cursor)
     else:result=engine.sessions(connect,uid,mode,after,limit)
    else:result=engine.create(connect,uid,data);status=200 if result['duplicate'] else 201
+  elif parts==['activation-requests'] and method=='POST':
+   if h.headers.get('Idempotency-Key')!=data.get('request_id'):raise EngineError('idempotency_key_mismatch')
+   result=engine.create_batch(connect,uid,data);status=200 if result['duplicate'] else 201
   elif len(parts)>=2 and parts[0]=='sessions':
    wid=parts[1]
    if not re.fullmatch(r'[A-Za-z0-9_.:-]{1,100}',wid):raise EngineError('invalid_watch_id')

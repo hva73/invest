@@ -4,7 +4,7 @@ from datetime import datetime,timezone,timedelta
 from decimal import Decimal
 from unittest.mock import patch
 import app,report_ingest,hotwatch_engine as engine
-from hotwatch_contract import EngineError,checksum
+from hotwatch_contract import EngineError,checksum,stamp
 from hotwatch_features import features
 from hotwatch_strategy import BASELINE,validate_strategy,calculate
 from hotwatch_adapters import PlutoAdapter,EODHDAdapter,DataUnavailable,unknown_context,reserve
@@ -45,6 +45,15 @@ class HotWatch(unittest.TestCase):
    with self.assertRaisesRegex(EngineError,'global_capacity_limit'):engine.create(app.connect,1,d,self.now)
   d=copy.deepcopy(self.req);d.update(watch_id='invalid-prod',is_test=False)
   with self.assertRaisesRegex(EngineError,'synthetic_requires_test_mode'):engine.create(app.connect,1,d,self.now)
+ def test_twenty_session_default_and_claim_only_charges_real_adapter_requests(self):
+  with patch.dict(os.environ,{},clear=True):self.assertEqual(engine.capacity(),20)
+  job=engine.claim(app.connect,self.now)
+  self.assertIsNotNone(job)
+  with app.connect() as c:self.assertEqual(c.execute('SELECT COALESCE(sum(used),0) FROM hw_request_budget').fetchone()[0],0)
+ def test_startup_diagnostics_reports_missing_eodhd_access_without_network_or_entitlement_claim(self):
+  from hotwatch_service import startup_diagnostics
+  with patch.dict(os.environ,{},clear=True):info=startup_diagnostics(app.connect)
+  self.assertFalse(info['startup_probe']['network_requests_made']);self.assertEqual(info['eodhd']['startup_status'],'blocked_feed_disabled');self.assertFalse(info['eodhd']['entitlements_verified'])
  def test_duplicate_samples_not_new_market_events_and_conflicts_atomic(self):
   t=tick(self.now);self.put(t);before=self.counts();self.assertTrue(self.put(t)['duplicate']);self.assertEqual(before,self.counts());changed=copy.deepcopy(t);changed['volume']='101'
   with self.assertRaisesRegex(EngineError,'sample_id_conflict'):self.put(changed)
@@ -170,6 +179,14 @@ class HotWatch(unittest.TestCase):
   gateway=PlutoAdapter(app.connect,1).factory('SYNTHETIC-TOKEN');gateway.catalog=[{'name':'propose_orders','annotations':{'readOnlyHint':True}}]
   with patch('mcp_client.MCP.request',side_effect=AssertionError('Must not send write')):
    with self.assertRaisesRegex(DataUnavailable,'PLUTO_WRITE_OR_UNKNOWN_TOOL_BLOCKED'):gateway.request('tools/call',{'name':'propose_orders','arguments':{}})
+ def test_scheduler_prioritizes_existing_critical_profile_without_changing_signal(self):
+  second=copy.deepcopy(self.req);second.update(watch_id='critical-scheduler-watch',purpose='critical scheduler candidate')
+  engine.create(app.connect,1,second,self.now)
+  with app.connect() as c:
+   c.execute("UPDATE hw_sessions SET state=? WHERE watch_id=?",(json.dumps({'signal':'WAIT','adaptive_profile':'CRITICAL'}),second['watch_id']))
+   c.execute('UPDATE hw_sessions SET next_due=?',(self.now.timestamp(),))
+  job=engine.claim(app.connect,self.now+timedelta(seconds=1));self.assertEqual(job['watch_id'],second['watch_id'])
+  view=engine.item(app.connect,1,second['watch_id'],True)['session'];self.assertEqual(view['last_computed_signal'],'NO_DATA')
  def test_eodhd_disabled_without_purchase_and_errors_do_not_leak_key(self):
   with patch.dict(os.environ,{},clear=True):
    with self.assertRaisesRegex(DataUnavailable,'EODHD_FEED_NOT_ENABLED'):EODHDAdapter(app.connect,1).poll({'request_data':self.req})
@@ -189,6 +206,25 @@ class HotWatch(unittest.TestCase):
    self.assertEqual(err.exception.code,'EODHD_RATE_LIMIT');self.assertEqual(err.exception.retry_after_s,900);self.assertNotIn('SECRET',str(err.exception))
    engine.fault(app.connect,1,self.req['watch_id'],True,err.exception.code,self.now,retry_after_s=err.exception.retry_after_s)
    with app.connect() as c:self.assertGreaterEqual(c.execute('SELECT next_due FROM hw_sessions').fetchone()[0],self.now.timestamp()+900)
+ def test_runner_eodhd_adapter_preserves_market_time_and_measures_ingestion(self):
+  from hotwatch_service import Runner
+  class Response:
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,limit):return json.dumps({'code':'MERC.US','timestamp':int(self.now.timestamp()),'close':'12.34','currency':'USD'}).encode()
+  class Opener:
+   def open(self,*args,**kwargs):return Response()
+  at=engine.utc().replace(microsecond=0);r=copy.deepcopy(self.req);r.update(watch_id='eodhd-runner-readonly',purpose='eodhd normal adapter test',provider='eodhd',provider_symbol='MERC.US')
+  r['asset_id']='synthetic-MERC';r['report_id']=self.r['report_id'];engine.control(app.connect,1,self.req['watch_id'],True,'pause',at)
+  with patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()),patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY-SECRET'}):
+   engine.create(app.connect,1,r,at);runner=Runner(app.connect);runner.adapters[(1,'eodhd')]=EODHDAdapter(app.connect,1,Opener())
+   # Adapter source timestamp is fixed to a known epoch and must remain exact through journal ingestion.
+   epoch=int(at.timestamp());Response.now=at
+   self.assertTrue(runner.once(at+timedelta(milliseconds=1)))
+  item=engine.history(app.connect,1,r['watch_id'],True,'samples')['items'][0]['data']
+  self.assertEqual(stamp(item['event_time']).timestamp(),epoch)
+  with app.connect() as c:health=json.loads(c.execute("SELECT payload FROM hw_provider_health WHERE user_id=1 AND is_test=1 AND source='eodhd'").fetchone()['payload'])
+  self.assertTrue(health['market_time_known']);self.assertIsInstance(health['event_to_adapter_receive_ms'],(int,float));self.assertIsInstance(health['adapter_to_journal_ms'],(int,float));self.assertGreaterEqual(health['adapter_to_journal_ms'],0)
  def test_realistic_synthetic_merc_buy_noise_exit_and_history_pinning(self):
   last=None
   prices=['100' if i%2==0 else '100.5' for i in range(34)]+['100.55','100.70','100.90','101.15','101.45','101.80']

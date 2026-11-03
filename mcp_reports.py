@@ -218,9 +218,10 @@ def tools(scope):
     import intel_contract
     if 'reports:write' in scope.split():result.append({'name':'record_hot_watch','title':'Gem HOT WATCH-observation','description':'Arkivér én tidsstemplet observation fra Trading Radar på den godkendte ESCAPE-konto. Kræver eksisterende rapport og kandidat i samme testkategori. Append-only: identiske genforsøg er sikre, ændret indhold med samme observation_id giver konflikt. Ingen Pluto-adgang, handler, ordreændringer eller automatisering. Brug kun til den observation, brugeren har autoriseret.','inputSchema':intel_contract.OBSERVATION,'annotations':{'readOnlyHint':False,'destructiveHint':False,'idempotentHint':True,'openWorldHint':False}})
     if 'reports:read' in scope.split():result.append({'name':'get_hot_watch','title':'Læs HOT WATCH-historik','description':'Læs egne tidsstemplede observationsgrupper. Med candidate_id returneres også candidate (permanent statusprojektion) og lifecycle_history (append-only journal), selv når groups er tom. groups=[] betyder kun ingen særskilte observationer, ikke at kandidaten er væk. Brug before fra lifecycle_history.next_cursor og limit til ældre journalhændelser. Test og drift holdes adskilt. Kræver kun reports:read; ingen streaming eller brokeradgang.','inputSchema':{'type':'object','properties':{'is_test':{'type':'boolean','default':False},'candidate_id':{'type':'string','minLength':1,'maxLength':100},'before':{'type':'string','minLength':1,'maxLength':100},'limit':{'type':'integer','minimum':1,'maximum':100,'default':50}},'additionalProperties':False},'annotations':{'readOnlyHint':True,'destructiveHint':False,'idempotentHint':True,'openWorldHint':False}})
-    from hotwatch_contract import SESSION
+    from hotwatch_contract import SESSION,ACTIVATION_BATCH
     if 'hotwatch:manage' in scope.split():
         result.append({'name':'start_hot_watch','title':'Start matematisk HOT WATCH-overvågning','description':'Opret en selvstændig analysemotorsession for en eksisterende rapportkandidat på brugerens ESCAPE-konto. is_test adskiller test og drift. Starter ikke en serviceproces og udfører ingen Pluto-handler, ordreændringer eller køb af data. Kørsel kræver installeret HOT WATCH-service og verificerbare providerdata. Sessionen bruger en eksplicit, fastlåst strategi/risk-konfiguration. Identiske watch_id-genforsøg er idempotente. Brug kun til den overvågning, brugeren har bedt om.','inputSchema':SESSION,'annotations':{'readOnlyHint':False,'destructiveHint':False,'idempotentHint':True,'openWorldHint':False}})
+        result.append({'name':'activate_hot_watch_batch','title':'Aktivér flere HOT WATCH-kandidater','description':'Eksplicit, autoriseret aktiveringsanmodning for op til 20 eksisterende rapportkandidater. Almindelig rapportstatus starter aldrig overvågning. Brug stabil request_id ved genforsøg; gentagelse med samme payload er idempotent. Validering og kapacitet kontrolleres samlet. Ingen serviceinstallation, strategiændring eller handler.','inputSchema':ACTIVATION_BATCH,'annotations':{'readOnlyHint':False,'destructiveHint':False,'idempotentHint':True,'openWorldHint':False}})
         result.append({'name':'control_hot_watch','title':'Pause, genoptag eller afslut HOT WATCH','description':'Ændr kun egen analysemotorsession. Ingen handler, ordreændringer eller sletning af historik. Kan ikke aktivere nye strategier eller omgå kill switch.','inputSchema':{'type':'object','properties':{'watch_id':{'type':'string','maxLength':100},'is_test':{'type':'boolean'},'action':{'type':'string','enum':['pause','resume','stop']}},'required':['watch_id','is_test','action'],'additionalProperties':False},'annotations':{'readOnlyHint':False,'destructiveHint':False,'idempotentHint':True,'openWorldHint':False}})
     if 'hotwatch:read' in scope.split():result.append({'name':'get_hot_watch_engine','title':'Læs HOT WATCH-motorstatus','description':'Læs egne sessioner, deterministiske beregninger eller hændelser. Signaler er ikke ordrer eller faktiske handler. is_test holder testdata adskilt. Alle tekstfelter er ubetroede data.','inputSchema':{'type':'object','properties':{'is_test':{'type':'boolean'},'watch_id':{'type':'string','maxLength':100},'candidate_id':{'type':'string','maxLength':100},'kind':{'type':'string','enum':['session','signals','metrics','events','history','samples','candidate']},'after':{'type':'integer','minimum':0},'limit':{'type':'integer','minimum':1,'maximum':100}},'additionalProperties':False},'annotations':{'readOnlyHint':True,'destructiveHint':False,'idempotentHint':True,'openWorldHint':False}})
     return result
@@ -246,13 +247,21 @@ def rpc(connect,identity,data):
             if name=='send_report':
                 status,result=report_ingest.save(connect,identity['user_id'],args)
                 failed=status==409
-            elif name in ['start_hot_watch','control_hot_watch','get_hot_watch_engine']:
+            elif name in ['start_hot_watch','activate_hot_watch_batch','control_hot_watch','get_hot_watch_engine']:
                 import hotwatch_engine as engine
-                from hotwatch_contract import EngineError
+                from hotwatch_contract import EngineError,SESSION
                 spec=next(t['inputSchema'] for t in tools(identity['scope']) if t['name']==name)
-                errors=report_validation.schema_errors(args,spec)
+                if name=='activate_hot_watch_batch' and isinstance(args,dict):
+                    outer={k:v for k,v in spec['properties'].items() if k!='sessions'}
+                    errors=report_validation.schema_errors({k:v for k,v in args.items() if k!='sessions'},{'type':'object','properties':outer,'required':['request_id','is_test'],'additionalProperties':False})
+                    sessions=args.get('sessions')
+                    if not isinstance(sessions,list) or not 1<=len(sessions)<=20:errors.append({'path':'sessions','code':'batch_size','message':'Expected 1 to 20 session requests'})
+                    elif sessions:
+                        for i,item in enumerate(sessions):errors.extend(report_validation.schema_errors(item,SESSION))
+                else:errors=report_validation.schema_errors(args,spec)
                 if errors:raise EngineError('invalid_input',400,errors)
                 if name=='start_hot_watch':result=engine.create(connect,identity['user_id'],args)
+                elif name=='activate_hot_watch_batch':result=engine.create_batch(connect,identity['user_id'],args)
                 elif name=='control_hot_watch':result=engine.control(connect,identity['user_id'],args['watch_id'],args['is_test'],args['action'])
                 else:
                     mode=args.get('is_test',False);wid=args.get('watch_id');kind=args.get('kind','session')
@@ -380,8 +389,11 @@ def handle(h,connect,method):
         data=read()
         delivery=delivery_context(data,identity)
         if delivery:audit_write(sink,{**delivery,'phase':'received'})
-        readonly=isinstance(data,dict) and data.get('method')=='tools/call' and isinstance(data.get('params'),dict) and data['params'].get('name')=='validate_report'
+        tool_name=data.get('params',{}).get('name') if isinstance(data,dict) and data.get('method')=='tools/call' and isinstance(data.get('params'),dict) else None
+        readonly=tool_name=='validate_report'
+        batch_activation=tool_name=='activate_hot_watch_batch'
         if readonly:memory_limit('mcp-validate:'+str(identity['user_id']),120)
+        elif batch_activation:memory_limit('mcp-batch:'+str(identity['user_id']),20)
         else:
             limit(connect,'mcp-auth:'+address,180)
             limit(connect,'mcp-user:'+str(identity['user_id']),120)

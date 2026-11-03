@@ -2,12 +2,12 @@
 import json,os,secrets,time
 from datetime import datetime,timezone
 from decimal import Decimal
-from hotwatch_contract import SESSION,SAMPLE,CONTEXT,EngineError,require,canonical,checksum,stamp,OPEN_STATES,PROFILES,GLOBAL_RISK
+from hotwatch_contract import SESSION,SAMPLE,CONTEXT,ACTIVATION_BATCH,EngineError,require,canonical,checksum,stamp,OPEN_STATES,PROFILES,GLOBAL_RISK
 from hotwatch_features import features
 from hotwatch_strategy import BASELINE,validate_strategy,calculate
 
 def utc():return datetime.now(timezone.utc)
-def capacity():return max(1,min(100,int(os.environ.get('ESCAPE_HW_CAPACITY','10'))))
+def capacity():return max(1,min(20,int(os.environ.get('ESCAPE_HW_CAPACITY','20'))))
 def init(c):
  c.execute('CREATE TABLE IF NOT EXISTS hw_strategies(owner_id INTEGER NOT NULL,strategy_id TEXT NOT NULL,version TEXT NOT NULL,payload TEXT NOT NULL,checksum TEXT NOT NULL,created TEXT NOT NULL,author TEXT NOT NULL,validation_status TEXT NOT NULL,PRIMARY KEY(owner_id,strategy_id,version))')
  c.execute('INSERT OR IGNORE INTO hw_strategies VALUES(0,?,?,?,?,?,?,?)',(BASELINE['strategy_id'],BASELINE['version'],canonical(BASELINE),checksum(BASELINE),utc().isoformat(),'ESCAPE builtin','baseline_tested'))
@@ -65,39 +65,93 @@ def row_for(c,uid,wid,mode):
  if not row:raise EngineError('watch_not_found',404)
  return row
 
-def create(connect,uid,data,now=None):
- now=now or utc();require(data,SESSION)
+def _create_in_transaction(c,uid,data,now):
  if len(set(data['portfolio_ids']))!=len(data['portfolio_ids']):raise EngineError('duplicate_portfolio_reference')
  if data['provider']=='synthetic' and not data['is_test']:raise EngineError('synthetic_requires_test_mode')
  if data['end_at'] and stamp(data['end_at'])<=now:raise EngineError('watch_deadline_already_passed')
  for key,maximum in GLOBAL_RISK.items():
   v=data['risk'][key]
   if Decimal(str(v))<=0 or Decimal(str(v))>Decimal(str(maximum)):raise EngineError('risk_limit_exceeds_global',400,[{'path':'risk.'+key,'code':'risk_limit','message':'Must be positive and no greater than '+str(maximum)}])
+ if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:raise EngineError('operator_kill_switch',409)
+ old=c.execute('SELECT * FROM hw_sessions WHERE user_id=? AND watch_id=?',(uid,data['watch_id'])).fetchone()
+ if old:
+  if old['digest']!=checksum(data):raise EngineError('watch_id_conflict',409)
+  return {'ok':True,'duplicate':True,'session':view(c,old,now)}
+ if c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]>=capacity():raise EngineError('global_capacity_limit',409)
+ if c.execute("SELECT count(*) FROM hw_sessions WHERE user_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,)).fetchone()[0]>=capacity():raise EngineError('capacity_limit',409)
+ if c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=? AND purpose=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,int(data['is_test']),data['candidate_id'],data['purpose'].strip().casefold())).fetchone():raise EngineError('active_watch_exists',409)
+ report=c.execute('SELECT payload FROM ingested_reports WHERE user_id=? AND report_id=? AND is_test=?',(uid,data['report_id'],int(data['is_test']))).fetchone()
+ if not report:raise EngineError('report_reference_not_found',404)
+ candidate=next((x for x in json.loads(report['payload']).get('candidates',[]) if x.get('candidate_id')==data['candidate_id']),None)
+ if not candidate:raise EngineError('candidate_reference_not_found',404)
+ if candidate.get('ticker','').casefold()!=data['ticker'].casefold():raise EngineError('candidate_ticker_mismatch',409)
+ for pid in data['portfolio_ids']:
+  if not c.execute("SELECT 1 FROM portfolios WHERE id=? AND user_id=? AND active=1 AND source='pluto'",(pid,uid)).fetchone():raise EngineError('portfolio_reference_not_found')
+ import candidate_lifecycle
+ previous_lifecycle=candidate_lifecycle.latest(c,uid,data['is_test'],data['candidate_id'])
+ if previous_lifecycle and previous_lifecycle['status'] in ['CLOSED','ARCHIVED'] and data.get('watch_mode','both')!='exit' and not data.get('reactivation_reason'):raise EngineError('reactivation_evidence_required')
+ version=strategy(c,uid,data['strategy_id'],data['strategy_version'])
+ if version['validation_status']!='baseline_tested':raise EngineError('strategy_qualification_required',409)
+ cur=c.execute('INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(uid,data['watch_id'],int(data['is_test']),data['candidate_id'],data['purpose'].strip().casefold(),'CREATED',canonical(data),checksum(data),version['payload'],canonical({'signal':'NO_DATA','alert_codes':[]}),now.isoformat(),now.isoformat(),now.timestamp()))
+ row=c.execute('SELECT * FROM hw_sessions WHERE id=?',(cur.lastrowid,)).fetchone();event(c,row,'WATCH_STARTED',now,data['activation_reason']);cycle=data.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':data['watch_id']})[:24];candidate_lifecycle.record(c,uid,data['is_test'],data['candidate_id'],'HOT_WATCH',now.isoformat(),data.get('reactivation_reason') or data['activation_reason'],data['watch_id'],cycle);return {'ok':True,'duplicate':False,'session':view(c,row,now)}
+
+def create(connect,uid,data,now=None):
+ now=now or utc();require(data,SESSION)
  with connect() as c:
   c.execute('BEGIN IMMEDIATE')
-  if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:raise EngineError('operator_kill_switch',409)
-  old=c.execute('SELECT * FROM hw_sessions WHERE user_id=? AND watch_id=?',(uid,data['watch_id'])).fetchone()
+  return _create_in_transaction(c,uid,data,now)
+
+def create_batch(connect,uid,data,now=None):
+ """Explicit, idempotent activation request; report lifecycle alone never calls this."""
+ now=now or utc()
+ if not isinstance(data,dict):raise EngineError('invalid_input')
+ sessions=data.get('sessions')
+ if not isinstance(sessions,list) or not 1<=len(sessions)<=20:raise EngineError('activation_batch_limit_exceeded')
+ outer={k:v for k,v in ACTIVATION_BATCH['properties'].items() if k!='sessions'}
+ require({k:v for k,v in data.items() if k!='sessions'}, {'type':'object','properties':outer,'required':['request_id','is_test'],'additionalProperties':False})
+ for item in sessions:require(item,SESSION)
+ if any(item['is_test'] is not data['is_test'] for item in data['sessions']):raise EngineError('activation_category_mismatch')
+ if len({item['candidate_id'] for item in data['sessions']})!=len(data['sessions']):raise EngineError('duplicate_candidate_in_activation')
+ digest_value=checksum(data)
+ with connect() as c:
+  old=c.execute('SELECT * FROM hw_activation_requests WHERE user_id=? AND request_id=?',(uid,data['request_id'])).fetchone() if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='hw_activation_requests'").fetchone() else None
+ if old:
+  if old['digest']!=digest_value:raise EngineError('activation_request_conflict',409)
+  return {**json.loads(old['response']),'duplicate':True}
+ with connect() as c:
+  c.execute('BEGIN IMMEDIATE')
+  c.execute('CREATE TABLE IF NOT EXISTS hw_activation_requests(user_id INTEGER NOT NULL,request_id TEXT NOT NULL,is_test INTEGER NOT NULL,digest TEXT NOT NULL,response TEXT NOT NULL,created TEXT NOT NULL,PRIMARY KEY(user_id,request_id))')
+  old=c.execute('SELECT * FROM hw_activation_requests WHERE user_id=? AND request_id=?',(uid,data['request_id'])).fetchone()
   if old:
-   if old['digest']!=checksum(data):raise EngineError('watch_id_conflict',409)
-   return {'ok':True,'duplicate':True,'session':view(c,old)}
-  if c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]>=capacity():raise EngineError('global_capacity_limit',409)
-  if c.execute('SELECT count(*) FROM hw_sessions WHERE user_id=? AND status IN (\'CREATED\',\'VALIDATING\',\'ACTIVE\',\'PAUSED\',\'DEGRADED\')',(uid,)).fetchone()[0]>=capacity():raise EngineError('capacity_limit',409)
-  if c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=? AND purpose=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,int(data['is_test']),data['candidate_id'],data['purpose'].strip().casefold())).fetchone():raise EngineError('active_watch_exists',409)
-  report=c.execute('SELECT payload FROM ingested_reports WHERE user_id=? AND report_id=? AND is_test=?',(uid,data['report_id'],int(data['is_test']))).fetchone()
-  if not report:raise EngineError('report_reference_not_found',404)
-  candidate=next((x for x in json.loads(report['payload']).get('candidates',[]) if x.get('candidate_id')==data['candidate_id']),None)
-  if not candidate or candidate.get('ticker','').casefold()!=data['ticker'].casefold():raise EngineError('candidate_identity_mismatch')
-  for pid in data['portfolio_ids']:
-   if not c.execute("SELECT 1 FROM portfolios WHERE id=? AND user_id=? AND active=1 AND source='pluto'",(pid,uid)).fetchone():raise EngineError('portfolio_reference_not_found')
-  import candidate_lifecycle
-  previous_lifecycle=candidate_lifecycle.latest(c,uid,data['is_test'],data['candidate_id'])
-  if previous_lifecycle and previous_lifecycle['status'] in ['CLOSED','ARCHIVED'] and data.get('watch_mode','both')!='exit' and not data.get('reactivation_reason'):raise EngineError('reactivation_evidence_required')
-  version=strategy(c,uid,data['strategy_id'],data['strategy_version'])
-  if version['validation_status']!='baseline_tested':raise EngineError('strategy_qualification_required',409)
-  killed=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
-  if killed and killed['killed']:raise EngineError('kill_switch_active',409)
-  cur=c.execute('INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(uid,data['watch_id'],int(data['is_test']),data['candidate_id'],data['purpose'].strip().casefold(),'CREATED',canonical(data),checksum(data),version['payload'],canonical({'signal':'NO_DATA','alert_codes':[]}),now.isoformat(),now.isoformat(),now.timestamp()))
-  row=c.execute('SELECT * FROM hw_sessions WHERE id=?',(cur.lastrowid,)).fetchone();event(c,row,'WATCH_STARTED',now,data['activation_reason']);cycle=data.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':data['watch_id']})[:24];candidate_lifecycle.record(c,uid,data['is_test'],data['candidate_id'],'HOT_WATCH',now.isoformat(),data.get('reactivation_reason') or data['activation_reason'],data['watch_id'],cycle);return {'ok':True,'duplicate':False,'session':view(c,row,now)}
+   if old['digest']!=digest_value:raise EngineError('activation_request_conflict',409)
+   return {**json.loads(old['response']),'duplicate':True}
+  # Validate all items before creating any, and reserve capacity atomically.
+  batch_candidates=set()
+  for item in data['sessions']:
+   if item['provider']=='synthetic' and not item['is_test']:raise EngineError('synthetic_requires_test_mode')
+   if item['end_at'] and stamp(item['end_at'])<=now:raise EngineError('watch_deadline_already_passed')
+   if item['candidate_id'] in batch_candidates:raise EngineError('duplicate_candidate_in_activation')
+   batch_candidates.add(item['candidate_id'])
+   if len(item['portfolio_ids'])!=len(set(item['portfolio_ids'])):raise EngineError('duplicate_portfolio_reference')
+   for key,maximum in GLOBAL_RISK.items():
+    value=Decimal(str(item['risk'][key]))
+    if value<=0 or value>Decimal(str(maximum)):raise EngineError('risk_limit_exceeds_global',400,[{'path':'risk.'+key,'code':'risk_limit','message':'Must be positive and no greater than '+str(maximum)}])
+   report=c.execute('SELECT payload FROM ingested_reports WHERE user_id=? AND report_id=? AND is_test=?',(uid,item['report_id'],int(item['is_test']))).fetchone()
+   if not report:raise EngineError('report_reference_not_found',404)
+   candidate=next((x for x in json.loads(report['payload']).get('candidates',[]) if x.get('candidate_id')==item['candidate_id']),None)
+   if not candidate:raise EngineError('candidate_reference_not_found',404)
+   if candidate.get('ticker','').casefold()!=item['ticker'].casefold():raise EngineError('candidate_ticker_mismatch',409)
+   if c.execute('SELECT 1 FROM hw_sessions WHERE user_id=? AND watch_id=?',(uid,item['watch_id'])).fetchone():raise EngineError('watch_id_conflict',409)
+   if c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=? AND purpose=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,int(item['is_test']),item['candidate_id'],item['purpose'].strip().casefold())).fetchone():raise EngineError('active_watch_exists',409)
+  open_count=c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]
+  own_count=c.execute("SELECT count(*) FROM hw_sessions WHERE user_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,)).fetchone()[0]
+  if open_count+len(data['sessions'])>capacity() or own_count+len(data['sessions'])>capacity():raise EngineError('activation_capacity_exceeded',409)
+  batch_started=time.perf_counter();results=[]
+  for item in data['sessions']:
+   result=_create_in_transaction(c,uid,item,now);results.append({'candidate_id':item['candidate_id'],'watch_id':item['watch_id'],'outcome':'duplicate' if result['duplicate'] else 'created','session':result['session']})
+  response={'ok':True,'request_id':data['request_id'],'duplicate':False,'results':results,'created_count':sum(x['outcome']=='created' for x in results),'batch_elapsed_ms':round((time.perf_counter()-batch_started)*1000,3)}
+  c.execute('INSERT INTO hw_activation_requests VALUES(?,?,?,?,?,?)',(uid,data['request_id'],int(data['is_test']),digest_value,canonical(response),now.isoformat()))
+  return response
 
 def view(c,row,now=None):
  now=now or utc()
@@ -304,21 +358,18 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   if status=='ERROR' and row['status']!='ERROR':event(c,row,'WATCH_ERROR',now,'Manual review required: '+code,severity='critical')
   c.execute("UPDATE hw_sessions SET status=?,state=?,last_error=?,failures=?,updated=?,next_due=?,lease_owner=NULL,lease_until=0 WHERE id=?",(status,canonical(state),code,failures,now.isoformat(),now.timestamp()+interval,row['id']))
 
-def claim(connect,now=None):
+def claim(connect,now=None,watch_id=None):
  now=now or utc();owner=secrets.token_hex(16)
  with connect() as c:
   c.execute('BEGIN IMMEDIATE')
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
   concurrency=max(1,min(10,int(os.environ.get('ESCAPE_HW_CONCURRENCY','2'))))
   if c.execute('SELECT count(*) FROM hw_sessions WHERE lease_until>?',(now.timestamp(),)).fetchone()[0]>=concurrency:return None
-  row=c.execute("SELECT s.* FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.next_due<=? AND s.lease_until<=? AND COALESCE(k.killed,0)=0 ORDER BY CASE json_extract(s.request,'$.priority') WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 ELSE 2 END,s.next_due,s.id LIMIT 1",(now.timestamp(),now.timestamp())).fetchone()
+  row=c.execute("SELECT s.* FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.next_due<=? AND s.lease_until<=? AND COALESCE(k.killed,0)=0 AND (? IS NULL OR s.watch_id=?) ORDER BY CASE json_extract(s.state,'$.adaptive_profile') WHEN 'CRITICAL' THEN 0 ELSE 1 END,CASE json_extract(s.request,'$.priority') WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 ELSE 2 END,s.next_due,s.created,s.id LIMIT 1",(now.timestamp(),now.timestamp(),watch_id,watch_id)).fetchone()
   if not row:return None
-  request=json.loads(row['request']);window=int(now.timestamp()//60);budget=max(1,min(120,int(os.environ.get('ESCAPE_HW_REQUESTS_PER_MINUTE','12'))))
-  c.execute('DELETE FROM hw_request_budget WHERE window<?',(window-2,))
-  used=c.execute('SELECT used FROM hw_request_budget WHERE user_id=? AND source=? AND window=?',(row['user_id'],request['provider'],window)).fetchone()
-  if used and used['used']>=budget:
-   c.execute('UPDATE hw_sessions SET next_due=? WHERE id=?',((window+1)*60,row['id']));return None
-  c.execute('INSERT INTO hw_request_budget VALUES(?,?,?,1) ON CONFLICT(user_id,source,window) DO UPDATE SET used=used+1',(row['user_id'],request['provider'],window))
+  # Provider adapters charge the shared budget immediately before each actual
+  # upstream request. Claiming a job is not itself a provider request.
+  request=json.loads(row['request'])
   c.execute("UPDATE hw_sessions SET status=CASE WHEN status='CREATED' THEN 'VALIDATING' ELSE status END,lease_owner=?,lease_until=? WHERE id=?",(owner,now.timestamp()+120,row['id']))
   return dict(row,lease_owner=owner,request_data=request)
 

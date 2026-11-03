@@ -1,16 +1,17 @@
 """Standalone read-only HOT WATCH service. Never scheduled by legacy worker.py."""
-import json,signal,threading,logging,hashlib
+import json,signal,threading,logging,hashlib,time
 import app,hotwatch_engine as engine
 from hotwatch_adapters import PlutoAdapter,EODHDAdapter,InboxAdapter,DataUnavailable
 from hotwatch_contract import EngineError,stamp
 
 class Runner:
  def __init__(self,connect):self.connect=connect;self.adapters={};self.stop=threading.Event()
- def once(self,now=None):
-  now=now or engine.utc();job=engine.claim(self.connect,now)
+ def once(self,now=None,watch_id=None):
+  now=now or engine.utc();job=engine.claim(self.connect,now,watch_id)
   if not job:return False
   uid=job['user_id'];r=job['request_data'];wid=job['watch_id'];mode=bool(job['is_test']);lease=job['lease_owner']
   try:
+   poll_started=time.perf_counter()
    if r['end_at'] and stamp(r['end_at'])<=now:
     engine.fault(self.connect,uid,wid,mode,'WATCH_EXPIRED',now,lease);return True
    if r['provider']=='synthetic':
@@ -19,9 +20,13 @@ class Runner:
    key=(uid,r['provider']);adapter=self.adapters.get(key)
    if not adapter:
     adapter={'pluto':PlutoAdapter,'eodhd':EODHDAdapter,'report_inbox':InboxAdapter}[r['provider']](self.connect,uid);self.adapters[key]=adapter
-   sample=adapter.poll(job);result=engine.ingest(self.connect,uid,wid,mode,sample,now=engine.utc(),lease=lease)
-   self.health(job,sample,None)
-   self.log(job,'processed',result.get('calculation',{}).get('signal'))
+   sample=adapter.poll(job);adapter_received=engine.utc();provider_done=time.perf_counter()
+   adapter_latency_ms=(adapter_received-stamp(sample['event_time'])).total_seconds()*1000 if sample.get('event_time') else None
+   result=engine.ingest(self.connect,uid,wid,mode,sample,now=engine.utc(),lease=lease)
+   journaled_at=engine.utc();ingest_done=time.perf_counter()
+   timings={'provider_ms':round((provider_done-poll_started)*1000,3),'adapter_to_journal_ms':round((journaled_at-adapter_received).total_seconds()*1000,3),'ingest_compute_ms':round((ingest_done-provider_done)*1000,3),'event_to_adapter_receive_ms':round(adapter_latency_ms,3) if adapter_latency_ms is not None else None,'market_time_known':bool(sample.get('event_time')),'signal':result.get('calculation',{}).get('signal')}
+   self.health(job,sample,None,timings)
+   self.log(job,'processed',result.get('calculation',{}).get('signal'),{**timings,'duplicate':bool(result.get('duplicate'))})
    if result.get('duplicate'):
     if (now-stamp(sample['event_time'])).total_seconds()>r['risk']['max_quote_age_s']:engine.fault(self.connect,uid,wid,mode,'DATA_STALE',lease=lease)
     else:engine.release(self.connect,job,now)
@@ -37,12 +42,13 @@ class Runner:
   except Exception:
    engine.fault(self.connect,uid,wid,mode,'PROVIDER_OR_PROCESSING_ERROR',lease=lease);self.health(job,None,'PROVIDER_OR_PROCESSING_ERROR');self.log(job,'degraded','PROVIDER_OR_PROCESSING_ERROR')
   return True
- def health(self,job,sample,code):
+ def health(self,job,sample,code,measurement=None):
   caps={'endpoint_access':True,'price_time':bool(sample.get('event_time')),'bid_ask':sample['bid'] is not None and sample['ask'] is not None,'interval_volume':sample['volume_type']=='interval','market_status':sample['market_status']!='UNKNOWN'} if sample else {}
+  if measurement:caps.update(measurement)
   now=engine.utc().isoformat()
   with self.connect() as c:c.execute('INSERT INTO hw_provider_health VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,is_test,source) DO UPDATE SET attempted=excluded.attempted,succeeded=COALESCE(excluded.succeeded,hw_provider_health.succeeded),code=excluded.code,payload=CASE WHEN excluded.succeeded IS NOT NULL THEN excluded.payload ELSE hw_provider_health.payload END',(job['user_id'],job['is_test'],job['request_data']['provider'],now,now if sample else None,code,json.dumps(caps)))
- def log(self,job,status,code):
-  logging.getLogger('escape.hotwatch').info(json.dumps({'service':'hotwatch','utc':engine.utc().isoformat(),'watch_ref':hashlib.sha256(job['watch_id'].encode()).hexdigest()[:16],'source':job['request_data']['provider'],'status':status,'code':code}))
+ def log(self,job,status,code,metrics=None):
+  logging.getLogger('escape.hotwatch').info(json.dumps({'service':'hotwatch','utc':engine.utc().isoformat(),'watch_ref':hashlib.sha256(job['watch_id'].encode()).hexdigest()[:16],'source':job['request_data']['provider'],'status':status,'code':code,'metrics':metrics or {}}))
  def run(self,interval=2):
   try:
    while not self.stop.is_set():
@@ -53,19 +59,46 @@ class Runner:
   finally:
    with self.connect() as c:c.execute("INSERT INTO hw_heartbeat VALUES(1,?,'stopped') ON CONFLICT(id) DO UPDATE SET updated=excluded.updated,status=excluded.status",(engine.utc().isoformat(),))
 
+def startup_diagnostics(connect):
+ """Report configured paths without making an unbudgeted provider request."""
+ from hotwatch_adapters import providers
+ info=providers()
+ info['startup_probe']={'network_requests_made':False,'note':'Provider entitlement is established only by a scheduled read; startup checks configuration, not account rights.'}
+ eodhd=info['eodhd']
+ eodhd['startup_status']='blocked_feed_disabled' if not eodhd['enabled'] else 'blocked_key_missing' if not eodhd['key_configured'] else 'configured_entitlement_unverified'
+ info['pluto']['startup_status']='adapter_available_unprobed'
+ info['report_inbox']['startup_status']='local_read_only'
+ info['synthetic']['startup_status']='test_only'
+ with connect() as c:
+  sources=[row['provider'] for row in c.execute("SELECT DISTINCT json_extract(request,'$.provider') AS provider FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED')")]
+ info['active_session_sources']=sources
+ for source in sources:
+  if source=='eodhd':
+   p=info['eodhd']
+   p['startup_status']='ready_to_probe_entitlement_unverified' if p['key_configured'] and p['enabled'] else 'blocked_configuration'
+  elif source=='pluto':info['pluto']['startup_status']='probe_on_scheduled_read'
+  elif source=='report_inbox':info['report_inbox']['startup_status']='local_read_only'
+  elif source=='synthetic':info['synthetic']['startup_status']='test_only'
+ logging.getLogger('escape.hotwatch').info(json.dumps({'service':'hotwatch','event':'startup_diagnostics','providers':info},sort_keys=True))
+ return info
+
 def main():
  import argparse
- parser=argparse.ArgumentParser();parser.add_argument('--once',action='store_true');parser.add_argument('--interval',type=int,default=2);parser.add_argument('--kill-switch',choices=['on','off']);parser.add_argument('--reason',default='Local server operator');args=parser.parse_args()
+ parser=argparse.ArgumentParser();parser.add_argument('--once',action='store_true');parser.add_argument('--diagnose',action='store_true',help='report configured data paths without network requests');parser.add_argument('--watch-id',help='limit --once to one explicitly selected session');parser.add_argument('--interval',type=int,default=2);parser.add_argument('--kill-switch',choices=['on','off']);parser.add_argument('--reason',default='Local server operator');args=parser.parse_args()
  if not 1<=args.interval<=30:parser.error('interval must be 1..30 seconds')
+ if args.watch_id and not args.once:parser.error('--watch-id requires --once')
  logging.basicConfig(level=logging.INFO,format='%(message)s');app.init()
  if args.kill_switch:
   print(json.dumps(engine.system_kill(app.connect,args.kill_switch=='on',args.reason)));return
+ if args.diagnose:
+  print(json.dumps(startup_diagnostics(app.connect),sort_keys=True));return
  runner=Runner(app.connect)
+ startup_diagnostics(app.connect)
  for name in [signal.SIGINT,signal.SIGTERM]:signal.signal(name,lambda *_:runner.stop.set())
  if args.once:
   with app.connect() as c:c.execute("INSERT INTO hw_heartbeat VALUES(1,?,'run_once') ON CONFLICT(id) DO UPDATE SET updated=excluded.updated,status=excluded.status",(engine.utc().isoformat(),))
   count=0
-  while count<engine.capacity() and runner.once():count+=1
+  while count<engine.capacity() and runner.once(watch_id=args.watch_id):count+=1
   print(json.dumps({'service':'hotwatch','processed':count,'trading_enabled':False}))
  else:runner.run(args.interval)
 if __name__=='__main__':main()

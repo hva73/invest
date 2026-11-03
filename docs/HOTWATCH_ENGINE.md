@@ -39,9 +39,9 @@ Rapport-inbox er afsenderdata og kan ikke alene give nye BUY. Syntetiske data ac
 
 ## Frekvens og fejl
 
-Profilernes mål er NORMAL 60s, ACTIVE 15s, CRITICAL 5s, IDLE 300s. Aktuelle adaptergulve er Pluto/EODHD **300s**, rapport-inbox 60s og syntetisk 5s. Hurtige profiler tilsidesætter ikke gulvet. Frontend opdaterer kun gemt status hvert 15. sekund; det er ikke dataleverandørens feedfrekvens.
+Profilernes mål er NORMAL 60s, ACTIVE 15s, CRITICAL 5s, IDLE 300s. Aktuelle adaptergulve er Pluto/EODHD **300s**, rapport-inbox 60s og syntetisk 5s. Hurtige profiler tilsidesætter ikke gulvet. Worker logger event→modtagelse, adapter→journal og provider-/computevarighed, når source event-time findes; ukendt tid forbliver null. Scheduler rykker motorens eksisterende CRITICAL-profil frem uden at ændre signalregler. Frontend opdaterer kun gemt status hvert 15. sekund; det er ikke dataleverandørens feedfrekvens.
 
-Standardkapacitet er 10 sessioner (`ESCAPE_HW_CAPACITY`, 1–100), concurrency 2 (`ESCAPE_HW_CONCURRENCY`, 1–10). `ESCAPE_HW_REQUESTS_PER_MINUTE` er et kalender-minutbudget, standard 12, maksimum 120; EODHD deler budget på tværs af konti. Det erstatter ikke leverandørens kontraktlige begrænsninger. Hvert eget Pluto-RPC tæller, også initialize/tools. Gentagne identiske quotes skaber ikke nye bekræftelser. Fejl anvender backoff; HTTP Retry-After respekteres. Permanente identitetsfejl kræver manuel kontrol. Udfald giver DEGRADED/NO_DATA, aldrig køb på gamle data.
+Standardkapacitet er 20 sessioner (`ESCAPE_HW_CAPACITY`, 1–20), concurrency 2 (`ESCAPE_HW_CONCURRENCY`, 1–10). `ESCAPE_HW_REQUESTS_PER_MINUTE` er et kalender-minutbudget, standard 12, maksimum 120; EODHD deler budget på tværs af konti. Budgettet tæller faktiske adapterkald, ikke interne scheduler-claims, og erstatter ikke leverandørens kontraktlige begrænsninger. Hvert eget Pluto-RPC tæller, også initialize/tools. Gentagne identiske quotes skaber ikke nye bekræftelser. Fejl anvender backoff; HTTP Retry-After respekteres. Permanente identitetsfejl kræver manuel kontrol. Udfald giver DEGRADED/NO_DATA, aldrig køb på gamle data.
 
 ## Matematik og risiko
 
@@ -58,6 +58,7 @@ Risk Engine kan blokere strategiens BUY uafhængigt af reglerne: friskhed, posit
 Base `/api/v1/hotwatch`. Cookie-login kræver CSRF på POST. MCP/OAuth-bearer kræver nye, eksplicit godkendte scopes `hotwatch:read` (GET) og `hotwatch:manage` (POST). Eksisterende rapportgrants opgraderes ikke automatisk. Alle resultater er ejer-/testisolerede. Rategrænse 120 API-kald pr. minut pr. bruger, JSON højst 128 KiB.
 
 - GET `/schema`, `/providers`
+- POST `/activation-requests`: eksplicit batch på 1–20 eksisterende kandidater; `request_id` er idempotensnøgle. Almindelig rapportstatus aktiverer ikke sessioner.
 - POST/GET `/sessions`; GET `/sessions/{watch_id}`
 - POST `/sessions/{watch_id}/pause`, `/resume`, `/stop`, body `{"is_test":true}`
 - GET `/sessions/{watch_id}/signals`, `/metrics`, `/events`, `/history`, `/samples`
@@ -75,11 +76,21 @@ Strategier har eksakt parameter-/feltliste, whitelistede indikatorer/operatorer,
 
 Installér via det eksisterende `apply_update.py`-flow mens appen er stoppet; genstart derefter. Tag privat SQLite-backup som beskrevet i UPDATE.md. Ved første appstart oprettes tabeller og bagudkompatibel kandidatjournal. Gamle rapportpayloads/digests omskrives ikke. Der startes **ingen HOT WATCH-service automatisk**.
 
-Kør med samme virtuelle Pythonmiljø, database, krypteringsnøgle og OAuth-konfiguration som webappen. Første afprøvning:
+Kør med samme virtuelle Pythonmiljø, database, krypteringsnøgle og OAuth-konfiguration som webappen. Konfigurationsdiagnosen laver ingen netværkskald:
 
 ```sh
-python hotwatch_service.py --once
+python hotwatch_service.py --diagnose
 ```
+
+Ved workerstart logges de konfigurerede dataveje. EODHD-nøgle/feature-flag kan kontrolleres lokalt; abonnementstilladelse og endpointadgang bekræftes først på første almindelige, planlagte læsning. Den læsning registrerer endpointfejl, faktisk kildetid, adaptermodtagelse, journalføringstid og tilgængelige felter. Manglende tid er `null`; ingen delay eller markedsværdi estimeres. Seneste måling vises i provider-health; hver scanning logges struktureret.
+
+Første rigtige feedtest begrænses til én eksplicit valgt session:
+
+```sh
+python hotwatch_service.py --once --watch-id <WATCH_ID>
+```
+
+Kommandoen bruger den almindelige adapter og gemmer den reelle observation. Kør ikke bred `--once`, hvis andre forfaldne sessioner ikke skal behandles.
 
 Kontinuerlig proces, når hostens tilladelse og supervisor er verificeret:
 
