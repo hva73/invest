@@ -26,7 +26,7 @@ def validate(data):
     return data
 
 def material(candidate):
-    return {key:candidate[key] for key in ['ticker','company_name','signal','assessment','catalysts','risks','next_action','exit_plan','analysis_urls']}|{'tradability':candidate['tradability']['status'],'market_verification':candidate['market']['verification']}
+    return {'decision':candidate.get('decision'),**{key:candidate[key] for key in ['ticker','company_name','signal','assessment','catalysts','risks','next_action','exit_plan','analysis_urls']}|{'tradability':candidate['tradability']['status'],'market_verification':candidate['market']['verification']}}
 
 # Announce local dependencies already enforced by the backend. Cross-object
 # source/identity checks remain in report_validation, where account data exists.
@@ -56,3 +56,42 @@ def strict_patterns(value):
         for child in value:strict_patterns(child)
     return value
 strict_patterns(SCHEMA)
+
+# Optional positions extension: old v2 objects remain valid and immutable.
+from copy import deepcopy
+POSITION=SCHEMA['properties']['positions']['items']
+SIGNED_NUM=nullable({'type':'string','pattern':r'^-?\d{1,18}(\.\d{1,18})?$'})
+POSITION_ASSESSMENT=obj({'action':enum('BEHOLD','OVERVÅG','AFVENT','REDUCÉR','SÆLG'),'reason':string(12000),'risk_level':enum('low','medium','high','unknown'),'next_action':nullable(string()),'assessed_at':TIME['anyOf'][0],'source_ids':dict(REFS,minItems=1),'data_quality':deepcopy(SCHEMA['properties']['data_quality'])})
+POSITION_MARKET=obj({'price':NONNEG_MONEY,'daily_change':MONEY,'daily_change_percent':SIGNED_NUM,'price_as_of':TIME,'change_as_of':TIME,'verification':enum('verified','unverified','unknown'),'source_ids':REFS})
+POSITION_MARKET['allOf']=[condition('verification',['verified'],{'price_as_of':TIME['anyOf'][0],'source_ids':dict(REFS,minItems=1)}),condition('verification',['unknown','unverified'],{k:{'type':'null'} for k in ['price','daily_change','daily_change_percent']})]
+POSITION['properties'].update({'asset_id':nullable(ID),'asset_name':nullable(string(200)),'assessment':nullable(POSITION_ASSESSMENT),'market':nullable(POSITION_MARKET),'unrealized_pnl':MONEY,'position_status':enum('open','closed','unknown')})
+SCHEMA['properties']['orders']['items']['properties'].update({'asset_id':nullable(ID),'side':nullable(enum('BUY','SELL')),'order_type':nullable(enum('MARKET','LIMIT','STOP','STOP_LIMIT')),'stop_price':NONNEG_MONEY,'limit_price':NONNEG_MONEY})
+strict_patterns(SCHEMA)
+
+PORTFOLIO['properties']['reported_result']=MONEY
+strict_patterns(SCHEMA)
+
+SCHEMA['properties']['journal']['items']['properties']['portfolio_id']=nullable(ID)
+strict_patterns(SCHEMA)
+
+# Optional V2.2 fields; legacy required fields remain unchanged.
+"""Additive v2.2 contracts; observation payloads are stored independently."""
+from copy import deepcopy
+AT=TIME['anyOf'][0]
+DECISION=obj({'status':enum('KØB','AFVENT','FRAVÆLG'),'decided_at':AT,'reason':string(12000),'next_trigger':nullable(string()),'deadline':TIME,'data_as_of':TIME,'source_ids':dict(REFS,minItems=1),'reactivation_reason':nullable(string()),'buy_plan':nullable(obj({'max_limit_price':NONNEG_MONEY['anyOf'][0],'amount_dkk':NONNEG_MONEY['anyOf'][0],'horizon':string(500),'expires_at':AT,'risk_budget':NONNEG_MONEY['anyOf'][0],'upside':string(2000),'downside':string(2000),'exit_method':string(4000),'approval':enum('proposed','awaiting_approval','approved','rejected','unknown')}))})
+DECISION['allOf']=[{'if':{'properties':{'status':{'const':'KØB'}},'required':['status']},'then':{'properties':{'buy_plan':DECISION['properties']['buy_plan']['anyOf'][0]}}},{'if':{'properties':{'status':{'const':'AFVENT'}},'required':['status']},'then':{'properties':{'next_trigger':string(),'deadline':AT,'data_as_of':AT}}}]
+COVERAGE=obj({'exchanges':array(string(200),80),'status':enum('OK','FEJL','IKKE KØRT'),'screening_count':nullable({'type':'integer','minimum':0}),'data_at':TIME,'news_checked_at':TIME,'new_signals':nullable({'type':'integer','minimum':0}),'pluto_verified':nullable({'type':'integer','minimum':0}),'excluded':nullable({'type':'integer','minimum':0}),'gaps':array(string(),30),'basis':enum('intraday','previous_close','unknown')})
+COVERAGE['allOf']=[{'if':{'properties':{'status':{'const':'OK'}},'required':['status']},'then':{'properties':{'exchanges':dict(array(string(200),80),minItems=1),'data_at':AT,'screening_count':{'type':'integer','minimum':0}}}}]
+OBSERVATION=obj({'observation_id':ID,'report_id':ID,'candidate_id':ID,'is_test':{'type':'boolean'},'observed_at':AT,'deadline':AT,'instrument':obj({'ticker':string(60),'exchange':nullable(string(200)),'asset_id':nullable(ID)}),'market':obj({'price':NONNEG_MONEY,'price_at':TIME,'bid':NONNEG_MONEY,'bid_at':TIME,'ask':NONNEG_MONEY,'ask_at':TIME,'spread':NONNEG_MONEY,'spread_percent':NUM,'volume':NUM,'volume_at':TIME,'volume_basis':nullable(string(200)),'intraday_percent':SIGNED_NUM,'momentum':enum('accelerating','decelerating','unknown'),'venue':nullable(string(200)),'feed_type':nullable(string(200)),'delay_seconds':nullable({'type':'integer','minimum':0}),'verification':enum('verified','unverified','unknown'),'price_source':enum('pluto','eodhd','other','unknown'),'source_ids':REFS}),'recent_trades':array(obj({'trade_id':ID,'price':NONNEG_MONEY['anyOf'][0],'quantity':NUM['anyOf'][0],'occurred_at':AT,'source_ids':REFS}),50),'decision':nullable(deepcopy(DECISION)),'next_trigger':nullable(string()),'position_ref':nullable(obj({'portfolio_id':ID,'position_id':ID})),'order_ids':array(ID,100),'position_action':nullable(obj({'action':enum('BEHOLD','OVERVÅG','AFVENT','REDUCÉR','SÆLG'),'reason':string(12000),'assessed_at':AT,'source_ids':REFS})),'sources':array(SOURCE,150),'note':nullable(string(4000))})
+
+def extend(schema):
+    p=schema['properties']
+    SOURCE['properties'].update({'data_at':TIME,'venue':nullable(string(200)),'feed_type':nullable(string(200)),'delay_seconds':nullable({'type':'integer','minimum':0}),'primary_news_url':nullable(URL)})
+    p['candidates']['items']['properties']['decision']=nullable(deepcopy(DECISION))
+    p['summary']['properties']['regions']['items']['properties']['coverage']=nullable(deepcopy(COVERAGE))
+    p['portfolios']['items']['properties'].update({'valuation_method':nullable(string(200)),'liquidity':nullable(obj({'available':array(NONNEG_MONEY,10),'reserved':array(NONNEG_MONEY,10),'earmarked':array(NONNEG_MONEY,10),'unknown':array(NONNEG_MONEY,10)}))})
+    p['orders']['items']['properties']['lifecycle']['enum'].append('expired')
+    p['orders']['items']['properties'].update({'approval_status':nullable(enum('proposed','awaiting_approval','approved','rejected','unknown')),'average_fill_price':NONNEG_MONEY,'created_at':TIME,'status_changed_at':TIME,'expires_at':TIME,'realized_pnl':MONEY,'execution_source':nullable(enum('pluto','other','unknown'))})
+    return strict_patterns(schema)
+strict_patterns(OBSERVATION)
+extend(SCHEMA)

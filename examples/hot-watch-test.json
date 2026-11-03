@@ -1,0 +1,70 @@
+{
+  "observation_id": "SYNTHETIC-MERC-OBS-1",
+  "report_id": "SYNTHETIC-V22-POSITIONS-DO-NOT-USE",
+  "candidate_id": "synthetic-candidate-PLTR",
+  "is_test": true,
+  "observed_at": "2026-11-03T10:05:00Z",
+  "deadline": "2026-11-03T11:00:00Z",
+  "instrument": {
+    "ticker": "MERC",
+    "exchange": "NASDAQ",
+    "asset_id": "synthetic-MERC"
+  },
+  "market": {
+    "price": {
+      "amount": "7.5",
+      "currency": "USD"
+    },
+    "price_at": "2026-11-03T10:05:00Z",
+    "bid": {
+      "amount": "7.4",
+      "currency": "USD"
+    },
+    "bid_at": "2026-11-03T10:05:00Z",
+    "ask": {
+      "amount": "7.6",
+      "currency": "USD"
+    },
+    "ask_at": "2026-11-03T10:05:00Z",
+    "spread": {
+      "amount": "0.2",
+      "currency": "USD"
+    },
+    "spread_percent": "2.6667",
+    "volume": "1000",
+    "volume_at": "2026-11-03T10:05:00Z",
+    "volume_basis": "session cumulative · synthetic",
+    "intraday_percent": "1.5",
+    "momentum": "unknown",
+    "venue": "SYNTHETIC",
+    "feed_type": "synthetic fixture",
+    "delay_seconds": null,
+    "verification": "verified",
+    "price_source": "pluto",
+    "source_ids": [
+      "synthetic-source"
+    ]
+  },
+  "recent_trades": [],
+  "decision": null,
+  "next_trigger": "Syntetisk nyhedskontrol",
+  "position_ref": {
+    "portfolio_id": "test-main",
+    "position_id": "test-main.MERC"
+  },
+  "order_ids": [
+    "synthetic-merc-stop"
+  ],
+  "position_action": null,
+  "sources": [
+    {
+      "source_id": "synthetic-source",
+      "url": "https://example.invalid/synthetic/merc",
+      "publisher": "SYNTHETISK TESTKILDE",
+      "published_at": "2026-01-02T12:00:00Z",
+      "verified_at": "2026-11-03T10:00:00Z",
+      "verification": "verified"
+    }
+  ],
+  "note": "KUN SYNTETISK ACCEPTTEST I MIDLERTIDIG DATABASE. Ingen reel MERC-kurs eller handel."
+}

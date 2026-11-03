@@ -32,7 +32,7 @@ def transport_schema():
     schema['properties']['is_test']={'type':'boolean','description':'Report storage category only: true=test inbox, false=production report overview. Neither value authorizes or triggers trading, order changes or automation. validate_report never stores either category.'}
     schema['properties']['report_id']=dict(schema['properties']['report_id'],description='Immutable report ID unique per ESCAPE user across test and production. New content or category requires a new ID; identical retries keep the same ID.')
     schema['allOf']=[{'if':{'properties':{'schema_version':{'const':i}},'required':['schema_version']},'then':s} for i,s in enumerate(versions,1)]
-    schema['description']='Exact v1/v2 structure. Use validate_report before send_report. All nullable fields remain required; use null for unknown values. Semantic/reference and canonical UTF-8 size checks are reported by the shared validator. No records are removed.'
+    schema['description']='Exact v1/v2 structure. Use validate_report before send_report. Required fields remain required even when nullable; use null for unknown values. Documented additive fields may be omitted; supplied objects must satisfy their full contract. Semantic/reference and canonical UTF-8 size checks are reported by the shared validator. No records are removed.'
     return schema
 
 def issue(path,code,message,expected=None):
@@ -80,6 +80,8 @@ def schema_errors(value,schema,path=''):
         if len(value)<schema.get('minItems',0):add('min_items','Minimum '+str(schema['minItems'])+' items')
         if schema.get('uniqueItems') and len({json.dumps(v,sort_keys=True,default=str) for v in value})!=len(value):add('duplicate_items','Expected unique items')
         for i,child in enumerate(value):errors.extend(schema_errors(child,schema['items'],path+'['+str(i)+']'))
+    elif actual in ['integer','number']:
+        if 'minimum' in schema and value<schema['minimum']:add('minimum','Expected value >= '+str(schema['minimum']))
     elif actual=='string':
         if not value.strip() or len(value)<schema.get('minLength',0):add('min_length','Expected non-blank string')
         if len(value)>schema.get('maxLength',len(value)):add('max_length','Maximum '+str(schema['maxLength'])+' characters')
@@ -139,6 +141,7 @@ def semantic(data,errors,warnings,connection,user_id):
         for i,row in rows(key):
             identity=row.get(field)
             if not isinstance(identity,str):continue
+            if key=='positions':identity=(row.get('portfolio_id') if isinstance(row.get('portfolio_id'),str) else '@invalid'+str(i),identity)
             if identity in maps[key]:add(f'{key}[{i}].{field}','duplicate_id','ID must be unique within '+key)
             else:maps[key][identity]=row
     def references(value,path=''):
@@ -180,12 +183,19 @@ def semantic(data,errors,warnings,connection,user_id):
                 if scoped and cid not in history:add(f'{key}[{i}].candidate_id','unknown_reference','Expected candidate_id in this report or owned history in the same test category')
                 elif not scoped:warnings.append(issue(f'{key}[{i}].candidate_id','context_required','Historical candidate reference requires account-scoped validation'))
             if key=='journal':
+                portfolio=row.get('portfolio_id')
+                if isinstance(portfolio,str) and portfolio not in maps['portfolios']:add(f'journal[{i}].portfolio_id','unknown_reference','Expected portfolio_id in this report')
                 for field,target in [('position_id','positions'),('order_id','orders')]:
                     ref=row.get(field)
-                    if isinstance(ref,str) and ref not in maps[target]:add(f'journal[{i}].{field}','unknown_reference','Expected '+field+' in this report')
-                for field,target in [('position_id','positions'),('order_id','orders')]:
-                    linked=maps[target].get(row.get(field)) if isinstance(row.get(field),str) else None
-                    if linked and isinstance(cid,str) and isinstance(linked.get('candidate_id'),str) and cid!=linked['candidate_id']:add(f'journal[{i}].{field}','reference_mismatch','Journal and referenced object identify different candidates')
+                    if not isinstance(ref,str):continue
+                    if target=='positions':matches=[p for (pid,identity),p in maps['positions'].items() if identity==ref and (not isinstance(portfolio,str) or portfolio==pid)]
+                    else:matches=[maps['orders'][ref]] if ref in maps['orders'] else []
+                    if not matches:add(f'journal[{i}].{field}','unknown_reference','Expected '+field+' in this report and portfolio')
+                    elif len(matches)>1:add(f'journal[{i}].{field}','ambiguous_reference','Position ID exists in multiple portfolios; provide journal.portfolio_id')
+                    else:
+                        linked=matches[0]
+                        if isinstance(cid,str) and isinstance(linked.get('candidate_id'),str) and cid!=linked['candidate_id']:add(f'journal[{i}].{field}','reference_mismatch','Journal and referenced object identify different candidates')
+                        if isinstance(portfolio,str) and linked.get('portfolio_id')!=portfolio:add(f'journal[{i}].{field}','reference_mismatch','Journal and referenced object identify different portfolios')
     for i,row in rows('candidates'):
         base=f'candidates[{i}]';market=mapping(row.get('market'));tradable=mapping(row.get('tradability'))
         if market.get('verification')=='verified':
@@ -212,6 +222,10 @@ def semantic(data,errors,warnings,connection,user_id):
             parent=connection.execute('SELECT 1 FROM ingested_reports r JOIN report_candidate_links l ON l.report_row_id=r.id WHERE l.user_id=? AND l.is_test=? AND l.candidate_id=? AND r.report_id=?',(user_id,int(data['is_test']),linked['candidate_id'],linked['report_id'])).fetchone()
             if not parent:add('analysis_for.report_id','unknown_reference','Expected original report containing candidate on this account in the same test category')
         elif not scoped:warnings.append(issue('analysis_for','context_required','Original report link requires account-scoped validation'))
+    import position_reports
+    position_reports.semantic(data,errors,warnings,connection,user_id)
+    import intel_workflows
+    intel_workflows.report_semantic(data,errors,warnings,connection,user_id)
     consolidation(data,maps,errors,verified)
     if prior and data.get('report_type') not in ['deep_analysis','historical']:
         previous=json.loads(prior['payload'])

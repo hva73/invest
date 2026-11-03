@@ -1,5 +1,5 @@
 """Interactive overview, synthetic reports and stubbed quote reads only."""
-import copy,sys,threading
+import copy,json,sys,threading
 from pathlib import Path
 from datetime import datetime,timezone
 from unittest.mock import patch
@@ -12,15 +12,15 @@ from playwright.sync_api import sync_playwright,expect
 def main():
  case=market_fixture.Quotes();case.setUp();previous=full_report(9);previous.update(report_id='overview-base',is_test=False,generated_at='2027-01-02T12:00:00Z')
  for p in previous['portfolios']:p['as_of']=previous['generated_at']
- report_ingest.save(app.connect,1,previous)
+ previous=json.loads(json.dumps(previous).replace('"synthetic-candidate-0"',json.dumps(case.cid)));report_ingest.save(app.connect,1,previous)
  current=full_report(12);current.update(report_id='overview-current',is_test=False,generated_at='2027-01-03T12:00:00Z')
  for p in current['portfolios']:p['as_of']=current['generated_at']
  current['portfolios'][0].update(value={'amount':'1025.25','currency':'DKK'},cash=[{'amount':'175.50','currency':'DKK'}])
  for i,c in enumerate(current['candidates']):c.update(signal='AFVENT' if i==0 else 'OVERVÅG' if i==1 else 'BEHOLD',assessment='Konkret syntetisk vurdering '+str(i),next_action='Kontrollér den nævnte begivenhed '+str(i))
- current['candidates'][0]['ticker']='CHART';report_ingest.save(app.connect,1,current)
+ current['candidates'][0]['ticker']='CHART';current=json.loads(json.dumps(current).replace('"synthetic-candidate-0"',json.dumps(case.cid)));report_ingest.save(app.connect,1,current)
  calls=[]
  def quote(connect,uid,data):
-  assert uid==1 and data['report_id']=='overview-current';c=next(c for c in current['candidates'] if c['candidate_id']==data['candidate_id']);calls.append(data)
+  assert uid==1 and data['report_id']=='overview-current';c=next(c for c in current['candidates'] if c['candidate_id']==data['candidate_id']) if data.get('candidate_id') else {'ticker':next(p['ticker'] for p in current['positions'] if p['position_id']==data['position_id']),'signal':'BEHOLD','candidate_id':data['position_id']};calls.append(data)
   q=market_data.normalized(case.raw,'synthetic-chart-asset',datetime.now(timezone.utc));q['ticker']=c['ticker'];q['asset_id']='synthetic-'+c['candidate_id']
   if c['signal']=='OVERVÅG':q.update(daily_change='-0.225',daily_change_percent='-1.222')
   return q
@@ -37,11 +37,11 @@ def main():
    assert 'Hold øje med disse kandidater' in page.locator('.desk-summary').inner_text();page.locator('.overview-next .market-slot').first.scroll_into_view_if_needed();page.locator('.overview-next .market-change.market-positive').wait_for();page.locator('.overview-next .market-change.market-negative').wait_for()
    assert page.locator('.overview-next .market-origin').first.is_visible();assert 'kurstid ukendt' in page.locator('.overview-next .market-origin').first.inner_text()
    positive=page.locator('.overview-next .market-change.market-positive');negative=page.locator('.overview-next .market-change.market-negative');assert positive.evaluate('(n)=>getComputedStyle(n).color')!=negative.evaluate('(n)=>getComputedStyle(n).color')
-   before=len(calls);page.locator('.overview-next [data-market-expand]').first.click();chart=page.locator('#market-chart-dialog');chart.wait_for(state='visible');assert chart.locator('.market-line').get_attribute('d').count('L')==1
+   page.wait_for_load_state('networkidle');before=len(calls);page.locator('.overview-next [data-market-expand]').first.click();chart=page.locator('#market-chart-dialog');chart.wait_for(state='visible');assert chart.locator('.market-line').get_attribute('d').count('L')==1
    chart.locator('[data-market-period=week]').click();assert chart.locator('.market-line').get_attribute('d').count('L')==81;assert len(calls)==before
    page.keyboard.press('Escape');expect(page.locator('.overview-next [data-market-expand]').first).to_be_focused()
    assert page.locator('.overview-value-link.market-positive').count()==1;assert page.locator('.overview-cash-link.market-negative').count()==1
-   page.locator('.overview-report-values>summary').click();page.locator('.overview-value-link').click();dialog=page.locator('#overview-detail-dialog');dialog.wait_for(state='visible');assert dialog.locator('[data-open-report=overview-base]').count()==1;assert dialog.locator('.overview-detail-row').count()==12;page.keyboard.press('Escape')
+   page.locator('.overview-report-values>summary').click();page.locator('.overview-report-values .overview-value-link').click();dialog=page.locator('#overview-detail-dialog');dialog.wait_for(state='visible');assert dialog.locator('[data-open-report=overview-base]').count()==1;assert dialog.locator('.overview-detail-row').count()==12;page.keyboard.press('Escape')
    for kind,count in [('positions',11),('orders',15),('candidates',12)]:
     button=page.locator('.overview-counts [data-overview-detail='+kind+']');button.click();assert dialog.locator('.overview-detail-row').count()==count;page.keyboard.press('Escape');assert button.evaluate('(n)=>n===document.activeElement')
    page.locator('.overview-status-links [data-overview-index=red]').click();assert 'Ingen kandidater i denne gruppe' in dialog.inner_text();dialog.locator('[data-overview-index=yellow]').click();assert dialog.locator('.overview-detail-row').count()==2

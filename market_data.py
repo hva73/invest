@@ -69,9 +69,14 @@ def normalized(raw,asset_id,now=None):
 
 def candidate(connect,user_id,data):
     if type(data.get('is_test',False)) is not bool:raise MarketError('Ukendt rapportkategori.')
-    result=report_ingest.item(connect,user_id,str(data.get('report_id','')),data.get('is_test',False))
+    result=report_ingest.item(connect,user_id,str(data.get('report_id','')),data.get('is_test',False),include_views=False)
     report=result['report']
     if not report or report['data']['schema_version']!=2:raise MarketError('Vælg en kandidat fra en tilgængelig v2-rapport.')
+    if data.get('position_id') is not None:
+        p=next((p for p in report['data']['positions'] if p['position_id']==data.get('position_id') and p['portfolio_id']==data.get('portfolio_id')),None)
+        if not p:raise MarketError('Positionen findes ikke i din rapport og portefølje.')
+        if data.get('candidate_id'):raise MarketError('Vælg enten position eller kandidat.')
+        return {'candidate_id':'@position/'+json.dumps([data.get('is_test',False),p['portfolio_id'],p['position_id']],separators=(',',':')),'ticker':p.get('ticker') or p.get('asset_id') or '', 'asset_id':p.get('asset_id')}
     c=next((c for c in report['data']['candidates'] if c['candidate_id']==data.get('candidate_id')),None)
     if not c:raise MarketError('Kandidaten findes ikke i din rapport.')
     return c
@@ -94,6 +99,10 @@ def quote(connect,user_id,data,factory=None):
     if selected is not None and (not isinstance(selected,str) or not 1<=len(selected)<=200):raise MarketError('Vælg et gyldigt aktiv fra Pluto-søgningen.')
     with connect() as db:link=db.execute('SELECT * FROM market_asset_links WHERE user_id=? AND candidate_id=?',(user_id,c['candidate_id'])).fetchone()
     aid=link['asset_id'] if link and link['expected_ticker']==ticker and not selected and data.get('choose') is not True else None
+    if c.get('asset_id'):
+        if data.get('choose') is True or selected and selected!=c['asset_id']:raise MarketError('Aktivet er fastlagt med asset_id i positionsrapporten. Ret rapporten ved en forkert aktividentitet.')
+        aid=c['asset_id']
+    if not ticker and not aid:raise MarketError('Positionen mangler asset_id og ticker til kursopslag.')
     cl=None;tools=None
     if not aid:
         cl,tools=trade_service.client(connect,user_id,factory)
@@ -117,6 +126,7 @@ def quote(connect,user_id,data,factory=None):
         if cached and cached['attempted']>time.time()-wait:
             if cached['payload']:
                 response=json.loads(cached['payload']);response['cached']=True;response['last_error']=cached['last_error'];db.execute('INSERT INTO market_asset_links VALUES(?,?,?,?) ON CONFLICT(user_id,candidate_id) DO UPDATE SET expected_ticker=excluded.expected_ticker,asset_id=excluded.asset_id',(user_id,c['candidate_id'],ticker,aid));return response
+            if not cached['last_error'] and cached['attempted']>time.time()-30:return {'pending':True,'retry_after':2}
             raise MarketError(cached['last_error'] or 'Kursopslaget er allerede i gang. Prøv igen om lidt.')
         db.execute('INSERT INTO market_asset_cache(user_id,asset_id,attempted) VALUES(?,?,?) ON CONFLICT(user_id,asset_id) DO UPDATE SET attempted=excluded.attempted',(user_id,aid,time.time()))
     try:

@@ -221,3 +221,7 @@ Send journalen som selvstændige hændelser med stabilt `entry_id`, reelt `occur
 ## Fokuseret forside og navigation
 
 Overblikket viser Pluto-kontotal først og analyseoverblikket separat nedenunder. Rapportens porteføljetal kan foldes ud som datagrundlag, og er åbne som udgangspunkt, hvis Pluto-værdier mangler. Klik på beløb og optællinger åbner kilder og underliggende poster; klik på dagskurser åbner grafen. Portefølje-/Collection-træet er flyttet til Porteføljer. Statusantal fungerer også som filtre i Radar og den fulde analyse. Se [OVERVIEW.md](OVERVIEW.md) for farver, kildeadskillelse og verificerede klikveje. Rapportformatet og eksisterende rapporter ændres ikke.
+
+## Additive positions- og V2.2-udvidelser (3. november 2026)
+
+De oprindelige obligatoriske v2-medlemmer er uændrede. Positionsvurderinger, kandidatbeslutninger, regionsdækning, kildemetadata, likviditetskategorier og ekstra ordrefelter kan nu leveres som valgfrie felter. Se [positionskontrakten](POSITION_ASSESSMENTS.md) og [V2.2-workflows](V2_2_WORKFLOWS.md). HOT WATCH-målinger gemmes separat og ændrer ikke historiske rapportpayloads. `schema_version` er fortsat 2; MCP-serverversionen er 2.4.0.

@@ -214,3 +214,13 @@ Forsiden viser kompakte Pluto-kontotal og analyseoverblik. Det overflødige afsn
 Der er også ryddet op i Porteføljer, Radar, Analyser og Journal: statusantal filtrerer kandidater, den manuelle idéformular og tekniske joboplysninger kan foldes ud, dobbelt analyseindbakke og tomme resultatbokse er fjernet. Brugeråbnede afsnit bevares ved opdatering. Kildetider, automatisk opdatering og træk-opdatering bevares. Se [OVERVIEW.md](OVERVIEW.md).
 
 Denne ZIP samler også den tidligere endnu ikke installerede MCP-leveringsdiagnostik (2.2.1). Hent én frisk ZIP og pak den ud under fx `escape_app/opdatering/overblik-oprydning/`. Stop appen, kør pakkens apply_update.py, start og genindlæs med Cmd+Shift+R. Ingen nye nøgler, afhængigheder eller databaseændringer. Eksisterende rapporter, Pluto-handler og timeautomatisering bevares; der skal ikke installeres særskilte mellemliggende opdateringer.
+
+## Positionsvurderinger og V2.2-tillæg — november 2026
+
+Anbefalet udpakningsmappe: `/home/nordicr4/escape_app/opdatering/positionsvurderinger/`. ZIP'ens egen undermappe kan have et andet navn; brug dens faktiske sti til `apply_update.py`. Installér hele den samlede opdatering, også hvis tidligere ændringer efter testen endnu ikke er installeret. Ingen manuel kopiering af enkelte JS-filer.
+
+Opdateringen tilføjer Python-filerne `position_reports.py`, `intel_contract.py`, `intel_workflows.py` samt `static/position-ui.js` og `static/intel-ui.js`. Det normale opdateringsscript tager privat backup og bevarer database og nøgler. Stop appen under kodeopdatering og genstart efter installation. Databaseændringerne oprettes additivt ved normal opstart; gamle rapportpayloads og digest omskrives ikke. Ingen nye produktionspakker eller ændring af cron/timeautomatisering.
+
+Genindlæs derefter ESCAPE-forbindelsens MCP-værktøjer i ChatGPT. Serverversion 2.4.0 annoncerer positionsfelter, de valgfrie V2.2-felter samt `record_hot_watch` og `get_hot_watch`. Rapportgeneratoren skal sende de nye felter efter den opdaterede kontrakt; eksisterende v2 fortsætter uændret, men giver DATA MANGLER/ukendt, hvor analyser eller observationer ikke leveres. Se [V2.2-workflows](V2_2_WORKFLOWS.md).
+
+Efter installation: kontrollér Overblik, Porteføljer/Collection-specifikation, Analyser, kandidatforløb og HOT WATCH ved både desktop og mobil. Driftsvisninger må ikke indeholde syntetiske eksempler. Foretag ikke rigtige handler som installationstest.

@@ -162,6 +162,179 @@
                 },
                 "maxItems": 80,
                 "uniqueItems": true
+              },
+              "coverage": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "exchanges": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200,
+                          "pattern": "\\S"
+                        },
+                        "maxItems": 80
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "OK",
+                          "FEJL",
+                          "IKKE KØRT"
+                        ]
+                      },
+                      "screening_count": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "data_at": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 50,
+                            "pattern": "\\S",
+                            "format": "date-time"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "news_checked_at": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 50,
+                            "pattern": "\\S",
+                            "format": "date-time"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "new_signals": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "pluto_verified": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "excluded": {
+                        "anyOf": [
+                          {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "gaps": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000,
+                          "pattern": "\\S"
+                        },
+                        "maxItems": 30
+                      },
+                      "basis": {
+                        "type": "string",
+                        "enum": [
+                          "intraday",
+                          "previous_close",
+                          "unknown"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "exchanges",
+                      "status",
+                      "screening_count",
+                      "data_at",
+                      "news_checked_at",
+                      "new_signals",
+                      "pluto_verified",
+                      "excluded",
+                      "gaps",
+                      "basis"
+                    ],
+                    "additionalProperties": false,
+                    "allOf": [
+                      {
+                        "if": {
+                          "properties": {
+                            "status": {
+                              "const": "OK"
+                            }
+                          },
+                          "required": [
+                            "status"
+                          ]
+                        },
+                        "then": {
+                          "properties": {
+                            "exchanges": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200,
+                                "pattern": "\\S"
+                              },
+                              "maxItems": 80,
+                              "minItems": 1
+                            },
+                            "data_at": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 50,
+                              "pattern": "\\S",
+                              "format": "date-time"
+                            },
+                            "screening_count": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
             "required": [
@@ -244,6 +417,71 @@
               "unverified",
               "historical",
               "unknown"
+            ]
+          },
+          "data_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50,
+                "pattern": "\\S",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "venue": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "\\S"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "feed_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "\\S"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "delay_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "primary_news_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000,
+                "pattern": "\\S",
+                "format": "https-url"
+              },
+              {
+                "type": "null"
+              }
             ]
           }
         },
@@ -441,6 +679,179 @@
             },
             "maxItems": 80,
             "uniqueItems": true
+          },
+          "reported_result": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "valuation_method": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "\\S"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "liquidity": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "available": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "amount": {
+                              "type": "string",
+                              "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                            }
+                          },
+                          "required": [
+                            "amount",
+                            "currency"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxItems": 10
+                  },
+                  "reserved": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "amount": {
+                              "type": "string",
+                              "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                            }
+                          },
+                          "required": [
+                            "amount",
+                            "currency"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxItems": 10
+                  },
+                  "earmarked": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "amount": {
+                              "type": "string",
+                              "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                            }
+                          },
+                          "required": [
+                            "amount",
+                            "currency"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxItems": 10
+                  },
+                  "unknown": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "amount": {
+                              "type": "string",
+                              "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                            },
+                            "currency": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                            }
+                          },
+                          "required": [
+                            "amount",
+                            "currency"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "maxItems": 10
+                  }
+                },
+                "required": [
+                  "available",
+                  "reserved",
+                  "earmarked",
+                  "unknown"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -763,6 +1174,417 @@
             },
             "maxItems": 80,
             "uniqueItems": true
+          },
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "asset_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "\\S"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "assessment": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "BEHOLD",
+                      "OVERVÅG",
+                      "AFVENT",
+                      "REDUCÉR",
+                      "SÆLG"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 12000,
+                    "pattern": "\\S"
+                  },
+                  "risk_level": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "unknown"
+                    ]
+                  },
+                  "next_action": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4000,
+                        "pattern": "\\S"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "assessed_at": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 50,
+                    "pattern": "\\S",
+                    "format": "date-time"
+                  },
+                  "source_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+                    },
+                    "maxItems": 80,
+                    "uniqueItems": true,
+                    "minItems": 1
+                  },
+                  "data_quality": {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "verified",
+                          "unverified",
+                          "historical",
+                          "mixed",
+                          "unknown"
+                        ]
+                      },
+                      "as_of": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 50,
+                            "pattern": "\\S",
+                            "format": "date-time"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "note": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000,
+                            "pattern": "\\S"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "status",
+                      "as_of",
+                      "note"
+                    ],
+                    "additionalProperties": false,
+                    "allOf": [
+                      {
+                        "if": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "verified"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "status"
+                          ]
+                        },
+                        "then": {
+                          "type": "object",
+                          "properties": {
+                            "as_of": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 50,
+                              "pattern": "\\S",
+                              "format": "date-time"
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "action",
+                  "reason",
+                  "risk_level",
+                  "next_action",
+                  "assessed_at",
+                  "source_ids",
+                  "data_quality"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "market": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "price": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "amount": {
+                            "type": "string",
+                            "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                          },
+                          "currency": {
+                            "type": "string",
+                            "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                          }
+                        },
+                        "required": [
+                          "amount",
+                          "currency"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "daily_change": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "amount": {
+                            "type": "string",
+                            "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                          },
+                          "currency": {
+                            "type": "string",
+                            "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                          }
+                        },
+                        "required": [
+                          "amount",
+                          "currency"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "daily_change_percent": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^-?\\d{1,18}(\\.\\d{1,18})?$(?![\\s\\S])"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "price_as_of": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 50,
+                        "pattern": "\\S",
+                        "format": "date-time"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "change_as_of": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 50,
+                        "pattern": "\\S",
+                        "format": "date-time"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "verification": {
+                    "type": "string",
+                    "enum": [
+                      "verified",
+                      "unverified",
+                      "unknown"
+                    ]
+                  },
+                  "source_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+                    },
+                    "maxItems": 80,
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "price",
+                  "daily_change",
+                  "daily_change_percent",
+                  "price_as_of",
+                  "change_as_of",
+                  "verification",
+                  "source_ids"
+                ],
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "verification": {
+                          "type": "string",
+                          "enum": [
+                            "verified"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "verification"
+                      ]
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "price_as_of": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 50,
+                          "pattern": "\\S",
+                          "format": "date-time"
+                        },
+                        "source_ids": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+                          },
+                          "maxItems": 80,
+                          "uniqueItems": true,
+                          "minItems": 1
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "type": "object",
+                      "properties": {
+                        "verification": {
+                          "type": "string",
+                          "enum": [
+                            "unknown",
+                            "unverified"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "verification"
+                      ]
+                    },
+                    "then": {
+                      "type": "object",
+                      "properties": {
+                        "price": {
+                          "type": "null"
+                        },
+                        "daily_change": {
+                          "type": "null"
+                        },
+                        "daily_change_percent": {
+                          "type": "null"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unrealized_pnl": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "position_status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "closed",
+              "unknown"
+            ]
           }
         },
         "required": [
@@ -831,7 +1653,8 @@
               "filled",
               "cancelled",
               "rejected",
-              "unknown"
+              "unknown",
+              "expired"
             ]
           },
           "requested_quantity": {
@@ -911,6 +1734,221 @@
                 "minLength": 1,
                 "maxLength": 4000,
                 "pattern": "\\S"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "side": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "BUY",
+                  "SELL"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "order_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "MARKET",
+                  "LIMIT",
+                  "STOP",
+                  "STOP_LIMIT"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stop_price": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "string",
+                    "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limit_price": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "string",
+                    "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "approval_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "proposed",
+                  "awaiting_approval",
+                  "approved",
+                  "rejected",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "average_fill_price": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "string",
+                    "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50,
+                "pattern": "\\S",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status_changed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50,
+                "pattern": "\\S",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50,
+                "pattern": "\\S",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "realized_pnl": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "amount": {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                  },
+                  "currency": {
+                    "type": "string",
+                    "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                  }
+                },
+                "required": [
+                  "amount",
+                  "currency"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "execution_source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pluto",
+                  "other",
+                  "unknown"
+                ]
               },
               {
                 "type": "null"
@@ -1535,6 +2573,400 @@
               "format": "https-url"
             },
             "maxItems": 10
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "KØB",
+                      "AFVENT",
+                      "FRAVÆLG"
+                    ]
+                  },
+                  "decided_at": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 50,
+                    "pattern": "\\S",
+                    "format": "date-time"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 12000,
+                    "pattern": "\\S"
+                  },
+                  "next_trigger": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4000,
+                        "pattern": "\\S"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "deadline": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 50,
+                        "pattern": "\\S",
+                        "format": "date-time"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "data_as_of": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 50,
+                        "pattern": "\\S",
+                        "format": "date-time"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "source_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+                    },
+                    "maxItems": 80,
+                    "uniqueItems": true,
+                    "minItems": 1
+                  },
+                  "reactivation_reason": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4000,
+                        "pattern": "\\S"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "buy_plan": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "max_limit_price": {
+                            "type": "object",
+                            "properties": {
+                              "amount": {
+                                "type": "string",
+                                "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                              },
+                              "currency": {
+                                "type": "string",
+                                "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                              }
+                            },
+                            "required": [
+                              "amount",
+                              "currency"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "amount_dkk": {
+                            "type": "object",
+                            "properties": {
+                              "amount": {
+                                "type": "string",
+                                "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                              },
+                              "currency": {
+                                "type": "string",
+                                "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                              }
+                            },
+                            "required": [
+                              "amount",
+                              "currency"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "horizon": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500,
+                            "pattern": "\\S"
+                          },
+                          "expires_at": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 50,
+                            "pattern": "\\S",
+                            "format": "date-time"
+                          },
+                          "risk_budget": {
+                            "type": "object",
+                            "properties": {
+                              "amount": {
+                                "type": "string",
+                                "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                              },
+                              "currency": {
+                                "type": "string",
+                                "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                              }
+                            },
+                            "required": [
+                              "amount",
+                              "currency"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "upside": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000,
+                            "pattern": "\\S"
+                          },
+                          "downside": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000,
+                            "pattern": "\\S"
+                          },
+                          "exit_method": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000,
+                            "pattern": "\\S"
+                          },
+                          "approval": {
+                            "type": "string",
+                            "enum": [
+                              "proposed",
+                              "awaiting_approval",
+                              "approved",
+                              "rejected",
+                              "unknown"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "max_limit_price",
+                          "amount_dkk",
+                          "horizon",
+                          "expires_at",
+                          "risk_budget",
+                          "upside",
+                          "downside",
+                          "exit_method",
+                          "approval"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "status",
+                  "decided_at",
+                  "reason",
+                  "next_trigger",
+                  "deadline",
+                  "data_as_of",
+                  "source_ids",
+                  "reactivation_reason",
+                  "buy_plan"
+                ],
+                "additionalProperties": false,
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "status": {
+                          "const": "KØB"
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "buy_plan": {
+                          "type": "object",
+                          "properties": {
+                            "max_limit_price": {
+                              "type": "object",
+                              "properties": {
+                                "amount": {
+                                  "type": "string",
+                                  "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                                },
+                                "currency": {
+                                  "type": "string",
+                                  "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                                }
+                              },
+                              "required": [
+                                "amount",
+                                "currency"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "amount_dkk": {
+                              "type": "object",
+                              "properties": {
+                                "amount": {
+                                  "type": "string",
+                                  "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                                },
+                                "currency": {
+                                  "type": "string",
+                                  "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                                }
+                              },
+                              "required": [
+                                "amount",
+                                "currency"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "horizon": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500,
+                              "pattern": "\\S"
+                            },
+                            "expires_at": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 50,
+                              "pattern": "\\S",
+                              "format": "date-time"
+                            },
+                            "risk_budget": {
+                              "type": "object",
+                              "properties": {
+                                "amount": {
+                                  "type": "string",
+                                  "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                                },
+                                "currency": {
+                                  "type": "string",
+                                  "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+                                }
+                              },
+                              "required": [
+                                "amount",
+                                "currency"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "upside": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2000,
+                              "pattern": "\\S"
+                            },
+                            "downside": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2000,
+                              "pattern": "\\S"
+                            },
+                            "exit_method": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4000,
+                              "pattern": "\\S"
+                            },
+                            "approval": {
+                              "type": "string",
+                              "enum": [
+                                "proposed",
+                                "awaiting_approval",
+                                "approved",
+                                "rejected",
+                                "unknown"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "max_limit_price",
+                            "amount_dkk",
+                            "horizon",
+                            "expires_at",
+                            "risk_budget",
+                            "upside",
+                            "downside",
+                            "exit_method",
+                            "approval"
+                          ],
+                          "additionalProperties": false
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "status": {
+                          "const": "AFVENT"
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ]
+                    },
+                    "then": {
+                      "properties": {
+                        "next_trigger": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000,
+                          "pattern": "\\S"
+                        },
+                        "deadline": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 50,
+                          "pattern": "\\S",
+                          "format": "date-time"
+                        },
+                        "data_as_of": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 50,
+                          "pattern": "\\S",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1638,6 +3070,17 @@
             },
             "maxItems": 80,
             "uniqueItems": true
+          },
+          "portfolio_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [

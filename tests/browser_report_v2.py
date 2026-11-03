@@ -30,7 +30,7 @@ def main():
     page=context.new_page();page.route('**/report-ui.js',lambda route:route.abort());errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(f'http://127.0.0.1:{server.server_port}')
     page.locator('#login-form [name=password]').fill('browser-test-password-long');page.locator('#login-form button').click();page.locator('#content .hero').wait_for()
-    page.locator('nav [data-view=reports]').click();page.locator('[data-view=inbox]').click();page.locator('#report-mode').select_option('true');page.locator('#load-ingested-report').click()
+    page.locator('nav [data-view=reports]').click();page.locator('#report-mode').select_option('true');page.locator('#load-ingested-report').click()
     page.locator('.intel-header').wait_for();assert page.locator('.intel-candidate').count()==6
     assert 'Samlet værdi vises ikke' in page.locator('.intel-consolidation').inner_text()
     assert 'signal' in page.locator('#ingested-report').inner_text()
@@ -39,7 +39,7 @@ def main():
      page.set_viewport_size({'width':width,'height':844})
      assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),width
     page.set_viewport_size({'width':390,'height':844});page.locator('.intel-header').scroll_into_view_if_needed();page.screenshot(path='/tmp/escape-intelligence-mobile.png')
-    first=page.locator('.intel-candidate').first
+    first=page.locator('.intel-candidate').filter(has=page.locator('[data-deep="test-candidate-alpha"]'))
     first.locator('header').scroll_into_view_if_needed();page.screenshot(path='/tmp/escape-intelligence-candidate-mobile.png')
     first.locator('[data-deep]').click();page.locator('#analysis-dialog').wait_for(state='visible')
     prompt=page.locator('#analysis-prompt').input_value();assert 'test-candidate-alpha' in prompt and 'escape-v2-synthetic-002' in prompt and 'Lang syntetisk' in prompt
@@ -57,7 +57,7 @@ def main():
     file=Path(directory)/'deep.json';file.write_text(json.dumps(deep,ensure_ascii=False))
     page.get_by_text('Importér analyse fra ChatGPT',exact=True).click();page.once('dialog',lambda dialog:dialog.accept());page.locator('#report-import').set_input_files(str(file))
     page.get_by_text('Rapporten er importeret.',exact=True).wait_for();page.get_by_text('Uddybning modtaget fra syntetisk import.',exact=True).first.wait_for()
-    first=page.locator('.intel-candidate').first;first.locator('[data-candidate-history]').click();page.locator('.intel-candidate-history').first.get_by_text('escape-v2-synthetic-002',exact=False).wait_for();assert 'escape-v2-synthetic-002' in page.locator('.intel-candidate-history').first.inner_text()
+    first=page.locator('.intel-candidate').filter(has=page.locator('[data-deep="test-candidate-alpha"]'));first.locator('[data-candidate-history]').click();page.locator('.intel-candidate-history').first.get_by_text('escape-v2-synthetic-002',exact=False).wait_for();assert 'escape-v2-synthetic-002' in page.locator('.intel-candidate-history').first.inner_text()
     # Legacy DB id 3 is preserved and uncertainty is explicit.
     page.locator('[data-view=report-archive]').first.click();page.locator('#report-mode').select_option('true');page.locator('#report-history option[value="'+legacy['report_id']+'"]').wait_for(state='attached');page.locator('#report-history').select_option(legacy['report_id']);page.get_by_text('Collection-overlap er ikke dokumenteret;',exact=False).wait_for()
     assert page.locator('[data-deep-legacy]').count()==3

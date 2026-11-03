@@ -21,6 +21,10 @@ def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS report_candidate_links(user_id INTEGER NOT NULL REFERENCES users(id),is_test INTEGER NOT NULL,candidate_id TEXT NOT NULL,report_row_id INTEGER NOT NULL REFERENCES ingested_reports(id),generated REAL NOT NULL,PRIMARY KEY(user_id,is_test,candidate_id,report_row_id))')
     c.execute('CREATE INDEX IF NOT EXISTS report_candidate_history ON report_candidate_links(user_id,is_test,candidate_id,generated)')
     c.execute('CREATE INDEX IF NOT EXISTS ingested_reports_mode ON ingested_reports(user_id,is_test,id)')
+    import position_reports
+    position_reports.init(c)
+    import intel_workflows
+    intel_workflows.init(c)
 
 def recipient(connect,authorization):
     key=os.environ.get('ESCAPE_REPORT_INGEST_KEY','');username=os.environ.get('ESCAPE_REPORT_INGEST_USER','')
@@ -48,11 +52,11 @@ def save(connect,user_id,data):
         c.execute('BEGIN IMMEDIATE')
         checked=inspect(data,c,user_id)
         if not checked['valid']:
-            if any(e['code']=='report_id_conflict' for e in checked['errors']):return 409,{'ok':False,'error':'report_id findes allerede med andet indhold','report_id':data['report_id'],**checked}
+            if any(e['code']=='report_id_conflict' for e in checked['errors']):return 409,{'ok':False,'delivery_status':'id_conflict','error':'report_id findes allerede med andet indhold','report_id':data['report_id'],**checked}
             raise ReportValidationError(checked)
         payload=json.dumps(data,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False)
         digest=hashlib.sha256(payload.encode()).hexdigest()
-        receipt={'ok':True,'valid':True,'report_id':data['report_id'],'schema_version':data['schema_version'],'counts':checked['counts'],'warnings':checked['warnings']}
+        receipt={'ok':True,'valid':True,'delivery_status':'stored','report_id':data['report_id'],'schema_version':data['schema_version'],'counts':checked['counts'],'warnings':checked['warnings']}
         old=c.execute('SELECT id,digest FROM ingested_reports WHERE user_id=? AND report_id=?',(user_id,data['report_id'])).fetchone()
         if old:
             return 200,{**receipt,'id':old['id'],'duplicate':True}
@@ -61,17 +65,37 @@ def save(connect,user_id,data):
         if data['schema_version']==2:
             for candidate in data['candidates']:
                 c.execute('INSERT INTO report_candidate_links VALUES(?,?,?,?,?)',(user_id,int(data['is_test']),candidate['candidate_id'],row_id,datetime.fromisoformat(data['generated_at'].upper().replace('Z','+00:00')).timestamp()))
+        import position_reports,intel_workflows
+        position_reports.index(c,user_id,row_id,data)
+        if data['schema_version']==2:intel_workflows.index_report(c,user_id,data)
+        for phase in ['received','validated','stored']:intel_workflows.evidence(c,row_id,phase)
         return 201,{**receipt,'id':row_id,'duplicate':False}
 
 def latest(connect,user_id,is_test=False):
-    with connect() as c:row=c.execute('SELECT id,received,payload FROM ingested_reports WHERE user_id=? AND is_test=? ORDER BY id DESC LIMIT 1',(user_id,int(is_test))).fetchone()
+    with connect() as c:
+        row=c.execute('SELECT id,received,payload,digest FROM ingested_reports WHERE user_id=? AND is_test=? ORDER BY id DESC LIMIT 1',(user_id,int(is_test))).fetchone()
+        if row:
+            import intel_workflows
+            intel_workflows.readback(c,row)
     return {'report':{'id':row['id'],'received':row['received'],'data':json.loads(row['payload'])} if row else None}
 
 def row_view(row):return {'id':row['id'],'received':row['received'],'data':json.loads(row['payload'])}
 
-def item(connect,user_id,report_id,is_test=False):
-    with connect() as c:row=c.execute('SELECT id,received,payload FROM ingested_reports WHERE user_id=? AND report_id=? AND is_test=?',(user_id,report_id,int(is_test))).fetchone()
-    return {'report':row_view(row) if row else None}
+def item(connect,user_id,report_id,is_test=False,include_views=True,record_readback=False):
+    with connect() as c:
+        row=c.execute('SELECT id,received,payload,digest FROM ingested_reports WHERE user_id=? AND report_id=? AND is_test=?',(user_id,report_id,int(is_test))).fetchone()
+        report=row_view(row) if row else None
+        if report and include_views:
+            import intel_workflows
+            if record_readback:intel_workflows.readback(c,row)
+            report['delivery']=intel_workflows.delivery(c,row['id'])
+        if include_views and report and report['data']['schema_version']==2:
+            prior=c.execute("SELECT id,received,payload FROM ingested_reports WHERE user_id=? AND is_test=? AND report_type!='deep_analysis' AND generated_epoch<? ORDER BY generated_epoch DESC,id DESC LIMIT 1",(user_id,int(is_test),datetime.fromisoformat(report['data']['generated_at'].upper().replace('Z','+00:00')).timestamp())).fetchone()
+            previous=row_view(prior) if prior else None
+            import position_reports
+            report['positions_view']=position_reports.projection(c,user_id,report,previous,overlay_assessments=False)
+            report['portfolio_changes']=overview_changes(report,previous)
+    return {'report':report}
 
 def history(connect,user_id,is_test=False):
     with connect() as c:rows=c.execute('SELECT id,report_id,received,payload FROM ingested_reports WHERE user_id=? AND is_test=? ORDER BY id DESC LIMIT 100',(user_id,int(is_test))).fetchall()
@@ -91,7 +115,9 @@ def candidate_history(connect,user_id,candidate_id,is_test=False):
             if entry['candidate_id']==candidate_id and key not in seen_journal:journal.append(entry);seen_journal.add(key)
         events.append({'report_id':d['report_id'],'generated_at':d['generated_at'],'received':row['received'],'candidate':candidate,'changes':changes,'journal':journal})
         previous=current
-    return {'candidate_id':candidate_id,'events':list(reversed(events))[:50],'history_truncated':len(rows)>50}
+    import intel_workflows
+    with connect() as c:summary=intel_workflows.candidates(c,user_id,is_test,candidate_id)
+    return {'summary':summary[0] if summary else None,'candidate_id':candidate_id,'events':list(reversed(events))[:50],'history_truncated':len(rows)>50}
 
 def analysis_package(connect,user_id,request):
     rid=request.get('report_id');mode=request.get('is_test')
@@ -170,14 +196,29 @@ def desk(connect,user_id):
                     if row:
                         source=row_view(row);chosen=next(c for c in source['data']['candidates'] if c['candidate_id']==candidate['candidate_id'])
                 candidates.append({'candidate':chosen,'report_id':source['data']['report_id'],'generated_at':source['data']['generated_at'],'received':source['received'],'schema_version':source['data']['schema_version'],'quality':source['data'].get('data_quality',{}).get('status','unknown'),'index':index})
+        import position_reports
+        positions=position_reports.projection(c,user_id,main,previous)
+        import intel_workflows
+        registry=intel_workflows.candidates(c,user_id,include_history_market=False)
+        main_order={x['candidate_id']:i for i,x in enumerate(main['data'].get('candidates',[]))} if main and main['data']['schema_version']==2 else {}
+        registry.sort(key=lambda x:(main_order.get(x['candidate']['candidate_id'],len(main_order)),x['candidate']['candidate_id']))
+        for entry in registry:
+            if entry['decision']:entry['candidate']=dict(entry['candidate'],decision=entry['decision'])
+        dormant=[x for x in registry if not x['active']]
+        # v1 stays unchanged; modern candidates persist independently of a single report.
+        if main and main['data']['schema_version']==2:candidates=[x for x in registry if x['active']]
+        account_projection=intel_workflows.account_projection(main)
+        delivery=intel_workflows.delivery(c,main['id']) if main else {'status':'unknown','events':{}}
         journal=[];seen=set()
         rows=c.execute('SELECT id,received,payload FROM ingested_reports WHERE user_id=? AND is_test=0 ORDER BY generated_epoch DESC,id DESC LIMIT 50',(user_id,)).fetchall()
         for row in rows:
             report=row_view(row);data=report['data']
             for entry in data.get('journal',[]):
-                identity=(entry['kind'],entry['text'],entry.get('occurred_at'),entry.get('candidate_id'),entry.get('position_id'),entry.get('order_id'))
+                identity=(entry['kind'],entry['text'],entry.get('occurred_at'),entry.get('candidate_id'),entry.get('portfolio_id'),entry.get('position_id'),entry.get('order_id'))
                 if identity in seen:continue
                 seen.add(identity)
                 journal.append({'entry':entry,'report_id':data['report_id'],'source':data['source'],'generated_at':data['generated_at']})
         journal.sort(key=lambda e:datetime.fromisoformat((e['entry'].get('occurred_at') or e['generated_at']).upper().replace('Z','+00:00')).timestamp(),reverse=True)
-    return {'overview_changes':overview_changes(main,previous),'journal_events':journal[:100],'report':row_view(recent) if recent else None,'main_report':main,'candidates':candidates,'portfolio_report':main if main and (main['data'].get('portfolios') or main['data'].get('portfolio_values')) else None,'order_report':main if main and main['data'].get('orders') else None,'journal_report':main if main and main['data'].get('journal') else None}
+    watch_summary=intel_workflows.watch(connect,user_id)
+    hot_watch_active=None if watch_summary['history_truncated'] else sum(g['active'] for g in watch_summary['groups'])
+    return {'hot_watch_active':hot_watch_active,'delivery':delivery,'account_projection':account_projection,'dormant_candidates':dormant,'positions':positions,'overview_changes':overview_changes(main,previous),'journal_events':journal[:100],'report':row_view(recent) if recent else None,'main_report':main,'candidates':candidates,'portfolio_report':main if main and (main['data'].get('portfolios') or main['data'].get('portfolio_values')) else None,'order_report':main if main and main['data'].get('orders') else None,'journal_report':main if main and main['data'].get('journal') else None}

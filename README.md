@@ -56,3 +56,5 @@ Importerede Pluto-enheder har en detaljevisning med manuel læsning af senest re
 Privat MCP-rapportindbakke med OAuth/PKCE: se [docs/MCP_REPORTS.md](docs/MCP_REPORTS.md). Forbindelse til ChatGPT og planlagte opgaver kræver separat verifikation.
 
 ESCAPE Intelligence rapportvisning og JSON v2: [docs/REPORT_V2.md](docs/REPORT_V2.md). V1 og eksisterende OAuth-integration er bagudkompatible.
+
+Positionsvurderinger og V2.2: [positionskontrakt](docs/POSITION_ASSESSMENTS.md), [beslutninger og HOT WATCH](docs/V2_2_WORKFLOWS.md), [kravtillæg](docs/REQUIREMENTS_V2_2_DA.md). Gamle v1/v2-rapporter forbliver gyldige. Nye målinger og analyser kræver faktisk levering fra rapportgeneratoren; rapportimport udløser ingen handler.

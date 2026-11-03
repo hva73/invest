@@ -199,19 +199,27 @@ class Handler(BaseHTTPRequestHandler):
             s=self.session()
             if not s: return self.send(401,{'error':'Log ind først'})
             user_id=s['user_id']
+            if self.path=='/api/reports/hot-watch':
+                import intel_workflows
+                q=parse_qs(request.query);mode=q.get('is_test',['false'])
+                if len(mode)!=1 or mode[0] not in ['true','false']:return self.send(400,{'error':'Ugyldig rapporttype'})
+                return self.send(200,intel_workflows.watch(connect,user_id,mode[0]=='true',q.get('candidate_id',[None])[0]))
             if self.path=='/api/reports/desk':
                 import report_ingest
                 return self.send(200,report_ingest.desk(connect,user_id))
             if self.path=='/api/reports/schema':
                 import report_v2
                 return self.send(200,report_v2.SCHEMA)
-            if self.path in ['/api/reports/history','/api/reports/item','/api/reports/candidate-history']:
+            if self.path in ['/api/reports/history','/api/reports/item','/api/reports/candidate-history','/api/reports/position-history']:
                 import report_ingest
                 q=parse_qs(request.query);mode=q.get('is_test',['false'])
                 if len(mode)!=1 or mode[0] not in ['true','false']:return self.send(400,{'error':'Ugyldig rapporttype'})
                 test=mode[0]=='true'
                 if self.path.endswith('/history'):return self.send(200,report_ingest.history(connect,user_id,test))
-                if self.path.endswith('/item'):return self.send(200,report_ingest.item(connect,user_id,q.get('report_id',[''])[0],test))
+                if self.path.endswith('/item'):return self.send(200,report_ingest.item(connect,user_id,q.get('report_id',[''])[0],test,record_readback=True))
+                if self.path.endswith('/position-history'):
+                    import position_reports
+                    return self.send(200,position_reports.history(connect,user_id,q.get('portfolio_id',[''])[0],q.get('position_id',[''])[0],test))
                 return self.send(200,report_ingest.candidate_history(connect,user_id,q.get('candidate_id',[''])[0],test))
             if self.path=='/api/reports/latest':
                 import report_ingest
@@ -238,7 +246,7 @@ class Handler(BaseHTTPRequestHandler):
         if not path:return self.send(404,{'error':'Ikke fundet'})
         kind={'.html':'text/html; charset=utf-8','.js':'application/javascript','.css':'text/css','.json':'application/manifest+json','.svg':'image/svg+xml'}[Path(path).suffix]
         body=(ROOT/'static'/path).read_bytes()
-        if path=='app.js':body=(ROOT/'static/overview-ui.js').read_bytes()+b'\n'+(ROOT/'static/market-ui.js').read_bytes()+b'\n'+(ROOT/'static/report-ui.js').read_bytes()+b'\n'+(ROOT/'static/trade-ui.js').read_bytes()+b'\n'+body
+        if path=='app.js':body=(ROOT/'static/intel-ui.js').read_bytes()+b'\n'+(ROOT/'static/position-ui.js').read_bytes()+b'\n'+(ROOT/'static/overview-ui.js').read_bytes()+b'\n'+(ROOT/'static/market-ui.js').read_bytes()+b'\n'+(ROOT/'static/report-ui.js').read_bytes()+b'\n'+(ROOT/'static/trade-ui.js').read_bytes()+b'\n'+body
         self.send(200,body,kind)
     def do_POST(self):
         import mcp_reports
@@ -264,8 +272,8 @@ class Handler(BaseHTTPRequestHandler):
                 status,result=report_ingest.save(connect,recipient,data)
                 return self.send(status,result)
             length=int(self.headers.get('Content-Length','0'))
-            if length>(262144 if self.path=='/api/reports/import' else 16384): return self.send(413,{'error':'For stor forespørgsel'})
-            data=json.loads(self.rfile.read(length),object_pairs_hook=unique_object) if self.path=='/api/reports/import' else json.loads(self.rfile.read(length))
+            if length>(262144 if self.path in ['/api/reports/import','/api/reports/hot-watch'] else 16384): return self.send(413,{'error':'For stor forespørgsel'})
+            data=json.loads(self.rfile.read(length),object_pairs_hook=unique_object) if self.path in ['/api/reports/import','/api/reports/hot-watch'] else json.loads(self.rfile.read(length))
             if not isinstance(data,dict): raise ValueError('Ugyldig forespørgsel')
             if self.path in ['/api/login','/api/register']:
                 if self.throttled():return self.send(429,{'error':'Prøv igen om fem minutter'})
@@ -290,6 +298,10 @@ class Handler(BaseHTTPRequestHandler):
             if not s:return self.send(401,{'error':'Log ind først'})
             if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),s['csrf']):return self.send(403,{'error':'Ugyldigt sikkerhedstoken'})
             user_id=s['user_id']
+            if self.path=='/api/reports/hot-watch':
+                import intel_workflows
+                status,result=intel_workflows.record(connect,user_id,data)
+                return self.send(status,result)
             if self.path in ['/api/reports/import','/api/reports/analysis-package']:
                 import report_ingest
                 if self.path.endswith('/analysis-package'):return self.send(200,report_ingest.analysis_package(connect,user_id,data))
