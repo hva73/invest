@@ -103,5 +103,23 @@ class HotWatchHTTP(unittest.TestCase):
   _,tokens,_=self.http.granted();d=observation(self.r);result=self.http.call(tokens['access_token'],'record_hot_watch',d)[1]['result'];self.assertFalse(result['isError']);self.assertEqual(self.http.call(tokens['access_token'],'get_hot_watch',{'is_test':False})[1]['result']['structuredContent']['groups'][0]['observations'][0]['data'],d)
   before=self.snapshot();d['note']='Changed';result=self.http.call(tokens['access_token'],'record_hot_watch',d)[1]['result'];self.assertTrue(result['isError']);self.assertIn('observation_id_conflict',{e['code'] for e in result['structuredContent']['errors']})
   with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM hot_watch_observations').fetchone()[0],1)
+ def test_mcp_candidate_journal_without_observations_survives_omission(self):
+  _,tokens,_=self.http.granted();token=tokens['access_token'];d=merc_report(True);d['report_id']='journal-only-report-1';d['candidates']=d['candidates'][:2];d['positions']=[];d['orders']=[];d['journal']=[]
+  for index,candidate in enumerate(d['candidates']):candidate['candidate_id']='journal-only-candidate-'+str(index)
+  a,b=[x['candidate_id'] for x in d['candidates']]
+  for index,candidate in enumerate(d['candidates']):candidate['lifecycle']={'status':'HOT_WATCH' if index==0 else 'WAITING_TRIGGER','changed_at':d['generated_at'],'reason':'Syntetisk journaltest','source_ids':['synthetic-source'],'trade_cycle_id':'synthetic-cycle-'+str(index)}
+  def call(name,args):return self.http.call(token,name,args)[1]['result']
+  self.assertTrue(call('validate_report',d)['structuredContent']['valid']);self.assertFalse(call('send_report',d)['isError'])
+  newer=copy.deepcopy(d);newer.update(report_id='journal-only-report-2',generated_at='2026-11-03T10:01:00Z');newer['candidates']=newer['candidates'][:1];newer['candidates'][0]['lifecycle'].update(status='WAITING_TRIGGER',changed_at=newer['generated_at'],reason='Syntetisk ændring')
+  self.assertFalse(call('send_report',newer)['isError']);self.assertTrue(call('send_report',newer)['structuredContent']['duplicate'])
+  read=call('get_hot_watch',{'candidate_id':a,'is_test':True})['structuredContent'];self.assertEqual(read['groups'],[]);self.assertEqual(read['candidate']['lifecycle']['status'],'WAITING_TRIGGER');self.assertEqual(read['candidate']['candidate']['candidate_id'],a)
+  self.assertTrue({'HOT_WATCH','WAITING_TRIGGER'}<={e['status'] for e in read['lifecycle_history']['events']})
+  omitted=call('get_hot_watch',{'candidate_id':b,'is_test':True})['structuredContent'];self.assertIsNotNone(omitted['candidate']);self.assertEqual(omitted['candidate']['lifecycle']['status'],'WAITING_TRIGGER');self.assertTrue(omitted['lifecycle_history']['events'])
+  first=call('get_hot_watch',{'candidate_id':a,'is_test':True,'limit':1})['structuredContent']['lifecycle_history'];self.assertIsNotNone(first['next_cursor'])
+  second=call('get_hot_watch',{'candidate_id':a,'is_test':True,'limit':1,'before':first['next_cursor']})['structuredContent']['lifecycle_history'];self.assertNotEqual(first['events'][0]['event_id'],second['events'][0]['event_id'])
+  wrong_mode=call('get_hot_watch',{'candidate_id':a,'is_test':False})['structuredContent'];self.assertIsNone(wrong_mode['candidate']);self.assertEqual(wrong_mode['lifecycle_history']['events'],[])
+  for args in [{'candidate_id':a,'limit':True},{'candidate_id':a,'before':'invalid'},{'candidate_id':a,'limit':101},{'candidate_id':''},{'limit':1}]:self.assertTrue(call('get_hot_watch',args)['isError'])
+  _,read_tokens,_=self.http.granted('reports:read');readonly=self.http.call(read_tokens['access_token'],'get_hot_watch',{'candidate_id':b,'is_test':True})[1]['result'];self.assertEqual(readonly['structuredContent']['candidate']['candidate']['candidate_id'],b)
+  other=mcp_reports.rpc(app.connect,{'user_id':999,'scope':'reports:read'},{'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':'get_hot_watch','arguments':{'candidate_id':a,'is_test':True}}})[1]['result']['structuredContent'];self.assertIsNone(other['candidate']);self.assertEqual(other['lifecycle_history']['events'],[])
  def snapshot(self):
   with app.connect() as c:return list(c.iterdump())

@@ -150,3 +150,15 @@ Se [MCP_DELIVERY.md](MCP_DELIVERY.md). send_report bevarer skriveklassifikation 
 ## HOT WATCH Engine 2.5.0
 
 Nye, separat godkendte scopes: `hotwatch:read` og `hotwatch:manage`. Eksisterende rapportscopes giver ikke automatisk motoradgang. `start_hot_watch`, `control_hot_watch` og `get_hot_watch_engine` er additive motorværktøjer; `kind=candidate` henter den permanente statusprojektion. Se [API og faseafgrænsning](HOTWATCH_ENGINE.md) og [kandidatstatus](CANDIDATE_STATUS_MODEL.md). Ingen af værktøjerne opretter faktiske handler.
+
+## Rettelse 2.5.1 — kandidatjournal uden særskilte observationer
+
+Rapportlagring opdaterer allerede den permanente kandidatmodel atomisk. Tidligere returnerede `get_hot_watch` alene observationsgrupper; `groups=[]` kunne derfor ikke bruges til at afgøre, om en rapportkandidat var bevaret.
+
+Med `candidate_id` returnerer værktøjet nu også `candidate` (seneste permanente projektion) og `lifecycle_history` (journal med `events` og `next_cursor`). Dette kræver kun eksisterende `reports:read`. Gruppernes format er uændret. Et ukendt eller ikke-ejet kandidat-ID returnerer `candidate:null` og tom journal, og test/drift er adskilt.
+
+Eksempel: `{"candidate_id":"escint20261103185936.B","is_test":true}`. Ældre journalhændelser hentes med samme argumenter plus `before` fra `lifecycle_history.next_cursor` og valgfri `limit` (1–100, standard 50). Pagination kræver et kandidat-ID. Uden kandidat-ID bevares det tidligere gruppeopslag.
+
+`get_hot_watch_engine` kræver fortsat separat `hotwatch:read`; rettelsen udvider ikke rapportforbindelsens adgang til motorstyring. Ingen rapporter, historik, driftsjobs eller strategier skal ændres eller genfremsendes. Opdatér kode, genstart webappen og genindlæs ChatGPT-forbindelsen ved behov. Serverversion vises som 2.5.1.
+
+Verifikation af 2.5.1: 254 Python-tests bestået. Det nye MCP-forløb tester rapport 1 med A/B → rapport 2 med ændret A og udeladt B → identisk genforsøg → kandidatjournal gennem reports:read uden observationsgrupper. Testen kontrollerer også paginering, ukendte/ikke-ejede kandidater, test/drift og ugyldige input. Kun midlertidige lokale databaser; ejerens konkrete produktions-ID’er er ikke slået op fra udviklingsmiljøet.
