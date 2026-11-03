@@ -225,7 +225,7 @@ def watch(connect,uid,is_test=False,candidate_id=None):
                 order=json.loads(row['value'])
                 if order['order_id'] not in orders:orders[order['order_id']]=dict(order,display_status=order_state(order),report_id=row['report_id'])
             group['orders']=list(orders.values())
-        return {'groups':sorted(groups.values(),key=lambda x:stamp(x['observations'][0]['data']['observed_at']).timestamp(),reverse=True),'is_test':is_test,'history_truncated':len(rows)>500}
+        return {'waiting_candidates':[r for r in candidates(c,uid,is_test,include_history_market=False) if r.get('display_group')=='waiting'],'active_candidates':[r for r in candidates(c,uid,is_test,include_history_market=False) if r.get('display_group') in ['active','buy','exit']],'groups':sorted(groups.values(),key=lambda x:stamp(x['observations'][0]['data']['observed_at']).timestamp(),reverse=True),'is_test':is_test,'history_truncated':len(rows)>500}
 
 def candidates(c,uid,mode=False,candidate_id=None,include_history_market=True):
     ids=[candidate_id] if candidate_id is not None else [r[0] for r in c.execute('SELECT DISTINCT candidate_id FROM report_candidate_links WHERE user_id=? AND is_test=?',(uid,int(mode)))]
@@ -257,6 +257,8 @@ def candidates(c,uid,mode=False,candidate_id=None,include_history_market=True):
         last_seen=max([d['generated_at']]+([observed['observed_at']] if observed else []),key=lambda t:stamp(t))
         import candidate_lifecycle
         status=candidate_lifecycle.projection(c,uid,mode,candidate,current_decision[1] if current_decision else None)
+        import display_policy
+        status['display_group']=display_policy.candidate_group(status)
         result.append({**status,'latest_verified_market':latest_market,'candidate':candidate,'decision':current_decision[1] if current_decision else None,'decision_origin':current_decision[2] if current_decision else None,'active':status['lifecycle']['status'] not in ['CLOSED','ARCHIVED'] and (not current_decision or current_decision[1]['status']!='FRAVÆLG'),'first_seen':first['generated_at'],'last_seen':last_seen,'first_price':initial['market']['price'],'report_id':d['report_id'],'received':latest['received'],'generated_at':d['generated_at'],'schema_version':2,'quality':d.get('data_quality',{}).get('status','unknown')})
     return result
 

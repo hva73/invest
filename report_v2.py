@@ -103,3 +103,6 @@ CANDIDATE_LIFECYCLE=obj({'status':enum(*LIFECYCLE_STATUSES),'changed_at':TIME['a
 CANDIDATE['properties'].update({'asset_id':nullable(ID),'exchange':nullable(string(200)),'lifecycle':nullable(CANDIDATE_LIFECYCLE),'reactivation_reason':nullable(string(4000))})
 for collection in ['positions','orders','journal']:SCHEMA['properties'][collection]['items']['properties']['trade_cycle_id']=nullable(ID)
 strict_patterns(SCHEMA)
+
+# Optional exact provider reference; sender claims do not confer broker authority.
+PORTFOLIO['properties']['broker_reference']=nullable(obj({'provider':enum('pluto'),'external_id':ID}))

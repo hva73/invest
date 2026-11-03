@@ -247,6 +247,13 @@ class Handler(BaseHTTPRequestHandler):
                 import jobs
                 return self.send(200,jobs.status(connect,user_id))
             if self.path=='/api/connections': return self.send(200,connection_state(user_id))
+            if self.path=='/api/dashboard/journal':
+                import journal_projection
+                q=parse_qs(request.query)
+                if any(len(v)!=1 for v in q.values()) or set(q)-{'days','source','kind','before','limit'}:return self.send(400,{'error':'Ugyldigt journalfilter'})
+                try:result=journal_projection.read(connect,user_id,days=int(q.get('days',['7'])[0]),source=q.get('source',['all'])[0],kind=q.get('kind',['all'])[0],before=q.get('before',[None])[0],limit=int(q.get('limit',['100'])[0]))
+                except (ValueError,OverflowError):return self.send(400,{'error':'Ugyldigt journalfilter'})
+                return self.send(200,result)
             if self.path=='/api/state':
                 import portfolios
                 with connect() as c:
@@ -254,16 +261,19 @@ class Handler(BaseHTTPRequestHandler):
                     import portfolio_data
                     snapshots=portfolio_data.snapshots(c,user_id)
                 summary=portfolio_data.summaries(owned,snapshots)
+                import dashboard_projection
+                dashboard=dashboard_projection.build(connect,user_id,owned,snapshots)
                 with connect() as c: p=[dict(r) for r in c.execute('SELECT * FROM proposals WHERE user_id=? ORDER BY id DESC',(user_id,))]; j=[dict(r) for r in c.execute('SELECT * FROM journal WHERE user_id=? ORDER BY id DESC',(user_id,))]
                 with connect() as c: opportunities=[dict(r) for r in c.execute('SELECT * FROM opportunities WHERE user_id=? ORDER BY id DESC',(user_id,))]
-                import trade_service
-                return self.send(200,{'broker_proposals':trade_service.summaries(connect,user_id),'portfolio_snapshots':snapshots,'portfolio_summary':summary,'portfolios':owned,'user':{'username':s['username'],'role':s['role']},'connection':connection_state(user_id),'opportunities':opportunities,'proposals':p,'journal':j,'time':now(),'integrations':{'Pluto Markets':'Ikke tilsluttet','Markedsdata':'Ikke tilsluttet','Nyheder og AI':'Ikke tilsluttet'},'reports':{'timezone':'Europe/Copenhagen','schedule':['08:00','14:00','22:00'],'status':'Afventer datakilder og scheduler'}})
+                import trade_service,hotwatch_adapters
+                provider_status=hotwatch_adapters.providers(connect,user_id,False)
+                return self.send(200,{'provider_status':provider_status,'dashboard':dashboard,'broker_proposals':trade_service.summaries(connect,user_id),'portfolio_snapshots':snapshots,'portfolio_summary':summary,'portfolios':owned,'user':{'username':s['username'],'role':s['role']},'connection':connection_state(user_id),'opportunities':opportunities,'proposals':p,'journal':j,'time':now(),'integrations':{'Pluto Markets':'Ikke tilsluttet','Markedsdata':'Ikke tilsluttet','Nyheder og AI':'Ikke tilsluttet'},'reports':{'timezone':'Europe/Copenhagen','schedule':['08:00','14:00','22:00'],'status':'Afventer datakilder og scheduler'}})
             return self.send(404,{'error':'Ukendt endpoint'})
         path={'/':'index.html','/app.js':'app.js','/report-ui.js':'report-ui.js','/style.css':'style.css','/manifest.json':'manifest.json','/sw.js':'sw.js','/icon.svg':'icon.svg'}.get(self.path)
         if not path:return self.send(404,{'error':'Ikke fundet'})
         kind={'.html':'text/html; charset=utf-8','.js':'application/javascript','.css':'text/css','.json':'application/manifest+json','.svg':'image/svg+xml'}[Path(path).suffix]
         body=(ROOT/'static'/path).read_bytes()
-        if path=='app.js':body=(ROOT/'static/candidate-ui.js').read_bytes()+b'\n'+(ROOT/'static/engine-ui.js').read_bytes()+b'\n'+(ROOT/'static/intel-ui.js').read_bytes()+b'\n'+(ROOT/'static/position-ui.js').read_bytes()+b'\n'+(ROOT/'static/overview-ui.js').read_bytes()+b'\n'+(ROOT/'static/market-ui.js').read_bytes()+b'\n'+(ROOT/'static/report-ui.js').read_bytes()+b'\n'+(ROOT/'static/trade-ui.js').read_bytes()+b'\n'+body
+        if path=='app.js':body=(ROOT/'static/journal-ui.js').read_bytes()+b'\n'+(ROOT/'static/dashboard-ui.js').read_bytes()+b'\n'+(ROOT/'static/candidate-ui.js').read_bytes()+b'\n'+(ROOT/'static/engine-ui.js').read_bytes()+b'\n'+(ROOT/'static/intel-ui.js').read_bytes()+b'\n'+(ROOT/'static/position-ui.js').read_bytes()+b'\n'+(ROOT/'static/overview-ui.js').read_bytes()+b'\n'+(ROOT/'static/market-ui.js').read_bytes()+b'\n'+(ROOT/'static/report-ui.js').read_bytes()+b'\n'+(ROOT/'static/trade-ui.js').read_bytes()+b'\n'+body
         self.send(200,body,kind)
     def do_POST(self):
         import hotwatch_api

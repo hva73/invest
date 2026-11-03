@@ -8,8 +8,12 @@ from mcp_client import MCP,decode_result,PortfolioFormatError,shape
 READ_TOOLS={'get_accounts':'portfolioId','get_positions':'portfolioId','get_portfolio_value':'portfolioId','get_collection':'collectionId'}
 
 def init(c):
+    import dashboard_projection
+    dashboard_projection.init(c)
     c.execute('CREATE TABLE IF NOT EXISTS pluto_refresh_checks(user_id INTEGER NOT NULL REFERENCES users(id),resource TEXT NOT NULL,attempted REAL NOT NULL,PRIMARY KEY(user_id,resource))')
     c.execute('CREATE TABLE IF NOT EXISTS portfolio_snapshots(portfolio_id INTEGER PRIMARY KEY REFERENCES portfolios(id),user_id INTEGER NOT NULL REFERENCES users(id),observed TEXT NOT NULL,payload TEXT NOT NULL,last_error TEXT,last_attempt TEXT NOT NULL)')
+    for row in c.execute('SELECT portfolio_id,user_id,payload FROM portfolio_snapshots'):
+        dashboard_projection.remember(c,row['user_id'],row['portfolio_id'],json.loads(row['payload']))
 
 def claim_refresh(connect,user_id,resource,automatic=False):
     """Share a five-minute read budget across tabs and Passenger processes."""
@@ -269,7 +273,10 @@ def read(connect,user_id,portfolio_id,client_factory=None):
 
 def save(c,user_id,portfolio_id,payload):
     if not c.execute("SELECT 1 FROM portfolios WHERE id=? AND user_id=? AND source='pluto'",(portfolio_id,user_id)).fetchone():raise ValueError('invalid owner')
-    c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?) ON CONFLICT(portfolio_id) DO UPDATE SET observed=excluded.observed,payload=excluded.payload,last_error=NULL,last_attempt=excluded.last_attempt WHERE excluded.observed>=portfolio_snapshots.observed',(portfolio_id,user_id,payload['observed'],json.dumps(payload),payload['observed']))
+    changed=c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?) ON CONFLICT(portfolio_id) DO UPDATE SET observed=excluded.observed,payload=excluded.payload,last_error=NULL,last_attempt=excluded.last_attempt WHERE excluded.observed>=portfolio_snapshots.observed',(portfolio_id,user_id,payload['observed'],json.dumps(payload),payload['observed']))
+    if changed.rowcount:
+        import dashboard_projection
+        dashboard_projection.remember(c,user_id,portfolio_id,payload)
 
 def snapshots(c,user_id):
     return {str(row['portfolio_id']):{'data':json.loads(row['payload']),'last_error':row['last_error'],'last_attempt':row['last_attempt']} for row in c.execute('SELECT * FROM portfolio_snapshots WHERE user_id=?',(user_id,))}
