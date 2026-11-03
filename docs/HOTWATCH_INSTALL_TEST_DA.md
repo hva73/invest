@@ -5,11 +5,11 @@ Dette er en manuel, read-only installationsprøve. Den opretter ingen handler og
 ## Installation
 
 1. Tag den eksisterende private backup efter jeres normale procedure, og stop webappen.
-2. Upload og udpak `hotwatch-engine-controlled-v1.zip` under `/home/nordicr4/escape_app/opdatering/`. Udpakningsmappen skal hedde `hotwatch-engine-controlled-v1` og indeholde `apply_update.py` direkte.
+2. Åbn GitHub-repoet `hva73/invest`, vælg branchen `codex/escape-development`, og brug **Code → Download ZIP**. GitHub-arkivet udpakkes som mappen `invest-codex-escape-development`. Upload ZIP-filen til `/home/nordicr4/escape_app/opdatering/`, og pak den ud dér. `apply_update.py` ligger direkte i den udpakkede repo-mappe sammen med `app.py`.
 3. Kør via Run Script:
 
    ```sh
-   /home/nordicr4/virtualenv/escape_app/3.11/bin/python3.11 /home/nordicr4/escape_app/opdatering/hotwatch-engine-controlled-v1/apply_update.py
+   /home/nordicr4/virtualenv/escape_app/3.11/bin/python3.11 /home/nordicr4/escape_app/opdatering/invest-codex-escape-development/apply_update.py
    ```
 
    Scriptet tager privat database-/kodebackup og erstatter kun de listede kodefiler. Kontrollér outputtet og gem backupstien.
