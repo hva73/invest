@@ -1,0 +1,514 @@
+{
+  "fixture_version": 1,
+  "purpose": "SYNTHETISK ACCEPTTESTGRUNDLAG — ikke en rapportpayload, ikke til send_report eller produktionsimport",
+  "source_spec": "docs/DESIGN_STATUS_SPEC_V1_DA.md",
+  "baseline_commit": "162d41f",
+  "release_authorized": false,
+  "installation_authorized": false,
+  "statuses_note": "existing_coverage angiver eksisterende delområde-evidens; det er ikke en samlet godkendelse af det kommende redesign. source_blocked kræver dokumenteret kilde/provenance eller korrekt UNKNOWN-fallback.",
+  "cases": [
+    {
+      "id": "T01",
+      "scenario": "Positiv dagsændring",
+      "synthetic_input": {
+        "quote": "104",
+        "official_previous_close": "100",
+        "currency": "USD",
+        "reference_verified": true
+      },
+      "expected": [
+        "+4,00 %",
+        "green",
+        "↑"
+      ],
+      "baseline_status": "source_blocked",
+      "evidence_or_gap": "Pluto previous_close er null; CSS-farven er separat browserkontrolleret."
+    },
+    {
+      "id": "T02",
+      "scenario": "Negativ dagsændring",
+      "synthetic_input": {
+        "quote": "96",
+        "official_previous_close": "100",
+        "currency": "USD",
+        "reference_verified": true
+      },
+      "expected": [
+        "−4,00 %",
+        "red",
+        "↓"
+      ],
+      "baseline_status": "source_blocked",
+      "evidence_or_gap": "Samme referencemangel som T01; rød klikfarve er browserkontrolleret."
+    },
+    {
+      "id": "T03",
+      "scenario": "Positiv dag, negativt urealiseret P/L",
+      "synthetic_input": {
+        "quote": "104",
+        "official_previous_close": "100",
+        "quantity": "2",
+        "cost_basis": "240",
+        "fees": "0",
+        "currency": "USD"
+      },
+      "expected": [
+        "dag +4,00 % grøn",
+        "P/L −32,00 USD rød",
+        "neutral kurs og positionsværdi"
+      ],
+      "baseline_status": "implementation_pending",
+      "evidence_or_gap": "Ny fælles komponent og neutral absolut værdi mangler."
+    },
+    {
+      "id": "T04",
+      "scenario": "Gevinst og SÆLG-vurdering",
+      "synthetic_input": {
+        "value": "220",
+        "cost_basis": "200",
+        "fees": "0",
+        "currency": "DKK",
+        "assessment": "SÆLG"
+      },
+      "expected": [
+        "P/L +20,00 DKK grøn",
+        "SÆLG som separat handlingsstatus",
+        "værdi neutral"
+      ],
+      "baseline_status": "implementation_pending",
+      "evidence_or_gap": "Eksisterende separation er delvist testet; værdifeltet farves endnu efter P/L."
+    },
+    {
+      "id": "T05",
+      "scenario": "Ukendt kurs",
+      "synthetic_input": {
+        "quote": null,
+        "reference": null
+      },
+      "expected": [
+        "neutral —",
+        "ingen opdigtet procent eller retningspil"
+      ],
+      "baseline_status": "partial",
+      "evidence_or_gap": "Ukendt beløb testes; endelig fælles referencevisning mangler."
+    },
+    {
+      "id": "T06",
+      "scenario": "Gammel analyse med faktisk position",
+      "synthetic_input": {
+        "broker_quantity": "2",
+        "assessment_age_hours": 25
+      },
+      "expected": [
+        "position synlig",
+        "analyse markeret forældet",
+        "ingen automatisk lukning"
+      ],
+      "baseline_status": "implementation_pending",
+      "evidence_or_gap": "Aktuel oversigt er rapportbaseret, ikke komplet brokerbaseret."
+    },
+    {
+      "id": "T07",
+      "scenario": "FRAVÆLG med faktisk position",
+      "synthetic_input": {
+        "decision": "FRAVÆLG",
+        "broker_quantity": "2"
+      },
+      "expected": [
+        "position synlig",
+        "nykøbskandidat skjult hvor ingen ordre/trigger",
+        "historik bevaret"
+      ],
+      "baseline_status": "partial",
+      "evidence_or_gap": "Kandidatprojektion bevarer ejerskab; samlet beholdningsvisning skal omlægges."
+    },
+    {
+      "id": "T08",
+      "scenario": "Delvis fyldning og efterfølgende annullering",
+      "synthetic_input": {
+        "requested_quantity": "10",
+        "filled_quantity": "4",
+        "status": "CANCELLED"
+      },
+      "expected": [
+        "4 udførte bevares",
+        "resten afsluttet",
+        "ingen ekstra køb/salg"
+      ],
+      "baseline_status": "partial",
+      "evidence_or_gap": "Backend bevarer CANCELLED og fyldt antal; ny 24h-gruppering mangler."
+    },
+    {
+      "id": "T09",
+      "scenario": "Terminale kandidater og sekundære filtre",
+      "synthetic_input": {
+        "lifecycles": [
+          "CLOSED",
+          "ARCHIVED"
+        ],
+        "attention_filters": [
+          "red",
+          "yellow",
+          "green",
+          "all"
+        ]
+      },
+      "expected": [
+        "ingen terminale poster i aktivlisten",
+        "kan findes i eksplicit historik/arkiv"
+      ],
+      "baseline_status": "existing_coverage",
+      "evidence_or_gap": "Udvidet browser_hotwatch_engine kontrollerer kombinerede filtre."
+    },
+    {
+      "id": "T10",
+      "scenario": "Fejlramt motorsession",
+      "synthetic_input": {
+        "statuses": [
+          "ERROR",
+          "DEGRADED"
+        ]
+      },
+      "expected": [
+        "synlig driftsadvarsel",
+        "ERROR kritisk",
+        "ikke skjult af dataalder"
+      ],
+      "baseline_status": "partial",
+      "evidence_or_gap": "Backend-fejltilstande er testet; ny prioriteret advarselsvisning mangler."
+    },
+    {
+      "id": "T11",
+      "scenario": "Samme ticker i to depoter",
+      "synthetic_input": {
+        "ticker": "BTC",
+        "portfolio_ids": [
+          "synthetic-root",
+          "synthetic-ai"
+        ]
+      },
+      "expected": [
+        "to selvstændige positioner",
+        "separate vurderinger og historikker"
+      ],
+      "baseline_status": "existing_coverage",
+      "evidence_or_gap": "Eksisterende positions- og browsertests; gentages mod ny brokerprojektion."
+    },
+    {
+      "id": "T12",
+      "scenario": "Root inkluderer AI",
+      "synthetic_input": {
+        "root_value_dkk": "1000",
+        "ai_value_dkk": "300",
+        "root_includes_ai": true
+      },
+      "expected": [
+        "samlet depotværdi 1000 DKK",
+        "AI 300 DKK separat",
+        "aldrig 1300 DKK"
+      ],
+      "baseline_status": "existing_coverage",
+      "evidence_or_gap": "Root-only summering findes; ny oversigt skal bevare samme invariant."
+    },
+    {
+      "id": "T13",
+      "scenario": "Manglende FX",
+      "synthetic_input": {
+        "value": {
+          "amount": "100",
+          "currency": "USD"
+        },
+        "fx_to_dkk": null
+      },
+      "expected": [
+        "100 USD i originalvaluta",
+        "ingen falsk DKK",
+        "årsag ved detalje"
+      ],
+      "baseline_status": "partial",
+      "evidence_or_gap": "Eksisterende kildevaluta bevares; nye DKK-kolonner og årsagskomponent mangler."
+    },
+    {
+      "id": "T14",
+      "scenario": "Afventer trigger",
+      "synthetic_input": {
+        "lifecycle": "WAITING_TRIGGER",
+        "next_trigger": "Syntetisk verificeret prisregel",
+        "deadline": null
+      },
+      "expected": [
+        "sammenklappet afventergruppe",
+        "korrekt antal/prioritet/trigger",
+        "ingen automatisk udløb"
+      ],
+      "baseline_status": "implementation_pending",
+      "evidence_or_gap": "Nuværende filter er ikke den godkendte sammenklappede gruppe."
+    },
+    {
+      "id": "T15",
+      "scenario": "Udeladt kandidat bevares",
+      "synthetic_input": {
+        "report1_candidates": [
+          "A",
+          "B"
+        ],
+        "report2_candidates": [
+          "A"
+        ]
+      },
+      "expected": [
+        "B søgbar",
+        "historik bevaret",
+        "ingen falsk sletning"
+      ],
+      "baseline_status": "existing_coverage",
+      "evidence_or_gap": "MCP 2.5.1 og kandidatlivscyklus har konkret to-rapporttest."
+    },
+    {
+      "id": "T16",
+      "scenario": "Append-only statusændring",
+      "synthetic_input": {
+        "candidate_id": "synthetic-A",
+        "trade_cycle_id": "synthetic-cycle-1",
+        "statuses": [
+          "HOT_WATCH",
+          "WAITING_TRIGGER"
+        ]
+      },
+      "expected": [
+        "samme identitet",
+        "to efterviselige statusændringer",
+        "gamle rapporter uændrede"
+      ],
+      "baseline_status": "existing_coverage",
+      "evidence_or_gap": "Kandidat- og MCP-tests kontrollerer readback, journal og duplicate."
+    },
+    {
+      "id": "T17",
+      "scenario": "Klikbare farver og hover",
+      "synthetic_input": {
+        "changes": [
+          "1.22",
+          "-1.22",
+          "0"
+        ],
+        "interaction": [
+          "normal",
+          "hover"
+        ]
+      },
+      "expected": [
+        "grøn ↑",
+        "rød ↓",
+        "neutral →"
+      ],
+      "baseline_status": "existing_coverage",
+      "evidence_or_gap": "Computed style og tekstretning kontrolleret i browser_positions, ikke kun klassenavne."
+    },
+    {
+      "id": "T18",
+      "scenario": "Inkompatibel siden-sidst",
+      "synthetic_input": {
+        "changed_dimensions": [
+          "source",
+          "feed_type",
+          "venue",
+          "currency",
+          "market_phase",
+          "price_type",
+          "corporate_action_basis"
+        ]
+      },
+      "expected": [
+        "sammenligning — for hver ændret dimension",
+        "ingen grøn/rød eller beregnet procent"
+      ],
+      "baseline_status": "implementation_pending",
+      "evidence_or_gap": "Intet generelt kompatibilitetsmærket observationstil-observation-lager."
+    },
+    {
+      "id": "T19",
+      "scenario": "Aktiv live-quote forældelse",
+      "synthetic_input": {
+        "market_status": "OPEN",
+        "quote_ages_s": [
+          59,
+          60,
+          61
+        ]
+      },
+      "expected": [
+        "59/60 inden for grænse",
+        "61 markeret forældet",
+        "event time bevares"
+      ],
+      "baseline_status": "implementation_pending",
+      "evidence_or_gap": "Visningen anvender nu generelle 10/30-minutgrænser."
+    },
+    {
+      "id": "T20",
+      "scenario": "Åbent intradag-snapshot",
+      "synthetic_input": {
+        "market_status": "OPEN",
+        "snapshot_ages_s": [
+          299,
+          300,
+          301
+        ]
+      },
+      "expected": [
+        "299/300 inden for grænse",
+        "301 forældet"
+      ],
+      "baseline_status": "implementation_pending",
+      "evidence_or_gap": "Central datatypeafhængig 300s-visningspolitik mangler."
+    },
+    {
+      "id": "T21",
+      "scenario": "Positionsanalyse 24h",
+      "synthetic_input": {
+        "analysis_ages_s": [
+          86399,
+          86400,
+          86401
+        ],
+        "broker_quantity": "2"
+      },
+      "expected": [
+        "86401 markeret forældet",
+        "beholdning forbliver synlig"
+      ],
+      "baseline_status": "implementation_pending",
+      "evidence_or_gap": "Fælles 24h-analyseindikator og brokerbaseret oversigt mangler."
+    },
+    {
+      "id": "T22",
+      "scenario": "Session, weekend og helligdag",
+      "synthetic_input": {
+        "calendar_cases": [
+          "synthetic-equity-weekend-closed",
+          "synthetic-equity-holiday-closed",
+          "synthetic-half-day",
+          "synthetic-DST-shift",
+          "synthetic-crypto-weekend-open",
+          "unknown-venue"
+        ]
+      },
+      "expected": [
+        "lukket marked bruger dokumenteret relevant session",
+        "krypto ikke fejlagtigt lukket i weekend",
+        "ukendt venue forbliver UNKNOWN"
+      ],
+      "baseline_status": "source_blocked",
+      "evidence_or_gap": "Ingen verificeret venuekalender installeret; syntetisk kalender kan kun teste logikken."
+    },
+    {
+      "id": "T23",
+      "scenario": "12+ kompakte mobilpositioner",
+      "synthetic_input": {
+        "position_count": 12,
+        "viewport_width": 390
+      },
+      "expected": [
+        "kompakte rækker",
+        "ingen gentagne lange analyser",
+        "alle positioner og kritiske advarsler tilgængelige"
+      ],
+      "baseline_status": "implementation_pending",
+      "evidence_or_gap": "Eksisterende side med 12 positioner er meget lang; layoutændring ikke lavet."
+    },
+    {
+      "id": "T24",
+      "scenario": "Responsivt layout",
+      "synthetic_input": {
+        "widths": [
+          320,
+          375,
+          390,
+          430,
+          768,
+          1024,
+          1280,
+          1440,
+          1920
+        ]
+      },
+      "expected": [
+        "ingen vandret sidescroll",
+        "læsbare felter",
+        "touch/tastatur/fokus",
+        "ingen afskårne kritiske værdier"
+      ],
+      "baseline_status": "partial",
+      "evidence_or_gap": "Nuværende layout er browserkontrolleret; kommende redesign skal kontrolleres igen."
+    },
+    {
+      "id": "T25",
+      "scenario": "Original historisk rapport",
+      "synthetic_input": {
+        "historical_candidate_lifecycle": "CLOSED",
+        "open_original_report": true
+      },
+      "expected": [
+        "oprindelig kandidat og fuldt indhold vises",
+        "payload/digest uændret",
+        "aktuelle filtre omskriver ikke rapporten"
+      ],
+      "baseline_status": "existing_coverage",
+      "evidence_or_gap": "Rapportreadback og historik bevares i eksisterende tests."
+    },
+    {
+      "id": "T26",
+      "scenario": "Rapport og broker i konflikt",
+      "synthetic_input": {
+        "report_quantity": "10",
+        "broker_quantity": "4",
+        "broker_scope_verified": true
+      },
+      "expected": [
+        "faktisk antal 4",
+        "rapportens 10 bevares historisk",
+        "afstemningsadvarsel",
+        "ingen automatisk handel"
+      ],
+      "baseline_status": "implementation_pending",
+      "evidence_or_gap": "Fælles brokerbaseret positions-/afstemningsvisning mangler."
+    },
+    {
+      "id": "T27",
+      "scenario": "Datakildeudfald og kritisk advarsel",
+      "synthetic_input": {
+        "source_error": true,
+        "held_position": true,
+        "critical_event_unresolved": true
+      },
+      "expected": [
+        "position og kritisk advarsel synlige",
+        "gamle data mærkes oprindeligt tidspunkt",
+        "ingen ny opfundet observation"
+      ],
+      "baseline_status": "partial",
+      "evidence_or_gap": "Motor-fejlhåndtering findes; samlet kritisk-liste og hændelsesafklaring mangler."
+    },
+    {
+      "id": "T28",
+      "scenario": "Handels- og godkendelsesregression",
+      "synthetic_input": {
+        "design_actions": [
+          "filter",
+          "sort",
+          "open_detail",
+          "read_history"
+        ]
+      },
+      "expected": [
+        "ingen broker-write",
+        "ingen nye forslag",
+        "uændret godkendelsesflow",
+        "ingen scheduler-/strategiændring"
+      ],
+      "baseline_status": "existing_coverage",
+      "evidence_or_gap": "Eksisterende trade-/browser-/autorisationsregression skal genkøres efter hver relevant ændring."
+    }
+  ]
+}
