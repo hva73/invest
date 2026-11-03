@@ -1,7 +1,7 @@
 let csrf='',state=null,view='overview',selectedPortfolio=null,portfolioSection=null,serverClockOffset=0,userRefreshBusy=false,sessionEpoch=0,pendingAutoRender=false,nextAutomaticAt=0,currentRefreshPromise=null,currentRefreshAll=false;
 let expandedUi=new Set(),touchedUi=new Set(),expandedUiOwner=null;
 const $=s=>document.querySelector(s),escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function api(path,data){const r=await fetch('/api/'+path,{method:data?'POST':'GET',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:data?JSON.stringify(data):undefined});const b=await r.json();if(!r.ok){const error=Error(b.error||'Serverfejl');error.status=r.status;error.details=b;throw error}return b}
+async function api(path,data,extraHeaders={}){const r=await fetch('/api/'+path,{method:data?'POST':'GET',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,...extraHeaders},body:data?JSON.stringify(data):undefined});const b=await r.json();if(!r.ok){const error=Error(b.error||'Serverfejl');error.status=r.status;error.details=b;throw error}return b}
 function notice(t,kind='info'){$('#notice').textContent=t;$('#notice').dataset.kind=kind}
 const empty=(title,text)=>`<div class="empty"><div class="symbol">⌁</div><h3>${title}</h3><p>${text}</p></div>`;
 const money=n=>new Intl.NumberFormat('da-DK',{style:'currency',currency:'DKK'}).format(n);

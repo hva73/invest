@@ -6,21 +6,45 @@ import display_policy as policy
 
 def init(c):
  c.execute('CREATE TABLE IF NOT EXISTS display_holdings_cache(portfolio_id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL,observed TEXT NOT NULL,payload TEXT NOT NULL)')
- c.execute('CREATE TABLE IF NOT EXISTS display_price_observations(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL,portfolio_id INTEGER NOT NULL,asset_id TEXT NOT NULL,event_time TEXT NOT NULL,payload TEXT NOT NULL,digest TEXT NOT NULL,UNIQUE(user_id,portfolio_id,digest))')
+ exists=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='display_price_observations'").fetchone()
+ columns={r['name']:dict(r) for r in c.execute('PRAGMA table_info(display_price_observations)')} if exists else {}
+ if exists and ('received_at' not in columns or columns.get('event_time',{}).get('notnull')):
+  # Keep real market event times nullable and store API receipt/snapshot time separately.
+  c.execute('DROP INDEX IF EXISTS display_price_history')
+  c.execute('ALTER TABLE display_price_observations RENAME TO display_price_observations_legacy')
+  c.execute('CREATE TABLE display_price_observations(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL,portfolio_id INTEGER NOT NULL,asset_id TEXT NOT NULL,event_time TEXT,received_at TEXT NOT NULL,payload TEXT NOT NULL,digest TEXT NOT NULL,UNIQUE(user_id,portfolio_id,digest))')
+  for row in c.execute('SELECT id,user_id,portfolio_id,asset_id,event_time,payload,digest FROM display_price_observations_legacy').fetchall():
+   # Legacy rows have a true price event time; receipt time was not captured.
+   c.execute('INSERT INTO display_price_observations VALUES(?,?,?,?,?,?,?,?)',(row['id'],row['user_id'],row['portfolio_id'],row['asset_id'],row['event_time'],'',row['payload'],row['digest']))
+  c.execute('DROP TABLE display_price_observations_legacy')
+ c.execute('CREATE TABLE IF NOT EXISTS display_price_observations(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL,portfolio_id INTEGER NOT NULL,asset_id TEXT NOT NULL,event_time TEXT,received_at TEXT NOT NULL,payload TEXT NOT NULL,digest TEXT NOT NULL,UNIQUE(user_id,portfolio_id,digest))')
  c.execute('CREATE INDEX IF NOT EXISTS display_price_history ON display_price_observations(user_id,portfolio_id,asset_id,id)')
 
-def observation(row):
+def observation(row,received_at=None):
  price=row.get('price') or {};meta=row.get('market_context') or {}
- return {'asset_id':row.get('asset_id'),'source':'pluto','currency':price.get('currency'),'price':price.get('amount'),'event_time':row.get('price_time'),'feed_type':meta.get('feed_type'),'venue':meta.get('venue'),'market_phase':meta.get('market_phase'),'session_key':meta.get('session_key'),'price_type':meta.get('price_type'),'adjustment_basis':meta.get('adjustment_basis')}
+ price_type=meta.get('price_type') or row.get('price_type')
+ return {'asset_id':row.get('asset_id'),'source':'pluto','currency':price.get('currency'),'price':price.get('amount'),'event_time':row.get('price_time'),'received_at':received_at,'feed_type':meta.get('feed_type'),'venue':meta.get('venue'),'market_phase':meta.get('market_phase'),'session_key':meta.get('session_key'),'price_type':price_type,'adjustment_basis':meta.get('adjustment_basis')}
 
 def remember(c,uid,pid,payload):
  if payload.get('positions_complete'):
   c.execute('INSERT INTO display_holdings_cache VALUES(?,?,?,?) ON CONFLICT(portfolio_id) DO UPDATE SET observed=excluded.observed,payload=excluded.payload WHERE excluded.observed>=display_holdings_cache.observed',(pid,uid,payload['observed'],json.dumps(payload)))
  for row in payload.get('positions',[]):
-  data=observation(row)
-  if row.get('kind')!='holding' or not data['asset_id'] or not policy.stamp(data['event_time']) or policy.decimal(data['price']) is None:continue
+  data=observation(row,payload.get('observed'))
+  if row.get('kind')!='holding' or not data['asset_id'] or not policy.stamp(data['received_at']) or policy.decimal(data['price']) is None:continue
   raw=json.dumps(data,sort_keys=True,separators=(',',':'));digest=hashlib.sha256(raw.encode()).hexdigest()
-  c.execute('INSERT OR IGNORE INTO display_price_observations(user_id,portfolio_id,asset_id,event_time,payload,digest) VALUES(?,?,?,?,?,?)',(uid,pid,data['asset_id'],data['event_time'],raw,digest))
+  c.execute('INSERT OR IGNORE INTO display_price_observations(user_id,portfolio_id,asset_id,event_time,received_at,payload,digest) VALUES(?,?,?,?,?,?,?)',(uid,pid,data['asset_id'],data['event_time'],data['received_at'],raw,digest))
+
+def snapshot_comparison(current,previous):
+ # A Pluto retrieval is a known observation of its latest-price field, not proof of
+ # the underlying market event time. Keep those two clocks visibly distinct.
+ required=['asset_id','source','currency','price_type']
+ if any(not current.get(k) or current.get(k)!=previous.get(k) for k in required):return None
+ for key in ['venue','adjustment_basis']:
+  if current.get(key) and previous.get(key) and current[key]!=previous[key]:return None
+ now=policy.stamp(current.get('received_at'));old=policy.stamp(previous.get('received_at'))
+ x=policy.decimal(current.get('price'));y=policy.decimal(previous.get('price'))
+ if not now or not old or now<=old or x is None or y is None or x<=0 or y<=0:return None
+ return {'percent':str((x-y)/y*100),'amount':str(x-y),'currency':current['currency'],'from':previous['received_at'],'to':current['received_at'],'basis':'pluto_snapshot_received_at','prior_received_at':previous['received_at'],'price_event_time_known':bool(current.get('event_time') and previous.get('event_time'))}
 
 def assessment_candidates(c,uid):
  rows=c.execute("SELECT payload,report_id,generated_epoch FROM ingested_reports WHERE user_id=? AND is_test=0 AND json_extract(payload,'$.schema_version')=2 ORDER BY generated_epoch DESC,id DESC LIMIT 300",(uid,)).fetchall()
@@ -28,8 +52,28 @@ def assessment_candidates(c,uid):
  for row in rows:
   data=json.loads(row['payload']);ports={p['portfolio_id']:p for p in data.get('portfolios',[])}
   for position in data.get('positions',[]):
-   if position.get('asset_id') and position.get('assessment'):result.append((position,ports.get(position['portfolio_id'],{}),row['report_id'],data['generated_at']))
+   if position.get('asset_id'):result.append((position,ports.get(position['portfolio_id'],{}),row['report_id'],data['generated_at']))
  return result
+
+def position_hotwatch(c,uid,portfolio_id,asset_id,report_position):
+ candidate_id=report_position.get('candidate_id') if report_position else None
+ cycle=report_position.get('trade_cycle_id') if report_position else None
+ rows=c.execute("SELECT watch_id,candidate_id,status,request,state,last_data,created FROM hw_sessions WHERE user_id=? AND is_test=0 ORDER BY id DESC",(uid,)).fetchall()
+ matches=[]
+ for row in rows:
+  request=json.loads(row['request'])
+  if request.get('asset_id')!=asset_id or portfolio_id not in request.get('portfolio_ids',[]):continue
+  if candidate_id:
+   if request.get('candidate_id')!=candidate_id:continue
+   if cycle and request.get('trade_cycle_id') and request['trade_cycle_id']!=cycle:continue
+  elif not cycle or request.get('trade_cycle_id')!=cycle:continue
+  matches.append((row,request))
+ if not candidate_id and len({r['candidate_id'] for r,_ in matches})==1 and matches:candidate_id=matches[0][0]['candidate_id']
+ lifecycle=None
+ if candidate_id:
+  lifecycle=c.execute('SELECT status,reported_status,occurred_at,reason,cycle_id,evidence FROM candidate_lifecycle_events WHERE user_id=? AND is_test=0 AND candidate_id=? ORDER BY occurred DESC,id DESC LIMIT 1',(uid,candidate_id)).fetchone()
+ session=next(((r,req) for r,req in matches if r['status'] in ['CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED']),matches[0] if matches else None)
+ return {'candidate_id':candidate_id,'trade_cycle_id':cycle,'lifecycle':dict(lifecycle) if lifecycle else None,'session':({'watch_id':session[0]['watch_id'],'status':session[0]['status'],'last_data_at':session[0]['last_data'],'signal':json.loads(session[0]['state']).get('signal')} if session else None),'link_basis':'candidate_id+asset_id+portfolio' if report_position and report_position.get('candidate_id') else 'asset_id+portfolio+trade_cycle_id' if candidate_id and cycle else None}
 
 def build(connect,uid,owned,snapshots,now=None):
  now=now or datetime.now(timezone.utc);result=[];warnings=[];totals={};accounts=[];orders=[]
@@ -73,20 +117,25 @@ def build(connect,uid,owned,snapshots,now=None):
     if pnl and policy.decimal(pnl.get('amount')) is None:pnl=None
     cost=row.get('cost_basis') or {};pnl_percent=None
     if pnl and pnl.get('currency')==cost.get('currency') and policy.decimal(cost.get('amount')) is not None and Decimal(cost['amount'])>0:pnl_percent=str(Decimal(pnl['amount'])/Decimal(cost['amount'])*100)
-    obs=observation(row);since=None
-    if aid and policy.stamp(obs['event_time']):
+    obs=observation(row,position_data.get('observed'));since=None
+    if aid and obs.get('received_at') and not failed and data.get('positions_complete'):
      previous=c.execute('SELECT payload FROM display_price_observations WHERE user_id=? AND portfolio_id=? AND asset_id=? ORDER BY id DESC LIMIT 120',(uid,p['id'],aid)).fetchall()
      for old in previous:
       prior=json.loads(old['payload'])
-      if policy.stamp(prior['event_time']) and policy.stamp(prior['event_time'])<policy.stamp(obs['event_time']):
-       since=policy.comparison(obs,prior);break
+      if policy.stamp(prior.get('received_at')) and policy.stamp(prior['received_at'])<policy.stamp(obs['received_at']):
+       if obs.get('event_time') and prior.get('event_time'):
+        since=policy.comparison(obs,prior)
+       if since is None:since=snapshot_comparison(obs,prior)
+       if since:break
     market=row.get('market_context') or {};market_state=market.get('session') if isinstance(market.get('session'),dict) else None
     daily=policy.daily_change(obs,row.get('official_close_reference'))
     price_age=policy.freshness('snapshot',row.get('price_time'),now,market_state,failed,obs.get('session_key'))
     analysis_age=policy.freshness('analysis',a.get('assessed_at'),now) if a else {'state':'unknown','reason':'NOT_PROVIDED'}
-    if price_age.get('reason') in ['FUTURE_TIMESTAMP','SOURCE_ERROR'] or not policy.stamp(row.get('price_time')):daily=None;since=None
+    if price_age.get('reason') in ['FUTURE_TIMESTAMP','SOURCE_ERROR']:daily=None;since=None
     action=a.get('action') if a else None
-    result.append({'key':identity,'portfolio_id':p['id'],'portfolio_name':p['name'],'portfolio_kind':p['kind'],'external_id':p['external_id'],'asset_id':aid,'ticker':row.get('ticker'),'name':row.get('name'),'quantity':row.get('quantity'),'price':row.get('price'),'price_time':row.get('price_time'),'value':shown,'original_value':raw_value,'cost_basis':cost,'average_entry':row.get('average_entry'),'unrealized':pnl,'unrealized_percent':pnl_percent,'daily':daily,'since_last':since,'assessment':a,'assessment_report_id':matched[1] if matched else None,'reported_position':report,'action':action,'critical':action in ['SÆLG','REDUCÉR'] or bool(conflicts),'price_freshness':price_age,'analysis_freshness':analysis_age,'snapshot_at':position_data.get('observed'),'verification':'last_known' if failed or not data.get('positions_complete') else 'broker_snapshot','conflicts':conflicts,'missing':{'daily':'NOT_PROVIDED' if daily is None else None,'since_last':'NOT_PROVIDED' if since is None else None,'fx':'NOT_PROVIDED' if shown.get('currency')!='DKK' else None,'assessment':'NOT_PROVIDED' if not a else None},'raw':row})
+    hotwatch=position_hotwatch(c,uid,p['id'],aid,report) if aid else {'candidate_id':None,'trade_cycle_id':None,'lifecycle':None,'session':None,'link_basis':None}
+    reasons={'daily':'OFFICIAL_CLOSE_REFERENCE_NOT_PROVIDED' if daily is None else None,'since_last':'NO_COMPARABLE_PLUTO_SNAPSHOT' if since is None else None,'fx':'DKK_CONVERSION_NOT_PROVIDED' if shown.get('currency')!='DKK' else None,'assessment':'NO_EXACT_ASSET_AND_PORTFOLIO_ASSESSMENT' if not a else None,'candidate_link':'NO_VERIFIED_CANDIDATE_AND_TRADE_CYCLE_LINK' if not hotwatch['candidate_id'] else None}
+    result.append({'key':identity,'portfolio_id':p['id'],'portfolio_name':p['name'],'portfolio_kind':p['kind'],'external_id':p['external_id'],'asset_id':aid,'ticker':row.get('ticker'),'name':row.get('name'),'quantity':row.get('quantity'),'price':row.get('price'),'price_time':row.get('price_time'),'value':shown,'original_value':raw_value,'cost_basis':cost,'average_entry':row.get('average_entry'),'unrealized':pnl,'unrealized_percent':pnl_percent,'daily':daily,'since_last':since,'assessment':a,'assessment_report_id':matched[1] if matched else None,'reported_position':report,'hot_watch':hotwatch,'action':action,'critical':action in ['SÆLG','REDUCÉR'] or bool(conflicts),'price_freshness':price_age,'analysis_freshness':analysis_age,'snapshot_at':position_data.get('observed'),'verification':'last_known' if failed or not data.get('positions_complete') else 'broker_snapshot','conflicts':conflicts,'missing':reasons,'raw':row})
   try:
    sessions=[]
    for row in c.execute("SELECT watch_id,status,last_error,last_data,request FROM hw_sessions WHERE user_id=? AND is_test=0 AND status IN ('DEGRADED','ERROR')",(uid,)):

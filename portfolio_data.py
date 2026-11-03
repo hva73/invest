@@ -166,7 +166,8 @@ def normalize_positions(data,collection_currency=None):
         if any(not isinstance(value,str) or not value for value in identifiers) or len(set(identifiers))>1:raise PortfolioFormatError('Manglende/modstridende aktividentitet i beholdningen')
         aid=identifiers[0] if identifiers else None
         price=money(item,['latestPrice','price'],code)
-        result.append({'asset_id':aid,'kind':'collection' if is_collection else 'holding','name':name,'ticker':ticker,'quantity':number(item.get('quantity')),'currency':code,'price':price,'price_time':date_field(item,['priceAsOf','priceTimestamp','quotedAt']),'value':money(item,['value','marketValue'],code),'cost_basis':money(item,['costBasis'],code),'average_entry':money(item,['averageEntryPrice'],code),'unrealized':money(item,['unrealisedPnL','unrealizedPnL'],code),'value_in_portfolio_currency':money(item,['valueInPortfolioCurrency'],collection_currency),'unrealized_in_portfolio_currency':money(item,['unrealisedPnLInPortfolioCurrency','unrealizedPnLInPortfolioCurrency'],collection_currency)})
+        price_type='latestPrice' if item.get('latestPrice') is not None else 'price' if item.get('price') is not None else None
+        result.append({'asset_id':aid,'kind':'collection' if is_collection else 'holding','name':name,'ticker':ticker,'quantity':number(item.get('quantity')),'currency':code,'price':price,'price_time':date_field(item,['priceAsOf','priceTimestamp','quotedAt']),'price_type':price_type,'value':money(item,['value','marketValue'],code),'cost_basis':money(item,['costBasis'],code),'average_entry':money(item,['averageEntryPrice'],code),'unrealized':money(item,['unrealisedPnL','unrealizedPnL'],code),'value_in_portfolio_currency':money(item,['valueInPortfolioCurrency'],collection_currency),'unrealized_in_portfolio_currency':money(item,['unrealisedPnLInPortfolioCurrency','unrealizedPnLInPortfolioCurrency'],collection_currency)})
     return result
 
 def supported(tools,name):
