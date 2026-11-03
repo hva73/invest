@@ -11,7 +11,7 @@ from test_hotwatch_engine import request,tick
 
 class EngineContract(unittest.TestCase):
  def setUp(self):
-  self.http=test_mcp_reports.McpReports();self.http.setUp();_,tokens,_=self.http.granted('reports:read reports:write hotwatch:read hotwatch:manage');self.token=tokens['access_token'];self.base=datetime.now(timezone.utc).replace(microsecond=0)-timedelta(minutes=40);self.report=merc_report(True);self.report['generated_at']=self.base.isoformat();self.req=request();self.auth=self.http.login()
+  self.http=test_mcp_reports.McpReports();self.http.setUp();_,tokens,_=self.http.granted('reports:read reports:write hotwatch:read hotwatch:manage');self.token=tokens['access_token'];self.base=datetime.now(timezone.utc).replace(microsecond=0)-timedelta(minutes=40);self.report=merc_report(True);self.report['generated_at']=self.base.isoformat();self.req=request();self.req['trade_cycle_id']='synthetic-radar-cycle';self.report['candidates'][0]['lifecycle']={'status':'HOT_WATCH','changed_at':self.report['generated_at'],'reason':'SYNTHETIC Radar activation','source_ids':['synthetic-source'],'trade_cycle_id':self.req['trade_cycle_id']};self.auth=self.http.login()
   self.assertTrue(self.call('validate_report',self.report)['valid']);self.assertTrue(self.call('send_report',self.report)['ok'])
   with patch('hotwatch_engine.utc',return_value=self.base):self.call('start_hot_watch',self.req)
  def tearDown(self):self.http.tearDown()
@@ -27,12 +27,12 @@ class EngineContract(unittest.TestCase):
   return at,result
  def test_H01_full_chain_signal_reassessment_stop_and_history(self):
   at,last=self.feed();self.assertEqual(last['calculation']['signal'],'BUY');self.assertEqual(last['calculation']['strategy_version'],'1.0.0');checksum=last['calculation']['strategy_checksum']
-  changed=copy.deepcopy(self.report);changed.update(report_id='synthetic-radar-reassessment',generated_at=(at+timedelta(seconds=1)).isoformat());candidate=changed['candidates'][0];candidate['lifecycle']={'status':'WAITING_TRIGGER','changed_at':changed['generated_at'],'reason':'SYNTHETIC revurdering, ikke en motorstyring','source_ids':['synthetic-source'],'trade_cycle_id':'synthetic-review-cycle'}
+  changed=copy.deepcopy(self.report);changed.update(report_id='synthetic-radar-reassessment',generated_at=(at+timedelta(seconds=1)).isoformat());candidate=changed['candidates'][0];candidate['lifecycle']={'status':'WAITING_TRIGGER','changed_at':changed['generated_at'],'reason':'SYNTHETIC revurdering, ikke en motorstyring','source_ids':['synthetic-source'],'trade_cycle_id':self.req['trade_cycle_id']}
   before=self.session();self.call('send_report',changed);after=self.session();self.assertEqual(before['status'],after['status']);self.assertEqual(before['next_due_at'],after['next_due_at']);self.assertEqual(after['strategy_checksum'],checksum)
   self.call('control_hot_watch',{'watch_id':self.req['watch_id'],'is_test':True,'action':'stop'});stopped=self.session();self.assertEqual(stopped['status'],'COMPLETED')
   self.assertIsNone(engine.claim(app.connect,at+timedelta(hours=1)))
   samples=self.call('get_hot_watch_engine',{'watch_id':self.req['watch_id'],'is_test':True,'kind':'samples'})['items'];self.assertEqual(len(samples),40)
-  journal=self.call('get_hot_watch',{'candidate_id':candidate['candidate_id'],'is_test':True});self.assertTrue(journal['lifecycle_history']['events']);self.assertIsNotNone(journal['candidate'])
+  journal=self.call('get_hot_watch',{'candidate_id':candidate['candidate_id'],'is_test':True});self.assertTrue(journal['lifecycle_history']['events']);self.assertIsNotNone(journal['candidate']);self.assertEqual({c['cycle_id'] for c in journal['candidate']['trade_cycles']},{self.req['trade_cycle_id']})
   signals=self.call('get_hot_watch_engine',{'watch_id':self.req['watch_id'],'is_test':True,'kind':'signals'})['items'];self.assertTrue(any(x['data']['signal']=='BUY' and x['data']['strategy_checksum']==checksum for x in signals))
   with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
  def test_H02_source_error_is_not_candidate_reject(self):
@@ -57,6 +57,8 @@ class EngineContract(unittest.TestCase):
   before=self.session()
   with app.connect() as c:dump=[line for line in c.iterdump() if 'mcp_limits' not in line]
   for name,args in [('get_hot_watch',{'candidate_id':self.req['candidate_id'],'is_test':True}),('get_hot_watch_engine',{'is_test':True,'kind':'events','watch_id':self.req['watch_id']})]:self.call(name,args)
+  for view in ['current','history']:
+   status,body,_=self.http.request('/api/v1/hotwatch/sessions?is_test=true&view='+view,None,self.auth);self.assertEqual(status,200);self.assertEqual(body['view'],view)
   with app.connect() as c:self.assertEqual(dump,[line for line in c.iterdump() if 'mcp_limits' not in line])
   after=self.session();self.assertEqual(before['status'],after['status']);self.assertEqual(before['next_due_at'],after['next_due_at'])
 

@@ -36,7 +36,7 @@ def market_session(at,venue=None,calendar=None,asset_class=None):
 
 def freshness(kind,event_time,now=None,market=None,failed=False,session_key=None):
  now=now or datetime.now(timezone.utc);at=stamp(event_time);limit=LIMITS[kind]
- if not at:return {'state':'unknown','reason':'NOT_PROVIDED','event_time':event_time,'age_s':None,'limit_s':limit}
+ if not at:return {'state':'error' if failed else 'unknown','reason':'SOURCE_ERROR' if failed else 'NOT_PROVIDED','event_time':event_time,'age_s':None,'limit_s':limit}
  age=(now-at).total_seconds()
  if age<0:return {'state':'unknown','reason':'FUTURE_TIMESTAMP','event_time':event_time,'age_s':None,'limit_s':limit}
  if failed:return {'state':'error','reason':'SOURCE_ERROR','event_time':event_time,'age_s':age,'limit_s':limit}

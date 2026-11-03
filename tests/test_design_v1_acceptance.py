@@ -76,7 +76,7 @@ class DesignAcceptance(unittest.TestCase):
   r=self.model()['positions'][0];self.assertEqual(r['value']['amount'],'100');self.assertGreater(Decimal(r['daily']['percent']),0);self.assertEqual(r['price']['amount'],'50')
  def test_T18_incompatible_observations_rejected_per_dimension(self):
   a=observation();b=observation('100',NOW-timedelta(minutes=1));self.assertIsNotNone(policy.comparison(a,b))
-  for key in ['source','feed_type','venue','currency','market_phase','session_key','price_type','adjustment_basis']:
+  for key in ['asset_id','source','feed_type','venue','currency','market_phase','session_key','price_type','adjustment_basis']:
    with self.subTest(key=key):
     c=copy.deepcopy(a);c[key]='OTHER';self.assertIsNone(policy.comparison(c,b));c[key]=None;self.assertIsNone(policy.comparison(c,b))
  def test_T19_live_quote_threshold(self):

@@ -225,7 +225,8 @@ def watch(connect,uid,is_test=False,candidate_id=None):
                 order=json.loads(row['value'])
                 if order['order_id'] not in orders:orders[order['order_id']]=dict(order,display_status=order_state(order),report_id=row['report_id'])
             group['orders']=list(orders.values())
-        return {'waiting_candidates':[r for r in candidates(c,uid,is_test,include_history_market=False) if r.get('display_group')=='waiting'],'active_candidates':[r for r in candidates(c,uid,is_test,include_history_market=False) if r.get('display_group') in ['active','buy','exit']],'groups':sorted(groups.values(),key=lambda x:stamp(x['observations'][0]['data']['observed_at']).timestamp(),reverse=True),'is_test':is_test,'history_truncated':len(rows)>500}
+        registry=candidates(c,uid,is_test,candidate_id,include_history_market=False)
+        return {'waiting_candidates':[r for r in registry if r.get('display_group')=='waiting'],'active_candidates':[r for r in registry if r.get('display_group') in ['active','buy','exit']],'groups':sorted(groups.values(),key=lambda x:stamp(x['observations'][0]['data']['observed_at']).timestamp(),reverse=True),'is_test':is_test,'history_truncated':len(rows)>500}
 
 def candidates(c,uid,mode=False,candidate_id=None,include_history_market=True):
     ids=[candidate_id] if candidate_id is not None else [r[0] for r in c.execute('SELECT DISTINCT candidate_id FROM report_candidate_links WHERE user_id=? AND is_test=?',(uid,int(mode)))]

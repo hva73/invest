@@ -128,3 +128,13 @@ Current source gaps: verified official close/reference, complete cashflow histor
 ## 12. HOT WATCH som selvstændig matematisk motor
 
 Det normative motorafsnit er [HOTWATCH_ENGINE_DATA_CONTRACT.md](HOTWATCH_ENGINE_DATA_CONTRACT.md). Det dokumenterer eksplicit overdragelse fra Radar/MCP, felt-/statusansvar, faktiske parametre/formler, risk/exit/anti-noise, adaptergulve og budgetter, pollingophør, otte særskilte H01–H08-integrationstests samt kendte arkitekturforskelle. Motorens state og signaler er uafhængige af kandidatens lifecycle og Radarens analytiske beslutning. UI-filtre og rapportstatus må ikke styre polling. Ingen strategi-, polling-, automations- eller mandatændring er godkendt som del af redesign.
+
+## 13. Aktuelle additive læseændringer
+
+- dashboard read model `design-1` i /api/state er adskilt fra rapportpayloads. Brokerreference er valgfri på v2-porteføljer, med gammel afsender kompatibilitet og streng ekstranøglevalidering testet.
+- /api/v1/hotwatch/sessions?view=current|history er en UI-læseprojektion. Historie kan bladres med before/limit. Den ændrer ikke engine claim/control eller kildens requestbudget. Oprindelig pagineret læsning og MCP-scopes er bevaret.
+- UI opdaterer gemt motorstatus med samme 15s-interval. Flere DB-læseprojektioner er ikke nye providerpolls. Uafklarede kildefejl er adskilt fra handelsbeslutning.
+- market quote output har en additiv daily_comparison-værdi, aktuelt null uden verificeret officiel reference. Rå dailyChange-data beholdes, men UI udleder ikke en dokumenteret officiel close fra dem.
+- Journalen mærker manglende provider-status-tid som observeret status, ikke som et nyligt udført fill. Gammel rapport og faktisk broker-evidens står separat.
+
+Ingen af disse ændringer opdaterer Trading Radar-prompten eller starter en motorsession automatisk.

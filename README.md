@@ -62,3 +62,7 @@ Positionsvurderinger og V2.2: [positionskontrakt](docs/POSITION_ASSESSMENTS.md),
 ## HOT WATCH Engine og permanent kandidatstatus
 
 Fase 1–2, selvstændig read-only service med deterministiske signaler, persistente sessioner og kandidatjournal. Se [funktioner, API og drift](docs/HOTWATCH_ENGINE.md) og [statusmodel](docs/CANDIDATE_STATUS_MODEL.md). Backtest, shadow og aktivering/rollback af uploadede algoritmer er fase 3 og ikke implementeret. Aktuelle produktionsfeeds og hostens vedvarende service er endnu ikke verificeret.
+
+## Design v1 — arbejdsudgave til gennemgang
+
+WIP-branchen indeholder brokerbaserede kompakte beholdninger, neutralt værdi-/kursformat, dokumenterede finansielle ændringer, separat kandidat-/motorstatus, sammenfoldet historik og samlet læsejournal. [End-to-end-kontrakten](docs/END_TO_END_DATA_CONTRACT.md) og [motorens særskilte kontrakt](docs/HOTWATCH_ENGINE_DATA_CONTRACT.md) fastlægger afsender-/modtageransvar og uændret strategi/polling. Ingen installation eller release er godkendt. Live close-reference, cashflow-resultat, FX og markedsdækning må ikke antages; manglende grundlag vises som ukendt.

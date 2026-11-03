@@ -84,6 +84,7 @@ def build(connect,uid,owned,snapshots,now=None):
     daily=policy.daily_change(obs,row.get('official_close_reference'))
     price_age=policy.freshness('snapshot',row.get('price_time'),now,market_state,failed,obs.get('session_key'))
     analysis_age=policy.freshness('analysis',a.get('assessed_at'),now) if a else {'state':'unknown','reason':'NOT_PROVIDED'}
+    if price_age.get('reason') in ['FUTURE_TIMESTAMP','SOURCE_ERROR'] or not policy.stamp(row.get('price_time')):daily=None;since=None
     action=a.get('action') if a else None
     result.append({'key':identity,'portfolio_id':p['id'],'portfolio_name':p['name'],'portfolio_kind':p['kind'],'external_id':p['external_id'],'asset_id':aid,'ticker':row.get('ticker'),'name':row.get('name'),'quantity':row.get('quantity'),'price':row.get('price'),'price_time':row.get('price_time'),'value':shown,'original_value':raw_value,'cost_basis':cost,'average_entry':row.get('average_entry'),'unrealized':pnl,'unrealized_percent':pnl_percent,'daily':daily,'since_last':since,'assessment':a,'assessment_report_id':matched[1] if matched else None,'reported_position':report,'action':action,'critical':action in ['SÆLG','REDUCÉR'] or bool(conflicts),'price_freshness':price_age,'analysis_freshness':analysis_age,'snapshot_at':position_data.get('observed'),'verification':'last_known' if failed or not data.get('positions_complete') else 'broker_snapshot','conflicts':conflicts,'missing':{'daily':'NOT_PROVIDED' if daily is None else None,'since_last':'NOT_PROVIDED' if since is None else None,'fx':'NOT_PROVIDED' if shown.get('currency')!='DKK' else None,'assessment':'NOT_PROVIDED' if not a else None},'raw':row})
   try:
@@ -91,4 +92,18 @@ def build(connect,uid,owned,snapshots,now=None):
   except Exception:sessions=[]
  currencies={r['value'].get('currency') for r in result if r['value']}
  result.sort(key=lambda r:(not r['critical'],r['portfolio_name'].casefold(),r['value'].get('currency') or '',-(policy.decimal(r['value'].get('amount')) or Decimal(0)),r['ticker'] or ''))
- return {'version':'design-1','positions':result,'count':len(result),'accounts':accounts,'totals':[{'currency':k,'amount':str(v)} for k,v in totals.items()],'daily_result':None,'daily_result_reason':'Pengestrømme og dokumenteret dagsreference er ikke tilgængelige','orders':orders,'warnings':warnings,'critical_sessions':sessions,'snapshot_at':max((a['snapshot_at'] for a in accounts if a['snapshot_at']),default=None),'mixed_value_currencies':len(currencies)>1}
+ return {'policy':{'version':'1.0.0','limits':policy.LIMITS},'version':'design-1','positions':result,'count':len(result),'accounts':accounts,'totals':[{'currency':k,'amount':str(v)} for k,v in totals.items()],'daily_result':None,'daily_result_reason':'Pengestrømme og dokumenteret dagsreference er ikke tilgængelige','orders':orders,'warnings':warnings,'critical_sessions':sessions,'snapshot_at':max((a['snapshot_at'] for a in accounts if a['snapshot_at']),default=None),'mixed_value_currencies':len(currencies)>1}
+
+
+def engine_session_view(connect,uid,mode,group,limit=100,before=None):
+ """UI-only read projection; never calls claim/control or edits scheduling."""
+ import hotwatch_engine as engine
+ result=engine.sessions(connect,uid,mode,limit=1)
+ where="status IN ('EXPIRED','COMPLETED')" if group=='history' else "status NOT IN ('EXPIRED','COMPLETED')"
+ order="id DESC" if group=='history' else "CASE WHEN status='ERROR' THEN 1 ELSE 0 END,id DESC"
+ with connect() as c:
+  bound=' AND id<?' if before and group=='history' else '';args=[uid,int(mode)]+([before] if bound else [])+[limit+1]
+  rows=c.execute('SELECT * FROM hw_sessions WHERE user_id=? AND is_test=? AND '+where+bound+' ORDER BY '+order+' LIMIT ?',args).fetchall()
+  result['sessions']=[dict(engine.view(c,r),display_freshness=policy.freshness('live_quote',r['last_data'])) for r in rows[:limit]]
+ result['next_cursor']=rows[limit-1]['id'] if group=='history' and len(rows)>limit else None;result['view']=group;result['truncated']=len(rows)>limit;result['shown_limit']=limit
+ return result

@@ -26,7 +26,7 @@ def handle(h,connect,method):
    if method=='POST' and not hmac.compare_digest(h.headers.get('X-CSRF-Token',''),session['csrf']):raise EngineError('invalid_csrf',403)
   mcp_reports.memory_limit('hw-api:'+str(uid),120)
   q=parse_qs(request.query,keep_blank_values=True,max_num_fields=10)
-  if any(len(v)!=1 for v in q.values()) or set(q)-{'is_test','after','limit','order','before'}:raise EngineError('invalid_query')
+  if any(len(v)!=1 for v in q.values()) or set(q)-{'is_test','after','limit','order','before','view'}:raise EngineError('invalid_query')
   mode=q.get('is_test',['false'])[0]
   if mode not in ['true','false']:raise EngineError('invalid_test_category')
   order=q.get('order',['asc'])[0]
@@ -58,7 +58,15 @@ def handle(h,connect,method):
     result={'candidate':rows[0]}
    elif len(parts)==3 and parts[2]=='history':result=candidate_lifecycle.history(connect,uid,parts[1],mode,q.get('before',[None])[0],min(200,limit))
   elif parts==['sessions']:
-   if method=='GET':result=engine.sessions(connect,uid,mode,after,limit)
+   if method=='GET':
+    view=q.get('view',[None])[0]
+    if view not in [None,'current','history']:raise EngineError('invalid_session_view')
+    if view:
+     import dashboard_projection
+     cursor=int(q['before'][0]) if 'before' in q else None
+     if cursor is not None and (view!='history' or not 1<=cursor<=10**15):raise EngineError('invalid_pagination')
+     result=dashboard_projection.engine_session_view(connect,uid,mode,view,limit,cursor)
+    else:result=engine.sessions(connect,uid,mode,after,limit)
    else:result=engine.create(connect,uid,data);status=200 if result['duplicate'] else 201
   elif len(parts)>=2 and parts[0]=='sessions':
    wid=parts[1]

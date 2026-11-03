@@ -852,6 +852,33 @@
                 "type": "null"
               }
             ]
+          },
+          "broker_reference": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "pluto"
+                    ]
+                  },
+                  "external_id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "external_id"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
