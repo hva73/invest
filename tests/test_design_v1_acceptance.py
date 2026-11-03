@@ -62,7 +62,7 @@ class DesignAcceptance(unittest.TestCase):
  def test_T13_missing_fx_keeps_original_currency(self):
   with app.connect() as c:
    snap=portfolio_data.snapshots(c,1)[str(self.root['id'])]['data'];snap['positions'][0]['value']={'amount':'100','currency':'USD'};portfolio_data.save(c,1,self.root['id'],snap)
-  r=next(r for r in self.model()['positions'] if r['ticker']=='TSLA');self.assertEqual(r['value']['currency'],'USD');self.assertEqual(r['missing']['fx'],'NOT_PROVIDED')
+  r=next(r for r in self.model()['positions'] if r['ticker']=='TSLA');self.assertEqual(r['value']['currency'],'USD');self.assertEqual(r['missing']['fx'],'DKK_CONVERSION_NOT_PROVIDED')
  def test_T14_waiting_is_separate_without_implicit_expiry(self):self.assertEqual(policy.candidate_group({'lifecycle':{'status':'WAITING_TRIGGER'},'normalized_decision':'WAIT'}),'waiting')
  def test_T15_omitted_candidate_remains_searchable(self):
   cid=self.report['candidates'][0]['candidate_id'];new=copy.deepcopy(self.report);new.update(report_id='omission',generated_at=(NOW+timedelta(minutes=1)).isoformat());new['candidates']=[];report_ingest.save(app.connect,1,new);self.assertTrue(report_ingest.candidate_history(app.connect,1,cid)['events'])
@@ -108,5 +108,26 @@ class DesignAcceptance(unittest.TestCase):
   def dump():
    with app.connect() as c:return list(c.iterdump())
   before=dump();self.model();self.assertEqual(before,dump())
+ def test_snapshot_history_records_unknown_market_time_without_guessing(self):
+  with app.connect() as c:rows=portfolio_data.snapshots(c,1)
+  for port in [self.root,self.child]:
+   payload=rows[str(port['id'])]['data'];payload['observed']=(NOW+timedelta(minutes=1)).isoformat()
+   for row in payload['positions']:row['price_time']=None
+   with app.connect() as c:portfolio_data.save(c,1,port['id'],payload)
+  result=self.model(NOW+timedelta(minutes=2))
+  self.assertTrue(all(r['since_last'] and r['since_last']['basis']=='pluto_snapshot_received_at' for r in result['positions']))
+  self.assertTrue(all(r['price_time'] is None for r in result['positions']))
+ def test_position_hotwatch_requires_verified_asset_portfolio_and_cycle(self):
+  import hotwatch_engine
+  port=self.root['id'];candidate='candidate-bayn-a';cycle='cycle-bayn-a';other='candidate-bayn-b'
+  with app.connect() as c:
+   for cid,aid,cyc in [(candidate,'pluto-asset-a',cycle),(other,'pluto-asset-b','cycle-bayn-b')]:
+    req={'asset_id':aid,'candidate_id':cid,'trade_cycle_id':cyc,'portfolio_ids':[port]}
+    c.execute("INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due) VALUES(1,?,0,?,'exit','ACTIVE',?,'d','{}','{}',?,?,0)",(cid,cid,json.dumps(req),NOW.isoformat(),NOW.isoformat()))
+   candidate_lifecycle.record(c,1,False,candidate,'POSITION_OPEN',NOW.isoformat(),'SYNTHETIC position link','synthetic-report',cycle)
+   linked=dashboard.position_hotwatch(c,1,port,'pluto-asset-a',{'candidate_id':candidate,'trade_cycle_id':cycle})
+   wrong_asset=dashboard.position_hotwatch(c,1,port,'pluto-asset-other',{'candidate_id':candidate,'trade_cycle_id':cycle})
+   wrong_cycle=dashboard.position_hotwatch(c,1,port,'pluto-asset-a',{'candidate_id':candidate,'trade_cycle_id':'other-cycle'})
+  self.assertEqual(linked['session']['watch_id'],candidate);self.assertEqual(linked['lifecycle']['status'],'POSITION_OPEN');self.assertIsNone(wrong_asset['session']);self.assertIsNone(wrong_cycle['session'])
 
 if __name__=='__main__':unittest.main()
