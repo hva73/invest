@@ -21,7 +21,7 @@ class Delivery(unittest.TestCase):
     def protected(self):
         with app.connect() as c:
             names=[r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")]
-            return {n:[tuple(r) for r in c.execute('SELECT * FROM "'+n+'"')] for n in names if n not in ['ingested_reports','report_candidate_links','report_position_links','report_delivery_evidence','candidate_decision_events','mcp_limits']}
+            return {n:[tuple(r) for r in c.execute('SELECT * FROM "'+n+'"')] for n in names if n not in ['ingested_reports','report_candidate_links','report_position_links','report_delivery_evidence','candidate_decision_events','candidate_lifecycle_events','candidate_trade_cycles','candidate_execution_events','mcp_limits']}
     def exercise(self,mode):
         _,tokens,_=self.http.granted();data=synthetic(mode);events=[];before=self.protected()
         with patch('mcp_reports.audit_write',side_effect=lambda sink,e:events.append(e)),patch('mcp_client.MCP',side_effect=AssertionError('No Pluto calls')):

@@ -255,7 +255,9 @@ def candidates(c,uid,mode=False,candidate_id=None,include_history_market=True):
             if m['price_at']:markets.append({'price':m['price'],'as_of':m['price_at'],'verification':'verified','source_ids':m['source_ids'],'origin':obs['observation_id']})
         latest_market=max(markets,key=lambda m:stamp(m['as_of'])) if markets else None
         last_seen=max([d['generated_at']]+([observed['observed_at']] if observed else []),key=lambda t:stamp(t))
-        result.append({'latest_verified_market':latest_market,'candidate':candidate,'decision':current_decision[1] if current_decision else None,'decision_origin':current_decision[2] if current_decision else None,'active':not current_decision or current_decision[1]['status']!='FRAVÆLG','first_seen':first['generated_at'],'last_seen':last_seen,'first_price':initial['market']['price'],'report_id':d['report_id'],'received':latest['received'],'generated_at':d['generated_at'],'schema_version':2,'quality':d.get('data_quality',{}).get('status','unknown')})
+        import candidate_lifecycle
+        status=candidate_lifecycle.projection(c,uid,mode,candidate,current_decision[1] if current_decision else None)
+        result.append({**status,'latest_verified_market':latest_market,'candidate':candidate,'decision':current_decision[1] if current_decision else None,'decision_origin':current_decision[2] if current_decision else None,'active':status['lifecycle']['status'] not in ['CLOSED','ARCHIVED'] and (not current_decision or current_decision[1]['status']!='FRAVÆLG'),'first_seen':first['generated_at'],'last_seen':last_seen,'first_price':initial['market']['price'],'report_id':d['report_id'],'received':latest['received'],'generated_at':d['generated_at'],'schema_version':2,'quality':d.get('data_quality',{}).get('status','unknown')})
     return result
 
 def account_projection(report):

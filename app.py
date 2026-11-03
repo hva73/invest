@@ -49,6 +49,8 @@ def init():
         c.execute('CREATE TABLE IF NOT EXISTS connection_checks(user_id INTEGER PRIMARY KEY REFERENCES users(id), checked REAL NOT NULL)')
         import report_ingest
         report_ingest.init(c)
+        import hotwatch_engine
+        hotwatch_engine.init(c)
         import mcp_reports
         mcp_reports.init(c)
         import jobs
@@ -177,6 +179,8 @@ class Handler(BaseHTTPRequestHandler):
         import mcp_reports
         if not mcp_reports.handle(self,connect,'DELETE'):self.send(405,{'error':'Metoden understøttes ikke'})
     def do_GET(self):
+        import hotwatch_api
+        if hotwatch_api.handle(self,connect,'GET'):return
         import mcp_reports
         if mcp_reports.handle(self,connect,'GET'):return
         request=urlsplit(self.path)
@@ -199,6 +203,19 @@ class Handler(BaseHTTPRequestHandler):
             s=self.session()
             if not s: return self.send(401,{'error':'Log ind først'})
             user_id=s['user_id']
+            if self.path=='/api/reports/candidate-lifecycle':
+                import candidate_lifecycle
+                q=parse_qs(request.query);mode=q.get('is_test',['false'])
+                if len(mode)!=1 or mode[0] not in ['true','false'] or any(len(v)!=1 for v in q.values()):return self.send(400,{'error':'Ugyldig statusforespørgsel'})
+                try:result=candidate_lifecycle.history(connect,user_id,q.get('candidate_id',[''])[0],mode[0]=='true',q.get('before',[None])[0],int(q.get('limit',['100'])[0]))
+                except ValueError:return self.send(400,{'error':'Ugyldig historikmarkør eller sidestørrelse'})
+                return self.send(200,result)
+            if self.path=='/api/reports/candidate-registry':
+                import intel_workflows
+                q=parse_qs(request.query);mode=q.get('is_test',['false'])
+                if len(mode)!=1 or mode[0] not in ['true','false']:return self.send(400,{'error':'Ugyldig rapporttype'})
+                with connect() as c:rows=intel_workflows.candidates(c,user_id,mode[0]=='true',include_history_market=False)
+                return self.send(200,{'candidates':rows,'is_test':mode[0]=='true'})
             if self.path=='/api/reports/hot-watch':
                 import intel_workflows
                 q=parse_qs(request.query);mode=q.get('is_test',['false'])
@@ -246,9 +263,11 @@ class Handler(BaseHTTPRequestHandler):
         if not path:return self.send(404,{'error':'Ikke fundet'})
         kind={'.html':'text/html; charset=utf-8','.js':'application/javascript','.css':'text/css','.json':'application/manifest+json','.svg':'image/svg+xml'}[Path(path).suffix]
         body=(ROOT/'static'/path).read_bytes()
-        if path=='app.js':body=(ROOT/'static/intel-ui.js').read_bytes()+b'\n'+(ROOT/'static/position-ui.js').read_bytes()+b'\n'+(ROOT/'static/overview-ui.js').read_bytes()+b'\n'+(ROOT/'static/market-ui.js').read_bytes()+b'\n'+(ROOT/'static/report-ui.js').read_bytes()+b'\n'+(ROOT/'static/trade-ui.js').read_bytes()+b'\n'+body
+        if path=='app.js':body=(ROOT/'static/candidate-ui.js').read_bytes()+b'\n'+(ROOT/'static/engine-ui.js').read_bytes()+b'\n'+(ROOT/'static/intel-ui.js').read_bytes()+b'\n'+(ROOT/'static/position-ui.js').read_bytes()+b'\n'+(ROOT/'static/overview-ui.js').read_bytes()+b'\n'+(ROOT/'static/market-ui.js').read_bytes()+b'\n'+(ROOT/'static/report-ui.js').read_bytes()+b'\n'+(ROOT/'static/trade-ui.js').read_bytes()+b'\n'+body
         self.send(200,body,kind)
     def do_POST(self):
+        import hotwatch_api
+        if hotwatch_api.handle(self,connect,'POST'):return
         import mcp_reports
         if mcp_reports.handle(self,connect,'POST'):return
         try:

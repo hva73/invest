@@ -25,6 +25,8 @@ def init(c):
     position_reports.init(c)
     import intel_workflows
     intel_workflows.init(c)
+    import candidate_lifecycle
+    candidate_lifecycle.init(c)
 
 def recipient(connect,authorization):
     key=os.environ.get('ESCAPE_REPORT_INGEST_KEY','');username=os.environ.get('ESCAPE_REPORT_INGEST_USER','')
@@ -67,7 +69,10 @@ def save(connect,user_id,data):
                 c.execute('INSERT INTO report_candidate_links VALUES(?,?,?,?,?)',(user_id,int(data['is_test']),candidate['candidate_id'],row_id,datetime.fromisoformat(data['generated_at'].upper().replace('Z','+00:00')).timestamp()))
         import position_reports,intel_workflows
         position_reports.index(c,user_id,row_id,data)
-        if data['schema_version']==2:intel_workflows.index_report(c,user_id,data)
+        if data['schema_version']==2:
+            intel_workflows.index_report(c,user_id,data)
+            import candidate_lifecycle
+            candidate_lifecycle.index_report(c,user_id,data)
         for phase in ['received','validated','stored']:intel_workflows.evidence(c,row_id,phase)
         return 201,{**receipt,'id':row_id,'duplicate':False}
 
@@ -117,7 +122,8 @@ def candidate_history(connect,user_id,candidate_id,is_test=False):
         previous=current
     import intel_workflows
     with connect() as c:summary=intel_workflows.candidates(c,user_id,is_test,candidate_id)
-    return {'summary':summary[0] if summary else None,'candidate_id':candidate_id,'events':list(reversed(events))[:50],'history_truncated':len(rows)>50}
+    import candidate_lifecycle
+    return {'lifecycle_history':candidate_lifecycle.history(connect,user_id,candidate_id,is_test),'summary':summary[0] if summary else None,'candidate_id':candidate_id,'events':list(reversed(events))[:50],'history_truncated':len(rows)>50}
 
 def analysis_package(connect,user_id,request):
     rid=request.get('report_id');mode=request.get('is_test')

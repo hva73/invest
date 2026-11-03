@@ -95,3 +95,11 @@ def extend(schema):
     return strict_patterns(schema)
 strict_patterns(OBSERVATION)
 extend(SCHEMA)
+
+# Additive permanent candidate lifecycle. Decision remains the existing v2
+# KØB/AFVENT/FRAVÆLG object; API projections also expose BUY/WAIT/REJECT.
+LIFECYCLE_STATUSES=['DISCOVERED','ANALYZING','HOT_WATCH','WAITING_TRIGGER','BUY_SIGNAL','ORDER_PENDING','POSITION_OPEN','EXIT_WATCH','CLOSED','ARCHIVED']
+CANDIDATE_LIFECYCLE=obj({'status':enum(*LIFECYCLE_STATUSES),'changed_at':TIME['anyOf'][0],'reason':string(4000),'source_ids':REFS,'trade_cycle_id':nullable(ID)})
+CANDIDATE['properties'].update({'asset_id':nullable(ID),'exchange':nullable(string(200)),'lifecycle':nullable(CANDIDATE_LIFECYCLE),'reactivation_reason':nullable(string(4000))})
+for collection in ['positions','orders','journal']:SCHEMA['properties'][collection]['items']['properties']['trade_cycle_id']=nullable(ID)
+strict_patterns(SCHEMA)

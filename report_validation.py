@@ -82,6 +82,7 @@ def schema_errors(value,schema,path=''):
         for i,child in enumerate(value):errors.extend(schema_errors(child,schema['items'],path+'['+str(i)+']'))
     elif actual in ['integer','number']:
         if 'minimum' in schema and value<schema['minimum']:add('minimum','Expected value >= '+str(schema['minimum']))
+        if 'maximum' in schema and value>schema['maximum']:add('maximum','Expected value <= '+str(schema['maximum']))
     elif actual=='string':
         if not value.strip() or len(value)<schema.get('minLength',0):add('min_length','Expected non-blank string')
         if len(value)>schema.get('maxLength',len(value)):add('max_length','Maximum '+str(schema['maxLength'])+' characters')
@@ -226,6 +227,8 @@ def semantic(data,errors,warnings,connection,user_id):
     position_reports.semantic(data,errors,warnings,connection,user_id)
     import intel_workflows
     intel_workflows.report_semantic(data,errors,warnings,connection,user_id)
+    import candidate_lifecycle
+    candidate_lifecycle.semantic(data,errors,warnings,connection,user_id)
     consolidation(data,maps,errors,verified)
     if prior and data.get('report_type') not in ['deep_analysis','historical']:
         previous=json.loads(prior['payload'])

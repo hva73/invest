@@ -1585,6 +1585,17 @@
               "closed",
               "unknown"
             ]
+          },
+          "trade_cycle_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1949,6 +1960,17 @@
                   "other",
                   "unknown"
                 ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trade_cycle_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
               },
               {
                 "type": "null"
@@ -2967,6 +2989,111 @@
                 "type": "null"
               }
             ]
+          },
+          "asset_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "\\S"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lifecycle": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "DISCOVERED",
+                      "ANALYZING",
+                      "HOT_WATCH",
+                      "WAITING_TRIGGER",
+                      "BUY_SIGNAL",
+                      "ORDER_PENDING",
+                      "POSITION_OPEN",
+                      "EXIT_WATCH",
+                      "CLOSED",
+                      "ARCHIVED"
+                    ]
+                  },
+                  "changed_at": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 50,
+                    "pattern": "\\S",
+                    "format": "date-time"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000,
+                    "pattern": "\\S"
+                  },
+                  "source_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+                    },
+                    "maxItems": 80,
+                    "uniqueItems": true
+                  },
+                  "trade_cycle_id": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "status",
+                  "changed_at",
+                  "reason",
+                  "source_ids",
+                  "trade_cycle_id"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reactivation_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000,
+                "pattern": "\\S"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3072,6 +3199,17 @@
             "uniqueItems": true
           },
           "portfolio_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trade_cycle_id": {
             "anyOf": [
               {
                 "type": "string",
