@@ -22,6 +22,8 @@ def main():
    if args['name']=='search_assets':return {'structuredContent':{'assets':[{'id':'synthetic-search','ticker':args['arguments']['query'],'name':'Synthetic searched asset','currency':'USD'}]}}
    assert args['name']=='get_asset';raw=copy.deepcopy(case.raw);raw['asset'].update(id=aid,ticker=aid.removeprefix('synthetic-asset-'));raw['price']['assetId']=aid
    if aid.endswith('PEPE'):raw['price'].update(currentPrice='0.0000000123456789',dailyChange='0.0000000000123',dailyChangePercent='0.0996')
+   if aid.endswith('MSFT'):raw['price'].update(dailyChange='-0.225',dailyChangePercent='-1.22')
+   if aid.endswith('ASML'):raw['price'].update(dailyChange='0',dailyChangePercent='0')
    return {'structuredContent':raw}
  items=[{'id':'portfolios:root','name':'Syntetisk hovedkonto','kind':'portfolio','can_trade':True},{'id':'collections:child','name':'Syntetisk AI Collection','kind':'collection','parent_external_id':'portfolios:root'}]
  now=datetime.now(timezone.utc).isoformat();payload={'source':'Synthetic','observed':now,'kind':'portfolio','value':{'value':{'amount':'1000','currency':'DKK'},'reported_result':{'amount':'25','currency':'DKK'},'source_time':now},'positions':portfolio_data.normalize_positions([{'assetId':'synthetic-btc','name':'Syntetisk BTC-beholdning','ticker':'BTC','quantity':'2','price':'10','currency':'USD','value':'20','unrealisedPnL':'-5','priceAsOf':now}]),'positions_complete':True,'accounts':portfolio_data.normalize_accounts([{'currency':'DKK','balance':'300','buyingPower':'200','asOf':now}]),'pending_orders':[],'orders_complete':True,'complete':True,'errors':[]}
@@ -33,6 +35,12 @@ def main():
    btc=panel.locator('.position-identity>strong').filter(has_text='BTC');assert btc.count()==2
    tsla=panel.locator('[data-position-key="test-main / test-main.TSLA"]');assert 'DATA MANGLER' in tsla.inner_text();assert 'BEHOLD' not in tsla.inner_text();assert 'FCX' in panel.inner_text()
    root_btc=panel.locator('[data-position-key="test-main / test-main.BTC"]');root_btc.locator('.market-slot').scroll_into_view_if_needed();root_btc.locator('.market-price').wait_for();root_btc.locator('[data-market-expand]').first.click();chart=page.locator('#market-chart-dialog');chart.wait_for(state='visible');assert chart.locator('[data-market-position="test-main.BTC"]').count()==1;assert chart.locator('.market-line').count()==1;page.keyboard.press('Escape')
+   # Check computed colors, not just class names: later button rules once erased direction colors.
+   for symbol,expected,arrow in [('BTC','rgb(139, 223, 184)','↑'),('MSFT','rgb(240, 154, 166)','↓'),('ASML','rgb(168, 189, 205)','→')]:
+    row=panel.locator('.position-row').filter(has=page.locator('.position-identity>strong',has_text=symbol)).first
+    row.locator('.market-slot').scroll_into_view_if_needed();change=row.locator('.market-change');change.wait_for();assert arrow in change.inner_text(),(symbol,change.inner_text())
+    assert change.evaluate('(n)=>getComputedStyle(n).color')==expected,(symbol,change.evaluate('(n)=>getComputedStyle(n).color'))
+    change.hover();assert change.evaluate('(n)=>getComputedStyle(n).color')==expected,('hover',symbol)
    panel.locator('[data-position-filter=red]').click();assert panel.locator('.position-row:visible').count()==1;panel.locator('[data-position-filter=all]').click()
    tsla.locator('[data-position-open]').click();dialog=page.locator('#position-dialog');dialog.wait_for(state='visible');assert 'Ingen individuel vurdering' in dialog.inner_text() or 'ingen individuel vurdering' in dialog.inner_text();assert 'ACTIVE_STOP' in dialog.inner_text();assert 'ingen bekræftet fyldning' in dialog.inner_text();assert 'gennemført salg' in dialog.inner_text();page.keyboard.press('Escape')
    child=panel.locator('[data-position-key="test-child / test-child.BTC"]');child.locator('[data-position-open]').click();assert 'REDUCÉR' in dialog.inner_text();assert 'test-child BTC' in dialog.inner_text();dialog.locator('[data-position-history]').click();dialog.get_by_text('Positionshistorik',exact=True).wait_for();assert 'positions-old' in dialog.inner_text();assert 'positions-current' in dialog.inner_text();page.keyboard.press('Escape')

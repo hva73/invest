@@ -37,6 +37,9 @@ def main():
      if width in [390,1440]:page.screenshot(path=f'/tmp/escape-engine-{width}.png',full_page=True)
     page.locator('nav [data-view=radar]').click();page.locator('.candidate-lifecycle-filters').wait_for();page.locator('[data-candidate-filter=closed]').click();expect(page.locator('.desk-candidate:not([hidden])')).to_have_count(1);expect(page.locator('.desk-candidate:not([hidden])')).to_contain_text('MERC');assert 'Ingen bekræftet udførelse' in page.locator('.desk-candidate:not([hidden])').inner_text()
     page.locator('[data-candidate-filter=position]').click();expect(page.locator('.desk-candidate:not([hidden])')).to_have_count(1);expect(page.locator('.desk-candidate:not([hidden])')).to_contain_text('FCX');assert 'FRAVÆLG' in page.locator('.desk-candidate:not([hidden])').inner_text();assert 'Egen position er særskilt bekræftet' in page.locator('.desk-candidate:not([hidden])').inner_text()
+    # Attention buttons must not resurrect closed/archived rows or discard the lifecycle selection.
+    page.locator('[data-candidate-filter=active]').click();active_count=page.locator('.desk-candidate:not([hidden])').count();page.locator('.desk-radar [data-attention-filter=all]').click();expect(page.locator('.desk-candidate:not([hidden])')).to_have_count(active_count);assert page.locator('.desk-candidate[data-candidate-lifecycle=CLOSED]:not([hidden]),.desk-candidate[data-candidate-lifecycle=ARCHIVED]:not([hidden])').count()==0
+    page.locator('[data-candidate-filter=closed]').click();page.locator('.desk-radar [data-attention-filter=all]').click();expect(page.locator('.desk-candidate:not([hidden])')).to_have_count(1)
     page.locator('[data-candidate-filter=archived]').click();expect(page.locator('.desk-candidate:not([hidden])')).to_have_count(2);page.locator('[data-candidate-filter=all]').click();expect(page.locator('.desk-candidate:not([hidden])')).to_have_count(12)
     assert not errors,errors;browser.close()
    with app.connect() as c:
