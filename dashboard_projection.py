@@ -88,7 +88,9 @@ def build(connect,uid,owned,snapshots,now=None):
     action=a.get('action') if a else None
     result.append({'key':identity,'portfolio_id':p['id'],'portfolio_name':p['name'],'portfolio_kind':p['kind'],'external_id':p['external_id'],'asset_id':aid,'ticker':row.get('ticker'),'name':row.get('name'),'quantity':row.get('quantity'),'price':row.get('price'),'price_time':row.get('price_time'),'value':shown,'original_value':raw_value,'cost_basis':cost,'average_entry':row.get('average_entry'),'unrealized':pnl,'unrealized_percent':pnl_percent,'daily':daily,'since_last':since,'assessment':a,'assessment_report_id':matched[1] if matched else None,'reported_position':report,'action':action,'critical':action in ['SÆLG','REDUCÉR'] or bool(conflicts),'price_freshness':price_age,'analysis_freshness':analysis_age,'snapshot_at':position_data.get('observed'),'verification':'last_known' if failed or not data.get('positions_complete') else 'broker_snapshot','conflicts':conflicts,'missing':{'daily':'NOT_PROVIDED' if daily is None else None,'since_last':'NOT_PROVIDED' if since is None else None,'fx':'NOT_PROVIDED' if shown.get('currency')!='DKK' else None,'assessment':'NOT_PROVIDED' if not a else None},'raw':row})
   try:
-   sessions=[dict(r) for r in c.execute("SELECT watch_id,status,last_error,last_data FROM hw_sessions WHERE user_id=? AND is_test=0 AND status IN ('DEGRADED','ERROR')",(uid,)).fetchall()]
+   sessions=[]
+   for row in c.execute("SELECT watch_id,status,last_error,last_data,request FROM hw_sessions WHERE user_id=? AND is_test=0 AND status IN ('DEGRADED','ERROR')",(uid,)):
+    item=dict(row);req=json.loads(item.pop('request'));item.update(ticker=req.get('ticker'),provider=req.get('provider'));sessions.append(item)
   except Exception:sessions=[]
  currencies={r['value'].get('currency') for r in result if r['value']}
  result.sort(key=lambda r:(not r['critical'],r['portfolio_name'].casefold(),r['value'].get('currency') or '',-(policy.decimal(r['value'].get('amount')) or Decimal(0)),r['ticker'] or ''))

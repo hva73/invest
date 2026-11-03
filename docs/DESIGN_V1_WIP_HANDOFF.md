@@ -49,3 +49,19 @@
 Repo /workspace/invest, lokal branch work. WIP: git push origin HEAD:codex/design-review-wip. Normalbranch codex/escape-development har e63739d (MCP2.5.1), tidligere installeretversion er a065df6 (MCP2.5.0). Brugeren udsatte installation af MCPrettelse for at samle den meddesign. Ingen subagents tilladt.
 
 Lokale HTTP/Chromiumtests kræver sandbox_permissions=require_escalated med passende begrundelse (ingen livebroker/handler). Python: unittestdiscover. Browser: /usr/bin/chromium, Playwright installeret. Ingen configuredsecrets i udviklingsmiljø. Forrige exec transportkortfejl blev løst ved normalt retry; workspace er intakt.
+
+## Nyeste checkpoint efter genstart
+
+Miljøet blev starting/ready under arbejdet; workspace og ændringer overlevede. Lokal kodecommit aedc6de indeholder videreudviklingen efter 9c1c539. Efterfølgende små ændringer gør finansielle tal klikbare med bevarede farver og tydeligere danske fejllabels. Disse gemmes i næste checkpoint.
+
+Nyere faktisk evidens:
+- /tmp/escape-design-review-complete-tests.log: **295 tests bestået**, 68,382s. Der er siden tilføjet én ekstra kontrakttest (nu forventet296); fuld endelig kørsel skal tælles faktisk, ikke antages.
+- /tmp/escape-hotwatch-e2e-final-review.log: **8 H-tests bestået**,8,700s, nu med eksplicit samme trade_cycle_id fra Radar til revurdering. H08 omfatter også de nye current/history UI-læseprojektioner.
+- /tmp/escape-design-contract-final-review.log: **6 kontrakt-/kompatibilitetstests bestået**, inkl. partial snapshot cache, ejerskab, optional brokerreference, future time, journalcursor og sessionshistorikpagination.
+- /tmp/escape-design-v1-clickable-review.log: ny browser bestået med 12 brokerpositioner, klikbare farver/hover, alle 9 bredder og alle8 visninger. Screenshots /tmp/escape-design-v1-*-390.png og *-1440.png. Aktuel mobiloversigt ca.3400–4000px mod før ca.8169px; se faktiske screenshots.
+- browser_hotwatch_engine, browser_trade_proposals, browser_report_v2, browser_pull_refresh og opdateret browser_positions er bestået. Logs /tmp/escape-design-*-browser*.log og /tmp/escape-design-historical-positions-browser.log.
+- Alle3 JS-suiter er bestået; freshness-test er opdateret til60/300/86400-grænser. Generiske tidsmærker bruger nu backend-publicerede policy-limits når tilgængelige.
+
+Kodeopdateringer siden gammel note: brokerbeholdninger genbruges også i porteføljedetaljer; sorteringsscope bevares. Finansielle tal åbner datagrundlag; absolutter er neutrale. MarketUI viser neutral manglende dagsreference i stedet for udokumenterede rå dailyChange-farver. Journalen bevarer godkendt-forslag≠fill og bruger provider status_time hvor kendt, ellers tydelig observeret-status. HOT WATCH current/history læses separat, historik har before-pagination, gamle sessioner skjuler ikke nye. ERROR/DEGRADED forbliver synlige under filtre. Radar-optællinger anvender filtrene ved første render. Ingen beskyttet motor-/strategi-/polling-/scheduler-/trade_service-fil er ændret.
+
+**Resterer før reviewaflevering:** Frys kode; kør én endelig fuld regression og browser på seneste små ændringer. Skriv faktisk individuel T01–T28/H01–H08-resultatrapport med syntetisk kontra livebegrænsning, kopier screenshots til docs, opdatér impact record og denne handoff. Bekræft alle runtimefiler i installer, checksums og beskyttede filer. Push kun WIP. Ingen release/installation/normalbranch. END_TO_END_DATA_CONTRACT.md og HOTWATCH_ENGINE_DATA_CONTRACT.md findes allerede og skal med i reviewleverancen. Hele den selvstændige motor er stadig fase1–2; backtest/shadow/ny strategiaktivering er ikke implementeret. Live close/cashflows/FX/kalender/EODHD/hosting er ikke verificeret og må ikke markeres PASS ud fra syntetiske tests.
