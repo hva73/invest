@@ -1,0 +1,248 @@
+{
+  "type": "object",
+  "properties": {
+    "watch_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$(?![\\s\\S])"
+    },
+    "report_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+    },
+    "candidate_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+    },
+    "is_test": {
+      "type": "boolean"
+    },
+    "purpose": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "\\S"
+    },
+    "ticker": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60,
+      "pattern": "\\S"
+    },
+    "exchange": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "\\S"
+    },
+    "asset_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+    },
+    "quote_currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+    },
+    "portfolio_ids": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "maxItems": 30
+    },
+    "priority": {
+      "type": "string",
+      "enum": [
+        "NORMAL",
+        "HIGH",
+        "CRITICAL"
+      ]
+    },
+    "profile": {
+      "type": "string",
+      "enum": [
+        "NORMAL",
+        "ACTIVE",
+        "CRITICAL",
+        "IDLE"
+      ]
+    },
+    "provider": {
+      "type": "string",
+      "enum": [
+        "pluto",
+        "report_inbox",
+        "eodhd",
+        "synthetic"
+      ]
+    },
+    "end_at": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50,
+          "pattern": "\\S",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "activation_reason": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000,
+      "pattern": "\\S"
+    },
+    "strategy_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+    },
+    "strategy_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 30,
+      "pattern": "\\S"
+    },
+    "risk": {
+      "type": "object",
+      "properties": {
+        "max_notional_dkk": {
+          "type": "string",
+          "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+        },
+        "max_loss_dkk": {
+          "type": "string",
+          "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+        },
+        "max_spread_pct": {
+          "type": "string",
+          "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+        },
+        "max_quote_age_s": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_position_fraction_pct": {
+          "type": "string",
+          "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+        },
+        "proposed_quantity": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stop_price": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exit_deadline": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 50,
+              "pattern": "\\S",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "max_notional_dkk",
+        "max_loss_dkk",
+        "max_spread_pct",
+        "max_quote_age_s",
+        "max_position_fraction_pct",
+        "proposed_quantity",
+        "stop_price",
+        "exit_deadline"
+      ],
+      "additionalProperties": false
+    },
+    "provider_symbol": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "\\S"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "trade_cycle_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "reactivation_reason": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "pattern": "\\S"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "watch_mode": {
+      "type": "string",
+      "enum": [
+        "entry",
+        "exit",
+        "both"
+      ]
+    }
+  },
+  "required": [
+    "watch_id",
+    "report_id",
+    "candidate_id",
+    "is_test",
+    "purpose",
+    "ticker",
+    "exchange",
+    "asset_id",
+    "quote_currency",
+    "portfolio_ids",
+    "priority",
+    "profile",
+    "provider",
+    "end_at",
+    "activation_reason",
+    "strategy_id",
+    "strategy_version",
+    "risk"
+  ],
+  "additionalProperties": false
+}

@@ -57,6 +57,44 @@ class HotWatch(unittest.TestCase):
   history=engine.history(app.connect,1,self.req['watch_id'],True)['items'];self.assertTrue(any(e['event_type']=='ORDER_FILLED' for e in history))
  def test_same_market_timestamp_with_new_provider_id_is_not_a_new_observation(self):
   t=tick(self.now);self.put(t);before=self.counts();copy_tick=copy.deepcopy(t);copy_tick['sample_id']='another-read-id';self.assertTrue(self.put(copy_tick)['duplicate']);self.assertEqual(before,self.counts())
+ def test_context_without_quote_preserves_broker_evidence_without_market_signal(self):
+  ctx=tick(self.now,held=True)['context'];before=self.counts()
+  engine.observe_context(app.connect,1,self.req['watch_id'],True,ctx,self.now)
+  view=engine.item(app.connect,1,self.req['watch_id'],True)['session']
+  self.assertEqual(view['latest_context']['quantity'],'10');self.assertIsNone(view['last_data_at']);self.assertEqual(view['signal'],'NO_DATA')
+  self.assertEqual(self.counts()['hw_samples'],before['hw_samples']);self.assertEqual(self.counts()['hw_calculations'],before['hw_calculations'])
+  self.assertTrue(engine.observe_context(app.connect,1,self.req['watch_id'],True,ctx,self.now)['duplicate'])
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  with self.assertRaisesRegex(EngineError,'watch_not_running'):engine.observe_context(app.connect,1,self.req['watch_id'],True,ctx,self.now)
+ def test_runner_journals_broker_context_when_quote_time_is_unavailable(self):
+  from hotwatch_service import Runner
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  r=copy.deepcopy(self.req);r.update(watch_id='broker-no-quote',purpose='broker-context-test',provider='pluto');engine.create(app.connect,1,r,self.now)
+  error=DataUnavailable('PLUTO_QUOTE_TIME_UNKNOWN');error.position_context=tick(self.now,held=True)['context']
+  from unittest.mock import Mock
+  adapter=Mock();adapter.poll.side_effect=error;runner=Runner(app.connect);runner.adapters[(1,'pluto')]=adapter
+  with patch('hotwatch_engine.utc',return_value=self.now):self.assertTrue(runner.once(self.now))
+  view=engine.item(app.connect,1,r['watch_id'],True)['session'];self.assertEqual(view['status'],'DEGRADED');self.assertEqual(view['signal'],'NO_DATA');self.assertIsNone(view['last_data_at']);self.assertEqual(view['latest_context']['quantity'],'10')
+  self.assertEqual(self.counts()['hw_samples'],0)
+ def test_checkpoint_context_migration_preserves_old_journal(self):
+  ctx=tick(self.now)['context'];engine.observe_context(app.connect,1,self.req['watch_id'],True,ctx,self.now)
+  with app.connect() as c:
+   c.execute('DROP TABLE hw_context_events')
+   c.execute('CREATE TABLE hw_context_events(id INTEGER PRIMARY KEY,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),sample_row_id INTEGER NOT NULL REFERENCES hw_samples(id),observed TEXT NOT NULL,payload TEXT NOT NULL)')
+   sample=tick(self.now)
+   c.execute('INSERT INTO hw_samples(watch_row_id,source,sample_id,event_epoch,received,payload,digest) VALUES(1,?,?,?,?,?,?)',('synthetic','legacy-tick',self.now.timestamp(),self.now.isoformat(),json.dumps(sample),checksum(sample)))
+   c.execute('INSERT INTO hw_context_events VALUES(1,1,1,?,?)',(self.now.isoformat(),json.dumps(ctx)))
+  app.init()
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_context_events').fetchone()[0],1)
+   self.assertFalse(next(r for r in c.execute('PRAGMA table_info(hw_context_events)') if r['name']=='sample_row_id')['notnull'])
+ def test_system_kill_blocks_work_and_requires_explicit_resume(self):
+  before=self.counts()['hw_events'];engine.system_kill(app.connect,True,'Synthetic operator test',self.now)
+  self.assertIsNone(engine.claim(app.connect,self.now));self.assertEqual(engine.item(app.connect,1,self.req['watch_id'],True)['session']['status'],'PAUSED')
+  engine.system_kill(app.connect,False,'Synthetic release',self.now)
+  with app.connect() as c:self.assertEqual([r[0] for r in c.execute('SELECT killed FROM hw_operator_events ORDER BY id')],[1,0])
+  self.assertIsNone(engine.claim(app.connect,self.now));self.assertGreater(self.counts()['hw_events'],before)
+  engine.control(app.connect,1,self.req['watch_id'],True,'resume',self.now);self.assertIsNotNone(engine.claim(app.connect,self.now))
  def test_unknown_tradability_blocks_new_buy(self):
   t=tick(self.now);t['context']['tradability']='unknown';r,_=calculate(t,good_metrics(),BASELINE,self.req['risk'],{},self.now);self.assertNotEqual(r['signal'],'BUY');self.assertIn('TRADABILITY_UNCONFIRMED',r['reason_codes'])
  def test_stale_future_missing_and_crossed_market(self):

@@ -1,0 +1,480 @@
+{
+  "type": "object",
+  "properties": {
+    "sample_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "pluto",
+        "eodhd",
+        "report_inbox",
+        "synthetic"
+      ]
+    },
+    "ticker": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60,
+      "pattern": "\\S"
+    },
+    "asset_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+    },
+    "venue": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "\\S"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$(?![\\s\\S])"
+    },
+    "event_time": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 50,
+      "pattern": "\\S",
+      "format": "date-time"
+    },
+    "session_key": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "\\S"
+    },
+    "market_status": {
+      "type": "string",
+      "enum": [
+        "PRE",
+        "REGULAR",
+        "AFTER",
+        "CLOSED",
+        "HALTED",
+        "UNKNOWN"
+      ]
+    },
+    "feed_type": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "\\S"
+    },
+    "documented_delay_s": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "verification": {
+      "type": "string",
+      "enum": [
+        "verified",
+        "unverified",
+        "unknown"
+      ]
+    },
+    "error_code": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "interval_s": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "price": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "bid": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ask": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "volume": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "volume_type": {
+      "type": "string",
+      "enum": [
+        "interval",
+        "cumulative",
+        "unknown"
+      ]
+    },
+    "open": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "high": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "low": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "close": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "context": {
+      "type": "object",
+      "properties": {
+        "tradability": {
+          "type": "string",
+          "enum": [
+            "available",
+            "unavailable",
+            "unknown"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "verified",
+            "unknown"
+          ]
+        },
+        "as_of": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 50,
+              "pattern": "\\S",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "position": {
+          "type": "string",
+          "enum": [
+            "held",
+            "none",
+            "unknown"
+          ]
+        },
+        "quantity": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cost_price": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "portfolio_equity_dkk": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exposure_dkk": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fx_to_dkk": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fees_dkk": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "orders": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.:-]{1,100}$(?![\\s\\S])"
+              },
+              "status": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "pattern": "\\S"
+              },
+              "requested_quantity": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "filled_quantity": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "side": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "BUY",
+                      "SELL"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status_time": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 50,
+                    "pattern": "\\S",
+                    "format": "date-time"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "average_fill_price": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "limit_price": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "stop_price": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^\\d{1,18}(\\.\\d{1,12})?$(?![\\s\\S])"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "order_type": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "pattern": "\\S"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "order_id",
+              "status",
+              "requested_quantity",
+              "filled_quantity",
+              "side"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 100
+        },
+        "orders_complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "tradability",
+        "status",
+        "as_of",
+        "position",
+        "quantity",
+        "cost_price",
+        "portfolio_equity_dkk",
+        "exposure_dkk",
+        "fx_to_dkk",
+        "fees_dkk",
+        "orders"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "sample_id",
+    "source",
+    "ticker",
+    "asset_id",
+    "venue",
+    "currency",
+    "event_time",
+    "session_key",
+    "market_status",
+    "feed_type",
+    "documented_delay_s",
+    "verification",
+    "error_code",
+    "interval_s",
+    "price",
+    "bid",
+    "ask",
+    "volume",
+    "volume_type",
+    "open",
+    "high",
+    "low",
+    "close",
+    "context"
+  ],
+  "additionalProperties": false
+}

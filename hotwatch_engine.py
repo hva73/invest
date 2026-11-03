@@ -2,7 +2,7 @@
 import json,os,secrets,time
 from datetime import datetime,timezone
 from decimal import Decimal
-from hotwatch_contract import SESSION,SAMPLE,EngineError,require,canonical,checksum,stamp,OPEN_STATES,PROFILES,GLOBAL_RISK
+from hotwatch_contract import SESSION,SAMPLE,CONTEXT,EngineError,require,canonical,checksum,stamp,OPEN_STATES,PROFILES,GLOBAL_RISK
 from hotwatch_features import features
 from hotwatch_strategy import BASELINE,validate_strategy,calculate
 
@@ -15,12 +15,19 @@ def init(c):
  c.execute("CREATE UNIQUE INDEX IF NOT EXISTS hw_active_identity ON hw_sessions(user_id,is_test,candidate_id,purpose) WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')")
  c.execute('CREATE INDEX IF NOT EXISTS hw_due ON hw_sessions(status,next_due,lease_until)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_samples(id INTEGER PRIMARY KEY,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),source TEXT NOT NULL,sample_id TEXT NOT NULL,event_epoch REAL NOT NULL,received TEXT NOT NULL,payload TEXT NOT NULL,digest TEXT NOT NULL,UNIQUE(watch_row_id,source,sample_id))')
- c.execute('CREATE TABLE IF NOT EXISTS hw_context_events(id INTEGER PRIMARY KEY,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),sample_row_id INTEGER NOT NULL REFERENCES hw_samples(id),observed TEXT NOT NULL,payload TEXT NOT NULL)')
+ c.execute('CREATE TABLE IF NOT EXISTS hw_context_events(id INTEGER PRIMARY KEY,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),sample_row_id INTEGER REFERENCES hw_samples(id),observed TEXT NOT NULL,payload TEXT NOT NULL)')
+ # Preserve unpublished checkpoint journals while allowing broker evidence before any quote.
+ if any(r['name']=='sample_row_id' and r['notnull'] for r in c.execute('PRAGMA table_info(hw_context_events)')):
+  c.execute('ALTER TABLE hw_context_events RENAME TO hw_context_events_legacy')
+  c.execute('CREATE TABLE hw_context_events(id INTEGER PRIMARY KEY,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),sample_row_id INTEGER REFERENCES hw_samples(id),observed TEXT NOT NULL,payload TEXT NOT NULL)')
+  c.execute('INSERT INTO hw_context_events SELECT * FROM hw_context_events_legacy')
+  c.execute('DROP TABLE hw_context_events_legacy')
  c.execute('CREATE INDEX IF NOT EXISTS hw_samples_time ON hw_samples(watch_row_id,event_epoch,id)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_calculations(id INTEGER PRIMARY KEY,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),sample_row_id INTEGER REFERENCES hw_samples(id),calculated TEXT NOT NULL,payload TEXT NOT NULL,strategy_checksum TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_events(id INTEGER PRIMARY KEY,event_id TEXT NOT NULL UNIQUE,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),event_type TEXT NOT NULL,severity TEXT NOT NULL,created TEXT NOT NULL,data_timestamp TEXT,payload TEXT NOT NULL)')
  c.execute('CREATE INDEX IF NOT EXISTS hw_event_history ON hw_events(watch_row_id,id)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_admin_events(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),kind TEXT NOT NULL,created TEXT NOT NULL,payload TEXT NOT NULL)')
+ c.execute('CREATE TABLE IF NOT EXISTS hw_operator_events(id INTEGER PRIMARY KEY,created TEXT NOT NULL,killed INTEGER NOT NULL,reason TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_system_control(id INTEGER PRIMARY KEY CHECK(id=1),killed INTEGER NOT NULL,changed TEXT NOT NULL,reason TEXT NOT NULL)')
  c.execute("INSERT OR IGNORE INTO hw_system_control VALUES(1,0,'','')")
  c.execute('CREATE TABLE IF NOT EXISTS hw_control(user_id INTEGER PRIMARY KEY REFERENCES users(id),killed INTEGER NOT NULL,changed TEXT NOT NULL,reason TEXT NOT NULL)')
@@ -248,6 +255,36 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   c.execute('UPDATE hw_sessions SET status=?,state=?,updated=?,last_data=?,last_calculation=?,next_due=?,failures=0,last_error=NULL,lease_owner=NULL,lease_until=0 WHERE id=?',(new_status,canonical(nextstate),now.isoformat(),sample['event_time'],now.isoformat(),now.timestamp()+interval,row['id']))
   return {'ok':True,'duplicate':False,'calculation':result,'session':view(c,row_for(c,uid,wid,mode),now)}
 
+def observe_context(connect,uid,wid,mode,context,now=None,lease=None):
+ """Trusted adapter evidence only. Never invent a quote or advance signal confirmation."""
+ now=now or utc();require(context,CONTEXT)
+ if not context['as_of'] or not 0<=now.timestamp()-stamp(context['as_of']).timestamp()<=300:raise EngineError('invalid_position_context_time')
+ if context['position']=='held' and (context['quantity'] is None or Decimal(context['quantity'])<=0):raise EngineError('invalid_position_quantity')
+ if context['position']=='none' and context['quantity'] not in [None,'0'] and Decimal(context['quantity'])!=0:raise EngineError('invalid_position_quantity')
+ with connect() as c:
+  c.execute('BEGIN IMMEDIATE');row=row_for(c,uid,wid,mode);request=json.loads(row['request'])
+  if lease and (row['lease_owner']!=lease or row['lease_until']<now.timestamp()):raise EngineError('lease_lost',409)
+  if row['status'] not in ['CREATED','VALIDATING','ACTIVE','DEGRADED']:raise EngineError('watch_not_running',409)
+  if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:raise EngineError('operator_kill_switch',409)
+  killed=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
+  if killed and killed['killed']:raise EngineError('kill_switch_active',409)
+  if request['provider'] not in ['pluto','synthetic']:raise EngineError('broker_context_source_required')
+  if request['provider']=='synthetic' and not mode:raise EngineError('synthetic_requires_test_mode')
+  if request['end_at'] and stamp(request['end_at'])<=now:raise EngineError('watch_not_running',409)
+  previous=c.execute('SELECT payload FROM hw_context_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
+  if previous:
+   old=json.loads(previous['payload'])
+   if stamp(context['as_of'])<stamp(old['as_of']):raise EngineError('out_of_order_position_context',409)
+   if old==context:return {'ok':True,'duplicate':True}
+  c.execute('INSERT INTO hw_context_events(watch_row_id,sample_row_id,observed,payload) VALUES(?,NULL,?,?)',(row['id'],now.isoformat(),canonical(context)))
+  import candidate_lifecycle
+  cycle=request.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':wid})[:24]
+  candidate_lifecycle.observe_pluto(c,uid,mode,request['candidate_id'],context,now.isoformat(),wid,cycle,'NO_DATA',synthetic=request['provider']=='synthetic')
+  material=lambda value:{k:v for k,v in value.items() if k!='as_of'}
+  if not previous or material(old)!=material(context):event(c,row,'BROKER_CONTEXT_UPDATED',now,'Verified broker context without usable market timestamp; no market signal calculated',data_time=context['as_of'])
+  return {'ok':True,'duplicate':False}
+
+
 def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
  now=now or utc()
  with connect() as c:
@@ -296,6 +333,7 @@ def system_kill(connect,enabled,reason,now=None):
  if type(enabled) is not bool or not isinstance(reason,str) or not 1<=len(reason)<=1000:raise EngineError('invalid_kill_switch')
  with connect() as c:
   c.execute('BEGIN IMMEDIATE');c.execute('UPDATE hw_system_control SET killed=?,changed=?,reason=? WHERE id=1',(int(enabled),now.isoformat(),reason))
+  c.execute('INSERT INTO hw_operator_events(created,killed,reason) VALUES(?,?,?)',(now.isoformat(),int(enabled),reason))
   if enabled:
    for row in c.execute("SELECT * FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED')").fetchall():
     state=json.loads(row['state']);state.update(signal='PAUSE',pending=None,confirmations=0)

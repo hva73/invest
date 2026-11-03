@@ -1,3 +1,5 @@
+> Historisk checkpointnote, afløst af fase 1–2-leverancen. Den tidligere åbne context-only-håndtering er færdig og testet; se HOTWATCH_ENGINE.md og CANDIDATE_STATUS_MODEL.md for aktuel status. Backtest/shadow/versionaktivering er stadig udskudt. Indholdet nedenfor dokumenterer backup-tidspunktet og er ikke den aktuelle afleveringsstatus.
+
 # HOT WATCH arbejdsbackup — 3. november 2026
 
 **Ikke en installationsklar udgave.** Branch `codex/hotwatch-engine-wip`.

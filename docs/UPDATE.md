@@ -224,3 +224,7 @@ Opdateringen tilføjer Python-filerne `position_reports.py`, `intel_contract.py`
 Genindlæs derefter ESCAPE-forbindelsens MCP-værktøjer i ChatGPT. Serverversion 2.4.0 annoncerer positionsfelter, de valgfrie V2.2-felter samt `record_hot_watch` og `get_hot_watch`. Rapportgeneratoren skal sende de nye felter efter den opdaterede kontrakt; eksisterende v2 fortsætter uændret, men giver DATA MANGLER/ukendt, hvor analyser eller observationer ikke leveres. Se [V2.2-workflows](V2_2_WORKFLOWS.md).
 
 Efter installation: kontrollér Overblik, Porteføljer/Collection-specifikation, Analyser, kandidatforløb og HOT WATCH ved både desktop og mobil. Driftsvisninger må ikke indeholde syntetiske eksempler. Foretag ikke rigtige handler som installationstest.
+
+## HOT WATCH fase 1–2
+
+Opdateringen kopierer motorens Python-/frontendfiler, men ændrer ikke eksisterende worker/cron eller starter en service. Appstart tilføjer journal-/sessiontabeller og indekserer gamle rapporter uden at ændre payloads. Se [HOT WATCH-drift](HOTWATCH_ENGINE.md) før separat afprøvning af `hotwatch_service.py --once`. Hold motoren stoppet under databasebackup/opdatering. Ved gendannelse skal filbackup og SQLite-backup passe sammen; genindlæs ikke gamle rapportpayloads for at nulstille journalen.

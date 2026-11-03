@@ -58,3 +58,7 @@ Privat MCP-rapportindbakke med OAuth/PKCE: se [docs/MCP_REPORTS.md](docs/MCP_REP
 ESCAPE Intelligence rapportvisning og JSON v2: [docs/REPORT_V2.md](docs/REPORT_V2.md). V1 og eksisterende OAuth-integration er bagudkompatible.
 
 Positionsvurderinger og V2.2: [positionskontrakt](docs/POSITION_ASSESSMENTS.md), [beslutninger og HOT WATCH](docs/V2_2_WORKFLOWS.md), [kravtillæg](docs/REQUIREMENTS_V2_2_DA.md). Gamle v1/v2-rapporter forbliver gyldige. Nye målinger og analyser kræver faktisk levering fra rapportgeneratoren; rapportimport udløser ingen handler.
+
+## HOT WATCH Engine og permanent kandidatstatus
+
+Fase 1–2, selvstændig read-only service med deterministiske signaler, persistente sessioner og kandidatjournal. Se [funktioner, API og drift](docs/HOTWATCH_ENGINE.md) og [statusmodel](docs/CANDIDATE_STATUS_MODEL.md). Backtest, shadow og aktivering/rollback af uploadede algoritmer er fase 3 og ikke implementeret. Aktuelle produktionsfeeds og hostens vedvarende service er endnu ikke verificeret.

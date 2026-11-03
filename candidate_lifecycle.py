@@ -116,7 +116,7 @@ def observe_pluto(c,uid,mode,cid,context,at,origin,cycle,signal=None,synthetic=F
   if known and known['cycle_id'] is not None and known['cycle_id']!=cycle:continue
   raw=order['status'].upper();q=Decimal(order['filled_quantity']) if order['filled_quantity'] is not None else None;requested=Decimal(order['requested_quantity']) if order['requested_quantity'] is not None else None
   status='SUBMITTED' if raw in ['ACCEPTED','ACTIVE','OPEN','NEW'] else 'CANCELLED' if raw in ['CANCELLED','CANCELED'] else 'REJECTED' if raw=='REJECTED' else 'UNKNOWN'
-  if q is not None and q>0:
+  if q is not None and q>0 and status not in ['CANCELLED','REJECTED']:
    if requested is not None and q==requested and raw in ['FILLED','EXECUTED','COMPLETED']:status='FILLED'
    elif requested is not None and q<requested:status='PARTIALLY_FILLED'
   assigned_cycle=known['cycle_id'] if known else cycle

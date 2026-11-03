@@ -1,0 +1,29 @@
+{
+  "watch_id": "synthetic-merc-watch",
+  "report_id": "SYNTHETIC-MERC-BASE",
+  "candidate_id": "synthetic-candidate-PLTR",
+  "is_test": true,
+  "purpose": "MERC synthetic momentum",
+  "ticker": "MERC",
+  "exchange": "NASDAQ",
+  "asset_id": "synthetic-MERC",
+  "quote_currency": "USD",
+  "portfolio_ids": [],
+  "priority": "NORMAL",
+  "profile": "NORMAL",
+  "provider": "synthetic",
+  "end_at": null,
+  "activation_reason": "SYNTHETISK MERC-test, ingen faktisk handel",
+  "strategy_id": "escape_momentum",
+  "strategy_version": "1.0.0",
+  "risk": {
+    "max_notional_dkk": "1000",
+    "max_loss_dkk": "100",
+    "max_spread_pct": "1",
+    "max_quote_age_s": 120,
+    "max_position_fraction_pct": "20",
+    "proposed_quantity": "1",
+    "stop_price": "95",
+    "exit_deadline": null
+  }
+}

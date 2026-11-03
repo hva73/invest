@@ -28,6 +28,11 @@ class Runner:
   except EngineError as error:
    if error.code in ['lease_lost','watch_not_running','kill_switch_active','operator_kill_switch']:
     self.log(job,'cancelled',error.code);return True
+   if getattr(error,'position_context',None) is not None:
+    try:engine.observe_context(self.connect,uid,wid,mode,error.position_context,lease=lease)
+    except EngineError as context_error:
+     if context_error.code in ['lease_lost','watch_not_running','kill_switch_active','operator_kill_switch']:return True
+     self.log(job,'context_rejected',context_error.code)
    engine.fault(self.connect,uid,wid,mode,error.code,lease=lease,retry_after_s=getattr(error,'retry_after_s',None));self.health(job,None,error.code);self.log(job,'degraded',error.code)
   except Exception:
    engine.fault(self.connect,uid,wid,mode,'PROVIDER_OR_PROCESSING_ERROR',lease=lease);self.health(job,None,'PROVIDER_OR_PROCESSING_ERROR');self.log(job,'degraded','PROVIDER_OR_PROCESSING_ERROR')

@@ -146,3 +146,7 @@ Se [REPORT_VALIDATION.md](REPORT_VALIDATION.md). `validate_report` er et separat
 ## Leveringsdiagnostik fra 2.2.1
 
 Se [MCP_DELIVERY.md](MCP_DELIVERY.md). send_report bevarer skriveklassifikation og rettigheder. Kvitteringer har nu delivery_trace_id og X-ESCAPE-Request-Id; privat Passenger-log kan skelne modtagelse, lagring, dublet og afvisning uden rapporttekst eller tokens. Bevar eksisterende timekørsel. En OpenAI-sikkerhedsafgørelse kan ikke forklares eller omgås af servermetadata.
+
+## HOT WATCH Engine 2.5.0
+
+Nye, separat godkendte scopes: `hotwatch:read` og `hotwatch:manage`. Eksisterende rapportscopes giver ikke automatisk motoradgang. `start_hot_watch`, `control_hot_watch` og `get_hot_watch_engine` er additive motorværktøjer; `kind=candidate` henter den permanente statusprojektion. Se [API og faseafgrænsning](HOTWATCH_ENGINE.md) og [kandidatstatus](CANDIDATE_STATUS_MODEL.md). Ingen af værktøjerne opretter faktiske handler.

@@ -41,6 +41,22 @@ class CandidateStatus(unittest.TestCase):
   report_ingest.save(app.connect,1,self.report('ARCHIVED',0));d=self.report('HOT_WATCH',1,'synthetic-cycle-2')
   with self.assertRaises(ValueError):report_ingest.save(app.connect,1,d)
   d['candidates'][0]['reactivation_reason']='Syntetisk ny væsentlig katalysator';report_ingest.save(app.connect,1,d);self.assertEqual(self.state()['candidate']['candidate_id'],self.cid);self.assertEqual({c['cycle_id'] for c in self.state()['trade_cycles']},{'synthetic-cycle-1','synthetic-cycle-2'});self.assertTrue(any(e['status']=='ARCHIVED' for e in model.history(app.connect,1,self.cid,True)['events']))
+ def test_cancelled_partially_filled_order_keeps_cancelled_status_and_quantity(self):
+  report_ingest.save(app.connect,1,self.report('ORDER_PENDING',0));at=self.at+timedelta(minutes=1);ctx=tick(at,held=True)['context']
+  ctx['orders']=[{'order_id':'cancelled-partial','status':'CANCELLED','requested_quantity':'10','filled_quantity':'4','side':'BUY'}]
+  with app.connect() as c:model.observe_pluto(c,1,True,self.cid,ctx,at.isoformat(),'synthetic-provider','synthetic-cycle-1',synthetic=True)
+  self.assertEqual(self.state()['execution'][0]['status'],'CANCELLED')
+  with app.connect() as c:self.assertEqual(json.loads(c.execute("SELECT payload FROM candidate_execution_events WHERE order_id='cancelled-partial'").fetchone()[0])['filled_quantity'],'4')
+ def test_historical_fill_cannot_close_new_trade_cycle(self):
+  report_ingest.save(app.connect,1,self.report('HOT_WATCH',0));at=self.at+timedelta(minutes=1);ctx=tick(at)['context']
+  ctx['orders']=[{'order_id':'old-sell','status':'FILLED','requested_quantity':'10','filled_quantity':'10','side':'SELL','status_time':(self.at-timedelta(days=1)).isoformat()}]
+  with app.connect() as c:model.observe_pluto(c,1,True,self.cid,ctx,at.isoformat(),'synthetic-provider','synthetic-cycle-1',synthetic=True)
+  self.assertNotEqual(self.state()['lifecycle']['status'],'CLOSED')
+  with app.connect() as c:self.assertIsNone(c.execute("SELECT cycle_id FROM candidate_execution_events WHERE order_id='old-sell'").fetchone()[0])
+  report_ingest.save(app.connect,1,self.report('ARCHIVED',2));report_ingest.save(app.connect,1,self.report('HOT_WATCH',3,'synthetic-cycle-2','Ny katalysator'))
+  at=self.at+timedelta(minutes=4);ctx['as_of']=at.isoformat()
+  with app.connect() as c:model.observe_pluto(c,1,True,self.cid,ctx,at.isoformat(),'synthetic-provider','synthetic-cycle-2',synthetic=True)
+  self.assertNotEqual(self.state()['lifecycle']['status'],'CLOSED');self.assertEqual(len(self.state()['trade_cycles']),2)
  def test_cycle_references_owner_mode_and_unknown_source_rejected(self):
   d=self.report('ORDER_PENDING',0);d['orders'][0]['trade_cycle_id']='synthetic-cycle-1';report_ingest.save(app.connect,1,d);bad=copy.deepcopy(d);bad.update(report_id='bad-cycle',generated_at='2026-11-03T11:00:00Z');bad['orders'][0]['trade_cycle_id']='missing';errors=report_ingest.validation(app.connect,1,bad)['errors'];self.assertIn('orders[0].trade_cycle_id',{e['path'] for e in errors});self.assertEqual(model.history(app.connect,2,self.cid,True)['events'],[]);self.assertEqual(model.history(app.connect,1,self.cid,False)['events'],[])
  def test_status_timestamp_conflicts_and_unknown_enum_have_exact_paths(self):

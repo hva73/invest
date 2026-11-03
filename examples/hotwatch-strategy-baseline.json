@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "strategy_id": "escape_momentum",
+  "version": "1.0.0",
+  "description": "Konservativ kausal momentum-baseline; ingen dokumenteret profitabilitet.",
+  "parameters": {
+    "min_relative_volume": "1.8",
+    "max_spread_pct": "0.8",
+    "momentum_pct": "0.3",
+    "min_acceleration": "0",
+    "max_volatility_pct": "3",
+    "short_period": 5,
+    "long_period": 13,
+    "rsi_period": 14,
+    "atr_period": 14,
+    "breakout_window": 10,
+    "min_samples": 34,
+    "confirmation_count": 3,
+    "cooldown_s": 60,
+    "minimum_signal_s": 15,
+    "release_momentum_pct": "0.1",
+    "exit_return_pct": "-0.8",
+    "trailing_pct": "2",
+    "allow_reduce": false
+  },
+  "entry_rules": {
+    "all": [
+      {
+        "metric": "return_3_pct",
+        "operator": ">=",
+        "parameter": "momentum_pct"
+      },
+      {
+        "metric": "acceleration_pct_s2",
+        "operator": ">=",
+        "parameter": "min_acceleration"
+      },
+      {
+        "metric": "relative_volume",
+        "operator": ">=",
+        "parameter": "min_relative_volume"
+      },
+      {
+        "metric": "spread_pct",
+        "operator": "<=",
+        "parameter": "max_spread_pct"
+      },
+      {
+        "metric": "volatility_pct",
+        "operator": "<=",
+        "parameter": "max_volatility_pct"
+      },
+      {
+        "metric": "breakout",
+        "operator": "==",
+        "value": true
+      },
+      {
+        "metric": "macd_histogram",
+        "operator": ">",
+        "value": "0"
+      },
+      {
+        "metric": "trend_up",
+        "operator": "==",
+        "value": true
+      },
+      {
+        "metric": "rsi",
+        "operator": "<=",
+        "value": "80"
+      }
+    ]
+  },
+  "exit_rules": {
+    "all": [
+      {
+        "metric": "return_3_pct",
+        "operator": "<=",
+        "parameter": "exit_return_pct"
+      },
+      {
+        "metric": "breakdown",
+        "operator": "==",
+        "value": true
+      }
+    ]
+  }
+}
