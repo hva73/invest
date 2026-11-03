@@ -1,8 +1,8 @@
 # ESCAPE INVEST — TILLÆG V2.2
 ## Endelig kravspecifikation til Codex
-**Dato:** 3. november 2026  
-**Status:** Implementering før endelig færdiggørelse  
-**Prioritet:** Høj  
+**Dato:** 3. november 2026<br>
+**Status:** Implementering før endelig færdiggørelse<br>
+**Prioritet:** Høj<br>
 **Grundlag:** Eksisterende ESCAPE Invest v2, Trading Radar v3.8 og HOT WATCH v1.0
 
 ---
