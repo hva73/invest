@@ -160,9 +160,10 @@ class EODHDAdapter:
   except Exception:raise DataUnavailable('EODHD_READ_OR_CONTRACT_ERROR') from None
   # This documented price endpoint does not prove bid/ask, interval volume,
   # market status or account entitlement. Never invent these capabilities.
-  currency=d.get('currency')
+  currency=d.get('currency') or r.get('quote_currency')
   if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):raise DataUnavailable('EODHD_CURRENCY_UNCONFIRMED')
-  return {'sample_id':'eodhd-'+hashlib.sha256((symbol+at.isoformat()).encode()).hexdigest()[:32],'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':r['exchange'],'currency':currency,'event_time':at.isoformat(),'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD REST real-time endpoint; entitlement/cadence unconfirmed','documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':300,'price':format(price,'f'),'bid':None,'ask':None,'volume':None,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':self.pluto.context(r,currency)}
+  if d.get('currency') and d['currency']!=r.get('quote_currency'):raise DataUnavailable('quote_currency_mismatch')
+  return {'sample_id':'eodhd-'+hashlib.sha256((symbol+at.isoformat()).encode()).hexdigest()[:32],'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':r['exchange'],'currency':currency,'event_time':at.isoformat(),'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD REST real-time endpoint; entitlement/cadence unconfirmed; currency='+('provider' if d.get('currency') else 'explicit session instrument'),'documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':300,'price':format(price,'f'),'bid':None,'ask':None,'volume':None,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':self.pluto.context(r,currency)}
 
 class InboxAdapter:
  def __init__(self,connect,uid):self.connect=connect;self.uid=uid
