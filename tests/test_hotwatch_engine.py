@@ -207,6 +207,29 @@ class HotWatch(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY'}),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):
    sample=EODHDAdapter(app.connect,1,Opener()).poll({'request_data':req})
   self.assertEqual(sample['currency'],'USD');self.assertIn('explicit session instrument',sample['feed_type']);self.assertIsNone(sample['volume']);self.assertIsNone(sample['bid'])
+ def test_eodhd_quote_trims_whitespace_from_existing_key(self):
+  from urllib.parse import urlsplit,parse_qs
+  class Response:
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,limit):return json.dumps({'code':'MERC.US','timestamp':int(observed.timestamp()),'close':'12.34','currency':'USD'}).encode()
+  class Capture:
+   def open(self,request,**kwargs):self.token=parse_qs(urlsplit(request.full_url).query)['api_token'][0];return Response()
+  observed=self.now;opener=Capture();req=copy.deepcopy(self.req);req.update(provider='eodhd',provider_symbol='MERC.US',quote_currency='USD')
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'  TEST-ONLY\n'}),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):
+   sample=EODHDAdapter(app.connect,1,opener).poll({'request_data':req})
+  self.assertEqual(opener.token,'TEST-ONLY');self.assertNotIn('TEST-ONLY',str(sample))
+ def test_eodhd_quote_records_its_own_market_not_pluto_venue(self):
+  class Response:
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,limit):return json.dumps({'code':'NOVO-B.CO','timestamp':int(observed.timestamp()),'close':'100','currency':'DKK'}).encode()
+  class Opener:
+   def open(self,*args,**kwargs):return Response()
+  observed=self.now;req=copy.deepcopy(self.req);req.update(ticker='NOVOB',exchange='CHIX',provider='eodhd',provider_symbol='NOVO-B.CO',quote_currency='DKK')
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY'}),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):
+   sample=EODHDAdapter(app.connect,1,Opener()).poll({'request_data':req})
+  self.assertEqual(sample['source'],'eodhd');self.assertEqual(sample['venue'],'EODHD:CO');self.assertEqual(req['exchange'],'CHIX');self.assertEqual(sample['currency'],'DKK')
  def test_eodhd_rate_limit_retry_after_is_observed_and_secret_redacted(self):
   import urllib.error
   class Limited:
@@ -233,7 +256,7 @@ class HotWatch(unittest.TestCase):
    epoch=int(at.timestamp());Response.now=at
    self.assertTrue(runner.once(at+timedelta(milliseconds=1)))
   item=engine.history(app.connect,1,r['watch_id'],True,'samples')['items'][0]['data']
-  self.assertEqual(stamp(item['event_time']).timestamp(),epoch)
+  self.assertEqual(stamp(item['event_time']).timestamp(),epoch);self.assertEqual(item['venue'],'EODHD:US');self.assertNotEqual(item['venue'],r['exchange'])
   with app.connect() as c:health=json.loads(c.execute("SELECT payload FROM hw_provider_health WHERE user_id=1 AND is_test=1 AND source='eodhd'").fetchone()['payload'])
   self.assertTrue(health['market_time_known']);self.assertIsInstance(health['event_to_adapter_receive_ms'],(int,float));self.assertIsInstance(health['adapter_to_journal_ms'],(int,float));self.assertGreaterEqual(health['adapter_to_journal_ms'],0)
  def test_realistic_synthetic_merc_buy_noise_exit_and_history_pinning(self):

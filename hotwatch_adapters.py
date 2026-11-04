@@ -20,7 +20,7 @@ def reserve(connect,uid,source,now=None):
 def unknown_context():return {'tradability':'unknown','status':'unknown','as_of':None,'position':'unknown','quantity':None,'cost_price':None,'portfolio_equity_dkk':None,'exposure_dkk':None,'fx_to_dkk':None,'fees_dkk':None,'orders':[]}
 
 def providers(connect=None,uid=None,mode=False):
- result={'pluto':{'adapter':'existing read-only contracts','minimum_poll_s':300,'known_limits':['Quote timestamp may be absent','Bid/ask, volume and market session are not guaranteed','Fees/FX remain unknown unless actually supplied']},'eodhd':{'plan_reported_by_owner':'Active Trader','key_configured':bool(os.environ.get('ESCAPE_EODHD_API_KEY')),'enabled':os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')=='1','endpoint':'/api/real-time/{symbol}','minimum_poll_s':300,'entitlements_verified':False,'websocket_enabled':False,'known_limits':['Account/feed rights must be verified on the installation','REST quote is not assumed tick-level, regular-session or a complete OHLC bar']},'report_inbox':{'adapter':'existing observation inbox','trusted_for_new_buy':False},'synthetic':{'test_only':True}}
+ result={'pluto':{'adapter':'existing read-only contracts','minimum_poll_s':300,'known_limits':['Quote timestamp may be absent','Bid/ask, volume and market session are not guaranteed','Fees/FX remain unknown unless actually supplied']},'eodhd':{'plan_reported_by_owner':'Active Trader','key_configured':bool(os.environ.get('ESCAPE_EODHD_API_KEY','').strip()),'enabled':os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')=='1','endpoint':'/api/real-time/{symbol}','minimum_poll_s':300,'entitlements_verified':False,'websocket_enabled':False,'known_limits':['Account/feed rights must be verified on the installation','REST quote is not assumed tick-level, regular-session or a complete OHLC bar']},'report_inbox':{'adapter':'existing observation inbox','trusted_for_new_buy':False},'synthetic':{'test_only':True}}
 
  if connect is not None and uid is not None:
   with connect() as c:
@@ -32,13 +32,13 @@ def search_eodhd_symbols(connect,uid,data,opener=None):
  """Search only a candidate owned by the current user; never expose API credentials."""
  import market_data
  if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':raise DataUnavailable('EODHD_FEED_NOT_ENABLED')
- key=os.environ.get('ESCAPE_EODHD_API_KEY')
+ key=os.environ.get('ESCAPE_EODHD_API_KEY','').strip()
  if not key:raise DataUnavailable('EODHD_KEY_NOT_CONFIGURED')
  candidate=market_data.candidate(connect,uid,data);ticker=candidate.get('ticker')
  if not isinstance(ticker,str) or not re.fullmatch(r'[A-Za-z0-9.\-]{1,32}',ticker):raise DataUnavailable('EODHD_SYMBOL_MAPPING_REQUIRED')
  name_key=lambda x:re.sub(r'[^a-z0-9]','',x.casefold()) if isinstance(x,str) else ''
  issuer=candidate.get('company_name');issuer_key=name_key(issuer)
- choices=[];seen=set();client=opener or urllib.request.build_opener(NoRedirect())
+ choices=[];seen=set();client=opener or urllib.request.build_opener(NoRedirect());not_found=[];successful=[]
  def search(query,allow_alias=False):
   reserve(connect,uid,'eodhd')
   url='https://eodhd.com/api/search/'+quote(query,safe='')+'?'+urlencode({'api_token':key,'fmt':'json','limit':50})
@@ -47,9 +47,13 @@ def search_eodhd_symbols(connect,uid,data,opener=None):
    if len(raw)>131072:raise ValueError()
    rows=json.loads(raw)
    if not isinstance(rows,list):raise ValueError()
+   successful.append(True)
   except urllib.error.HTTPError as error:
-   raise DataUnavailable('EODHD_ENTITLEMENT_REJECTED' if error.code in [401,403] else 'EODHD_RATE_LIMIT' if error.code==429 else 'EODHD_READ_ERROR') from None
-  except Exception:raise DataUnavailable('EODHD_READ_OR_CONTRACT_ERROR') from None
+   if error.code==404:not_found.append(True);return
+   if error.code in [401,403]:raise DataUnavailable('EODHD_SEARCH_HTTP_'+str(error.code),502) from None
+   if error.code==429:raise DataUnavailable('EODHD_RATE_LIMIT',429) from None
+   raise DataUnavailable('EODHD_SEARCH_HTTP_'+str(error.code),502) from None
+  except Exception:raise DataUnavailable('EODHD_SEARCH_NETWORK_OR_RESPONSE_ERROR',502) from None
   for row in rows[:50]:
    if not isinstance(row,dict):continue
    code=row.get('Code');exchange=row.get('Exchange');name=row.get('Name');currency=row.get('Currency');isin=row.get('ISIN')
@@ -60,7 +64,16 @@ def search_eodhd_symbols(connect,uid,data,opener=None):
    if symbol.casefold() in seen:continue
    seen.add(symbol.casefold());choices.append({'symbol':symbol,'name':name[:200] if isinstance(name,str) else None,'exchange':exchange,'currency':currency if isinstance(currency,str) and re.fullmatch('[A-Z]{3}',currency) else None,'isin':isin[:32] if isinstance(isin,str) else None})
  search(ticker)
- if not choices and isinstance(issuer,str) and 3<=len(issuer_key)<=100:search(issuer[:100],allow_alias=True)
+ expected_currency=data.get('quote_currency')
+ if not isinstance(expected_currency,str) or not re.fullmatch('[A-Z]{3}',expected_currency):expected_currency=None
+ needs_issuer=not choices or (expected_currency and not any(x['currency']==expected_currency for x in choices))
+ # Search terms are path components: slashes in legal names can be rejected by
+ # web servers. Search by the first two words and require the complete issuer
+ # name to match in the returned metadata before offering an alias.
+ words=re.findall(r'[^\W_]+',issuer,flags=re.UNICODE) if isinstance(issuer,str) else []
+ issuer_query=' '.join(words[:2])
+ if needs_issuer and len(name_key(issuer_query))>=3:search(issuer_query[:100],allow_alias=True)
+ if not choices and not_found and not successful:raise DataUnavailable('EODHD_SEARCH_HTTP_404',502)
  return {'ticker':ticker,'choices':choices}
 
 class PlutoAdapter:
@@ -167,7 +180,7 @@ class EODHDAdapter:
  def __init__(self,connect,uid,opener=None):self.connect=connect;self.uid=uid;self.opener=opener or urllib.request.build_opener(NoRedirect());self.pluto=PlutoAdapter(connect,uid)
  def poll(self,session):
   if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':raise DataUnavailable('EODHD_FEED_NOT_ENABLED')
-  key=os.environ.get('ESCAPE_EODHD_API_KEY')
+  key=os.environ.get('ESCAPE_EODHD_API_KEY','').strip()
   if not key:raise DataUnavailable('EODHD_KEY_NOT_CONFIGURED')
   r=session['request_data'];symbol=r.get('provider_symbol')
   if not symbol:raise DataUnavailable('EODHD_SYMBOL_MAPPING_REQUIRED')
@@ -198,7 +211,11 @@ class EODHDAdapter:
   currency=d.get('currency') or r.get('quote_currency')
   if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):raise DataUnavailable('EODHD_CURRENCY_UNCONFIRMED')
   if d.get('currency') and d['currency']!=r.get('quote_currency'):raise DataUnavailable('quote_currency_mismatch')
-  return {'sample_id':'eodhd-'+hashlib.sha256((symbol+at.isoformat()).encode()).hexdigest()[:32],'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':r['exchange'],'currency':currency,'event_time':at.isoformat(),'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD REST real-time endpoint; entitlement/cadence unconfirmed; currency='+('provider' if d.get('currency') else 'explicit session instrument'),'documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':300,'price':format(price,'f'),'bid':None,'ask':None,'volume':None,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':self.pluto.context(r,currency)}
+  # The EODHD symbol suffix identifies its feed market; the Pluto venue is
+  # a separate instrument reference and must never label this observation.
+  market=symbol.rsplit('.',1)[1] if '.' in symbol else None
+  venue='EODHD:'+market.upper() if market and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',market) else None
+  return {'sample_id':'eodhd-'+hashlib.sha256((symbol+at.isoformat()).encode()).hexdigest()[:32],'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':venue,'currency':currency,'event_time':at.isoformat(),'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD REST real-time endpoint; entitlement/cadence unconfirmed; currency='+('provider' if d.get('currency') else 'explicit session instrument'),'documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':300,'price':format(price,'f'),'bid':None,'ask':None,'volume':None,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':self.pluto.context(r,currency)}
 
 class InboxAdapter:
  def __init__(self,connect,uid):self.connect=connect;self.uid=uid
