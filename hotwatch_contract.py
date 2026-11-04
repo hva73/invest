@@ -26,7 +26,10 @@ PROFILES={'NORMAL':60,'ACTIVE':15,'CRITICAL':5,'IDLE':300}
 def provider_floor(source):
  """Production keeps the existing 300s floor unless explicitly enabled by an operator."""
  if source!='eodhd':return {'pluto':300,'report_inbox':60,'synthetic':5}[source]
- if os.environ.get('ESCAPE_HW_EODHD_FAST_POLL_ENABLED')!='1':return 300
+ if os.environ.get('ESCAPE_HW_EODHD_FAST_POLL_ENABLED')!='1':
+  # A configured live feed can be checked once per minute; the shared request
+  # budget and actual source timestamps still govern availability and freshness.
+  return 60 if os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1' else 300
  try:value=int(os.environ.get('ESCAPE_HW_EODHD_MIN_POLL_S','300'))
  except (TypeError,ValueError):return 300
  return value if 5<=value<=300 else 300

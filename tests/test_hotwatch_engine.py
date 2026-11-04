@@ -103,6 +103,17 @@ class HotWatch(unittest.TestCase):
    engine.ingest(app.connect,1,req['watch_id'],True,sample,self.now)
    session=engine.item(app.connect,1,req['watch_id'],True)['session']
    self.assertEqual(session['effective_min_interval_s'],15);self.assertEqual((stamp(session['next_due_at'])-self.now).total_seconds(),15);self.assertEqual(GLOBAL_RISK['max_quote_age_s'],120)
+ def test_live_eodhd_defaults_to_minute_updates_and_rest_keeps_its_floor(self):
+  from hotwatch_contract import provider_floor
+  env={'ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'0','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}
+  with patch.dict(os.environ,env):
+   self.assertEqual(provider_floor('eodhd'),60)
+   req=copy.deepcopy(self.req);req.update(watch_id='minute-live',purpose='minute live',provider='eodhd',provider_symbol='MERC.US',profile='NORMAL')
+   engine.create(app.connect,1,req,self.now);sample=tick(self.now);sample.update(source='eodhd',interval_s=60)
+   engine.ingest(app.connect,1,req['watch_id'],True,sample,self.now)
+   session=engine.item(app.connect,1,req['watch_id'],True)['session']
+   self.assertEqual((stamp(session['next_due_at'])-self.now).total_seconds(),60)
+  with patch.dict(os.environ,{**env,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0'}):self.assertEqual(provider_floor('eodhd'),300)
  def test_parallel_due_scans_are_bounded_and_keep_shared_budget(self):
   import threading
   from hotwatch_service import Runner

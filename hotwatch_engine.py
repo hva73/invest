@@ -175,7 +175,7 @@ def view(c,row,now=None):
      if not 0<=(now-bar_end).total_seconds()<=max_age or not 0<=(now-stamp(latest_sample['bar_evidence']['schedule_received_at'])).total_seconds()<=max_age:effective='NO_DATA'
     except (KeyError,TypeError,ValueError,IndexError):effective='NO_DATA'
  profile=state.get('adaptive_profile',request['profile'])
- minimum=provider_floor(request['provider'])
+ minimum=state.get('provider_floor_s',provider_floor(request['provider']))
  latest_payload=json.loads(sample['payload']) if sample else None
  history=[latest_payload] if latest_payload and latest_payload.get('bar_history') else [json.loads(x['payload']) for x in reversed(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 120',(row['id'],)).fetchall())]
  data_status=observation_status(history,now,request['risk']['max_quote_age_s'],effective,row['status'])
@@ -334,7 +334,8 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   nextstate.update(alert_codes=sorted(codes),orders={o['order_id']:o['filled_quantity'] for o in sample['context']['orders']})
   adaptive='CRITICAL' if result['risk_level']=='critical' else 'ACTIVE' if metrics.get('breakout') or nextstate.get('volume_spike') else 'IDLE' if sample['market_status'] in ['CLOSED','HALTED'] else request['profile']
   nextstate['adaptive_profile']=adaptive
-  interval=max(PROFILES[adaptive],provider_floor(request['provider']))
+  nextstate['provider_floor_s']=provider_floor(request['provider'])
+  interval=max(PROFILES[adaptive],nextstate['provider_floor_s'])
   if sample['market_status'] in ['CLOSED','HALTED']:interval=max(interval,300)
   c.execute('UPDATE hw_sessions SET status=?,state=?,updated=?,last_data=?,last_calculation=?,next_due=?,failures=0,last_error=NULL,lease_owner=NULL,lease_until=0 WHERE id=?',(new_status,canonical(nextstate),now.isoformat(),sample['event_time'],now.isoformat(),now.timestamp()+interval,row['id']))
   return {'ok':True,'duplicate':False,'calculation':result,'session':view(c,row_for(c,uid,wid,mode),now)}
