@@ -387,6 +387,23 @@ class HotWatch(unittest.TestCase):
   self.assertEqual(stamp(item['event_time']).timestamp(),epoch);self.assertEqual(item['venue'],'EODHD:US');self.assertNotEqual(item['venue'],r['exchange'])
   with app.connect() as c:health=json.loads(c.execute("SELECT payload FROM hw_provider_health WHERE user_id=1 AND is_test=1 AND source='eodhd'").fetchone()['payload'])
   self.assertTrue(health['market_time_known']);self.assertIsInstance(health['event_to_adapter_receive_ms'],(int,float));self.assertIsInstance(health['adapter_to_journal_ms'],(int,float));self.assertGreaterEqual(health['adapter_to_journal_ms'],0)
+ def test_worker_websocket_denied_falls_back_to_real_rest_observation(self):
+  from hotwatch_service import Runner
+  at=engine.utc().replace(microsecond=0);r=copy.deepcopy(self.req);r.update(watch_id='mock-rest-fallback',purpose='mock fallback chain',provider='eodhd',provider_symbol='MERC.US')
+  class Response:
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,limit):return json.dumps({'code':'MERC.US','timestamp':int(at.timestamp()),'close':'12.34','previousClose':'12','currency':'USD'}).encode()
+  class Opener:
+   def open(self,*args,**kwargs):return Response()
+  class Feeds:
+   def capture(self,*args,**kwargs):return {'status':'ENTITLEMENT_UNVERIFIED'}
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',at);engine.create(app.connect,1,r,at);runner=Runner(app.connect);adapter=EODHDAdapter(app.connect,1,Opener());runner.adapters[(1,'eodhd')]=adapter
+  with patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()),patch.object(adapter,'feeds',return_value=Feeds()),patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1'}):
+   self.assertTrue(runner.once(at+timedelta(milliseconds=1),watch_id=r['watch_id']))
+  view=engine.item(app.connect,1,r['watch_id'],True)['session'];self.assertEqual(view['data_status']['price'],'12.34');self.assertEqual(view['last_data_at'],at.isoformat());self.assertEqual(view['display_status'],'DATA MANGLER')
+  with app.connect() as c:health=json.loads(c.execute("SELECT payload FROM hw_provider_health WHERE user_id=1 AND is_test=1 AND source='eodhd'").fetchone()['payload'])
+  self.assertEqual(health['websocket_trade_status'],'ENTITLEMENT_UNVERIFIED')
  def test_runner_ingests_real_source_time_from_mocked_ws_without_changing_risk(self):
   from hotwatch_service import Runner
   at=engine.utc().replace(microsecond=0);r=copy.deepcopy(self.req);r.update(watch_id='eodhd-ws-test',purpose='mock ws test',provider='eodhd',provider_symbol='MERC.US')
@@ -398,6 +415,46 @@ class HotWatch(unittest.TestCase):
   sample=engine.history(app.connect,1,r['watch_id'],True,'samples')['items'][0]['data']
   self.assertEqual(sample['event_time'],at.isoformat());self.assertIsNone(sample['venue']);self.assertEqual(sample['market_status'],'UNKNOWN');self.assertIsNone(sample['bid'])
   self.assertEqual(engine.item(app.connect,1,r['watch_id'],True)['session']['signal'],'NO_DATA')
+ def test_live_trade_quote_status_and_real_bars_drive_full_signal_chain(self):
+  from hotwatch_service import Runner
+  base=datetime(2026,11,4,15,15,tzinfo=timezone.utc);r=copy.deepcopy(self.req);r.update(watch_id='mock-full-live',purpose='mock complete feed',provider='eodhd',provider_symbol='MERC.US')
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',base);engine.create(app.connect,1,r,base)
+  prices=['100' if i%2==0 else '100.5' for i in range(34)]+['100.55','100.70','100.90','101.15','101.45','101.80','90']
+  class Feeds:
+   i=0
+   def capture(self,feed,*args,**kwargs):
+    at=base+timedelta(minutes=self.i);price=Decimal(prices[33+self.i])
+    if feed.endswith('trades'):row={'event_time':at.isoformat(),'received_at':at.isoformat(),'price':str(price),'market_session':'open'}
+    elif feed.endswith('quotes'):row={'event_time':at.isoformat(),'bid':str(price-Decimal('.05')),'ask':str(price+Decimal('.05'))}
+    else:row={'event_time':at.isoformat(),'trading_status':'T'}
+    return {'status':'OK','messages':[row]}
+   def market_status(self,exchange):
+    return {'status':'OK','exchange_open':True,'timezone':'America/New_York','received_at':(base+timedelta(minutes=self.i)).isoformat(),'calendar':{'open':'09:30:00','close':'16:00:00','working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[]}}
+   def minute_bars(self,*args):
+    data=[]
+    for j,price in enumerate(prices[:34+self.i]):
+     at=base-timedelta(minutes=34)+timedelta(minutes=j);p=Decimal(price);volume=100 if j<34 else 1000*2**(j-34)
+     data.append({'bar_open_at':at.isoformat(),'open':str(p),'high':str(p+Decimal('.1')),'low':str(p-Decimal('.1')),'close':str(p),'volume':str(volume)})
+    return {'status':'OK','bars':data}
+  feeds=Feeds();runner=Runner(app.connect);signals=[]
+  env={'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_BARS_ENABLED':'1','ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'1','ESCAPE_HW_EODHD_MIN_POLL_S':'5'}
+  with patch.dict(os.environ,env),patch('hotwatch_adapters.EODHDAdapter.feeds',return_value=feeds):
+   for i in range(7):
+    feeds.i=i;now=base+timedelta(minutes=i);context=tick(now)['context']
+    with patch('hotwatch_adapters.PlutoAdapter.context',return_value=context),patch('hotwatch_adapters.utc',return_value=now),patch('hotwatch_engine.utc',return_value=now):
+     self.assertTrue(runner.once(now,watch_id=r['watch_id']));signals.append(engine.item(app.connect,1,r['watch_id'],True)['session']['last_computed_signal'])
+     if i==6:
+      import dashboard_projection
+      rows=dashboard_projection.engine_session_view(app.connect,1,True,'current',100,None)['sessions'];display=next(x for x in rows if x['watch_id']==r['watch_id'])
+      self.assertEqual(display['display_status'],'KØBSSIGNAL');self.assertEqual(display['data_status']['quote_status'],'FRESH');self.assertIsNotNone(display['data_status']['momentum_pct']['5'])
+  self.assertIn('BUY',signals)
+  saved=engine.history(app.connect,1,r['watch_id'],True,'samples',order='desc')['items'][0]['data'];self.assertEqual(len(saved['bar_history']),40);self.assertEqual(saved['bid_at'],saved['event_time']);self.assertEqual(saved['status_feed'],'us_status')
+  feeds.i=7;now=base+timedelta(minutes=7);held=tick(now,price='90',held=True)['context']
+  with patch.dict(os.environ,env),patch('hotwatch_adapters.EODHDAdapter.feeds',return_value=feeds),patch('hotwatch_adapters.PlutoAdapter.context',return_value=held),patch('hotwatch_adapters.utc',return_value=now),patch('hotwatch_engine.utc',return_value=now):
+   self.assertTrue(runner.once(now,watch_id=r['watch_id']));self.assertEqual(engine.item(app.connect,1,r['watch_id'],True)['session']['last_computed_signal'],'SELL')
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
+   health=json.loads(c.execute("SELECT payload FROM hw_provider_health WHERE user_id=1 AND is_test=1 AND source='eodhd'").fetchone()['payload']);self.assertEqual(health['bar_history_status'],'VERIFIED')
  def test_minute_bar_adapter_to_motor_preserves_volume_and_missing_session(self):
   from hotwatch_service import Runner
   at=engine.utc().replace(microsecond=0);r=copy.deepcopy(self.req);r.update(watch_id='mock-minute-bars',purpose='mock minute bars',provider='eodhd',provider_symbol='MERC.US')

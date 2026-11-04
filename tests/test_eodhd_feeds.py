@@ -54,6 +54,10 @@ class FeedTests(unittest.TestCase):
  def test_exchange_open_is_receive_time_not_invented_source_time(self):
   result=EODHDFeeds(SECRET,opener=Opener({'Code':'CO','isOpen':True,'Timezone':'Europe/Copenhagen'})).market_status('CO')
   self.assertTrue(result['exchange_open']);self.assertIsNone(result['source_time']);self.assertTrue(result['received_at'])
+ def test_exchange_calendar_requires_explicit_hours_and_exceptions(self):
+  raw={'Code':'US','isOpen':True,'Timezone':'America/New_York','TradingHours':{'Open':'09:30:00','Close':'16:00:00','WorkingDays':'Mon,Tue,Wed,Thu,Fri'},'ExchangeHolidays':{'0':{'Date':'2026-11-26'}},'ExchangeEarlyCloseDays':{'0':{'Date':'2026-11-27'}}}
+  result=EODHDFeeds(SECRET,opener=Opener(raw)).market_status('US');self.assertEqual(result['calendar']['excluded_dates'],['2026-11-26','2026-11-27'])
+  del raw['ExchangeEarlyCloseDays'];self.assertIsNone(EODHDFeeds(SECRET,opener=Opener(raw)).market_status('US')['calendar'])
  def test_permission_rate_and_sensitive_errors_are_explicit(self):
   class Failure:
    def __init__(self,code):self.code=code
@@ -119,7 +123,7 @@ class FeedTests(unittest.TestCase):
     if feed.endswith('quotes'):return {'status':'OK','messages':[{'event_time':now.isoformat(),'bid':'46','ask':'45'}]}
     return {'status':'ENTITLEMENT_UNVERIFIED'}
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
-  self.assertIsNone(sample['bid']);self.assertIsNone(sample['ask']);self.assertEqual(sample['market_status'],'UNKNOWN')
+  self.assertIsNone(sample['bid']);self.assertIsNone(sample['ask']);self.assertEqual(sample['market_status'],'REGULAR');self.assertEqual(sample['status_feed'],'us_trades')
  def test_closed_bar_uses_actual_bar_open_time_without_inventing_trade_time(self):
   from test_hotwatch_engine import request
   import hotwatch_engine

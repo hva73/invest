@@ -230,6 +230,7 @@ class EODHDAdapter:
      interval=max(PROFILES.get(profile,PROFILES[r['profile']]),provider_floor('eodhd'))
      sample={'sample_id':'eodhd-ws-'+hashlib.sha256((symbol+trade['event_time']).encode()).hexdigest()[:28],'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':None,'currency':currency,'event_time':trade['event_time'],'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD WebSocket '+market+' trade; venue not supplied; not necessarily consolidated','documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':interval,'price':trade['price'],'bid':None,'ask':None,'volume':None,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context,'price_time_kind':'trade'}
      if trade.get('market_session')=='closed':sample.update(market_status='CLOSED',session_key=at.date().isoformat()+':CLOSED',status_at=trade['event_time'],status_feed=market+'_trades')
+     if trade.get('market_session')=='open':sample.update(market_status='REGULAR',session_key=at.date().isoformat()+':REGULAR',status_at=trade['event_time'],status_feed=market+'_trades')
      if session.get('id') is not None:
       with self.connect() as c:old=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(session['id'],'eodhd',sample['sample_id'])).fetchone()
       if old:
@@ -245,9 +246,37 @@ class EODHDAdapter:
       quotes=[x for x in quote_feed.get('messages',[]) if fresh(x) and x.get('bid') and x.get('ask') and Decimal(x['bid'])>0 and Decimal(x['ask'])>=Decimal(x['bid'])]
       if quotes:
        q=max(quotes,key=lambda x:stamp(x['event_time']));sample.update(bid=q['bid'],ask=q['ask'],bid_at=q['event_time'],ask_at=q['event_time'],quote_feed=market+'_quotes')
-      statuses=[x for x in status_feed.get('messages',[]) if fresh(x) and x.get('trading_status')=='T']
+      statuses=[x for x in status_feed.get('messages',[]) if fresh(x) and x.get('trading_status')]
       if statuses and trade.get('market_session')=='open':
-       status=max(statuses,key=lambda x:stamp(x['event_time']));sample.update(market_status='REGULAR',session_key=at.date().isoformat()+':REGULAR',status_at=status['event_time'],status_feed=market+'_status')
+       status=max(statuses,key=lambda x:stamp(x['event_time']))
+       if status['trading_status']=='T':sample.update(market_status='REGULAR',session_key=at.date().isoformat()+':REGULAR',status_at=status['event_time'],status_feed=market+'_status')
+       else:sample.update(market_status='UNKNOWN',session_key=at.date().isoformat()+':UNKNOWN');sample.pop('status_at',None);sample.pop('status_feed',None)
+      if sample['market_status']=='REGULAR' and os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1':
+       schedule=client.market_status(exchange);self.last_feed_diagnostics['exchange_status']=schedule['status']
+       if schedule['status']=='RATE_LIMIT':
+        failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+       if schedule.get('status')=='OK' and schedule.get('exchange_open') is True and schedule.get('calendar') and schedule.get('timezone'):
+        bars=client.minute_bars(market,stream_symbol);self.last_feed_diagnostics['minute_bars_status']=bars['status']
+        if bars['status']=='RATE_LIMIT':
+         failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+        if bars['status']=='OK':
+         try:
+          from zoneinfo import ZoneInfo
+          from hotwatch_features import verified_bar_samples
+          zone=ZoneInfo(schedule['timezone']);local=at.astimezone(zone);calendar=schedule['calendar'];start=datetime.strptime(calendar['open'],'%H:%M:%S').time();end=datetime.strptime(calendar['close'],'%H:%M:%S').time()
+          same_session=[]
+          for bar in bars.get('bars',[]):
+           opened=stamp(bar['bar_open_at']);closed=opened+timedelta(seconds=60);lo=opened.astimezone(zone);lc=closed.astimezone(zone)
+           if lo.date()==local.date()==lc.date() and start<=lo.time()<end and lc.time()<=end and closed<=at:
+            same_session.append({k:bar[k] for k in ('bar_open_at','open','high','low','close','volume')})
+          evidence={'provider_symbol':symbol,'market':market,'exchange':exchange,'timezone':schedule['timezone'],'session_date':local.date().isoformat(),'open':calendar['open'],'close':calendar['close'],'working_days':calendar['working_days'],'excluded_dates':calendar['excluded_dates'],'schedule_received_at':schedule['received_at'],'exchange_open':True,'feed':'eodhd_realtime_history'}
+          if same_session:
+           sample.update(bar_history=same_session[-120:],bar_evidence=evidence)
+           if verified_bar_samples(sample,r,utc()) is None:sample.pop('bar_history');sample.pop('bar_evidence');self.last_feed_diagnostics['bar_history_status']='EVIDENCE_UNVERIFIED'
+           else:self.last_feed_diagnostics['bar_history_status']='VERIFIED'
+          else:self.last_feed_diagnostics['bar_history_status']='NO_COMPARABLE_BARS'
+         except (KeyError,ValueError,TypeError,ArithmeticError):self.last_feed_diagnostics['bar_history_status']='EVIDENCE_UNVERIFIED'
+       else:self.last_feed_diagnostics['bar_history_status']='SCHEDULE_UNVERIFIED'
      return sample
   # Bar open times and close prices are recorded as such; never pretend that
   # the bar timestamp is the timestamp of its final trade.

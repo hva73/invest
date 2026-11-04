@@ -1,5 +1,35 @@
 """Deterministic causal features. No providers, DB, interpolation or AI."""
 from decimal import Decimal,localcontext
+from datetime import datetime,timedelta,time as day_time
+from zoneinfo import ZoneInfo,ZoneInfoNotFoundError
+
+def verified_bar_samples(sample,request,now):
+ """Validate actual closed bars against explicit source/session evidence."""
+ from report_validation import stamp
+ bars=sample.get('bar_history');e=sample.get('bar_evidence')
+ if not isinstance(bars,list) or not bars or len(bars)>120 or not isinstance(e,dict):return None
+ try:
+  symbol=request['provider_symbol'];market='us' if symbol.endswith('.US') else 'eu'
+  if sample['source']!='eodhd' or sample.get('price_time_kind')!='trade' or sample['market_status']!='REGULAR' or e['exchange_open'] is not True or e['feed']!='eodhd_realtime_history' or e['provider_symbol']!=symbol or e['market']!=market or e['exchange']!=symbol.rsplit('.',1)[1]:return None
+  trade_at=stamp(sample['event_time']);received=stamp(e['schedule_received_at'])
+  if not 0<=(now-received).total_seconds()<=request['risk']['max_quote_age_s']:return None
+  zone=ZoneInfo(e['timezone']);local=trade_at.astimezone(zone);date=local.date();opening=day_time.fromisoformat(e['open']);closing=day_time.fromisoformat(e['close'])
+  if received.astimezone(zone).date()!=date:return None
+  if opening.tzinfo or closing.tzinfo or opening>=closing or e['session_date']!=date.isoformat() or date.isoformat() in e['excluded_dates'] or ('Mon','Tue','Wed','Thu','Fri','Sat','Sun')[date.weekday()] not in e['working_days'] or not opening<=local.time()<closing:return None
+  output=[];previous=None
+  for bar in bars:
+   at=stamp(bar['bar_open_at']);end=at+timedelta(seconds=60);start_local=at.astimezone(zone);end_local=end.astimezone(zone)
+   if previous is not None and at<=previous:return None
+   if start_local.date()!=date or end_local.date()!=date or not opening<=start_local.time()<closing or end_local.time()>closing or end>trade_at:return None
+   values=[number(bar[k]) for k in ('open','high','low','close')]
+   if any(v is None or v<=0 for v in values) or values[1]<max(values[0],values[3]) or values[2]>min(values[0],values[3]) or values[2]>values[1] or (bar['volume'] is not None and number(bar['volume'])<0):return None
+   output.append({**sample,'bar_history':None,'bar_evidence':None,'event_time':bar['bar_open_at'],'interval_s':60,'feed_type':'EODHD verified real-time closed 1m bars','price_time_kind':'bar_open','price':bar['close'],'open':bar['open'],'high':bar['high'],'low':bar['low'],'close':bar['close'],'volume':bar['volume'],'volume_type':'interval','bid':None,'ask':None})
+   previous=at
+  if not output:return None
+  bar_end=stamp(output[-1]['event_time'])+timedelta(seconds=60)
+  if not 0<=(trade_at-bar_end).total_seconds()<=request['risk']['max_quote_age_s'] or not 0<=(now-bar_end).total_seconds()<=request['risk']['max_quote_age_s']:return None
+  return output
+ except (KeyError,ValueError,TypeError,ArithmeticError,ZoneInfoNotFoundError):return None
 
 def observation_status(samples,now,max_age_s,signal,watch_status):
  """Read-only data quality and time-horizon changes; never a trading input."""
@@ -23,6 +53,16 @@ def observation_status(samples,now,max_age_s,signal,watch_status):
  elif age>max_age_s:result['price_status']='STALE'
  else:result['price_status']='FRESH'
  if latest['market_status']=='UNKNOWN':return result
+ history=latest.get('bar_history')
+ if isinstance(history,list) and history:
+  last_bar=history[-1];last_time=stamp(last_bar['bar_open_at']);last_price=number(last_bar['close'])
+  if len(history)>1 and number(history[-2]['close'])>0:result['since_last_pct']=format((last_price/number(history[-2]['close'])-1)*100,'f')
+  for minutes in (1,5,15,30):
+   choices=[b for b in history[:-1] if (last_time-stamp(b['bar_open_at'])).total_seconds()==minutes*60]
+   if choices and number(choices[-1]['close'])>0:result['momentum_pct'][str(minutes)]=format((last_price/number(choices[-1]['close'])-1)*100,'f')
+  bar_age=(now-(last_time+timedelta(seconds=60))).total_seconds()
+  result['momentum_status']='STALE' if result['price_status']!='FRESH' or not 0<=bar_age<=max_age_s else 'READY' if any(v is not None for v in result['momentum_pct'].values()) else 'INSUFFICIENT_HISTORY'
+  return result
  identity=lambda s:tuple(s[k] for k in ('source','asset_id','currency','venue','session_key','market_status','feed_type'))+(s.get('price_time_kind'),)
  comparable=[s for s in samples[:-1] if identity(s)==identity(latest) and s.get('price') is not None and stamp(s['event_time'])<event]
  if not comparable:result['momentum_status']='INSUFFICIENT_HISTORY';return result

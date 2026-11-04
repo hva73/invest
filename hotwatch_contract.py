@@ -14,6 +14,9 @@ CONTEXT=obj({'tradability':enum('available','unavailable','unknown'),'status':en
 SAMPLE=obj({'sample_id':ID,'source':enum('pluto','eodhd','report_inbox','synthetic'),'ticker':string(60),'asset_id':ID,'venue':nullable(string(200)),'currency':{'type':'string','pattern':'^[A-Z]{3}$'},'event_time':AT,'session_key':string(100),'market_status':enum('PRE','REGULAR','AFTER','CLOSED','HALTED','UNKNOWN'),'feed_type':string(200),'documented_delay_s':nullable({'type':'integer','minimum':0}),'verification':enum('verified','unverified','unknown'),'error_code':nullable(ID),'interval_s':{'type':'integer','minimum':1},'price':NUM,'bid':NUM,'ask':NUM,'volume':NUM,'volume_type':enum('interval','cumulative','unknown'),'open':NUM,'high':NUM,'low':NUM,'close':NUM,'context':CONTEXT})
 # Additive evidence fields keep old journal records and clients valid.
 SAMPLE['properties'].update({'bid_at':TIME,'ask_at':TIME,'status_at':TIME,'quote_feed':nullable(string(200)),'status_feed':nullable(string(200)),'price_time_kind':enum('trade','bar_open','snapshot'),'previous_close':NUM})
+BAR=obj({'bar_open_at':AT,'open':NUM,'high':NUM,'low':NUM,'close':NUM,'volume':NUM})
+BAR_EVIDENCE=obj({'provider_symbol':string(80),'market':enum('us','eu'),'exchange':string(16),'timezone':string(64),'session_date':dict(string(10),format='date'),'open':string(16),'close':string(16),'working_days':array(enum('Mon','Tue','Wed','Thu','Fri','Sat','Sun'),7),'excluded_dates':array(dict(string(10),format='date'),400),'schedule_received_at':AT,'exchange_open':{'type':'boolean','const':True},'feed':enum('eodhd_realtime_history')})
+SAMPLE['properties'].update({'bar_history':array(BAR,120),'bar_evidence':BAR_EVIDENCE})
 CONTEXT['properties']['orders']['items']['properties'].update({'status_time':TIME,'average_fill_price':NUM,'limit_price':NUM,'stop_price':NUM,'order_type':nullable(string(100))})
 CONTEXT['properties']['orders_complete']={'type':'boolean'}
 for s in [SESSION,SAMPLE]:strict_patterns(s)

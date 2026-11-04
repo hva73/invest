@@ -3,7 +3,7 @@ import json,os,secrets,time
 from datetime import datetime,timezone
 from decimal import Decimal
 from hotwatch_contract import SESSION,SAMPLE,CONTEXT,ACTIVATION_BATCH,EngineError,require,canonical,checksum,stamp,OPEN_STATES,PROFILES,GLOBAL_RISK,provider_floor
-from hotwatch_features import features,observation_status
+from hotwatch_features import features,observation_status,verified_bar_samples
 from hotwatch_strategy import BASELINE,validate_strategy,calculate
 
 def utc():return datetime.now(timezone.utc)
@@ -168,9 +168,16 @@ def view(c,row,now=None):
   if latest_sample['source']=='eodhd' and latest_sample['market_status']!='UNKNOWN':
    fields=['status_at']+(['bid_at','ask_at'] if effective=='BUY' else [])
    if any(not latest_sample.get(k) or not 0<=(now-stamp(latest_sample[k])).total_seconds()<=max_age for k in fields):effective='NO_DATA'
+   if latest_sample.get('bar_history'):
+    from datetime import timedelta
+    try:
+     bar_end=stamp(latest_sample['bar_history'][-1]['bar_open_at'])+timedelta(seconds=60)
+     if not 0<=(now-bar_end).total_seconds()<=max_age or not 0<=(now-stamp(latest_sample['bar_evidence']['schedule_received_at'])).total_seconds()<=max_age:effective='NO_DATA'
+    except (KeyError,TypeError,ValueError,IndexError):effective='NO_DATA'
  profile=state.get('adaptive_profile',request['profile'])
  minimum=provider_floor(request['provider'])
- history=[json.loads(x['payload']) for x in reversed(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 120',(row['id'],)).fetchall())]
+ latest_payload=json.loads(sample['payload']) if sample else None
+ history=[latest_payload] if latest_payload and latest_payload.get('bar_history') else [json.loads(x['payload']) for x in reversed(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 120',(row['id'],)).fetchall())]
  data_status=observation_status(history,now,request['risk']['max_quote_age_s'],effective,row['status'])
  display_status={'BUY':'KØBSSIGNAL','SELL':'SÆLGSSIGNAL','REDUCE':'EXIT WATCH','WAIT':'AFVENT','NO_DATA':'DATA MANGLER','PAUSE':'DATA MANGLER'}.get(effective,'HOT WATCH')
  return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'strategy_checksum':checksum(json.loads(row['strategy'])),'signal':effective,'display_status':display_status,'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,PROFILES[profile]),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
@@ -252,6 +259,8 @@ def sample_errors(sample,request,now):
   if sample['market_status']!='UNKNOWN':
    if not sample.get('status_at') or not sample.get('status_feed'):raise EngineError('market_status_evidence_missing')
    if not 0<=(now-stamp(sample['status_at'])).total_seconds()<=request['risk']['max_quote_age_s']:raise EngineError('market_status_evidence_stale')
+ if 'bar_history' in sample or 'bar_evidence' in sample:
+  if verified_bar_samples(sample,request,now) is None:raise EngineError('bar_evidence_invalid')
  context=sample['context']
  if context['as_of'] and stamp(context['as_of'])>now:raise EngineError('future_position_context')
  if context['position']=='held' and (context['quantity'] is None or Decimal(context['quantity'])<=0):raise EngineError('invalid_position_quantity')
@@ -290,8 +299,11 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
    if row['last_data'] and stamp(sample['event_time'])<=stamp(row['last_data']):raise EngineError('out_of_order_market_data',409)
    cur=c.execute('INSERT INTO hw_samples(watch_row_id,source,sample_id,event_epoch,received,payload,digest) VALUES(?,?,?,?,?,?,?)',(row['id'],sample['source'],sample['sample_id'],stamp(sample['event_time']).timestamp(),now.isoformat(),canonical(sample),checksum(sample)))
    sample_row_id=cur.lastrowid
-  samples=[json.loads(r['payload']) for r in reversed(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 120',(row['id'],)).fetchall())]
-  strategy_data=json.loads(row['strategy']);state=json.loads(row['state']);metrics=features(samples,strategy_data['parameters'])
+  samples=[sample] if sample.get('bar_history') else [json.loads(r['payload']) for r in reversed(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 120',(row['id'],)).fetchall())]
+  strategy_data=json.loads(row['strategy']);state=json.loads(row['state']);bar_samples=verified_bar_samples(sample,request,now) if sample.get('bar_history') else None
+  metrics=features(bar_samples if bar_samples is not None else samples,strategy_data['parameters'])
+  if bar_samples is not None:
+   live_metrics=features([sample],strategy_data['parameters']);metrics.update(price=sample['price'],spread=live_metrics.get('spread'),spread_pct=live_metrics.get('spread_pct'),bar_history_count=len(bar_samples))
   import intel_workflows,candidate_lifecycle
   decision=intel_workflows.prior_decision(c,uid,mode,request['candidate_id'])
   risk=dict(request['risk'],entry_allowed=request.get('watch_mode','both')!='exit' and (not decision or decision[1]['status']!='FRAVÆLG'),exit_allowed=request.get('watch_mode','both')!='entry')

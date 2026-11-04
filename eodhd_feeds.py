@@ -1,6 +1,6 @@
 """Bounded, read-only EODHD feed clients. No strategy or broker actions."""
 import json, logging, re, time, urllib.error, urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, time as day_time
 from decimal import Decimal, InvalidOperation
 from urllib.parse import quote, urlencode
 
@@ -40,6 +40,25 @@ def _unique_bars(bars):
   if previous is not None and previous!=bar:return None
   by_time[bar['bar_open_at']]=bar
  return sorted(by_time.values(),key=lambda row:row['bar_open_at'])
+
+def _calendar(data):
+ """Preserve only explicitly supplied exchange schedule evidence."""
+ hours=data.get('TradingHours');holidays=data.get('ExchangeHolidays');early=data.get('ExchangeEarlyCloseDays')
+ if not isinstance(hours,dict) or not isinstance(holidays,(dict,list)) or not isinstance(early,(dict,list)):return None
+ try:
+  opening=day_time.fromisoformat(hours['Open']);closing=day_time.fromisoformat(hours['Close'])
+  if opening.tzinfo or closing.tzinfo or opening>=closing:raise ValueError()
+  days=[x.strip() for x in hours['WorkingDays'].split(',')]
+  if not days or len(days)>7 or any(x not in ('Mon','Tue','Wed','Thu','Fri','Sat','Sun') for x in days):raise ValueError()
+  excluded=[]
+  for collection in (holidays,early):
+   for item in (collection.values() if isinstance(collection,dict) else collection):
+    value=item.get('Date') if isinstance(item,dict) else None
+    if not isinstance(value,str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}',value):raise ValueError()
+    datetime.fromisoformat(value);excluded.append(value)
+  if len(set(excluded))>400:raise ValueError()
+  return {'open':opening.isoformat(),'close':closing.isoformat(),'working_days':days,'excluded_dates':sorted(set(excluded))}
+ except (KeyError,ValueError,TypeError,AttributeError):return None
 
 class EODHDFeeds:
  def __init__(self,key,reserve=None,opener=None,ws_factory=None):
@@ -120,7 +139,7 @@ class EODHDFeeds:
   if res['status']!='OK':return res
   data=res.pop('payload')
   if not isinstance(data,dict) or not isinstance(data.get('isOpen'),bool) or not isinstance(data.get('Code',exchange),str) or data.get('Code',exchange).upper()!=exchange.upper():return _result('INVALID_RESPONSE','/exchange-details/{exchange}')
-  return {**res,'exchange':exchange,'exchange_open':data['isOpen'],'source_time':None,'timezone':data.get('Timezone') if isinstance(data.get('Timezone'),str) and re.fullmatch(r'[A-Za-z0-9_+/-]{1,64}',data['Timezone']) else None}
+  return {**res,'exchange':exchange,'exchange_open':data['isOpen'],'source_time':None,'timezone':data.get('Timezone') if isinstance(data.get('Timezone'),str) and re.fullmatch(r'[A-Za-z0-9_+/-]{1,64}',data['Timezone']) else None,'calendar':_calendar(data)}
  def websocket_trades(self,market,symbol,duration=2):return self.capture(str(market)+'_trades',symbol,duration)
  def websocket_quotes(self,market,symbol,duration=2):return self.capture(str(market)+'_quotes',symbol,duration)
  def websocket_status(self,market,symbol,duration=2):return self.capture(str(market)+'_status',symbol,duration)
