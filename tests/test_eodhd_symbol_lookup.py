@@ -13,6 +13,16 @@ class SymbolLookup(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-SECRET'}),patch('market_data.candidate',return_value={'ticker':'AMD'}),patch.object(adapter,'reserve'):
    result=adapter.search_eodhd_symbols(None,1,{'candidate_id':'c'},Opener())
   self.assertEqual([x['symbol'] for x in result['choices']],['AMD.US','AMD.XETRA']);self.assertNotIn('TEST-SECRET',str(result))
+ def test_key_whitespace_is_removed_before_request(self):
+  from urllib.parse import urlsplit,parse_qs
+  class Capture:
+   def open(self,request,**kw):
+    self.token=parse_qs(urlsplit(request.full_url).query)['api_token'][0]
+    return Response()
+  opener=Capture()
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'  TEST-SECRET\n'}),patch('market_data.candidate',return_value={'ticker':'AMD'}),patch.object(adapter,'reserve'):
+   result=adapter.search_eodhd_symbols(None,1,{'candidate_id':'c'},opener)
+  self.assertEqual(opener.token,'TEST-SECRET');self.assertNotIn('TEST-SECRET',str(result))
  def test_alias_lookup_requires_exact_issuer_name(self):
   class Reply:
    def __init__(self,body):self.body=body
@@ -28,6 +38,68 @@ class SymbolLookup(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-SECRET'}),patch('market_data.candidate',return_value={'ticker':'NOVOB','company_name':'Novo Nordisk A/S'}),patch.object(adapter,'reserve') as budget:
    result=adapter.search_eodhd_symbols(None,1,{'candidate_id':'c'},opener)
   self.assertEqual([x['symbol'] for x in result['choices']],['NOVO-B.CO']);self.assertEqual(budget.call_count,2)
+ def test_observed_novob_ticker_and_issuer_search_shape(self):
+  from urllib.parse import unquote,urlsplit
+  class Reply:
+   def __init__(self,body):self.body=body
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,size):return json.dumps(self.body).encode()
+  class Observed:
+   def __init__(self):self.paths=[]
+   def open(self,request,**kwargs):
+    self.paths.append(unquote(urlsplit(request.full_url).path))
+    if len(self.paths)==1:return Reply([{'Code':'NOVOB80','Exchange':'BK','Name':'Novo Nordisk A/S','Currency':'THB'}])
+    return Reply([{'Code':'NVO','Exchange':'US','Name':'Novo Nordisk A/S','Currency':'USD'},{'Code':'NOVO-B','Exchange':'CO','Name':'Novo Nordisk A/S','Currency':'DKK'},{'Code':'OTHER','Exchange':'CO','Name':'Different company','Currency':'DKK'}])
+  opener=Observed()
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY'}),patch('market_data.candidate',return_value={'ticker':'NOVOB','company_name':'Novo Nordisk A/S'}),patch.object(adapter,'reserve'):
+   result=adapter.search_eodhd_symbols(None,1,{'candidate_id':'synthetic','quote_currency':'DKK'},opener)
+  self.assertEqual(opener.paths,['/api/search/NOVOB','/api/search/Novo Nordisk']);self.assertEqual([v['symbol'] for v in result['choices']],['NVO.US','NOVO-B.CO']);self.assertEqual(result['choices'][1]['currency'],'DKK')
+ def test_company_fallback_when_ticker_only_matches_wrong_currency(self):
+  from urllib.parse import urlsplit,unquote
+  class Reply:
+   def __init__(self,body):self.body=body
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,size):return json.dumps(self.body).encode()
+  class DifferentCurrency:
+   def __init__(self):self.paths=[]
+   def open(self,request,**kw):
+    self.paths.append(urlsplit(request.full_url).path)
+    if len(self.paths)==1:return Reply([{'Code':'NOVOB','Exchange':'ST','Name':'Novo Nordisk A/S','Currency':'SEK'}])
+    return Reply([{'Code':'NOVO-B','Exchange':'CO','Name':'Novo Nordisk A/S','Currency':'DKK'}])
+  opener=DifferentCurrency()
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-SECRET'}),patch('market_data.candidate',return_value={'ticker':'NOVOB','company_name':'Novo Nordisk A/S'}),patch.object(adapter,'reserve') as budget:
+   result=adapter.search_eodhd_symbols(None,1,{'candidate_id':'c','quote_currency':'DKK'},opener)
+  self.assertEqual([x['symbol'] for x in result['choices']],['NOVOB.ST','NOVO-B.CO']);self.assertEqual(budget.call_count,2)
+  self.assertEqual(unquote(opener.paths[1]),'/api/search/Novo Nordisk');self.assertNotIn('%2F',opener.paths[1])
+ def test_404_ticker_search_retries_exact_issuer_name(self):
+  class Reply:
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,size):return json.dumps([{'Code':'NOVO-B','Exchange':'CO','Name':'Novo Nordisk A/S','Currency':'DKK'}]).encode()
+  class NotFoundThenMatch:
+   def __init__(self):self.calls=0
+   def open(self,*a,**kw):
+    self.calls+=1
+    if self.calls==1:raise urllib.error.HTTPError('https://example.invalid/TEST-SECRET',404,'not found',{},None)
+    return Reply()
+  opener=NotFoundThenMatch()
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-SECRET'}),patch('market_data.candidate',return_value={'ticker':'NOVOB','company_name':'Novo Nordisk A/S'}),patch.object(adapter,'reserve') as budget:
+   result=adapter.search_eodhd_symbols(None,1,{'candidate_id':'c'},opener)
+  self.assertEqual([x['symbol'] for x in result['choices']],['NOVO-B.CO']);self.assertEqual(budget.call_count,2)
+ def test_missing_search_endpoint_reports_404_without_secret(self):
+  class Missing:
+   def open(self,*a,**kw):raise urllib.error.HTTPError('https://example.invalid/TEST-SECRET',404,'not found',{},None)
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-SECRET'}),patch('market_data.candidate',return_value={'ticker':'AMD','company_name':'AMD Inc'}),patch.object(adapter,'reserve') as budget:
+   with self.assertRaises(adapter.DataUnavailable) as error:adapter.search_eodhd_symbols(None,1,{'candidate_id':'c'},Missing())
+  self.assertEqual(error.exception.code,'EODHD_SEARCH_HTTP_404');self.assertEqual(budget.call_count,2);self.assertNotIn('TEST-SECRET',str(error.exception))
+ def test_other_http_error_shows_only_status_not_key(self):
+  class Bad:
+   def open(self,*a,**kw):raise urllib.error.HTTPError('https://example.invalid/TEST-SECRET',503,'failure',{},None)
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-SECRET'}),patch('market_data.candidate',return_value={'ticker':'AMD'}),patch.object(adapter,'reserve'):
+   with self.assertRaises(adapter.DataUnavailable) as e:adapter.search_eodhd_symbols(None,1,{'candidate_id':'c'},Bad())
+  self.assertEqual(e.exception.code,'EODHD_SEARCH_HTTP_503');self.assertNotIn('TEST-SECRET',str(e.exception))
  def test_candidate_authorization_is_checked_before_network(self):
   class NoNetwork:
    def open(self,*a,**kw):raise AssertionError('Network must not run')
@@ -39,7 +111,7 @@ class SymbolLookup(unittest.TestCase):
    def open(self,*a,**kw):raise urllib.error.HTTPError('https://example.invalid/TEST-SECRET',403,'denied',{},None)
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-SECRET'}),patch('market_data.candidate',return_value={'ticker':'AMD'}),patch.object(adapter,'reserve'):
    with self.assertRaises(adapter.DataUnavailable) as e:adapter.search_eodhd_symbols(None,1,{'candidate_id':'c'},Bad())
-  self.assertEqual(e.exception.code,'EODHD_ENTITLEMENT_REJECTED');self.assertNotIn('TEST-SECRET',str(e.exception))
+  self.assertEqual(e.exception.code,'EODHD_SEARCH_HTTP_403');self.assertNotIn('TEST-SECRET',str(e.exception))
 class SymbolEndpoint(unittest.TestCase):
  def test_auth_and_csrf_required_before_search(self):
   import app,test_app
