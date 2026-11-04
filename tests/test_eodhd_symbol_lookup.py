@@ -13,6 +13,21 @@ class SymbolLookup(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-SECRET'}),patch('market_data.candidate',return_value={'ticker':'AMD'}),patch.object(adapter,'reserve'):
    result=adapter.search_eodhd_symbols(None,1,{'candidate_id':'c'},Opener())
   self.assertEqual([x['symbol'] for x in result['choices']],['AMD.US','AMD.XETRA']);self.assertNotIn('TEST-SECRET',str(result))
+ def test_alias_lookup_requires_exact_issuer_name(self):
+  class Reply:
+   def __init__(self,body):self.body=body
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,size):return json.dumps(self.body).encode()
+  class AliasOpener:
+   def __init__(self):self.calls=0
+   def open(self,*a,**kw):
+    self.calls+=1
+    return Reply([] if self.calls==1 else [{'Code':'NOVO-B','Exchange':'CO','Name':'Novo Nordisk A/S','Currency':'DKK'},{'Code':'OTHER','Exchange':'CO','Name':'Other Co','Currency':'DKK'}])
+  opener=AliasOpener()
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-SECRET'}),patch('market_data.candidate',return_value={'ticker':'NOVOB','company_name':'Novo Nordisk A/S'}),patch.object(adapter,'reserve') as budget:
+   result=adapter.search_eodhd_symbols(None,1,{'candidate_id':'c'},opener)
+  self.assertEqual([x['symbol'] for x in result['choices']],['NOVO-B.CO']);self.assertEqual(budget.call_count,2)
  def test_candidate_authorization_is_checked_before_network(self):
   class NoNetwork:
    def open(self,*a,**kw):raise AssertionError('Network must not run')
