@@ -29,6 +29,8 @@ Market-status er fortsat UNKNOWN, hvis kilden ikke giver verificerbar status. Ri
 
 EODHD REST-opslag fra installationen returnerede `volume`, men ingen `bid` eller `ask` for de afprøvede instrumenter. Volumen lagres nu som kildeoplyst med ukendt periode og vises i sessionsdetaljen; den indgår ikke i interval- eller relativvolumen. Eksisterende observationer ændres ikke ved gentagne tidsstempler. Felternes tilstedeværelse dokumenterer ikke datatidens friskhed eller rettigheder til andre feeds.
 
+Sessionsvisningen indeholder nu separate `data_status`-felter for kurs, marked, momentum, bid/ask og signal. Den gamle `signal`-kontrakt og risikomotoren er uændrede. `DELAYED` bruges kun ved kildeoplyst forsinkelse; ellers markeres en for gammel kurs `STALE`. Tidsændringer for 1/5/15/30 minutter vises kun for faktiske, sammenlignelige observationer med verificeret markedssession og højst 5 sekunders afstand til det pågældende tidsmål. De er visningsmålinger og ændrer ikke handelsstrategien. Separate bid/ask-tider findes ikke i den aktuelle kontrakt og kan derfor ikke verificeres af adapteren.
+
 ## Arkitektur og tilstand
 
 `hotwatch_service.py` kører adapter → datavalidering → `hotwatch_features.py` → `hotwatch_strategy.py` (regler, separat risikogate og signalstabilisering) → SQLite-journal i `hotwatch_engine.py`. `hotwatch_api.py` og `static/engine-ui.js` viser resultatet. Backend kræver ingen aktiv ChatGPT-session.

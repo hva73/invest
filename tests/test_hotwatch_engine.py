@@ -5,7 +5,7 @@ from decimal import Decimal
 from unittest.mock import patch
 import app,report_ingest,hotwatch_engine as engine
 from hotwatch_contract import EngineError,checksum,stamp
-from hotwatch_features import features
+from hotwatch_features import features,observation_status
 from hotwatch_strategy import BASELINE,validate_strategy,calculate
 from hotwatch_adapters import PlutoAdapter,EODHDAdapter,DataUnavailable,unknown_context,reserve
 from test_intel_workflows import merc_report
@@ -27,6 +27,30 @@ class HotWatch(unittest.TestCase):
  def put(self,data,now=None):return engine.ingest(app.connect,1,self.req['watch_id'],True,data,now or self.now)
  def counts(self):
   with app.connect() as c:return {name:c.execute('SELECT count(*) FROM '+name).fetchone()[0] for name in ['hw_sessions','hw_samples','hw_calculations','hw_events']}
+ def test_observation_status_separates_stale_price_from_signal_without_guessing_delay(self):
+  sample=tick(self.now-timedelta(minutes=15));sample.update(source='eodhd',market_status='UNKNOWN',bid=None,ask=None,documented_delay_s=None)
+  quality=observation_status([sample],self.now,120,'NO_DATA','DEGRADED')
+  self.assertEqual(quality['price'],'100');self.assertEqual(quality['price_status'],'STALE');self.assertEqual(quality['market_status'],'UNKNOWN')
+  self.assertEqual(quality['quote_status'],'UNAVAILABLE');self.assertEqual(quality['momentum_status'],'UNAVAILABLE');self.assertEqual(quality['signal_status'],'WAITING_FOR_DATA')
+  sample['documented_delay_s']=900
+  self.assertEqual(observation_status([sample],self.now,120,'NO_DATA','ACTIVE')['price_status'],'DELAYED')
+  self.assertEqual(observation_status([],self.now,120,'NO_DATA','CREATED')['price_status'],'MISSING')
+ def test_timed_momentum_uses_only_actual_comparable_samples(self):
+  samples=[tick(self.now-timedelta(minutes=n),index=i,price=str(100+i)) for i,n in enumerate((30,15,5,1,0))]
+  view=observation_status(samples,self.now,120,'WAIT','ACTIVE')
+  self.assertEqual(view['momentum_status'],'READY');self.assertEqual(view['market_status'],'OPEN');self.assertEqual(view['signal_status'],'READY')
+  self.assertTrue(all(v is not None for v in view['momentum_pct'].values()))
+  samples[-2]['venue']='DIFFERENT';samples[-3]['session_key']='DIFFERENT'
+  view=observation_status(samples,self.now,120,'WAIT','ACTIVE')
+  self.assertIsNone(view['momentum_pct']['1']);self.assertIsNone(view['momentum_pct']['5']);self.assertIsNotNone(view['momentum_pct']['15'])
+  samples[-1]['market_status']='UNKNOWN'
+  self.assertEqual(observation_status(samples,self.now,120,'NO_DATA','ACTIVE')['momentum_status'],'UNAVAILABLE')
+ def test_session_view_keeps_price_when_signal_waits_for_data(self):
+  result=self.put(tick(self.now))
+  self.assertEqual(result['session']['signal'],'NO_DATA')
+  self.assertEqual(result['session']['data_status']['price'],'100')
+  self.assertEqual(result['session']['data_status']['price_status'],'FRESH')
+  self.assertEqual(result['session']['data_status']['signal_status'],'WAITING_FOR_DATA')
  def test_session_idempotence_conflict_duplicate_and_restart(self):
   self.assertTrue(engine.create(app.connect,1,self.req,self.now)['duplicate']);changed=copy.deepcopy(self.req);changed['activation_reason']='changed'
   with self.assertRaisesRegex(EngineError,'watch_id_conflict'):engine.create(app.connect,1,changed,self.now)
