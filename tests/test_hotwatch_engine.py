@@ -196,6 +196,17 @@ class HotWatch(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'SECRET-TEST-KEY'}):
    with self.assertRaises(DataUnavailable) as err:EODHDAdapter(app.connect,1,Bad()).poll({'request_data':req})
    self.assertNotIn('SECRET-TEST-KEY',str(err.exception))
+ def test_eodhd_quote_without_currency_uses_explicit_instrument_currency(self):
+  class Response:
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,limit):return json.dumps({'code':'MERC.US','timestamp':int(self_now.timestamp()),'close':'12.34'}).encode()
+  class Opener:
+   def open(self,*args,**kwargs):return Response()
+  self_now=self.now;req=copy.deepcopy(self.req);req.update(provider='eodhd',provider_symbol='MERC.US',quote_currency='USD')
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY'}),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):
+   sample=EODHDAdapter(app.connect,1,Opener()).poll({'request_data':req})
+  self.assertEqual(sample['currency'],'USD');self.assertIn('explicit session instrument',sample['feed_type']);self.assertIsNone(sample['volume']);self.assertIsNone(sample['bid'])
  def test_eodhd_rate_limit_retry_after_is_observed_and_secret_redacted(self):
   import urllib.error
   class Limited:

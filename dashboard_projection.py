@@ -117,6 +117,10 @@ def build(connect,uid,owned,snapshots,now=None):
     if pnl and policy.decimal(pnl.get('amount')) is None:pnl=None
     cost=row.get('cost_basis') or {};pnl_percent=None
     if pnl and pnl.get('currency')==cost.get('currency') and policy.decimal(cost.get('amount')) is not None and Decimal(cost['amount'])>0:pnl_percent=str(Decimal(pnl['amount'])/Decimal(cost['amount'])*100)
+    # Percentage uses the original-currency broker P/L and cost when the displayed
+    # DKK result has a different currency from the supplied cost basis.
+    if pnl_percent is None and not row.get('unrealized_basis') and raw_pnl.get('currency')==cost.get('currency') and policy.decimal(raw_pnl.get('amount')) is not None and policy.decimal(cost.get('amount')) is not None and Decimal(cost['amount'])>0:
+     pnl_percent=str(Decimal(raw_pnl['amount'])/Decimal(cost['amount'])*100)
     obs=observation(row,position_data.get('observed'));since=None
     if aid and obs.get('received_at') and not failed and data.get('positions_complete'):
      previous=c.execute('SELECT payload FROM display_price_observations WHERE user_id=? AND portfolio_id=? AND asset_id=? ORDER BY id DESC LIMIT 120',(uid,p['id'],aid)).fetchall()
