@@ -4,24 +4,30 @@ from decimal import Decimal,localcontext
 def observation_status(samples,now,max_age_s,signal,watch_status):
  """Read-only data quality and time-horizon changes; never a trading input."""
  from report_validation import stamp
- result={'price_status':'MISSING','market_status':'UNKNOWN','momentum_status':'UNAVAILABLE','quote_status':'UNAVAILABLE','signal_status':'WAITING_FOR_DATA','price':None,'currency':None,'source':None,'venue':None,'price_type':None,'feed_description':None,'event_time':None,'age_s':None,'momentum_pct':{str(n):None for n in (1,5,15,30)}}
+ result={'price_status':'MISSING','market_status':'UNKNOWN','momentum_status':'UNAVAILABLE','quote_status':'UNAVAILABLE','signal_status':'WAITING_FOR_DATA','price':None,'currency':None,'source':None,'venue':None,'price_type':None,'feed_description':None,'event_time':None,'age_s':None,'bid':None,'ask':None,'bid_at':None,'ask_at':None,'daily_change_pct':None,'since_last_pct':None,'momentum_pct':{str(n):None for n in (1,5,15,30)}}
  if watch_status in ('PAUSED','COMPLETED','EXPIRED','ERROR'):result['signal_status']='NOT_APPLICABLE'
  elif signal=='PAUSE':result['signal_status']='BLOCKED'
  elif signal!='NO_DATA':result['signal_status']='READY'
  if not samples:return result
  latest=samples[-1];event=stamp(latest['event_time']);age=(now-event).total_seconds()
- result.update(price=latest['price'],currency=latest['currency'],source=latest['source'],venue=latest['venue'],feed_description=latest['feed_type'],event_time=latest['event_time'],age_s=round(age,3))
+ result.update(price=latest['price'],currency=latest['currency'],source=latest['source'],venue=latest['venue'],price_type={'bar_open':'bar_close','trade':'trade','snapshot':'snapshot'}.get(latest.get('price_time_kind')),feed_description=latest['feed_type'],event_time=latest['event_time'],age_s=round(age,3))
+ if latest.get('bid') is not None and latest.get('ask') is not None and latest.get('bid_at') and latest.get('ask_at'):
+  result.update(bid=latest['bid'],ask=latest['ask'],bid_at=latest['bid_at'],ask_at=latest['ask_at'])
+  result['quote_status']='FRESH' if all(0<=(now-stamp(latest[k])).total_seconds()<=max_age_s for k in ('bid_at','ask_at')) else 'STALE'
  result['market_status']={'REGULAR':'OPEN','PRE':'PREMARKET','AFTER':'AFTERHOURS','CLOSED':'CLOSED','HALTED':'HALTED'}.get(latest['market_status'],'UNKNOWN')
  if latest['price'] is None:return result
+ if latest.get('previous_close') is not None and number(latest['previous_close'])>0:result['daily_change_pct']=format((number(latest['price'])/number(latest['previous_close'])-1)*100,'f')
  delay=latest.get('documented_delay_s')
  if age<0:result['price_status']='MISSING'
  elif delay and age<=delay+max_age_s:result['price_status']='DELAYED'
  elif age>max_age_s:result['price_status']='STALE'
  else:result['price_status']='FRESH'
  if latest['market_status']=='UNKNOWN':return result
- identity=lambda s:tuple(s[k] for k in ('source','asset_id','currency','venue','session_key','market_status','feed_type'))
+ identity=lambda s:tuple(s[k] for k in ('source','asset_id','currency','venue','session_key','market_status','feed_type'))+(s.get('price_time_kind'),)
  comparable=[s for s in samples[:-1] if identity(s)==identity(latest) and s.get('price') is not None and stamp(s['event_time'])<event]
  if not comparable:result['momentum_status']='INSUFFICIENT_HISTORY';return result
+ prior=max(comparable,key=lambda s:stamp(s['event_time']))
+ if number(prior['price'])>0:result['since_last_pct']=format((number(latest['price'])/number(prior['price'])-1)*100,'f')
  for minutes in (1,5,15,30):
   target=minutes*60
   choices=[s for s in comparable if abs((event-stamp(s['event_time'])).total_seconds()-target)<=5]
@@ -44,7 +50,7 @@ def features(samples,parameters):
  if not samples:return {}
  # Caller supplies ascending, unique event times. Do not mix providers,
  # currencies, venues, sessions, bar durations or market phases.
- last=samples[-1];identity=lambda s:tuple(s[k] for k in ['source','asset_id','currency','venue','session_key','market_status','interval_s'])
+ last=samples[-1];identity=lambda s:tuple(s[k] for k in ['source','asset_id','currency','venue','session_key','market_status','interval_s','feed_type'])+(s.get('price_time_kind'),)
  rows=[]
  for s in reversed(samples):
   if identity(s)!=identity(last):break

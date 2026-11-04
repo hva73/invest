@@ -162,11 +162,18 @@ def view(c,row,now=None):
  last=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
  stale=not row['last_data'] or (now-stamp(row['last_data'])).total_seconds()>request['risk']['max_quote_age_s']
  effective='NO_DATA' if stale and state.get('signal') not in ['PAUSE','NO_DATA'] else state.get('signal','NO_DATA')
+ if effective not in ('NO_DATA','PAUSE') and (not context or context.get('status')!='verified' or not context.get('as_of') or not 0<=(now-stamp(context['as_of'])).total_seconds()<=300):effective='NO_DATA'
+ if sample and effective not in ('NO_DATA','PAUSE'):
+  latest_sample=json.loads(sample['payload']);max_age=request['risk']['max_quote_age_s']
+  if latest_sample['source']=='eodhd' and latest_sample['market_status']!='UNKNOWN':
+   fields=['status_at']+(['bid_at','ask_at'] if effective=='BUY' else [])
+   if any(not latest_sample.get(k) or not 0<=(now-stamp(latest_sample[k])).total_seconds()<=max_age for k in fields):effective='NO_DATA'
  profile=state.get('adaptive_profile',request['profile'])
  minimum=provider_floor(request['provider'])
  history=[json.loads(x['payload']) for x in reversed(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 120',(row['id'],)).fetchall())]
  data_status=observation_status(history,now,request['risk']['max_quote_age_s'],effective,row['status'])
- return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'strategy_checksum':checksum(json.loads(row['strategy'])),'signal':effective,'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,PROFILES[profile]),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
+ display_status={'BUY':'KØBSSIGNAL','SELL':'SÆLGSSIGNAL','REDUCE':'EXIT WATCH','WAIT':'AFVENT','NO_DATA':'DATA MANGLER','PAUSE':'DATA MANGLER'}.get(effective,'HOT WATCH')
+ return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'strategy_checksum':checksum(json.loads(row['strategy'])),'signal':effective,'display_status':display_status,'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,PROFILES[profile]),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
 def sessions(connect,uid,mode=False,after=0,limit=50):
  with connect() as c:
@@ -236,6 +243,15 @@ def sample_errors(sample,request,now):
  if all(sample[k] is not None for k in ['open','high','low','close']):
   if Decimal(sample['low'])>min(Decimal(sample['open']),Decimal(sample['close'])) or Decimal(sample['high'])<max(Decimal(sample['open']),Decimal(sample['close'])) or Decimal(sample['low'])>Decimal(sample['high']):raise EngineError('invalid_ohlc')
  if stamp(sample['event_time'])>now:raise EngineError('future_market_data')
+ for field in ('bid_at','ask_at','status_at'):
+  if sample.get(field) and stamp(sample[field])>now:raise EngineError('future_market_data')
+ if sample['source']=='eodhd' and not (request['is_test'] and sample['feed_type']=='synthetic interval bars'):
+  if sample['bid'] is not None or sample['ask'] is not None:
+   if not sample.get('bid_at') or not sample.get('ask_at') or not sample.get('quote_feed'):raise EngineError('quote_evidence_missing')
+   if any(not 0<=(now-stamp(sample[k])).total_seconds()<=request['risk']['max_quote_age_s'] for k in ('bid_at','ask_at')):raise EngineError('quote_evidence_stale')
+  if sample['market_status']!='UNKNOWN':
+   if not sample.get('status_at') or not sample.get('status_feed'):raise EngineError('market_status_evidence_missing')
+   if not 0<=(now-stamp(sample['status_at'])).total_seconds()<=request['risk']['max_quote_age_s']:raise EngineError('market_status_evidence_stale')
  context=sample['context']
  if context['as_of'] and stamp(context['as_of'])>now:raise EngineError('future_position_context')
  if context['position']=='held' and (context['quantity'] is None or Decimal(context['quantity'])<=0):raise EngineError('invalid_position_quantity')

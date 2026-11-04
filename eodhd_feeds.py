@@ -33,6 +33,14 @@ def _timestamp(value,unit):
 def _result(status,endpoint,**kwargs):
  return {'status':status,'endpoint':endpoint,**kwargs}
 
+def _unique_bars(bars):
+ by_time={}
+ for bar in bars:
+  previous=by_time.get(bar['bar_open_at'])
+  if previous is not None and previous!=bar:return None
+  by_time[bar['bar_open_at']]=bar
+ return sorted(by_time.values(),key=lambda row:row['bar_open_at'])
+
 class EODHDFeeds:
  def __init__(self,key,reserve=None,opener=None,ws_factory=None):
   self._key=key.strip() if isinstance(key,str) else ''
@@ -65,11 +73,12 @@ class EODHDFeeds:
   rows=res.pop('payload')
   if not isinstance(rows,list):return _result('INVALID_RESPONSE','/history')
   out=[]
-  for row in rows[:1000]:
+  for row in sorted((x for x in rows if isinstance(x,dict) and type(x.get('t')) is int),key=lambda x:x['t'])[-1000:]:
    if not isinstance(row,dict) or row.get('s') not in ([symbol,symbol+'.US'] if market=='us' and not symbol.endswith('.US') else [symbol]) or row.get('i')!='1m':continue
    ts=_timestamp(row.get('t'),1000);values={k:_number(row.get(k)) for k in ('o','h','l','c','v')}
    if ts and all(values[k] is not None for k in ('o','h','l','c')):out.append({'symbol':symbol,'bar_open_at':ts,'interval_s':60,'open':values['o'],'high':values['h'],'low':values['l'],'close':values['c'],'volume':values['v'],'volume_type':'interval'})
-  out.sort(key=lambda row:row['bar_open_at'])
+  out=_unique_bars(out)
+  if out is None:return _result('INVALID_RESPONSE','/history')
   return {**res,'status':'OK' if out else 'NO_DATA','bars':out}
  def snapshot(self,symbol):
   if not _valid_symbol(symbol):return _result('INVALID_INPUT','/real-time')
@@ -89,11 +98,12 @@ class EODHDFeeds:
   rows=res.pop('payload')
   if not isinstance(rows,list):return _result('INVALID_RESPONSE','/intraday/{symbol}')
   out=[]
-  for row in rows[:1000]:
+  for row in sorted((x for x in rows if isinstance(x,dict) and type(x.get('timestamp')) is int),key=lambda x:x['timestamp'])[-1000:]:
    if not isinstance(row,dict):continue
    ts=_timestamp(row.get('timestamp'),1);values={k:_number(row.get(k)) for k in ('open','high','low','close','volume')}
    if ts and all(values[k] is not None for k in ('open','high','low','close')):out.append({'symbol':symbol,'bar_open_at':ts,**values,'volume_type':'interval'})
-  out.sort(key=lambda row:row['bar_open_at'])
+  out=_unique_bars(out)
+  if out is None:return _result('INVALID_RESPONSE','/intraday/{symbol}')
   return {**res,'status':'OK' if out else 'NO_DATA','bars':out}
  def us_quotes(self,symbol):
   if not _valid_symbol(symbol) or not symbol.endswith('.US'):return _result('INVALID_INPUT','/us-quote-delayed')

@@ -1,6 +1,6 @@
 """Simulated provider responses only; no real network or credentials."""
 import copy,json,os,unittest,urllib.error
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from unittest.mock import patch
 from eodhd_feeds import EODHDFeeds
 from hotwatch_adapters import EODHDAdapter,unknown_context
@@ -35,6 +35,15 @@ class FeedTests(unittest.TestCase):
   opener=Opener([{'timestamp':1730000000,'open':10,'high':12,'low':9,'close':11,'volume':20}]);client=EODHDFeeds(SECRET,opener=opener)
   result=client.intraday('NOVO-B.CO','5m',1730000000,1730001000);self.assertEqual(result['bars'][0]['bar_open_at'],'2024-10-27T03:33:20+00:00');self.assertIn('/api/intraday/NOVO-B.CO?',opener.url)
   self.assertEqual(EODHDFeeds(SECRET,opener=Opener([])).minute_bars('eu','NOVO-B.CO')['status'],'NO_DATA')
+ def test_bar_limit_keeps_newest_observations(self):
+  rows=[{'timestamp':1730000000+i*60,'open':10,'high':12,'low':9,'close':11,'volume':20} for i in range(1001)]
+  result=EODHDFeeds(SECRET,opener=Opener(list(reversed(rows)))).intraday('AMD.US')
+  self.assertEqual(len(result['bars']),1000)
+  self.assertEqual(result['bars'][-1]['bar_open_at'],datetime.fromtimestamp(rows[-1]['timestamp'],timezone.utc).isoformat())
+ def test_conflicting_bars_at_same_source_time_are_rejected(self):
+  a={'timestamp':1730000000,'open':10,'high':12,'low':9,'close':11,'volume':20};b=dict(a,close=12)
+  self.assertEqual(EODHDFeeds(SECRET,opener=Opener([a,b])).intraday('AMD.US')['status'],'INVALID_RESPONSE')
+  self.assertEqual(len(EODHDFeeds(SECRET,opener=Opener([a,a])).intraday('AMD.US')['bars']),1)
  def test_millisecond_source_timestamp_is_exact(self):
   from eodhd_feeds import _timestamp
   self.assertEqual(_timestamp(1730000000123,1000),'2024-10-27T03:33:20.123000+00:00')
@@ -49,7 +58,7 @@ class FeedTests(unittest.TestCase):
   class Failure:
    def __init__(self,code):self.code=code
    def open(self,req,**kw):raise urllib.error.HTTPError('https://x/'+SECRET,self.code,'error',{},None)
-  for code,expected in [(401,'ENTITLEMENT_UNVERIFIED'),(403,'ENTITLEMENT_UNVERIFIED'),(429,'RATE_LIMIT'),(500,'HTTP_ERROR')]:
+  for code,expected in [(401,'ENTITLEMENT_UNVERIFIED'),(402,'ENTITLEMENT_UNVERIFIED'),(403,'ENTITLEMENT_UNVERIFIED'),(429,'RATE_LIMIT'),(500,'HTTP_ERROR')]:
    res=EODHDFeeds(SECRET,opener=Failure(code)).minute_bars('us','AMD');self.assertEqual(res['status'],expected);self.assertNotIn(SECRET,str(res))
  def test_ws_trade_quote_status_and_no_messages(self):
   for feed,msg,field in [('us_trades',{'s':'AMD','t':1730000000000,'p':10,'v':5,'ms':'open'},'price'),('us_quotes',{'s':'AMD','t':1730000000000,'bp':10,'ap':11},'bid'),('us_status',{'s':'AMD','t':1730000000000,'h':'T'},'trading_status')]:
@@ -73,6 +82,13 @@ class FeedTests(unittest.TestCase):
    def capture(self,*a,**k):return {'status':'ENTITLEMENT_UNVERIFIED'}
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Missing()),patch('hotwatch_adapters.reserve'),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
   self.assertEqual(sample['price'],'12.34');self.assertIn('/api/real-time/',opener.url);self.assertEqual(adapter.last_feed_diagnostics['websocket_trade_status'],'ENTITLEMENT_UNVERIFIED')
+ def test_rest_uses_previous_close_from_same_provider_snapshot(self):
+  from test_hotwatch_engine import request
+  from hotwatch_features import observation_status
+  req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0)
+  opener=Opener({'code':'MERC.US','timestamp':int(now.timestamp()),'close':'12.00','previousClose':'10.00','currency':'USD'});adapter=EODHDAdapter(None,1,opener)
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}),patch('hotwatch_adapters.reserve'),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
+  self.assertEqual(sample['previous_close'],'10.00');self.assertEqual(observation_status([sample],now,120,'NO_DATA','DEGRADED')['daily_change_pct'],'20.0')
  def test_opt_in_live_trade_is_real_observation_but_unknown_risk_fields_remain_unknown(self):
   from test_hotwatch_engine import request
   req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0);adapter=EODHDAdapter(None,1,Opener({}))
@@ -80,3 +96,35 @@ class FeedTests(unittest.TestCase):
    def capture(self,*args,**kwargs):return {'status':'OK','messages':[{'event_time':now.isoformat(),'price':'45.2'}]}
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Live()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
   self.assertEqual(sample['event_time'],now.isoformat());self.assertEqual(sample['price'],'45.2');self.assertEqual(sample['market_status'],'UNKNOWN');self.assertIsNone(sample['bid']);self.assertIsNone(sample['volume'])
+ def test_fused_live_trade_uses_fresh_independent_quote_and_status_times(self):
+  from test_hotwatch_engine import request
+  import hotwatch_engine
+  req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0);adapter=EODHDAdapter(None,1,Opener({}))
+  class Feeds:
+   def capture(self,feed,*args,**kwargs):
+    if feed.endswith('trades'):item={'event_time':(now-timedelta(seconds=4)).isoformat(),'price':'45.2','market_session':'open'}
+    elif feed.endswith('quotes'):item={'event_time':(now-timedelta(seconds=2)).isoformat(),'bid':'45.1','ask':'45.3'}
+    else:item={'event_time':(now-timedelta(seconds=1)).isoformat(),'trading_status':'T'}
+    return {'status':'OK','messages':[item]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
+  hotwatch_engine.sample_errors(sample,req,now);self.assertEqual(sample['market_status'],'REGULAR');self.assertEqual(sample['bid'],'45.1');self.assertNotEqual(sample['event_time'],sample['bid_at']);self.assertNotEqual(sample['bid_at'],sample['status_at'])
+  stale=copy.deepcopy(sample);stale['ask_at']=(now-timedelta(seconds=121)).isoformat()
+  with self.assertRaisesRegex(ValueError,'quote_evidence_stale'):hotwatch_engine.sample_errors(stale,req,now)
+ def test_stale_or_crossed_quotes_do_not_become_a_spread(self):
+  from test_hotwatch_engine import request
+  req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0);adapter=EODHDAdapter(None,1,Opener({}))
+  class Feeds:
+   def capture(self,feed,*args,**kwargs):
+    if feed.endswith('trades'):return {'status':'OK','messages':[{'event_time':now.isoformat(),'price':'45.2','market_session':'open'}]}
+    if feed.endswith('quotes'):return {'status':'OK','messages':[{'event_time':now.isoformat(),'bid':'46','ask':'45'}]}
+    return {'status':'ENTITLEMENT_UNVERIFIED'}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
+  self.assertIsNone(sample['bid']);self.assertIsNone(sample['ask']);self.assertEqual(sample['market_status'],'UNKNOWN')
+ def test_closed_bar_uses_actual_bar_open_time_without_inventing_trade_time(self):
+  from test_hotwatch_engine import request
+  import hotwatch_engine
+  req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0);adapter=EODHDAdapter(None,1,Opener({}));at=(now-timedelta(minutes=3)).isoformat()
+  class Feeds:
+   def minute_bars(self,*args):return {'status':'OK','bars':[{'bar_open_at':at,'open':'10','high':'12','low':'9','close':'11','volume':'50'}]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
+  hotwatch_engine.sample_errors(sample,req,now);self.assertEqual(sample['event_time'],at);self.assertEqual(sample['price_time_kind'],'bar_open');self.assertEqual(sample['close'],'11');self.assertEqual(sample['volume_type'],'interval');self.assertEqual(sample['market_status'],'UNKNOWN')

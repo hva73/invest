@@ -1,6 +1,6 @@
 """Read-only provider adapters. Missing entitlements/fields are explicit faults."""
 import hashlib,json,os,re,time,urllib.request,urllib.error
-from datetime import datetime,timezone
+from datetime import datetime,timedelta,timezone
 from decimal import Decimal,InvalidOperation
 from urllib.parse import quote,urlencode
 from hotwatch_contract import EngineError,checksum,stamp,provider_floor,PROFILES
@@ -77,13 +77,13 @@ def search_eodhd_symbols(connect,uid,data,opener=None):
  return {'ticker':ticker,'choices':choices}
 
 class PlutoAdapter:
- def __init__(self,connect,uid):self.connect=connect;self.uid=uid;self.gateway=None;self.order_cache={}
+ def __init__(self,connect,uid):self.connect=connect;self.uid=uid;self.gateway=None;self.order_cache={};self.permission_cache={}
  def factory(self,token):
   if self.gateway and self.gateway.token==token:return self.gateway
   from mcp_client import MCP
   connect=self.connect;uid=self.uid
   class ReadOnlyGateway(MCP):
-   allowed={'search_assets','get_asset','get_portfolio_value','get_accounts','get_positions','get_collection','list_orders','get_collection_activity'}
+   allowed={'search_assets','get_asset','get_portfolio_value','get_accounts','get_positions','get_collection','list_orders','list_portfolios','list_collections','get_collection_activity'}
    def __init__(self,token):super().__init__(token);self.catalog=None
    def tools(self):
     if self.catalog is None:self.catalog=super().tools()
@@ -95,6 +95,22 @@ class PlutoAdapter:
     elif method not in ['initialize','notifications/initialized','tools/list']:raise DataUnavailable('PLUTO_METHOD_BLOCKED')
     reserve(connect,uid,'pluto');return super().request(method,params,notification)
   self.gateway=ReadOnlyGateway(token);return self.gateway
+ def tradability(self,request,currency,portfolios):
+  """Only use current read-only Pluto instrument and account evidence."""
+  import trade_service
+  if not portfolios:return 'unknown',None
+  key=(request['asset_id'],request['ticker'].casefold(),str(request.get('exchange') or '').casefold(),currency,tuple(sorted(p['id'] for p in portfolios)),request.get('risk',{}).get('proposed_quantity') is not None);now=utc().timestamp();cached=self.permission_cache.get(key)
+  if cached and 0<=now-cached['at']<300:return cached['status'],cached['at']
+  try:
+   client,tools=trade_service.client(self.connect,self.uid,self.factory);raw=trade_service.call(client,tools,'get_asset',{'assetId':request['asset_id']})
+   asset=raw.get('asset') if isinstance(raw,dict) else None;buy=raw.get('buyBy') if isinstance(raw,dict) else None
+   if not isinstance(asset,dict) or asset.get('id')!=request['asset_id'] or str(asset.get('ticker','')).casefold()!=request['ticker'].casefold() or asset.get('currency')!=currency:return 'unknown',None
+   if request.get('exchange') and str(asset.get('exchange','')).casefold()!=request['exchange'].casefold():return 'unknown',None
+   if not isinstance(buy,dict) or not (buy.get('shares') is True or buy.get('amount') is True):return 'unknown',None
+   if request.get('risk',{}).get('proposed_quantity') is not None and buy.get('shares') is not True:return 'unknown',None
+   for portfolio in portfolios:trade_service.fresh_permission(client,tools,self.connect,self.uid,portfolio)
+   self.permission_cache[key]={'at':now,'status':'available'};return 'available',now
+  except Exception:return 'unknown',None
  def context(self,request,currency):
   import portfolio_data
   result=unknown_context();rows=[];portfolios=[]
@@ -113,12 +129,14 @@ class PlutoAdapter:
    if not payload.get('positions_complete') or not payload.get('complete'):return result
    rows.append(payload)
   if not rows:return result
+  result['tradability'],tradability_at=self.tradability(request,currency,portfolios)
   found=[position for payload in rows for position in payload['positions'] if position.get('asset_id')==request['asset_id']]
   if any(p['quantity'] is None for p in found):return result
   if any(p.get('ticker') and p['ticker'].casefold()!=request['ticker'].casefold() for p in found):raise DataUnavailable('PLUTO_ASSET_NOT_CONFIRMED')
   if any(Decimal(p['quantity'])<0 for p in found):raise DataUnavailable('PLUTO_SHORT_POSITION_NOT_SUPPORTED')
   quantity=sum((Decimal(p['quantity']) for p in found),Decimal(0))
-  result.update(status='verified',as_of=min((p['observed'] for p in rows),key=stamp),position='held' if quantity>0 else 'none',quantity=format(quantity,'f'),fx_to_dkk='1' if currency=='DKK' else None)
+  observed=[p['observed'] for p in rows]+([datetime.fromtimestamp(tradability_at,timezone.utc).isoformat()] if tradability_at is not None else [])
+  result.update(status='verified',as_of=min(observed,key=stamp),position='held' if quantity>0 else 'none',quantity=format(quantity,'f'),fx_to_dkk='1' if currency=='DKK' else None)
   if len(found)==1 and found[0].get('average_entry',{}).get('currency')==currency:result['cost_price']=found[0]['average_entry']['amount']
   values=[p.get('value',{}).get('value') for p in rows]
   if all(v and v['amount'] is not None and v['currency']=='DKK' for v in values):result['portfolio_equity_dkk']=format(sum(Decimal(v['amount']) for v in values),'f')
@@ -196,7 +214,7 @@ class EODHDAdapter:
   if os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and exchange and exchange!='US' and exchange not in eu_exchanges:self.last_feed_diagnostics={'websocket_trade_status':'MARKET_MAPPING_UNVERIFIED'}
   if os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and (exchange=='US' or exchange in eu_exchanges):
    market='us' if exchange=='US' else 'eu';stream_symbol=symbol[:-3] if market=='us' else symbol
-   stream_started=time.perf_counter();feed=self.feeds().capture(market+'_trades',stream_symbol,duration=2);stream_ms=(time.perf_counter()-stream_started)*1000
+   client=self.feeds();stream_started=time.perf_counter();feed=client.capture(market+'_trades',stream_symbol,duration=2);stream_ms=(time.perf_counter()-stream_started)*1000
    self.last_feed_diagnostics={'websocket_trade_status':feed['status']}
    if feed['status']=='RATE_LIMIT':
     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
@@ -210,7 +228,51 @@ class EODHDAdapter:
      self.last_telemetry={'websocket_capture_ms':round(stream_ms,3),'pluto_context_ms':round(context_ms,3),'event_to_websocket_receive_ms':round((stamp(trade['received_at'])-at).total_seconds()*1000,3) if trade.get('received_at') else None}
      state=json.loads(session.get('state') or '{}');profile=state.get('adaptive_profile') or r['profile']
      interval=max(PROFILES.get(profile,PROFILES[r['profile']]),provider_floor('eodhd'))
-     return {'sample_id':'eodhd-ws-'+hashlib.sha256((symbol+trade['event_time']).encode()).hexdigest()[:28],'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':None,'currency':currency,'event_time':trade['event_time'],'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD WebSocket '+market+' trade; venue not supplied; not necessarily consolidated','documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':interval,'price':trade['price'],'bid':None,'ask':None,'volume':None,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context}
+     sample={'sample_id':'eodhd-ws-'+hashlib.sha256((symbol+trade['event_time']).encode()).hexdigest()[:28],'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':None,'currency':currency,'event_time':trade['event_time'],'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD WebSocket '+market+' trade; venue not supplied; not necessarily consolidated','documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':interval,'price':trade['price'],'bid':None,'ask':None,'volume':None,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context,'price_time_kind':'trade'}
+     if trade.get('market_session')=='closed':sample.update(market_status='CLOSED',session_key=at.date().isoformat()+':CLOSED',status_at=trade['event_time'],status_feed=market+'_trades')
+     if session.get('id') is not None:
+      with self.connect() as c:old=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(session['id'],'eodhd',sample['sample_id'])).fetchone()
+      if old:
+       previous=json.loads(old['payload']);previous['context']=context;return previous
+     if os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
+      quote_feed=client.capture(market+'_quotes',stream_symbol,duration=2)
+      status_feed=client.capture(market+'_status',stream_symbol,duration=2) if quote_feed['status']!='RATE_LIMIT' else {'status':'RATE_LIMIT'}
+      self.last_feed_diagnostics.update(websocket_quote_status=quote_feed['status'],websocket_status_status=status_feed['status'])
+      if 'RATE_LIMIT' in (quote_feed['status'],status_feed['status']):
+       failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+      now=utc();max_age=r['risk']['max_quote_age_s']
+      fresh=lambda item:bool(item.get('event_time') and 0<=(now-stamp(item['event_time'])).total_seconds()<=max_age)
+      quotes=[x for x in quote_feed.get('messages',[]) if fresh(x) and x.get('bid') and x.get('ask') and Decimal(x['bid'])>0 and Decimal(x['ask'])>=Decimal(x['bid'])]
+      if quotes:
+       q=max(quotes,key=lambda x:stamp(x['event_time']));sample.update(bid=q['bid'],ask=q['ask'],bid_at=q['event_time'],ask_at=q['event_time'],quote_feed=market+'_quotes')
+      statuses=[x for x in status_feed.get('messages',[]) if fresh(x) and x.get('trading_status')=='T']
+      if statuses and trade.get('market_session')=='open':
+       status=max(statuses,key=lambda x:stamp(x['event_time']));sample.update(market_status='REGULAR',session_key=at.date().isoformat()+':REGULAR',status_at=status['event_time'],status_feed=market+'_status')
+     return sample
+  # Bar open times and close prices are recorded as such; never pretend that
+  # the bar timestamp is the timestamp of its final trade.
+  if os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1' and (exchange=='US' or exchange in eu_exchanges):
+   market='us' if exchange=='US' else 'eu';stream_symbol=symbol[:-3] if market=='us' else symbol;client=self.feeds();bars=client.minute_bars(market,stream_symbol);kind='realtime'
+   self.last_feed_diagnostics['minute_bars_status']=bars['status']
+   if bars['status']=='RATE_LIMIT':
+    failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+   if bars['status']!='OK':
+    end=int(utc().timestamp());bars=client.intraday(symbol,start=end-86400,end=end);kind='intraday';self.last_feed_diagnostics['intraday_status']=bars['status']
+    if bars['status']=='RATE_LIMIT':
+     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+   if bars['status']=='OK':
+    closed=[b for b in bars.get('bars',[]) if b.get('bar_open_at') and stamp(b['bar_open_at'])+timedelta(seconds=60)<=utc() and b.get('close') and Decimal(b['close'])>0 and (not session.get('last_data') or stamp(b['bar_open_at'])>=stamp(session['last_data']))]
+    if closed:
+     bar=max(closed,key=lambda b:stamp(b['bar_open_at']));at=stamp(bar['bar_open_at']);currency=r.get('quote_currency')
+     if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):raise DataUnavailable('EODHD_CURRENCY_UNCONFIRMED')
+     sample_id='eodhd-bar-'+hashlib.sha256((kind+symbol+bar['bar_open_at']).encode()).hexdigest()[:27];old=None
+     if session.get('id') is not None:
+      with self.connect() as c:old=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(session['id'],'eodhd',sample_id)).fetchone()
+     if old:
+      previous=json.loads(old['payload']);previous['context']=self.pluto.context(r,currency);return previous
+     if not session.get('last_data') or at>stamp(session['last_data']):
+      context=self.pluto.context(r,currency)
+      return {'sample_id':sample_id,'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':None,'currency':currency,'event_time':bar['bar_open_at'],'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD '+kind+' closed 1m bar; time is bar open','documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':60,'price':bar['close'],'bid':None,'ask':None,'volume':bar.get('volume'),'volume_type':'interval','open':bar['open'],'high':bar['high'],'low':bar['low'],'close':bar['close'],'context':context,'price_time_kind':'bar_open'}
   # Exchange is an explicit EODHD code, not inferred from a display name.
   reserve(self.connect,self.uid,'eodhd');url='https://eodhd.com/api/real-time/'+quote(symbol,safe='')+'?'+urlencode({'api_token':key,'fmt':'json'})
   self.last_telemetry={};http_started=time.perf_counter()
@@ -261,7 +323,10 @@ class EODHDAdapter:
   state=json.loads(session.get('state') or '{}');profile=state.get('adaptive_profile') or r['profile']
   interval=max(PROFILES.get(profile,PROFILES[r['profile']]),provider_floor('eodhd'))
   if old_sample:interval=old_sample['interval_s']
-  return {'sample_id':sample_id,'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':venue,'currency':currency,'event_time':at.isoformat(),'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD REST real-time endpoint; entitlement/cadence unconfirmed; currency='+('provider' if d.get('currency') else 'explicit session instrument'),'documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':interval,'price':format(price,'f'),'bid':None,'ask':None,'volume':volume,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context}
+  result={'sample_id':sample_id,'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':venue,'currency':currency,'event_time':at.isoformat(),'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD REST real-time endpoint; entitlement/cadence unconfirmed; currency='+('provider' if d.get('currency') else 'explicit session instrument'),'documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':interval,'price':format(price,'f'),'bid':None,'ask':None,'volume':volume,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context}
+  previous=old_sample.get('previous_close') if old_sample else str(d.get('previousClose')) if type(d.get('previousClose')) in (int,str) else None
+  if previous is not None and re.fullmatch(r'\d{1,18}(?:\.\d{1,12})?',previous) and Decimal(previous)>0:result['previous_close']=previous
+  return result
 
 class InboxAdapter:
  def __init__(self,connect,uid):self.connect=connect;self.uid=uid

@@ -1,11 +1,84 @@
 """Standalone read-only HOT WATCH service. Never scheduled by legacy worker.py."""
-import json,signal,threading,logging,hashlib,time,os
+import json,signal,threading,logging,hashlib,time,os,re
 from concurrent.futures import ThreadPoolExecutor
 import app,hotwatch_engine as engine
 from hotwatch_adapters import PlutoAdapter,EODHDAdapter,InboxAdapter,DataUnavailable
 from hotwatch_contract import EngineError,stamp
 
 HEARTBEAT_INTERVAL_S=5
+
+def verified_discovery_instrument(connect,uid,candidate):
+ """Verify a reported stable asset with Pluto's read-only get_asset tool."""
+ import trade_service
+ adapter=PlutoAdapter(connect,uid);client,tools=trade_service.client(connect,uid,adapter.factory)
+ raw=trade_service.call(client,tools,'get_asset',{'assetId':candidate['asset_id']})
+ asset=raw.get('asset') if isinstance(raw,dict) else None;buy=raw.get('buyBy') if isinstance(raw,dict) else None
+ if not isinstance(asset,dict) or asset.get('id')!=candidate['asset_id'] or str(asset.get('ticker','')).casefold()!=candidate['ticker'].casefold():return None
+ if candidate.get('exchange') and str(asset.get('exchange','')).casefold()!=candidate['exchange'].casefold():return None
+ if not isinstance(buy,dict) or not (buy.get('shares') is True or buy.get('amount') is True):return None
+ with connect() as c:portfolios=[dict(p) for p in c.execute("SELECT * FROM portfolios WHERE user_id=? AND active=1 AND source='pluto' AND kind='portfolio'",(uid,))]
+ permitted=False
+ for portfolio in portfolios:
+  try:trade_service.fresh_permission(client,tools,connect,uid,portfolio);permitted=True;break
+  except Exception:continue
+ if not permitted:return None
+ currency=asset.get('currency');isin=asset.get('isin');exchange=asset.get('exchange')
+ if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency) or not isinstance(exchange,str) or not exchange or not isinstance(isin,str) or not re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',isin):return None
+ return {'asset_id':asset['id'],'ticker':asset['ticker'],'exchange':exchange,'currency':currency,'isin':isin}
+
+def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup=None):
+ """Start only a new, uniquely matched candidate; no order or purchase plan."""
+ import candidate_lifecycle
+ cid=candidate.get('candidate_id');asset=candidate.get('asset_id')
+ if not cid or not asset or (candidate.get('decision') or {}).get('status')=='FRAVÆLG':return {'status':'IDENTITY_OR_DECISION_UNAVAILABLE'}
+ with connect() as c:
+  if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return {'status':'operator_kill_switch'}
+  killed=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
+  if killed and killed['killed']:return {'status':'kill_switch_active'}
+  latest=candidate_lifecycle.latest(c,uid,mode,cid)
+  if latest and latest['status'] not in ('DISCOVERED','ANALYZING','WAITING_TRIGGER'):return {'status':'NOT_NEW'}
+  existing_cycle=latest['cycle_id'] if latest else None
+  if c.execute('SELECT count(DISTINCT report_row_id) FROM report_candidate_links WHERE user_id=? AND is_test=? AND candidate_id=?',(uid,int(mode),cid)).fetchone()[0]!=1:return {'status':'NOT_NEW'}
+  if c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,int(mode),cid)).fetchone():return {'status':'ALREADY_ACTIVE'}
+  if c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]>=engine.capacity():return {'status':'global_capacity_limit'}
+  prior={row['asset'] for row in c.execute("SELECT json_extract(request,'$.asset_id') AS asset FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=?",(uid,int(mode),cid)) if row['asset']}
+  link=c.execute('SELECT asset_id FROM market_asset_links WHERE user_id=? AND candidate_id=?',(uid,cid)).fetchone()
+  if link:prior.add(link['asset_id'])
+  if prior and prior!={asset}:return {'status':'IDENTITY_CONFLICT'}
+ try:
+  instrument=(verify or verified_discovery_instrument)(connect,uid,candidate)
+  if not instrument or instrument.get('asset_id')!=asset or str(instrument.get('ticker','')).casefold()!=candidate.get('ticker','').casefold():return {'status':'PLUTO_VERIFICATION_REQUIRED'}
+  from hotwatch_adapters import search_eodhd_symbols
+  options=(lookup or search_eodhd_symbols)(connect,uid,{'report_id':report['report_id'],'candidate_id':cid,'is_test':mode,'quote_currency':instrument['currency']})
+  matches=[x for x in options.get('choices',[]) if x.get('isin')==instrument['isin'] and x.get('currency')==instrument['currency']]
+  if len(matches)!=1:return {'status':'EODHD_IDENTITY_UNCERTAIN'}
+  watch='hw-auto-'+hashlib.sha256((str(uid)+'|'+str(int(mode))+'|'+cid).encode()).hexdigest()[:28]
+  risk={'max_notional_dkk':'1000','max_loss_dkk':'100','max_spread_pct':'1','max_quote_age_s':120,'max_position_fraction_pct':'20','proposed_quantity':None,'stop_price':None,'exit_deadline':None}
+  with connect() as c:portfolios=[dict(p) for p in c.execute("SELECT id,external_id,parent_external_id FROM portfolios WHERE user_id=? AND active=1 AND source='pluto' ORDER BY id",(uid,))]
+  overlapping=any(a['external_id']==b.get('parent_external_id') for a in portfolios for b in portfolios)
+  portfolio_ids=[p['id'] for p in portfolios] if len(portfolios)<=30 and not overlapping else []
+  req={'watch_id':watch,'report_id':report['report_id'],'candidate_id':cid,'is_test':mode,'purpose':'automatic discovery','ticker':candidate['ticker'],'exchange':instrument['exchange'],'asset_id':asset,'quote_currency':instrument['currency'],'portfolio_ids':portfolio_ids,'priority':'NORMAL','profile':'NORMAL','provider':'eodhd','provider_symbol':matches[0]['symbol'],'end_at':None,'activation_reason':'Automatisk overvågning efter verificeret Pluto-aktiv og handelsbarhed','strategy_id':'escape_momentum','strategy_version':'1.0.0','risk':risk,'watch_mode':'entry'}
+  if existing_cycle:req['trade_cycle_id']=existing_cycle
+  result=engine.create(connect,uid,req);return {'status':'ACTIVE' if not result['duplicate'] else 'ALREADY_ACTIVE','watch_id':watch}
+ except EngineError as error:return {'status':error.code}
+ except Exception:return {'status':'DISCOVERY_VERIFICATION_FAILED'}
+
+def auto_discover(connect,cursor=0):
+ """Optional worker path, bounded by existing capacity and provider budgets."""
+ if os.environ.get('ESCAPE_HW_AUTOSTART_ENABLED')!='1':return cursor
+ try:after=stamp(os.environ.get('ESCAPE_HW_AUTOSTART_AFTER',''))
+ except (ValueError,TypeError):return cursor
+ with connect() as c:users=[row['id'] for row in c.execute('SELECT id FROM users WHERE active=1')]
+ for uid in users:
+  with connect() as c:row=c.execute("SELECT payload,received FROM ingested_reports WHERE user_id=? AND is_test=0 AND report_type!='deep_analysis' ORDER BY generated_epoch DESC,id DESC LIMIT 1",(uid,)).fetchone()
+  if not row or stamp(row['received'])<=after:continue
+  report=json.loads(row['payload'])
+  candidates=report.get('candidates',[])
+  if candidates:
+   candidate=candidates[cursor%len(candidates)];result=auto_activate_candidate(connect,uid,False,report,candidate)
+   if result['status'] not in ('NOT_NEW','ALREADY_ACTIVE'):
+    logging.getLogger('escape.hotwatch').info(json.dumps({'service':'hotwatch','event':'discovery','candidate_ref':hashlib.sha256(str(candidate.get('candidate_id','')).encode()).hexdigest()[:16],'status':result['status']}))
+ return cursor+1
 
 class Runner:
  def __init__(self,connect):self.connect=connect;self.adapters={};self.stop=threading.Event();self._workers=[]
@@ -31,7 +104,7 @@ class Runner:
    telemetry=getattr(adapter,'last_telemetry',None)
    if isinstance(telemetry,dict):timings.update({k:telemetry[k] for k in ['eodhd_http_ms','pluto_context_ms','event_to_http_receive_ms','websocket_capture_ms','event_to_websocket_receive_ms'] if k in telemetry})
    diagnostics=getattr(adapter,'last_feed_diagnostics',None)
-   if isinstance(diagnostics,dict) and diagnostics.get('websocket_trade_status'):timings['websocket_trade_status']=diagnostics['websocket_trade_status']
+   if isinstance(diagnostics,dict):timings.update({k:diagnostics[k] for k in ('websocket_trade_status','websocket_quote_status','websocket_status_status') if k in diagnostics})
    self.health(job,sample,None,timings)
    self.log(job,'processed',result.get('calculation',{}).get('signal'),{**timings,'duplicate':bool(result.get('duplicate'))})
    if result.get('duplicate'):
@@ -83,9 +156,14 @@ class Runner:
     except Exception:logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'heartbeat_error'}))
     self.stop.wait(HEARTBEAT_INTERVAL_S)
   thread=threading.Thread(target=beat,name='hotwatch-heartbeat',daemon=True);thread.start()
+  next_discovery=0;discovery_cursor=0
   try:
    while not self.stop.is_set():
     self.drain()
+    if os.environ.get('ESCAPE_HW_AUTOSTART_ENABLED')=='1' and time.monotonic()>=next_discovery:
+     try:discovery_cursor=auto_discover(self.connect,discovery_cursor)
+     except Exception:logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'discovery_error'}))
+     next_discovery=time.monotonic()+15
     self.stop.wait(interval)
   finally:
    self.stop.set();thread.join(timeout=6)
