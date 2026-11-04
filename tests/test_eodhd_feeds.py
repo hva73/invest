@@ -1,0 +1,82 @@
+"""Simulated provider responses only; no real network or credentials."""
+import copy,json,os,unittest,urllib.error
+from datetime import datetime,timezone
+from unittest.mock import patch
+from eodhd_feeds import EODHDFeeds
+from hotwatch_adapters import EODHDAdapter,unknown_context
+
+SECRET='MOCK-SECRET-ONLY'
+class Response:
+ def __init__(self,payload):self.payload=payload
+ def __enter__(self):return self
+ def __exit__(self,*args):return False
+ def read(self,limit):return json.dumps(self.payload).encode()
+class Opener:
+ def __init__(self,payload):self.payload=payload;self.url=None
+ def open(self,request,**kwargs):self.url=request.full_url;return Response(self.payload)
+class WS:
+ def __init__(self,messages):self.messages=list(messages);self.sent=None
+ def __enter__(self):return self
+ def __exit__(self,*args):return False
+ def send(self,msg):self.sent=json.loads(msg)
+ def recv(self,timeout):
+  if not self.messages:raise TimeoutError()
+  return json.dumps(self.messages.pop(0))
+
+class FeedTests(unittest.TestCase):
+ def test_realtime_minute_bars_preserve_open_millisecond_and_interval_volume(self):
+  opener=Opener([{'s':'AMD.US','i':'1m','t':1730000000000,'o':10,'h':12,'l':9,'c':11,'v':45}]);result=EODHDFeeds(SECRET,opener=opener).minute_bars('us','AMD')
+  self.assertEqual(result['status'],'OK');self.assertEqual(result['bars'][0]['bar_open_at'],'2024-10-27T03:33:20+00:00');self.assertEqual(result['bars'][0]['volume_type'],'interval');self.assertIn('ws.eodhistoricaldata.com/history?',opener.url);self.assertNotIn(SECRET,str(result))
+ def test_snapshot_shows_actual_price_and_source_time(self):
+  opener=Opener({'code':'AMD.US','timestamp':1730000000,'close':12.5,'volume':100})
+  res=EODHDFeeds(SECRET,opener=opener).snapshot('AMD.US')
+  self.assertEqual(res['price'],'12.5');self.assertEqual(res['event_time'],'2024-10-27T03:33:20+00:00');self.assertEqual(res['volume_type'],'unknown');self.assertNotIn(SECRET,str(res))
+ def test_historical_bar_seconds_and_empty(self):
+  opener=Opener([{'timestamp':1730000000,'open':10,'high':12,'low':9,'close':11,'volume':20}]);client=EODHDFeeds(SECRET,opener=opener)
+  result=client.intraday('NOVO-B.CO','5m',1730000000,1730001000);self.assertEqual(result['bars'][0]['bar_open_at'],'2024-10-27T03:33:20+00:00');self.assertIn('/api/intraday/NOVO-B.CO?',opener.url)
+  self.assertEqual(EODHDFeeds(SECRET,opener=Opener([])).minute_bars('eu','NOVO-B.CO')['status'],'NO_DATA')
+ def test_millisecond_source_timestamp_is_exact(self):
+  from eodhd_feeds import _timestamp
+  self.assertEqual(_timestamp(1730000000123,1000),'2024-10-27T03:33:20.123000+00:00')
+ def test_delayed_quote_preserves_independent_times_and_missing_times(self):
+  data={'data':{'AMD.US':{'symbol':'AMD.US','bidPrice':10,'askPrice':11,'bidTime':1730000000000,'askTime':1730000005000}}}
+  result=EODHDFeeds(SECRET,opener=Opener(data)).us_quotes('AMD.US');q=result['quote'];self.assertNotEqual(q['bid_at'],q['ask_at']);self.assertEqual(q['bid'],'10');self.assertIn('delayed',q['documented_delay'])
+  del data['data']['AMD.US']['askTime'];self.assertIsNone(EODHDFeeds(SECRET,opener=Opener(data)).us_quotes('AMD.US')['quote']['ask_at'])
+ def test_exchange_open_is_receive_time_not_invented_source_time(self):
+  result=EODHDFeeds(SECRET,opener=Opener({'Code':'CO','isOpen':True,'Timezone':'Europe/Copenhagen'})).market_status('CO')
+  self.assertTrue(result['exchange_open']);self.assertIsNone(result['source_time']);self.assertTrue(result['received_at'])
+ def test_permission_rate_and_sensitive_errors_are_explicit(self):
+  class Failure:
+   def __init__(self,code):self.code=code
+   def open(self,req,**kw):raise urllib.error.HTTPError('https://x/'+SECRET,self.code,'error',{},None)
+  for code,expected in [(401,'ENTITLEMENT_UNVERIFIED'),(403,'ENTITLEMENT_UNVERIFIED'),(429,'RATE_LIMIT'),(500,'HTTP_ERROR')]:
+   res=EODHDFeeds(SECRET,opener=Failure(code)).minute_bars('us','AMD');self.assertEqual(res['status'],expected);self.assertNotIn(SECRET,str(res))
+ def test_ws_trade_quote_status_and_no_messages(self):
+  for feed,msg,field in [('us_trades',{'s':'AMD','t':1730000000000,'p':10,'v':5,'ms':'open'},'price'),('us_quotes',{'s':'AMD','t':1730000000000,'bp':10,'ap':11},'bid'),('us_status',{'s':'AMD','t':1730000000000,'h':'T'},'trading_status')]:
+   ws=WS([msg]);client=EODHDFeeds(SECRET,ws_factory=lambda *a,**k:ws);result=client.capture(feed,'AMD',1)
+   self.assertEqual(result['status'],'OK');self.assertIsNotNone(result['messages'][0][field]);self.assertEqual(ws.sent,{'action':'subscribe','symbols':'AMD'});self.assertNotIn(SECRET,str(result))
+  self.assertEqual(EODHDFeeds(SECRET,ws_factory=lambda *a,**k:WS([])).capture('eu_trades','NOVO-B.CO',1)['status'],'NO_MESSAGES')
+ def test_websocket_entitlement_error_and_untrusted_fields_do_not_leak(self):
+  ws=WS([{'status_code':403,'message':SECRET}]);self.assertEqual(EODHDFeeds(SECRET,ws_factory=lambda *a,**k:ws).capture('us_trades','AMD',1)['status'],'ENTITLEMENT_UNVERIFIED')
+  ws=WS([{'s':'AMD','t':1730000000000,'p':10,'extra':SECRET}]);res=EODHDFeeds(SECRET,ws_factory=lambda *a,**k:ws).capture('us_trades','AMD',1);self.assertNotIn(SECRET,str(res))
+ def test_probe_stops_after_rate_limit(self):
+  from hotwatch_service import probe_eodhd
+  with patch('eodhd_feeds.EODHDFeeds') as factory:
+   feed=factory.return_value;feed.snapshot.return_value={'status':'OK'};feed.minute_bars.return_value={'status':'RATE_LIMIT'}
+   out=probe_eodhd(None,'AMD.US','us',1)
+   self.assertEqual(out['checks']['minute_bars']['status'],'RATE_LIMIT');self.assertEqual(out['checks']['ws_trades']['status'],'NOT_TESTED_RATE_LIMIT');feed.capture.assert_not_called();feed.intraday.assert_not_called()
+ def test_opt_in_stream_falls_back_to_rest_when_unavailable(self):
+  from test_hotwatch_engine import request
+  req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0)
+  opener=Opener({'code':'MERC.US','timestamp':int(now.timestamp()),'close':'12.34','currency':'USD'});adapter=EODHDAdapter(None,1,opener)
+  class Missing:
+   def capture(self,*a,**k):return {'status':'ENTITLEMENT_UNVERIFIED'}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Missing()),patch('hotwatch_adapters.reserve'),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
+  self.assertEqual(sample['price'],'12.34');self.assertIn('/api/real-time/',opener.url);self.assertEqual(adapter.last_feed_diagnostics['websocket_trade_status'],'ENTITLEMENT_UNVERIFIED')
+ def test_opt_in_live_trade_is_real_observation_but_unknown_risk_fields_remain_unknown(self):
+  from test_hotwatch_engine import request
+  req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0);adapter=EODHDAdapter(None,1,Opener({}))
+  class Live:
+   def capture(self,*args,**kwargs):return {'status':'OK','messages':[{'event_time':now.isoformat(),'price':'45.2'}]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Live()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
+  self.assertEqual(sample['event_time'],now.isoformat());self.assertEqual(sample['price'],'45.2');self.assertEqual(sample['market_status'],'UNKNOWN');self.assertIsNone(sample['bid']);self.assertIsNone(sample['volume'])

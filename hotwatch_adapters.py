@@ -20,7 +20,7 @@ def reserve(connect,uid,source,now=None):
 def unknown_context():return {'tradability':'unknown','status':'unknown','as_of':None,'position':'unknown','quantity':None,'cost_price':None,'portfolio_equity_dkk':None,'exposure_dkk':None,'fx_to_dkk':None,'fees_dkk':None,'orders':[]}
 
 def providers(connect=None,uid=None,mode=False):
- result={'pluto':{'adapter':'existing read-only contracts','minimum_poll_s':300,'known_limits':['Quote timestamp may be absent','Bid/ask, volume and market session are not guaranteed','Fees/FX remain unknown unless actually supplied']},'eodhd':{'plan_reported_by_owner':'Active Trader','key_configured':bool(os.environ.get('ESCAPE_EODHD_API_KEY','').strip()),'enabled':os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')=='1','endpoint':'/api/real-time/{symbol}','minimum_poll_s':provider_floor('eodhd'),'entitlements_verified':False,'websocket_enabled':False,'known_limits':['Account/feed rights must be verified on the installation','REST quote is not assumed tick-level, regular-session or a complete OHLC bar']},'report_inbox':{'adapter':'existing observation inbox','trusted_for_new_buy':False},'synthetic':{'test_only':True}}
+ result={'pluto':{'adapter':'existing read-only contracts','minimum_poll_s':300,'known_limits':['Quote timestamp may be absent','Bid/ask, volume and market session are not guaranteed','Fees/FX remain unknown unless actually supplied']},'eodhd':{'plan_reported_by_owner':'Active Trader','key_configured':bool(os.environ.get('ESCAPE_EODHD_API_KEY','').strip()),'enabled':os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')=='1','endpoint':'/api/real-time/{symbol}','minimum_poll_s':provider_floor('eodhd'),'entitlements_verified':False,'websocket_enabled':os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1','known_limits':['Account/feed rights must be verified on the installation','REST quote is not assumed tick-level, regular-session or a complete OHLC bar']},'report_inbox':{'adapter':'existing observation inbox','trusted_for_new_buy':False},'synthetic':{'test_only':True}}
 
  if connect is not None and uid is not None:
   with connect() as c:
@@ -178,6 +178,9 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
  def redirect_request(self,*args,**kwargs):return None
 class EODHDAdapter:
  def __init__(self,connect,uid,opener=None):self.connect=connect;self.uid=uid;self.opener=opener or urllib.request.build_opener(NoRedirect());self.pluto=PlutoAdapter(connect,uid);self.last_telemetry={}
+ def feeds(self):
+  from eodhd_feeds import EODHDFeeds
+  return EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),reserve=lambda:reserve(self.connect,self.uid,'eodhd'),opener=self.opener)
  def poll(self,session):
   if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':raise DataUnavailable('EODHD_FEED_NOT_ENABLED')
   key=os.environ.get('ESCAPE_EODHD_API_KEY','').strip()
@@ -185,6 +188,29 @@ class EODHDAdapter:
   r=session['request_data'];symbol=r.get('provider_symbol')
   if not symbol:raise DataUnavailable('EODHD_SYMBOL_MAPPING_REQUIRED')
   if not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',symbol):raise DataUnavailable('EODHD_SYMBOL_MAPPING_REQUIRED')
+  self.last_feed_diagnostics={};self.last_telemetry={}
+  # Explicit opt-in: one bounded live trade capture. If unavailable, use the
+  # unchanged REST adapter. No inferred venue/session or fabricated bid/ask.
+  exchange=symbol.rsplit('.',1)[1].upper() if '.' in symbol else ''
+  eu_exchanges={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}
+  if os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and exchange and exchange!='US' and exchange not in eu_exchanges:self.last_feed_diagnostics={'websocket_trade_status':'MARKET_MAPPING_UNVERIFIED'}
+  if os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and (exchange=='US' or exchange in eu_exchanges):
+   market='us' if exchange=='US' else 'eu';stream_symbol=symbol[:-3] if market=='us' else symbol
+   stream_started=time.perf_counter();feed=self.feeds().capture(market+'_trades',stream_symbol,duration=2);stream_ms=(time.perf_counter()-stream_started)*1000
+   self.last_feed_diagnostics={'websocket_trade_status':feed['status']}
+   if feed['status']=='RATE_LIMIT':
+    failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+   if feed['status']=='OK':
+    valid=[x for x in feed['messages'] if stamp(x['event_time'])<=utc() and (utc()-stamp(x['event_time'])).total_seconds()<=r['risk']['max_quote_age_s']]
+    if not valid:self.last_feed_diagnostics={'websocket_trade_status':'STALE_OR_FUTURE'}
+    if valid:
+     trade=max(valid,key=lambda x:stamp(x['event_time']));at=stamp(trade['event_time']);currency=r.get('quote_currency')
+     if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):raise DataUnavailable('EODHD_CURRENCY_UNCONFIRMED')
+     context_started=time.perf_counter();context=self.pluto.context(r,currency);context_ms=(time.perf_counter()-context_started)*1000
+     self.last_telemetry={'websocket_capture_ms':round(stream_ms,3),'pluto_context_ms':round(context_ms,3),'event_to_websocket_receive_ms':round((stamp(trade['received_at'])-at).total_seconds()*1000,3) if trade.get('received_at') else None}
+     state=json.loads(session.get('state') or '{}');profile=state.get('adaptive_profile') or r['profile']
+     interval=max(PROFILES.get(profile,PROFILES[r['profile']]),provider_floor('eodhd'))
+     return {'sample_id':'eodhd-ws-'+hashlib.sha256((symbol+trade['event_time']).encode()).hexdigest()[:28],'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':None,'currency':currency,'event_time':trade['event_time'],'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD WebSocket '+market+' trade; venue not supplied; not necessarily consolidated','documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':interval,'price':trade['price'],'bid':None,'ask':None,'volume':None,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context}
   # Exchange is an explicit EODHD code, not inferred from a display name.
   reserve(self.connect,self.uid,'eodhd');url='https://eodhd.com/api/real-time/'+quote(symbol,safe='')+'?'+urlencode({'api_token':key,'fmt':'json'})
   self.last_telemetry={};http_started=time.perf_counter()
