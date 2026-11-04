@@ -1,9 +1,9 @@
 """Read-only provider adapters. Missing entitlements/fields are explicit faults."""
-import hashlib,json,os,re,urllib.request,urllib.error
+import hashlib,json,os,re,time,urllib.request,urllib.error
 from datetime import datetime,timezone
 from decimal import Decimal,InvalidOperation
 from urllib.parse import quote,urlencode
-from hotwatch_contract import EngineError,checksum,stamp
+from hotwatch_contract import EngineError,checksum,stamp,provider_floor,PROFILES
 from hotwatch_engine import utc
 
 class DataUnavailable(EngineError):pass
@@ -20,7 +20,7 @@ def reserve(connect,uid,source,now=None):
 def unknown_context():return {'tradability':'unknown','status':'unknown','as_of':None,'position':'unknown','quantity':None,'cost_price':None,'portfolio_equity_dkk':None,'exposure_dkk':None,'fx_to_dkk':None,'fees_dkk':None,'orders':[]}
 
 def providers(connect=None,uid=None,mode=False):
- result={'pluto':{'adapter':'existing read-only contracts','minimum_poll_s':300,'known_limits':['Quote timestamp may be absent','Bid/ask, volume and market session are not guaranteed','Fees/FX remain unknown unless actually supplied']},'eodhd':{'plan_reported_by_owner':'Active Trader','key_configured':bool(os.environ.get('ESCAPE_EODHD_API_KEY','').strip()),'enabled':os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')=='1','endpoint':'/api/real-time/{symbol}','minimum_poll_s':300,'entitlements_verified':False,'websocket_enabled':False,'known_limits':['Account/feed rights must be verified on the installation','REST quote is not assumed tick-level, regular-session or a complete OHLC bar']},'report_inbox':{'adapter':'existing observation inbox','trusted_for_new_buy':False},'synthetic':{'test_only':True}}
+ result={'pluto':{'adapter':'existing read-only contracts','minimum_poll_s':300,'known_limits':['Quote timestamp may be absent','Bid/ask, volume and market session are not guaranteed','Fees/FX remain unknown unless actually supplied']},'eodhd':{'plan_reported_by_owner':'Active Trader','key_configured':bool(os.environ.get('ESCAPE_EODHD_API_KEY','').strip()),'enabled':os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')=='1','endpoint':'/api/real-time/{symbol}','minimum_poll_s':provider_floor('eodhd'),'entitlements_verified':False,'websocket_enabled':False,'known_limits':['Account/feed rights must be verified on the installation','REST quote is not assumed tick-level, regular-session or a complete OHLC bar']},'report_inbox':{'adapter':'existing observation inbox','trusted_for_new_buy':False},'synthetic':{'test_only':True}}
 
  if connect is not None and uid is not None:
   with connect() as c:
@@ -177,7 +177,7 @@ class PlutoAdapter:
 class NoRedirect(urllib.request.HTTPRedirectHandler):
  def redirect_request(self,*args,**kwargs):return None
 class EODHDAdapter:
- def __init__(self,connect,uid,opener=None):self.connect=connect;self.uid=uid;self.opener=opener or urllib.request.build_opener(NoRedirect());self.pluto=PlutoAdapter(connect,uid)
+ def __init__(self,connect,uid,opener=None):self.connect=connect;self.uid=uid;self.opener=opener or urllib.request.build_opener(NoRedirect());self.pluto=PlutoAdapter(connect,uid);self.last_telemetry={}
  def poll(self,session):
   if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':raise DataUnavailable('EODHD_FEED_NOT_ENABLED')
   key=os.environ.get('ESCAPE_EODHD_API_KEY','').strip()
@@ -187,10 +187,12 @@ class EODHDAdapter:
   if not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',symbol):raise DataUnavailable('EODHD_SYMBOL_MAPPING_REQUIRED')
   # Exchange is an explicit EODHD code, not inferred from a display name.
   reserve(self.connect,self.uid,'eodhd');url='https://eodhd.com/api/real-time/'+quote(symbol,safe='')+'?'+urlencode({'api_token':key,'fmt':'json'})
+  self.last_telemetry={};http_started=time.perf_counter()
   try:
    with self.opener.open(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=8) as response:
     raw=response.read(131073)
     if len(raw)>131072:raise ValueError()
+    received=utc();http_ms=(time.perf_counter()-http_started)*1000
     d=json.loads(raw,parse_float=str)
    if not isinstance(d,dict) or d.get('code') not in [symbol,r['ticker']] or not isinstance(d.get('timestamp'),(int,str)) or type(d.get('timestamp')) is bool:raise ValueError()
    at=datetime.fromtimestamp(int(d['timestamp']),timezone.utc);price=Decimal(str(d['close']))
@@ -215,7 +217,25 @@ class EODHDAdapter:
   # a separate instrument reference and must never label this observation.
   market=symbol.rsplit('.',1)[1] if '.' in symbol else None
   venue='EODHD:'+market.upper() if market and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',market) else None
-  return {'sample_id':'eodhd-'+hashlib.sha256((symbol+at.isoformat()).encode()).hexdigest()[:32],'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':venue,'currency':currency,'event_time':at.isoformat(),'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD REST real-time endpoint; entitlement/cadence unconfirmed; currency='+('provider' if d.get('currency') else 'explicit session instrument'),'documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':300,'price':format(price,'f'),'bid':None,'ask':None,'volume':None,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':self.pluto.context(r,currency)}
+  # The field is provider-reported volume, but its accumulation period has not
+  # been verified. Keep it visible without feeding it into interval metrics.
+  raw_volume=d.get('volume');volume=str(raw_volume) if type(raw_volume) in (int,str) else None
+  if volume is not None and not re.fullmatch(r'\d{1,18}(?:\.\d{1,12})?',volume):volume=None
+  sample_id='eodhd-'+hashlib.sha256((symbol+at.isoformat()).encode()).hexdigest()[:32]
+  # An observation already journalled at this source time is immutable. A
+  # software upgrade or a repeated quote must not turn it into a conflicting
+  # sample merely because volume is now exposed or has changed.
+  old_sample=None
+  if session.get('id') is not None:
+   with self.connect() as c:
+    old=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(session['id'],'eodhd',sample_id)).fetchone()
+   if old:old_sample=json.loads(old['payload']);volume=old_sample.get('volume')
+  context_started=time.perf_counter();context=self.pluto.context(r,currency);context_ms=(time.perf_counter()-context_started)*1000
+  self.last_telemetry={'eodhd_http_ms':round(http_ms,3),'pluto_context_ms':round(context_ms,3),'event_to_http_receive_ms':round((received-at).total_seconds()*1000,3)}
+  state=json.loads(session.get('state') or '{}');profile=state.get('adaptive_profile') or r['profile']
+  interval=max(PROFILES.get(profile,PROFILES[r['profile']]),provider_floor('eodhd'))
+  if old_sample:interval=old_sample['interval_s']
+  return {'sample_id':sample_id,'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':venue,'currency':currency,'event_time':at.isoformat(),'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD REST real-time endpoint; entitlement/cadence unconfirmed; currency='+('provider' if d.get('currency') else 'explicit session instrument'),'documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':interval,'price':format(price,'f'),'bid':None,'ask':None,'volume':volume,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context}
 
 class InboxAdapter:
  def __init__(self,connect,uid):self.connect=connect;self.uid=uid

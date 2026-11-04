@@ -1,5 +1,5 @@
 """HOT WATCH Engine v1 contracts; independent of immutable report schemas."""
-import json,hashlib
+import json,hashlib,os
 from report_v2 import obj,array,string,nullable,enum,ID,TIME,NUM,NONNEG_MONEY,SIGNED_NUM,strict_patterns
 from report_validation import schema_errors,stamp
 AT=TIME['anyOf'][0]
@@ -18,6 +18,13 @@ for s in [SESSION,SAMPLE]:strict_patterns(s)
 STATES={'CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED','EXPIRED','COMPLETED','ERROR'}
 OPEN_STATES={'CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED'}
 PROFILES={'NORMAL':60,'ACTIVE':15,'CRITICAL':5,'IDLE':300}
+def provider_floor(source):
+ """Production keeps the existing 300s floor unless explicitly enabled by an operator."""
+ if source!='eodhd':return {'pluto':300,'report_inbox':60,'synthetic':5}[source]
+ if os.environ.get('ESCAPE_HW_EODHD_FAST_POLL_ENABLED')!='1':return 300
+ try:value=int(os.environ.get('ESCAPE_HW_EODHD_MIN_POLL_S','300'))
+ except (TypeError,ValueError):return 300
+ return value if 5<=value<=300 else 300
 GLOBAL_RISK={'max_notional_dkk':'1000','max_loss_dkk':'100','max_spread_pct':'1','max_quote_age_s':120,'max_position_fraction_pct':'20'}
 class EngineError(ValueError):
  def __init__(self,code,status=400,errors=None):

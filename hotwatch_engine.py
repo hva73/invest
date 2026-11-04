@@ -2,7 +2,7 @@
 import json,os,secrets,time
 from datetime import datetime,timezone
 from decimal import Decimal
-from hotwatch_contract import SESSION,SAMPLE,CONTEXT,ACTIVATION_BATCH,EngineError,require,canonical,checksum,stamp,OPEN_STATES,PROFILES,GLOBAL_RISK
+from hotwatch_contract import SESSION,SAMPLE,CONTEXT,ACTIVATION_BATCH,EngineError,require,canonical,checksum,stamp,OPEN_STATES,PROFILES,GLOBAL_RISK,provider_floor
 from hotwatch_features import features
 from hotwatch_strategy import BASELINE,validate_strategy,calculate
 
@@ -163,7 +163,7 @@ def view(c,row,now=None):
  stale=not row['last_data'] or (now-stamp(row['last_data'])).total_seconds()>request['risk']['max_quote_age_s']
  effective='NO_DATA' if stale and state.get('signal') not in ['PAUSE','NO_DATA'] else state.get('signal','NO_DATA')
  profile=state.get('adaptive_profile',request['profile'])
- minimum={'pluto':300,'eodhd':300,'report_inbox':60,'synthetic':5}[request['provider']]
+ minimum=provider_floor(request['provider'])
  return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'strategy_checksum':checksum(json.loads(row['strategy'])),'signal':effective,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,PROFILES[profile]),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
 def sessions(connect,uid,mode=False,after=0,limit=50):
@@ -304,7 +304,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   nextstate.update(alert_codes=sorted(codes),orders={o['order_id']:o['filled_quantity'] for o in sample['context']['orders']})
   adaptive='CRITICAL' if result['risk_level']=='critical' else 'ACTIVE' if metrics.get('breakout') or nextstate.get('volume_spike') else 'IDLE' if sample['market_status'] in ['CLOSED','HALTED'] else request['profile']
   nextstate['adaptive_profile']=adaptive
-  interval=max(PROFILES[adaptive],{'pluto':300,'eodhd':300,'report_inbox':60,'synthetic':5}[request['provider']])
+  interval=max(PROFILES[adaptive],provider_floor(request['provider']))
   if sample['market_status'] in ['CLOSED','HALTED']:interval=max(interval,300)
   c.execute('UPDATE hw_sessions SET status=?,state=?,updated=?,last_data=?,last_calculation=?,next_due=?,failures=0,last_error=NULL,lease_owner=NULL,lease_until=0 WHERE id=?',(new_status,canonical(nextstate),now.isoformat(),sample['event_time'],now.isoformat(),now.timestamp()+interval,row['id']))
   return {'ok':True,'duplicate':False,'calculation':result,'session':view(c,row_for(c,uid,wid,mode),now)}
@@ -348,7 +348,7 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   if request['end_at'] and stamp(request['end_at'])<=now:
    c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']));event(c,row,'WATCH_EXPIRED',now,'Session deadline reached');return
   if row['last_error']!=code:event(c,row,'DATA_STALE' if code=='DATA_STALE' else 'DATA_ERROR',now,code,severity='warning',data_time=row['last_data'])
-  failures=min(row['failures']+1,10);floor={'pluto':300,'eodhd':300,'report_inbox':60,'synthetic':5}[request['provider']];interval=min(1800,max(floor,PROFILES[request['profile']])*2**min(failures-1,5));state.update(signal='NO_DATA',pending=None,confirmations=0)
+  failures=min(row['failures']+1,10);floor=provider_floor(request['provider']);interval=min(1800,max(floor,PROFILES[request['profile']])*2**min(failures-1,5));state.update(signal='NO_DATA',pending=None,confirmations=0)
   if retry_after_s is not None:interval=max(interval,max(0,retry_after_s))
   if row['last_error']!=code:
    previous=json.loads(row['strategy']);result={'signal':'NO_DATA','reason_codes':[code],'human_readable_explanation':code,'supporting_metrics':{'quote_age_s':(now-stamp(row['last_data'])).total_seconds() if row['last_data'] else None},'calculation_timestamp':now.isoformat(),'data_timestamp':row['last_data'],'strategy_id':previous['strategy_id'],'strategy_version':previous['version'],'strategy_checksum':checksum(previous),'confidence_score':0,'risk_level':'critical' if set(state.get('alert_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE'} else 'high','rules_score_note':'No valid current market input','critical_override':False}
@@ -374,7 +374,7 @@ def claim(connect,now=None,watch_id=None):
   return dict(row,lease_owner=owner,request_data=request)
 
 def release(connect,job,now=None):
- now=now or utc();request=job['request_data'];interval=max(PROFILES[request['profile']],{'pluto':300,'eodhd':300,'report_inbox':60,'synthetic':5}[request['provider']])
+ now=now or utc();request=job['request_data'];interval=max(PROFILES[request['profile']],provider_floor(request['provider']))
  with connect() as c:c.execute('UPDATE hw_sessions SET next_due=?,lease_owner=NULL,lease_until=0 WHERE id=? AND lease_owner=?',(now.timestamp()+interval,job['id'],job['lease_owner']))
 
 
