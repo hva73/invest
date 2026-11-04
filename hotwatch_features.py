@@ -1,6 +1,37 @@
 """Deterministic causal features. No providers, DB, interpolation or AI."""
 from decimal import Decimal,localcontext
 
+def observation_status(samples,now,max_age_s,signal,watch_status):
+ """Read-only data quality and time-horizon changes; never a trading input."""
+ from report_validation import stamp
+ result={'price_status':'MISSING','market_status':'UNKNOWN','momentum_status':'UNAVAILABLE','quote_status':'UNAVAILABLE','signal_status':'WAITING_FOR_DATA','price':None,'currency':None,'source':None,'venue':None,'price_type':None,'feed_description':None,'event_time':None,'age_s':None,'momentum_pct':{str(n):None for n in (1,5,15,30)}}
+ if watch_status in ('PAUSED','COMPLETED','EXPIRED','ERROR'):result['signal_status']='NOT_APPLICABLE'
+ elif signal=='PAUSE':result['signal_status']='BLOCKED'
+ elif signal!='NO_DATA':result['signal_status']='READY'
+ if not samples:return result
+ latest=samples[-1];event=stamp(latest['event_time']);age=(now-event).total_seconds()
+ result.update(price=latest['price'],currency=latest['currency'],source=latest['source'],venue=latest['venue'],feed_description=latest['feed_type'],event_time=latest['event_time'],age_s=round(age,3))
+ result['market_status']={'REGULAR':'OPEN','PRE':'PREMARKET','AFTER':'AFTERHOURS','CLOSED':'CLOSED','HALTED':'HALTED'}.get(latest['market_status'],'UNKNOWN')
+ if latest['price'] is None:return result
+ delay=latest.get('documented_delay_s')
+ if age<0:result['price_status']='MISSING'
+ elif delay and age<=delay+max_age_s:result['price_status']='DELAYED'
+ elif age>max_age_s:result['price_status']='STALE'
+ else:result['price_status']='FRESH'
+ if latest['market_status']=='UNKNOWN':return result
+ identity=lambda s:tuple(s[k] for k in ('source','asset_id','currency','venue','session_key','market_status','feed_type'))
+ comparable=[s for s in samples[:-1] if identity(s)==identity(latest) and s.get('price') is not None and stamp(s['event_time'])<event]
+ if not comparable:result['momentum_status']='INSUFFICIENT_HISTORY';return result
+ for minutes in (1,5,15,30):
+  target=minutes*60
+  choices=[s for s in comparable if abs((event-stamp(s['event_time'])).total_seconds()-target)<=5]
+  if choices:
+   previous=min(choices,key=lambda s:abs((event-stamp(s['event_time'])).total_seconds()-target))
+   before=number(previous['price']);after=number(latest['price'])
+   if before is not None and before>0:result['momentum_pct'][str(minutes)]=format((after/before-1)*100,'f')
+ result['momentum_status']='STALE' if result['price_status']!='FRESH' else 'READY' if any(v is not None for v in result['momentum_pct'].values()) else 'INSUFFICIENT_HISTORY'
+ return result
+
 def number(v):return Decimal(v) if v is not None else None
 def average(values):return sum(values)/len(values) if values else None
 def ema(values,period):
