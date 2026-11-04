@@ -1,11 +1,14 @@
 """Standalone read-only HOT WATCH service. Never scheduled by legacy worker.py."""
-import json,signal,threading,logging,hashlib,time
+import json,signal,threading,logging,hashlib,time,os
+from concurrent.futures import ThreadPoolExecutor
 import app,hotwatch_engine as engine
 from hotwatch_adapters import PlutoAdapter,EODHDAdapter,InboxAdapter,DataUnavailable
 from hotwatch_contract import EngineError,stamp
 
+HEARTBEAT_INTERVAL_S=5
+
 class Runner:
- def __init__(self,connect):self.connect=connect;self.adapters={};self.stop=threading.Event()
+ def __init__(self,connect):self.connect=connect;self.adapters={};self.stop=threading.Event();self._workers=[]
  def once(self,now=None,watch_id=None):
   now=now or engine.utc();job=engine.claim(self.connect,now,watch_id)
   if not job:return False
@@ -25,6 +28,8 @@ class Runner:
    result=engine.ingest(self.connect,uid,wid,mode,sample,now=engine.utc(),lease=lease)
    journaled_at=engine.utc();ingest_done=time.perf_counter()
    timings={'provider_ms':round((provider_done-poll_started)*1000,3),'adapter_to_journal_ms':round((journaled_at-adapter_received).total_seconds()*1000,3),'ingest_compute_ms':round((ingest_done-provider_done)*1000,3),'event_to_adapter_receive_ms':round(adapter_latency_ms,3) if adapter_latency_ms is not None else None,'market_time_known':bool(sample.get('event_time')),'signal':result.get('calculation',{}).get('signal')}
+   telemetry=getattr(adapter,'last_telemetry',None)
+   if isinstance(telemetry,dict):timings.update({k:telemetry[k] for k in ['eodhd_http_ms','pluto_context_ms','event_to_http_receive_ms'] if k in telemetry})
    self.health(job,sample,None,timings)
    self.log(job,'processed',result.get('calculation',{}).get('signal'),{**timings,'duplicate':bool(result.get('duplicate'))})
    if result.get('duplicate'):
@@ -49,15 +54,41 @@ class Runner:
   with self.connect() as c:c.execute('INSERT INTO hw_provider_health VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,is_test,source) DO UPDATE SET attempted=excluded.attempted,succeeded=COALESCE(excluded.succeeded,hw_provider_health.succeeded),code=excluded.code,payload=CASE WHEN excluded.succeeded IS NOT NULL THEN excluded.payload ELSE hw_provider_health.payload END',(job['user_id'],job['is_test'],job['request_data']['provider'],now,now if sample else None,code,json.dumps(caps)))
  def log(self,job,status,code,metrics=None):
   logging.getLogger('escape.hotwatch').info(json.dumps({'service':'hotwatch','utc':engine.utc().isoformat(),'watch_ref':hashlib.sha256(job['watch_id'].encode()).hexdigest()[:16],'source':job['request_data']['provider'],'status':status,'code':code,'metrics':metrics or {}}))
+ def drain(self,watch_id=None):
+  """Drain due work in bounded batches, opt-in for concurrent provider calls."""
+  if watch_id:return int(self.once(watch_id=watch_id))
+  try:
+   requested=int(os.environ.get('ESCAPE_HW_PARALLEL_SCANS','1'))
+   lease_limit=int(os.environ.get('ESCAPE_HW_CONCURRENCY','2'))
+  except (TypeError,ValueError):requested=1;lease_limit=1
+  workers=max(1,min(10,engine.capacity(),requested,lease_limit))
+  while len(self._workers)<workers-1:
+   child=Runner(self.connect);child.stop=self.stop;self._workers.append(child)
+  runners=[self]+self._workers[:workers-1];count=0
+  with ThreadPoolExecutor(max_workers=workers,thread_name_prefix='hotwatch') as pool:
+   while count<engine.capacity() and not self.stop.is_set():
+    slots=min(workers,engine.capacity()-count)
+    results=[f.result() for f in [pool.submit(runners[i].once) for i in range(slots)]]
+    completed=sum(bool(x) for x in results);count+=completed
+    if not completed:break
+  return count
+ def heartbeat(self,status):
+  with self.connect() as c:c.execute("INSERT INTO hw_heartbeat VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET updated=excluded.updated,status=excluded.status",(engine.utc().isoformat(),status))
  def run(self,interval=2):
+  def beat():
+   while not self.stop.is_set():
+    try:self.heartbeat('running')
+    except Exception:logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'heartbeat_error'}))
+    self.stop.wait(HEARTBEAT_INTERVAL_S)
+  thread=threading.Thread(target=beat,name='hotwatch-heartbeat',daemon=True);thread.start()
   try:
    while not self.stop.is_set():
-    with self.connect() as c:c.execute("INSERT INTO hw_heartbeat VALUES(1,?,'running') ON CONFLICT(id) DO UPDATE SET updated=excluded.updated,status=excluded.status",(engine.utc().isoformat(),))
-    for _ in range(engine.capacity()):
-     if self.stop.is_set() or not self.once():break
+    self.drain()
     self.stop.wait(interval)
   finally:
-   with self.connect() as c:c.execute("INSERT INTO hw_heartbeat VALUES(1,?,'stopped') ON CONFLICT(id) DO UPDATE SET updated=excluded.updated,status=excluded.status",(engine.utc().isoformat(),))
+   self.stop.set();thread.join(timeout=6)
+   if thread.is_alive():logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'heartbeat_shutdown_timeout'}))
+   else:self.heartbeat('stopped')
 
 def startup_diagnostics(connect):
  """Report configured paths without making an unbudgeted provider request."""
@@ -97,8 +128,7 @@ def main():
  for name in [signal.SIGINT,signal.SIGTERM]:signal.signal(name,lambda *_:runner.stop.set())
  if args.once:
   with app.connect() as c:c.execute("INSERT INTO hw_heartbeat VALUES(1,?,'run_once') ON CONFLICT(id) DO UPDATE SET updated=excluded.updated,status=excluded.status",(engine.utc().isoformat(),))
-  count=0
-  while count<engine.capacity() and runner.once(watch_id=args.watch_id):count+=1
+  count=runner.drain(watch_id=args.watch_id)
   print(json.dumps({'service':'hotwatch','processed':count,'trading_enabled':False}))
  else:runner.run(args.interval)
 if __name__=='__main__':main()

@@ -19,6 +19,14 @@ Leverance 3. november 2026. Selvstændig, deterministisk observationsmotor til E
 
 Faserne er derfor ikke en fuld godkendelse af hele v1.0-specifikationen. Der udføres ingen køb, salg, ændringer/annullering af ordrer eller pengeoverførsler.
 
+## WIP: kontrolleret hurtigere REST og worker
+
+Standard er uændret: EODHD mindst 300 sekunder og én scanning ad gangen. Først efter særskilt driftsgodkendelse og verifikation af feedets rettigheder/kvoter kan operatøren sætte `ESCAPE_HW_EODHD_FAST_POLL_ENABLED=1` samt `ESCAPE_HW_EODHD_MIN_POLL_S` mellem 5 og 300. Profilen har fortsat sit eget mål: NORMAL 60 s, ACTIVE 15 s, CRITICAL 5 s og IDLE 300 s. Et kortere interval beviser ikke, at EODHD leverer friske data. `ESCAPE_HW_PARALLEL_SCANS` kan særskilt sættes til 1–10 og begrænses desuden af `ESCAPE_HW_CONCURRENCY` og kapaciteten; standard er 1. Det globale EODHD-requestbudget håndhæves stadig for hvert kald. Under uændret standard på 12 kald/minut kan 20 kandidater ikke alle opdateres hvert femte sekund.
+
+Samme beskyttede miljøindstillinger skal være tilgængelige for webapp og selvstændig worker. Ingen flag aktiveres, worker startes eller abonnement ændres ved installation. Ændringen af indstillingerne påvirker eksisterende aktive EODHD-sessioners fremtidige scanninger og skal godkendes særskilt. Workerens heartbeat holdes opdateret også under langsomme opslag. Loggen kan skelne EODHD HTTP-tid, Pluto-konteksttid og kildetidsalder; ingen hemmeligheder logges.
+
+Market-status er fortsat UNKNOWN, hvis kilden ikke giver verificerbar status. Risikogrænser og strategi er uændrede; gamle data og ukendt markedsstatus kan stadig give NO_DATA. Ingen WebSocket- eller bid/ask-rettighed er verificeret af disse ændringer.
+
 ## Arkitektur og tilstand
 
 `hotwatch_service.py` kører adapter → datavalidering → `hotwatch_features.py` → `hotwatch_strategy.py` (regler, separat risikogate og signalstabilisering) → SQLite-journal i `hotwatch_engine.py`. `hotwatch_api.py` og `static/engine-ui.js` viser resultatet. Backend kræver ingen aktiv ChatGPT-session.

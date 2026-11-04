@@ -50,6 +50,77 @@ class HotWatch(unittest.TestCase):
   job=engine.claim(app.connect,self.now)
   self.assertIsNotNone(job)
   with app.connect() as c:self.assertEqual(c.execute('SELECT COALESCE(sum(used),0) FROM hw_request_budget').fetchone()[0],0)
+ def test_fast_eodhd_polling_is_explicit_bounded_and_budgeted(self):
+  from hotwatch_contract import provider_floor
+  from hotwatch_adapters import providers
+  with patch.dict(os.environ,{},clear=True):
+   self.assertEqual(provider_floor('eodhd'),300);self.assertEqual(providers()['eodhd']['minimum_poll_s'],300)
+  for setting in ['4','301','broken','-1']:
+   with self.subTest(setting=setting),patch.dict(os.environ,{'ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'1','ESCAPE_HW_EODHD_MIN_POLL_S':setting}):self.assertEqual(provider_floor('eodhd'),300)
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'1','ESCAPE_HW_EODHD_MIN_POLL_S':'5','ESCAPE_HW_REQUESTS_PER_MINUTE':'1'}):
+   self.assertEqual(provider_floor('eodhd'),5);self.assertEqual(providers()['eodhd']['minimum_poll_s'],5);self.assertEqual(provider_floor('pluto'),300)
+   reserve(app.connect,1,'eodhd',self.now)
+   with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now)
+ def test_fast_eodhd_scheduling_uses_opt_in_floor_without_weakening_risk(self):
+  from hotwatch_contract import GLOBAL_RISK
+  req=copy.deepcopy(self.req);req.update(watch_id='fast-eodhd',purpose='fast eodhd fixture',provider='eodhd',provider_symbol='MERC.US',profile='ACTIVE')
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'1','ESCAPE_HW_EODHD_MIN_POLL_S':'5'}):
+   engine.create(app.connect,1,req,self.now);sample=tick(self.now);sample.update(source='eodhd',interval_s=15)
+   engine.ingest(app.connect,1,req['watch_id'],True,sample,self.now)
+   session=engine.item(app.connect,1,req['watch_id'],True)['session']
+   self.assertEqual(session['effective_min_interval_s'],15);self.assertEqual((stamp(session['next_due_at'])-self.now).total_seconds(),15);self.assertEqual(GLOBAL_RISK['max_quote_age_s'],120)
+ def test_parallel_due_scans_are_bounded_and_keep_shared_budget(self):
+  import threading
+  from hotwatch_service import Runner
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  for i in range(2):
+   req=copy.deepcopy(self.req);req.update(watch_id='parallel-'+str(i),purpose='parallel fixture '+str(i),provider='pluto');engine.create(app.connect,1,req,self.now)
+  gate=threading.Barrier(2);active=0;peak=0;lock=threading.Lock();self_now=self.now
+  class FakePluto:
+   def __init__(self,connect,uid):self.connect=connect;self.uid=uid
+   def poll(self,job):
+    nonlocal active,peak
+    reserve(self.connect,self.uid,'pluto',self_now)
+    with lock:active+=1;peak=max(peak,active)
+    try:gate.wait(timeout=3)
+    finally:
+     with lock:active-=1
+    sample=tick(self_now);sample.update(source='pluto',sample_id='sample-'+job['watch_id']);return sample
+  with patch.dict(os.environ,{'ESCAPE_HW_PARALLEL_SCANS':'2','ESCAPE_HW_CONCURRENCY':'2','ESCAPE_HW_REQUESTS_PER_MINUTE':'2'}),patch('hotwatch_service.PlutoAdapter',FakePluto):
+   count=Runner(app.connect).drain()
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_samples').fetchone()[0],2)
+   self.assertEqual(c.execute("SELECT sum(used) FROM hw_request_budget WHERE source='pluto'").fetchone()[0],2)
+  self.assertEqual(count,2);self.assertEqual(peak,2)
+ def test_parallel_scan_setting_defaults_to_one_and_caps_at_leases(self):
+  from hotwatch_service import Runner
+  from unittest.mock import Mock
+  runner=Runner(app.connect);runner.once=Mock(return_value=False)
+  with patch.dict(os.environ,{},clear=True):self.assertEqual(runner.drain(),0)
+  self.assertEqual(runner.once.call_count,1)
+ def test_worker_heartbeat_remains_fresh_during_slow_provider_call(self):
+  import threading,time
+  from hotwatch_service import Runner
+  runner=Runner(app.connect);entered=threading.Event();release=threading.Event()
+  def slow():entered.set();release.wait(timeout=3);runner.stop.set();return 0
+  with patch('hotwatch_service.HEARTBEAT_INTERVAL_S',.03),patch.object(runner,'drain',side_effect=slow):
+   worker=threading.Thread(target=runner.run,kwargs={'interval':.01});worker.start()
+   try:
+    self.assertTrue(entered.wait(2));first=None
+    for _ in range(100):
+     with app.connect() as c:row=c.execute('SELECT updated,status FROM hw_heartbeat WHERE id=1').fetchone()
+     if row and row['status']=='running':first=row['updated'];break
+     time.sleep(.01)
+    self.assertIsNotNone(first)
+    latest=first
+    for _ in range(100):
+     with app.connect() as c:row=c.execute('SELECT updated,status FROM hw_heartbeat WHERE id=1').fetchone()
+     if row and row['updated']!=first:latest=row['updated'];break
+     time.sleep(.01)
+    self.assertNotEqual(first,latest)
+   finally:release.set();worker.join(timeout=4)
+  self.assertFalse(worker.is_alive())
+  with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM hw_heartbeat WHERE id=1').fetchone()['status'],'stopped')
  def test_startup_diagnostics_reports_missing_eodhd_access_without_network_or_entitlement_claim(self):
   from hotwatch_service import startup_diagnostics
   with patch.dict(os.environ,{},clear=True):info=startup_diagnostics(app.connect)
@@ -255,6 +326,7 @@ class HotWatch(unittest.TestCase):
    # Adapter source timestamp is fixed to a known epoch and must remain exact through journal ingestion.
    epoch=int(at.timestamp());Response.now=at
    self.assertTrue(runner.once(at+timedelta(milliseconds=1)))
+  self.assertIn('eodhd_http_ms',runner.adapters[(1,'eodhd')].last_telemetry);self.assertIn('pluto_context_ms',runner.adapters[(1,'eodhd')].last_telemetry)
   item=engine.history(app.connect,1,r['watch_id'],True,'samples')['items'][0]['data']
   self.assertEqual(stamp(item['event_time']).timestamp(),epoch);self.assertEqual(item['venue'],'EODHD:US');self.assertNotEqual(item['venue'],r['exchange'])
   with app.connect() as c:health=json.loads(c.execute("SELECT payload FROM hw_provider_health WHERE user_id=1 AND is_test=1 AND source='eodhd'").fetchone()['payload'])
