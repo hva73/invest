@@ -217,11 +217,25 @@ class EODHDAdapter:
   # a separate instrument reference and must never label this observation.
   market=symbol.rsplit('.',1)[1] if '.' in symbol else None
   venue='EODHD:'+market.upper() if market and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',market) else None
+  # The field is provider-reported volume, but its accumulation period has not
+  # been verified. Keep it visible without feeding it into interval metrics.
+  raw_volume=d.get('volume');volume=str(raw_volume) if type(raw_volume) in (int,str) else None
+  if volume is not None and not re.fullmatch(r'\d{1,18}(?:\.\d{1,12})?',volume):volume=None
+  sample_id='eodhd-'+hashlib.sha256((symbol+at.isoformat()).encode()).hexdigest()[:32]
+  # An observation already journalled at this source time is immutable. A
+  # software upgrade or a repeated quote must not turn it into a conflicting
+  # sample merely because volume is now exposed or has changed.
+  old_sample=None
+  if session.get('id') is not None:
+   with self.connect() as c:
+    old=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(session['id'],'eodhd',sample_id)).fetchone()
+   if old:old_sample=json.loads(old['payload']);volume=old_sample.get('volume')
   context_started=time.perf_counter();context=self.pluto.context(r,currency);context_ms=(time.perf_counter()-context_started)*1000
   self.last_telemetry={'eodhd_http_ms':round(http_ms,3),'pluto_context_ms':round(context_ms,3),'event_to_http_receive_ms':round((received-at).total_seconds()*1000,3)}
   state=json.loads(session.get('state') or '{}');profile=state.get('adaptive_profile') or r['profile']
   interval=max(PROFILES.get(profile,PROFILES[r['profile']]),provider_floor('eodhd'))
-  return {'sample_id':'eodhd-'+hashlib.sha256((symbol+at.isoformat()).encode()).hexdigest()[:32],'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':venue,'currency':currency,'event_time':at.isoformat(),'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD REST real-time endpoint; entitlement/cadence unconfirmed; currency='+('provider' if d.get('currency') else 'explicit session instrument'),'documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':interval,'price':format(price,'f'),'bid':None,'ask':None,'volume':None,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context}
+  if old_sample:interval=old_sample['interval_s']
+  return {'sample_id':sample_id,'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':venue,'currency':currency,'event_time':at.isoformat(),'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD REST real-time endpoint; entitlement/cadence unconfirmed; currency='+('provider' if d.get('currency') else 'explicit session instrument'),'documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':interval,'price':format(price,'f'),'bid':None,'ask':None,'volume':volume,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context}
 
 class InboxAdapter:
  def __init__(self,connect,uid):self.connect=connect;self.uid=uid

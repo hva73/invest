@@ -27,6 +27,8 @@ Samme beskyttede miljøindstillinger skal være tilgængelige for webapp og selv
 
 Market-status er fortsat UNKNOWN, hvis kilden ikke giver verificerbar status. Risikogrænser og strategi er uændrede; gamle data og ukendt markedsstatus kan stadig give NO_DATA. Ingen WebSocket- eller bid/ask-rettighed er verificeret af disse ændringer.
 
+EODHD REST-opslag fra installationen returnerede `volume`, men ingen `bid` eller `ask` for de afprøvede instrumenter. Volumen lagres nu som kildeoplyst med ukendt periode og vises i sessionsdetaljen; den indgår ikke i interval- eller relativvolumen. Eksisterende observationer ændres ikke ved gentagne tidsstempler. Felternes tilstedeværelse dokumenterer ikke datatidens friskhed eller rettigheder til andre feeds.
+
 ## Arkitektur og tilstand
 
 `hotwatch_service.py` kører adapter → datavalidering → `hotwatch_features.py` → `hotwatch_strategy.py` (regler, separat risikogate og signalstabilisering) → SQLite-journal i `hotwatch_engine.py`. `hotwatch_api.py` og `static/engine-ui.js` viser resultatet. Backend kræver ingen aktiv ChatGPT-session.

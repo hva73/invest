@@ -301,6 +301,28 @@ class HotWatch(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY'}),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):
    sample=EODHDAdapter(app.connect,1,Opener()).poll({'request_data':req})
   self.assertEqual(sample['source'],'eodhd');self.assertEqual(sample['venue'],'EODHD:CO');self.assertEqual(req['exchange'],'CHIX');self.assertEqual(sample['currency'],'DKK')
+ def test_eodhd_reported_volume_keeps_unknown_basis_and_existing_observation(self):
+  class Response:
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,limit):return json.dumps(payload).encode()
+  class Opener:
+   def open(self,*args,**kwargs):return Response()
+  r=copy.deepcopy(self.req);r.update(watch_id='eodhd-volume',purpose='eodhd volume test',provider='eodhd',provider_symbol='MERC.US')
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now);engine.create(app.connect,1,r,self.now)
+  with app.connect() as c:row=dict(c.execute('SELECT * FROM hw_sessions WHERE watch_id=?',(r['watch_id'],)).fetchone())
+  row['request_data']=r;payload={'code':'MERC.US','timestamp':int(self.now.timestamp()),'close':'12.34','currency':'USD'}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY'}),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):
+   adapter=EODHDAdapter(app.connect,1,Opener());old=adapter.poll(row)
+   engine.ingest(app.connect,1,r['watch_id'],True,old,self.now)
+   payload['volume']=12345;repeated=adapter.poll(row)
+   self.assertIsNone(repeated['volume']);self.assertTrue(engine.ingest(app.connect,1,r['watch_id'],True,repeated,self.now)['duplicate'])
+   payload['timestamp']+=1;fresh=adapter.poll(row)
+   self.assertEqual(fresh['volume'],'12345');self.assertEqual(fresh['volume_type'],'unknown');self.assertIsNone(fresh['bid']);self.assertIsNone(fresh['ask'])
+   result=engine.ingest(app.connect,1,r['watch_id'],True,fresh,self.now+timedelta(seconds=1))
+   self.assertIsNone(result['calculation']['supporting_metrics']['interval_volume'])
+   payload['volume']=-3;payload['timestamp']+=1
+   self.assertIsNone(adapter.poll(row)['volume'])
  def test_eodhd_rate_limit_retry_after_is_observed_and_secret_redacted(self):
   import urllib.error
   class Limited:
