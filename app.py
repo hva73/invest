@@ -410,6 +410,12 @@ class Handler(BaseHTTPRequestHandler):
                     c.execute('INSERT INTO connection_checks VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET checked=excluded.checked',(user_id,time.time()))
                 from pluto import discover
                 return self.send(200,discover())
+            if self.path=='/api/market/eodhd-symbols':
+                import hotwatch_adapters,market_data
+                try:return self.send(200,hotwatch_adapters.search_eodhd_symbols(connect,user_id,data))
+                except hotwatch_adapters.DataUnavailable as error:return self.send(error.status,{'error':error.code})
+                except market_data.MarketError:return self.send(409,{'error':'EODHD_SYMBOL_SEARCH_FAILED'})
+                except Exception:return self.send(502,{'error':'EODHD_SYMBOL_SEARCH_FAILED'})
             if self.path=='/api/market/quote':
                 import market_data
                 try:return self.send(200,market_data.quote(connect,user_id,data))
