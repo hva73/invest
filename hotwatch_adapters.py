@@ -36,27 +36,31 @@ def search_eodhd_symbols(connect,uid,data,opener=None):
  if not key:raise DataUnavailable('EODHD_KEY_NOT_CONFIGURED')
  candidate=market_data.candidate(connect,uid,data);ticker=candidate.get('ticker')
  if not isinstance(ticker,str) or not re.fullmatch(r'[A-Za-z0-9.\-]{1,32}',ticker):raise DataUnavailable('EODHD_SYMBOL_MAPPING_REQUIRED')
- reserve(connect,uid,'eodhd')
- url='https://eodhd.com/api/search/'+quote(ticker,safe='')+'?'+urlencode({'api_token':key,'fmt':'json','limit':50})
- try:
-  with (opener or urllib.request.build_opener(NoRedirect())).open(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=8) as response:
-   raw=response.read(131073)
-  if len(raw)>131072:raise ValueError()
-  rows=json.loads(raw)
-  if not isinstance(rows,list):raise ValueError()
- except urllib.error.HTTPError as error:
-  raise DataUnavailable('EODHD_ENTITLEMENT_REJECTED' if error.code in [401,403] else 'EODHD_RATE_LIMIT' if error.code==429 else 'EODHD_READ_ERROR') from None
- except Exception:raise DataUnavailable('EODHD_READ_OR_CONTRACT_ERROR') from None
- choices=[];seen=set()
- for row in rows[:50]:
-  if not isinstance(row,dict):continue
-  code=row.get('Code');exchange=row.get('Exchange');name=row.get('Name');currency=row.get('Currency');isin=row.get('ISIN')
-  if not isinstance(code,str) or not isinstance(exchange,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}',code) or not re.fullmatch(r'[A-Za-z0-9_-]{1,16}',exchange):continue
-  base=code.rsplit('.',1)[0] if code.upper().endswith('.'+exchange.upper()) else code
-  if base.casefold()!=ticker.casefold():continue
-  symbol=code if code.upper().endswith('.'+exchange.upper()) else code+'.'+exchange
-  if symbol.casefold() in seen:continue
-  seen.add(symbol.casefold());choices.append({'symbol':symbol,'name':name[:200] if isinstance(name,str) else None,'exchange':exchange,'currency':currency if isinstance(currency,str) and re.fullmatch('[A-Z]{3}',currency) else None,'isin':isin[:32] if isinstance(isin,str) else None})
+ name_key=lambda x:re.sub(r'[^a-z0-9]','',x.casefold()) if isinstance(x,str) else ''
+ issuer=candidate.get('company_name');issuer_key=name_key(issuer)
+ choices=[];seen=set();client=opener or urllib.request.build_opener(NoRedirect())
+ def search(query,allow_alias=False):
+  reserve(connect,uid,'eodhd')
+  url='https://eodhd.com/api/search/'+quote(query,safe='')+'?'+urlencode({'api_token':key,'fmt':'json','limit':50})
+  try:
+   with client.open(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=8) as response:raw=response.read(131073)
+   if len(raw)>131072:raise ValueError()
+   rows=json.loads(raw)
+   if not isinstance(rows,list):raise ValueError()
+  except urllib.error.HTTPError as error:
+   raise DataUnavailable('EODHD_ENTITLEMENT_REJECTED' if error.code in [401,403] else 'EODHD_RATE_LIMIT' if error.code==429 else 'EODHD_READ_ERROR') from None
+  except Exception:raise DataUnavailable('EODHD_READ_OR_CONTRACT_ERROR') from None
+  for row in rows[:50]:
+   if not isinstance(row,dict):continue
+   code=row.get('Code');exchange=row.get('Exchange');name=row.get('Name');currency=row.get('Currency');isin=row.get('ISIN')
+   if not isinstance(code,str) or not isinstance(exchange,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}',code) or not re.fullmatch(r'[A-Za-z0-9_-]{1,16}',exchange):continue
+   base=code.rsplit('.',1)[0] if code.upper().endswith('.'+exchange.upper()) else code
+   if base.casefold()!=ticker.casefold() and not (allow_alias and issuer_key and name_key(name)==issuer_key):continue
+   symbol=code if code.upper().endswith('.'+exchange.upper()) else code+'.'+exchange
+   if symbol.casefold() in seen:continue
+   seen.add(symbol.casefold());choices.append({'symbol':symbol,'name':name[:200] if isinstance(name,str) else None,'exchange':exchange,'currency':currency if isinstance(currency,str) and re.fullmatch('[A-Z]{3}',currency) else None,'isin':isin[:32] if isinstance(isin,str) else None})
+ search(ticker)
+ if not choices and isinstance(issuer,str) and 3<=len(issuer_key)<=100:search(issuer[:100],allow_alias=True)
  return {'ticker':ticker,'choices':choices}
 
 class PlutoAdapter:
