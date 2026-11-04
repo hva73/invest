@@ -377,6 +377,17 @@ class HotWatch(unittest.TestCase):
   self.assertEqual(stamp(item['event_time']).timestamp(),epoch);self.assertEqual(item['venue'],'EODHD:US');self.assertNotEqual(item['venue'],r['exchange'])
   with app.connect() as c:health=json.loads(c.execute("SELECT payload FROM hw_provider_health WHERE user_id=1 AND is_test=1 AND source='eodhd'").fetchone()['payload'])
   self.assertTrue(health['market_time_known']);self.assertIsInstance(health['event_to_adapter_receive_ms'],(int,float));self.assertIsInstance(health['adapter_to_journal_ms'],(int,float));self.assertGreaterEqual(health['adapter_to_journal_ms'],0)
+ def test_runner_ingests_real_source_time_from_mocked_ws_without_changing_risk(self):
+  from hotwatch_service import Runner
+  at=engine.utc().replace(microsecond=0);r=copy.deepcopy(self.req);r.update(watch_id='eodhd-ws-test',purpose='mock ws test',provider='eodhd',provider_symbol='MERC.US')
+  class Stream:
+   def capture(self,*args,**kwargs):return {'status':'OK','messages':[{'event_time':at.isoformat(),'price':'12.34'}]}
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',at)
+  with patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()),patch('hotwatch_adapters.EODHDAdapter.feeds',return_value=Stream()),patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY'}):
+   engine.create(app.connect,1,r,at);runner=Runner(app.connect);self.assertTrue(runner.once(at+timedelta(milliseconds=1)))
+  sample=engine.history(app.connect,1,r['watch_id'],True,'samples')['items'][0]['data']
+  self.assertEqual(sample['event_time'],at.isoformat());self.assertIsNone(sample['venue']);self.assertEqual(sample['market_status'],'UNKNOWN');self.assertIsNone(sample['bid'])
+  self.assertEqual(engine.item(app.connect,1,r['watch_id'],True)['session']['signal'],'NO_DATA')
  def test_realistic_synthetic_merc_buy_noise_exit_and_history_pinning(self):
   last=None
   prices=['100' if i%2==0 else '100.5' for i in range(34)]+['100.55','100.70','100.90','101.15','101.45','101.80']

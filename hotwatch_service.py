@@ -29,7 +29,9 @@ class Runner:
    journaled_at=engine.utc();ingest_done=time.perf_counter()
    timings={'provider_ms':round((provider_done-poll_started)*1000,3),'adapter_to_journal_ms':round((journaled_at-adapter_received).total_seconds()*1000,3),'ingest_compute_ms':round((ingest_done-provider_done)*1000,3),'event_to_adapter_receive_ms':round(adapter_latency_ms,3) if adapter_latency_ms is not None else None,'market_time_known':bool(sample.get('event_time')),'signal':result.get('calculation',{}).get('signal')}
    telemetry=getattr(adapter,'last_telemetry',None)
-   if isinstance(telemetry,dict):timings.update({k:telemetry[k] for k in ['eodhd_http_ms','pluto_context_ms','event_to_http_receive_ms'] if k in telemetry})
+   if isinstance(telemetry,dict):timings.update({k:telemetry[k] for k in ['eodhd_http_ms','pluto_context_ms','event_to_http_receive_ms','websocket_capture_ms','event_to_websocket_receive_ms'] if k in telemetry})
+   diagnostics=getattr(adapter,'last_feed_diagnostics',None)
+   if isinstance(diagnostics,dict) and diagnostics.get('websocket_trade_status'):timings['websocket_trade_status']=diagnostics['websocket_trade_status']
    self.health(job,sample,None,timings)
    self.log(job,'processed',result.get('calculation',{}).get('signal'),{**timings,'duplicate':bool(result.get('duplicate'))})
    if result.get('duplicate'):
@@ -113,12 +115,44 @@ def startup_diagnostics(connect):
  logging.getLogger('escape.hotwatch').info(json.dumps({'service':'hotwatch','event':'startup_diagnostics','providers':info},sort_keys=True))
  return info
 
+def probe_eodhd(connect,symbol,market,duration=2):
+ """Explicit operator probe: bounded read-only requests and sanitized output."""
+ from eodhd_feeds import EODHDFeeds
+ from hotwatch_adapters import reserve
+ client=EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),reserve=lambda:reserve(connect,0,'eodhd'))
+ if market not in ('us','eu') or '.' not in symbol or (market=='us' and not symbol.endswith('.US')):return {'status':'INVALID_INPUT'}
+ exchange=symbol.rsplit('.',1)[1];stream_symbol=symbol[:-3] if market=='us' else symbol
+ end=int(time.time());actions=[('rest_snapshot',lambda:client.snapshot(symbol)),('minute_bars',lambda:client.minute_bars(market,stream_symbol)),('intraday',lambda:client.intraday(symbol,start=end-86400,end=end)),('market_status',lambda:client.market_status(exchange))]
+ if market=='us':actions.append(('delayed_quotes',lambda:client.us_quotes(symbol)))
+ for suffix in ('trades','quotes','status'):actions.append(('ws_'+suffix,lambda suffix=suffix:client.capture(market+'_'+suffix,stream_symbol,duration=duration)))
+ checks={};limited=False
+ for name,action in actions:
+  checks[name]={'status':'NOT_TESTED_RATE_LIMIT'} if limited else action()
+  if checks[name]['status']=='RATE_LIMIT':limited=True
+ for value in checks.values():
+  if value.get('event_time') and value.get('received_at'):value['event_to_receive_ms']=round((stamp(value['received_at'])-stamp(value['event_time'])).total_seconds()*1000,3)
+  if 'bars' in value:
+   bars=value.pop('bars');value['count']=len(bars);value['first_bar_at']=bars[0]['bar_open_at'] if bars else None;value['last_bar_at']=bars[-1]['bar_open_at'] if bars else None
+  if 'messages' in value:
+   messages=value.pop('messages');value['last_message']=messages[-1] if messages else None
+ result={'symbol':symbol,'market':market,'checks':checks,'trading_enabled':False};secret=os.environ.get('ESCAPE_EODHD_API_KEY','').strip()
+ def redact(value):
+  if isinstance(value,str):return value.replace(secret,'[REDACTED]') if secret else value
+  if isinstance(value,list):return [redact(x) for x in value]
+  if isinstance(value,dict):return {k:redact(v) for k,v in value.items()}
+  return value
+ return redact(result)
+
 def main():
  import argparse
- parser=argparse.ArgumentParser();parser.add_argument('--once',action='store_true');parser.add_argument('--diagnose',action='store_true',help='report configured data paths without network requests');parser.add_argument('--watch-id',help='limit --once to one explicitly selected session');parser.add_argument('--interval',type=int,default=2);parser.add_argument('--kill-switch',choices=['on','off']);parser.add_argument('--reason',default='Local server operator');args=parser.parse_args()
+ parser=argparse.ArgumentParser();parser.add_argument('--once',action='store_true');parser.add_argument('--diagnose',action='store_true',help='report configured data paths without network requests');parser.add_argument('--probe-eodhd',metavar='SYMBOL',help='explicitly test EODHD feeds using read-only requests');parser.add_argument('--market',choices=['us','eu']);parser.add_argument('--capture-seconds',type=int,default=2);parser.add_argument('--watch-id',help='limit --once to one explicitly selected session');parser.add_argument('--interval',type=int,default=2);parser.add_argument('--kill-switch',choices=['on','off']);parser.add_argument('--reason',default='Local server operator');args=parser.parse_args()
  if not 1<=args.interval<=30:parser.error('interval must be 1..30 seconds')
+ if args.probe_eodhd and (not args.market or not 1<=args.capture_seconds<=5):parser.error('--probe-eodhd requires --market and capture duration 1..5')
+ if args.probe_eodhd and (args.once or args.diagnose or args.kill_switch or args.watch_id):parser.error('--probe-eodhd cannot be combined with actions')
  if args.watch_id and not args.once:parser.error('--watch-id requires --once')
  logging.basicConfig(level=logging.INFO,format='%(message)s');app.init()
+ if args.probe_eodhd:
+  print(json.dumps(probe_eodhd(app.connect,args.probe_eodhd,args.market,args.capture_seconds)));return
  if args.kill_switch:
   print(json.dumps(engine.system_kill(app.connect,args.kill_switch=='on',args.reason)));return
  if args.diagnose:
