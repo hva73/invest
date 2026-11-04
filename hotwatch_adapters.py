@@ -113,13 +113,17 @@ class PlutoAdapter:
   except Exception:return 'unknown',None
  def context(self,request,currency):
   import portfolio_data
-  result=unknown_context();rows=[];portfolios=[]
+  result=unknown_context();rows=[];portfolios=[];automatic=not request['portfolio_ids']
   with self.connect() as c:
-   for pid in request['portfolio_ids']:
-    p=c.execute("SELECT * FROM portfolios WHERE id=? AND user_id=? AND source='pluto' AND active=1",(pid,self.uid)).fetchone()
-    if not p:return result
-    portfolios.append(dict(p))
-   if any(a['external_id']==b.get('parent_external_id') for a in portfolios for b in portfolios):return result
+   if automatic:
+    portfolios=[dict(p) for p in c.execute("SELECT * FROM portfolios WHERE user_id=? AND source='pluto' AND active=1 ORDER BY id",(self.uid,))]
+   else:
+    for pid in request['portfolio_ids']:
+     p=c.execute("SELECT * FROM portfolios WHERE id=? AND user_id=? AND source='pluto' AND active=1",(pid,self.uid)).fetchone()
+     if not p:return result
+     portfolios.append(dict(p))
+   overlap=any(a['external_id']==b.get('parent_external_id') for a in portfolios for b in portfolios)
+   if overlap and not automatic:return result
   for p in portfolios:
    with self.connect() as c:row=c.execute('SELECT * FROM portfolio_snapshots WHERE portfolio_id=? AND user_id=?',(p['id'],self.uid)).fetchone()
    if not row or row['last_error'] or (utc()-stamp(row['observed'])).total_seconds()>300:
@@ -129,8 +133,13 @@ class PlutoAdapter:
    if not payload.get('positions_complete') or not payload.get('complete'):return result
    rows.append(payload)
   if not rows:return result
-  result['tradability'],tradability_at=self.tradability(request,currency,portfolios)
+  # An unidentified holding could be this asset; absence is not proven.
+  if any(p.get('kind','holding')=='holding' and not p.get('asset_id') for payload in rows for p in payload['positions']):return result
   found=[position for payload in rows for position in payload['positions'] if position.get('asset_id')==request['asset_id']]
+  # Parent and collection snapshots may overlap. Their complete absence can
+  # establish zero holdings, but a matching position cannot be safely summed.
+  if overlap and found:return result
+  result['tradability'],tradability_at=self.tradability(request,currency,portfolios)
   if any(p['quantity'] is None for p in found):return result
   if any(p.get('ticker') and p['ticker'].casefold()!=request['ticker'].casefold() for p in found):raise DataUnavailable('PLUTO_ASSET_NOT_CONFIRMED')
   if any(Decimal(p['quantity'])<0 for p in found):raise DataUnavailable('PLUTO_SHORT_POSITION_NOT_SUPPORTED')
@@ -139,7 +148,7 @@ class PlutoAdapter:
   result.update(status='verified',as_of=min(observed,key=stamp),position='held' if quantity>0 else 'none',quantity=format(quantity,'f'),fx_to_dkk='1' if currency=='DKK' else None)
   if len(found)==1 and found[0].get('average_entry',{}).get('currency')==currency:result['cost_price']=found[0]['average_entry']['amount']
   values=[p.get('value',{}).get('value') for p in rows]
-  if all(v and v['amount'] is not None and v['currency']=='DKK' for v in values):result['portfolio_equity_dkk']=format(sum(Decimal(v['amount']) for v in values),'f')
+  if not overlap and all(v and v['amount'] is not None and v['currency']=='DKK' for v in values):result['portfolio_equity_dkk']=format(sum(Decimal(v['amount']) for v in values),'f')
   exposures=[p.get('value_in_portfolio_currency') for p in found]
   if not found:result['exposure_dkk']='0'
   elif all(v and v['amount'] is not None and v['currency']=='DKK' for v in exposures):result['exposure_dkk']=format(sum(Decimal(v['amount']) for v in exposures),'f')

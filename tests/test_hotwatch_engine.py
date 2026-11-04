@@ -544,6 +544,24 @@ class HotWatch(unittest.TestCase):
   wrong=copy.deepcopy(self.req);wrong['ticker']='OTHER'
   with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value=raw):
    self.assertEqual(adapter.tradability(wrong,'USD',[portfolio]),('unknown',None))
+ def test_automatic_pluto_context_checks_all_portfolios_and_never_assumes_absence(self):
+  import portfolios,portfolio_data
+  with app.connect() as c:
+   portfolios.replace_pluto(c,1,[{'id':'portfolios:root','name':'Root','kind':'portfolio'},{'id':'collections:child','name':'Child','kind':'collection','parent_external_id':'portfolios:root'}])
+   ids=[p['id'] for p in portfolios.list_owned(c,1)]
+   for pid in ids:
+    portfolio_data.save(c,1,pid,{'observed':engine.utc().isoformat(),'positions':[],'positions_complete':True,'complete':True,'value':{'value':{'amount':'1000','currency':'DKK'}},'pending_orders':[]})
+  adapter=PlutoAdapter(app.connect,1)
+  with patch.object(adapter,'tradability',return_value=('unknown',None)),patch.object(adapter,'inactive_orders',return_value=[]):
+   result=adapter.context(self.req,'USD')
+   self.assertEqual((result['status'],result['position'],result['quantity']),('verified','none','0'))
+   self.assertIsNone(result['portfolio_equity_dkk'])
+   with app.connect() as c:
+    row=c.execute('SELECT payload FROM portfolio_snapshots WHERE portfolio_id=?',(ids[0],)).fetchone();payload=json.loads(row['payload']);payload['positions']=[{'asset_id':self.req['asset_id'],'ticker':'MERC','quantity':'2'}];c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),ids[0]))
+   self.assertEqual(adapter.context(self.req,'USD')['status'],'unknown')
+   with app.connect() as c:
+    payload['positions']=[];payload['positions_complete']=False;c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),ids[0]))
+   self.assertEqual(adapter.context(self.req,'USD')['status'],'unknown')
  def test_realistic_synthetic_merc_buy_noise_exit_and_history_pinning(self):
   last=None
   prices=['100' if i%2==0 else '100.5' for i in range(34)]+['100.55','100.70','100.90','101.15','101.45','101.80']
