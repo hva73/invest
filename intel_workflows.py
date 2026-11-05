@@ -45,7 +45,7 @@ def prior_decision(c,uid,mode,cid,before=None):
     row=c.execute('SELECT decided,payload,origin FROM candidate_decision_events WHERE user_id=? AND is_test=? AND candidate_id=?'+bound+' ORDER BY decided DESC LIMIT 1',args).fetchone()
     return (row['decided'],json.loads(row['payload']),row['origin']) if row else None
 
-def candidate_currentness(c,uid,mode,cid,at=None):
+def candidate_currentness(c,uid,mode,cid,at=None,report_fallback=False):
     """Determine expiry from an assessment, never from market-feed freshness."""
     at=at or datetime.now(timezone.utc)
     decision=prior_decision(c,uid,mode,cid,at.timestamp())
@@ -58,7 +58,10 @@ def candidate_currentness(c,uid,mode,cid,at=None):
         deadline=stamp(data['deadline']) if data.get('deadline') else assessment+timedelta(hours=24)
         reason='fravalgt' if data.get('status')=='FRAVÆLG' else 'frist udløbet · revurdering mangler' if deadline+timedelta(hours=24)<=at else None
     else:
-        return {'status':'UNKNOWN','reason':'Tidsstemplet vurdering mangler','deadline':None,'assessed_at':None}
+        row=c.execute('SELECT generated FROM report_candidate_links WHERE user_id=? AND is_test=? AND candidate_id=? AND generated<=? ORDER BY generated DESC LIMIT 1',(uid,int(mode),cid,at.timestamp())).fetchone() if report_fallback else None
+        if not row:return {'status':'UNKNOWN','reason':'Tidsstemplet vurdering mangler','deadline':None,'assessed_at':None}
+        assessment=datetime.fromtimestamp(row['generated'],timezone.utc);deadline=assessment+timedelta(hours=24)
+        reason='frist udløbet · revurdering mangler' if deadline+timedelta(hours=24)<=at else None
     return {'status':'COLD' if reason else 'REVIEW_DUE' if deadline<=at else 'CURRENT','reason':reason or ('revurdering forfalder' if deadline<=at else None),'deadline':deadline.isoformat(),'assessed_at':assessment.isoformat()}
 
 def decision_errors(decision,path,at,previous=None):

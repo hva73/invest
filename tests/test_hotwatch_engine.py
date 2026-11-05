@@ -44,6 +44,14 @@ class HotWatch(unittest.TestCase):
    c.execute('INSERT INTO hw_exchange_calendar VALUES(?,?,?,?)',('CO','2026-11-05T15:00:00+00:00','Europe/Copenhagen',json.dumps(cal)))
    row=c.execute('SELECT * FROM hw_sessions WHERE id=?',(row['id'],)).fetchone();result=engine.view(c,row,at)
   self.assertEqual(result['data_status']['regular_session']['status'],'CLOSED');self.assertEqual(result['display_status'],'ORDINÆR HANDEL LUKKET');self.assertTrue(result['data_stale'])
+ def test_manual_pluto_search_creates_one_non_report_watch(self):
+  import hotwatch_service as service
+  asset={'id':'manual-asset','ticker':'ABC','exchange':'NASDAQ','currency':'USD','name':'ABC Company'}
+  def call(client,tools,name,data):return [{'id':'manual-asset','ticker':'ABC'}] if name=='search_assets' else {'asset':asset}
+  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',side_effect=call),patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'0'}):
+   result=service.start_manual_pluto(app.connect,1,{'asset_id':'manual-asset','ticker':'ABC'});again=service.start_manual_pluto(app.connect,1,{'asset_id':'manual-asset','ticker':'ABC'})
+  self.assertFalse(result['duplicate']);self.assertTrue(again['duplicate']);self.assertEqual(result['session']['watch_id'],again['session']['watch_id']);self.assertEqual(result['session']['request']['report_id'],'manual-pluto')
+  self.assertEqual(engine.reconcile_candidates(app.connect,self.now+timedelta(days=10)),0)
  def put(self,data,now=None):return engine.ingest(app.connect,1,self.req['watch_id'],True,data,now or self.now)
  def counts(self):
   with app.connect() as c:return {name:c.execute('SELECT count(*) FROM '+name).fetchone()[0] for name in ['hw_sessions','hw_samples','hw_calculations','hw_events']}
@@ -666,7 +674,7 @@ class HotWatch(unittest.TestCase):
   verified={'asset_id':'synthetic-auto-asset','ticker':'MERC','exchange':'NASDAQ','currency':'USD','isin':'US1234567890'}
   verify=lambda *args:verified
   lookup=lambda *args:{'choices':[{'symbol':'MERC.US','currency':'USD','isin':'US1234567890'}]}
-  result=auto_activate_candidate(app.connect,1,True,report,candidate,verify,lookup);self.assertEqual(result['status'],'ACTIVE')
+  result=auto_activate_candidate(app.connect,1,True,report,candidate,verify,lookup);self.assertEqual(result['status'],'CREATED')
   again=auto_activate_candidate(app.connect,1,True,report,candidate,verify,lookup);self.assertIn(again['status'],('NOT_NEW','ALREADY_ACTIVE'))
   session=engine.item(app.connect,1,result['watch_id'],True)['session'];self.assertEqual(session['request']['candidate_id'],candidate['candidate_id']);self.assertEqual(session['request']['trade_cycle_id'],'cycle-preserved');self.assertIsNone(session['request']['risk']['proposed_quantity'])
   from hotwatch_service import Runner
@@ -691,7 +699,24 @@ class HotWatch(unittest.TestCase):
   verified={'asset_id':'synthetic-asset','ticker':'MERC','exchange':'NASDAQ','currency':'USD','isin':'US1234567890'}
   self.assertEqual(auto_activate_candidate(app.connect,1,True,report,candidate,lambda *a:None,lambda *a:{})['status'],'PLUTO_VERIFICATION_REQUIRED')
   ambiguous=lambda *a:{'choices':[{'symbol':'MERC.US','currency':'USD','isin':'US1234567890'},{'symbol':'MERC.X','currency':'USD','isin':'US1234567890'}]}
-  self.assertEqual(auto_activate_candidate(app.connect,1,True,report,candidate,lambda *a:verified,ambiguous)['status'],'EODHD_IDENTITY_UNCERTAIN')
+  result=auto_activate_candidate(app.connect,1,True,report,candidate,lambda *a:verified,ambiguous);self.assertEqual(result['status'],'CREATED')
+  self.assertEqual(engine.item(app.connect,1,result['watch_id'],True)['session']['request']['provider'],'pluto')
+ def test_discovery_handles_renewed_report_without_asset_id_or_explicit_decision(self):
+  from hotwatch_service import auto_activate_candidate
+  report=copy.deepcopy(self.r);report['report_id']='automatic-unresolved-1';report['generated_at']=self.now.isoformat();candidate=report['candidates'][0];candidate.update(candidate_id='unresolved-auto',asset_id=None,decision=None,exchange='NASDAQ')
+  report_ingest.save(app.connect,1,report);new=copy.deepcopy(report);new['report_id']='automatic-unresolved-2';report_ingest.save(app.connect,1,new)
+  verified={'asset_id':'resolved-asset','ticker':'MERC','exchange':'NASDAQ','currency':'USD','isin':'US1234567890'}
+  with patch('trade_service.search',return_value={'assets':[{'asset_id':'resolved-asset','ticker':'MERC'}]}):
+   result=auto_activate_candidate(app.connect,1,True,new,new['candidates'][0],lambda *a:verified,lambda *a:{'choices':[{'symbol':'MERC.US','currency':'USD','isin':'US1234567890'}]})
+  self.assertEqual(result['status'],'CREATED');self.assertEqual(engine.item(app.connect,1,result['watch_id'],True)['session']['request']['asset_id'],'resolved-asset')
+  engine.control(app.connect,1,result['watch_id'],True,'stop',self.now)
+  self.assertEqual(auto_activate_candidate(app.connect,1,True,new,new['candidates'][0],lambda *a:verified,lambda *a:{})['status'],'NOT_NEW')
+ def test_auto_discovery_does_not_restart_manually_stopped_instrument_under_new_candidate(self):
+  from hotwatch_service import auto_activate_candidate
+  engine.control(app.connect,1,self.req['watch_id'],True,'stop',self.now)
+  report=copy.deepcopy(self.r);report['report_id']='synthetic-stopped-asset';candidate=report['candidates'][0];candidate.update(candidate_id='another-idea',asset_id=self.req['asset_id'],exchange='NASDAQ');report_ingest.save(app.connect,1,report)
+  result=auto_activate_candidate(app.connect,1,True,report,candidate,lambda *a:self.fail('Stopped asset must not be restarted'),lambda *a:{})
+  self.assertEqual(result['status'],'NOT_NEW')
  def test_discovery_respects_kill_switch_before_provider_calls(self):
   from hotwatch_service import auto_activate_candidate
   report=copy.deepcopy(self.r);report['report_id']='synthetic-killed-report';candidate=report['candidates'][0];candidate['candidate_id']='synthetic-killed';candidate['asset_id']='synthetic-asset';report_ingest.save(app.connect,1,report)
@@ -705,12 +730,29 @@ class HotWatch(unittest.TestCase):
    auto_discover(app.connect);start.assert_not_called()
   with patch.dict(os.environ,{'ESCAPE_HW_AUTOSTART_ENABLED':'1','ESCAPE_HW_AUTOSTART_AFTER':(engine.utc()-timedelta(minutes=1)).isoformat()}),patch('hotwatch_service.auto_activate_candidate',return_value={'status':'NOT_NEW'}) as start:
    auto_discover(app.connect);start.assert_called_once()
- def test_discovery_does_not_assume_account_permission_from_asset_size_support(self):
+ def test_auto_discovery_report_to_persisted_session_and_retry_evidence(self):
+  from hotwatch_service import auto_discover
+  report=merc_report(False);report['report_id']='automatic-report-live-fixture';candidate=report['candidates'][0];candidate['asset_id']='synthetic-MERC';candidate['exchange']='NASDAQ';report_ingest.save(app.connect,1,report)
+  verified={'asset_id':'synthetic-MERC','ticker':'MERC','exchange':'NASDAQ','currency':'USD','isin':'US1234567890'}
+  with patch.dict(os.environ,{'ESCAPE_HW_AUTOSTART_ENABLED':'1','ESCAPE_HW_AUTOSTART_AFTER':(engine.utc()-timedelta(minutes=1)).isoformat()}),patch('hotwatch_service.verified_discovery_instrument',return_value=verified),patch('hotwatch_adapters.search_eodhd_symbols',return_value={'choices':[{'symbol':'MERC.US','currency':'USD','isin':'US1234567890'}]}):
+   auto_discover(app.connect,0)
+  with app.connect() as c:
+   attempt=c.execute('SELECT status,watch_id FROM hw_discovery_attempts WHERE user_id=1 AND candidate_id=?',(candidate['candidate_id'],)).fetchone();self.assertEqual(attempt['status'],'CREATED');wid=attempt['watch_id']
+  session=engine.item(app.connect,1,wid,False)['session'];self.assertEqual(session['request']['candidate_id'],candidate['candidate_id']);self.assertEqual(session['status'],'CREATED')
+ def test_auto_discovery_visits_every_report_candidate_without_replaying_completed_attempts(self):
+  from hotwatch_service import auto_discover
+  report=merc_report(False);report['report_id']='synthetic-all-candidates';report_ingest.save(app.connect,1,report);seen=[]
+  def activate(connect,uid,mode,report,candidate):seen.append(candidate['candidate_id']);return {'status':'ALREADY_ACTIVE'}
+  with patch.dict(os.environ,{'ESCAPE_HW_AUTOSTART_ENABLED':'1','ESCAPE_HW_AUTOSTART_AFTER':(engine.utc()-timedelta(minutes=1)).isoformat()}),patch('hotwatch_service.auto_activate_candidate',side_effect=activate):
+   cursor=0
+   for _ in range(len(report['candidates'])+2):cursor=auto_discover(app.connect,cursor)
+  self.assertEqual(set(seen),{x['candidate_id'] for x in report['candidates']});self.assertEqual(len(seen),len(report['candidates']))
+ def test_discovery_verifies_asset_without_assuming_trading_permission(self):
   from hotwatch_service import verified_discovery_instrument
   candidate={'asset_id':'synthetic-MERC','ticker':'MERC','exchange':'NASDAQ'}
   raw={'asset':{'id':'synthetic-MERC','ticker':'MERC','exchange':'NASDAQ','currency':'USD','isin':'US1234567890'},'buyBy':{'shares':True}}
-  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value=raw):
-   self.assertIsNone(verified_discovery_instrument(app.connect,1,candidate))
+  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',side_effect=[[{'id':'synthetic-MERC','ticker':'MERC'}],raw]),patch('trade_service.fresh_permission',side_effect=AssertionError('No trading permission check for read-only monitoring')):
+   self.assertEqual(verified_discovery_instrument(app.connect,1,candidate)['asset_id'],'synthetic-MERC')
  def test_tradability_requires_matching_asset_sizing_and_fresh_account_permission(self):
   adapter=PlutoAdapter(app.connect,1);portfolio={'id':123};raw={'asset':{'id':self.req['asset_id'],'ticker':'MERC','exchange':'NASDAQ','currency':'USD'},'buyBy':{'shares':True}}
   with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value=raw),patch('trade_service.fresh_permission',side_effect=ValueError('not permitted')):

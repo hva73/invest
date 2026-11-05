@@ -1,5 +1,5 @@
 """Standalone read-only HOT WATCH service. Never scheduled by legacy worker.py."""
-import json,signal,threading,logging,hashlib,time,os,re
+import json,signal,threading,logging,hashlib,time,os,re,secrets
 from concurrent.futures import ThreadPoolExecutor
 import app,hotwatch_engine as engine
 from hotwatch_adapters import PlutoAdapter,EODHDAdapter,InboxAdapter,DataUnavailable
@@ -18,18 +18,12 @@ def verified_discovery_instrument(connect,uid,candidate):
  else:matches=[]
  if len([x for x in matches if isinstance(x,dict) and (x.get('id') or x.get('assetId'))==candidate['asset_id'] and str(x.get('ticker','')).casefold()==candidate['ticker'].casefold()])!=1:return None
  raw=trade_service.call(client,tools,'get_asset',{'assetId':candidate['asset_id']})
- asset=raw.get('asset') if isinstance(raw,dict) else None;buy=raw.get('buyBy') if isinstance(raw,dict) else None
+ asset=raw.get('asset') if isinstance(raw,dict) else None
  if not isinstance(asset,dict) or asset.get('id')!=candidate['asset_id'] or str(asset.get('ticker','')).casefold()!=candidate['ticker'].casefold():return None
  if candidate.get('exchange') and str(asset.get('exchange','')).casefold()!=candidate['exchange'].casefold():return None
- if not isinstance(buy,dict) or not (buy.get('shares') is True or buy.get('amount') is True):return None
- with connect() as c:portfolios=[dict(p) for p in c.execute("SELECT * FROM portfolios WHERE user_id=? AND active=1 AND source='pluto' AND kind='portfolio'",(uid,))]
- permitted=False
- for portfolio in portfolios:
-  try:trade_service.fresh_permission(client,tools,connect,uid,portfolio);permitted=True;break
-  except Exception:continue
- if not permitted:return None
  currency=asset.get('currency');isin=asset.get('isin');exchange=asset.get('exchange')
- if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency) or not isinstance(exchange,str) or not exchange or not isinstance(isin,str) or not re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',isin):return None
+ if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency) or not isinstance(exchange,str) or not exchange:return None
+ if not isinstance(isin,str) or not re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',isin):isin=None
  return {'asset_id':asset['id'],'ticker':asset['ticker'],'exchange':exchange,'currency':currency,'isin':isin}
 
 def verify_requested_instruments(connect,uid,requests):
@@ -46,40 +40,87 @@ def verify_requested_instruments(connect,uid,requests):
    if not instrument or instrument.get('asset_id')!=key[0] or str(instrument.get('ticker','')).casefold()!=str(key[1]).casefold() or str(instrument.get('exchange','')).casefold()!=str(key[2]).casefold() or instrument.get('currency')!=key[3]:raise EngineError('pluto_identity_unverified',409)
    verified[key]=instrument
 
+def start_manual_pluto(connect,uid,data):
+ """Start an explicit watch for a selected Pluto asset, without a report."""
+ import trade_service
+ if set(data)!={'asset_id','ticker'} or not isinstance(data['asset_id'],str) or not isinstance(data['ticker'],str) or not data['asset_id'] or not data['ticker']:raise EngineError('invalid_input')
+ try:
+  adapter=PlutoAdapter(connect,uid);client,tools=trade_service.client(connect,uid,adapter.factory)
+  found=trade_service.call(client,tools,'search_assets',{'query':data['ticker'],'limit':10,'assetType':'ALL'})
+  if isinstance(found,list):rows=found
+  elif isinstance(found,dict):
+   lists=[found[k] for k in ('assets','results','items') if isinstance(found.get(k),list)];rows=lists[0] if len(lists)==1 else []
+  else:rows=[]
+  if not any(isinstance(x,dict) and (x.get('id') or x.get('assetId'))==data['asset_id'] and str(x.get('ticker','')).casefold()==data['ticker'].casefold() for x in rows):raise EngineError('pluto_identity_unverified',409)
+  raw=trade_service.call(client,tools,'get_asset',{'assetId':data['asset_id']});asset=raw.get('asset') if isinstance(raw,dict) else None
+  if not isinstance(asset,dict) or asset.get('id')!=data['asset_id'] or str(asset.get('ticker','')).casefold()!=data['ticker'].casefold() or not isinstance(asset.get('exchange'),str) or not asset['exchange'] or not isinstance(asset.get('currency'),str) or not re.fullmatch('[A-Z]{3}',asset['currency']):raise EngineError('pluto_identity_unverified',409)
+ except EngineError:raise
+ except Exception:raise EngineError('pluto_identity_unverified',409) from None
+ provider='pluto';symbol=None
+ if asset.get('isin') and os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')=='1' and os.environ.get('ESCAPE_EODHD_API_KEY'):
+  try:
+   from hotwatch_adapters import search_eodhd_symbols
+   options=search_eodhd_symbols(connect,uid,{'quote_currency':asset['currency']},candidate_override={'ticker':asset['ticker'],'company_name':asset.get('name')})
+   matches=[x for x in options.get('choices',[]) if x.get('isin')==asset['isin'] and x.get('currency')==asset['currency']]
+   if len(matches)==1:provider='eodhd';symbol=matches[0]['symbol']
+  except Exception:pass
+ cid='manual-'+hashlib.sha256((str(uid)+'|'+data['asset_id']).encode()).hexdigest()[:28]
+ risk={'max_notional_dkk':'1000','max_loss_dkk':'100','max_spread_pct':'1','max_quote_age_s':120,'max_position_fraction_pct':'20','proposed_quantity':None,'stop_price':None,'exit_deadline':None}
+ req={'watch_id':'hw-manual-'+secrets.token_hex(12),'report_id':'manual-pluto','candidate_id':cid,'is_test':False,'purpose':'manual pluto','ticker':asset['ticker'],'exchange':asset['exchange'],'asset_id':asset['id'],'quote_currency':asset['currency'],'portfolio_ids':[],'priority':'NORMAL','profile':'NORMAL','provider':provider,'provider_symbol':symbol,'end_at':None,'activation_reason':'Manuelt valgt Pluto-instrument','reactivation_reason':'Manuelt genvalgt Pluto-instrument','strategy_id':'escape_momentum','strategy_version':'1.0.0','risk':risk,'watch_mode':'entry'}
+ return engine.create_manual(connect,uid,req)
+
 def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup=None):
  """Start only a new, uniquely matched candidate; no order or purchase plan."""
  import candidate_lifecycle
  cid=candidate.get('candidate_id');asset=candidate.get('asset_id')
- if not cid or not asset or (candidate.get('decision') or {}).get('status')=='FRAVÆLG':return {'status':'IDENTITY_OR_DECISION_UNAVAILABLE'}
+ if not cid:return {'status':'IDENTITY_OR_DECISION_UNAVAILABLE'}
+ if (candidate.get('decision') or {}).get('status')=='FRAVÆLG':return {'status':'REJECTED'}
  with connect() as c:
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return {'status':'operator_kill_switch'}
   killed=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
   if killed and killed['killed']:return {'status':'kill_switch_active'}
   latest=candidate_lifecycle.latest(c,uid,mode,cid)
-  if latest and latest['status'] not in ('DISCOVERED','ANALYZING','WAITING_TRIGGER'):return {'status':'NOT_NEW'}
+  if latest and latest['status'] in ('CLOSED','ARCHIVED'):return {'status':'NOT_NEW'}
   existing_cycle=latest['cycle_id'] if latest else None
-  if c.execute('SELECT count(DISTINCT report_row_id) FROM report_candidate_links WHERE user_id=? AND is_test=? AND candidate_id=?',(uid,int(mode),cid)).fetchone()[0]!=1:return {'status':'NOT_NEW'}
   if c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,int(mode),cid)).fetchone():return {'status':'ALREADY_ACTIVE'}
+  if c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=? AND status IN ('COMPLETED','EXPIRED','ERROR')",(uid,int(mode),cid)).fetchone():return {'status':'NOT_NEW'}
   if c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]>=engine.capacity():return {'status':'global_capacity_limit'}
   prior={row['asset'] for row in c.execute("SELECT json_extract(request,'$.asset_id') AS asset FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=?",(uid,int(mode),cid)) if row['asset']}
   link=c.execute('SELECT asset_id FROM market_asset_links WHERE user_id=? AND candidate_id=?',(uid,cid)).fetchone()
   if link:prior.add(link['asset_id'])
-  if prior and prior!={asset}:return {'status':'IDENTITY_CONFLICT'}
+  if asset and prior and prior!={asset}:return {'status':'IDENTITY_CONFLICT'}
  try:
+  if not asset:
+   import trade_service
+   options=trade_service.search(connect,uid,candidate.get('ticker','')).get('assets',[])
+   exact=[x for x in options if str(x.get('ticker','')).casefold()==str(candidate.get('ticker','')).casefold()]
+   if len(exact)!=1:return {'status':'PLUTO_IDENTITY_UNCERTAIN'}
+   asset=exact[0]['asset_id'];candidate=dict(candidate,asset_id=asset)
+   if prior and prior!={asset}:return {'status':'IDENTITY_CONFLICT'}
+  with connect() as c:
+   other=c.execute("SELECT watch_id,request FROM hw_sessions WHERE user_id=? AND is_test=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') AND json_extract(request,'$.asset_id')=?",(uid,int(mode),asset)).fetchall()
+   existing=next((r for r in other if json.loads(r['request']).get('watch_mode','both')!='exit'),None)
+   if existing:return {'status':'ALREADY_ACTIVE','watch_id':existing['watch_id']}
+   stopped=c.execute("SELECT s.request FROM hw_sessions s JOIN hw_events e ON e.watch_row_id=s.id AND e.event_type='WATCH_COMPLETED' WHERE s.user_id=? AND s.is_test=? AND json_extract(s.request,'$.asset_id')=?",(uid,int(mode),asset)).fetchall()
+   if any(json.loads(r['request']).get('watch_mode','both')!='exit' for r in stopped):return {'status':'NOT_NEW'}
   instrument=(verify or verified_discovery_instrument)(connect,uid,candidate)
   if not instrument or instrument.get('asset_id')!=asset or str(instrument.get('ticker','')).casefold()!=candidate.get('ticker','').casefold():return {'status':'PLUTO_VERIFICATION_REQUIRED'}
   from hotwatch_adapters import search_eodhd_symbols
-  options=(lookup or search_eodhd_symbols)(connect,uid,{'report_id':report['report_id'],'candidate_id':cid,'is_test':mode,'quote_currency':instrument['currency']})
-  matches=[x for x in options.get('choices',[]) if x.get('isin')==instrument['isin'] and x.get('currency')==instrument['currency']]
-  if len(matches)!=1:return {'status':'EODHD_IDENTITY_UNCERTAIN'}
+  matches=[]
+  if instrument.get('isin'):
+   try:
+    options=(lookup or search_eodhd_symbols)(connect,uid,{'report_id':report['report_id'],'candidate_id':cid,'is_test':mode,'quote_currency':instrument['currency']})
+    matches=[x for x in options.get('choices',[]) if x.get('isin')==instrument['isin'] and x.get('currency')==instrument['currency']]
+   except Exception:pass
+  provider='eodhd' if len(matches)==1 else 'pluto';symbol=matches[0]['symbol'] if len(matches)==1 else None
   watch='hw-auto-'+hashlib.sha256((str(uid)+'|'+str(int(mode))+'|'+cid).encode()).hexdigest()[:28]
   risk={'max_notional_dkk':'1000','max_loss_dkk':'100','max_spread_pct':'1','max_quote_age_s':120,'max_position_fraction_pct':'20','proposed_quantity':None,'stop_price':None,'exit_deadline':None}
   with connect() as c:portfolios=[dict(p) for p in c.execute("SELECT id,external_id,parent_external_id FROM portfolios WHERE user_id=? AND active=1 AND source='pluto' ORDER BY id",(uid,))]
   overlapping=any(a['external_id']==b.get('parent_external_id') for a in portfolios for b in portfolios)
   portfolio_ids=[p['id'] for p in portfolios] if len(portfolios)<=30 and not overlapping else []
-  req={'watch_id':watch,'report_id':report['report_id'],'candidate_id':cid,'is_test':mode,'purpose':'automatic discovery','ticker':candidate['ticker'],'exchange':instrument['exchange'],'asset_id':asset,'quote_currency':instrument['currency'],'portfolio_ids':portfolio_ids,'priority':'NORMAL','profile':'NORMAL','provider':'eodhd','provider_symbol':matches[0]['symbol'],'end_at':None,'activation_reason':'Automatisk overvågning efter verificeret Pluto-aktiv og handelsbarhed','strategy_id':'escape_momentum','strategy_version':'1.0.0','risk':risk,'watch_mode':'entry'}
+  req={'watch_id':watch,'report_id':report['report_id'],'candidate_id':cid,'is_test':mode,'purpose':'automatic discovery','ticker':candidate['ticker'],'exchange':instrument['exchange'],'asset_id':asset,'quote_currency':instrument['currency'],'portfolio_ids':portfolio_ids,'priority':'NORMAL','profile':'NORMAL','provider':provider,'provider_symbol':symbol,'end_at':None,'activation_reason':'Automatisk overvågning efter verificeret Pluto-aktiv og handelsbarhed','strategy_id':'escape_momentum','strategy_version':'1.0.0','risk':risk,'watch_mode':'entry'}
   if existing_cycle:req['trade_cycle_id']=existing_cycle
-  result=engine.create(connect,uid,req);return {'status':'ACTIVE' if not result['duplicate'] else 'ALREADY_ACTIVE','watch_id':watch}
+  result=engine.create(connect,uid,req);return {'status':result['session']['status'] if not result['duplicate'] else 'ALREADY_ACTIVE','watch_id':watch}
  except EngineError as error:return {'status':error.code}
  except Exception:return {'status':'DISCOVERY_VERIFICATION_FAILED'}
 
@@ -89,19 +130,25 @@ def auto_discover(connect,cursor=0):
  configured=os.environ.get('ESCAPE_HW_AUTOSTART_AFTER')
  try:
   if configured:after=stamp(configured)
-  else:
-   with connect() as c:
-    c.execute('INSERT OR IGNORE INTO hw_discovery_control VALUES(1,?)',(engine.utc().isoformat(),))
-    after=stamp(c.execute('SELECT started_at FROM hw_discovery_control WHERE id=1').fetchone()['started_at'])
+  else:after=None
  except (ValueError,TypeError):return cursor
  with connect() as c:users=[row['id'] for row in c.execute('SELECT id FROM users WHERE active=1')]
  for uid in users:
   with connect() as c:row=c.execute("SELECT payload,received FROM ingested_reports WHERE user_id=? AND is_test=0 AND report_type!='deep_analysis' ORDER BY generated_epoch DESC,id DESC LIMIT 1",(uid,)).fetchone()
-  if not row or stamp(row['received'])<=after:continue
+  if not row or after and stamp(row['received'])<=after:continue
   report=json.loads(row['payload'])
   candidates=report.get('candidates',[])
   if candidates:
-   candidate=candidates[cursor%len(candidates)];result=auto_activate_candidate(connect,uid,False,report,candidate)
+   candidate=None
+   with connect() as c:
+    for offset in range(len(candidates)):
+     item=candidates[(cursor+offset)%len(candidates)];cid=item.get('candidate_id')
+     if not cid:continue
+     old=c.execute('SELECT report_id,next_attempt FROM hw_discovery_attempts WHERE user_id=? AND is_test=0 AND candidate_id=?',(uid,cid)).fetchone()
+     if not old or old['report_id']!=report['report_id'] or old['next_attempt']<=engine.utc().timestamp():candidate=item;cursor+=offset;break
+   if candidate is None:continue
+   result=auto_activate_candidate(connect,uid,False,report,candidate)
+   with connect() as c:c.execute('INSERT INTO hw_discovery_attempts VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,is_test,candidate_id) DO UPDATE SET report_id=excluded.report_id,status=excluded.status,updated=excluded.updated,next_attempt=excluded.next_attempt,watch_id=excluded.watch_id',(uid,0,candidate['candidate_id'],report['report_id'],result['status'],engine.utc().isoformat(),engine.utc().timestamp()+(300 if result['status'] in ('ALREADY_ACTIVE','NOT_NEW','CREATED') else 60),result.get('watch_id')))
    if result['status'] not in ('NOT_NEW','ALREADY_ACTIVE'):
     logging.getLogger('escape.hotwatch').info(json.dumps({'service':'hotwatch','event':'discovery','candidate_ref':hashlib.sha256(str(candidate.get('candidate_id','')).encode()).hexdigest()[:16],'status':result['status']}))
  return cursor+1
@@ -334,17 +381,19 @@ class Runner:
     except Exception:logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'holdings_autowatch_error'}))
     self.stop.wait(15)
   holding_thread=threading.Thread(target=holdings_loop,name='hotwatch-holdings',daemon=True);holding_thread.start()
-  next_discovery=0;discovery_cursor=0
+  def discovery_loop():
+   cursor=0
+   while not self.stop.is_set():
+    try:cursor=auto_discover(self.connect,cursor)
+    except Exception:logging.getLogger('escape.hotwatch').exception('discovery_error')
+    self.stop.wait(2)
+  discovery_thread=threading.Thread(target=discovery_loop,name='hotwatch-discovery',daemon=True);discovery_thread.start()
   try:
    while not self.stop.is_set():
     self.drain()
-    if os.environ.get('ESCAPE_HW_AUTOSTART_ENABLED','1')=='1' and time.monotonic()>=next_discovery:
-     try:discovery_cursor=auto_discover(self.connect,discovery_cursor)
-     except Exception:logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'discovery_error'}))
-     next_discovery=time.monotonic()+15
     self.stop.wait(interval)
   finally:
-   self.stop.set();thread.join(timeout=6);holding_thread.join(timeout=2);candidate_thread.join(timeout=2)
+   self.stop.set();thread.join(timeout=6);holding_thread.join(timeout=2);candidate_thread.join(timeout=2);discovery_thread.join(timeout=2)
    if thread.is_alive():logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'heartbeat_shutdown_timeout'}))
    else:self.heartbeat('stopped')
 

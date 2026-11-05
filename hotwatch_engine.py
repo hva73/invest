@@ -31,6 +31,7 @@ def init(c):
  c.execute('CREATE INDEX IF NOT EXISTS hw_event_history ON hw_events(watch_row_id,id)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_discovery_control(id INTEGER PRIMARY KEY CHECK(id=1),started_at TEXT NOT NULL)')
  c.execute('INSERT OR IGNORE INTO hw_discovery_control VALUES(1,?)',(utc().isoformat(),))
+ c.execute('CREATE TABLE IF NOT EXISTS hw_discovery_attempts(user_id INTEGER NOT NULL,is_test INTEGER NOT NULL,candidate_id TEXT NOT NULL,report_id TEXT NOT NULL,status TEXT NOT NULL,updated TEXT NOT NULL,next_attempt REAL NOT NULL,watch_id TEXT,PRIMARY KEY(user_id,is_test,candidate_id))')
  c.execute('CREATE TABLE IF NOT EXISTS hw_admin_events(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),kind TEXT NOT NULL,created TEXT NOT NULL,payload TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_operator_events(id INTEGER PRIMARY KEY,created TEXT NOT NULL,killed INTEGER NOT NULL,reason TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_system_control(id INTEGER PRIMARY KEY CHECK(id=1),killed INTEGER NOT NULL,changed TEXT NOT NULL,reason TEXT NOT NULL)')
@@ -90,7 +91,7 @@ def row_for(c,uid,wid,mode):
  if not row:raise EngineError('watch_not_found',404)
  return row
 
-def _create_in_transaction(c,uid,data,now,holding=False):
+def _create_in_transaction(c,uid,data,now,holding=False,manual=False):
  if len(set(data['portfolio_ids']))!=len(data['portfolio_ids']):raise EngineError('duplicate_portfolio_reference')
  if data['provider']=='synthetic' and not data['is_test']:raise EngineError('synthetic_requires_test_mode')
  if data['end_at'] and stamp(data['end_at'])<=now:raise EngineError('watch_deadline_already_passed')
@@ -117,6 +118,8 @@ def _create_in_transaction(c,uid,data,now,holding=False):
   try:fresh=0<=(now-stamp(payload['observed'])).total_seconds()<=300
   except (KeyError,ValueError,TypeError):fresh=False
   if not fresh or not payload.get('positions_complete') or not any(x.get('kind')=='holding' and x.get('asset_id')==data['asset_id'] and x.get('quantity') is not None and Decimal(str(x['quantity']))>0 for x in payload.get('positions',[])):raise EngineError('holding_not_verified',409)
+ elif manual:
+  if data['is_test'] or data['report_id']!='manual-pluto' or not data['candidate_id'].startswith('manual-'):raise EngineError('invalid_manual_watch')
  else:
   report=c.execute('SELECT payload FROM ingested_reports WHERE user_id=? AND report_id=? AND is_test=?',(uid,data['report_id'],int(data['is_test']))).fetchone()
   if not report:raise EngineError('report_reference_not_found',404)
@@ -125,7 +128,7 @@ def _create_in_transaction(c,uid,data,now,holding=False):
   if candidate.get('ticker','').casefold()!=data['ticker'].casefold():raise EngineError('candidate_ticker_mismatch',409)
   if data.get('watch_mode','both')!='exit':
    from intel_workflows import candidate_currentness
-   currentness=candidate_currentness(c,uid,data['is_test'],data['candidate_id'],now)
+   currentness=candidate_currentness(c,uid,data['is_test'],data['candidate_id'],now,report_fallback=data.get('purpose')=='automatic discovery')
    if currentness['status']!='CURRENT':raise EngineError('candidate_not_current',409)
    stopped=c.execute("SELECT e.created FROM hw_sessions s JOIN hw_events e ON e.watch_row_id=s.id AND e.event_type IN ('WATCH_COMPLETED','CANDIDATE_WATCH_EXPIRED') WHERE s.user_id=? AND s.is_test=? AND s.candidate_id=? ORDER BY e.id DESC LIMIT 1",(uid,int(data['is_test']),data['candidate_id'])).fetchone()
    if stopped and (not data.get('reactivation_reason') or stamp(currentness['assessed_at'])<=stamp(stopped['created'])):raise EngineError('new_assessment_and_reactivation_reason_required',409)
@@ -151,6 +154,18 @@ def create_holding(connect,uid,data,now=None):
  with connect() as c:
   c.execute('BEGIN IMMEDIATE')
   return _create_in_transaction(c,uid,data,now,holding=True)
+
+def create_manual(connect,uid,data,now=None):
+ """Create an explicitly requested, Pluto-verified, non-report watch."""
+ now=now or utc();require(data,SESSION)
+ with connect() as c:
+  c.execute('BEGIN IMMEDIATE')
+  existing=c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=0 AND candidate_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') ORDER BY id DESC LIMIT 1",(uid,data['candidate_id'])).fetchone()
+  if not existing:
+   for row in c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=0 AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') AND json_extract(request,'$.asset_id')=? ORDER BY id DESC",(uid,data['asset_id'])):
+    if json.loads(row['request']).get('watch_mode','both')!='exit':existing=row;break
+  if existing:return {'ok':True,'duplicate':True,'session':view(c,existing,now)}
+  return _create_in_transaction(c,uid,data,now,manual=True)
 
 def start_candidates(connect,uid,mode=False):
  """Owned candidate choices, excluding all open/paused watches by stable identity."""
@@ -325,9 +340,9 @@ def view(c,row,now=None):
  if effective in ('NO_DATA','PAUSE') and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED') and regular['status']=='CLOSED' and data_status['market_status'] not in ('PREMARKET','AFTERHOURS','HALTED'):
   display_status='ORDINÆR HANDEL LUKKET'
  candidate_review=None
- if request.get('watch_mode','both')!='exit' and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED','PAUSED'):
+ if request.get('report_id')!='manual-pluto' and request.get('watch_mode','both')!='exit' and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED','PAUSED'):
   from intel_workflows import candidate_currentness
-  candidate_review=candidate_currentness(c,row['user_id'],row['is_test'],row['candidate_id'],now)
+  candidate_review=candidate_currentness(c,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery')
   if candidate_review['status']=='REVIEW_DUE' and row['status']!='PAUSED':display_status='REVURDERING FORFALDET'
  return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,PROFILES[profile]),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
@@ -349,8 +364,8 @@ def reconcile_candidates(connect,now=None,connection=None):
     c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']))
     event(c,row,'WATCH_EXPIRED',now,'Session deadline reached');changed+=1
     continue
-   if mode=='exit' or req.get('purpose')=='automatic holding watch':continue
-   current=candidate_currentness(c,row['user_id'],row['is_test'],row['candidate_id'],now)
+   if mode=='exit' or req.get('purpose')=='automatic holding watch' or req.get('report_id')=='manual-pluto':continue
+   current=candidate_currentness(c,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=req.get('purpose')=='automatic discovery')
    if current['status']!='COLD':
     state=json.loads(row['state'])
     if state.pop('candidate_cold',None):
@@ -404,9 +419,9 @@ def control(connect,uid,wid,mode,action,now=None):
    if killed and killed['killed']:raise EngineError('kill_switch_active',409)
    request=json.loads(row['request'])
    if request['end_at'] and stamp(request['end_at'])<=now:raise EngineError('watch_expired',409)
-   if request.get('watch_mode','both')=='entry':
+   if request.get('watch_mode','both')=='entry' and request.get('report_id')!='manual-pluto':
     from intel_workflows import candidate_currentness
-    if candidate_currentness(c,uid,mode,row['candidate_id'],now)['status'] not in ('CURRENT','REVIEW_DUE'):raise EngineError('candidate_not_current',409)
+    if candidate_currentness(c,uid,mode,row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery')['status'] not in ('CURRENT','REVIEW_DUE'):raise EngineError('candidate_not_current',409)
    new='VALIDATING'
   elif action=='stop':new='COMPLETED'
   else:raise EngineError('unknown_action')
@@ -513,7 +528,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   import intel_workflows,candidate_lifecycle
   decision=intel_workflows.prior_decision(c,uid,mode,request['candidate_id'])
   from intel_workflows import candidate_currentness
-  currentness=candidate_currentness(c,uid,mode,row['candidate_id'],now) if request.get('report_id')!='automatic-holdings' else {'status':'UNKNOWN'}
+  currentness={'status':'CURRENT'} if request.get('report_id')=='manual-pluto' else candidate_currentness(c,uid,mode,row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery') if request.get('report_id')!='automatic-holdings' else {'status':'UNKNOWN'}
   risk=dict(request['risk'],entry_allowed=request.get('watch_mode','both')!='exit' and currentness['status'] in ('CURRENT','REVIEW_DUE') and (not decision or decision[1]['status']!='FRAVÆLG'),exit_allowed=request.get('watch_mode','both')!='entry')
   result,nextstate=calculate(sample,metrics,strategy_data,risk,state,now,new_market_event=new_market_event)
   result['position_context']=sample['context'];result['new_market_observation']=new_market_event

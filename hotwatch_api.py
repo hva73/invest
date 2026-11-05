@@ -61,6 +61,15 @@ def handle(h,connect,method):
    elif len(parts)==3 and parts[2]=='history':result=candidate_lifecycle.history(connect,uid,parts[1],mode,q.get('before',[None])[0],min(200,limit))
   elif method=='GET' and parts==['start-candidates']:
    result=engine.start_candidates(connect,uid,mode)
+  elif method=='POST' and parts==['manual-search']:
+   if mode or set(data)!={'query'}:raise EngineError('invalid_input')
+   import trade_service
+   try:result=trade_service.search(connect,uid,data['query'])
+   except Exception:raise EngineError('pluto_search_unavailable',409) from None
+  elif method=='POST' and parts==['manual-start']:
+   if mode:raise EngineError('invalid_test_category')
+   from hotwatch_service import start_manual_pluto
+   result=start_manual_pluto(connect,uid,data);status=200 if result['duplicate'] else 201
   elif parts==['sessions']:
    if method=='GET':
     view=q.get('view',[None])[0]
@@ -71,6 +80,7 @@ def handle(h,connect,method):
      if cursor is not None and (view!='history' or not 1<=cursor<=10**15):raise EngineError('invalid_pagination')
      result=dashboard_projection.engine_session_view(connect,uid,mode,view,limit,cursor)
     else:result=engine.sessions(connect,uid,mode,after,limit)
+    with connect() as c:result['discovery_attempts']=[dict(row) for row in c.execute('SELECT candidate_id,status,updated,next_attempt,watch_id FROM hw_discovery_attempts WHERE user_id=? AND is_test=? ORDER BY updated DESC LIMIT 500',(uid,int(mode)))]
    else:
     from hotwatch_contract import require
     require(data,SESSION)

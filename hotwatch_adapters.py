@@ -41,13 +41,13 @@ def providers(connect=None,uid=None,mode=False):
     result[row['source']].update(last_attempt=row['attempted'],last_success=row['succeeded'],last_error=row['code'],observed_capabilities=json.loads(row['payload']))
  return result
 
-def search_eodhd_symbols(connect,uid,data,opener=None):
+def search_eodhd_symbols(connect,uid,data,opener=None,candidate_override=None):
  """Search only a candidate owned by the current user; never expose API credentials."""
  import market_data
  if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':raise DataUnavailable('EODHD_FEED_NOT_ENABLED')
  key=os.environ.get('ESCAPE_EODHD_API_KEY','').strip()
  if not key:raise DataUnavailable('EODHD_KEY_NOT_CONFIGURED')
- candidate=market_data.holding_candidate(connect,uid,data) if 'holding_portfolio_id' in data else market_data.candidate(connect,uid,data);ticker=candidate.get('ticker')
+ candidate=candidate_override if candidate_override is not None else market_data.holding_candidate(connect,uid,data) if 'holding_portfolio_id' in data else market_data.candidate(connect,uid,data);ticker=candidate.get('ticker')
  if not isinstance(ticker,str) or not re.fullmatch(r'[A-Za-z0-9.\-]{1,32}',ticker):raise DataUnavailable('EODHD_SYMBOL_MAPPING_REQUIRED')
  name_key=lambda x:re.sub(r'[^a-z0-9]','',x.casefold()) if isinstance(x,str) else ''
  issuer=candidate.get('company_name');issuer_key=name_key(issuer)
@@ -209,7 +209,12 @@ class PlutoAdapter:
   return result
  def poll(self,session):
   import market_data
-  r=session['request_data'];q=market_data.quote(self.connect,self.uid,{'report_id':r['report_id'],'candidate_id':r['candidate_id'],'is_test':r['is_test'],'asset_id':r['asset_id']},factory=self.factory)
+  r=session['request_data']
+  if r['report_id']=='manual-pluto':
+   import trade_service
+   client,tools=trade_service.client(self.connect,self.uid,self.factory)
+   q=market_data.normalized(trade_service.call(client,tools,'get_asset',{'assetId':r['asset_id'],'period':'ONE_WEEK'}),r['asset_id'])
+  else:q=market_data.quote(self.connect,self.uid,{'report_id':r['report_id'],'candidate_id':r['candidate_id'],'is_test':r['is_test'],'asset_id':r['asset_id']},factory=self.factory)
   if q.get('pending'):raise DataUnavailable('PLUTO_REQUEST_PENDING')
   if q.get('selection_required') or q.get('asset_id')!=r['asset_id'] or str(q.get('ticker','')).casefold()!=r['ticker'].casefold():raise DataUnavailable('PLUTO_ASSET_NOT_CONFIRMED')
   if q.get('last_error'):raise DataUnavailable('PLUTO_PROVIDER_ERROR')
