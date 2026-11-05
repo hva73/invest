@@ -21,6 +21,7 @@ def unknown_context():return {'tradability':'unknown','status':'unknown','as_of'
 
 def providers(connect=None,uid=None,mode=False):
  result={'pluto':{'adapter':'existing read-only contracts','minimum_poll_s':300,'known_limits':['Quote timestamp may be absent','Bid/ask, volume and market session are not guaranteed','Fees/FX remain unknown unless actually supplied']},'eodhd':{'plan_reported_by_owner':'Active Trader','key_configured':bool(os.environ.get('ESCAPE_EODHD_API_KEY','').strip()),'enabled':os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')=='1','endpoint':'/api/real-time/{symbol}','minimum_poll_s':provider_floor('eodhd'),'entitlements_verified':False,'websocket_enabled':os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1','known_limits':['Account/feed rights must be verified on the installation','REST quote is not assumed tick-level, regular-session or a complete OHLC bar']},'report_inbox':{'adapter':'existing observation inbox','trusted_for_new_buy':False},'synthetic':{'test_only':True}}
+ result['eodhd'].update(fusion_enabled=os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1',minute_bars_enabled=os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1')
 
  if connect is not None and uid is not None:
   with connect() as c:
@@ -225,6 +226,7 @@ class EODHDAdapter:
    market='us' if exchange=='US' else 'eu';stream_symbol=symbol[:-3] if market=='us' else symbol
    client=self.feeds();stream_started=time.perf_counter();feed=client.capture(market+'_trades',stream_symbol,duration=2);stream_ms=(time.perf_counter()-stream_started)*1000
    self.last_feed_diagnostics={'websocket_trade_status':feed['status']}
+   if feed['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
    if feed['status']=='RATE_LIMIT':
     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
    if feed['status']=='OK':
@@ -246,6 +248,8 @@ class EODHDAdapter:
        previous=json.loads(old['payload']);previous['context']=context;return previous
      if os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
       quote_feed=client.capture(market+'_quotes',stream_symbol,duration=2)
+      if quote_feed['status']=='LOCAL_BUDGET_EXHAUSTED':
+       self.last_feed_diagnostics['websocket_quote_status']='LOCAL_BUDGET_EXHAUSTED';return sample
       status_feed=client.capture(market+'_status',stream_symbol,duration=2) if quote_feed['status']!='RATE_LIMIT' else {'status':'RATE_LIMIT'}
       self.last_feed_diagnostics.update(websocket_quote_status=quote_feed['status'],websocket_status_status=status_feed['status'])
       if 'RATE_LIMIT' in (quote_feed['status'],status_feed['status']):
@@ -255,6 +259,7 @@ class EODHDAdapter:
       quotes=[x for x in quote_feed.get('messages',[]) if fresh(x) and x.get('bid') and x.get('ask') and Decimal(x['bid'])>0 and Decimal(x['ask'])>=Decimal(x['bid'])]
       if quotes:
        q=max(quotes,key=lambda x:stamp(x['event_time']));sample.update(bid=q['bid'],ask=q['ask'],bid_at=q['event_time'],ask_at=q['event_time'],quote_feed=market+'_quotes')
+      if status_feed['status']=='LOCAL_BUDGET_EXHAUSTED':return sample
       statuses=[x for x in status_feed.get('messages',[]) if fresh(x) and x.get('trading_status')]
       if statuses and trade.get('market_session')=='open':
        status=max(statuses,key=lambda x:stamp(x['event_time']))
@@ -262,10 +267,12 @@ class EODHDAdapter:
        else:sample.update(market_status='UNKNOWN',session_key=at.date().isoformat()+':UNKNOWN');sample.pop('status_at',None);sample.pop('status_feed',None)
       if sample['market_status']=='REGULAR' and os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1':
        schedule=client.market_status(exchange);self.last_feed_diagnostics['exchange_status']=schedule['status']
+       if schedule['status']=='LOCAL_BUDGET_EXHAUSTED':return sample
        if schedule['status']=='RATE_LIMIT':
         failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
        if schedule.get('status')=='OK' and schedule.get('exchange_open') is True and schedule.get('calendar') and schedule.get('timezone'):
         bars=client.minute_bars(market,stream_symbol);self.last_feed_diagnostics['minute_bars_status']=bars['status']
+        if bars['status']=='LOCAL_BUDGET_EXHAUSTED':return sample
         if bars['status']=='RATE_LIMIT':
          failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
         if bars['status']=='OK':
@@ -292,10 +299,12 @@ class EODHDAdapter:
   if os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1' and (exchange=='US' or exchange in eu_exchanges):
    market='us' if exchange=='US' else 'eu';stream_symbol=symbol[:-3] if market=='us' else symbol;client=self.feeds();bars=client.minute_bars(market,stream_symbol);kind='realtime'
    self.last_feed_diagnostics['minute_bars_status']=bars['status']
+   if bars['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
    if bars['status']=='RATE_LIMIT':
     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
    if bars['status']!='OK':
     end=int(utc().timestamp());bars=client.intraday(symbol,start=end-86400,end=end);kind='intraday';self.last_feed_diagnostics['intraday_status']=bars['status']
+    if bars['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
     if bars['status']=='RATE_LIMIT':
      failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
    if bars['status']=='OK':

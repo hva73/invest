@@ -275,6 +275,15 @@ class HotWatch(unittest.TestCase):
  def test_fault_backoff_dedup_and_recovery(self):
   engine.fault(app.connect,1,self.req['watch_id'],True,'DATA_STALE',self.now);before=self.counts();engine.fault(app.connect,1,self.req['watch_id'],True,'DATA_STALE',self.now+timedelta(seconds=5));self.assertEqual(before,self.counts());self.assertEqual(engine.item(app.connect,1,self.req['watch_id'],True)['session']['status'],'DEGRADED')
   self.put(tick(self.now+timedelta(seconds=60),1),self.now+timedelta(seconds=60));events=engine.history(app.connect,1,self.req['watch_id'],True)['items'];self.assertTrue(any(e['event_type']=='DATA_RECOVERED' for e in events))
+ def test_local_budget_retry_and_expired_display_explain_actual_cause(self):
+  engine.fault(app.connect,1,self.req['watch_id'],True,'PROVIDER_RATE_BUDGET',self.now)
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True);view=engine.view(c,row,self.now)
+   self.assertEqual(row['next_due'],self.now.timestamp()+60);self.assertIn('PROVIDER_RATE_BUDGET',view['display_reason_codes'])
+  self.put(tick(self.now+timedelta(seconds=61),1),self.now+timedelta(seconds=61))
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True);view=engine.view(c,row,self.now+timedelta(seconds=182))
+   self.assertEqual(view['signal'],'NO_DATA');self.assertIn('DATA_STALE',view['display_reason_codes']);self.assertEqual(view['data_status']['price'],'100')
  def test_order_accepted_partial_filled_are_separate_from_signals(self):
   for i,filled in enumerate(['0','4','4','10']):
    t=tick(self.now+timedelta(minutes=i),i,held=True);t['context']['orders']=[{'order_id':'synthetic-limit','status':'ACCEPTED' if i==0 else 'PARTIAL' if i<3 else 'FILLED','requested_quantity':'10','filled_quantity':filled,'side':'SELL'}];self.put(t,self.now+timedelta(minutes=i))
@@ -412,7 +421,7 @@ class HotWatch(unittest.TestCase):
   engine.control(app.connect,1,self.req['watch_id'],True,'pause',at);engine.create(app.connect,1,r,at);runner=Runner(app.connect);adapter=EODHDAdapter(app.connect,1,Opener());runner.adapters[(1,'eodhd')]=adapter
   with patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()),patch.object(adapter,'feeds',return_value=Feeds()),patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1'}):
    self.assertTrue(runner.once(at+timedelta(milliseconds=1),watch_id=r['watch_id']))
-  view=engine.item(app.connect,1,r['watch_id'],True)['session'];self.assertEqual(view['data_status']['price'],'12.34');self.assertEqual(view['last_data_at'],at.isoformat());self.assertEqual(view['display_status'],'DATA MANGLER')
+  view=engine.item(app.connect,1,r['watch_id'],True)['session'];self.assertEqual(view['data_status']['price'],'12.34');self.assertEqual(view['last_data_at'],at.isoformat());self.assertEqual(view['display_status'],'AFVENTER SIGNALDATA')
   with app.connect() as c:health=json.loads(c.execute("SELECT payload FROM hw_provider_health WHERE user_id=1 AND is_test=1 AND source='eodhd'").fetchone()['payload'])
   self.assertEqual(health['websocket_trade_status'],'ENTITLEMENT_UNVERIFIED')
  def test_runner_ingests_real_source_time_from_mocked_ws_without_changing_risk(self):
@@ -466,6 +475,19 @@ class HotWatch(unittest.TestCase):
   with app.connect() as c:
    self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
    health=json.loads(c.execute("SELECT payload FROM hw_provider_health WHERE user_id=1 AND is_test=1 AND source='eodhd'").fetchone()['payload']);self.assertEqual(health['bar_history_status'],'VERIFIED')
+ def test_worker_keeps_fresh_trade_if_local_budget_runs_out_mid_scan(self):
+  from hotwatch_service import Runner
+  now=engine.utc().replace(microsecond=0);r=copy.deepcopy(self.req);r.update(watch_id='budget-live',purpose='local budget integration',provider='eodhd',provider_symbol='MERC.US')
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',now);engine.create(app.connect,1,r,now)
+  class Feeds:
+   def capture(self,feed,*args,**kwargs):
+    if feed.endswith('trades'):return {'status':'OK','messages':[{'event_time':now.isoformat(),'price':'100','market_session':'open'}]}
+    return {'status':'LOCAL_BUDGET_EXHAUSTED'}
+  env={'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'0'}
+  with patch.dict(os.environ,env),patch('hotwatch_adapters.EODHDAdapter.feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=tick(now)['context']):
+   self.assertTrue(Runner(app.connect).once(now,watch_id=r['watch_id']))
+  view=engine.item(app.connect,1,r['watch_id'],True)['session']
+  self.assertEqual(view['data_status']['price'],'100');self.assertEqual(view['display_status'],'AFVENTER SIGNALDATA');self.assertNotEqual(view['last_error'],'EODHD_RATE_LIMIT');self.assertIsNone(view['data_status']['bid'])
  def test_minute_bar_adapter_to_motor_preserves_volume_and_missing_session(self):
   from hotwatch_service import Runner
   at=engine.utc().replace(microsecond=0);r=copy.deepcopy(self.req);r.update(watch_id='mock-minute-bars',purpose='mock minute bars',provider='eodhd',provider_symbol='MERC.US')
@@ -492,7 +514,7 @@ class HotWatch(unittest.TestCase):
   with app.connect() as c:
    row=c.execute('SELECT state FROM hw_sessions WHERE watch_id=?',(r['watch_id'],)).fetchone();state=json.loads(row['state']);state['signal']='BUY';c.execute('UPDATE hw_sessions SET state=? WHERE watch_id=?',(json.dumps(state),r['watch_id']))
    view=engine.view(c,engine.row_for(c,1,r['watch_id'],True),at+timedelta(seconds=2))
-  self.assertFalse(view['data_stale']);self.assertEqual(view['signal'],'NO_DATA');self.assertEqual(view['data_status']['quote_status'],'STALE')
+  self.assertFalse(view['data_stale']);self.assertEqual(view['signal'],'NO_DATA');self.assertEqual(view['data_status']['quote_status'],'STALE');self.assertIn('MARKET_EVIDENCE_STALE',view['display_reason_codes'])
  def test_discovery_verifies_identity_and_is_idempotent_without_orders(self):
   from hotwatch_service import auto_activate_candidate
   report=copy.deepcopy(self.r);report['report_id']='synthetic-auto-report';candidate=report['candidates'][0];candidate['candidate_id']='synthetic-new-discovery';candidate['asset_id']='synthetic-auto-asset';candidate['exchange']='NASDAQ';report_ingest.save(app.connect,1,report)

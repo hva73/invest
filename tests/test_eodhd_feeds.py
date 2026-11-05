@@ -64,6 +64,21 @@ class FeedTests(unittest.TestCase):
    def open(self,req,**kw):raise urllib.error.HTTPError('https://x/'+SECRET,self.code,'error',{},None)
   for code,expected in [(401,'ENTITLEMENT_UNVERIFIED'),(402,'ENTITLEMENT_UNVERIFIED'),(403,'ENTITLEMENT_UNVERIFIED'),(429,'RATE_LIMIT'),(500,'HTTP_ERROR')]:
    res=EODHDFeeds(SECRET,opener=Failure(code)).minute_bars('us','AMD');self.assertEqual(res['status'],expected);self.assertNotIn(SECRET,str(res))
+ def test_local_request_budget_is_distinct_from_provider_rate_limit(self):
+  from hotwatch_adapters import DataUnavailable
+  def exhausted():raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+  client=EODHDFeeds(SECRET,reserve=exhausted,opener=Opener([]),ws_factory=lambda *a,**kw:WS([]))
+  self.assertEqual(client.minute_bars('us','AMD')['status'],'LOCAL_BUDGET_EXHAUSTED')
+  self.assertEqual(client.capture('us_trades','AMD',1)['status'],'LOCAL_BUDGET_EXHAUSTED')
+ def test_live_trade_survives_exhausted_local_quote_budget(self):
+  from test_hotwatch_engine import request
+  req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0);adapter=EODHDAdapter(None,1,Opener({}))
+  class Feeds:
+   def capture(self,feed,*args,**kwargs):
+    if feed.endswith('trades'):return {'status':'OK','messages':[{'event_time':now.isoformat(),'price':'45.2','market_session':'open'}]}
+    return {'status':'LOCAL_BUDGET_EXHAUSTED'}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
+  self.assertEqual(sample['price'],'45.2');self.assertEqual(sample['market_status'],'REGULAR');self.assertIsNone(sample['bid']);self.assertEqual(adapter.last_feed_diagnostics['websocket_quote_status'],'LOCAL_BUDGET_EXHAUSTED')
  def test_ws_trade_quote_status_and_no_messages(self):
   for feed,msg,field in [('us_trades',{'s':'AMD','t':1730000000000,'p':10,'v':5,'ms':'open'},'price'),('us_quotes',{'s':'AMD','t':1730000000000,'bp':10,'ap':11},'bid'),('us_status',{'s':'AMD','t':1730000000000,'h':'T'},'trading_status')]:
    ws=WS([msg]);client=EODHDFeeds(SECRET,ws_factory=lambda *a,**k:ws);result=client.capture(feed,'AMD',1)

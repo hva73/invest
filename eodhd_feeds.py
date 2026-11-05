@@ -83,7 +83,7 @@ class EODHDFeeds:
    status='ENTITLEMENT_UNVERIFIED' if error.code in (401,402,403) else 'RATE_LIMIT' if error.code==429 else 'HTTP_ERROR'
    return _result(status,path,http_status=error.code)
   except Exception as error:
-   if getattr(error,'code',None)=='PROVIDER_RATE_BUDGET':return _result('RATE_LIMIT',path)
+   if getattr(error,'code',None)=='PROVIDER_RATE_BUDGET':return _result('LOCAL_BUDGET_EXHAUSTED',path)
    return _result('NETWORK_OR_RESPONSE_ERROR',path)
  def minute_bars(self,market,symbol):
   if market not in ('us','eu') or not _valid_symbol(symbol):return _result('INVALID_INPUT','/history')
@@ -184,5 +184,6 @@ class EODHDFeeds:
   except Exception as error:
    code=getattr(getattr(error,'response',None),'status_code',None)
    if code in (401,402,403):return _result('ENTITLEMENT_UNVERIFIED',path,http_status=code)
-   if code==429 or getattr(error,'code',None)=='PROVIDER_RATE_BUDGET':return _result('RATE_LIMIT',path)
+   if getattr(error,'code',None)=='PROVIDER_RATE_BUDGET':return _result('LOCAL_BUDGET_EXHAUSTED',path)
+   if code==429:return _result('RATE_LIMIT',path)
    return _result('NETWORK_OR_RESPONSE_ERROR',path)

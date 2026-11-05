@@ -161,26 +161,30 @@ def view(c,row,now=None):
   if context is None or newer['as_of'] and (not context['as_of'] or stamp(newer['as_of'])>=stamp(context['as_of'])):context=newer
  last=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
  stale=not row['last_data'] or (now-stamp(row['last_data'])).total_seconds()>request['risk']['max_quote_age_s']
+ display_reasons=[]
+ if row['last_error']:display_reasons.append(row['last_error'])
+ if stale and row['last_data']:display_reasons.append('DATA_STALE')
  effective='NO_DATA' if stale and state.get('signal') not in ['PAUSE','NO_DATA'] else state.get('signal','NO_DATA')
- if effective not in ('NO_DATA','PAUSE') and (not context or context.get('status')!='verified' or not context.get('as_of') or not 0<=(now-stamp(context['as_of'])).total_seconds()<=300):effective='NO_DATA'
+ if effective not in ('NO_DATA','PAUSE') and (not context or context.get('status')!='verified' or not context.get('as_of') or not 0<=(now-stamp(context['as_of'])).total_seconds()<=300):effective='NO_DATA';display_reasons.append('POSITION_CONTEXT_UNKNOWN')
  if sample and effective not in ('NO_DATA','PAUSE'):
   latest_sample=json.loads(sample['payload']);max_age=request['risk']['max_quote_age_s']
   if latest_sample['source']=='eodhd' and latest_sample['market_status']!='UNKNOWN':
    fields=['status_at']+(['bid_at','ask_at'] if effective=='BUY' else [])
-   if any(not latest_sample.get(k) or not 0<=(now-stamp(latest_sample[k])).total_seconds()<=max_age for k in fields):effective='NO_DATA'
+   if any(not latest_sample.get(k) or not 0<=(now-stamp(latest_sample[k])).total_seconds()<=max_age for k in fields):effective='NO_DATA';display_reasons.append('MARKET_EVIDENCE_STALE')
    if latest_sample.get('bar_history'):
     from datetime import timedelta
     try:
      bar_end=stamp(latest_sample['bar_history'][-1]['bar_open_at'])+timedelta(seconds=60)
-     if not 0<=(now-bar_end).total_seconds()<=max_age or not 0<=(now-stamp(latest_sample['bar_evidence']['schedule_received_at'])).total_seconds()<=max_age:effective='NO_DATA'
-    except (KeyError,TypeError,ValueError,IndexError):effective='NO_DATA'
+     if not 0<=(now-bar_end).total_seconds()<=max_age or not 0<=(now-stamp(latest_sample['bar_evidence']['schedule_received_at'])).total_seconds()<=max_age:effective='NO_DATA';display_reasons.append('BAR_EVIDENCE_STALE')
+    except (KeyError,TypeError,ValueError,IndexError):effective='NO_DATA';display_reasons.append('BAR_EVIDENCE_STALE')
  profile=state.get('adaptive_profile',request['profile'])
  minimum=state.get('provider_floor_s',provider_floor(request['provider']))
  latest_payload=json.loads(sample['payload']) if sample else None
  history=[latest_payload] if latest_payload and latest_payload.get('bar_history') else [json.loads(x['payload']) for x in reversed(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 120',(row['id'],)).fetchall())]
  data_status=observation_status(history,now,request['risk']['max_quote_age_s'],effective,row['status'])
  display_status={'BUY':'KØBSSIGNAL','SELL':'SÆLGSSIGNAL','REDUCE':'EXIT WATCH','WAIT':'AFVENT','NO_DATA':'DATA MANGLER','PAUSE':'DATA MANGLER'}.get(effective,'HOT WATCH')
- return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'strategy_checksum':checksum(json.loads(row['strategy'])),'signal':effective,'display_status':display_status,'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,PROFILES[profile]),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
+ if effective=='NO_DATA' and data_status['price'] is not None:display_status='AFVENTER SIGNALDATA'
+ return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'strategy_checksum':checksum(json.loads(row['strategy'])),'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,PROFILES[profile]),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
 def sessions(connect,uid,mode=False,after=0,limit=50):
  with connect() as c:
@@ -380,6 +384,7 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
    c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']));event(c,row,'WATCH_EXPIRED',now,'Session deadline reached');return
   if row['last_error']!=code:event(c,row,'DATA_STALE' if code=='DATA_STALE' else 'DATA_ERROR',now,code,severity='warning',data_time=row['last_data'])
   failures=min(row['failures']+1,10);floor=provider_floor(request['provider']);interval=min(1800,max(floor,PROFILES[request['profile']])*2**min(failures-1,5));state.update(signal='NO_DATA',pending=None,confirmations=0)
+  if code=='PROVIDER_RATE_BUDGET':interval=60
   if retry_after_s is not None:interval=max(interval,max(0,retry_after_s))
   if row['last_error']!=code:
    previous=json.loads(row['strategy']);result={'signal':'NO_DATA','reason_codes':[code],'human_readable_explanation':code,'supporting_metrics':{'quote_age_s':(now-stamp(row['last_data'])).total_seconds() if row['last_data'] else None},'calculation_timestamp':now.isoformat(),'data_timestamp':row['last_data'],'strategy_id':previous['strategy_id'],'strategy_version':previous['version'],'strategy_checksum':checksum(previous),'confidence_score':0,'risk_level':'critical' if set(state.get('alert_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE'} else 'high','rules_score_note':'No valid current market input','critical_override':False}

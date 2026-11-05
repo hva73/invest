@@ -206,7 +206,7 @@ def probe_eodhd(connect,symbol,market,duration=2):
  checks={};limited=False
  for name,action in actions:
   checks[name]={'status':'NOT_TESTED_RATE_LIMIT'} if limited else action()
-  if checks[name]['status']=='RATE_LIMIT':limited=True
+  if checks[name]['status'] in ('RATE_LIMIT','LOCAL_BUDGET_EXHAUSTED'):limited=True
  for value in checks.values():
   if value.get('event_time') and value.get('received_at'):value['event_to_receive_ms']=round((stamp(value['received_at'])-stamp(value['event_time'])).total_seconds()*1000,3)
   if 'bars' in value:
