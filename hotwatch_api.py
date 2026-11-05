@@ -71,9 +71,16 @@ def handle(h,connect,method):
      if cursor is not None and (view!='history' or not 1<=cursor<=10**15):raise EngineError('invalid_pagination')
      result=dashboard_projection.engine_session_view(connect,uid,mode,view,limit,cursor)
     else:result=engine.sessions(connect,uid,mode,after,limit)
-   else:result=engine.create(connect,uid,data);status=200 if result['duplicate'] else 201
+   else:
+    from hotwatch_contract import require
+    require(data,SESSION)
+    from hotwatch_service import verify_requested_instruments
+    verify_requested_instruments(connect,uid,[data])
+    result=engine.create(connect,uid,data);status=200 if result['duplicate'] else 201
   elif parts==['activation-requests'] and method=='POST':
    if h.headers.get('Idempotency-Key')!=data.get('request_id'):raise EngineError('idempotency_key_mismatch')
+   from hotwatch_service import verify_requested_instruments
+   if isinstance(data.get('sessions'),list):verify_requested_instruments(connect,uid,data['sessions'])
    result=engine.create_batch(connect,uid,data);status=200 if result['duplicate'] else 201
   elif len(parts)>=2 and parts[0]=='sessions':
    wid=parts[1]

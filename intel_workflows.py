@@ -56,10 +56,10 @@ def candidate_currentness(c,uid,mode,cid,at=None):
         assessment=datetime.fromtimestamp(decision[0],timezone.utc)
         data=decision[1]
         deadline=stamp(data['deadline']) if data.get('deadline') else assessment+timedelta(hours=24)
-        reason='fravalgt' if data.get('status')=='FRAVÆLG' else 'frist udløbet · revurdering mangler' if deadline<=at else None
+        reason='fravalgt' if data.get('status')=='FRAVÆLG' else 'frist udløbet · revurdering mangler' if deadline+timedelta(hours=24)<=at else None
     else:
         return {'status':'UNKNOWN','reason':'Tidsstemplet vurdering mangler','deadline':None,'assessed_at':None}
-    return {'status':'COLD' if reason else 'CURRENT','reason':reason,'deadline':deadline.isoformat(),'assessed_at':assessment.isoformat()}
+    return {'status':'COLD' if reason else 'REVIEW_DUE' if deadline<=at else 'CURRENT','reason':reason or ('revurdering forfalder' if deadline<=at else None),'deadline':deadline.isoformat(),'assessed_at':assessment.isoformat()}
 
 def decision_errors(decision,path,at,previous=None):
     errors=[]
@@ -181,6 +181,9 @@ def record(connect,uid,data):
         payload=canonical(data)
         c.execute('INSERT INTO hot_watch_observations(user_id,is_test,observation_id,candidate_id,report_row_id,observed,payload,digest,received) VALUES(?,?,?,?,?,?,?,?,?)',(uid,int(data['is_test']),data['observation_id'],data['candidate_id'],parent['id'],stamp(data['observed_at']).timestamp(),payload,hashlib.sha256(payload.encode()).hexdigest(),now()))
         index_decision(c,uid,data['is_test'],data['candidate_id'],data['decision'],data['observation_id'])
+        if (data['decision'] or {}).get('status')=='FRAVÆLG':
+            import hotwatch_engine
+            hotwatch_engine.reconcile_candidates(connect,connection=c)
         return 201,{'ok':True,'observation_id':data['observation_id'],'duplicate':False,'warnings':checked['warnings']}
 
 def order_state(o):

@@ -1,5 +1,6 @@
 """Persistent HOT WATCH v1 session/signal engine. No trading capabilities."""
 import json,os,secrets,time,hashlib
+from contextlib import nullcontext
 from datetime import datetime,timezone
 from decimal import Decimal
 from hotwatch_contract import SESSION,SAMPLE,CONTEXT,ACTIVATION_BATCH,EngineError,require,canonical,checksum,stamp,OPEN_STATES,PROFILES,GLOBAL_RISK,provider_floor
@@ -28,6 +29,8 @@ def init(c):
  c.execute('CREATE TABLE IF NOT EXISTS hw_calculations(id INTEGER PRIMARY KEY,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),sample_row_id INTEGER REFERENCES hw_samples(id),calculated TEXT NOT NULL,payload TEXT NOT NULL,strategy_checksum TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_events(id INTEGER PRIMARY KEY,event_id TEXT NOT NULL UNIQUE,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),event_type TEXT NOT NULL,severity TEXT NOT NULL,created TEXT NOT NULL,data_timestamp TEXT,payload TEXT NOT NULL)')
  c.execute('CREATE INDEX IF NOT EXISTS hw_event_history ON hw_events(watch_row_id,id)')
+ c.execute('CREATE TABLE IF NOT EXISTS hw_discovery_control(id INTEGER PRIMARY KEY CHECK(id=1),started_at TEXT NOT NULL)')
+ c.execute('INSERT OR IGNORE INTO hw_discovery_control VALUES(1,?)',(utc().isoformat(),))
  c.execute('CREATE TABLE IF NOT EXISTS hw_admin_events(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),kind TEXT NOT NULL,created TEXT NOT NULL,payload TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_operator_events(id INTEGER PRIMARY KEY,created TEXT NOT NULL,killed INTEGER NOT NULL,reason TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_system_control(id INTEGER PRIMARY KEY CHECK(id=1),killed INTEGER NOT NULL,changed TEXT NOT NULL,reason TEXT NOT NULL)')
@@ -288,19 +291,24 @@ def view(c,row,now=None):
   display_status='MARKED LUKKET' if data_status['market_status']=='CLOSED' else 'HANDEL STANDSET'
  if effective in ('NO_DATA','PAUSE') and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED') and regular['status']=='CLOSED' and data_status['market_status'] not in ('PREMARKET','AFTERHOURS','HALTED'):
   display_status='ORDINÆR HANDEL LUKKET'
- return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_cold_exit_retained':json.loads(row['state']).get('candidate_cold'),'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,PROFILES[profile]),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
+ candidate_review=None
+ if request.get('watch_mode','both')!='exit' and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED','PAUSED'):
+  from intel_workflows import candidate_currentness
+  candidate_review=candidate_currentness(c,row['user_id'],row['is_test'],row['candidate_id'],now)
+  if candidate_review['status']=='REVIEW_DUE' and row['status']!='PAUSED':display_status='REVURDERING FORFALDET'
+ return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,PROFILES[profile]),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
 def sessions(connect,uid,mode=False,after=0,limit=50):
  with connect() as c:
   rows=c.execute('SELECT * FROM hw_sessions WHERE user_id=? AND is_test=? AND id>? ORDER BY id LIMIT ?',(uid,int(mode),after,limit+1)).fetchall();control=c.execute('SELECT killed,reason,changed FROM hw_control WHERE user_id=?',(uid,)).fetchone();beat=c.execute('SELECT updated,status FROM hw_heartbeat WHERE id=1').fetchone();supervisor=c.execute('SELECT updated,status,reason,attempts FROM hw_supervisor_status WHERE id=1').fetchone()
   return {'sessions':[view(c,r) for r in rows[:limit]],'next_cursor':rows[limit-1]['id'] if len(rows)>limit else None,'is_test':mode,'operator_kill_switch':bool(c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]),'kill_switch':dict(control) if control else {'killed':0,'reason':'','changed':None},'worker':dict(beat) if beat else None,'supervisor':dict(supervisor) if supervisor else None,'capacity':capacity(),'phase':'1-2','deferred':['backtest','shadow','qualified strategy activation/rollback']}
 
-def reconcile_candidates(connect,now=None):
+def reconcile_candidates(connect,now=None,connection=None):
  """Expire report-only entry watches without relying on a market-data read."""
  from intel_workflows import candidate_currentness
  now=now or utc();changed=0
- with connect() as c:
-  c.execute('BEGIN IMMEDIATE')
+ with (nullcontext(connection) if connection is not None else connect()) as c:
+  if connection is None:c.execute('BEGIN IMMEDIATE')
   rows=c.execute("SELECT * FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchall()
   for row in rows:
    req=json.loads(row['request']);mode=req.get('watch_mode','both')
@@ -365,7 +373,7 @@ def control(connect,uid,wid,mode,action,now=None):
    if request['end_at'] and stamp(request['end_at'])<=now:raise EngineError('watch_expired',409)
    if request.get('watch_mode','both')=='entry':
     from intel_workflows import candidate_currentness
-    if candidate_currentness(c,uid,mode,row['candidate_id'],now)['status']!='CURRENT':raise EngineError('candidate_not_current',409)
+    if candidate_currentness(c,uid,mode,row['candidate_id'],now)['status'] not in ('CURRENT','REVIEW_DUE'):raise EngineError('candidate_not_current',409)
    new='VALIDATING'
   elif action=='stop':new='COMPLETED'
   else:raise EngineError('unknown_action')
@@ -473,7 +481,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   decision=intel_workflows.prior_decision(c,uid,mode,request['candidate_id'])
   from intel_workflows import candidate_currentness
   currentness=candidate_currentness(c,uid,mode,row['candidate_id'],now) if request.get('report_id')!='automatic-holdings' else {'status':'UNKNOWN'}
-  risk=dict(request['risk'],entry_allowed=request.get('watch_mode','both')!='exit' and currentness['status']=='CURRENT' and (not decision or decision[1]['status']!='FRAVÆLG'),exit_allowed=request.get('watch_mode','both')!='entry')
+  risk=dict(request['risk'],entry_allowed=request.get('watch_mode','both')!='exit' and currentness['status'] in ('CURRENT','REVIEW_DUE') and (not decision or decision[1]['status']!='FRAVÆLG'),exit_allowed=request.get('watch_mode','both')!='entry')
   result,nextstate=calculate(sample,metrics,strategy_data,risk,state,now,new_market_event=new_market_event)
   result['position_context']=sample['context'];result['new_market_observation']=new_market_event
   result.update(engine_version='1.0-phase1-2',feature_version='1.0.0',risk_version='1.0.0',global_risk_limits=GLOBAL_RISK,algorithm_constraints={'max_volatility_pct':'5','max_price_gap_pct':'5','max_action_signals_hour':20,'max_context_age_s':300},risk_parameters=risk,prior_signal_state=state,input_sample_ids=[s['sample_id'] for s in samples])

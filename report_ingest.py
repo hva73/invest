@@ -73,6 +73,9 @@ def save(connect,user_id,data):
             intel_workflows.index_report(c,user_id,data)
             import candidate_lifecycle
             candidate_lifecycle.index_report(c,user_id,data)
+            if any((candidate.get('decision') or {}).get('status')=='FRAVÆLG' for candidate in data['candidates']):
+                import hotwatch_engine
+                hotwatch_engine.reconcile_candidates(connect,connection=c)
         for phase in ['received','validated','stored']:intel_workflows.evidence(c,row_id,phase)
         return 201,{**receipt,'id':row_id,'duplicate':False}
 

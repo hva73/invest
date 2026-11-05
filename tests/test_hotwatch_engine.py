@@ -728,6 +728,11 @@ class EngineHTTP(unittest.TestCase):
   import test_mcp_reports
   self.http=test_mcp_reports.McpReports();self.http.setUp();report_ingest.save(app.connect,1,merc_report(True));self.req=request();self.auth=self.http.login()
  def tearDown(self):self.http.tearDown()
+ def test_live_session_requires_pluto_identity_gate(self):
+  live=request(False)
+  with patch('hotwatch_service.verified_discovery_instrument',return_value=None):
+   status,result,_=self.http.request('/api/v1/hotwatch/sessions',live,self.auth)
+  self.assertEqual(status,409);self.assertEqual(result['code'],'pluto_identity_unverified')
  def test_session_auth_csrf_scoping_pagination_and_management(self):
   path='/api/v1/hotwatch/sessions';self.assertEqual(self.http.request(path,self.req)[0],401);self.assertEqual(self.http.request(path,self.req,{'Cookie':self.auth['Cookie']})[0],403);status,result,_=self.http.request(path,self.req,self.auth);self.assertEqual(status,201);wid=result['session']['watch_id'];self.assertEqual(self.http.request(path,self.req,self.auth)[0],200)
   self.assertEqual(self.http.request(path+'?is_test=false',None,self.auth)[1]['sessions'],[]);self.assertEqual(len(self.http.request(path+'?is_test=true',None,self.auth)[1]['sessions']),1);self.assertEqual(self.http.request(path+'?limit=101',None,self.auth)[0],400)

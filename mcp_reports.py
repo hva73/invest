@@ -261,6 +261,9 @@ def rpc(connect,identity,data):
                         for i,item in enumerate(sessions):errors.extend(report_validation.schema_errors(item,SESSION))
                 else:errors=report_validation.schema_errors(args,spec)
                 if errors:raise EngineError('invalid_input',400,errors)
+                if name in ('start_hot_watch','activate_hot_watch_batch'):
+                    from hotwatch_service import verify_requested_instruments
+                    verify_requested_instruments(connect,identity['user_id'],[args] if name=='start_hot_watch' else args['sessions'])
                 if name=='start_hot_watch':result=engine.create(connect,identity['user_id'],args)
                 elif name=='activate_hot_watch_batch':result=engine.create_batch(connect,identity['user_id'],args)
                 elif name=='control_hot_watch':result=engine.control(connect,identity['user_id'],args['watch_id'],args['is_test'],args['action'])

@@ -11,6 +11,12 @@ def verified_discovery_instrument(connect,uid,candidate):
  """Verify a reported stable asset with Pluto's read-only get_asset tool."""
  import trade_service
  adapter=PlutoAdapter(connect,uid);client,tools=trade_service.client(connect,uid,adapter.factory)
+ found=trade_service.call(client,tools,'search_assets',{'query':candidate['ticker'],'limit':10,'assetType':'ALL'})
+ if isinstance(found,list):matches=found
+ elif isinstance(found,dict):
+  lists=[found[k] for k in ('assets','results','items') if isinstance(found.get(k),list)];matches=lists[0] if len(lists)==1 else []
+ else:matches=[]
+ if len([x for x in matches if isinstance(x,dict) and (x.get('id') or x.get('assetId'))==candidate['asset_id'] and str(x.get('ticker','')).casefold()==candidate['ticker'].casefold()])!=1:return None
  raw=trade_service.call(client,tools,'get_asset',{'assetId':candidate['asset_id']})
  asset=raw.get('asset') if isinstance(raw,dict) else None;buy=raw.get('buyBy') if isinstance(raw,dict) else None
  if not isinstance(asset,dict) or asset.get('id')!=candidate['asset_id'] or str(asset.get('ticker','')).casefold()!=candidate['ticker'].casefold():return None
@@ -25,6 +31,20 @@ def verified_discovery_instrument(connect,uid,candidate):
  currency=asset.get('currency');isin=asset.get('isin');exchange=asset.get('exchange')
  if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency) or not isinstance(exchange,str) or not exchange or not isinstance(isin,str) or not re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',isin):return None
  return {'asset_id':asset['id'],'ticker':asset['ticker'],'exchange':exchange,'currency':currency,'isin':isin}
+
+def verify_requested_instruments(connect,uid,requests):
+ """Require Pluto search and asset verification for each real activation."""
+ verified={}
+ for req in requests:
+  if req.get('is_test') is not False:continue
+  with connect() as c:existing=c.execute('SELECT digest FROM hw_sessions WHERE user_id=? AND watch_id=?',(uid,req.get('watch_id'))).fetchone()
+  if existing and existing['digest']==engine.checksum(req):continue
+  key=(req.get('asset_id'),req.get('ticker'),req.get('exchange'),req.get('quote_currency'))
+  if key not in verified:
+   try:instrument=verified_discovery_instrument(connect,uid,{'asset_id':key[0],'ticker':key[1],'exchange':key[2]})
+   except Exception:instrument=None
+   if not instrument or instrument.get('asset_id')!=key[0] or str(instrument.get('ticker','')).casefold()!=str(key[1]).casefold() or str(instrument.get('exchange','')).casefold()!=str(key[2]).casefold() or instrument.get('currency')!=key[3]:raise EngineError('pluto_identity_unverified',409)
+   verified[key]=instrument
 
 def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup=None):
  """Start only a new, uniquely matched candidate; no order or purchase plan."""
@@ -65,8 +85,14 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
 
 def auto_discover(connect,cursor=0):
  """Optional worker path, bounded by existing capacity and provider budgets."""
- if os.environ.get('ESCAPE_HW_AUTOSTART_ENABLED')!='1':return cursor
- try:after=stamp(os.environ.get('ESCAPE_HW_AUTOSTART_AFTER',''))
+ if os.environ.get('ESCAPE_HW_AUTOSTART_ENABLED','1')!='1':return cursor
+ configured=os.environ.get('ESCAPE_HW_AUTOSTART_AFTER')
+ try:
+  if configured:after=stamp(configured)
+  else:
+   with connect() as c:
+    c.execute('INSERT OR IGNORE INTO hw_discovery_control VALUES(1,?)',(engine.utc().isoformat(),))
+    after=stamp(c.execute('SELECT started_at FROM hw_discovery_control WHERE id=1').fetchone()['started_at'])
  except (ValueError,TypeError):return cursor
  with connect() as c:users=[row['id'] for row in c.execute('SELECT id FROM users WHERE active=1')]
  for uid in users:
@@ -280,6 +306,8 @@ class Runner:
  def heartbeat(self,status):
   with self.connect() as c:c.execute("INSERT INTO hw_heartbeat VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET updated=excluded.updated,status=excluded.status",(engine.utc().isoformat(),status))
  def run(self,interval=2):
+  if os.environ.get('ESCAPE_HW_AUTOSTART_ENABLED','1')=='1':
+   with self.connect() as c:c.execute('INSERT OR IGNORE INTO hw_discovery_control VALUES(1,?)',(engine.utc().isoformat(),))
   def beat():
    while not self.stop.is_set():
     try:self.heartbeat('running')
@@ -307,7 +335,7 @@ class Runner:
   try:
    while not self.stop.is_set():
     self.drain()
-    if os.environ.get('ESCAPE_HW_AUTOSTART_ENABLED')=='1' and time.monotonic()>=next_discovery:
+    if os.environ.get('ESCAPE_HW_AUTOSTART_ENABLED','1')=='1' and time.monotonic()>=next_discovery:
      try:discovery_cursor=auto_discover(self.connect,discovery_cursor)
      except Exception:logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'discovery_error'}))
      next_discovery=time.monotonic()+15
