@@ -64,11 +64,11 @@ class HoldingAutowatch(unittest.TestCase):
   self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
   with app.connect() as c:
    sessions=c.execute('SELECT watch_id,status FROM hw_sessions ORDER BY id').fetchall();self.assertEqual(len(sessions),2);self.assertNotEqual(sessions[0]['watch_id'],sessions[1]['watch_id'])
- def test_ambiguous_symbol_is_not_created_and_retry_is_bounded(self):
+ def test_ambiguous_eodhd_symbol_uses_verified_pluto_instead(self):
   bad=lambda *_:{'choices':[{'symbol':'ONE.US','currency':'USD','isin':'US1234567890'},{'symbol':'TWO.US','currency':'USD','isin':'US1234567890'}]}
-  self.assertEqual(self.tick(verify=self.verify,lookup=bad),'EODHD_IDENTITY_UNCERTAIN')
-  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM hw_sessions').fetchone()[0],0)
-  self.assertIsNone(self.tick(verify=lambda *_:self.fail('retried too soon'),lookup=bad))
+  self.assertEqual(self.tick(verify=self.verify,lookup=bad),'LINKED')
+  with app.connect() as c:
+   row=c.execute('SELECT request FROM hw_sessions').fetchone();self.assertEqual(json.loads(row['request'])['provider'],'pluto')
  def test_failed_incomplete_or_stale_scope_does_not_start(self):
   with app.connect() as c:c.execute("UPDATE portfolio_snapshots SET last_error='unavailable'")
   self.assertIsNone(self.tick(verify=lambda *_:self.fail('must not look up'),lookup=self.lookup))
@@ -98,11 +98,58 @@ class HoldingAutowatch(unittest.TestCase):
   with patch.object(engine,'capacity',return_value=0):
    status=self.tick(verify=lambda *_:self.fail('capacity must be checked first'),lookup=self.lookup)
   self.assertEqual(status,'CAPACITY_LIMIT')
- def test_missing_feed_key_stops_before_pluto_or_eodhd_lookup(self):
+ def test_missing_eodhd_key_uses_verified_pluto_without_eodhd_lookup(self):
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
-   status=service.auto_holdings_tick(app.connect,verify=lambda *_:self.fail('must not call Pluto'),lookup=lambda *_:self.fail('must not call EODHD'),now=self.now)
-  self.assertEqual(status,'EODHD_KEY_NOT_CONFIGURED')
-  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM hw_sessions').fetchone()[0],0)
+   status=service.auto_holdings_tick(app.connect,verify=self.verify,lookup=lambda *_:self.fail('must not call EODHD'),now=self.now)
+  self.assertEqual(status,'LINKED')
+  with app.connect() as c:self.assertEqual(json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()[0])['provider'],'pluto')
+ def test_missing_isin_does_not_prevent_verified_pluto_identity(self):
+  raw={'asset':{'id':'synthetic-asset','ticker':'TEST','exchange':'NASDAQ','currency':'USD'}}
+  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value=raw):
+   instrument=service.holding_instrument(app.connect,1,dict(self.holding,currency='USD'))
+  self.assertIsNone(instrument['isin']);self.assertEqual(instrument['asset_id'],'synthetic-asset')
+  self.assertEqual(self.tick(verify=lambda *_:instrument,lookup=lambda *_:self.fail('No ISIN means no automatic EODHD match')),'LINKED')
+  with app.connect() as c:self.assertEqual(json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()[0])['provider'],'pluto')
+ def test_missing_exchange_is_recovered_only_from_same_pluto_asset_id(self):
+  raw={'asset':{'id':'synthetic-asset','ticker':'TEST','currency':'USD'}}
+  matches=[{'id':'another-asset','ticker':'TEST','exchange':'OTHER','currency':'USD'},{'id':'synthetic-asset','ticker':'TEST','exchange':'NASDAQ','currency':'USD'}]
+  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',side_effect=[raw,matches]):
+   instrument=service.holding_instrument(app.connect,1,dict(self.holding,currency='USD'))
+  self.assertEqual(instrument['exchange'],'NASDAQ');self.assertEqual(instrument['asset_id'],'synthetic-asset')
+  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',side_effect=[raw,matches[:1]]):
+   self.assertIsNone(service.holding_instrument(app.connect,1,dict(self.holding,currency='USD')))
+ def test_verified_existing_candidate_feed_creates_separate_holding_watch(self):
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);req.update(watch_mode='entry',purpose='candidate',watch_id='existing-candidate',candidate_id='existing-candidate')
+   c.execute('UPDATE hw_sessions SET watch_id=?,candidate_id=?,purpose=?,request=? WHERE id=?',('existing-candidate','existing-candidate','candidate',json.dumps(req),row['id']))
+   c.execute('DELETE FROM hw_holding_autowatch')
+   sample={'verification':'verified','asset_id':'synthetic-asset','ticker':'TEST','currency':'USD'}
+   c.execute('INSERT INTO hw_samples(watch_row_id,source,sample_id,event_epoch,received,payload,digest) VALUES(?,?,?,?,?,?,?)',(row['id'],'eodhd','identity-evidence',self.now.timestamp(),self.now.isoformat(),json.dumps(sample),'digest'))
+  with patch('hotwatch_service.holding_instrument',side_effect=AssertionError('reuse existing verified identity')),patch('hotwatch_adapters.search_eodhd_symbols',side_effect=AssertionError('reuse existing verified feed')):
+   self.assertEqual(self.tick(),'LINKED')
+  with app.connect() as c:
+   requests=[json.loads(r['request']) for r in c.execute('SELECT request FROM hw_sessions ORDER BY id')]
+  self.assertEqual([r['watch_mode'] for r in requests],['entry','exit']);self.assertEqual(requests[1]['provider_symbol'],'TEST.US')
+ def test_rate_budget_retry_waits_until_next_minute_not_five_minutes(self):
+  def blocked(*_):raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+  self.assertEqual(self.tick(verify=self.verify,lookup=blocked),'PROVIDER_RATE_BUDGET')
+  with app.connect() as c:row=c.execute('SELECT next_attempt FROM hw_holding_autowatch').fetchone()
+  self.assertGreater(row['next_attempt'],self.now.timestamp());self.assertLessEqual(row['next_attempt']-self.now.timestamp(),61)
+ def test_existing_budget_delay_is_shortened_safely_on_startup(self):
+  with app.connect() as c:c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(1,self.pid,'synthetic-asset','PROVIDER_RATE_BUDGET',None,self.now.timestamp()+300,self.now.isoformat()))
+  with patch('hotwatch_engine.utc',return_value=self.now):app.init()
+  with app.connect() as c:row=c.execute('SELECT status,next_attempt FROM hw_holding_autowatch').fetchone()
+  self.assertEqual(row['status'],'PROVIDER_RATE_BUDGET');self.assertGreater(row['next_attempt'],self.now.timestamp());self.assertLessEqual(row['next_attempt']-self.now.timestamp(),61)
+ def test_pluto_fallback_reads_exact_owned_position_and_source_time(self):
+  from hotwatch_adapters import PlutoAdapter,unknown_context
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with app.connect() as c:row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request'])
+  quote={'asset_id':'synthetic-asset','ticker':'TEST','currency':'USD','exchange':'NASDAQ','price':'100','price_time':self.now.isoformat()}
+  with patch('market_data.quote',return_value=quote) as get_quote,patch.object(PlutoAdapter,'context',return_value=unknown_context()):
+   sample=PlutoAdapter(app.connect,1).poll({'request_data':req})
+  self.assertEqual(sample['source'],'pluto');self.assertEqual(sample['event_time'],self.now.isoformat());self.assertEqual(get_quote.call_args.args[2],{'holding_portfolio_id':self.pid,'holding_asset_id':'synthetic-asset'})
  def test_old_snapshot_is_not_used(self):
   with app.connect() as c:
    payload={'positions_complete':True,'observed':(self.now-timedelta(minutes=6)).isoformat(),'positions':[self.holding]}

@@ -214,6 +214,8 @@ class PlutoAdapter:
    import trade_service
    client,tools=trade_service.client(self.connect,self.uid,self.factory)
    q=market_data.normalized(trade_service.call(client,tools,'get_asset',{'assetId':r['asset_id'],'period':'ONE_WEEK'}),r['asset_id'])
+  elif r['report_id']=='automatic-holdings' and len(r['portfolio_ids'])==1:
+   q=market_data.quote(self.connect,self.uid,{'holding_portfolio_id':r['portfolio_ids'][0],'holding_asset_id':r['asset_id']},factory=self.factory)
   else:q=market_data.quote(self.connect,self.uid,{'report_id':r['report_id'],'candidate_id':r['candidate_id'],'is_test':r['is_test'],'asset_id':r['asset_id']},factory=self.factory)
   if q.get('pending'):raise DataUnavailable('PLUTO_REQUEST_PENDING')
   if q.get('selection_required') or q.get('asset_id')!=r['asset_id'] or str(q.get('ticker','')).casefold()!=r['ticker'].casefold():raise DataUnavailable('PLUTO_ASSET_NOT_CONFIRMED')

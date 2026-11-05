@@ -160,9 +160,40 @@ def holding_instrument(connect,uid,holding):
  raw=trade_service.call(client,tools,'get_asset',{'assetId':holding['asset_id']})
  asset=raw.get('asset') if isinstance(raw,dict) else None
  if not isinstance(asset,dict) or asset.get('id')!=holding['asset_id']:return None
- currency=asset.get('currency');isin=asset.get('isin');exchange=asset.get('exchange');ticker=asset.get('ticker')
- if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency) or not isinstance(isin,str) or not re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',isin) or not isinstance(exchange,str) or not exchange or not isinstance(ticker,str) or not ticker:return None
+ currency=asset.get('currency') or holding.get('currency');isin=asset.get('isin');exchange=asset.get('exchange');ticker=asset.get('ticker')
+ if (not exchange or not ticker or not currency or not isin) and holding.get('ticker'):
+  try:
+   from market_data import choices
+   options=choices(trade_service.call(client,tools,'search_assets',{'query':holding['ticker'],'limit':10,'assetType':'ALL'}))
+   exact=[x for x in options if x.get('asset_id')==holding['asset_id']]
+   if len(exact)==1:
+    match=exact[0]
+    if ticker and match.get('ticker') and ticker.casefold()!=match['ticker'].casefold():return None
+    if currency and match.get('currency') and currency!=match['currency']:return None
+    if isin and match.get('isin') and isin!=match['isin']:return None
+    ticker=ticker or match.get('ticker');currency=currency or match.get('currency');exchange=exchange or match.get('exchange');isin=isin or match.get('isin')
+  except Exception:pass
+ if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency) or not isinstance(exchange,str) or not exchange or not isinstance(ticker,str) or not ticker:return None
+ if holding.get('currency') and holding['currency']!=currency:return None
+ if holding.get('ticker') and str(holding['ticker']).casefold()!=ticker.casefold():return None
+ if not isinstance(isin,str) or not re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',isin):isin=None
  return {'asset_id':asset['id'],'ticker':ticker,'exchange':exchange,'currency':currency,'isin':isin}
+
+def verified_existing_feed(connect,uid,holding):
+ """Reuse instrument identity from an actual verified observation, not a ticker guess."""
+ aid=holding['asset_id']
+ with connect() as c:
+  rows=c.execute("SELECT s.request,p.payload FROM hw_sessions s JOIN hw_samples p ON p.watch_row_id=s.id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') AND json_extract(s.request,'$.asset_id')=? AND p.source='eodhd' ORDER BY p.id DESC LIMIT 30",(uid,aid)).fetchall()
+ for row in rows:
+  try:
+   req=json.loads(row['request']);sample=json.loads(row['payload']);ticker=req['ticker'];currency=req['quote_currency'];symbol=req.get('provider_symbol');exchange=req['exchange']
+   if sample.get('verification')!='verified' or sample.get('asset_id')!=aid or sample.get('currency')!=currency or str(sample.get('ticker','')).casefold()!=ticker.casefold():continue
+   if holding.get('ticker') and str(holding['ticker']).casefold()!=ticker.casefold():continue
+   if holding.get('currency') and holding['currency']!=currency:continue
+   if not isinstance(symbol,str) or not symbol or not isinstance(exchange,str) or not exchange:continue
+   return {'asset_id':aid,'ticker':ticker,'currency':currency,'exchange':exchange,'provider_symbol':symbol}
+  except (KeyError,TypeError,ValueError,AttributeError):continue
+ return None
 
 def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
  """Activate at most one owned position per tick, with persistent bounded retries."""
@@ -213,22 +244,26 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
  try:
   with connect() as c:count=c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]
   if count>=engine.capacity():status='CAPACITY_LIMIT'
-  elif os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':status='EODHD_FEED_NOT_ENABLED'
-  elif not os.environ.get('ESCAPE_EODHD_API_KEY','').strip():status='EODHD_KEY_NOT_CONFIGURED'
   else:
-   instrument=(verify or holding_instrument)(connect,uid,holding)
+   known=verified_existing_feed(connect,uid,holding) if verify is None else None
+   instrument=known or (verify or holding_instrument)(connect,uid,holding)
    if instrument and instrument.get('asset_id')==aid:
-    opts=(lookup or search_eodhd_symbols)(connect,uid,{'holding_portfolio_id':pid,'holding_asset_id':aid,'quote_currency':instrument['currency']})
-    matches=[item for item in opts.get('choices',[]) if item.get('isin')==instrument.get('isin') and item.get('currency')==instrument.get('currency')]
-    if len(matches)!=1:status='EODHD_IDENTITY_UNCERTAIN'
-    else:
-     cid='holding-'+hashlib.sha256((str(uid)+'|'+str(pid)+'|'+aid).encode()).hexdigest()[:28]
-     risk={'max_notional_dkk':'1000','max_loss_dkk':'100','max_spread_pct':'1','max_quote_age_s':120,'max_position_fraction_pct':'20','proposed_quantity':None,'stop_price':None,'exit_deadline':None}
-     req={'watch_id':watch,'report_id':'automatic-holdings','candidate_id':cid,'is_test':False,'purpose':'automatic holding watch','ticker':instrument['ticker'],'exchange':instrument['exchange'],'asset_id':aid,'quote_currency':instrument['currency'],'portfolio_ids':[pid],'priority':'NORMAL','profile':'NORMAL','provider':'eodhd','provider_symbol':matches[0]['symbol'],'end_at':None,'activation_reason':'Automatisk overvågning af verificeret Pluto-beholdning','strategy_id':'escape_momentum','strategy_version':'1.0.0','risk':risk,'watch_mode':'exit'}
-     result=engine.create_holding(connect,uid,req,now);status='LINKED';linked=result['session']['watch_id']
+    provider='eodhd' if known else 'pluto';symbol=known.get('provider_symbol') if known else None
+    if not known and instrument.get('isin') and os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')=='1' and os.environ.get('ESCAPE_EODHD_API_KEY','').strip():
+     try:
+      opts=(lookup or search_eodhd_symbols)(connect,uid,{'holding_portfolio_id':pid,'holding_asset_id':aid,'quote_currency':instrument['currency']})
+      matches=[item for item in opts.get('choices',[]) if item.get('isin')==instrument['isin'] and item.get('currency')==instrument['currency']]
+      if len(matches)==1:provider='eodhd';symbol=matches[0]['symbol']
+     except DataUnavailable as error:
+      if error.code in ('PROVIDER_RATE_BUDGET','EODHD_RATE_LIMIT'):raise
+    cid='holding-'+hashlib.sha256((str(uid)+'|'+str(pid)+'|'+aid).encode()).hexdigest()[:28]
+    risk={'max_notional_dkk':'1000','max_loss_dkk':'100','max_spread_pct':'1','max_quote_age_s':120,'max_position_fraction_pct':'20','proposed_quantity':None,'stop_price':None,'exit_deadline':None}
+    req={'watch_id':watch,'report_id':'automatic-holdings','candidate_id':cid,'is_test':False,'purpose':'automatic holding watch','ticker':instrument['ticker'],'exchange':instrument['exchange'],'asset_id':aid,'quote_currency':instrument['currency'],'portfolio_ids':[pid],'priority':'NORMAL','profile':'NORMAL','provider':provider,'provider_symbol':symbol,'end_at':None,'activation_reason':'Automatisk overvågning af verificeret Pluto-beholdning','strategy_id':'escape_momentum','strategy_version':'1.0.0','risk':risk,'watch_mode':'exit'}
+    result=engine.create_holding(connect,uid,req,now);status='LINKED';linked=result['session']['watch_id']
  except EngineError as error:status=error.code
  except Exception:status='VERIFICATION_FAILED'
- with connect() as c:c.execute("UPDATE hw_holding_autowatch SET status=?,watch_id=?,next_attempt=?,updated=? WHERE user_id=? AND portfolio_id=? AND asset_id=?",(status,linked,epoch+300,engine.utc().isoformat(),uid,pid,aid))
+ retry_at=(int(epoch//60)+1)*60+1 if status=='PROVIDER_RATE_BUDGET' else epoch+120 if status=='EODHD_RATE_LIMIT' else epoch+300
+ with connect() as c:c.execute("UPDATE hw_holding_autowatch SET status=?,watch_id=?,next_attempt=?,updated=? WHERE user_id=? AND portfolio_id=? AND asset_id=?",(status,linked,retry_at,engine.utc().isoformat(),uid,pid,aid))
  return status
 
 def reconcile_closed_holdings(connect,now=None):

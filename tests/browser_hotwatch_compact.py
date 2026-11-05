@@ -14,6 +14,9 @@ def main():
  with tempfile.TemporaryDirectory() as tmp:
   app.DB=tmp+'/db';app.init();app.create_user('test-password-long-enough');report_ingest.save(app.connect,1,merc_report(True));req=request();now=engine.utc();before=now-timedelta(seconds=60);engine.create(app.connect,1,req,before)
   engine.ingest(app.connect,1,req['watch_id'],True,tick(before,1,'100'),before);engine.ingest(app.connect,1,req['watch_id'],True,tick(now,2,'99'),now)
+  with app.connect() as c:
+   for i in range(3):
+    c.execute("INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due) SELECT user_id,?,is_test,candidate_id,?,'COMPLETED',request,digest,strategy,state,created,updated,next_due FROM hw_sessions WHERE watch_id=?",(f'historical-{i}',f'old-{i}',req['watch_id']))
   server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
   asset={'id':'test-asset','ticker':'ABC','exchange':'NASDAQ','currency':'USD','name':'ABC Company'}
   def call(client,tools,name,data):return [{'id':'test-asset','ticker':'ABC'}] if name=='search_assets' else {'asset':asset}
@@ -21,7 +24,7 @@ def main():
    with patch('trade_service.search',return_value={'assets':[{'asset_id':'test-asset','ticker':'ABC','name':'ABC Company','currency':'USD','isin':''}]}),patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',side_effect=call),patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'0'}),sync_playwright() as pw:
     browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':390,'height':900});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();page.locator('nav [data-view=hot-watch]').click();page.locator('.engine-overview').wait_for()
-    page.locator('#watch-mode').select_option('true');page.locator('.engine-list-row').first.wait_for()
+    page.locator('#watch-mode').select_option('true');page.locator('.engine-list-row').first.wait_for();expect(page.locator('[data-engine-filter="NO_DATA"] strong')).to_have_text('1')
     for width in (320,390,768,1440):
      page.set_viewport_size({'width':width,'height':900});assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),width
      page.locator('.engine-list-identity').first.click();dialog=page.locator('#engine-dialog');dialog.wait_for(state='visible');assert dialog.evaluate('(n)=>n.scrollWidth<=n.clientWidth+1'),width

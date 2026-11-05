@@ -830,6 +830,14 @@ class EngineHTTP(unittest.TestCase):
   d=copy.deepcopy(BASELINE);d['version']='1.1.0';path='/api/v1/hotwatch/strategies';self.assertEqual(self.http.request(path,d,self.auth)[0],201);self.assertTrue(self.http.request(path+'/'+d['strategy_id']+'/'+d['version']+'/validate',{},self.auth)[1]['valid']);self.assertEqual(self.http.request(path+'/'+d['strategy_id']+'/'+d['version']+'/activate',{},self.auth)[0],501);self.assertFalse(self.http.request(path,None,self.auth)[1]['capabilities']['shadow'])
  def test_old_report_grants_cannot_manage_or_read_engine(self):
   _,token,_=self.http.granted();access=token['access_token'];result=self.http.call(access,'start_hot_watch',self.req)[1];self.assertIn('error',result);self.assertEqual(self.http.request('/api/v1/hotwatch/sessions',None,{'Authorization':'Bearer '+access})[0],403)
+ def test_report_read_grant_exposes_scoped_status_sync_without_manage_access(self):
+  import mcp_reports
+  engine.create(app.connect,1,self.req);_,token,_=self.http.granted('reports:read');access=token['access_token']
+  self.assertIn('sync_hot_watch',{x['name'] for x in mcp_reports.tools('reports:read')})
+  result=self.http.call(access,'sync_hot_watch',{'is_test':True,'session_limit':1})[1]['result'];self.assertFalse(result['isError']);body=result['structuredContent']
+  self.assertEqual(body['detail_level'],'status');self.assertEqual(body['open_sessions'][0]['watch_id'],self.req['watch_id']);self.assertEqual(body['open_sessions'][0]['ticker'],'MERC');self.assertNotIn('request',body['open_sessions'][0]);self.assertIn('worker_heartbeat_fresh',body)
+  self.assertEqual(self.http.call(access,'sync_hot_watch',{'is_test':False})[1]['result']['structuredContent']['open_sessions'],[])
+  self.assertIn('error',self.http.call(access,'control_hot_watch',{'watch_id':self.req['watch_id'],'is_test':True,'action':'stop'})[1])
  def test_mcp_start_control_read_and_strategy_admin_scope(self):
   _,token,_=self.http.granted('reports:read reports:write hotwatch:read hotwatch:manage');access=token['access_token'];result=self.http.call(access,'start_hot_watch',self.req)[1]['result'];self.assertFalse(result['isError']);self.assertEqual(result['structuredContent']['session']['status'],'CREATED')
   read=self.http.call(access,'get_hot_watch_engine',{'is_test':True})[1]['result'];self.assertEqual(len(read['structuredContent']['sessions']),1);bad=self.http.call(access,'get_hot_watch_engine',{'limit':101})[1]['result'];self.assertTrue(bad['isError'])

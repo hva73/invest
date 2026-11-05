@@ -53,6 +53,14 @@ class Agreement(unittest.TestCase):
   page=engine.sync(app.connect,1,True,0,1);self.assertTrue(page['has_more']);self.assertTrue(page['open_sessions_complete']);self.assertEqual(len(page['open_sessions']),1)
   page2=engine.sync(app.connect,1,True,page['next_cursor'],1);self.assertFalse(page2['has_more']);self.assertNotEqual(page['events'][0]['event_id'],page2['events'][0]['event_id'])
   self.assertEqual(engine.sync(app.connect,1,False)['open_sessions'],[])
+ def test_status_sync_paginates_sessions_without_sensitive_engine_payload(self):
+  self.assess();first=request(wid='sync-one');first['watch_mode']='entry';second=request(wid='sync-two');second.update(watch_mode='exit',purpose='separate exit')
+  engine.create(app.connect,1,first,self.now);engine.create(app.connect,1,second,self.now);engine.control(app.connect,1,'sync-two',True,'pause',self.now)
+  with app.connect() as c:before=list(c.iterdump())
+  one=engine.sync(app.connect,1,True,0,1,0,1,True);self.assertFalse(one['open_sessions_complete']);self.assertTrue(one['sessions_have_more']);self.assertEqual(one['open_sessions'][0]['watch_kind'],'candidate');self.assertNotIn('request',one['open_sessions'][0]);self.assertNotIn('data',one['events'][0])
+  two=engine.sync(app.connect,1,True,one['next_cursor'],1,one['next_sessions_cursor'],1,True);self.assertFalse(two['sessions_have_more']);self.assertFalse(two['open_sessions_complete']);self.assertEqual(two['open_sessions'][0]['watch_kind'],'holding');self.assertEqual(two['open_sessions'][0]['status'],'PAUSED')
+  self.assertEqual(engine.sync(app.connect,2,True,summary_only=True)['open_sessions'],[]);self.assertEqual(engine.sync(app.connect,1,False,summary_only=True)['open_sessions'],[])
+  with app.connect() as c:self.assertEqual(before,list(c.iterdump()))
  def test_candidate_lifecycle_is_not_proof_of_running_engine(self):
   self.assess();req=request();req['watch_mode']='entry';engine.create(app.connect,1,req,self.now)
   engine.control(app.connect,1,req['watch_id'],True,'stop',self.now)

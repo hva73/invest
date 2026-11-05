@@ -44,6 +44,9 @@ def init(c):
  c.execute('CREATE TABLE IF NOT EXISTS hw_exchange_status(exchange TEXT PRIMARY KEY,received TEXT,is_open INTEGER,next_attempt REAL NOT NULL DEFAULT 0)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_exchange_calendar(exchange TEXT PRIMARY KEY,received TEXT NOT NULL,timezone TEXT NOT NULL,calendar TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_holding_autowatch(user_id INTEGER NOT NULL,portfolio_id INTEGER NOT NULL,asset_id TEXT NOT NULL,status TEXT NOT NULL,watch_id TEXT,next_attempt REAL NOT NULL DEFAULT 0,updated TEXT NOT NULL,PRIMARY KEY(user_id,portfolio_id,asset_id))')
+ # Existing local-budget failures can retry when the minute window resets.
+ boundary=(int(utc().timestamp()//60)+1)*60+1
+ c.execute("UPDATE hw_holding_autowatch SET next_attempt=? WHERE status='PROVIDER_RATE_BUDGET' AND next_attempt>?",(boundary,boundary))
 
 def scheduled_regular_close(c,exchange,now):
  """Use same-day provider schedule only to identify regular-session closure."""
@@ -108,7 +111,7 @@ def _create_in_transaction(c,uid,data,now,holding=False,manual=False):
  if c.execute("SELECT count(*) FROM hw_sessions WHERE user_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,)).fetchone()[0]>=capacity():raise EngineError('capacity_limit',409)
  if c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=? AND purpose=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,int(data['is_test']),data['candidate_id'],data['purpose'].strip().casefold())).fetchone():raise EngineError('active_watch_exists',409)
  if holding:
-  if data['is_test'] or data['watch_mode']!='exit' or data['provider']!='eodhd' or len(data['portfolio_ids'])!=1:raise EngineError('invalid_holding_watch')
+  if data['is_test'] or data['watch_mode']!='exit' or data['provider'] not in ('eodhd','pluto') or len(data['portfolio_ids'])!=1:raise EngineError('invalid_holding_watch')
   pid=data['portfolio_ids'][0]
   for existing in c.execute("SELECT request FROM hw_sessions WHERE user_id=? AND is_test=0 AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') AND json_extract(request,'$.asset_id')=?",(uid,data['asset_id'])):
    other=json.loads(existing['request']);scope=other.get('portfolio_ids',[])
@@ -398,18 +401,25 @@ def reconcile_candidates(connect,now=None,connection=None):
 def item(connect,uid,wid,mode=False):
  with connect() as c:return {'session':view(c,row_for(c,uid,wid,mode))}
 
-def sync(connect,uid,mode=False,after=0,limit=50):
- """Read a complete open-session snapshot and a paginated event stream."""
+def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=100,summary_only=False):
+ """Read owned open sessions and events with separate pagination cursors."""
  now=utc()
  with connect() as c:
   c.execute('BEGIN')
-  opened=c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') ORDER BY id",(uid,int(mode))).fetchall()
+  opened=c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=? AND id>? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') ORDER BY id LIMIT ?",(uid,int(mode),sessions_after,session_limit+1)).fetchall()
   beat=c.execute('SELECT updated,status FROM hw_heartbeat WHERE id=1').fetchone();worker=dict(beat) if beat else None
   try:worker_fresh=bool(worker and worker['status']=='running' and 0<=(now-stamp(worker['updated'])).total_seconds()<15)
   except (ValueError,TypeError):worker_fresh=False
   events=c.execute('SELECT e.id,e.event_id,e.event_type,e.severity,e.created,e.data_timestamp,e.payload,s.watch_id,s.candidate_id FROM hw_events e JOIN hw_sessions s ON s.id=e.watch_row_id WHERE s.user_id=? AND s.is_test=? AND e.id>? ORDER BY e.id LIMIT ?',(uid,int(mode),after,limit+1)).fetchall()
-  items=[{'sequence':r['id'],'event_id':r['event_id'],'event_type':r['event_type'],'severity':r['severity'],'created_at':r['created'],'data_timestamp':r['data_timestamp'],'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'data':json.loads(r['payload'])} for r in events[:limit]]
-  return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':[view(c,r,now) for r in opened],'open_sessions_complete':True,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit}
+  items=[{'sequence':r['id'],'event_id':r['event_id'],'event_type':r['event_type'],'severity':r['severity'],'created_at':r['created'],'data_timestamp':r['data_timestamp'],'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],**({} if summary_only else {'data':json.loads(r['payload'])})} for r in events[:limit]]
+  sessions=[]
+  for r in opened[:session_limit]:
+   req=json.loads(r['request']);purpose=req.get('purpose','');source='holding' if req.get('watch_mode')=='exit' or req.get('report_id')=='automatic-holdings' or purpose in ('automatic holding watch',) or purpose.startswith('retained exit ') else 'manual' if req.get('report_id')=='manual-pluto' else 'candidate'
+   if summary_only:
+    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'updated_at':r['updated'],'last_data_at':r['last_data']})
+   else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
+  more=len(opened)>session_limit
+  return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}
 
 def control(connect,uid,wid,mode,action,now=None):
  now=now or utc()
