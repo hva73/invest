@@ -63,7 +63,7 @@ def position_hotwatch(c,uid,portfolio_id,asset_id,report_position):
  for row in rows:
   request=json.loads(row['request'])
   scopes=request.get('portfolio_ids',[])
-  if not asset_id or request.get('asset_id')!=asset_id or scopes and portfolio_id not in scopes:continue
+  if not asset_id or request.get('asset_id')!=asset_id or request.get('watch_mode','both')=='entry' or scopes and portfolio_id not in scopes:continue
   if candidate_id:
    if request.get('candidate_id')!=candidate_id:continue
    if cycle and request.get('trade_cycle_id') and request['trade_cycle_id']!=cycle:continue
@@ -75,12 +75,21 @@ def position_hotwatch(c,uid,portfolio_id,asset_id,report_position):
   lifecycle=c.execute('SELECT status,reported_status,occurred_at,reason,cycle_id,evidence FROM candidate_lifecycle_events WHERE user_id=? AND is_test=0 AND candidate_id=? ORDER BY occurred DESC,id DESC LIMIT 1',(uid,candidate_id)).fetchone()
  active=[(r,req) for r,req in matches if r['status'] in ['CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED']]
  session=(active[0] if len(active)==1 else None) if not candidate_id and not cycle else next(iter(active),matches[0] if matches else None)
+ asset_fallback=False
+ if not session and asset_id:
+  fallback=[]
+  for row in rows:
+   request=json.loads(row['request']);scope=request.get('portfolio_ids',[])
+   if row['status'] in ['CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED'] and request.get('asset_id')==asset_id and request.get('watch_mode','both')!='entry' and (not scope or portfolio_id in scope) and (not cycle or request.get('purpose')=='automatic holding watch'):fallback.append((row,request))
+  if len(fallback)==1:session=fallback[0];asset_fallback=True
+ auto=c.execute('SELECT status,watch_id,updated FROM hw_holding_autowatch WHERE user_id=? AND portfolio_id=? AND asset_id=?',(uid,portfolio_id,asset_id)).fetchone() if asset_id else None
  import hotwatch_engine
  current=None
  if session:
   try:current=hotwatch_engine.view(c,session[0])
   except (KeyError,TypeError,ValueError):current={'watch_id':session[0]['watch_id'],'status':session[0]['status'],'last_data_at':session[0]['last_data'],'signal':'NO_DATA','display_status':'DATA MANGLER'}
- return {'candidate_id':candidate_id,'trade_cycle_id':cycle,'lifecycle':dict(lifecycle) if lifecycle else None,'session':({'watch_id':current['watch_id'],'status':current['status'],'last_data_at':current['last_data_at'],'signal':current['signal'],'display_status':current['display_status']} if current else None),'link_basis':'candidate_id+asset_id+portfolio' if report_position and report_position.get('candidate_id') else 'asset_id+portfolio+trade_cycle_id' if candidate_id and cycle else 'unique_asset_and_portfolio_scope' if session else None}
+  if current.get('signal')=='NO_DATA' and not current.get('data_stale') and not current.get('last_error') and (current.get('data_status') or {}).get('price') is not None and 'WARMUP' in ((current.get('latest_calculation') or {}).get('reason_codes') or []):current['display_status']='WARMUP'
+ return {'auto_status':dict(auto) if auto else None,'candidate_id':candidate_id,'trade_cycle_id':cycle,'lifecycle':dict(lifecycle) if lifecycle else None,'session':({'watch_id':current['watch_id'],'status':current['status'],'last_data_at':current['last_data_at'],'signal':current['signal'],'display_status':current['display_status']} if current else None),'link_basis':'unique_asset_and_portfolio_scope' if asset_fallback else 'candidate_id+asset_id+portfolio' if report_position and report_position.get('candidate_id') else 'asset_id+portfolio+trade_cycle_id' if candidate_id and cycle else 'unique_asset_and_portfolio_scope' if session else None}
 
 def build(connect,uid,owned,snapshots,now=None):
  now=now or datetime.now(timezone.utc);result=[];warnings=[];totals={};accounts=[];orders=[]

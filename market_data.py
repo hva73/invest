@@ -113,7 +113,7 @@ def holding_candidate(connect,user_id,data):
         matches=[x for x in snapshot.get('positions',[]) if x.get('kind')=='holding' and x.get('asset_id')==aid]
     if not matches:raise MarketError('Aktivet findes ikke i depotets gemte beholdninger.')
     if data.get('choose') is True or data.get('asset_id') not in (None,aid):raise MarketError('Kursgrafen skal bruge beholdningens Pluto-aktiv.')
-    return {'candidate_id':f'holding:{pid}:{aid}','ticker':matches[0].get('ticker') or '', 'asset_id':aid}
+    return {'candidate_id':f'holding:{pid}:{aid}','ticker':matches[0].get('ticker') or '', 'company_name':matches[0].get('name') or '', 'asset_id':aid}
 
 def quote(connect,user_id,data,factory=None):
     c=holding_candidate(connect,user_id,data) if 'holding_portfolio_id' in data else candidate(connect,user_id,data);ticker=c['ticker'].strip().upper();selected=data.get('asset_id')

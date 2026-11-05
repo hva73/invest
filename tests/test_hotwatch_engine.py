@@ -111,11 +111,18 @@ class HotWatch(unittest.TestCase):
    with self.assertRaisesRegex(EngineError,'global_capacity_limit'):engine.create(app.connect,1,d,self.now)
   d=copy.deepcopy(self.req);d.update(watch_id='invalid-prod',is_test=False)
   with self.assertRaisesRegex(EngineError,'synthetic_requires_test_mode'):engine.create(app.connect,1,d,self.now)
- def test_twenty_session_default_and_claim_only_charges_real_adapter_requests(self):
-  with patch.dict(os.environ,{},clear=True):self.assertEqual(engine.capacity(),20)
+ def test_forty_session_default_and_claim_only_charges_real_adapter_requests(self):
+  with patch.dict(os.environ,{},clear=True):self.assertEqual(engine.capacity(),40)
   job=engine.claim(app.connect,self.now)
   self.assertIsNotNone(job)
   with app.connect() as c:self.assertEqual(c.execute('SELECT COALESCE(sum(used),0) FROM hw_request_budget').fetchone()[0],0)
+ def test_capacity_supports_40_sessions_and_rejects_41st(self):
+  with patch.dict(os.environ,{},clear=True):
+   for i in range(1,40):
+    item=copy.deepcopy(self.req);item.update(watch_id='capacity-watch-'+str(i),purpose='capacity '+str(i));engine.create(app.connect,1,item,self.now)
+   with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM hw_sessions').fetchone()[0],40)
+   item=copy.deepcopy(self.req);item.update(watch_id='capacity-watch-over',purpose='capacity overflow')
+   with self.assertRaisesRegex(EngineError,'global_capacity_limit'):engine.create(app.connect,1,item,self.now)
  def test_fast_eodhd_polling_is_explicit_bounded_and_budgeted(self):
   from hotwatch_contract import provider_floor
   from hotwatch_adapters import providers

@@ -8,12 +8,17 @@ from hotwatch_engine import utc
 
 class DataUnavailable(EngineError):pass
 
-def reserve(connect,uid,source,now=None):
+def reserve(connect,uid,source,now=None,purpose=None):
  uid=0 if source=='eodhd' else uid
  now=now or utc();window=int(now.timestamp()//60);limit=max(1,min(120,int(os.environ.get('ESCAPE_HW_REQUESTS_PER_MINUTE','12'))))
  with connect() as c:
   c.execute('BEGIN IMMEDIATE');c.execute('DELETE FROM hw_request_budget WHERE window<?',(window-2,))
   row=c.execute('SELECT used FROM hw_request_budget WHERE user_id=? AND source=? AND window=?',(uid,source,window)).fetchone()
+  # Keep at most two calls available for a pending identity check. This does
+  # not increase the provider limit and expires if the watchdog disappears.
+  if source=='eodhd' and purpose!='holding_identity' and limit>2:
+   pending=c.execute("SELECT 1 FROM hw_holding_autowatch WHERE (status='VERIFYING' AND next_attempt>=?) OR (status='PROVIDER_RATE_BUDGET' AND next_attempt BETWEEN ? AND ?) LIMIT 1",(now.timestamp()-60,now.timestamp()-60,now.timestamp()+60)).fetchone()
+   if pending:limit-=2
   if row and row['used']>=limit:raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
   c.execute('INSERT INTO hw_request_budget VALUES(?,?,?,1) ON CONFLICT(user_id,source,window) DO UPDATE SET used=used+1',(uid,source,window))
 
@@ -38,13 +43,13 @@ def search_eodhd_symbols(connect,uid,data,opener=None):
  if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':raise DataUnavailable('EODHD_FEED_NOT_ENABLED')
  key=os.environ.get('ESCAPE_EODHD_API_KEY','').strip()
  if not key:raise DataUnavailable('EODHD_KEY_NOT_CONFIGURED')
- candidate=market_data.candidate(connect,uid,data);ticker=candidate.get('ticker')
+ candidate=market_data.holding_candidate(connect,uid,data) if 'holding_portfolio_id' in data else market_data.candidate(connect,uid,data);ticker=candidate.get('ticker')
  if not isinstance(ticker,str) or not re.fullmatch(r'[A-Za-z0-9.\-]{1,32}',ticker):raise DataUnavailable('EODHD_SYMBOL_MAPPING_REQUIRED')
  name_key=lambda x:re.sub(r'[^a-z0-9]','',x.casefold()) if isinstance(x,str) else ''
  issuer=candidate.get('company_name');issuer_key=name_key(issuer)
  choices=[];seen=set();client=opener or urllib.request.build_opener(NoRedirect());not_found=[];successful=[]
  def search(query,allow_alias=False,allow_ticker_alias=False):
-  reserve(connect,uid,'eodhd')
+  reserve(connect,uid,'eodhd',purpose='holding_identity' if 'holding_portfolio_id' in data else None)
   url='https://eodhd.com/api/search/'+quote(query,safe='')+'?'+urlencode({'api_token':key,'fmt':'json','limit':50})
   try:
    with client.open(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=8) as response:raw=response.read(131073)

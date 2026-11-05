@@ -80,6 +80,82 @@ def auto_discover(connect,cursor=0):
     logging.getLogger('escape.hotwatch').info(json.dumps({'service':'hotwatch','event':'discovery','candidate_ref':hashlib.sha256(str(candidate.get('candidate_id','')).encode()).hexdigest()[:16],'status':result['status']}))
  return cursor+1
 
+def holding_instrument(connect,uid,holding):
+ """Resolve the actual owned asset using Pluto's read-only identity endpoint."""
+ import trade_service
+ adapter=PlutoAdapter(connect,uid);client,tools=trade_service.client(connect,uid,adapter.factory)
+ raw=trade_service.call(client,tools,'get_asset',{'assetId':holding['asset_id']})
+ asset=raw.get('asset') if isinstance(raw,dict) else None
+ if not isinstance(asset,dict) or asset.get('id')!=holding['asset_id']:return None
+ currency=asset.get('currency');isin=asset.get('isin');exchange=asset.get('exchange');ticker=asset.get('ticker')
+ if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency) or not isinstance(isin,str) or not re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',isin) or not isinstance(exchange,str) or not exchange or not isinstance(ticker,str) or not ticker:return None
+ return {'asset_id':asset['id'],'ticker':ticker,'exchange':exchange,'currency':currency,'isin':isin}
+
+def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
+ """Activate at most one owned position per tick, with persistent bounded retries."""
+ from decimal import Decimal,InvalidOperation
+ from hotwatch_adapters import search_eodhd_symbols
+ now=now or engine.utc();epoch=now.timestamp();at=now.isoformat()
+ if os.environ.get('ESCAPE_HW_HOLDINGS_AUTOWATCH','1')=='0':return None
+ with connect() as c:
+  if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
+  snapshots=c.execute("SELECT p.user_id,p.id,s.payload FROM portfolios p JOIN users u ON u.id=p.user_id JOIN portfolio_snapshots s ON s.portfolio_id=p.id AND s.user_id=p.user_id WHERE p.active=1 AND p.source='pluto' AND u.active=1 AND s.last_error IS NULL ORDER BY p.user_id,p.id").fetchall()
+  choices=[]
+  for snap in snapshots:
+   try:payload=json.loads(snap['payload'])
+   except (ValueError,TypeError):continue
+   if not isinstance(payload,dict) or not payload.get('positions_complete'):continue
+   try:fresh=0<=(now-stamp(payload['observed'])).total_seconds()<=300
+   except (KeyError,TypeError,ValueError):fresh=False
+   if not fresh:continue
+   for holding in payload.get('positions',[]):
+    aid=holding.get('asset_id')
+    try:valid=holding.get('kind')=='holding' and isinstance(aid,str) and bool(aid) and Decimal(str(holding.get('quantity')))>0
+    except (InvalidOperation,ValueError,TypeError):valid=False
+    if valid:choices.append((snap['user_id'],snap['id'],holding))
+  for uid,pid,holding in choices:
+   aid=holding['asset_id']
+   control=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
+   if control and control['killed']:continue
+   existing=c.execute("SELECT watch_id,status,request FROM hw_sessions WHERE user_id=? AND is_test=0 AND json_extract(request,'$.asset_id')=? ORDER BY id DESC",(uid,aid)).fetchall()
+   matches=[row for row in existing if json.loads(row['request']).get('watch_mode','both')!='entry' and (not json.loads(row['request']).get('portfolio_ids') or pid in json.loads(row['request'])['portfolio_ids'])]
+   active=[row for row in matches if row['status'] in ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')]
+   watch='hw-holding-'+hashlib.sha256((str(uid)+'|'+str(pid)+'|'+aid).encode()).hexdigest()[:28]
+   prior=c.execute('SELECT status,watch_id,next_attempt FROM hw_holding_autowatch WHERE user_id=? AND portfolio_id=? AND asset_id=?',(uid,pid,aid)).fetchone()
+   if len(active)==1:status='LINKED';linked=active[0]['watch_id']
+   elif len(active)>1:status='AMBIGUOUS';linked=None
+   elif prior and prior['status']=='STOPPED':status='STOPPED';linked=prior['watch_id']
+   elif prior and prior['watch_id'] and any(row['watch_id']==prior['watch_id'] and row['status'] in ('COMPLETED','EXPIRED','ERROR') for row in matches):status='STOPPED';linked=prior['watch_id']
+   elif any(row['watch_id']==watch for row in matches):status='STOPPED';linked=watch
+   else:
+    if prior and prior['next_attempt']>epoch:continue
+    status='VERIFYING';linked=None
+   if status!='VERIFYING' and prior and prior['status']==status and prior['watch_id']==linked:continue
+   c.execute("INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,portfolio_id,asset_id) DO UPDATE SET status=excluded.status,watch_id=excluded.watch_id,next_attempt=excluded.next_attempt,updated=excluded.updated",(uid,pid,aid,status,linked,epoch+300,at))
+   if status=='VERIFYING':selected=(uid,pid,holding,watch);break
+  else:return None
+ uid,pid,holding,watch=selected;aid=holding['asset_id'];status='IDENTITY_UNVERIFIED';linked=None
+ try:
+  with connect() as c:count=c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]
+  if count>=engine.capacity():status='CAPACITY_LIMIT'
+  elif os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':status='EODHD_FEED_NOT_ENABLED'
+  elif not os.environ.get('ESCAPE_EODHD_API_KEY','').strip():status='EODHD_KEY_NOT_CONFIGURED'
+  else:
+   instrument=(verify or holding_instrument)(connect,uid,holding)
+   if instrument and instrument.get('asset_id')==aid:
+    opts=(lookup or search_eodhd_symbols)(connect,uid,{'holding_portfolio_id':pid,'holding_asset_id':aid,'quote_currency':instrument['currency']})
+    matches=[item for item in opts.get('choices',[]) if item.get('isin')==instrument.get('isin') and item.get('currency')==instrument.get('currency')]
+    if len(matches)!=1:status='EODHD_IDENTITY_UNCERTAIN'
+    else:
+     cid='holding-'+hashlib.sha256((str(uid)+'|'+str(pid)+'|'+aid).encode()).hexdigest()[:28]
+     risk={'max_notional_dkk':'1000','max_loss_dkk':'100','max_spread_pct':'1','max_quote_age_s':120,'max_position_fraction_pct':'20','proposed_quantity':None,'stop_price':None,'exit_deadline':None}
+     req={'watch_id':watch,'report_id':'automatic-holdings','candidate_id':cid,'is_test':False,'purpose':'automatic holding watch','ticker':instrument['ticker'],'exchange':instrument['exchange'],'asset_id':aid,'quote_currency':instrument['currency'],'portfolio_ids':[pid],'priority':'NORMAL','profile':'NORMAL','provider':'eodhd','provider_symbol':matches[0]['symbol'],'end_at':None,'activation_reason':'Automatisk overvågning af verificeret Pluto-beholdning','strategy_id':'escape_momentum','strategy_version':'1.0.0','risk':risk,'watch_mode':'exit'}
+     result=engine.create_holding(connect,uid,req,now);status='LINKED';linked=result['session']['watch_id']
+ except EngineError as error:status=error.code
+ except Exception:status='VERIFICATION_FAILED'
+ with connect() as c:c.execute("UPDATE hw_holding_autowatch SET status=?,watch_id=?,next_attempt=?,updated=? WHERE user_id=? AND portfolio_id=? AND asset_id=?",(status,linked,epoch+300,engine.utc().isoformat(),uid,pid,aid))
+ return status
+
 class Runner:
  def __init__(self,connect):self.connect=connect;self.adapters={};self.stop=threading.Event();self._workers=[]
  def once(self,now=None,watch_id=None):
@@ -156,6 +232,12 @@ class Runner:
     except Exception:logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'heartbeat_error'}))
     self.stop.wait(HEARTBEAT_INTERVAL_S)
   thread=threading.Thread(target=beat,name='hotwatch-heartbeat',daemon=True);thread.start()
+  def holdings_loop():
+   while not self.stop.is_set():
+    try:auto_holdings_tick(self.connect)
+    except Exception:logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'holdings_autowatch_error'}))
+    self.stop.wait(15)
+  holding_thread=threading.Thread(target=holdings_loop,name='hotwatch-holdings',daemon=True);holding_thread.start()
   next_discovery=0;discovery_cursor=0
   try:
    while not self.stop.is_set():
@@ -166,7 +248,7 @@ class Runner:
      next_discovery=time.monotonic()+15
     self.stop.wait(interval)
   finally:
-   self.stop.set();thread.join(timeout=6)
+   self.stop.set();thread.join(timeout=6);holding_thread.join(timeout=2)
    if thread.is_alive():logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'heartbeat_shutdown_timeout'}))
    else:self.heartbeat('stopped')
 

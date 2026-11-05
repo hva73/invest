@@ -240,3 +240,9 @@ Et allerede afsendt netværkskald kan nå at afslutte eller time out; eksisteren
 - H08: Rene status-/historikopslag ændrer ikke forretningsdata, sessionsstatus eller next_due. HTTP-authens eksisterende rate-limit-bogføring er særskilt og er ikke et markedsdatapoll.
 
 Disse supplerer T01–T28 og eksisterende risiko-/matematik-/auth-/kill-switch-tests. Produktionskilder og den egentlige separate Radar-prompt er ikke ændret eller live-testet. Der må ikke mærkes fuld ekstern end-to-end-godkendelse alene ud fra lokale fixtures.
+
+### Automatisk beholdningsovervågning og kapacitet (opdateret)
+
+Motoren har nu højst 40 aktive/pausede sessioner som standard, med valgfri lavere `ESCAPE_HW_CAPACITY`. En separat baggrundsløkke forsøger gradvist at overvåge aktuelle, komplet verificerede Pluto-beholdninger. Aktivet skal bekræftes af Pluto og have præcis én EODHD-kandidat med samme ISIN og valuta; ukendte eller tvetydige instrumenter oprettes ikke. Positioner oprettes i exit-tilstand og sender aldrig ordrer. Eksisterende og pausede sessioner genbruges; en manuelt afsluttet session genstartes ikke automatisk. Stale, fejlede eller ufuldstændige depotsnapshots bruges ikke til nye sessioner. `ESCAPE_HW_HOLDINGS_AUTOWATCH=0` deaktiverer denne automatiske oprettelse.
+
+Kapacitet er ikke adgang eller frekvens: EODHD-budgettet er delt og tæller alle leverandørkald. Med 40 sessioner kan scanninger blive betydeligt langsommere end 60 sekunder, og adgang, kildetid, kvoter og genstart skal verificeres på installationen. Flere symboler og før-/eftermarked kræver bekræftede feedrettigheder. Ingen købssignaler tillades uden for de eksisterende risikoregler.
