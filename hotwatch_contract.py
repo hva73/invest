@@ -19,6 +19,7 @@ BAR_EVIDENCE=obj({'provider_symbol':string(80),'market':enum('us','eu'),'exchang
 SAMPLE['properties'].update({'bar_history':array(BAR,120),'bar_evidence':BAR_EVIDENCE})
 CONTEXT['properties']['orders']['items']['properties'].update({'status_time':TIME,'average_fill_price':NUM,'limit_price':NUM,'stop_price':NUM,'order_type':nullable(string(100))})
 CONTEXT['properties']['orders_complete']={'type':'boolean'}
+CONTEXT['properties']['diagnostic']=nullable(string(100))
 for s in [SESSION,SAMPLE]:strict_patterns(s)
 STATES={'CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED','EXPIRED','COMPLETED','ERROR'}
 OPEN_STATES={'CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED'}

@@ -17,7 +17,10 @@ def reserve(connect,uid,source,now=None):
   if row and row['used']>=limit:raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
   c.execute('INSERT INTO hw_request_budget VALUES(?,?,?,1) ON CONFLICT(user_id,source,window) DO UPDATE SET used=used+1',(uid,source,window))
 
-def unknown_context():return {'tradability':'unknown','status':'unknown','as_of':None,'position':'unknown','quantity':None,'cost_price':None,'portfolio_equity_dkk':None,'exposure_dkk':None,'fx_to_dkk':None,'fees_dkk':None,'orders':[]}
+def unknown_context(diagnostic=None):
+ result={'tradability':'unknown','status':'unknown','as_of':None,'position':'unknown','quantity':None,'cost_price':None,'portfolio_equity_dkk':None,'exposure_dkk':None,'fx_to_dkk':None,'fees_dkk':None,'orders':[]}
+ if diagnostic:result['diagnostic']=diagnostic
+ return result
 
 def providers(connect=None,uid=None,mode=False):
  result={'pluto':{'adapter':'existing read-only contracts','minimum_poll_s':300,'known_limits':['Quote timestamp may be absent','Bid/ask, volume and market session are not guaranteed','Fees/FX remain unknown unless actually supplied']},'eodhd':{'plan_reported_by_owner':'Active Trader','key_configured':bool(os.environ.get('ESCAPE_EODHD_API_KEY','').strip()),'enabled':os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')=='1','endpoint':'/api/real-time/{symbol}','minimum_poll_s':provider_floor('eodhd'),'entitlements_verified':False,'websocket_enabled':os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1','known_limits':['Account/feed rights must be verified on the installation','REST quote is not assumed tick-level, regular-session or a complete OHLC bar']},'report_inbox':{'adapter':'existing observation inbox','trusted_for_new_buy':False},'synthetic':{'test_only':True}}
@@ -121,27 +124,27 @@ class PlutoAdapter:
    else:
     for pid in request['portfolio_ids']:
      p=c.execute("SELECT * FROM portfolios WHERE id=? AND user_id=? AND source='pluto' AND active=1",(pid,self.uid)).fetchone()
-     if not p:return result
+     if not p:return unknown_context('PORTFOLIO_NOT_ACTIVE')
      portfolios.append(dict(p))
    overlap=any(a['external_id']==b.get('parent_external_id') for a in portfolios for b in portfolios)
-   if overlap and not automatic:return result
+   if overlap and not automatic:return unknown_context('PORTFOLIO_SCOPE_OVERLAP')
   for p in portfolios:
    with self.connect() as c:row=c.execute('SELECT * FROM portfolio_snapshots WHERE portfolio_id=? AND user_id=?',(p['id'],self.uid)).fetchone()
    if not row or row['last_error'] or (utc()-stamp(row['observed'])).total_seconds()>300:
     payload=portfolio_data.read(self.connect,self.uid,p['id'],client_factory=self.factory)
     with self.connect() as c:portfolio_data.save(c,self.uid,p['id'],payload)
    else:payload=json.loads(row['payload'])
-   if not payload.get('positions_complete') or not payload.get('complete'):return result
+   if not payload.get('positions_complete') or not payload.get('complete'):return unknown_context('PORTFOLIO_SNAPSHOT_INCOMPLETE')
    rows.append(payload)
-  if not rows:return result
+  if not rows:return unknown_context('NO_ACTIVE_PORTFOLIOS')
   # An unidentified holding could be this asset; absence is not proven.
-  if any(p.get('kind','holding')=='holding' and not p.get('asset_id') for payload in rows for p in payload['positions']):return result
+  if any(p.get('kind','holding')=='holding' and not p.get('asset_id') for payload in rows for p in payload['positions']):return unknown_context('HOLDING_ID_MISSING')
   found=[position for payload in rows for position in payload['positions'] if position.get('asset_id')==request['asset_id']]
   # Parent and collection snapshots may overlap. Their complete absence can
   # establish zero holdings, but a matching position cannot be safely summed.
-  if overlap and found:return result
+  if overlap and found:return unknown_context('HOLDING_SCOPE_OVERLAP')
   result['tradability'],tradability_at=self.tradability(request,currency,portfolios)
-  if any(p['quantity'] is None for p in found):return result
+  if any(p['quantity'] is None for p in found):return unknown_context('HOLDING_QUANTITY_MISSING')
   if any(p.get('ticker') and p['ticker'].casefold()!=request['ticker'].casefold() for p in found):raise DataUnavailable('PLUTO_ASSET_NOT_CONFIRMED')
   if any(Decimal(p['quantity'])<0 for p in found):raise DataUnavailable('PLUTO_SHORT_POSITION_NOT_SUPPORTED')
   quantity=sum((Decimal(p['quantity']) for p in found),Decimal(0))
@@ -204,6 +207,21 @@ class PlutoAdapter:
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
  def redirect_request(self,*args,**kwargs):return None
+
+def extended_session(trade,schedule,now,max_age_s):
+ """Classify an explicitly extended-hours trade using a verified exchange calendar."""
+ from zoneinfo import ZoneInfo,ZoneInfoNotFoundError
+ try:
+  if trade.get('market_session') not in ('extended-hours','extended hours') or schedule.get('status')!='OK' or schedule.get('exchange_open') is not False:return None
+  received=stamp(schedule['received_at']);at=stamp(trade['event_time'])
+  if not 0<=(now-received).total_seconds()<=max_age_s or not 0<=(now-at).total_seconds()<=max_age_s:return None
+  zone=ZoneInfo(schedule['timezone']);local=at.astimezone(zone);calendar=schedule['calendar']
+  opening=datetime.strptime(calendar['open'],'%H:%M:%S').time();closing=datetime.strptime(calendar['close'],'%H:%M:%S').time()
+  weekday=('Mon','Tue','Wed','Thu','Fri','Sat','Sun')[local.weekday()]
+  if opening>=closing or received.astimezone(zone).date()!=local.date() or weekday not in calendar['working_days'] or local.date().isoformat() in calendar['excluded_dates']:return None
+  return 'PRE' if local.time()<opening else 'AFTER' if local.time()>=closing else None
+ except (KeyError,ValueError,TypeError,ZoneInfoNotFoundError):return None
+
 class EODHDAdapter:
  def __init__(self,connect,uid,opener=None):self.connect=connect;self.uid=uid;self.opener=opener or urllib.request.build_opener(NoRedirect());self.pluto=PlutoAdapter(connect,uid);self.last_telemetry={}
  def feeds(self):
@@ -265,6 +283,13 @@ class EODHDAdapter:
        status=max(statuses,key=lambda x:stamp(x['event_time']))
        if status['trading_status']=='T':sample.update(market_status='REGULAR',session_key=at.date().isoformat()+':REGULAR',status_at=status['event_time'],status_feed=market+'_status')
        else:sample.update(market_status='UNKNOWN',session_key=at.date().isoformat()+':UNKNOWN');sample.pop('status_at',None);sample.pop('status_feed',None)
+      if sample['market_status']=='UNKNOWN' and trade.get('market_session') in ('extended-hours','extended hours') and (not statuses or max(statuses,key=lambda x:stamp(x['event_time']))['trading_status']=='T'):
+       schedule=client.market_status(exchange);self.last_feed_diagnostics['exchange_status']=schedule['status']
+       if schedule['status']=='RATE_LIMIT':
+        failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+       phase=extended_session(trade,schedule,utc(),max_age)
+       if phase:
+        sample.update(market_status=phase,session_key=at.date().isoformat()+':'+phase,status_at=trade['event_time'],status_feed=market+'_trades')
       if sample['market_status']=='REGULAR' and os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1':
        schedule=client.market_status(exchange);self.last_feed_diagnostics['exchange_status']=schedule['status']
        if schedule['status']=='LOCAL_BUDGET_EXHAUSTED':return sample

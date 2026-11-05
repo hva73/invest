@@ -591,10 +591,10 @@ class HotWatch(unittest.TestCase):
    self.assertIsNone(result['portfolio_equity_dkk'])
    with app.connect() as c:
     row=c.execute('SELECT payload FROM portfolio_snapshots WHERE portfolio_id=?',(ids[0],)).fetchone();payload=json.loads(row['payload']);payload['positions']=[{'asset_id':self.req['asset_id'],'ticker':'MERC','quantity':'2'}];c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),ids[0]))
-   self.assertEqual(adapter.context(self.req,'USD')['status'],'unknown')
+   overlap=adapter.context(self.req,'USD');self.assertEqual(overlap['status'],'unknown');self.assertEqual(overlap['diagnostic'],'HOLDING_SCOPE_OVERLAP')
    with app.connect() as c:
     payload['positions']=[];payload['positions_complete']=False;c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),ids[0]))
-   self.assertEqual(adapter.context(self.req,'USD')['status'],'unknown')
+   incomplete=adapter.context(self.req,'USD');self.assertEqual(incomplete['status'],'unknown');self.assertEqual(incomplete['diagnostic'],'PORTFOLIO_SNAPSHOT_INCOMPLETE')
  def test_realistic_synthetic_merc_buy_noise_exit_and_history_pinning(self):
   last=None
   prices=['100' if i%2==0 else '100.5' for i in range(34)]+['100.55','100.70','100.90','101.15','101.45','101.80']
