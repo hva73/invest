@@ -58,22 +58,29 @@ def assessment_candidates(c,uid):
 def position_hotwatch(c,uid,portfolio_id,asset_id,report_position):
  candidate_id=report_position.get('candidate_id') if report_position else None
  cycle=report_position.get('trade_cycle_id') if report_position else None
- rows=c.execute("SELECT watch_id,candidate_id,status,request,state,last_data,created FROM hw_sessions WHERE user_id=? AND is_test=0 ORDER BY id DESC",(uid,)).fetchall()
+ rows=c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=0 ORDER BY id DESC",(uid,)).fetchall()
  matches=[]
  for row in rows:
   request=json.loads(row['request'])
-  if request.get('asset_id')!=asset_id or portfolio_id not in request.get('portfolio_ids',[]):continue
+  scopes=request.get('portfolio_ids',[])
+  if not asset_id or request.get('asset_id')!=asset_id or scopes and portfolio_id not in scopes:continue
   if candidate_id:
    if request.get('candidate_id')!=candidate_id:continue
    if cycle and request.get('trade_cycle_id') and request['trade_cycle_id']!=cycle:continue
-  elif not cycle or request.get('trade_cycle_id')!=cycle:continue
+  elif cycle and request.get('trade_cycle_id')!=cycle:continue
   matches.append((row,request))
- if not candidate_id and len({r['candidate_id'] for r,_ in matches})==1 and matches:candidate_id=matches[0][0]['candidate_id']
+ if not candidate_id and cycle and len({r['candidate_id'] for r,_ in matches})==1 and matches:candidate_id=matches[0][0]['candidate_id']
  lifecycle=None
  if candidate_id:
   lifecycle=c.execute('SELECT status,reported_status,occurred_at,reason,cycle_id,evidence FROM candidate_lifecycle_events WHERE user_id=? AND is_test=0 AND candidate_id=? ORDER BY occurred DESC,id DESC LIMIT 1',(uid,candidate_id)).fetchone()
- session=next(((r,req) for r,req in matches if r['status'] in ['CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED']),matches[0] if matches else None)
- return {'candidate_id':candidate_id,'trade_cycle_id':cycle,'lifecycle':dict(lifecycle) if lifecycle else None,'session':({'watch_id':session[0]['watch_id'],'status':session[0]['status'],'last_data_at':session[0]['last_data'],'signal':json.loads(session[0]['state']).get('signal')} if session else None),'link_basis':'candidate_id+asset_id+portfolio' if report_position and report_position.get('candidate_id') else 'asset_id+portfolio+trade_cycle_id' if candidate_id and cycle else None}
+ active=[(r,req) for r,req in matches if r['status'] in ['CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED']]
+ session=(active[0] if len(active)==1 else None) if not candidate_id and not cycle else next(iter(active),matches[0] if matches else None)
+ import hotwatch_engine
+ current=None
+ if session:
+  try:current=hotwatch_engine.view(c,session[0])
+  except (KeyError,TypeError,ValueError):current={'watch_id':session[0]['watch_id'],'status':session[0]['status'],'last_data_at':session[0]['last_data'],'signal':'NO_DATA','display_status':'DATA MANGLER'}
+ return {'candidate_id':candidate_id,'trade_cycle_id':cycle,'lifecycle':dict(lifecycle) if lifecycle else None,'session':({'watch_id':current['watch_id'],'status':current['status'],'last_data_at':current['last_data_at'],'signal':current['signal'],'display_status':current['display_status']} if current else None),'link_basis':'candidate_id+asset_id+portfolio' if report_position and report_position.get('candidate_id') else 'asset_id+portfolio+trade_cycle_id' if candidate_id and cycle else 'unique_asset_and_portfolio_scope' if session else None}
 
 def build(connect,uid,owned,snapshots,now=None):
  now=now or datetime.now(timezone.utc);result=[];warnings=[];totals={};accounts=[];orders=[]

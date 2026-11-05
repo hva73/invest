@@ -27,6 +27,17 @@ class Quotes(unittest.TestCase):
     raise AssertionError('Only market reads are permitted')
   self.factory=Client
  def tearDown(self):self.case.tearDown()
+ def test_holding_chart_requires_an_owned_active_portfolio_and_asset(self):
+  with app.connect() as c:
+   payload={'positions_complete':True,'positions':[{'kind':'holding','asset_id':'synthetic-chart-asset','ticker':'CHART'}]}
+   c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?)',(self.case.root,1,'2026-11-05T12:00:00+00:00',json.dumps(payload),'2026-11-05T12:00:00+00:00'))
+  request={'holding_portfolio_id':self.case.root,'holding_asset_id':'synthetic-chart-asset'}
+  for user,params in [(2,request),(1,dict(request,holding_asset_id='other')),(1,dict(request,asset_id='other'))]:
+   with self.assertRaises(market_data.MarketError):market_data.quote(app.connect,user,params,self.factory)
+  self.assertEqual(self.calls,[])
+  result=market_data.quote(app.connect,1,request,self.factory)
+  self.assertEqual(result['asset_id'],'synthetic-chart-asset');self.assertEqual(len(result['series']),82)
+  self.assertEqual([c['name'] for c in self.calls],['get_asset'])
  def test_actual_shape_missing_quote_time_and_daily_not_week(self):
   q=market_data.normalized(self.raw,'synthetic-chart-asset',self.fixed)
   self.assertEqual(q['price'],'18.636');self.assertEqual(q['daily_change'],'0.225');self.assertGreater(float(q['daily_change_percent']),0);self.assertLess(float(q['week_change_percent']),0)

@@ -98,8 +98,25 @@ def choices(raw):
         seen.add(ids[0]);result.append({'asset_id':ids[0],'name':str(item.get('name') or item.get('ticker') or ids[0]),'ticker':str(item.get('ticker') or ''),'exchange':str(item.get('exchange') or ''),'currency':str(item.get('currency') or ''),'isin':str(item.get('isin') or '')})
     return result
 
+def holding_candidate(connect,user_id,data):
+    """Resolve only an asset in this user's own active Pluto snapshot."""
+    pid=data.get('holding_portfolio_id');aid=data.get('holding_asset_id')
+    if type(pid) is not int or not isinstance(aid,str) or not 1<=len(aid)<=200:
+        raise MarketError('Beholdningen mangler et gyldigt aktiv eller depot.')
+    with connect() as db:
+        row=db.execute("SELECT s.payload FROM portfolios p JOIN portfolio_snapshots s ON s.portfolio_id=p.id AND s.user_id=p.user_id WHERE p.id=? AND p.user_id=? AND p.source='pluto' AND p.active=1",(pid,user_id)).fetchone()
+        if not row:raise MarketError('Beholdningen findes ikke i et aktivt Pluto-depot.')
+        snapshot=json.loads(row['payload'])
+        if not snapshot.get('positions_complete'):
+            old=db.execute('SELECT payload FROM display_holdings_cache WHERE user_id=? AND portfolio_id=?',(user_id,pid)).fetchone()
+            if old:snapshot=json.loads(old['payload'])
+        matches=[x for x in snapshot.get('positions',[]) if x.get('kind')=='holding' and x.get('asset_id')==aid]
+    if not matches:raise MarketError('Aktivet findes ikke i depotets gemte beholdninger.')
+    if data.get('choose') is True or data.get('asset_id') not in (None,aid):raise MarketError('Kursgrafen skal bruge beholdningens Pluto-aktiv.')
+    return {'candidate_id':f'holding:{pid}:{aid}','ticker':matches[0].get('ticker') or '', 'asset_id':aid}
+
 def quote(connect,user_id,data,factory=None):
-    c=candidate(connect,user_id,data);ticker=c['ticker'].strip().upper();selected=data.get('asset_id')
+    c=holding_candidate(connect,user_id,data) if 'holding_portfolio_id' in data else candidate(connect,user_id,data);ticker=c['ticker'].strip().upper();selected=data.get('asset_id')
     if selected is not None and (not isinstance(selected,str) or not 1<=len(selected)<=200):raise MarketError('Vælg et gyldigt aktiv fra Pluto-søgningen.')
     with connect() as db:link=db.execute('SELECT * FROM market_asset_links WHERE user_id=? AND candidate_id=?',(user_id,c['candidate_id'])).fetchone()
     aid=link['asset_id'] if link and link['expected_ticker']==ticker and not selected and data.get('choose') is not True else None

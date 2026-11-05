@@ -5,4 +5,5 @@ const row={key:'x',ticker:'TEST',name:'Test',portfolio_name:'Test depot',critica
 const state={dashboard:{positions:[row],accounts:[],totals:[],warnings:[],orders:[],critical_sessions:[]},report_desk:null};
 let html=ui.render(state);assert.match(html,/Estimat/);assert.match(html,/dash-change negative/);assert.doesNotMatch(html,/<th scope="col">I dag<\/th>/);assert.doesNotMatch(html,/<th scope="col">Vurdering<\/th>/);
 row.daily={percent:'2',amount:'1',currency:'DKK',basis:'pluto_reported_daily_change',from:null,to:'2026-11-05T12:00:00Z'};html=ui.render(state);assert.match(html,/<th scope="col">I dag<\/th>/);assert.match(html,/dash-change positive/);
+row.hot_watch={session:{watch_id:'synthetic-watch',signal:'WAIT',display_status:'AFVENT'}};html=ui.render(state);assert.match(html,/data-dashboard-watch="synthetic-watch"/);assert.match(html,/AFVENT/);
 console.log('PASS: estimated result is labeled, signed values are colored, empty columns are omitted');

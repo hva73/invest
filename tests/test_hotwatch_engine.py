@@ -80,6 +80,19 @@ class HotWatch(unittest.TestCase):
   self.assertEqual(result['session']['data_status']['price'],'100')
   self.assertEqual(result['session']['data_status']['price_status'],'FRESH')
   self.assertEqual(result['session']['data_status']['signal_status'],'WAITING_FOR_DATA')
+ def test_dashboard_shows_only_unambiguous_owned_asset_watch(self):
+  import dashboard_projection
+  with app.connect() as c:c.execute('UPDATE hw_sessions SET is_test=0')
+  with app.connect() as c:
+   matched=dashboard_projection.position_hotwatch(c,1,123,self.req['asset_id'],None)
+   self.assertEqual(matched['session']['watch_id'],self.req['watch_id'])
+   self.assertIsNone(matched['candidate_id'])
+   self.assertIsNone(dashboard_projection.position_hotwatch(c,2,123,self.req['asset_id'],None)['session'])
+   self.assertIsNone(dashboard_projection.position_hotwatch(c,1,123,'other-asset',None)['session'])
+  second=copy.deepcopy(self.req);second.update(watch_id='another-watch',purpose='another purpose')
+  engine.create(app.connect,1,second,self.now)
+  with app.connect() as c:c.execute('UPDATE hw_sessions SET is_test=0')
+  with app.connect() as c:self.assertIsNone(dashboard_projection.position_hotwatch(c,1,123,self.req['asset_id'],None)['session'])
  def test_session_idempotence_conflict_duplicate_and_restart(self):
   self.assertTrue(engine.create(app.connect,1,self.req,self.now)['duplicate']);changed=copy.deepcopy(self.req);changed['activation_reason']='changed'
   with self.assertRaisesRegex(EngineError,'watch_id_conflict'):engine.create(app.connect,1,changed,self.now)
