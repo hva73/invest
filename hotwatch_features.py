@@ -34,7 +34,7 @@ def verified_bar_samples(sample,request,now):
 def observation_status(samples,now,max_age_s,signal,watch_status):
  """Read-only data quality and time-horizon changes; never a trading input."""
  from report_validation import stamp
- result={'price_status':'MISSING','market_status':'UNKNOWN','momentum_status':'UNAVAILABLE','quote_status':'UNAVAILABLE','signal_status':'WAITING_FOR_DATA','price':None,'currency':None,'source':None,'venue':None,'price_type':None,'feed_description':None,'event_time':None,'age_s':None,'bid':None,'ask':None,'bid_at':None,'ask_at':None,'daily_change_pct':None,'since_last_pct':None,'momentum_pct':{str(n):None for n in (1,5,15,30)}}
+ result={'price_status':'MISSING','market_status':'UNKNOWN','last_market_status':'UNKNOWN','market_status_at':None,'momentum_status':'UNAVAILABLE','quote_status':'UNAVAILABLE','signal_status':'WAITING_FOR_DATA','price':None,'currency':None,'source':None,'venue':None,'price_type':None,'feed_description':None,'event_time':None,'age_s':None,'bid':None,'ask':None,'bid_at':None,'ask_at':None,'daily_change_pct':None,'since_last_pct':None,'momentum_pct':{str(n):None for n in (1,5,15,30)}}
  if watch_status in ('PAUSED','COMPLETED','EXPIRED','ERROR'):result['signal_status']='NOT_APPLICABLE'
  elif signal=='PAUSE':result['signal_status']='BLOCKED'
  elif signal!='NO_DATA':result['signal_status']='READY'
@@ -44,7 +44,10 @@ def observation_status(samples,now,max_age_s,signal,watch_status):
  if latest.get('bid') is not None and latest.get('ask') is not None and latest.get('bid_at') and latest.get('ask_at'):
   result.update(bid=latest['bid'],ask=latest['ask'],bid_at=latest['bid_at'],ask_at=latest['ask_at'])
   result['quote_status']='FRESH' if all(0<=(now-stamp(latest[k])).total_seconds()<=max_age_s for k in ('bid_at','ask_at')) else 'STALE'
- result['market_status']={'REGULAR':'OPEN','PRE':'PREMARKET','AFTER':'AFTERHOURS','CLOSED':'CLOSED','HALTED':'HALTED'}.get(latest['market_status'],'UNKNOWN')
+ phase={'REGULAR':'OPEN','PRE':'PREMARKET','AFTER':'AFTERHOURS','CLOSED':'CLOSED','HALTED':'HALTED'}.get(latest['market_status'],'UNKNOWN')
+ status_at=latest.get('status_at') or (latest['event_time'] if latest['source']!='eodhd' else None)
+ result.update(last_market_status=phase,market_status_at=status_at)
+ if status_at and 0<=(now-stamp(status_at)).total_seconds()<=max_age_s:result['market_status']=phase
  if latest['price'] is None:return result
  if latest.get('previous_close') is not None and number(latest['previous_close'])>0:result['daily_change_pct']=format((number(latest['price'])/number(latest['previous_close'])-1)*100,'f')
  delay=latest.get('documented_delay_s')

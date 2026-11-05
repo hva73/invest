@@ -13,6 +13,7 @@ class Updater(unittest.TestCase):
   with tempfile.TemporaryDirectory() as d:
    source,target=self.fixture(Path(d));backup=apply_update.apply(source,target)
    self.assertEqual((target/'app.py').read_text(),'new code');self.assertEqual((backup/'code/app.py').read_text(),'old code')
+   self.assertTrue((target/'var/hotwatch-autostart.enabled').is_file())
    for path in [target/'var/escape.db',backup/'escape.db']:
     with sqlite3.connect(path) as c:self.assertEqual(c.execute('SELECT value FROM preserved').fetchone()[0],'private-data')
  def test_missing_file_changes_nothing(self):
@@ -30,3 +31,9 @@ class Updater(unittest.TestCase):
    with patch('apply_update.os.replace',side_effect=fail_second):
     with self.assertRaises(OSError):apply_update.apply(source,target)
    self.assertEqual((target/'app.py').read_text(),'old code');self.assertFalse((target/'pluto.py').exists())
+
+ def test_explicitly_disabled_watchdog_stays_disabled(self):
+  with tempfile.TemporaryDirectory() as d:
+   source,target=self.fixture(Path(d));(target/'var/hotwatch-autostart.disabled').touch()
+   apply_update.apply(source,target)
+   self.assertFalse((target/'var/hotwatch-autostart.enabled').exists())

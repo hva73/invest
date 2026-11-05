@@ -1,11 +1,11 @@
 """Run this file from an extracted ZIP under escape_app/opdatering.
-Stop the application first. Does not migrate the DB or start services.
+Stop the application first. The motor starts when Passenger starts the app.
 """
 import os,shutil,sqlite3,tempfile
 from datetime import datetime,timezone
 from pathlib import Path
 
-FILES=('static/journal-ui.js','journal_projection.py','dashboard_projection.py','display_policy.py','static/dashboard-ui.js','candidate_lifecycle.py','static/candidate-ui.js','hotwatch_api.py','hotwatch_contract.py','hotwatch_engine.py','hotwatch_features.py','hotwatch_strategy.py','hotwatch_adapters.py','eodhd_feeds.py','hotwatch_service.py','static/engine-ui.js','intel_workflows.py','intel_contract.py','static/intel-ui.js','app.py','static/overview-ui.js','market_data.py','static/market-ui.js','trade_service.py','pluto_trade_contract.json','static/trade-ui.js','report_ingest.py','report_v2.py','report_validation.py','position_reports.py','static/position-ui.js','mcp_reports.py','asset_quotes.py','pending_orders.py','portfolio_data.py','portfolios.py','mcp_client.py','pluto.py','oauth.py','jobs.py','news.py','worker.py','setup_runtime.py','requirements.txt','passenger_wsgi.py','static/app.js','static/report-ui.js','static/index.html','static/style.css','static/manifest.json','static/sw.js','static/icon.svg')
+FILES=('static/journal-ui.js','journal_projection.py','dashboard_projection.py','display_policy.py','static/dashboard-ui.js','candidate_lifecycle.py','static/candidate-ui.js','hotwatch_api.py','hotwatch_contract.py','hotwatch_engine.py','hotwatch_features.py','hotwatch_strategy.py','hotwatch_adapters.py','eodhd_feeds.py','hotwatch_service.py','hotwatch_supervisor.py','static/engine-ui.js','intel_workflows.py','intel_contract.py','static/intel-ui.js','app.py','static/overview-ui.js','market_data.py','static/market-ui.js','trade_service.py','pluto_trade_contract.json','static/trade-ui.js','report_ingest.py','report_v2.py','report_validation.py','position_reports.py','static/position-ui.js','mcp_reports.py','asset_quotes.py','pending_orders.py','portfolio_data.py','portfolios.py','mcp_client.py','pluto.py','oauth.py','jobs.py','news.py','worker.py','setup_runtime.py','requirements.txt','passenger_wsgi.py','static/app.js','static/report-ui.js','static/index.html','static/style.css','static/manifest.json','static/sw.js','static/icon.svg')
 
 def apply(source,target):
     source=Path(source).resolve();target=Path(target).resolve()
@@ -33,7 +33,7 @@ def apply(source,target):
         destination=target/name
         if destination.exists():
             saved=backup/'code'/name;saved.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(destination,saved);existed.append(name)
-    # Stage everything before replacing the first code file. Never touch var/.
+    # Stage everything before replacing the first code file.
     with tempfile.TemporaryDirectory(prefix='.update-stage-',dir=target) as stage:
         stage=Path(stage)
         for name in FILES:
@@ -47,6 +47,11 @@ def apply(source,target):
                 if name in existed:shutil.copy2(backup/'code'/name,target/name)
                 else:(target/name).unlink(missing_ok=True)
             raise
+    disabled=target/'var/hotwatch-autostart.disabled'
+    enabled=target/'var/hotwatch-autostart.enabled'
+    if not disabled.exists():
+        fd=os.open(enabled,os.O_WRONLY|os.O_CREAT|getattr(os,'O_NOFOLLOW',0),0o600)
+        os.close(fd)
     return backup
 
 if __name__=='__main__':

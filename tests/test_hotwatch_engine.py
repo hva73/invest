@@ -35,6 +35,12 @@ class HotWatch(unittest.TestCase):
   sample['documented_delay_s']=900
   self.assertEqual(observation_status([sample],self.now,120,'NO_DATA','ACTIVE')['price_status'],'DELAYED')
   self.assertEqual(observation_status([],self.now,120,'NO_DATA','CREATED')['price_status'],'MISSING')
+ def test_market_phase_is_not_current_when_evidence_is_old(self):
+  sample=tick(self.now);sample.update(source='eodhd',status_at=(self.now-timedelta(seconds=121)).isoformat())
+  view=observation_status([sample],self.now,120,'NO_DATA','ACTIVE')
+  self.assertEqual(view['market_status'],'UNKNOWN');self.assertEqual(view['last_market_status'],'OPEN')
+  sample['status_at']=self.now.isoformat();sample['market_status']='PRE'
+  self.assertEqual(observation_status([sample],self.now,120,'NO_DATA','ACTIVE')['market_status'],'PREMARKET')
  def test_timed_momentum_uses_only_actual_comparable_samples(self):
   samples=[tick(self.now-timedelta(minutes=n),index=i,price=str(100+i)) for i,n in enumerate((30,15,5,1,0))]
   view=observation_status(samples,self.now,120,'WAIT','ACTIVE')

@@ -11,6 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 os.environ.setdefault('ESCAPE_SECURE_COOKIE', '1')
 import app
 app.init()
+try:
+    import hotwatch_supervisor
+    hotwatch_supervisor.start_if_enabled()
+except Exception:
+    import logging
+    logging.getLogger("escape.hotwatch").error("Automatisk motorstart kunne ikke iværksættes")
 
 class WSGIHandler(app.Handler):
     def send_response(self, code, message=None):

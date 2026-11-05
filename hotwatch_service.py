@@ -242,5 +242,11 @@ def main():
   with app.connect() as c:c.execute("INSERT INTO hw_heartbeat VALUES(1,?,'run_once') ON CONFLICT(id) DO UPDATE SET updated=excluded.updated,status=excluded.status",(engine.utc().isoformat(),))
   count=runner.drain(watch_id=args.watch_id)
   print(json.dumps({'service':'hotwatch','processed':count,'trading_enabled':False}))
- else:runner.run(args.interval)
+ else:
+  from hotwatch_supervisor import lock
+  fd=lock("worker")
+  if fd is None:
+   print(json.dumps({"service":"hotwatch","error":"worker_already_running"}));return
+  try:runner.run(args.interval)
+  finally:os.close(fd)
 if __name__=='__main__':main()

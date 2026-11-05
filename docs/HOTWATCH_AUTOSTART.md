@@ -1,0 +1,9 @@
+# HOT WATCH: automatisk start og overvågning
+
+Når opdateringen er installeret og appen startes i Passenger, starter appen en separat lokal overvåger. Den starter HOT WATCH, holder øje med motorens heartbeat og forsøger at genstarte en motor, som stopper eller ikke længere sender heartbeat. Forsøgene bruger stigende ventetid og standser efter fem minutter uden en stabil motor. Efter en timeout kan appen genstartes, eller automatisk start kan aktiveres igen med `python hotwatch_supervisor.py --enable`. Appen kan vise status for genstarten; tjek også, at ny markedsdata faktisk kommer frem.
+
+Overvågeren starter kun én ny motor ad gangen og bruger en proceslås for motorer af denne version. En gammel motor fra en tidligere version har ikke nødvendigvis denne lås: stop den manuelt før installation og kontroller, at den ikke kører. `--disable` deaktiverer autostart og stopper den motor, som overvågeren selv har startet. En manuelt startet motor skal standses separat. En bevidst deaktivering bevares ved senere opdateringer; `--enable` aktiverer den igen.
+
+Passenger skal have EODHD-nøglen i sit eget miljø, og Python-miljøet skal have afhængighederne fra requirements.txt. Overvågeren arver appens miljø, og standardværdierne aktiverer de tidligere verificerede EODHD-funktioner for USA og CO. Eksisterende miljøindstillinger overstyrer standardværdierne. Nøgler skrives ikke til argumenter eller logfiler af overvågeren.
+
+En Passenger-opstart kan være forsinket indtil første besøg, og webhotellet kan begrænse eller standse frakoblede processer. Hvis serveren genstartes uden at Passenger indlæser appen, eller hvis overvågeren selv standses, kan appen alene ikke garantere uafbrudt drift. Til reel drift døgnet rundt kræves en selvstændig host-understøttet procesovervåger eller watchdog, med adgang til samme miljø og database. Dette skal kontrolleres på den konkrete server. Automatikken giver ikke handelsadgang og ændrer ikke motorens risikoregler.
