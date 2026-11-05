@@ -59,6 +59,8 @@ def handle(h,connect,method):
     if not rows:raise EngineError('candidate_not_found',404)
     result={'candidate':rows[0]}
    elif len(parts)==3 and parts[2]=='history':result=candidate_lifecycle.history(connect,uid,parts[1],mode,q.get('before',[None])[0],min(200,limit))
+  elif method=='GET' and parts==['start-candidates']:
+   result=engine.start_candidates(connect,uid,mode)
   elif parts==['sessions']:
    if method=='GET':
     view=q.get('view',[None])[0]

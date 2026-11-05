@@ -125,6 +125,31 @@ def create_holding(connect,uid,data,now=None):
   c.execute('BEGIN IMMEDIATE')
   return _create_in_transaction(c,uid,data,now,holding=True)
 
+def start_candidates(connect,uid,mode=False):
+ """Owned candidate choices, excluding all open/paused watches by stable identity."""
+ import report_ingest
+ if mode:
+  import intel_workflows
+  with connect() as c:source=[row for row in intel_workflows.candidates(c,uid,True,include_history_market=False) if row['active']]
+  for entry in source:
+   if entry['decision']:entry['candidate']=dict(entry['candidate'],decision=entry['decision'])
+ else:
+  source=report_ingest.desk(connect,uid).get('candidates',[])
+ with connect() as c:
+  sessions=c.execute("SELECT candidate_id,request FROM hw_sessions WHERE user_id=? AND is_test=? AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED','PAUSED')",(uid,int(mode))).fetchall()
+  candidate_ids={row['candidate_id'] for row in sessions}
+  assets={json.loads(row['request']).get('asset_id') for row in sessions}
+  links={row['candidate_id']:(row['expected_ticker'],row['asset_id']) for row in c.execute('SELECT candidate_id,expected_ticker,asset_id FROM market_asset_links WHERE user_id=?',(uid,))}
+  allowed=[];excluded=0
+  for item in source:
+   candidate=item.get('candidate') or {};cid=candidate.get('candidate_id')
+   if not cid:continue
+   asset=candidate.get('asset_id');link=links.get(cid)
+   if not asset and link and link[0].casefold()==str(candidate.get('ticker') or '').casefold():asset=link[1]
+   if cid in candidate_ids or asset and asset in assets:excluded+=1;continue
+   allowed.append(item)
+ return {'candidates':allowed,'already_watched':excluded,'is_test':mode}
+
 def create_batch(connect,uid,data,now=None):
  """Explicit, idempotent activation request; report lifecycle alone never calls this."""
  now=now or utc()

@@ -93,6 +93,33 @@ class HotWatch(unittest.TestCase):
   engine.create(app.connect,1,second,self.now)
   with app.connect() as c:c.execute('UPDATE hw_sessions SET is_test=0')
   with app.connect() as c:self.assertIsNone(dashboard_projection.position_hotwatch(c,1,123,self.req['asset_id'],None)['session'])
+ def test_dashboard_warmup_counts_actual_observations_and_does_not_hide_stale_data(self):
+  import dashboard_projection
+  self.put(tick(self.now))
+  with app.connect() as c:c.execute('UPDATE hw_sessions SET is_test=0')
+  with patch('hotwatch_engine.utc',return_value=self.now):
+   with app.connect() as c:view=dashboard_projection.position_hotwatch(c,1,123,self.req['asset_id'],None)
+  self.assertEqual(view['session']['warmup'],{'count':1,'required':34,'remaining':33})
+  with patch('hotwatch_engine.utc',return_value=self.now+timedelta(seconds=121)):
+   with app.connect() as c:view=dashboard_projection.position_hotwatch(c,1,123,self.req['asset_id'],None)
+  self.assertIsNone(view['session']['warmup']);self.assertNotEqual(view['session']['display_status'],'WARMUP')
+ def test_start_candidates_omits_open_watches_by_candidate_and_verified_asset(self):
+  base=self.req['candidate_id'];asset=self.req['asset_id']
+  with app.connect() as c:
+   c.execute('UPDATE hw_sessions SET is_test=0')
+   c.execute('INSERT INTO market_asset_links VALUES(?,?,?,?)',(1,'linked-id','LINKED',asset))
+  entries=[{'candidate':{'candidate_id':base,'ticker':'MERC'},'report_id':'r'}, {'candidate':{'candidate_id':'same-asset','ticker':'OTHER','asset_id':asset},'report_id':'r'}, {'candidate':{'candidate_id':'linked-id','ticker':'LINKED'},'report_id':'r'}, {'candidate':{'candidate_id':'different-asset','ticker':'MERC','asset_id':'other'},'report_id':'r'}, {'candidate':{'candidate_id':'unknown-asset','ticker':'MERC'},'report_id':'r'}]
+  with patch('report_ingest.desk',return_value={'candidates':entries}):
+   result=engine.start_candidates(app.connect,1,False)
+   self.assertEqual([x['candidate']['candidate_id'] for x in result['candidates']],['different-asset','unknown-asset']);self.assertEqual(result['already_watched'],3)
+   self.assertEqual(len(engine.start_candidates(app.connect,2,False)['candidates']),5)
+   with app.connect() as c:c.execute("UPDATE hw_sessions SET status='PAUSED'")
+   self.assertEqual(engine.start_candidates(app.connect,1,False)['already_watched'],3)
+   with app.connect() as c:c.execute("UPDATE hw_sessions SET status='COMPLETED'")
+   self.assertEqual(len(engine.start_candidates(app.connect,1,False)['candidates']),5)
+ def test_start_candidates_respects_test_partition(self):
+  result=engine.start_candidates(app.connect,1,True)
+  self.assertEqual(result['already_watched'],1);self.assertNotIn(self.req['candidate_id'],[x['candidate']['candidate_id'] for x in result['candidates']])
  def test_session_idempotence_conflict_duplicate_and_restart(self):
   self.assertTrue(engine.create(app.connect,1,self.req,self.now)['duplicate']);changed=copy.deepcopy(self.req);changed['activation_reason']='changed'
   with self.assertRaisesRegex(EngineError,'watch_id_conflict'):engine.create(app.connect,1,changed,self.now)
@@ -664,6 +691,13 @@ class EngineHTTP(unittest.TestCase):
   path='/api/v1/hotwatch/sessions';self.assertEqual(self.http.request(path,self.req)[0],401);self.assertEqual(self.http.request(path,self.req,{'Cookie':self.auth['Cookie']})[0],403);status,result,_=self.http.request(path,self.req,self.auth);self.assertEqual(status,201);wid=result['session']['watch_id'];self.assertEqual(self.http.request(path,self.req,self.auth)[0],200)
   self.assertEqual(self.http.request(path+'?is_test=false',None,self.auth)[1]['sessions'],[]);self.assertEqual(len(self.http.request(path+'?is_test=true',None,self.auth)[1]['sessions']),1);self.assertEqual(self.http.request(path+'?limit=101',None,self.auth)[0],400)
   for action,status in [('pause','PAUSED'),('resume','VALIDATING'),('stop','COMPLETED')]:self.assertEqual(self.http.request(path+'/'+wid+'/'+action,{'is_test':True},self.auth)[1]['session']['status'],status)
+ def test_start_candidate_endpoint_requires_auth_and_excludes_running_watch(self):
+  path='/api/v1/hotwatch/start-candidates?is_test=true'
+  self.assertEqual(self.http.request(path)[0],401)
+  self.assertEqual(self.http.request('/api/v1/hotwatch/sessions',self.req,self.auth)[0],201)
+  status,result,_=self.http.request(path,None,self.auth)
+  self.assertEqual(status,200);self.assertEqual(result['already_watched'],1)
+  self.assertNotIn(self.req['candidate_id'],[x['candidate']['candidate_id'] for x in result['candidates']])
  def test_api_synthetic_feed_only_and_metadata_separation(self):
   self.http.request('/api/v1/hotwatch/sessions',self.req,self.auth);wid=self.req['watch_id'];t=tick(datetime.now(timezone.utc));path='/api/v1/hotwatch/sessions/'+wid+'/samples'
   self.assertEqual(self.http.request(path,t,self.auth)[0],403);self.assertEqual(self.http.request(path+'?is_test=true',t,self.auth)[0],200);self.assertEqual(len(self.http.request(path+'?is_test=true&order=desc',None,self.auth)[1]['items']),1)
