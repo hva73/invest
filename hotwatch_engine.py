@@ -1,7 +1,7 @@
 """Persistent HOT WATCH v1 session/signal engine. No trading capabilities."""
 import json,os,secrets,time,hashlib
 from contextlib import nullcontext
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from decimal import Decimal
 from hotwatch_contract import SESSION,SAMPLE,CONTEXT,ACTIVATION_BATCH,EngineError,require,canonical,checksum,stamp,OPEN_STATES,PROFILES,GLOBAL_RISK,provider_floor
 from hotwatch_features import features,observation_status,verified_bar_samples
@@ -41,7 +41,24 @@ def init(c):
  c.execute('CREATE TABLE IF NOT EXISTS hw_heartbeat(id INTEGER PRIMARY KEY CHECK(id=1),updated TEXT NOT NULL,status TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_supervisor_status(id INTEGER PRIMARY KEY CHECK(id=1),updated TEXT NOT NULL,status TEXT NOT NULL,reason TEXT,attempts INTEGER NOT NULL DEFAULT 0)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_exchange_status(exchange TEXT PRIMARY KEY,received TEXT,is_open INTEGER,next_attempt REAL NOT NULL DEFAULT 0)')
+ c.execute('CREATE TABLE IF NOT EXISTS hw_exchange_calendar(exchange TEXT PRIMARY KEY,received TEXT NOT NULL,timezone TEXT NOT NULL,calendar TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_holding_autowatch(user_id INTEGER NOT NULL,portfolio_id INTEGER NOT NULL,asset_id TEXT NOT NULL,status TEXT NOT NULL,watch_id TEXT,next_attempt REAL NOT NULL DEFAULT 0,updated TEXT NOT NULL,PRIMARY KEY(user_id,portfolio_id,asset_id))')
+
+def scheduled_regular_close(c,exchange,now):
+ """Use same-day provider schedule only to identify regular-session closure."""
+ from zoneinfo import ZoneInfo,ZoneInfoNotFoundError
+ row=c.execute('SELECT received,timezone,calendar FROM hw_exchange_calendar WHERE exchange=?',(exchange,)).fetchone()
+ if not row:return None
+ try:
+  received=stamp(row['received']);zone=ZoneInfo(row['timezone']);local=now.astimezone(zone);schedule=json.loads(row['calendar'])
+  if received>now or received.astimezone(zone).date()!=local.date():return None
+  opening=datetime.strptime(schedule['open'],'%H:%M:%S').time();closing=datetime.strptime(schedule['close'],'%H:%M:%S').time()
+  days=schedule['working_days'];excluded=schedule['excluded_dates']
+  if opening>=closing or not isinstance(days,list) or not days or not isinstance(excluded,list) or local.date().isoformat() in excluded:return None
+  if local.strftime('%a') not in days or local.time()<opening or local.time()>=closing:
+   return {'status':'CLOSED','received_at':row['received'],'exchange':exchange,'source':'EODHD tidsplan for ordinær handel'}
+ except (KeyError,TypeError,ValueError,ZoneInfoNotFoundError):pass
+ return None
 
 def event(c,row,kind,now,reason,metrics=None,severity='info',data_time=None):
  payload={'watch_id':row['watch_id'],'event_type':kind,'reason':reason,'supporting_metrics':metrics or {},'strategy_version':json.loads(row['strategy'])['version']}
@@ -150,15 +167,30 @@ def start_candidates(connect,uid,mode=False):
   candidate_ids={row['candidate_id'] for row in sessions}
   assets={json.loads(row['request']).get('asset_id') for row in sessions}
   links={row['candidate_id']:(row['expected_ticker'],row['asset_id']) for row in c.execute('SELECT candidate_id,expected_ticker,asset_id FROM market_asset_links WHERE user_id=?',(uid,))}
-  allowed=[];excluded=0
+  allowed=[];excluded=0;unassessed=0;duplicates=0;seen_assets=set();seen_candidates=set();seen_unresolved=set()
   for item in source:
    candidate=item.get('candidate') or {};cid=candidate.get('candidate_id')
    if not cid:continue
    asset=candidate.get('asset_id');link=links.get(cid)
    if not asset and link and link[0].casefold()==str(candidate.get('ticker') or '').casefold():asset=link[1]
    if cid in candidate_ids or asset and asset in assets:excluded+=1;continue
+   decision=item.get('decision') or candidate.get('decision') or {}
+   currentness=item.get('currentness') or {}
+   try:
+    assessed=stamp(decision['decided_at']);deadline=stamp(decision['deadline']) if decision.get('deadline') else assessed+timedelta(hours=24)
+    valid=assessed<=utc()<deadline
+   except (KeyError,TypeError,ValueError):valid=False
+   if decision.get('status') not in ('KØB','AFVENT') or not valid or currentness.get('status') in ('COLD','REVIEW_DUE','UNKNOWN'):
+    unassessed+=1;continue
+   identity=tuple(str(candidate.get(key) or '').strip().casefold() for key in ('ticker','exchange','company_name'))
+   unresolved=not asset and all(identity)
+   if cid in seen_candidates or asset and asset in seen_assets or unresolved and identity in seen_unresolved:
+    duplicates+=1;continue
+   seen_candidates.add(cid)
+   if asset:seen_assets.add(asset)
+   elif unresolved:seen_unresolved.add(identity)
    allowed.append(item)
- return {'candidates':allowed,'already_watched':excluded,'is_test':mode}
+ return {'candidates':allowed,'already_watched':excluded,'without_current_assessment':unassessed,'duplicates':duplicates,'is_test':mode}
 
 def create_batch(connect,uid,data,now=None):
  """Explicit, idempotent activation request; report lifecycle alone never calls this."""
@@ -270,6 +302,7 @@ def view(c,row,now=None):
    try:
     if 0<=(now-stamp(observed['received'])).total_seconds()<=300:regular={'status':'OPEN' if observed['is_open'] else 'CLOSED','received_at':observed['received'],'exchange':exchange,'source':'EODHD exchange details'}
    except (ValueError,TypeError):pass
+  if regular['status']=='UNKNOWN':regular=scheduled_regular_close(c,exchange,now) or regular
  if regular['status']=='CLOSED' and data_status['market_status']=='OPEN' and data_status.get('market_status_at'):
   try:
    if stamp(data_status['market_status_at'])>stamp(regular['received_at']):regular={'status':'UNKNOWN','received_at':regular['received_at'],'exchange':exchange,'source':'EODHD exchange details; nyere instrumentstatus afviger'}

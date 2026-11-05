@@ -24,6 +24,26 @@ class HotWatch(unittest.TestCase):
  def setUp(self):
   self.old=app.DB;self.temp=tempfile.TemporaryDirectory();app.DB=self.temp.name+'/db';app.init();app.create_user('test-password-long-enough');self.now=datetime.now(timezone.utc).replace(microsecond=0);self.r=merc_report(True);report_ingest.save(app.connect,1,self.r);self.req=request();engine.create(app.connect,1,self.req,self.now)
  def tearDown(self):app.DB=self.old;self.temp.cleanup()
+ def test_regular_close_uses_same_day_verified_exchange_calendar(self):
+  from datetime import datetime,timezone
+  cal={'open':'09:00:00','close':'17:00:00','working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[]}
+  received=datetime(2026,11,5,15,0,tzinfo=timezone.utc)
+  with app.connect() as c:
+   c.execute('INSERT INTO hw_exchange_calendar VALUES(?,?,?,?)',('CO',received.isoformat(),'Europe/Copenhagen',json.dumps(cal)))
+   closed=engine.scheduled_regular_close(c,'CO',datetime(2026,11,5,19,57,tzinfo=timezone.utc));self.assertEqual(closed['status'],'CLOSED')
+   self.assertIsNone(engine.scheduled_regular_close(c,'CO',datetime(2026,11,5,15,30,tzinfo=timezone.utc)))
+   self.assertIsNone(engine.scheduled_regular_close(c,'CO',datetime(2026,11,6,19,57,tzinfo=timezone.utc)))
+   cal['excluded_dates']=['2026-11-05'];c.execute('UPDATE hw_exchange_calendar SET calendar=? WHERE exchange=?',(json.dumps(cal),'CO'))
+   self.assertIsNone(engine.scheduled_regular_close(c,'CO',datetime(2026,11,5,19,57,tzinfo=timezone.utc)))
+ def test_novob_shows_closed_regular_session_even_when_quote_is_old(self):
+  cal={'open':'09:00:00','close':'17:00:00','working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[]}
+  at=datetime(2026,11,5,19,57,tzinfo=timezone.utc)
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions WHERE watch_id=?',(self.req['watch_id'],)).fetchone();req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol='NOVO-B.CO')
+   c.execute('UPDATE hw_sessions SET is_test=0,request=? WHERE id=?',(json.dumps(req),row['id']))
+   c.execute('INSERT INTO hw_exchange_calendar VALUES(?,?,?,?)',('CO','2026-11-05T15:00:00+00:00','Europe/Copenhagen',json.dumps(cal)))
+   row=c.execute('SELECT * FROM hw_sessions WHERE id=?',(row['id'],)).fetchone();result=engine.view(c,row,at)
+  self.assertEqual(result['data_status']['regular_session']['status'],'CLOSED');self.assertEqual(result['display_status'],'ORDINÆR HANDEL LUKKET');self.assertTrue(result['data_stale'])
  def put(self,data,now=None):return engine.ingest(app.connect,1,self.req['watch_id'],True,data,now or self.now)
  def counts(self):
   with app.connect() as c:return {name:c.execute('SELECT count(*) FROM '+name).fetchone()[0] for name in ['hw_sessions','hw_samples','hw_calculations','hw_events']}
@@ -72,11 +92,13 @@ class HotWatch(unittest.TestCase):
    c.execute('UPDATE hw_sessions SET is_test=0,request=? WHERE id=?',(json.dumps(req),row['id']))
   calls=[]
   class Client:
-   def market_status(client,exchange):calls.append(exchange);return {'status':'OK','exchange':exchange,'exchange_open':False,'received_at':self.now.isoformat()}
+   def market_status(client,exchange):
+    calls.append(exchange);return {'status':'OK','exchange':exchange,'exchange_open':False,'received_at':self.now.isoformat(),'timezone':'Europe/Copenhagen','calendar':{'open':'09:00:00','close':'17:00:00','working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[]}}
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_engine.utc',return_value=self.now):
    self.assertEqual(service.exchange_status_tick(app.connect,lambda:Client(),self.now),'OK')
    self.assertIsNone(service.exchange_status_tick(app.connect,lambda:Client(),self.now+timedelta(seconds=1)))
   self.assertEqual(calls,['CO'])
+  with app.connect() as c:self.assertIsNotNone(c.execute("SELECT received FROM hw_exchange_calendar WHERE exchange='CO'").fetchone())
   class Failed:
    def market_status(client,exchange):return {'status':'LOCAL_BUDGET_EXHAUSTED'}
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}):self.assertEqual(service.exchange_status_tick(app.connect,lambda:Failed(),self.now+timedelta(seconds=301)),'LOCAL_BUDGET_EXHAUSTED')
@@ -143,13 +165,14 @@ class HotWatch(unittest.TestCase):
   self.assertEqual(view['session']['warmup'],{'count':1,'required':34,'remaining':33})
   with patch('hotwatch_engine.utc',return_value=self.now+timedelta(seconds=121)):
    with app.connect() as c:view=dashboard_projection.position_hotwatch(c,1,123,self.req['asset_id'],None)
-  self.assertIsNone(view['session']['warmup']);self.assertNotEqual(view['session']['display_status'],'WARMUP')
+  self.assertEqual(view['session']['warmup'],{'count':1,'required':34,'remaining':33,'historical':True});self.assertNotEqual(view['session']['display_status'],'WARMUP')
  def test_start_candidates_omits_open_watches_by_candidate_and_verified_asset(self):
   base=self.req['candidate_id'];asset=self.req['asset_id']
   with app.connect() as c:
    c.execute('UPDATE hw_sessions SET is_test=0')
    c.execute('INSERT INTO market_asset_links VALUES(?,?,?,?)',(1,'linked-id','LINKED',asset))
   entries=[{'candidate':{'candidate_id':base,'ticker':'MERC'},'report_id':'r'}, {'candidate':{'candidate_id':'same-asset','ticker':'OTHER','asset_id':asset},'report_id':'r'}, {'candidate':{'candidate_id':'linked-id','ticker':'LINKED'},'report_id':'r'}, {'candidate':{'candidate_id':'different-asset','ticker':'MERC','asset_id':'other'},'report_id':'r'}, {'candidate':{'candidate_id':'unknown-asset','ticker':'MERC'},'report_id':'r'}]
+  for item in entries:item['candidate']['decision']={'status':'AFVENT','decided_at':self.now.isoformat(),'deadline':(self.now+timedelta(hours=1)).isoformat()}
   with patch('report_ingest.desk',return_value={'candidates':entries}):
    result=engine.start_candidates(app.connect,1,False)
    self.assertEqual([x['candidate']['candidate_id'] for x in result['candidates']],['different-asset','unknown-asset']);self.assertEqual(result['already_watched'],3)
@@ -157,7 +180,20 @@ class HotWatch(unittest.TestCase):
    with app.connect() as c:c.execute("UPDATE hw_sessions SET status='PAUSED'")
    self.assertEqual(engine.start_candidates(app.connect,1,False)['already_watched'],3)
    with app.connect() as c:c.execute("UPDATE hw_sessions SET status='COMPLETED'")
-   self.assertEqual(len(engine.start_candidates(app.connect,1,False)['candidates']),5)
+   self.assertEqual(len(engine.start_candidates(app.connect,1,False)['candidates']),4)
+ def test_start_candidates_omits_unassessed_expired_and_verified_duplicates(self):
+  decision={'status':'AFVENT','decided_at':self.now.isoformat(),'deadline':(self.now+timedelta(hours=1)).isoformat()}
+  entries=[{'candidate':{'candidate_id':'one','ticker':'ABC','asset_id':'asset-one','decision':decision}}, {'candidate':{'candidate_id':'duplicate','ticker':'ABC','asset_id':'asset-one','decision':decision}}, {'candidate':{'candidate_id':'different','ticker':'ABC','asset_id':'asset-two','decision':decision}}, {'candidate':{'candidate_id':'unknown','ticker':'ABC'}}, {'candidate':{'candidate_id':'expired','ticker':'ABC','decision':dict(decision,deadline=(self.now-timedelta(seconds=1)).isoformat())}}]
+  with patch('report_ingest.desk',return_value={'candidates':entries}):
+   result=engine.start_candidates(app.connect,1,False)
+   self.assertEqual([x['candidate']['candidate_id'] for x in result['candidates']],['one','different'])
+   self.assertEqual(result['duplicates'],1);self.assertEqual(result['without_current_assessment'],2)
+ def test_unresolved_duplicates_require_same_ticker_exchange_and_name(self):
+  decision={'status':'AFVENT','decided_at':self.now.isoformat(),'deadline':(self.now+timedelta(hours=1)).isoformat()}
+  def row(cid,exchange):return {'candidate':{'candidate_id':cid,'ticker':'BTC','exchange':exchange,'company_name':'Bitcoin','decision':decision}}
+  with patch('report_ingest.desk',return_value={'candidates':[row('a','XONE'),row('b','XONE'),row('c','XTWO')]}):
+   result=engine.start_candidates(app.connect,1,False)
+   self.assertEqual([x['candidate']['candidate_id'] for x in result['candidates']],['a','c']);self.assertEqual(result['duplicates'],1)
  def test_start_candidates_respects_test_partition(self):
   result=engine.start_candidates(app.connect,1,True)
   self.assertEqual(result['already_watched'],1);self.assertNotIn(self.req['candidate_id'],[x['candidate']['candidate_id'] for x in result['candidates']])

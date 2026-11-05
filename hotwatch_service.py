@@ -232,7 +232,10 @@ def exchange_status_tick(connect,client_factory=None,now=None):
   result=client.market_status(exchange)
   received=stamp(result['received_at']) if result.get('received_at') else None
   if result.get('status')!='OK' or result.get('exchange')!=exchange or type(result.get('exchange_open')) is not bool or not received or not 0<=(engine.utc()-received).total_seconds()<=30:return result.get('status','INVALID_RESPONSE')
-  with connect() as c:c.execute('UPDATE hw_exchange_status SET received=?,is_open=?,next_attempt=? WHERE exchange=?',(received.isoformat(),int(result['exchange_open']),epoch+300,exchange))
+  with connect() as c:
+   c.execute('UPDATE hw_exchange_status SET received=?,is_open=?,next_attempt=? WHERE exchange=?',(received.isoformat(),int(result['exchange_open']),epoch+300,exchange))
+   if result.get('calendar') and result.get('timezone'):
+    c.execute('INSERT INTO hw_exchange_calendar VALUES(?,?,?,?) ON CONFLICT(exchange) DO UPDATE SET received=excluded.received,timezone=excluded.timezone,calendar=excluded.calendar',(exchange,received.isoformat(),result['timezone'],json.dumps(result['calendar'])))
   return 'OK'
  except Exception:return 'UNAVAILABLE'
 

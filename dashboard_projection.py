@@ -90,9 +90,11 @@ def position_hotwatch(c,uid,portfolio_id,asset_id,report_position):
   except (KeyError,TypeError,ValueError):current={'watch_id':session[0]['watch_id'],'status':session[0]['status'],'last_data_at':session[0]['last_data'],'signal':'NO_DATA','display_status':'DATA MANGLER'}
   if current.get('signal')=='NO_DATA' and current.get('display_status')=='AFVENTER SIGNALDATA' and not current.get('data_stale') and not current.get('last_error') and (current.get('data_status') or {}).get('price') is not None and 'WARMUP' in ((current.get('latest_calculation') or {}).get('reason_codes') or []):current['display_status']='WARMUP'
  warmup=None
- if current and current.get('display_status')=='WARMUP':
+ if current and 'WARMUP' in ((current.get('latest_calculation') or {}).get('reason_codes') or []):
   count=((current.get('latest_calculation') or {}).get('supporting_metrics') or {}).get('sample_count');required=current.get('minimum_required_samples')
-  if type(count) is int and type(required) is int and 0<=count<required:warmup={'count':count,'required':required,'remaining':required-count}
+  if type(count) is int and type(required) is int and 0<=count<required:
+   warmup={'count':count,'required':required,'remaining':required-count}
+   if current.get('display_status')!='WARMUP':warmup['historical']=True
  return {'auto_status':dict(auto) if auto else None,'candidate_id':candidate_id,'trade_cycle_id':cycle,'lifecycle':dict(lifecycle) if lifecycle else None,'session':({'watch_id':current['watch_id'],'status':current['status'],'last_data_at':current['last_data_at'],'signal':current['signal'],'display_status':current['display_status'],'warmup':warmup} if current else None),'link_basis':'unique_asset_and_portfolio_scope' if asset_fallback else 'candidate_id+asset_id+portfolio' if report_position and report_position.get('candidate_id') else 'asset_id+portfolio+trade_cycle_id' if candidate_id and cycle else 'unique_asset_and_portfolio_scope' if session else None}
 
 def build(connect,uid,owned,snapshots,now=None):
