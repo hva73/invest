@@ -117,7 +117,31 @@ class HoldingAutowatch(unittest.TestCase):
    instrument=service.holding_instrument(app.connect,1,dict(self.holding,currency='USD'))
   self.assertEqual(instrument['exchange'],'NASDAQ');self.assertEqual(instrument['asset_id'],'synthetic-asset')
   with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',side_effect=[raw,matches[:1]]):
-   self.assertIsNone(service.holding_instrument(app.connect,1,dict(self.holding,currency='USD')))
+   self.assertEqual(service.holding_instrument(app.connect,1,dict(self.holding,currency='USD'))['exchange'],'UKENDT')
+ def test_flat_pluto_asset_format_and_unknown_exchange_still_allow_position_monitoring(self):
+  raw={'assetId':'synthetic-asset','ticker':'TEST','currency':'USD'}
+  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',side_effect=[raw,[]]):
+   instrument=service.holding_instrument(app.connect,1,self.holding)
+  self.assertEqual(instrument['asset_id'],'synthetic-asset');self.assertEqual(instrument['exchange'],'UKENDT')
+  self.assertEqual(self.tick(verify=lambda *_:instrument,lookup=lambda *_:self.fail('No verified ISIN')),'LINKED')
+  with app.connect() as c:self.assertEqual(json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()[0])['provider'],'pluto')
+ def test_identity_diagnostics_explain_missing_and_conflicting_currency(self):
+  raw={'asset':{'id':'synthetic-asset','ticker':'TEST','exchange':'NASDAQ'}};diagnostic={}
+  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',side_effect=[raw,[]]):self.assertIsNone(service.holding_instrument(app.connect,1,self.holding,diagnostic))
+  self.assertEqual(diagnostic['code'],'PLUTO_CURRENCY_MISSING')
+  diagnostic={};raw['asset']['currency']='EUR'
+  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',side_effect=[raw,[]]):self.assertIsNone(service.holding_instrument(app.connect,1,dict(self.holding,currency='USD'),diagnostic))
+  self.assertEqual(diagnostic['code'],'PLUTO_CURRENCY_MISMATCH')
+  diagnostic={}
+  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value={'assetId':'different-asset','ticker':'TEST','currency':'USD'}):self.assertIsNone(service.holding_instrument(app.connect,1,self.holding,diagnostic))
+  self.assertEqual(diagnostic['code'],'PLUTO_ASSET_ID_MISMATCH')
+ def test_holding_worker_records_specific_failure_without_fabricating_a_session(self):
+  raw={'asset':{'id':'synthetic-asset','ticker':'TEST','exchange':'NASDAQ'}}
+  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',side_effect=[raw,[]]):
+   self.assertEqual(self.tick(),'PLUTO_CURRENCY_MISSING')
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT status FROM hw_holding_autowatch').fetchone()[0],'PLUTO_CURRENCY_MISSING')
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_sessions').fetchone()[0],0)
  def test_verified_existing_candidate_feed_creates_separate_holding_watch(self):
   self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
   with app.connect() as c:
@@ -141,6 +165,11 @@ class HoldingAutowatch(unittest.TestCase):
   with patch('hotwatch_engine.utc',return_value=self.now):app.init()
   with app.connect() as c:row=c.execute('SELECT status,next_attempt FROM hw_holding_autowatch').fetchone()
   self.assertEqual(row['status'],'PROVIDER_RATE_BUDGET');self.assertGreater(row['next_attempt'],self.now.timestamp());self.assertLessEqual(row['next_attempt']-self.now.timestamp(),61)
+ def test_old_identity_failures_retry_promptly_after_upgrade(self):
+  with app.connect() as c:c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(1,self.pid,'synthetic-asset','IDENTITY_UNVERIFIED',None,self.now.timestamp()+300,self.now.isoformat()))
+  with patch('hotwatch_engine.utc',return_value=self.now):app.init()
+  with app.connect() as c:row=c.execute('SELECT status,next_attempt FROM hw_holding_autowatch').fetchone()
+  self.assertEqual(row['status'],'IDENTITY_UNVERIFIED');self.assertEqual(row['next_attempt'],self.now.timestamp()+10)
  def test_pluto_fallback_reads_exact_owned_position_and_source_time(self):
   from hotwatch_adapters import PlutoAdapter,unknown_context
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):

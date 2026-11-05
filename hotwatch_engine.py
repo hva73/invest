@@ -47,6 +47,9 @@ def init(c):
  # Existing local-budget failures can retry when the minute window resets.
  boundary=(int(utc().timestamp()//60)+1)*60+1
  c.execute("UPDATE hw_holding_autowatch SET next_attempt=? WHERE status='PROVIDER_RATE_BUDGET' AND next_attempt>?",(boundary,boundary))
+ # Existing generic identity failures deserve an early retry after upgrading.
+ retry=utc().timestamp()+10
+ c.execute("UPDATE hw_holding_autowatch SET next_attempt=? WHERE status='IDENTITY_UNVERIFIED' AND next_attempt>?",(retry,retry))
 
 def scheduled_regular_close(c,exchange,now):
  """Use same-day provider schedule only to identify regular-session closure."""

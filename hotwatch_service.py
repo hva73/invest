@@ -153,14 +153,21 @@ def auto_discover(connect,cursor=0):
     logging.getLogger('escape.hotwatch').info(json.dumps({'service':'hotwatch','event':'discovery','candidate_ref':hashlib.sha256(str(candidate.get('candidate_id','')).encode()).hexdigest()[:16],'status':result['status']}))
  return cursor+1
 
-def holding_instrument(connect,uid,holding):
+def holding_instrument(connect,uid,holding,diagnostic=None):
  """Resolve the actual owned asset using Pluto's read-only identity endpoint."""
  import trade_service
+ def invalid(code):
+  if diagnostic is not None:diagnostic['code']=code
+  return None
  adapter=PlutoAdapter(connect,uid);client,tools=trade_service.client(connect,uid,adapter.factory)
  raw=trade_service.call(client,tools,'get_asset',{'assetId':holding['asset_id']})
- asset=raw.get('asset') if isinstance(raw,dict) else None
- if not isinstance(asset,dict) or asset.get('id')!=holding['asset_id']:return None
- currency=asset.get('currency') or holding.get('currency');isin=asset.get('isin');exchange=asset.get('exchange');ticker=asset.get('ticker')
+ if not isinstance(raw,dict):return invalid('PLUTO_ASSET_METADATA_MISSING')
+ asset=raw.get('asset') if isinstance(raw.get('asset'),dict) else raw
+ ids=[x for x in (asset.get('id'),asset.get('assetId'),raw.get('assetId')) if x is not None]
+ if not ids or any(x!=holding['asset_id'] for x in ids):return invalid('PLUTO_ASSET_ID_MISMATCH')
+ asset_currency=asset.get('currency');outer_currency=raw.get('currency')
+ if asset_currency and outer_currency and asset_currency!=outer_currency:return invalid('PLUTO_CURRENCY_MISMATCH')
+ currency=asset_currency or outer_currency or holding.get('currency');isin=asset.get('isin');exchange=asset.get('exchange');ticker=asset.get('ticker') or holding.get('ticker')
  if (not exchange or not ticker or not currency or not isin) and holding.get('ticker'):
   try:
    from market_data import choices
@@ -168,16 +175,17 @@ def holding_instrument(connect,uid,holding):
    exact=[x for x in options if x.get('asset_id')==holding['asset_id']]
    if len(exact)==1:
     match=exact[0]
-    if ticker and match.get('ticker') and ticker.casefold()!=match['ticker'].casefold():return None
-    if currency and match.get('currency') and currency!=match['currency']:return None
-    if isin and match.get('isin') and isin!=match['isin']:return None
+    if ticker and match.get('ticker') and ticker.casefold()!=match['ticker'].casefold():return invalid('PLUTO_TICKER_MISMATCH')
+    if currency and match.get('currency') and currency!=match['currency']:return invalid('PLUTO_CURRENCY_MISMATCH')
+    if isin and match.get('isin') and isin!=match['isin']:return invalid('PLUTO_ASSET_ID_MISMATCH')
     ticker=ticker or match.get('ticker');currency=currency or match.get('currency');exchange=exchange or match.get('exchange');isin=isin or match.get('isin')
   except Exception:pass
- if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency) or not isinstance(exchange,str) or not exchange or not isinstance(ticker,str) or not ticker:return None
- if holding.get('currency') and holding['currency']!=currency:return None
- if holding.get('ticker') and str(holding['ticker']).casefold()!=ticker.casefold():return None
+ if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):return invalid('PLUTO_CURRENCY_MISSING')
+ if not isinstance(ticker,str) or not ticker:return invalid('PLUTO_TICKER_MISSING')
+ if holding.get('currency') and holding['currency']!=currency:return invalid('PLUTO_CURRENCY_MISMATCH')
+ if holding.get('ticker') and str(holding['ticker']).casefold()!=ticker.casefold():return invalid('PLUTO_TICKER_MISMATCH')
  if not isinstance(isin,str) or not re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',isin):isin=None
- return {'asset_id':asset['id'],'ticker':ticker,'exchange':exchange,'currency':currency,'isin':isin}
+ return {'asset_id':holding['asset_id'],'ticker':ticker,'exchange':exchange if isinstance(exchange,str) and exchange else 'UKENDT','currency':currency,'isin':isin}
 
 def verified_existing_feed(connect,uid,holding):
  """Reuse instrument identity from an actual verified observation, not a ticker guess."""
@@ -245,8 +253,9 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
   with connect() as c:count=c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]
   if count>=engine.capacity():status='CAPACITY_LIMIT'
   else:
-   known=verified_existing_feed(connect,uid,holding) if verify is None else None
-   instrument=known or (verify or holding_instrument)(connect,uid,holding)
+   known=verified_existing_feed(connect,uid,holding) if verify is None else None;diagnostic={}
+   instrument=known or (verify(connect,uid,holding) if verify else holding_instrument(connect,uid,holding,diagnostic))
+   if not instrument:status=diagnostic.get('code','IDENTITY_UNVERIFIED')
    if instrument and instrument.get('asset_id')==aid:
     provider='eodhd' if known else 'pluto';symbol=known.get('provider_symbol') if known else None
     if not known and instrument.get('isin') and os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')=='1' and os.environ.get('ESCAPE_EODHD_API_KEY','').strip():
