@@ -53,6 +53,15 @@ class Agreement(unittest.TestCase):
   page=engine.sync(app.connect,1,True,0,1);self.assertTrue(page['has_more']);self.assertTrue(page['open_sessions_complete']);self.assertEqual(len(page['open_sessions']),1)
   page2=engine.sync(app.connect,1,True,page['next_cursor'],1);self.assertFalse(page2['has_more']);self.assertNotEqual(page['events'][0]['event_id'],page2['events'][0]['event_id'])
   self.assertEqual(engine.sync(app.connect,1,False)['open_sessions'],[])
+ def test_candidate_lifecycle_is_not_proof_of_running_engine(self):
+  self.assess();req=request();req['watch_mode']='entry';engine.create(app.connect,1,req,self.now)
+  engine.control(app.connect,1,req['watch_id'],True,'stop',self.now)
+  report=intel_workflows.watch(app.connect,1,True);self.assertFalse(report['engine_sessions_checked']);self.assertIn('bekræfter ikke',report['candidate_status_note'])
+  result=engine.sync(app.connect,1,True);self.assertTrue(result['open_sessions_complete']);self.assertEqual(result['open_sessions'],[]);self.assertFalse(result['worker_heartbeat_fresh'])
+  with app.connect() as c:c.execute('INSERT INTO hw_heartbeat VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET updated=excluded.updated,status=excluded.status',(engine.utc().isoformat(),'running'))
+  self.assertTrue(engine.sync(app.connect,1,True)['worker_heartbeat_fresh'])
+  import mcp_reports
+  description=next(t['description'] for t in mcp_reports.tools('reports:read') if t['name']=='get_hot_watch');self.assertIn('bekræfter ikke',description);self.assertIn('sync_hot_watch',description)
  def test_rejection_closes_entry_and_preserves_history(self):
   self.assess();req=request();req['watch_mode']='entry';engine.create(app.connect,1,req,self.now)
   self.assess('FRAVÆLG',at=self.now+timedelta(seconds=1))

@@ -404,9 +404,12 @@ def sync(connect,uid,mode=False,after=0,limit=50):
  with connect() as c:
   c.execute('BEGIN')
   opened=c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') ORDER BY id",(uid,int(mode))).fetchall()
+  beat=c.execute('SELECT updated,status FROM hw_heartbeat WHERE id=1').fetchone();worker=dict(beat) if beat else None
+  try:worker_fresh=bool(worker and worker['status']=='running' and 0<=(now-stamp(worker['updated'])).total_seconds()<15)
+  except (ValueError,TypeError):worker_fresh=False
   events=c.execute('SELECT e.id,e.event_id,e.event_type,e.severity,e.created,e.data_timestamp,e.payload,s.watch_id,s.candidate_id FROM hw_events e JOIN hw_sessions s ON s.id=e.watch_row_id WHERE s.user_id=? AND s.is_test=? AND e.id>? ORDER BY e.id LIMIT ?',(uid,int(mode),after,limit+1)).fetchall()
   items=[{'sequence':r['id'],'event_id':r['event_id'],'event_type':r['event_type'],'severity':r['severity'],'created_at':r['created'],'data_timestamp':r['data_timestamp'],'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'data':json.loads(r['payload'])} for r in events[:limit]]
-  return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':[view(c,r,now) for r in opened],'open_sessions_complete':True,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit}
+  return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':[view(c,r,now) for r in opened],'open_sessions_complete':True,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit}
 
 def control(connect,uid,wid,mode,action,now=None):
  now=now or utc()
