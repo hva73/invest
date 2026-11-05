@@ -42,6 +42,10 @@ def normalized(raw,asset_id,now=None):
     if change is not None and pct is not None and Decimal(change)*Decimal(pct)<0:
         change=None;pct=None;change_note='Modstridende dagsændringer fra Pluto vises ikke.'
     result={'asset_id':asset_id,'name':asset.get('name') if isinstance(asset.get('name'),str) else asset_id,'ticker':asset.get('ticker') if isinstance(asset.get('ticker'),str) else None,'exchange':asset.get('exchange') if isinstance(asset.get('exchange'),str) else None,'currency':quote['price']['currency'],'price':quote['price']['amount'],'price_time':stamp(quote['price_time']).isoformat(timespec='milliseconds') if quote['price_time'] else None,'daily_change':change,'daily_change_percent':pct,'daily_note':change_note,'previous_close':None,'daily_comparison':None,'fetched_at':now.isoformat(timespec='milliseconds'),'source':'Pluto Markets · get_asset','asset_type':asset.get('type') if isinstance(asset.get('type'),str) else None,'display_timezone':'Europe/Copenhagen','series':[],'series_error':None,'week_change_percent':None}
+    isin=asset.get('isin')
+    if isinstance(isin,str):
+        import re
+        if re.fullmatch(r'[A-Z]{2}[A-Z0-9]{9}[0-9]',isin):result['isin']=isin
     performance=raw.get('performance')
     if not isinstance(performance,dict) or not isinstance(performance.get('series'),list):
         result['series_error']='Pluto har ikke leveret en kurshistorik.';return result

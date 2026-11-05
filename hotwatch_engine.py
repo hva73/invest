@@ -153,6 +153,19 @@ def create_batch(connect,uid,data,now=None):
   c.execute('INSERT INTO hw_activation_requests VALUES(?,?,?,?,?,?)',(uid,data['request_id'],int(data['is_test']),digest_value,canonical(response),now.isoformat()))
   return response
 
+def reported_daily_from_history(history,request,price):
+ """Use only a same-instrument EODHD reference on the verified exchange day."""
+ if request.get('provider')!='eodhd' or not history or history[-1].get('source')!='eodhd' or not history[-1].get('bar_evidence') or price is None:return None
+ try:
+  from zoneinfo import ZoneInfo
+  latest=history[-1];zone=ZoneInfo(latest['bar_evidence']['timezone']);at=stamp(latest['event_time']);day=at.astimezone(zone).date()
+  for prior in reversed(history[:-1]):
+   if prior.get('source')!='eodhd' or prior.get('asset_id')!=latest.get('asset_id') or prior.get('currency')!=latest.get('currency') or not str(prior.get('feed_type','')).startswith('EODHD REST real-time endpoint') or not prior.get('previous_close'):continue
+   reference=stamp(prior['event_time']);previous=Decimal(prior['previous_close']);current=Decimal(price)
+   if reference<=at and reference.astimezone(zone).date()==day and previous>0 and current>0:return format((current/previous-1)*100,'f')
+ except (KeyError,ValueError,TypeError,ArithmeticError):pass
+ return None
+
 def view(c,row,now=None):
  now=now or utc()
  request=json.loads(row['request']);state=json.loads(row['state']);sample=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone();currency=json.loads(sample['payload'])['currency'] if sample else None;context=json.loads(sample['payload'])['context'] if sample else None;extra=c.execute('SELECT payload FROM hw_context_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
@@ -180,8 +193,19 @@ def view(c,row,now=None):
  profile=state.get('adaptive_profile',request['profile'])
  minimum=state.get('provider_floor_s',provider_floor(request['provider']))
  latest_payload=json.loads(sample['payload']) if sample else None
- history=[latest_payload] if latest_payload and latest_payload.get('bar_history') else [json.loads(x['payload']) for x in reversed(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 120',(row['id'],)).fetchall())]
+ if latest_payload and latest_payload.get('bar_history'):
+  # Older bar arrays are not needed for quote-to-quote comparisons; omit them
+  # so each dashboard refresh does not deserialize thousands of old bars.
+  previous=c.execute("SELECT json_remove(payload,'$.bar_history','$.bar_evidence') AS payload FROM hw_samples WHERE watch_row_id=? AND event_epoch<? ORDER BY event_epoch DESC,id DESC LIMIT 119",(row['id'],stamp(latest_payload['event_time']).timestamp())).fetchall()
+  history=[json.loads(x['payload']) for x in reversed(previous)]+[latest_payload]
+ else:history=[json.loads(x['payload']) for x in reversed(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 120',(row['id'],)).fetchall())]
  data_status=observation_status(history,now,request['risk']['max_quote_age_s'],effective,row['status'])
+ # A previous-close value from an earlier EODHD snapshot for this same watch
+ # can accompany a later trade only on the same verified exchange-local date.
+ # It remains a provider-reported reference, never an official-close claim.
+ if data_status['daily_change_pct'] is None:
+  reported_daily=reported_daily_from_history(history,request,data_status['price'])
+  if reported_daily is not None:data_status.update(daily_change_pct=reported_daily,daily_change_source='EODHD reported previousClose')
  display_status={'BUY':'KØBSSIGNAL','SELL':'SÆLGSSIGNAL','REDUCE':'EXIT WATCH','WAIT':'AFVENT','NO_DATA':'DATA MANGLER','PAUSE':'DATA MANGLER'}.get(effective,'HOT WATCH')
  if effective=='NO_DATA' and data_status['price'] is not None:display_status='AFVENTER SIGNALDATA'
  return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'strategy_checksum':checksum(json.loads(row['strategy'])),'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,PROFILES[profile]),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}

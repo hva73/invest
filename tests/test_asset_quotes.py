@@ -15,7 +15,10 @@ class Quotes(unittest.TestCase):
   data={'asset':{'id':'test-id','currency':'USD'},'price':{'assetId':'test-id','currentPrice':502.5,'dailyChange':-1.2,'dailyChangePercent':-0.24}}
   result=asset_quotes.parse(data,'test-id')
   self.assertEqual(result['price'],{'amount':'502.5','currency':'USD'})
+  self.assertEqual(result['daily']['percent'],'-0.24');self.assertEqual(result['daily']['basis'],'pluto_reported_daily_change')
   self.assertIsNone(result['price_time'])
+  contradicting={'asset':{'id':'test-id','currency':'USD'},'price':{'currentPrice':'500','dailyChange':'2','dailyChangePercent':'-1'}}
+  self.assertIsNone(asset_quotes.parse(contradicting,'test-id')['daily'])
   data['price']['assetId']='foreign'
   with self.assertRaises(portfolio_data.PortfolioFormatError):asset_quotes.parse(data,'test-id')
  def test_calculated_value_is_labeled_and_same_currency(self):
@@ -34,6 +37,7 @@ class Quotes(unittest.TestCase):
   asset_quotes.enrich(Client(),tools,payload,lambda response,name:response['structuredContent'])
   self.assertEqual(len(calls),1);self.assertEqual(calls[0],{'name':'get_asset','arguments':{'assetId':'test-id'}})
   self.assertIsNone(payload['positions'][0]['price_time']);self.assertTrue(payload['complete'])
+  self.assertEqual(payload['positions'][0]['price_type'],'get_asset_latest')
  def test_missing_id_and_unknown_quote_stay_unknown(self):
   row=self.row();row['asset_id']=None;payload={'positions':[row],'errors':[],'complete':True}
   class Client:

@@ -31,6 +31,7 @@ class Quotes(unittest.TestCase):
   q=market_data.normalized(self.raw,'synthetic-chart-asset',self.fixed)
   self.assertEqual(q['price'],'18.636');self.assertEqual(q['daily_change'],'0.225');self.assertGreater(float(q['daily_change_percent']),0);self.assertLess(float(q['week_change_percent']),0)
   self.assertIsNone(q['price_time']);self.assertIsNone(q['previous_close']);self.assertEqual(len(q['series']),82)
+  raw=copy.deepcopy(self.raw);raw['asset']['isin']='US1234567890';self.assertEqual(market_data.normalized(raw,'synthetic-chart-asset',self.fixed)['isin'],'US1234567890')
   today=[p for p in q['series'] if p['date']=='2026-11-02'];self.assertEqual(len(today),2);self.assertGreater(float(today[0]['price']),float(today[1]['price']))
   self.assertEqual(today[0]['timestamp'],'2026-11-02T09:00:00.000Z');self.assertEqual(today[0]['source_timestamp'],'2026-11-02T09:00:00.000000000Z')
  def test_cache_preserves_fetch_time_and_reads_only_once(self):

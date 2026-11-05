@@ -50,6 +50,19 @@ class HotWatch(unittest.TestCase):
   result=observation_status([first,last],self.now,120,'WAIT','ACTIVE')
   self.assertEqual(Decimal(result['daily_change_pct']),Decimal('10'));self.assertEqual(Decimal(result['since_last_pct']),Decimal('10'))
   first['venue']='OTHER';result=observation_status([first,last],self.now,120,'WAIT','ACTIVE');self.assertIsNone(result['since_last_pct'])
+ def test_since_last_uses_observed_trade_not_last_two_bar_closes(self):
+  first=tick(self.now-timedelta(minutes=1),0,'100');last=tick(self.now,1,'110')
+  last['bar_history']=[{'bar_open_at':(self.now-timedelta(minutes=2)).isoformat(),'close':'100'},{'bar_open_at':(self.now-timedelta(minutes=1)).isoformat(),'close':'100'}]
+  view=observation_status([first,last],self.now,120,'WAIT','ACTIVE')
+  self.assertEqual(Decimal(view['since_last_pct']),Decimal('10'));self.assertEqual(Decimal(view['momentum_pct']['1']),Decimal('0'))
+  self.assertIsNone(observation_status([last],self.now,120,'WAIT','ACTIVE')['since_last_pct'])
+ def test_eodhd_daily_reference_is_same_symbol_currency_and_exchange_day(self):
+  at=datetime(2026,11,5,13,40,tzinfo=timezone.utc);current=tick(at,1,'110');current.update(source='eodhd',bar_evidence={'timezone':'Europe/Copenhagen'})
+  prior=tick(at-timedelta(minutes=15),0,'101');prior.update(source='eodhd',feed_type='EODHD REST real-time endpoint; synthetic',previous_close='100')
+  req={'provider':'eodhd'}
+  self.assertEqual(Decimal(engine.reported_daily_from_history([prior,current],req,'110')),Decimal('10'))
+  for change in ({'currency':'USD' if current['currency']!='USD' else 'DKK'},{'asset_id':'different'},{'event_time':(at-timedelta(days=1)).isoformat()},{'previous_close':'0'}):
+   modified={**prior,**change};self.assertIsNone(engine.reported_daily_from_history([modified,current],req,'110'))
  def test_different_feed_and_price_time_kinds_are_not_mixed(self):
   first=tick(self.now-timedelta(minutes=1),0,'100');last=tick(self.now,1,'101');last['feed_type']='different quote source'
   self.assertEqual(features([first,last],BASELINE['parameters'])['sample_count'],1)

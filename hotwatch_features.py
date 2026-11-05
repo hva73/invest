@@ -53,21 +53,21 @@ def observation_status(samples,now,max_age_s,signal,watch_status):
  elif age>max_age_s:result['price_status']='STALE'
  else:result['price_status']='FRESH'
  if latest['market_status']=='UNKNOWN':return result
+ identity=lambda s:tuple(s[k] for k in ('source','asset_id','currency','venue','session_key','market_status','feed_type'))+(s.get('price_time_kind'),)
+ comparable=[s for s in samples[:-1] if identity(s)==identity(latest) and s.get('price') is not None and stamp(s['event_time'])<event]
+ if comparable:
+  prior=max(comparable,key=lambda s:stamp(s['event_time']))
+  if number(prior['price'])>0:result['since_last_pct']=format((number(latest['price'])/number(prior['price'])-1)*100,'f')
  history=latest.get('bar_history')
  if isinstance(history,list) and history:
   last_bar=history[-1];last_time=stamp(last_bar['bar_open_at']);last_price=number(last_bar['close'])
-  if len(history)>1 and number(history[-2]['close'])>0:result['since_last_pct']=format((last_price/number(history[-2]['close'])-1)*100,'f')
   for minutes in (1,5,15,30):
    choices=[b for b in history[:-1] if (last_time-stamp(b['bar_open_at'])).total_seconds()==minutes*60]
    if choices and number(choices[-1]['close'])>0:result['momentum_pct'][str(minutes)]=format((last_price/number(choices[-1]['close'])-1)*100,'f')
   bar_age=(now-(last_time+timedelta(seconds=60))).total_seconds()
   result['momentum_status']='STALE' if result['price_status']!='FRESH' or not 0<=bar_age<=max_age_s else 'READY' if any(v is not None for v in result['momentum_pct'].values()) else 'INSUFFICIENT_HISTORY'
   return result
- identity=lambda s:tuple(s[k] for k in ('source','asset_id','currency','venue','session_key','market_status','feed_type'))+(s.get('price_time_kind'),)
- comparable=[s for s in samples[:-1] if identity(s)==identity(latest) and s.get('price') is not None and stamp(s['event_time'])<event]
  if not comparable:result['momentum_status']='INSUFFICIENT_HISTORY';return result
- prior=max(comparable,key=lambda s:stamp(s['event_time']))
- if number(prior['price'])>0:result['since_last_pct']=format((number(latest['price'])/number(prior['price'])-1)*100,'f')
  for minutes in (1,5,15,30):
   target=minutes*60
   choices=[s for s in comparable if abs((event-stamp(s['event_time'])).total_seconds()-target)<=5]

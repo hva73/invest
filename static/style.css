@@ -154,3 +154,8 @@ main,#content,.panel,.grid>*,.formgrid>*,.actions>*{min-width:0}.financial-panel
 /* Compact broker overview; complete evidence remains in position details. */
 .dash-data-summary{font-size:11px;color:#afc2ce;line-height:1.5;margin:8px 0 12px}.dash-table td{padding:8px 6px}.dash-table .dash-number{background:transparent!important;box-shadow:none;min-height:32px}.dash-instrument small{max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dash-action-badge{font-size:10px;padding:4px 6px}.dash-hotwatch:empty{display:none}.dash-table .dash-price small{font-size:9px}.dash-table .dash-action{max-width:155px}@media(min-width:901px){.dash-table{table-layout:auto}.dash-table th{font-size:10px}.dash-table td{font-size:12px}}
 @media(max-width:900px){.dash-table td{padding:0}.dash-table .dash-number{min-height:28px}.dash-row{padding:10px 6px}.dash-table .dash-action{max-width:none}}
+
+/* Signed changes and results use the same colors across views. */
+.signed-positive{color:var(--dash-positive);font-variant-numeric:tabular-nums}
+.signed-negative{color:var(--dash-negative);font-variant-numeric:tabular-nums}
+.signed-neutral{color:var(--muted);font-variant-numeric:tabular-nums}

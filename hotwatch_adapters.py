@@ -43,7 +43,7 @@ def search_eodhd_symbols(connect,uid,data,opener=None):
  name_key=lambda x:re.sub(r'[^a-z0-9]','',x.casefold()) if isinstance(x,str) else ''
  issuer=candidate.get('company_name');issuer_key=name_key(issuer)
  choices=[];seen=set();client=opener or urllib.request.build_opener(NoRedirect());not_found=[];successful=[]
- def search(query,allow_alias=False):
+ def search(query,allow_alias=False,allow_ticker_alias=False):
   reserve(connect,uid,'eodhd')
   url='https://eodhd.com/api/search/'+quote(query,safe='')+'?'+urlencode({'api_token':key,'fmt':'json','limit':50})
   try:
@@ -63,7 +63,8 @@ def search_eodhd_symbols(connect,uid,data,opener=None):
    code=row.get('Code');exchange=row.get('Exchange');name=row.get('Name');currency=row.get('Currency');isin=row.get('ISIN')
    if not isinstance(code,str) or not isinstance(exchange,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}',code) or not re.fullmatch(r'[A-Za-z0-9_-]{1,16}',exchange):continue
    base=code.rsplit('.',1)[0] if code.upper().endswith('.'+exchange.upper()) else code
-   if base.casefold()!=ticker.casefold() and not (allow_alias and issuer_key and name_key(name)==issuer_key):continue
+   ticker_equivalent=allow_ticker_alias and re.sub(r'[^a-z0-9]','',base.casefold())==re.sub(r'[^a-z0-9]','',ticker.casefold())
+   if base.casefold()!=ticker.casefold() and not ticker_equivalent and not (allow_alias and issuer_key and name_key(name)==issuer_key):continue
    symbol=code if code.upper().endswith('.'+exchange.upper()) else code+'.'+exchange
    if symbol.casefold() in seen:continue
    seen.add(symbol.casefold());choices.append({'symbol':symbol,'name':name[:200] if isinstance(name,str) else None,'exchange':exchange,'currency':currency if isinstance(currency,str) and re.fullmatch('[A-Z]{3}',currency) else None,'isin':isin[:32] if isinstance(isin,str) else None})
@@ -77,6 +78,10 @@ def search_eodhd_symbols(connect,uid,data,opener=None):
  words=re.findall(r'[^\W_]+',issuer,flags=re.UNICODE) if isinstance(issuer,str) else []
  issuer_query=' '.join(words[:2])
  if needs_issuer and len(name_key(issuer_query))>=3:search(issuer_query[:100],allow_alias=True)
+ elif needs_issuer and len(ticker)>=3 and ticker.isalnum():
+  # Some exchanges spell a share-class suffix with a hyphen (e.g. XYZB vs
+  # XYZ-B). Search that exact variant; the user must still select the result.
+  search(ticker[:-1]+'-'+ticker[-1],allow_ticker_alias=True)
  if not choices and not_found and not successful:raise DataUnavailable('EODHD_SEARCH_HTTP_404',502)
  return {'ticker':ticker,'choices':choices}
 

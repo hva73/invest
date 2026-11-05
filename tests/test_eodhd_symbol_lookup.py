@@ -23,6 +23,22 @@ class SymbolLookup(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'  TEST-SECRET\n'}),patch('market_data.candidate',return_value={'ticker':'AMD'}),patch.object(adapter,'reserve'):
    result=adapter.search_eodhd_symbols(None,1,{'candidate_id':'c'},opener)
   self.assertEqual(opener.token,'TEST-SECRET');self.assertNotIn('TEST-SECRET',str(result))
+ def test_share_class_suffix_search_does_not_offer_a_different_class(self):
+  from urllib.parse import urlsplit,unquote
+  class Reply:
+   def __init__(self,rows):self.rows=rows
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,size):return json.dumps(self.rows).encode()
+  class ClassAlias:
+   def __init__(self):self.paths=[]
+   def open(self,request,**kw):
+    self.paths.append(unquote(urlsplit(request.full_url).path))
+    return Reply([] if len(self.paths)==1 else [{'Code':'TEST-B','Exchange':'CO','Name':'Synthetic B','Currency':'DKK'},{'Code':'TEST-A','Exchange':'CO','Name':'Synthetic A','Currency':'DKK'}])
+  client=ClassAlias()
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-SECRET'}),patch('market_data.candidate',return_value={'ticker':'TESTB','company_name':'A.P. Synthetic A/S B'}),patch.object(adapter,'reserve'):
+   result=adapter.search_eodhd_symbols(None,1,{'candidate_id':'c','quote_currency':'DKK'},client)
+  self.assertEqual(client.paths,['/api/search/TESTB','/api/search/TEST-B']);self.assertEqual([v['symbol'] for v in result['choices']],['TEST-B.CO'])
  def test_alias_lookup_requires_exact_issuer_name(self):
   class Reply:
    def __init__(self,body):self.body=body

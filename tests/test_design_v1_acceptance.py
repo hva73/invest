@@ -74,6 +74,17 @@ class DesignAcceptance(unittest.TestCase):
   events=candidate_lifecycle.history(app.connect,1,cid)['events'];self.assertTrue({'HOT_WATCH','WAITING_TRIGGER'}<={e['status'] for e in events});self.assertEqual(report_ingest.item(app.connect,1,self.report['report_id'])['report']['data'],self.report)
  def test_T17_financial_signs_provided_without_changing_absolute_values(self):
   r=self.model()['positions'][0];self.assertEqual(r['value']['amount'],'100');self.assertGreater(Decimal(r['daily']['percent']),0);self.assertEqual(r['price']['amount'],'50')
+ def test_collection_quote_history_reported_day_and_estimated_result(self):
+  import asset_quotes
+  with app.connect() as c:
+   payload=portfolio_data.snapshots(c,1)[str(self.child['id'])]['data']
+   row=portfolio_data.normalize_positions([{'assetId':'collection-test','ticker':'TEST','name':'Synthetic','quantity':'2','currency':'USD','costBasis':'90'}])[0]
+   row['price']={'amount':'50','currency':'USD'};row['price_source']='Pluto get_asset · senest kendte pris';asset_quotes.calculate(row)
+   payload['positions']=[row];payload['observed']=(NOW+timedelta(minutes=1)).isoformat();portfolio_data.save(c,1,self.child['id'],payload)
+   row=copy.deepcopy(row);row['price']['amount']='55';row['value']['amount']='110';row['unrealized']['amount']='20';row['reported_daily']={'percent':'-2','amount':'-1','currency':'USD','from':None,'to':(NOW+timedelta(minutes=2)).isoformat(),'basis':'pluto_reported_daily_change','source_id':'Pluto get_asset'}
+   payload['positions']=[row];payload['observed']=(NOW+timedelta(minutes=2)).isoformat();portfolio_data.save(c,1,self.child['id'],payload)
+  item=next(r for r in self.model(NOW+timedelta(minutes=2))['positions'] if r['asset_id']=='collection-test')
+  self.assertEqual(Decimal(item['since_last']['percent']),Decimal('10'));self.assertEqual(item['daily']['percent'],'-2');self.assertEqual(item['unrealized']['amount'],'20');self.assertTrue(item['unrealized_estimated']);self.assertEqual(item['unrealized']['currency'],'USD')
  def test_T18_incompatible_observations_rejected_per_dimension(self):
   a=observation();b=observation('100',NOW-timedelta(minutes=1));self.assertIsNotNone(policy.comparison(a,b))
   for key in ['asset_id','source','feed_type','venue','currency','market_phase','session_key','price_type','adjustment_basis']:

@@ -34,7 +34,17 @@ def parse(data,asset_id):
     stamp=date_field(data,['priceAsOf','priceTimestamp','quotedAt'])
     if not stamp:stamp=date_field(metadata,['priceAsOf','priceTimestamp','quotedAt'])
     if not stamp and isinstance(raw,dict):stamp=date_field(raw,['timestamp','asOf','quotedAt'])
-    return {'price':quote,'price_time':stamp,'observed':datetime.now(timezone.utc).isoformat(),'source':'Pluto get_asset · senest kendte pris'}
+    observed=datetime.now(timezone.utc).isoformat()
+    daily=None
+    # Show the provider's explicit figure as reported, without inventing an
+    # official close or a market timestamp that Pluto did not supply.
+    if isinstance(raw,dict):
+        try:
+            pct=number(raw.get('dailyChangePercent'));delta=number(raw.get('dailyChange'))
+            if pct is not None and (delta is None or Decimal(delta)*Decimal(pct)>=0):
+                daily={'percent':pct,'amount':delta,'currency':quote['currency'],'from':None,'to':stamp or observed,'basis':'pluto_reported_daily_change','source_id':'Pluto get_asset','reference_note':'Pluto oplyst dagsændring; reference og kurstid er ikke altid dokumenteret'}
+        except PortfolioFormatError:pass
+    return {'price':quote,'price_time':stamp,'observed':observed,'source':'Pluto get_asset · senest kendte pris','daily':daily}
 
 def calculate(row):
     price=row['price'];quantity=row['quantity'];code=row['currency']
@@ -68,7 +78,7 @@ def enrich(client,tools,payload,decode):
                 quote=cache[aid]
                 if isinstance(quote,Exception):raise quote
                 if not row['currency'] or quote['price']['currency']!=row['currency']:raise PortfolioFormatError('Prisvaluta kan ikke matches med beholdningens valuta')
-                row['price']=quote['price'];row['price_time']=quote['price_time'];row['price_source']=quote['source'];row['price_observed']=quote['observed']
+                row['price']=quote['price'];row['price_time']=quote['price_time'];row['price_source']=quote['source'];row['price_observed']=quote['observed'];row['price_type']='get_asset_latest';row['reported_daily']=quote.get('daily')
             except PortfolioFormatError as error:
                 payload['errors'].append('Prisopslag post '+str(index+1)+': '+str(error));continue
         try:calculate(row)
