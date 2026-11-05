@@ -160,3 +160,18 @@ async function maybeAutoRefresh({force=false}={}){
 document.addEventListener('input',e=>{window.TradeUI.change(e);const form=e.target.closest('#content form');if(form)form.dataset.dirty='true'});
 document.addEventListener('focusout',()=>{if(pendingAutoRender)setTimeout(()=>{if(state&&!editingData())render()},0)});
 setInterval(maybeAutoRefresh,30000);
+
+// Refresh stored values without initiating extra Pluto or EODHD requests.
+let storedPollBusy=false;
+setInterval(async()=>{
+ if(storedPollBusy||userRefreshBusy||!state||document.hidden||editingData()||view==='hot-watch'||document.querySelector('dialog[open]'))return;
+ const epoch=sessionEpoch,currentView=view;storedPollBusy=true;
+ try{
+  const current=await api('state');
+  if(epoch!==sessionEpoch||!state||view!==currentView||document.hidden)return;
+  const previous={...state};delete previous.automation;delete previous.report_desk;delete previous.time;
+  const next={...current};delete next.time;
+  serverClockOffset=Date.parse(current.time)-Date.now();
+  if(JSON.stringify(previous)!==JSON.stringify(next)){state={...state,...current};if(editingData())pendingAutoRender=true;else render()}
+ }catch{}finally{storedPollBusy=false}
+},30000);
