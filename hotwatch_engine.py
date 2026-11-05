@@ -1,5 +1,5 @@
 """Persistent HOT WATCH v1 session/signal engine. No trading capabilities."""
-import json,os,secrets,time
+import json,os,secrets,time,hashlib
 from datetime import datetime,timezone
 from decimal import Decimal
 from hotwatch_contract import SESSION,SAMPLE,CONTEXT,ACTIVATION_BATCH,EngineError,require,canonical,checksum,stamp,OPEN_STATES,PROFILES,GLOBAL_RISK,provider_floor
@@ -103,6 +103,12 @@ def _create_in_transaction(c,uid,data,now,holding=False):
   candidate=next((x for x in json.loads(report['payload']).get('candidates',[]) if x.get('candidate_id')==data['candidate_id']),None)
   if not candidate:raise EngineError('candidate_reference_not_found',404)
   if candidate.get('ticker','').casefold()!=data['ticker'].casefold():raise EngineError('candidate_ticker_mismatch',409)
+  if data.get('watch_mode','both')!='exit':
+   from intel_workflows import candidate_currentness
+   currentness=candidate_currentness(c,uid,data['is_test'],data['candidate_id'],now)
+   if currentness['status']!='CURRENT':raise EngineError('candidate_not_current',409)
+   stopped=c.execute("SELECT e.created FROM hw_sessions s JOIN hw_events e ON e.watch_row_id=s.id AND e.event_type IN ('WATCH_COMPLETED','CANDIDATE_WATCH_EXPIRED') WHERE s.user_id=? AND s.is_test=? AND s.candidate_id=? ORDER BY e.id DESC LIMIT 1",(uid,int(data['is_test']),data['candidate_id'])).fetchone()
+   if stopped and (not data.get('reactivation_reason') or stamp(currentness['assessed_at'])<=stamp(stopped['created'])):raise EngineError('new_assessment_and_reactivation_reason_required',409)
  for pid in data['portfolio_ids']:
   if not c.execute("SELECT 1 FROM portfolios WHERE id=? AND user_id=? AND active=1 AND source='pluto'",(pid,uid)).fetchone():raise EngineError('portfolio_reference_not_found')
  import candidate_lifecycle
@@ -282,15 +288,69 @@ def view(c,row,now=None):
   display_status='MARKED LUKKET' if data_status['market_status']=='CLOSED' else 'HANDEL STANDSET'
  if effective in ('NO_DATA','PAUSE') and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED') and regular['status']=='CLOSED' and data_status['market_status'] not in ('PREMARKET','AFTERHOURS','HALTED'):
   display_status='ORDINÆR HANDEL LUKKET'
- return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,PROFILES[profile]),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
+ return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_cold_exit_retained':json.loads(row['state']).get('candidate_cold'),'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,PROFILES[profile]),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
 def sessions(connect,uid,mode=False,after=0,limit=50):
  with connect() as c:
   rows=c.execute('SELECT * FROM hw_sessions WHERE user_id=? AND is_test=? AND id>? ORDER BY id LIMIT ?',(uid,int(mode),after,limit+1)).fetchall();control=c.execute('SELECT killed,reason,changed FROM hw_control WHERE user_id=?',(uid,)).fetchone();beat=c.execute('SELECT updated,status FROM hw_heartbeat WHERE id=1').fetchone();supervisor=c.execute('SELECT updated,status,reason,attempts FROM hw_supervisor_status WHERE id=1').fetchone()
   return {'sessions':[view(c,r) for r in rows[:limit]],'next_cursor':rows[limit-1]['id'] if len(rows)>limit else None,'is_test':mode,'operator_kill_switch':bool(c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]),'kill_switch':dict(control) if control else {'killed':0,'reason':'','changed':None},'worker':dict(beat) if beat else None,'supervisor':dict(supervisor) if supervisor else None,'capacity':capacity(),'phase':'1-2','deferred':['backtest','shadow','qualified strategy activation/rollback']}
 
+def reconcile_candidates(connect,now=None):
+ """Expire report-only entry watches without relying on a market-data read."""
+ from intel_workflows import candidate_currentness
+ now=now or utc();changed=0
+ with connect() as c:
+  c.execute('BEGIN IMMEDIATE')
+  rows=c.execute("SELECT * FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchall()
+  for row in rows:
+   req=json.loads(row['request']);mode=req.get('watch_mode','both')
+   if req.get('end_at') and stamp(req['end_at'])<=now:
+    c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']))
+    event(c,row,'WATCH_EXPIRED',now,'Session deadline reached');changed+=1
+    continue
+   if mode=='exit' or req.get('purpose')=='automatic holding watch':continue
+   current=candidate_currentness(c,row['user_id'],row['is_test'],row['candidate_id'],now)
+   if current['status']!='COLD':
+    state=json.loads(row['state'])
+    if state.pop('candidate_cold',None):
+     c.execute('UPDATE hw_sessions SET state=?,updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?',(canonical(state),now.isoformat(),row['id']))
+     event(c,row,'CANDIDATE_REASSESSED',now,'Ny gyldig vurdering');changed+=1
+    continue
+   if mode=='entry':
+    c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']))
+    event(c,row,'CANDIDATE_WATCH_EXPIRED',now,current['reason']);changed+=1
+   else:
+    # A legacy combined watch also carries exit protection. Split it in the
+    # same transaction, retaining its scope and pause state before closing it.
+    retained=dict(req);retained['watch_id']='hw-exit-'+hashlib.sha256((str(row['user_id'])+'|'+row['watch_id']).encode()).hexdigest()[:28]
+    retained['purpose']='retained exit '+row['watch_id'];retained['watch_mode']='exit'
+    retained['activation_reason']='Exit-overvågning bevaret ved lukning af rapportkandidat'
+    retained['end_at']=None
+    existing=c.execute('SELECT * FROM hw_sessions WHERE user_id=? AND watch_id=?',(row['user_id'],retained['watch_id'])).fetchone()
+    if not existing:
+     alternatives=c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=? AND id!=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') AND json_extract(request,'$.asset_id')=?",(row['user_id'],row['is_test'],row['id'],req.get('asset_id'))).fetchall()
+     existing=next((other for other in alternatives if json.loads(other['request']).get('watch_mode')=='exit' and set(json.loads(other['request']).get('portfolio_ids',[]))==set(req.get('portfolio_ids',[])) and (row['status']=='PAUSED' or other['status']!='PAUSED')),None)
+    if existing and existing['status'] in ('COMPLETED','EXPIRED','ERROR'):raise EngineError('retained_exit_watch_was_manually_ended',409)
+    if not existing:
+     state={'signal':'PAUSE' if row['status']=='PAUSED' else 'NO_DATA','alert_codes':[],'retained_from_watch_id':row['watch_id']}
+     cur=c.execute('INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(row['user_id'],retained['watch_id'],row['is_test'],row['candidate_id'],retained['purpose'].strip().casefold(),'PAUSED' if row['status']=='PAUSED' else 'VALIDATING',canonical(retained),checksum(retained),row['strategy'],canonical(state),now.isoformat(),now.isoformat(),now.timestamp()))
+     child=c.execute('SELECT * FROM hw_sessions WHERE id=?',(cur.lastrowid,)).fetchone();event(c,child,'EXIT_WATCH_RETAINED',now,'Exit-overvågning bevaret fra '+row['watch_id'])
+    c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']))
+    event(c,row,'CANDIDATE_WATCH_EXPIRED',now,current['reason']);changed+=1
+ return changed
+
 def item(connect,uid,wid,mode=False):
  with connect() as c:return {'session':view(c,row_for(c,uid,wid,mode))}
+
+def sync(connect,uid,mode=False,after=0,limit=50):
+ """Read a complete open-session snapshot and a paginated event stream."""
+ now=utc()
+ with connect() as c:
+  c.execute('BEGIN')
+  opened=c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') ORDER BY id",(uid,int(mode))).fetchall()
+  events=c.execute('SELECT e.id,e.event_id,e.event_type,e.severity,e.created,e.data_timestamp,e.payload,s.watch_id,s.candidate_id FROM hw_events e JOIN hw_sessions s ON s.id=e.watch_row_id WHERE s.user_id=? AND s.is_test=? AND e.id>? ORDER BY e.id LIMIT ?',(uid,int(mode),after,limit+1)).fetchall()
+  items=[{'sequence':r['id'],'event_id':r['event_id'],'event_type':r['event_type'],'severity':r['severity'],'created_at':r['created'],'data_timestamp':r['data_timestamp'],'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'data':json.loads(r['payload'])} for r in events[:limit]]
+  return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':[view(c,r,now) for r in opened],'open_sessions_complete':True,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit}
 
 def control(connect,uid,wid,mode,action,now=None):
  now=now or utc()
@@ -303,6 +363,9 @@ def control(connect,uid,wid,mode,action,now=None):
    if killed and killed['killed']:raise EngineError('kill_switch_active',409)
    request=json.loads(row['request'])
    if request['end_at'] and stamp(request['end_at'])<=now:raise EngineError('watch_expired',409)
+   if request.get('watch_mode','both')=='entry':
+    from intel_workflows import candidate_currentness
+    if candidate_currentness(c,uid,mode,row['candidate_id'],now)['status']!='CURRENT':raise EngineError('candidate_not_current',409)
    new='VALIDATING'
   elif action=='stop':new='COMPLETED'
   else:raise EngineError('unknown_action')
@@ -408,7 +471,9 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
    live_metrics=features([sample],strategy_data['parameters']);metrics.update(price=sample['price'],spread=live_metrics.get('spread'),spread_pct=live_metrics.get('spread_pct'),bar_history_count=len(bar_samples))
   import intel_workflows,candidate_lifecycle
   decision=intel_workflows.prior_decision(c,uid,mode,request['candidate_id'])
-  risk=dict(request['risk'],entry_allowed=request.get('watch_mode','both')!='exit' and (not decision or decision[1]['status']!='FRAVÆLG'),exit_allowed=request.get('watch_mode','both')!='entry')
+  from intel_workflows import candidate_currentness
+  currentness=candidate_currentness(c,uid,mode,row['candidate_id'],now) if request.get('report_id')!='automatic-holdings' else {'status':'UNKNOWN'}
+  risk=dict(request['risk'],entry_allowed=request.get('watch_mode','both')!='exit' and currentness['status']=='CURRENT' and (not decision or decision[1]['status']!='FRAVÆLG'),exit_allowed=request.get('watch_mode','both')!='entry')
   result,nextstate=calculate(sample,metrics,strategy_data,risk,state,now,new_market_event=new_market_event)
   result['position_context']=sample['context'];result['new_market_observation']=new_market_event
   result.update(engine_version='1.0-phase1-2',feature_version='1.0.0',risk_version='1.0.0',global_risk_limits=GLOBAL_RISK,algorithm_constraints={'max_volatility_pct':'5','max_price_gap_pct':'5','max_action_signals_hour':20,'max_context_age_s':300},risk_parameters=risk,prior_signal_state=state,input_sample_ids=[s['sample_id'] for s in samples])

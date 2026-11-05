@@ -42,6 +42,17 @@ class EngineContract(unittest.TestCase):
   conflict=copy.deepcopy(req);conflict['sessions'][0]['activation_reason']='different payload'
   with self.assertRaises(engine.EngineError):engine.create_batch(app.connect,1,conflict)
  def session(self):return self.call('get_hot_watch_engine',{'watch_id':self.req['watch_id'],'is_test':True})['session']
+ def test_radar_session_readback_and_complete_sync(self):
+  report=self.call('get_latest_report',{'is_test':True})['report'];self.assertEqual(report['data']['report_id'],self.report['report_id'])
+  with app.connect() as c:self.assertEqual(c.execute("SELECT count(*) FROM report_delivery_evidence WHERE report_row_id=? AND kind='readback_verified'",(report['id'],)).fetchone()[0],1)
+  with patch('hotwatch_engine.utc',return_value=self.base):engine.ingest(app.connect,1,self.req['watch_id'],True,tick(self.base),self.base)
+  synced=self.call('sync_hot_watch',{'is_test':True,'limit':1});self.assertTrue(synced['open_sessions_complete']);self.assertTrue(any(s['watch_id']==self.req['watch_id'] and s['status'] in ('ACTIVE','DEGRADED') for s in synced['open_sessions']))
+  seen=[]
+  while True:
+   seen.extend(synced['events'])
+   if not synced['has_more']:break
+   synced=self.call('sync_hot_watch',{'is_test':True,'limit':1,'after':synced['next_cursor']})
+  self.assertTrue(any(e['event_type']=='WATCH_STARTED' for e in seen))
  def feed(self):
   prices=['100' if i%2==0 else '100.5' for i in range(34)]+['100.55','100.70','100.90','101.15','101.45','101.80']
   for i,price in enumerate(prices):

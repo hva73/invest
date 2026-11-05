@@ -37,7 +37,7 @@ class DisplayContract(unittest.TestCase):
  def test_current_session_view_not_buried_by_history_and_history_paginates(self):
   import hotwatch_engine as engine
   from test_hotwatch_engine import request
-  r=request(False,'synthetic-current-view');r.update(report_id=self.fixture.report['report_id'],ticker=self.fixture.report['candidates'][0]['ticker'],candidate_id=self.fixture.report['candidates'][0]['candidate_id'],provider='report_inbox')
+  r=request(False,'synthetic-current-view');r.update(report_id=self.fixture.report['report_id'],ticker=self.fixture.report['candidates'][0]['ticker'],candidate_id=self.fixture.report['candidates'][0]['candidate_id'],provider='report_inbox',watch_mode='exit')
   engine.create(app.connect,1,r)
   for i in range(4):
    old=copy.deepcopy(r);old.update(watch_id='synthetic-past-'+str(i),purpose='SYNTHETIC past '+str(i));engine.create(app.connect,1,old);engine.control(app.connect,1,old['watch_id'],False,'stop')

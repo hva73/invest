@@ -1,6 +1,6 @@
 """Append-only observation and delivery evidence. Never imports broker clients."""
 import hashlib,json
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from decimal import Decimal,localcontext
 from report_validation import issue,stamp,schema_errors,ReportValidationError
 from report_v2 import OBSERVATION,DECISION
@@ -44,6 +44,22 @@ def prior_decision(c,uid,mode,cid,before=None):
     if before is not None:bound=' AND decided<=?';args.append(before)
     row=c.execute('SELECT decided,payload,origin FROM candidate_decision_events WHERE user_id=? AND is_test=? AND candidate_id=?'+bound+' ORDER BY decided DESC LIMIT 1',args).fetchone()
     return (row['decided'],json.loads(row['payload']),row['origin']) if row else None
+
+def candidate_currentness(c,uid,mode,cid,at=None):
+    """Determine expiry from an assessment, never from market-feed freshness."""
+    at=at or datetime.now(timezone.utc)
+    decision=prior_decision(c,uid,mode,cid,at.timestamp())
+    lifecycle=c.execute("SELECT status,reason,occurred FROM candidate_lifecycle_events WHERE user_id=? AND is_test=? AND candidate_id=? AND occurred<=? ORDER BY occurred DESC,id DESC LIMIT 1",(uid,int(mode),cid,at.timestamp())).fetchone()
+    if lifecycle and lifecycle['status'] in ('CLOSED','ARCHIVED') and (not decision or lifecycle['occurred']>=decision[0]):
+        return {'status':'COLD','reason':lifecycle['reason'],'deadline':None,'assessed_at':datetime.fromtimestamp(lifecycle['occurred'],timezone.utc).isoformat()}
+    if decision:
+        assessment=datetime.fromtimestamp(decision[0],timezone.utc)
+        data=decision[1]
+        deadline=stamp(data['deadline']) if data.get('deadline') else assessment+timedelta(hours=24)
+        reason='fravalgt' if data.get('status')=='FRAVÆLG' else 'frist udløbet · revurdering mangler' if deadline<=at else None
+    else:
+        return {'status':'UNKNOWN','reason':'Tidsstemplet vurdering mangler','deadline':None,'assessed_at':None}
+    return {'status':'COLD' if reason else 'CURRENT','reason':reason,'deadline':deadline.isoformat(),'assessed_at':assessment.isoformat()}
 
 def decision_errors(decision,path,at,previous=None):
     errors=[]
@@ -260,7 +276,8 @@ def candidates(c,uid,mode=False,candidate_id=None,include_history_market=True):
         status=candidate_lifecycle.projection(c,uid,mode,candidate,current_decision[1] if current_decision else None)
         import display_policy
         status['display_group']=display_policy.candidate_group(status)
-        result.append({**status,'latest_verified_market':latest_market,'candidate':candidate,'decision':current_decision[1] if current_decision else None,'decision_origin':current_decision[2] if current_decision else None,'active':status['lifecycle']['status'] not in ['CLOSED','ARCHIVED'] and (not current_decision or current_decision[1]['status']!='FRAVÆLG'),'first_seen':first['generated_at'],'last_seen':last_seen,'first_price':initial['market']['price'],'report_id':d['report_id'],'received':latest['received'],'generated_at':d['generated_at'],'schema_version':2,'quality':d.get('data_quality',{}).get('status','unknown')})
+        currentness=candidate_currentness(c,uid,mode,cid)
+        result.append({**status,'currentness':currentness,'latest_verified_market':latest_market,'candidate':candidate,'decision':current_decision[1] if current_decision else None,'decision_origin':current_decision[2] if current_decision else None,'active':status['lifecycle']['status'] not in ['CLOSED','ARCHIVED'] and currentness['status']!='COLD','first_seen':first['generated_at'],'last_seen':last_seen,'first_price':initial['market']['price'],'report_id':d['report_id'],'received':latest['received'],'generated_at':d['generated_at'],'schema_version':2,'quality':d.get('data_quality',{}).get('status','unknown')})
     return result
 
 def account_projection(report):

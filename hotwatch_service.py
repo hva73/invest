@@ -120,12 +120,14 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
    existing=c.execute("SELECT watch_id,status,request FROM hw_sessions WHERE user_id=? AND is_test=0 AND json_extract(request,'$.asset_id')=? ORDER BY id DESC",(uid,aid)).fetchall()
    matches=[row for row in existing if json.loads(row['request']).get('watch_mode','both')!='entry' and (not json.loads(row['request']).get('portfolio_ids') or pid in json.loads(row['request'])['portfolio_ids'])]
    active=[row for row in matches if row['status'] in ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')]
-   watch='hw-holding-'+hashlib.sha256((str(uid)+'|'+str(pid)+'|'+aid).encode()).hexdigest()[:28]
    prior=c.execute('SELECT status,watch_id,next_attempt FROM hw_holding_autowatch WHERE user_id=? AND portfolio_id=? AND asset_id=?',(uid,pid,aid)).fetchone()
+   generation=c.execute('SELECT updated FROM hw_holding_autowatch WHERE user_id=? AND portfolio_id=? AND asset_id=?',(uid,pid,aid)).fetchone() if prior and prior['status']=='POSITION_CLOSED' else None
+   identity=str(uid)+'|'+str(pid)+'|'+aid+('|'+generation['updated'] if generation else '')
+   watch='hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
    if len(active)==1:status='LINKED';linked=active[0]['watch_id']
    elif len(active)>1:status='AMBIGUOUS';linked=None
    elif prior and prior['status']=='STOPPED':status='STOPPED';linked=prior['watch_id']
-   elif prior and prior['watch_id'] and any(row['watch_id']==prior['watch_id'] and row['status'] in ('COMPLETED','EXPIRED','ERROR') for row in matches):status='STOPPED';linked=prior['watch_id']
+   elif prior and prior['status']!='POSITION_CLOSED' and prior['watch_id'] and any(row['watch_id']==prior['watch_id'] and row['status'] in ('COMPLETED','EXPIRED','ERROR') for row in matches):status='STOPPED';linked=prior['watch_id']
    elif any(row['watch_id']==watch for row in matches):status='STOPPED';linked=watch
    else:
     if prior and prior['next_attempt']>epoch:continue
@@ -155,6 +157,32 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
  except Exception:status='VERIFICATION_FAILED'
  with connect() as c:c.execute("UPDATE hw_holding_autowatch SET status=?,watch_id=?,next_attempt=?,updated=? WHERE user_id=? AND portfolio_id=? AND asset_id=?",(status,linked,epoch+300,engine.utc().isoformat(),uid,pid,aid))
  return status
+
+def reconcile_closed_holdings(connect,now=None):
+ """Close only automatic position watches on fresh complete Pluto evidence."""
+ from decimal import Decimal,InvalidOperation
+ now=now or engine.utc();closed=0
+ with connect() as c:
+  c.execute('BEGIN IMMEDIATE')
+  rows=c.execute("SELECT * FROM hw_sessions WHERE is_test=0 AND purpose='automatic holding watch' AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchall()
+  for row in rows:
+   req=json.loads(row['request']);pids=req.get('portfolio_ids',[]);aid=req.get('asset_id')
+   if len(pids)!=1 or not aid:continue
+   snap=c.execute("SELECT s.payload,s.last_error FROM portfolios p JOIN portfolio_snapshots s ON s.portfolio_id=p.id AND s.user_id=p.user_id WHERE p.id=? AND p.user_id=? AND p.active=1 AND p.source='pluto'",(pids[0],row['user_id'])).fetchone()
+   if not snap or snap['last_error']:continue
+   try:
+    payload=json.loads(snap['payload']);observed=stamp(payload['observed']);positions=payload['positions']
+    if not payload.get('positions_complete') or not isinstance(positions,list) or not 0<=(now-observed).total_seconds()<=300 or observed<stamp(row['created']):continue
+    if any(not isinstance(p,dict) or not p.get('kind') for p in positions):continue
+    holdings=[p for p in positions if p.get('kind')=='holding']
+    if any(not p.get('asset_id') or p.get('quantity') is None for p in holdings):continue
+    if any(p['asset_id']==aid and Decimal(str(p['quantity']))!=0 for p in holdings):continue
+   except (AttributeError,KeyError,TypeError,ValueError,InvalidOperation):continue
+   c.execute("UPDATE hw_sessions SET status='COMPLETED',updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']))
+   engine.event(c,row,'HOLDING_NOT_PRESENT',now,'Frisk komplet depotobservation viser ingen beholdning',data_time=observed.isoformat())
+   c.execute("UPDATE hw_holding_autowatch SET status='POSITION_CLOSED',next_attempt=0,updated=? WHERE user_id=? AND portfolio_id=? AND asset_id=? AND watch_id=?",(now.isoformat(),row['user_id'],pids[0],aid,row['watch_id']))
+   closed+=1
+ return closed
 
 def exchange_status_tick(connect,client_factory=None,now=None):
  """Refresh one EODHD exchange status; this is not instrument tradability."""
@@ -258,6 +286,14 @@ class Runner:
     except Exception:logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'heartbeat_error'}))
     self.stop.wait(HEARTBEAT_INTERVAL_S)
   thread=threading.Thread(target=beat,name='hotwatch-heartbeat',daemon=True);thread.start()
+  def candidate_loop():
+   while not self.stop.is_set():
+    try:
+     engine.reconcile_candidates(self.connect)
+     reconcile_closed_holdings(self.connect)
+    except Exception:logging.getLogger('escape.hotwatch').exception('candidate_reconciliation_error')
+    self.stop.wait(15)
+  candidate_thread=threading.Thread(target=candidate_loop,name='hotwatch-candidates',daemon=True);candidate_thread.start()
   def holdings_loop():
    while not self.stop.is_set():
     try:exchange_status_tick(self.connect)
@@ -277,7 +313,7 @@ class Runner:
      next_discovery=time.monotonic()+15
     self.stop.wait(interval)
   finally:
-   self.stop.set();thread.join(timeout=6);holding_thread.join(timeout=2)
+   self.stop.set();thread.join(timeout=6);holding_thread.join(timeout=2);candidate_thread.join(timeout=2)
    if thread.is_alive():logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'heartbeat_shutdown_timeout'}))
    else:self.heartbeat('stopped')
 

@@ -50,6 +50,20 @@ class HoldingAutowatch(unittest.TestCase):
   engine.control(app.connect,1,wid,False,'pause',self.now)
   self.assertIsNone(self.tick(verify=lambda *_:self.fail('paused watch must not be replaced'),lookup=self.lookup))
   with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM hw_sessions').fetchone()[0],'PAUSED')
+ def test_exit_watch_ends_only_on_fresh_complete_absence_and_reopens_on_new_holding(self):
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  with app.connect() as c:
+   old=c.execute('SELECT watch_id FROM hw_sessions').fetchone()[0]
+   c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':False,'observed':self.now.isoformat(),'positions':[]}),))
+  self.assertEqual(service.reconcile_closed_holdings(app.connect,self.now),0)
+  with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[]}),))
+  self.assertEqual(service.reconcile_closed_holdings(app.connect,self.now),1)
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT status FROM hw_sessions WHERE watch_id=?',(old,)).fetchone()[0],'COMPLETED')
+   c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[self.holding]}),))
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  with app.connect() as c:
+   sessions=c.execute('SELECT watch_id,status FROM hw_sessions ORDER BY id').fetchall();self.assertEqual(len(sessions),2);self.assertNotEqual(sessions[0]['watch_id'],sessions[1]['watch_id'])
  def test_ambiguous_symbol_is_not_created_and_retry_is_bounded(self):
   bad=lambda *_:{'choices':[{'symbol':'ONE.US','currency':'USD','isin':'US1234567890'},{'symbol':'TWO.US','currency':'USD','isin':'US1234567890'}]}
   self.assertEqual(self.tick(verify=self.verify,lookup=bad),'EODHD_IDENTITY_UNCERTAIN')
