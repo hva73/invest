@@ -37,6 +37,7 @@ def init(c):
  c.execute('CREATE TABLE IF NOT EXISTS hw_provider_health(user_id INTEGER NOT NULL,is_test INTEGER NOT NULL,source TEXT NOT NULL,attempted TEXT NOT NULL,succeeded TEXT,code TEXT,payload TEXT NOT NULL,PRIMARY KEY(user_id,is_test,source))')
  c.execute('CREATE TABLE IF NOT EXISTS hw_heartbeat(id INTEGER PRIMARY KEY CHECK(id=1),updated TEXT NOT NULL,status TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_supervisor_status(id INTEGER PRIMARY KEY CHECK(id=1),updated TEXT NOT NULL,status TEXT NOT NULL,reason TEXT,attempts INTEGER NOT NULL DEFAULT 0)')
+ c.execute('CREATE TABLE IF NOT EXISTS hw_exchange_status(exchange TEXT PRIMARY KEY,received TEXT,is_open INTEGER,next_attempt REAL NOT NULL DEFAULT 0)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_holding_autowatch(user_id INTEGER NOT NULL,portfolio_id INTEGER NOT NULL,asset_id TEXT NOT NULL,status TEXT NOT NULL,watch_id TEXT,next_attempt REAL NOT NULL DEFAULT 0,updated TEXT NOT NULL,PRIMARY KEY(user_id,portfolio_id,asset_id))')
 
 def event(c,row,kind,now,reason,metrics=None,severity='info',data_time=None):
@@ -249,6 +250,26 @@ def view(c,row,now=None):
   history=[json.loads(x['payload']) for x in reversed(previous)]+[latest_payload]
  else:history=[json.loads(x['payload']) for x in reversed(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 120',(row['id'],)).fetchall())]
  data_status=observation_status(history,now,request['risk']['max_quote_age_s'],effective,row['status'])
+ # Exchange-open evidence is separate from the instrument's session and can
+ # never assert that extended-hours trading is unavailable.
+ regular={'status':'UNKNOWN','received_at':None,'exchange':None,'source':'EODHD exchange details'}
+ symbol=request.get('provider_symbol') or ''
+ exchange=symbol.rsplit('.',1)[-1].upper() if '.' in symbol else ''
+ if request.get('provider')=='eodhd' and not row['is_test'] and exchange:
+  observed=c.execute('SELECT received,is_open FROM hw_exchange_status WHERE exchange=?',(exchange,)).fetchone()
+  if observed and observed['received'] and observed['is_open'] in (0,1):
+   try:
+    if 0<=(now-stamp(observed['received'])).total_seconds()<=300:regular={'status':'OPEN' if observed['is_open'] else 'CLOSED','received_at':observed['received'],'exchange':exchange,'source':'EODHD exchange details'}
+   except (ValueError,TypeError):pass
+ if regular['status']=='CLOSED' and data_status['market_status']=='OPEN' and data_status.get('market_status_at'):
+  try:
+   if stamp(data_status['market_status_at'])>stamp(regular['received_at']):regular={'status':'UNKNOWN','received_at':regular['received_at'],'exchange':exchange,'source':'EODHD exchange details; nyere instrumentstatus afviger'}
+   else:
+    data_status['market_status']='UNKNOWN'
+    if effective not in ('NO_DATA','PAUSE'):
+     effective='NO_DATA';data_status['signal_status']='WAITING_FOR_DATA';display_reasons.append('REGULAR_SESSION_CLOSED')
+  except (ValueError,TypeError):regular={'status':'UNKNOWN','received_at':None,'exchange':exchange,'source':'EODHD exchange details'}
+ data_status['regular_session']=regular
  # A previous-close value from an earlier EODHD snapshot for this same watch
  # can accompany a later trade only on the same verified exchange-local date.
  # It remains a provider-reported reference, never an official-close claim.
@@ -256,9 +277,11 @@ def view(c,row,now=None):
   reported_daily=reported_daily_from_history(history,request,data_status['price'])
   if reported_daily is not None:data_status.update(daily_change_pct=reported_daily,daily_change_source='EODHD reported previousClose')
  display_status={'BUY':'KØBSSIGNAL','SELL':'SÆLGSSIGNAL','REDUCE':'EXIT WATCH','WAIT':'AFVENT','NO_DATA':'DATA MANGLER','PAUSE':'DATA MANGLER'}.get(effective,'HOT WATCH')
- if effective=='NO_DATA' and data_status['price'] is not None:display_status='AFVENTER SIGNALDATA'
+ if effective=='NO_DATA' and data_status['price'] is not None:display_status='DATA FOR GAMLE' if stale else 'AFVENTER SIGNALDATA'
  if effective in ('NO_DATA','PAUSE') and data_status['market_status'] in ('CLOSED','HALTED') and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED'):
   display_status='MARKED LUKKET' if data_status['market_status']=='CLOSED' else 'HANDEL STANDSET'
+ if effective in ('NO_DATA','PAUSE') and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED') and regular['status']=='CLOSED' and data_status['market_status'] not in ('PREMARKET','AFTERHOURS','HALTED'):
+  display_status='ORDINÆR HANDEL LUKKET'
  return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,PROFILES[profile]),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
 def sessions(connect,uid,mode=False,after=0,limit=50):

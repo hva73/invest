@@ -37,6 +37,10 @@ def main():
      new_row=c.execute("SELECT watch_id,request FROM hw_sessions WHERE purpose='manual-synthetic-check'").fetchone();new_watch=new_row['watch_id'];new_request=json.loads(new_row['request'])
     first=tick(fixed,1000,'101');first.update(ticker=new_request['ticker'],asset_id=new_request['asset_id']);engine.ingest(app.connect,1,new_watch,True,first,fixed)
     page.locator('[data-watch-refresh]').click();warm=page.locator('.engine-card').filter(has_text='WARMUP');expect(warm).to_have_count(1);expect(warm).to_contain_text('mangler 33');assert warm.locator('progress').get_attribute('value')=='1'
+    with app.connect() as c:c.execute('UPDATE hw_sessions SET last_data=? WHERE watch_id=?',((fixed-timedelta(seconds=121)).isoformat(),new_watch))
+    page.locator('[data-watch-refresh]').click();stale=page.locator('.engine-card').filter(has=page.locator('[data-engine-id="'+new_watch+'"]'));expect(stale).to_contain_text('DATA FOR GAMLE');assert stale.locator('.engine-warmup').count()==0
+    with app.connect() as c:c.execute('UPDATE hw_sessions SET last_data=? WHERE watch_id=?',(fixed.isoformat(),new_watch))
+    page.locator('[data-watch-refresh]').click();warm=page.locator('.engine-card').filter(has_text='WARMUP');expect(warm).to_have_count(1)
     warm.locator('.engine-title').click();dialog.wait_for(state='visible')
     next_at=fixed+timedelta(seconds=60);second=tick(next_at,1001,'102');second.update(ticker=new_request['ticker'],asset_id=new_request['asset_id']);engine.ingest(app.connect,1,new_watch,True,second,next_at)
     expect(dialog).to_contain_text('Sammenlignelige observationer',timeout=20000);page.wait_for_timeout(16000);expect(dialog.locator('dt').filter(has_text='Sammenlignelige observationer').locator('xpath=following-sibling::dd')).to_have_text('2');assert dialog.is_visible();page.keyboard.press('Escape');dialog.wait_for(state='hidden')

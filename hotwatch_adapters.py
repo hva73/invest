@@ -14,11 +14,15 @@ def reserve(connect,uid,source,now=None,purpose=None):
  with connect() as c:
   c.execute('BEGIN IMMEDIATE');c.execute('DELETE FROM hw_request_budget WHERE window<?',(window-2,))
   row=c.execute('SELECT used FROM hw_request_budget WHERE user_id=? AND source=? AND window=?',(uid,source,window)).fetchone()
-  # Keep at most two calls available for a pending identity check. This does
-  # not increase the provider limit and expires if the watchdog disappears.
-  if source=='eodhd' and purpose!='holding_identity' and limit>2:
-   pending=c.execute("SELECT 1 FROM hw_holding_autowatch WHERE (status='VERIFYING' AND next_attempt>=?) OR (status='PROVIDER_RATE_BUDGET' AND next_attempt BETWEEN ? AND ?) LIMIT 1",(now.timestamp()-60,now.timestamp()-60,now.timestamp()+60)).fetchone()
-   if pending:limit-=2
+  # Leave room within the existing shared limit for identity and exchange
+  # checks; neither kind of request may exceed the provider-wide budget.
+  if source=='eodhd' and limit>3:
+   reserved=0
+   if purpose!='holding_identity':
+    pending=c.execute("SELECT 1 FROM hw_holding_autowatch WHERE (status='VERIFYING' AND next_attempt>=?) OR (status='PROVIDER_RATE_BUDGET' AND next_attempt BETWEEN ? AND ?) LIMIT 1",(now.timestamp()-60,now.timestamp()-60,now.timestamp()+60)).fetchone()
+    if pending:reserved+=2
+   if purpose!='exchange_status' and c.execute('SELECT 1 FROM hw_exchange_status WHERE next_attempt BETWEEN ? AND ? LIMIT 1',(now.timestamp()-60,now.timestamp()+60)).fetchone():reserved+=1
+   limit=max(1,limit-reserved)
   if row and row['used']>=limit:raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
   c.execute('INSERT INTO hw_request_budget VALUES(?,?,?,1) ON CONFLICT(user_id,source,window) DO UPDATE SET used=used+1',(uid,source,window))
 

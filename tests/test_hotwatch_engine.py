@@ -41,6 +41,47 @@ class HotWatch(unittest.TestCase):
   self.assertEqual(view['market_status'],'UNKNOWN');self.assertEqual(view['last_market_status'],'OPEN')
   sample['status_at']=self.now.isoformat();sample['market_status']='PRE'
   self.assertEqual(observation_status([sample],self.now,120,'NO_DATA','ACTIVE')['market_status'],'PREMARKET')
+ def test_exchange_status_separates_closed_regular_hours_from_extended_trading(self):
+  self.put(tick(self.now))
+  with app.connect() as c:
+   row=c.execute('SELECT id,request FROM hw_sessions WHERE watch_id=?',(self.req['watch_id'],)).fetchone();req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol='MERC.US')
+   c.execute('UPDATE hw_sessions SET is_test=0,request=? WHERE id=?',(json.dumps(req),row['id']))
+   c.execute('INSERT INTO hw_exchange_status VALUES(?,?,?,?)',('US',(self.now+timedelta(seconds=121)).isoformat(),0,self.now.timestamp()+421))
+   view=engine.view(c,engine.row_for(c,1,self.req['watch_id'],False),self.now+timedelta(seconds=121))
+   self.assertEqual(view['display_status'],'ORDINÆR HANDEL LUKKET');self.assertEqual(view['data_status']['regular_session']['status'],'CLOSED');self.assertTrue(view['data_stale'])
+   data=json.loads(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=?',(row['id'],)).fetchone()[0]);data.update(market_status='PRE',status_at=self.now.isoformat());c.execute('UPDATE hw_samples SET payload=? WHERE watch_row_id=?',(json.dumps(data),row['id']))
+   view=engine.view(c,engine.row_for(c,1,self.req['watch_id'],False),self.now+timedelta(seconds=121))
+   self.assertEqual(view['data_status']['market_status'],'UNKNOWN')
+   c.execute('UPDATE hw_exchange_status SET received=? WHERE exchange=?',(self.now.isoformat(),'US'))
+   view=engine.view(c,engine.row_for(c,1,self.req['watch_id'],False),self.now+timedelta(seconds=301))
+   self.assertEqual(view['data_status']['regular_session']['status'],'UNKNOWN');self.assertEqual(view['display_status'],'DATA FOR GAMLE')
+   c.execute('UPDATE hw_exchange_status SET received=? WHERE exchange=?',(self.now.isoformat(),'US'))
+   view=engine.view(c,engine.row_for(c,1,self.req['watch_id'],False),self.now+timedelta(seconds=60))
+   self.assertEqual(view['data_status']['market_status'],'PREMARKET');self.assertNotEqual(view['display_status'],'ORDINÆR HANDEL LUKKET')
+   data.update(market_status='REGULAR',status_at=self.now.isoformat());c.execute('UPDATE hw_samples SET payload=? WHERE watch_row_id=?',(json.dumps(data),row['id']))
+   c.execute('UPDATE hw_exchange_status SET received=? WHERE exchange=?',((self.now-timedelta(seconds=1)).isoformat(),'US'))
+   view=engine.view(c,engine.row_for(c,1,self.req['watch_id'],False),self.now+timedelta(seconds=1))
+   self.assertEqual(view['data_status']['regular_session']['status'],'UNKNOWN');self.assertNotEqual(view['display_status'],'ORDINÆR HANDEL LUKKET')
+   c.execute('UPDATE hw_exchange_status SET received=? WHERE exchange=?',((self.now+timedelta(seconds=1)).isoformat(),'US'))
+   view=engine.view(c,engine.row_for(c,1,self.req['watch_id'],False),self.now+timedelta(seconds=2))
+   self.assertEqual(view['data_status']['market_status'],'UNKNOWN');self.assertEqual(view['display_status'],'ORDINÆR HANDEL LUKKET')
+ def test_exchange_status_refresh_is_cached_and_failed_read_does_not_refresh_old_evidence(self):
+  import hotwatch_service as service
+  with app.connect() as c:
+   row=c.execute('SELECT id,request FROM hw_sessions WHERE watch_id=?',(self.req['watch_id'],)).fetchone();req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol='MERC.CO')
+   c.execute('UPDATE hw_sessions SET is_test=0,request=? WHERE id=?',(json.dumps(req),row['id']))
+  calls=[]
+  class Client:
+   def market_status(client,exchange):calls.append(exchange);return {'status':'OK','exchange':exchange,'exchange_open':False,'received_at':self.now.isoformat()}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_engine.utc',return_value=self.now):
+   self.assertEqual(service.exchange_status_tick(app.connect,lambda:Client(),self.now),'OK')
+   self.assertIsNone(service.exchange_status_tick(app.connect,lambda:Client(),self.now+timedelta(seconds=1)))
+  self.assertEqual(calls,['CO'])
+  class Failed:
+   def market_status(client,exchange):return {'status':'LOCAL_BUDGET_EXHAUSTED'}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}):self.assertEqual(service.exchange_status_tick(app.connect,lambda:Failed(),self.now+timedelta(seconds=301)),'LOCAL_BUDGET_EXHAUSTED')
+  with app.connect() as c:
+   row=c.execute("SELECT received,is_open FROM hw_exchange_status WHERE exchange='CO'").fetchone();self.assertEqual(row['received'],self.now.isoformat());self.assertEqual(row['is_open'],0)
  def test_timed_momentum_uses_only_actual_comparable_samples(self):
   samples=[tick(self.now-timedelta(minutes=n),index=i,price=str(100+i)) for i,n in enumerate((30,15,5,1,0))]
   view=observation_status(samples,self.now,120,'WAIT','ACTIVE')

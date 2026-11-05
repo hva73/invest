@@ -156,6 +156,32 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
  with connect() as c:c.execute("UPDATE hw_holding_autowatch SET status=?,watch_id=?,next_attempt=?,updated=? WHERE user_id=? AND portfolio_id=? AND asset_id=?",(status,linked,epoch+300,engine.utc().isoformat(),uid,pid,aid))
  return status
 
+def exchange_status_tick(connect,client_factory=None,now=None):
+ """Refresh one EODHD exchange status; this is not instrument tradability."""
+ now=now or engine.utc();epoch=now.timestamp()
+ if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1' or not os.environ.get('ESCAPE_EODHD_API_KEY','').strip():return None
+ with connect() as c:
+  c.execute('BEGIN IMMEDIATE')
+  if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
+  rows=c.execute("SELECT s.request FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND json_extract(s.request,'$.provider')='eodhd'").fetchall()
+  exchanges=sorted({v.rsplit('.',1)[-1].upper() for row in rows if isinstance((v:=json.loads(row['request']).get('provider_symbol')),str) and '.' in v and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',v.rsplit('.',1)[-1])})
+  exchange=None
+  for item in exchanges:
+   prior=c.execute('SELECT next_attempt FROM hw_exchange_status WHERE exchange=?',(item,)).fetchone()
+   if not prior or prior['next_attempt']<=epoch:
+    exchange=item;c.execute('INSERT INTO hw_exchange_status(exchange,next_attempt) VALUES(?,?) ON CONFLICT(exchange) DO UPDATE SET next_attempt=excluded.next_attempt',(exchange,epoch+60));break
+ if not exchange:return None
+ try:
+  from eodhd_feeds import EODHDFeeds
+  from hotwatch_adapters import reserve
+  client=(client_factory or (lambda:EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),reserve=lambda:reserve(connect,0,'eodhd',purpose='exchange_status'))))()
+  result=client.market_status(exchange)
+  received=stamp(result['received_at']) if result.get('received_at') else None
+  if result.get('status')!='OK' or result.get('exchange')!=exchange or type(result.get('exchange_open')) is not bool or not received or not 0<=(engine.utc()-received).total_seconds()<=30:return result.get('status','INVALID_RESPONSE')
+  with connect() as c:c.execute('UPDATE hw_exchange_status SET received=?,is_open=?,next_attempt=? WHERE exchange=?',(received.isoformat(),int(result['exchange_open']),epoch+300,exchange))
+  return 'OK'
+ except Exception:return 'UNAVAILABLE'
+
 class Runner:
  def __init__(self,connect):self.connect=connect;self.adapters={};self.stop=threading.Event();self._workers=[]
  def once(self,now=None,watch_id=None):
@@ -234,6 +260,9 @@ class Runner:
   thread=threading.Thread(target=beat,name='hotwatch-heartbeat',daemon=True);thread.start()
   def holdings_loop():
    while not self.stop.is_set():
+    try:exchange_status_tick(self.connect)
+    except Exception:logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'exchange_status_error'}))
+    if self.stop.is_set():break
     try:auto_holdings_tick(self.connect)
     except Exception:logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'holdings_autowatch_error'}))
     self.stop.wait(15)

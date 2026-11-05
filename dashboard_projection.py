@@ -88,7 +88,7 @@ def position_hotwatch(c,uid,portfolio_id,asset_id,report_position):
  if session:
   try:current=hotwatch_engine.view(c,session[0])
   except (KeyError,TypeError,ValueError):current={'watch_id':session[0]['watch_id'],'status':session[0]['status'],'last_data_at':session[0]['last_data'],'signal':'NO_DATA','display_status':'DATA MANGLER'}
-  if current.get('signal')=='NO_DATA' and not current.get('data_stale') and not current.get('last_error') and (current.get('data_status') or {}).get('price') is not None and 'WARMUP' in ((current.get('latest_calculation') or {}).get('reason_codes') or []):current['display_status']='WARMUP'
+  if current.get('signal')=='NO_DATA' and current.get('display_status')=='AFVENTER SIGNALDATA' and not current.get('data_stale') and not current.get('last_error') and (current.get('data_status') or {}).get('price') is not None and 'WARMUP' in ((current.get('latest_calculation') or {}).get('reason_codes') or []):current['display_status']='WARMUP'
  warmup=None
  if current and current.get('display_status')=='WARMUP':
   count=((current.get('latest_calculation') or {}).get('supporting_metrics') or {}).get('sample_count');required=current.get('minimum_required_samples')

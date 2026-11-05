@@ -67,11 +67,18 @@ class HoldingAutowatch(unittest.TestCase):
    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now)
    for _ in range(2):reserve(app.connect,1,'eodhd',self.now,purpose='holding_identity')
    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now,purpose='holding_identity')
+ def test_exchange_check_gets_one_reserved_call_without_increasing_budget(self):
+  with app.connect() as c:c.execute('INSERT INTO hw_exchange_status(exchange,next_attempt) VALUES(?,?)',('CO',self.now.timestamp()+60))
+  with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12'}):
+   for _ in range(11):reserve(app.connect,1,'eodhd',self.now)
+   with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now)
+   reserve(app.connect,1,'eodhd',self.now,purpose='exchange_status')
+   with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now,purpose='exchange_status')
  def test_runner_starts_the_automatic_holding_loop(self):
   runner=service.Runner(app.connect);calls=[]
   def activate(connect):
    calls.append(connect);runner.stop.set()
-  with patch.object(service,'auto_holdings_tick',side_effect=activate),patch.object(runner,'drain',return_value=0):runner.run(interval=0.01)
+  with patch.object(service,'exchange_status_tick',return_value=None),patch.object(service,'auto_holdings_tick',side_effect=activate),patch.object(runner,'drain',return_value=0):runner.run(interval=0.01)
   self.assertEqual(calls,[app.connect])
  def test_full_capacity_skips_external_lookups(self):
   with patch.object(engine,'capacity',return_value=0):
