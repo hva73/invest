@@ -1,5 +1,8 @@
-import json, os, re, time
+import json, os, re, sys, time
 from pathlib import Path
+
+# This diagnostic may be downloaded to /tmp; app modules live in the cwd.
+sys.path.insert(0, str(Path.cwd()))
 
 workers = []
 for proc in Path('/proc').iterdir():
