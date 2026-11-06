@@ -1,5 +1,6 @@
 """Contract-shaped synthetic quotes. No provider requests or production seeding."""
 import copy,json,unittest
+from unittest.mock import patch
 from datetime import datetime,timezone
 from pathlib import Path
 import test_trade_service as fixtures
@@ -27,6 +28,18 @@ class Quotes(unittest.TestCase):
     raise AssertionError('Only market reads are permitted')
   self.factory=Client
  def tearDown(self):self.case.tearDown()
+ def test_local_budget_denial_remains_retryable_and_is_not_a_provider_outage(self):
+  from hotwatch_adapters import DataUnavailable
+  with app.connect() as c:
+   payload={'positions_complete':True,'positions':[{'kind':'holding','asset_id':'synthetic-chart-asset','ticker':'CHART'}]}
+   c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?)',(self.case.root,1,'2026-11-05T12:00:00+00:00',json.dumps(payload),'2026-11-05T12:00:00+00:00'))
+  request={'holding_portfolio_id':self.case.root,'holding_asset_id':'synthetic-chart-asset'}
+  with patch('trade_service.client',side_effect=DataUnavailable('PROVIDER_RATE_BUDGET',429)):
+   with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):market_data.quote(app.connect,1,request,self.factory)
+  with app.connect() as c:
+   row=c.execute('SELECT attempted,last_error FROM market_asset_cache').fetchone()
+   self.assertEqual(row['attempted'],0);self.assertIsNone(row['last_error'])
+  self.assertEqual(market_data.quote(app.connect,1,request,self.factory)['asset_id'],'synthetic-chart-asset')
  def test_holding_chart_requires_an_owned_active_portfolio_and_asset(self):
   with app.connect() as c:
    payload={'positions_complete':True,'positions':[{'kind':'holding','asset_id':'synthetic-chart-asset','ticker':'CHART'}]}

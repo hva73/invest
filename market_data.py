@@ -158,7 +158,15 @@ def quote(connect,user_id,data,factory=None):
             db.execute('INSERT INTO market_asset_links VALUES(?,?,?,?) ON CONFLICT(user_id,candidate_id) DO UPDATE SET expected_ticker=excluded.expected_ticker,asset_id=excluded.asset_id',(user_id,c['candidate_id'],ticker,aid))
             db.execute('UPDATE market_asset_cache SET payload=?,fetched=?,last_error=NULL WHERE user_id=? AND asset_id=?',(json.dumps(result),time.time(),user_id,aid))
         return result
-    except Exception:
+    except Exception as error:
+        # A local budget denial is not a failed Pluto response. Preserve the
+        # typed error and do not cache it as an outage for the next five minutes.
+        from hotwatch_contract import EngineError
+        if isinstance(error, EngineError) and error.code == 'PROVIDER_RATE_BUDGET':
+            with connect() as db:
+                db.execute('UPDATE market_asset_cache SET attempted=?,last_error=? WHERE user_id=? AND asset_id=?',
+                           (cached['attempted'] if cached else 0, cached['last_error'] if cached else None, user_id, aid))
+            raise
         message='Pluto-kursopslaget fejlede. Tidligere data kan være forældede.'
         with connect() as db:db.execute('UPDATE market_asset_cache SET last_error=? WHERE user_id=? AND asset_id=?',(message,user_id,aid))
         if cached and cached['payload']:
