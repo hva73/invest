@@ -1,4 +1,4 @@
-import json, os, re
+import json, os, re, time
 from pathlib import Path
 
 workers = []
@@ -21,7 +21,7 @@ for key in ('ESCAPE_DB', 'ESCAPE_TOKEN_KEY_FILE', 'ESCAPE_HW_REQUESTS_PER_MINUTE
     if key.encode() in env:
         os.environ[key] = env[key.encode()].decode()
 
-import app, market_data, trade_service
+import app, market_data, trade_service, oauth
 from hotwatch_adapters import PlutoAdapter, search_eodhd_symbols
 if not Path(app.DB).is_file():
     raise SystemExit('Motorens database blev ikke fundet.')
@@ -33,8 +33,14 @@ for ticker in ('NOVOB', 'TSM'):
         if not row:
             print(ticker, 'ingen session fundet'); continue
         req = json.loads(row['request']); uid = row['user_id']; aid = req['asset_id']
+        with app.connect() as con:
+            auth = con.execute('SELECT payload,expires FROM oauth_tokens WHERE user_id=?', (uid,)).fetchone()
+        if not auth or auth['expires'] <= time.time() + 60:
+            print(ticker, 'Pluto-adgang mangler eller udløber snart; intet opslag udført'); continue
+        token = oauth.unseal(uid, auth['payload'])['token']['access_token']
         adapter = PlutoAdapter(app.connect, uid)
-        client, tools = trade_service.client(app.connect, uid, adapter.factory)
+        client = adapter.factory(token)
+        tools = {item['name']: item for item in client.tools()}
         raw = trade_service.call(client, tools, 'get_asset', {'assetId': aid})
         found = trade_service.call(client, tools, 'search_assets', {'query': ticker, 'limit': 10, 'assetType': 'ALL'})
         choices = market_data.choices(found)
