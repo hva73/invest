@@ -77,7 +77,7 @@ def _risk_gate(sample,metrics,risk,now,raw):
  if sample['market_status']=='UNKNOWN':codes.append('MARKET_STATUS_UNKNOWN')
  context_fresh=context['status']=='verified' and context['as_of'] and 0<=now.timestamp()-stamp(context['as_of']).timestamp()<=300
  if not context_fresh or context['position']=='unknown':codes.append('POSITION_CONTEXT_UNKNOWN')
- if held and price is not None and risk['stop_price'] is not None and price<=Decimal(risk['stop_price']):critical.append('STOP_BREACHED')
+ if held and sample['verification']=='verified' and price is not None and risk['stop_price'] is not None and price<=Decimal(risk['stop_price']):critical.append('STOP_BREACHED')
  if held and risk['exit_deadline'] and now>=stamp(risk['exit_deadline']):critical.append('EXIT_DEADLINE')
  if codes:return 'NO_DATA' if not any(x in codes for x in ['MARKET_HALTED','MARKET_CLOSED']) else 'PAUSE',codes,critical
  if critical and held:

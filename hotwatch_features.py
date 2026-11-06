@@ -40,7 +40,7 @@ def observation_status(samples,now,max_age_s,signal,watch_status):
  elif signal!='NO_DATA':result['signal_status']='READY'
  if not samples:return result
  latest=samples[-1];event=stamp(latest['event_time']);age=(now-event).total_seconds()
- result.update(price=latest['price'],currency=latest['currency'],source=latest['source'],venue=latest['venue'],price_type={'bar_open':'bar_close','trade':'trade','snapshot':'snapshot'}.get(latest.get('price_time_kind')),feed_description=latest['feed_type'],event_time=latest['event_time'],age_s=round(age,3))
+ result.update(price=latest['price'],currency=latest['currency'],source=latest['source'],venue=latest['venue'],price_type={'bar_open':'bar_close','trade':'trade','snapshot':'snapshot'}.get(latest.get('price_time_kind')),feed_description=latest['feed_type'],event_time=latest['event_time'],age_s=round(age,3),identity_verification=latest.get('verification','unknown'))
  if latest.get('bid') is not None and latest.get('ask') is not None and latest.get('bid_at') and latest.get('ask_at'):
   result.update(bid=latest['bid'],ask=latest['ask'],bid_at=latest['bid_at'],ask_at=latest['ask_at'])
   result['quote_status']='FRESH' if all(0<=(now-stamp(latest[k])).total_seconds()<=max_age_s for k in ('bid_at','ask_at')) else 'STALE'
@@ -55,8 +55,9 @@ def observation_status(samples,now,max_age_s,signal,watch_status):
  elif delay and age<=delay+max_age_s:result['price_status']='DELAYED'
  elif age>max_age_s:result['price_status']='STALE'
  else:result['price_status']='FRESH'
+ if latest.get('verification')!='verified':result['price_status']='UNVERIFIED'
  if latest['market_status']=='UNKNOWN':return result
- identity=lambda s:tuple(s[k] for k in ('source','asset_id','currency','venue','session_key','market_status','feed_type'))+(s.get('price_time_kind'),)
+ identity=lambda s:tuple(s[k] for k in ('source','asset_id','currency','venue','session_key','market_status','feed_type'))+(s.get('price_time_kind'),s.get('verification','unknown'))
  comparable=[s for s in samples[:-1] if identity(s)==identity(latest) and s.get('price') is not None and stamp(s['event_time'])<event]
  if comparable:
   prior=max(comparable,key=lambda s:stamp(s['event_time']))
@@ -93,7 +94,7 @@ def features(samples,parameters):
  if not samples:return {}
  # Caller supplies ascending, unique event times. Do not mix providers,
  # currencies, venues, sessions, bar durations or market phases.
- last=samples[-1];identity=lambda s:tuple(s[k] for k in ['source','asset_id','currency','venue','session_key','market_status','interval_s','feed_type'])+(s.get('price_time_kind'),)
+ last=samples[-1];identity=lambda s:tuple(s[k] for k in ['source','asset_id','currency','venue','session_key','market_status','interval_s','feed_type'])+(s.get('price_time_kind'),s.get('verification','unknown'))
  rows=[]
  for s in reversed(samples):
   if identity(s)!=identity(last):break

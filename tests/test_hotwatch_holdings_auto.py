@@ -102,7 +102,7 @@ class HoldingAutowatch(unittest.TestCase):
  def test_candidate_and_holding_checks_take_turns_when_both_wait(self):
   with app.connect() as c:
    c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(1,self.pid,'synthetic-asset','VERIFYING',None,self.now.timestamp()+300,self.now.isoformat()))
-   c.execute('INSERT INTO hw_discovery_attempts VALUES(?,?,?,?,?,?,?,?)',(1,0,'candidate','trade-source','PROVIDER_RATE_BUDGET',self.now.isoformat(),self.now.timestamp(),None))
+   c.execute('INSERT INTO hw_discovery_attempts VALUES(?,?,?,?,?,?,?,?)',(1,0,self.fixture.report['candidates'][0]['candidate_id'],'trade-source','PROVIDER_RATE_BUDGET',self.now.isoformat(),self.now.timestamp(),None))
   at=self.now
   if int(at.timestamp()//60)%2:at+=timedelta(minutes=1)
   with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12'}):
@@ -118,6 +118,16 @@ class HoldingAutowatch(unittest.TestCase):
    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now)
    reserve(app.connect,1,'eodhd',self.now,purpose='exchange_status')
    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now,purpose='exchange_status')
+ def test_feed_recovery_has_reserved_eodhd_capacity(self):
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  with app.connect() as c:
+   row=c.execute('SELECT id FROM hw_sessions').fetchone()
+   c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?)',(row['id'],self.now.timestamp(),'PLUTO_ISIN_MISSING',self.now.isoformat()))
+  with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12'}):
+   for _ in range(10):reserve(app.connect,1,'eodhd',self.now)
+   with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now)
+   for _ in range(2):reserve(app.connect,1,'eodhd',self.now,purpose='holding_identity')
+   with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now,purpose='holding_identity')
  def test_runner_starts_the_automatic_holding_loop(self):
   runner=service.Runner(app.connect);calls=[]
   def activate(connect):
@@ -155,6 +165,14 @@ class HoldingAutowatch(unittest.TestCase):
   self.assertEqual(instrument['asset_id'],'synthetic-asset');self.assertEqual(instrument['exchange'],'UKENDT')
   self.assertEqual(self.tick(verify=lambda *_:instrument,lookup=lambda *_:self.fail('No verified ISIN')),'LINKED')
   with app.connect() as c:self.assertEqual(json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()[0])['provider'],'pluto')
+ def test_pluto_nested_isin_is_used_only_when_unambiguous(self):
+  raw={'asset':{'id':'synthetic-asset','ticker':'TEST','exchange':'NASDAQ','currency':'USD','identifiers':[{'type':'ISIN','value':'US1234567890'}]}}
+  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value=raw):
+   self.assertEqual(service.holding_instrument(app.connect,1,self.holding)['isin'],'US1234567890')
+  raw['asset']['isin']='US9999999999';diagnostic={}
+  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value=raw):
+   self.assertIsNone(service.holding_instrument(app.connect,1,self.holding,diagnostic))
+  self.assertEqual(diagnostic['code'],'PLUTO_ASSET_METADATA_MISSING')
  def test_identity_diagnostics_explain_missing_and_conflicting_currency(self):
   raw={'asset':{'id':'synthetic-asset','ticker':'TEST','exchange':'NASDAQ'}};diagnostic={}
   with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',side_effect=[raw,[]]):self.assertIsNone(service.holding_instrument(app.connect,1,self.holding,diagnostic))
@@ -236,6 +254,89 @@ class HoldingAutowatch(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',side_effect=AssertionError('cannot match without ISIN')):
    self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
   with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM hw_feed_recovery').fetchone()['status'],'PLUTO_ISIN_MISSING')
+ def test_provisional_match_requires_unique_issuer_ticker_currency_and_market(self):
+  novo={'ticker':'NOVOB','name':'Novo Nordisk A/S','currency':'DKK','exchange':'CHIX'}
+  choices=[{'symbol':'NVO.US','name':'Novo Nordisk A/S','exchange':'US','currency':'USD'},{'symbol':'NOVO-B.CO','name':'Novo Nordisk A/S','exchange':'CO','currency':'DKK'}]
+  self.assertEqual(service.provisional_feed_match(novo,choices)['symbol'],'NOVO-B.CO')
+  tsm={'ticker':'TSM','name':'Taiwan Semiconductor Manufacturing Company Ltd.','currency':'USD','exchange':'NYSE'}
+  us={'symbol':'TSM.US','name':'Taiwan Semiconductor Manufacturing','exchange':'US','currency':'USD'}
+  self.assertEqual(service.provisional_feed_match(tsm,[us])['symbol'],'TSM.US')
+  self.assertIsNone(service.provisional_feed_match(tsm,[us,dict(us)]))
+  self.assertIsNone(service.provisional_feed_match(tsm,[dict(us,name='Different Company')]))
+  self.assertIsNone(service.provisional_feed_match(tsm,[dict(us,currency='EUR')]))
+  self.assertIsNone(service.provisional_feed_match(dict(tsm,exchange='UKENDT'),[us]))
+  self.assertIsNone(service.provisional_feed_match(dict(tsm,ticker='TSMA'),[us]))
+  asml={'ticker':'ASML','name':'ASML Holding NV','currency':'EUR','exchange':'CHIX'}
+  amsterdam={'symbol':'ASML.AS','name':'ASML Holding NV','exchange':'AS','currency':'EUR'}
+  frankfurt={'symbol':'ASML.F','name':'ASML Holding NV','exchange':'F','currency':'EUR'}
+  self.assertEqual(service.provisional_feed_match(asml,[amsterdam])['symbol'],'ASML.AS')
+  self.assertIsNone(service.provisional_feed_match(asml,[amsterdam,frankfurt]))
+ def test_provisional_quote_is_visible_but_cannot_generate_a_signal_or_false_stop(self):
+  from test_hotwatch_engine import tick
+  holding=dict(self.holding,ticker='TSM')
+  with app.connect() as c:
+   payload={'positions_complete':True,'observed':self.now.isoformat(),'positions':[holding]}
+   c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps(payload),))
+  instrument={'asset_id':'synthetic-asset','ticker':'TSM','name':'Taiwan Semiconductor Manufacturing Company Ltd.','exchange':'NYSE','currency':'USD','isin':None}
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=lambda *_:instrument,now=self.now),'LINKED')
+  choices={'choices':[{'symbol':'TSM.US','name':'Taiwan Semiconductor Manufacturing','exchange':'US','currency':'USD'}]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),1)
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);req['risk']['stop_price']='105';c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps(req),row['id']))
+   self.assertEqual(req['provider_symbol'],'TSM.US')
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_provisional_feed_links WHERE watch_row_id=?',(row['id'],)).fetchone()[0],1)
+  from hotwatch_adapters import EODHDAdapter,unknown_context
+  calls=[]
+  class Feed:
+   def snapshot(self,symbol):calls.append(symbol);return {'status':'OK','event_time':self_now.isoformat(),'price':'100','volume':None}
+   def capture(self,*args,**kwargs):raise AssertionError('unverified source must use one snapshot')
+  self_now=self.now;adapter=EODHDAdapter(app.connect,1)
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch.object(adapter,'feeds',return_value=Feed()),patch.object(adapter.pluto,'context',return_value=unknown_context()):
+   observed=adapter.poll({'id':row['id'],'request_data':req,'state':'{}'})
+  self.assertEqual(calls,['TSM.US']);self.assertEqual(observed['verification'],'unverified');self.assertEqual(observed['event_time'],self.now.isoformat())
+  sample=tick(self.now,1,price='100',held=True)
+  sample.update(source='eodhd',ticker='TSM',asset_id='synthetic-asset',market_status='UNKNOWN',session_key='test:UNKNOWN',feed_type='synthetic EODHD snapshot',bid=None,ask=None)
+  result=engine.ingest(app.connect,1,req['watch_id'],False,sample,self.now)
+  with app.connect() as c:
+   stored=json.loads(c.execute('SELECT payload FROM hw_samples').fetchone()['payload'])
+  self.assertEqual(stored['verification'],'unverified')
+  self.assertEqual(result['calculation']['signal'],'NO_DATA')
+  self.assertIn('DATA_UNVERIFIED',result['calculation']['reason_codes'])
+  self.assertNotIn('STOP_BREACHED',result['calculation']['reason_codes'])
+  self.assertEqual(result['session']['data_status']['price'],'100')
+  self.assertEqual(result['session']['data_status']['price_status'],'UNVERIFIED')
+  self.assertEqual(result['session']['display_status'],'INSTRUMENT IKKE BEKRÆFTET')
+  import dashboard_projection
+  with app.connect() as c:
+   position=dashboard_projection.position_hotwatch(c,1,self.pid,'synthetic-asset',None)
+  self.assertEqual(position['session']['display_status'],'INSTRUMENT IKKE BEKRÆFTET')
+  self.assertIsNone(position['session']['warmup'])
+  synced=engine.sync(app.connect,1,False,summary_only=True)
+  self.assertEqual(synced['open_sessions'][0]['identity_verification'],'unverified')
+  self.assertEqual(synced['open_sessions'][0]['last_data_at'],self.now.isoformat())
+  verified=dict(instrument,isin='US1234567890');check_at=self.now+timedelta(minutes=6)
+  with app.connect() as c:c.execute('UPDATE hw_feed_recovery SET next_attempt=0')
+  wrong={'choices':[{'symbol':'DIFFERENT.US','name':'Taiwan Semiconductor Manufacturing','exchange':'US','currency':'USD','isin':'US1234567890'}]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=verified),patch('hotwatch_adapters.search_eodhd_symbols',return_value=wrong):
+   self.assertEqual(service.verify_provisional_feeds(app.connect,check_at),0)
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_provisional_feed_links').fetchone()[0],1)
+   c.execute('UPDATE hw_feed_recovery SET next_attempt=0')
+  right={'choices':[{'symbol':'TSM.US','name':'Taiwan Semiconductor Manufacturing','exchange':'US','currency':'USD','isin':'US1234567890'}]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=verified),patch('hotwatch_adapters.search_eodhd_symbols',return_value=right):
+   self.assertEqual(service.verify_provisional_feeds(app.connect,check_at),1)
+  self.assertEqual(engine.sync(app.connect,1,False,summary_only=True)['open_sessions'][0]['identity_verification'],'unverified')
+  at=check_at+timedelta(minutes=1);new_sample=tick(at,2,price='101',held=True)
+  new_sample.update(source='eodhd',ticker='TSM',asset_id='synthetic-asset',market_status='UNKNOWN',session_key='test:UNKNOWN',feed_type='synthetic EODHD snapshot',bid=None,ask=None)
+  refreshed=engine.ingest(app.connect,1,req['watch_id'],False,new_sample,at)
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_provisional_feed_links').fetchone()[0],0)
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_samples').fetchone()[0],2)
+   self.assertEqual(json.loads(c.execute('SELECT payload FROM hw_samples ORDER BY id DESC LIMIT 1').fetchone()['payload'])['verification'],'verified')
+  self.assertEqual(refreshed['calculation']['supporting_metrics']['sample_count'],1)
+  self.assertEqual(engine.sync(app.connect,1,False,summary_only=True)['open_sessions'][0]['identity_verification'],'verified')
  def test_recovery_respects_global_and_user_kill_switches(self):
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
    self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')

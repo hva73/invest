@@ -7,6 +7,24 @@ from hotwatch_contract import EngineError,stamp
 
 HEARTBEAT_INTERVAL_S=5
 
+def pluto_isin(*nodes):
+ """Read only explicitly named ISIN fields; reject malformed or conflicting values."""
+ values=[]
+ def add(value):
+  if isinstance(value,str) and value:values.append(value)
+ for node in nodes:
+  if not isinstance(node,dict):continue
+  for key in ('isin','ISIN','isinCode'):add(node.get(key))
+  nested=node.get('identifiers')
+  if isinstance(nested,dict):
+   for key in ('isin','ISIN','isinCode'):add(nested.get(key))
+  elif isinstance(nested,list):
+   for item in nested:
+    if isinstance(item,dict) and str(item.get('type') or item.get('scheme') or '').upper()=='ISIN':add(item.get('value'))
+ if not values:return None,False
+ if any(not re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',value) for value in values) or len(set(values))!=1:return None,True
+ return values[0],False
+
 def verified_discovery_instrument(connect,uid,candidate,adapter=None):
  """Verify a reported stable asset with Pluto's read-only get_asset tool."""
  import trade_service
@@ -16,15 +34,26 @@ def verified_discovery_instrument(connect,uid,candidate,adapter=None):
  elif isinstance(found,dict):
   lists=[found[k] for k in ('assets','results','items') if isinstance(found.get(k),list)];matches=lists[0] if len(lists)==1 else []
  else:matches=[]
- if len([x for x in matches if isinstance(x,dict) and (x.get('id') or x.get('assetId'))==candidate['asset_id'] and str(x.get('ticker','')).casefold()==candidate['ticker'].casefold()])!=1:return None
+ exact=[x for x in matches if isinstance(x,dict) and (x.get('id') or x.get('assetId'))==candidate['asset_id'] and str(x.get('ticker','')).casefold()==candidate['ticker'].casefold()]
+ if len(exact)!=1:return None
+ match=exact[0]
+ if any(x!=candidate['asset_id'] for x in (match.get('id'),match.get('assetId')) if x is not None):return None
  raw=trade_service.call(client,tools,'get_asset',{'assetId':candidate['asset_id']})
- asset=raw.get('asset') if isinstance(raw,dict) else None
- if not isinstance(asset,dict) or asset.get('id')!=candidate['asset_id'] or str(asset.get('ticker','')).casefold()!=candidate['ticker'].casefold():return None
- if candidate.get('exchange') and str(asset.get('exchange','')).casefold()!=candidate['exchange'].casefold():return None
- currency=asset.get('currency');isin=asset.get('isin');exchange=asset.get('exchange')
+ if not isinstance(raw,dict):return None
+ asset=raw['asset'] if isinstance(raw.get('asset'),dict) else raw
+ ids=[x for x in (asset.get('id'),asset.get('assetId'),raw.get('assetId')) if x is not None]
+ if not ids or any(x!=candidate['asset_id'] for x in ids):return None
+ if asset.get('ticker') and str(asset['ticker']).casefold()!=candidate['ticker'].casefold():return None
+ def consistent(key):
+  values=[x for x in (asset.get(key),raw.get(key),match.get(key)) if isinstance(x,str) and x]
+  return values[0] if values and all(x.casefold()==values[0].casefold() for x in values) else None
+ currency=consistent('currency');isin,isin_conflict=pluto_isin(asset,raw,match);exchange=consistent('exchange')
+ if isin_conflict:return None
+ if candidate.get('exchange') and (not exchange or exchange.casefold()!=candidate['exchange'].casefold()):return None
  if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency) or not isinstance(exchange,str) or not exchange:return None
  if not isinstance(isin,str) or not re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',isin):isin=None
- return {'asset_id':asset['id'],'ticker':asset['ticker'],'exchange':exchange,'currency':currency,'isin':isin}
+ name=asset.get('name') or raw.get('name') or match.get('name')
+ return {'asset_id':candidate['asset_id'],'ticker':candidate['ticker'],'exchange':exchange,'currency':currency,'isin':isin,'name':name if isinstance(name,str) else None}
 
 def verify_requested_instruments(connect,uid,requests):
  """Require Pluto search and asset verification for each real activation."""
@@ -84,6 +113,8 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
   existing_cycle=latest['cycle_id'] if latest else None
   if c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,int(mode),cid)).fetchone():return {'status':'ALREADY_ACTIVE'}
   if c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=? AND status IN ('COMPLETED','EXPIRED','ERROR')",(uid,int(mode),cid)).fetchone():return {'status':'NOT_NEW'}
+  from intel_workflows import candidate_currentness
+  if candidate_currentness(c,uid,mode,cid,report_fallback=True)['status']!='CURRENT':return {'status':'NOT_NEW'}
   if c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]>=engine.capacity():return {'status':'global_capacity_limit'}
   prior={row['asset'] for row in c.execute("SELECT json_extract(request,'$.asset_id') AS asset FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=?",(uid,int(mode),cid)) if row['asset']}
   link=c.execute('SELECT asset_id FROM market_asset_links WHERE user_id=? AND candidate_id=?',(uid,cid)).fetchone()
@@ -136,18 +167,23 @@ def auto_discover(connect,cursor=0):
  except (ValueError,TypeError):return cursor
  with connect() as c:users=[row['id'] for row in c.execute('SELECT id FROM users WHERE active=1')]
  for uid in users:
-  with connect() as c:row=c.execute("SELECT payload,received FROM ingested_reports WHERE user_id=? AND is_test=0 AND report_type!='deep_analysis' ORDER BY generated_epoch DESC,id DESC LIMIT 1",(uid,)).fetchone()
-  if not row or after and stamp(row['received'])<=after:continue
-  report=json.loads(row['payload'])
-  candidates=report.get('candidates',[])
-  if candidates:
-   candidate=None
+  now=engine.utc()
+  with connect() as c:
+   started=c.execute('SELECT started_at FROM hw_discovery_control WHERE id=1').fetchone()
+   latest_report=c.execute("SELECT id FROM ingested_reports WHERE user_id=? AND is_test=0 AND report_type!='deep_analysis' ORDER BY generated_epoch DESC,id DESC LIMIT 1",(uid,)).fetchone()
+   rows=c.execute("SELECT l.candidate_id,l.generated,r.id,r.received,r.payload FROM report_candidate_links l JOIN ingested_reports r ON r.id=l.report_row_id WHERE l.user_id=? AND l.is_test=0 AND r.report_type!='deep_analysis' AND l.generated<=? AND NOT EXISTS (SELECT 1 FROM report_candidate_links newer JOIN ingested_reports nr ON nr.id=newer.report_row_id WHERE newer.user_id=l.user_id AND newer.is_test=0 AND newer.candidate_id=l.candidate_id AND nr.report_type!='deep_analysis' AND newer.generated<=? AND (newer.generated>l.generated OR (newer.generated=l.generated AND nr.id>r.id))) ORDER BY l.generated DESC,r.id DESC,(SELECT CAST(j.key AS INTEGER) FROM json_each(r.payload,'$.candidates') j WHERE json_extract(j.value,'$.candidate_id')=l.candidate_id LIMIT 1)",(uid,now.timestamp(),now.timestamp())).fetchall()
+  if rows:
+   candidate=None;report=None
    with connect() as c:
-    for offset in range(len(candidates)):
-     item=candidates[(cursor+offset)%len(candidates)];cid=item.get('candidate_id')
-     if not cid:continue
+    for offset in range(len(rows)):
+     row=rows[(cursor+offset)%len(rows)]
+     if after and stamp(row['received'])<=after:continue
+     current=json.loads(row['payload']);cid=row['candidate_id']
+     item=next((v for v in current.get('candidates',[]) if v.get('candidate_id')==cid),None)
+     if not item:continue
      old=c.execute('SELECT report_id,next_attempt FROM hw_discovery_attempts WHERE user_id=? AND is_test=0 AND candidate_id=?',(uid,cid)).fetchone()
-     if not old or old['report_id']!=report['report_id'] or old['next_attempt']<=engine.utc().timestamp():candidate=item;cursor+=offset;break
+     if not after and started and stamp(row['received'])<stamp(started['started_at']) and (not latest_report or row['id']!=latest_report['id']) and not old:continue
+     if not old or old['report_id']!=current['report_id'] or old['next_attempt']<=now.timestamp():candidate=item;report=current;cursor+=offset;break
    if candidate is None:continue
    result=auto_activate_candidate(connect,uid,False,report,candidate)
    with connect() as c:c.execute('INSERT INTO hw_discovery_attempts VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,is_test,candidate_id) DO UPDATE SET report_id=excluded.report_id,status=excluded.status,updated=excluded.updated,next_attempt=excluded.next_attempt,watch_id=excluded.watch_id',(uid,0,candidate['candidate_id'],report['report_id'],result['status'],engine.utc().isoformat(),engine.utc().timestamp()+(300 if result['status'] in ('ALREADY_ACTIVE','NOT_NEW','CREATED') else 60),result.get('watch_id')))
@@ -169,25 +205,35 @@ def holding_instrument(connect,uid,holding,diagnostic=None):
  if not ids or any(x!=holding['asset_id'] for x in ids):return invalid('PLUTO_ASSET_ID_MISMATCH')
  asset_currency=asset.get('currency');outer_currency=raw.get('currency')
  if asset_currency and outer_currency and asset_currency!=outer_currency:return invalid('PLUTO_CURRENCY_MISMATCH')
- currency=asset_currency or outer_currency or holding.get('currency');isin=asset.get('isin');exchange=asset.get('exchange');ticker=asset.get('ticker') or holding.get('ticker')
+ for field in ('ticker','exchange'):
+  inner=asset.get(field);outer=raw.get(field)
+  if inner and outer and str(inner).casefold()!=str(outer).casefold():return invalid('PLUTO_ASSET_METADATA_MISSING')
+ isin,isin_conflict=pluto_isin(asset,raw)
+ if isin_conflict:return invalid('PLUTO_ASSET_METADATA_MISSING')
+ currency=asset_currency or outer_currency or holding.get('currency');exchange=asset.get('exchange') or raw.get('exchange');ticker=asset.get('ticker') or raw.get('ticker') or holding.get('ticker');name=asset.get('name') or raw.get('name')
  if (not exchange or not ticker or not currency or not isin) and holding.get('ticker'):
   try:
    from market_data import choices
-   options=choices(trade_service.call(client,tools,'search_assets',{'query':holding['ticker'],'limit':10,'assetType':'ALL'}))
+   found=trade_service.call(client,tools,'search_assets',{'query':holding['ticker'],'limit':10,'assetType':'ALL'});options=choices(found)
    exact=[x for x in options if x.get('asset_id')==holding['asset_id']]
    if len(exact)==1:
     match=exact[0]
+    raw_options=found if isinstance(found,list) else next((found[k] for k in ('assets','results','items') if isinstance(found,dict) and isinstance(found.get(k),list)),[])
+    raw_exact=[item for item in raw_options if isinstance(item,dict) and (item.get('id') or item.get('assetId'))==holding['asset_id']]
+    if len(raw_exact)!=1:return invalid('PLUTO_ASSET_METADATA_MISSING')
+    search_isin,conflict=pluto_isin(raw_exact[0])
+    if conflict or isin and search_isin and isin!=search_isin:return invalid('PLUTO_ASSET_METADATA_MISSING')
     if ticker and match.get('ticker') and ticker.casefold()!=match['ticker'].casefold():return invalid('PLUTO_TICKER_MISMATCH')
     if currency and match.get('currency') and currency!=match['currency']:return invalid('PLUTO_CURRENCY_MISMATCH')
     if isin and match.get('isin') and isin!=match['isin']:return invalid('PLUTO_ASSET_ID_MISMATCH')
-    ticker=ticker or match.get('ticker');currency=currency or match.get('currency');exchange=exchange or match.get('exchange');isin=isin or match.get('isin')
+    ticker=ticker or match.get('ticker');currency=currency or match.get('currency');exchange=exchange or match.get('exchange');isin=isin or search_isin;name=name or (match.get('name') if match.get('name')!=holding['asset_id'] else None)
   except Exception:pass
  if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):return invalid('PLUTO_CURRENCY_MISSING')
  if not isinstance(ticker,str) or not ticker:return invalid('PLUTO_TICKER_MISSING')
  if holding.get('currency') and holding['currency']!=currency:return invalid('PLUTO_CURRENCY_MISMATCH')
  if holding.get('ticker') and str(holding['ticker']).casefold()!=ticker.casefold():return invalid('PLUTO_TICKER_MISMATCH')
  if not isinstance(isin,str) or not re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',isin):isin=None
- return {'asset_id':holding['asset_id'],'ticker':ticker,'exchange':exchange if isinstance(exchange,str) and exchange else 'UKENDT','currency':currency,'isin':isin}
+ return {'asset_id':holding['asset_id'],'ticker':ticker,'exchange':exchange if isinstance(exchange,str) and exchange else 'UKENDT','currency':currency,'isin':isin,'name':name if isinstance(name,str) else None}
 
 def verified_existing_feed(connect,uid,holding,now=None):
  """Reuse only a prior explicit ISIN-and-currency identity check."""
@@ -203,8 +249,35 @@ def remember_verified_feed(connect,uid,instrument,symbol,now=None):
  with connect() as c:
   c.execute('INSERT INTO hw_verified_feed_links VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,asset_id) DO UPDATE SET ticker=excluded.ticker,currency=excluded.currency,exchange=excluded.exchange,symbol=excluded.symbol,isin=excluded.isin,verified_epoch=excluded.verified_epoch',(uid,instrument['asset_id'],instrument['ticker'],instrument['currency'],instrument['exchange'],symbol,instrument['isin'],now.timestamp()))
 
+def provisional_feed_match(instrument,choices):
+ """Choose a unique, clearly unverified quote candidate from multiple independent fields."""
+ import unicodedata
+ def issuer(value):
+  if not isinstance(value,str):return None
+  words=re.findall(r'[a-z0-9]+',unicodedata.normalize('NFKD',value).casefold())
+  while words and words[-1] in ('ltd','limited','company','inc','incorporated','corporation','corp','plc'):words.pop()
+  return tuple(words) if len(words)>=2 and sum(map(len,words))>=8 else None
+ def ticker(value):
+  return re.sub(r'[.\-]','',value).upper() if isinstance(value,str) and re.fullmatch(r'[A-Za-z0-9.\-]{1,32}',value) else None
+ name=issuer(instrument.get('name'));symbol=ticker(instrument.get('ticker'));currency=instrument.get('currency');venue=re.sub(r'[^A-Z0-9]','',str(instrument.get('exchange') or '').upper())
+ markets={
+  'USD':{'US':{'NYSE','NASDAQ','XNYS','XNAS','NYSEARCA','ARCX'}},
+  'DKK':{'CO':{'CHIX','XCSE','CSE','COPENHAGEN','NASDAQCOPENHAGEN'}},
+  'EUR':{'AS':{'CHIX','XAMS','AMS','EURONEXTAMSTERDAM'},'F':{'CHIX','XFRA','FRA','FRANKFURT'},'XETRA':{'CHIX','XETR','XETRA'},'PA':{'CHIX','XPAR','PARIS','EURONEXTPARIS'},'MI':{'CHIX','XMIL','MILAN'}},
+ }
+ if not name or not symbol or currency not in markets:return None
+ selected=[]
+ for item in choices:
+  if not isinstance(item,dict):continue
+  full=item.get('symbol');exchange=item.get('exchange')
+  if not isinstance(full,str) or not isinstance(exchange,str) or '.' not in full:continue
+  base,suffix=full.rsplit('.',1);market=exchange.upper()
+  if suffix.upper()!=market or venue not in markets[currency].get(market,set()):continue
+  if item.get('currency')==currency and ticker(base)==symbol and issuer(item.get('name'))==name:selected.append(item)
+ return selected[0] if len(selected)==1 else None
+
 def recover_automatic_feeds(connect,now=None):
- """Recover empty automatic sessions only from recent, verified same-asset evidence."""
+ """Recover empty automatic sessions, labeling field-only matches as unverified."""
  if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1' or not os.environ.get('ESCAPE_EODHD_API_KEY','').strip():return 0
  now=now or engine.utc();changed=0;lookup_attempted=False
  with connect() as c:
@@ -213,7 +286,7 @@ def recover_automatic_feeds(connect,now=None):
  for row in rows:
   try:
    req=json.loads(row['request']);holding={'asset_id':req['asset_id'],'ticker':req['ticker'],'currency':req['quote_currency']}
-   known=verified_existing_feed(connect,row['user_id'],holding,now);reason='EODHD identity reused from a recent ISIN-and-currency check'
+   known=verified_existing_feed(connect,row['user_id'],holding,now);reason='EODHD-match genbrugt fra en nylig kontrol af ISIN og valuta'
    if not known and not lookup_attempted:
     with connect() as c:retry=c.execute('SELECT next_attempt FROM hw_feed_recovery WHERE watch_row_id=?',(row['id'],)).fetchone()
     if retry and retry['next_attempt']>now.timestamp():continue
@@ -222,13 +295,21 @@ def recover_automatic_feeds(connect,now=None):
      if row['purpose']=='automatic holding watch':instrument=holding_instrument(connect,row['user_id'],holding)
      else:instrument=verified_discovery_instrument(connect,row['user_id'],holding)
      if instrument and instrument.get('asset_id')==holding['asset_id'] and str(instrument.get('ticker','')).casefold()==holding['ticker'].casefold() and instrument.get('currency')==holding['currency']:
-      if not instrument.get('isin'):status='PLUTO_ISIN_MISSING'
+      if not instrument.get('isin'):
+       status='PLUTO_ISIN_MISSING'
+       if instrument.get('name'):
+        from hotwatch_adapters import search_eodhd_symbols
+        options=search_eodhd_symbols(connect,row['user_id'],{'quote_currency':holding['currency']},candidate_override={'ticker':holding['ticker'],'company_name':instrument['name']},purpose='holding_identity')
+        provisional=provisional_feed_match(instrument,options.get('choices',[]))
+        if provisional:
+         known={'provider_symbol':provisional['symbol'],'provisional':{'pluto_venue':instrument['exchange'],'eodhd_venue':provisional['exchange'],'currency':holding['currency'],'basis':'issuer_ticker_currency_venue'}}
+         status='PROVISIONAL_MATCH';reason='Foreløbigt EODHD-match på navn, ticker, valuta og marked; identiteten er ikke bekræftet, og signaler er blokeret'
       else:
        from hotwatch_adapters import search_eodhd_symbols
-       options=search_eodhd_symbols(connect,row['user_id'],{'quote_currency':holding['currency']},candidate_override={'ticker':holding['ticker']})
+       options=search_eodhd_symbols(connect,row['user_id'],{'quote_currency':holding['currency']},candidate_override={'ticker':holding['ticker']},purpose='holding_identity')
        matches=[x for x in options.get('choices',[]) if x.get('isin')==instrument['isin'] and x.get('currency')==holding['currency']]
        if len(matches)==1:
-        known={'provider_symbol':matches[0]['symbol']};status='MATCHED';reason='EODHD identity verified using matching ISIN and currency'
+        known={'provider_symbol':matches[0]['symbol']};status='MATCHED';reason='EODHD-identitet kontrolleret med samme ISIN og valuta'
         remember_verified_feed(connect,row['user_id'],instrument,matches[0]['symbol'],now)
        else:status='EODHD_IDENTITY_UNCERTAIN'
      else:status='PLUTO_IDENTITY_UNVERIFIED'
@@ -242,9 +323,45 @@ def recover_automatic_feeds(connect,now=None):
     c.execute('BEGIN IMMEDIATE')
     result=c.execute("UPDATE hw_sessions SET request=?,next_due=? WHERE id=? AND request=? AND lease_until<=? AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND NOT EXISTS (SELECT 1 FROM hw_samples p WHERE p.watch_row_id=hw_sessions.id) AND NOT EXISTS (SELECT 1 FROM hw_system_control g WHERE g.id=1 AND g.killed=1) AND NOT EXISTS (SELECT 1 FROM hw_control k WHERE k.user_id=hw_sessions.user_id AND k.killed=1)",(json.dumps(updated),now.timestamp(),row['id'],row['request'],now.timestamp()))
     if result.rowcount:
+     if known.get('provisional'):c.execute('INSERT INTO hw_provisional_feed_links VALUES(?,?,?,?)',(row['id'],known['provider_symbol'],json.dumps(known['provisional']),now.isoformat()))
      engine.event(c,row,'PROVIDER_CHANGED',now,reason);changed+=1
   except (KeyError,TypeError,ValueError):continue
  return changed
+
+def verify_provisional_feeds(connect,now=None):
+ """Upgrade a provisional link only after a later independent ISIN match."""
+ if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1' or not os.environ.get('ESCAPE_EODHD_API_KEY','').strip():return 0
+ now=now or engine.utc()
+ with connect() as c:
+  if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return 0
+  row=c.execute("SELECT s.*,p.symbol AS provisional_symbol FROM hw_sessions s JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id LEFT JOIN hw_feed_recovery f ON f.watch_row_id=s.id LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.is_test=0 AND COALESCE(k.killed,0)=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.lease_until<=? AND json_extract(s.request,'$.provider')='eodhd' AND json_extract(s.request,'$.provider_symbol')=p.symbol AND COALESCE(f.next_attempt,0)<=? ORDER BY COALESCE(f.next_attempt,0),s.id LIMIT 1",(now.timestamp(),now.timestamp())).fetchone()
+ if not row:return 0
+ req=json.loads(row['request']);holding={'asset_id':req['asset_id'],'ticker':req['ticker'],'currency':req['quote_currency']};status='PLUTO_IDENTITY_UNVERIFIED';instrument=None
+ try:
+  instrument=holding_instrument(connect,row['user_id'],holding) if row['purpose']=='automatic holding watch' else verified_discovery_instrument(connect,row['user_id'],holding)
+  if instrument and instrument.get('asset_id')==holding['asset_id'] and str(instrument.get('ticker','')).casefold()==holding['ticker'].casefold() and instrument.get('currency')==holding['currency']:
+   if not instrument.get('isin'):status='PLUTO_ISIN_MISSING'
+   else:
+    from hotwatch_adapters import search_eodhd_symbols
+    options=search_eodhd_symbols(connect,row['user_id'],{'quote_currency':holding['currency']},candidate_override={'ticker':holding['ticker'],'company_name':instrument.get('name')},purpose='holding_identity')
+    matches=[x for x in options.get('choices',[]) if x.get('isin')==instrument['isin'] and x.get('currency')==holding['currency']]
+    status='MATCHED' if len(matches)==1 and matches[0].get('symbol')==row['provisional_symbol'] else 'EODHD_IDENTITY_UNCERTAIN'
+ except EngineError as error:status=error.code
+ except Exception:status='VERIFICATION_FAILED'
+ with connect() as c:
+  c.execute('BEGIN IMMEDIATE')
+  current=c.execute("SELECT s.* FROM hw_sessions s WHERE s.id=? AND s.request=? AND s.lease_until<=? AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND NOT EXISTS (SELECT 1 FROM hw_system_control g WHERE g.id=1 AND g.killed=1) AND NOT EXISTS (SELECT 1 FROM hw_control k WHERE k.user_id=s.user_id AND k.killed=1)",(row['id'],row['request'],now.timestamp())).fetchone()
+  if not current:return 0
+  if status=='MATCHED':
+   removed=c.execute('DELETE FROM hw_provisional_feed_links WHERE watch_row_id=? AND symbol=?',(row['id'],row['provisional_symbol']))
+   if removed.rowcount:
+    c.execute('INSERT INTO hw_verified_feed_links VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,asset_id) DO UPDATE SET ticker=excluded.ticker,currency=excluded.currency,exchange=excluded.exchange,symbol=excluded.symbol,isin=excluded.isin,verified_epoch=excluded.verified_epoch',(row['user_id'],instrument['asset_id'],instrument['ticker'],instrument['currency'],instrument['exchange'],row['provisional_symbol'],instrument['isin'],now.timestamp()))
+    c.execute('UPDATE hw_sessions SET next_due=? WHERE id=?',(now.timestamp(),row['id']))
+    engine.event(c,current,'INSTRUMENT_VERIFIED',now,'EODHD-identitet bekræftet med samme ISIN og valuta; ny signalhistorik starter fra verificerede data')
+   else:return 0
+  delay=60 if status=='PROVIDER_RATE_BUDGET' else 21600
+  c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?) ON CONFLICT(watch_row_id) DO UPDATE SET next_attempt=excluded.next_attempt,status=excluded.status,updated=excluded.updated',(row['id'],now.timestamp()+delay,status,now.isoformat()))
+ return 1 if status=='MATCHED' else 0
 
 def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
  """Activate at most one owned position per tick, with persistent bounded retries."""
@@ -469,6 +586,8 @@ class Runner:
     except Exception:logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'holdings_autowatch_error'}))
     try:recover_automatic_feeds(self.connect)
     except Exception:logging.getLogger('escape.hotwatch').exception('automatic_feed_recovery_error')
+    try:verify_provisional_feeds(self.connect)
+    except Exception:logging.getLogger('escape.hotwatch').exception('provisional_feed_verification_error')
     self.stop.wait(15)
   holding_thread=threading.Thread(target=holdings_loop,name='hotwatch-holdings',daemon=True);holding_thread.start()
   def discovery_loop():

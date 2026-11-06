@@ -11,6 +11,21 @@ def utc():return datetime.now(timezone.utc)
 def capacity():
  try:return max(1,min(40,int(os.environ.get('ESCAPE_HW_CAPACITY','40'))))
  except (TypeError,ValueError):return 40
+
+def effective_poll_interval(c,request,profile=None):
+ """Budget-aware cadence; never raise the provider request limit."""
+ source=request['provider'];profile=profile or request['profile'];minimum=max(PROFILES.get(profile,PROFILES[request['profile']]),provider_floor(source))
+ if source!='eodhd':return minimum
+ try:limit=max(1,min(120,int(os.environ.get('ESCAPE_HW_REQUESTS_PER_MINUTE','12'))))
+ except (TypeError,ValueError):limit=12
+ available=max(1,limit-3 if limit>3 else limit)
+ ws=os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1';fuse=os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1';bars=os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1'
+ # A verified scan can use trade, quote, status, schedule and bar endpoints.
+ # Reserve conservatively so the plan does not promise an unsustainable pace.
+ verified_cost=1+(3 if ws and fuse else 0)+(2 if bars else 0)
+ row=c.execute("SELECT COALESCE(SUM(CASE WHEN p.watch_row_id IS NOT NULL AND p.symbol=json_extract(s.request,'$.provider_symbol') THEN 1 ELSE ? END),0) AS units FROM hw_sessions s LEFT JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND json_extract(s.request,'$.provider')='eodhd'",(verified_cost,)).fetchone()
+ units=max(1,row['units'] or 0)
+ return max(minimum,(units*60+available-1)//available)
 def init(c):
  c.execute('CREATE TABLE IF NOT EXISTS hw_strategies(owner_id INTEGER NOT NULL,strategy_id TEXT NOT NULL,version TEXT NOT NULL,payload TEXT NOT NULL,checksum TEXT NOT NULL,created TEXT NOT NULL,author TEXT NOT NULL,validation_status TEXT NOT NULL,PRIMARY KEY(owner_id,strategy_id,version))')
  c.execute('INSERT OR IGNORE INTO hw_strategies VALUES(0,?,?,?,?,?,?,?)',(BASELINE['strategy_id'],BASELINE['version'],canonical(BASELINE),checksum(BASELINE),utc().isoformat(),'ESCAPE builtin','baseline_tested'))
@@ -28,6 +43,7 @@ def init(c):
  c.execute('CREATE INDEX IF NOT EXISTS hw_samples_time ON hw_samples(watch_row_id,event_epoch,id)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_feed_recovery(watch_row_id INTEGER PRIMARY KEY REFERENCES hw_sessions(id),next_attempt REAL NOT NULL,status TEXT NOT NULL,updated TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_verified_feed_links(user_id INTEGER NOT NULL,asset_id TEXT NOT NULL,ticker TEXT NOT NULL,currency TEXT NOT NULL,exchange TEXT NOT NULL,symbol TEXT NOT NULL,isin TEXT NOT NULL,verified_epoch REAL NOT NULL,PRIMARY KEY(user_id,asset_id))')
+ c.execute('CREATE TABLE IF NOT EXISTS hw_provisional_feed_links(watch_row_id INTEGER PRIMARY KEY REFERENCES hw_sessions(id),symbol TEXT NOT NULL,evidence TEXT NOT NULL,created TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_calculations(id INTEGER PRIMARY KEY,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),sample_row_id INTEGER REFERENCES hw_samples(id),calculated TEXT NOT NULL,payload TEXT NOT NULL,strategy_checksum TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_events(id INTEGER PRIMARY KEY,event_id TEXT NOT NULL UNIQUE,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),event_type TEXT NOT NULL,severity TEXT NOT NULL,created TEXT NOT NULL,data_timestamp TEXT,payload TEXT NOT NULL)')
  c.execute('CREATE INDEX IF NOT EXISTS hw_event_history ON hw_events(watch_row_id,id)')
@@ -275,7 +291,7 @@ def reported_daily_from_history(history,request,price):
   from zoneinfo import ZoneInfo
   latest=history[-1];zone=ZoneInfo(latest['bar_evidence']['timezone']);at=stamp(latest['event_time']);day=at.astimezone(zone).date()
   for prior in reversed(history[:-1]):
-   if prior.get('source')!='eodhd' or prior.get('asset_id')!=latest.get('asset_id') or prior.get('currency')!=latest.get('currency') or not str(prior.get('feed_type','')).startswith('EODHD REST real-time endpoint') or not prior.get('previous_close'):continue
+   if prior.get('source')!='eodhd' or prior.get('asset_id')!=latest.get('asset_id') or prior.get('currency')!=latest.get('currency') or prior.get('verification')!=latest.get('verification') or not str(prior.get('feed_type','')).startswith('EODHD REST real-time endpoint') or not prior.get('previous_close'):continue
    reference=stamp(prior['event_time']);previous=Decimal(prior['previous_close']);current=Decimal(price)
    if reference<=at and reference.astimezone(zone).date()==day and previous>0 and current>0:return format((current/previous-1)*100,'f')
  except (KeyError,ValueError,TypeError,ArithmeticError):pass
@@ -307,6 +323,7 @@ def view(c,row,now=None):
     except (KeyError,TypeError,ValueError,IndexError):effective='NO_DATA';display_reasons.append('BAR_EVIDENCE_STALE')
  profile=state.get('adaptive_profile',request['profile'])
  minimum=state.get('provider_floor_s',provider_floor(request['provider']))
+ budget_interval=effective_poll_interval(c,request,profile)
  latest_payload=json.loads(sample['payload']) if sample else None
  if latest_payload and latest_payload.get('bar_history'):
   # Older bar arrays are not needed for quote-to-quote comparisons; omit them
@@ -353,7 +370,12 @@ def view(c,row,now=None):
   from intel_workflows import candidate_currentness
   candidate_review=candidate_currentness(c,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery')
   if candidate_review['status']=='REVIEW_DUE' and row['status']!='PAUSED':display_status='REVURDERING FORFALDET'
- return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,PROFILES[profile]),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
+ provisional=c.execute('SELECT symbol,evidence FROM hw_provisional_feed_links WHERE watch_row_id=?',(row['id'],)).fetchone()
+ if provisional and request.get('provider')=='eodhd' and request.get('provider_symbol')==provisional['symbol']:
+  data_status['identity_verification']='unverified';data_status['identity_evidence']=json.loads(provisional['evidence'])
+ if (data_status.get('identity_verification')=='unverified' or latest_payload and latest_payload.get('verification')!='verified') and row['status']!='PAUSED':
+  display_status='INSTRUMENT IKKE BEKRÆFTET';display_reasons.append('DATA_UNVERIFIED')
+ return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,budget_interval),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
 def sessions(connect,uid,mode=False,after=0,limit=50):
  with connect() as c:
@@ -423,7 +445,10 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
    req=json.loads(r['request']);purpose=req.get('purpose','');source='holding' if req.get('watch_mode')=='exit' or req.get('report_id')=='automatic-holdings' or purpose in ('automatic holding watch',) or purpose.startswith('retained exit ') else 'manual' if req.get('report_id')=='manual-pluto' else 'candidate'
    if summary_only:
     recovery=c.execute('SELECT status,next_attempt FROM hw_feed_recovery WHERE watch_row_id=?',(r['id'],)).fetchone()
-    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'updated_at':r['updated'],'last_data_at':r['last_data'],'provider':req.get('provider'),'last_error':r['last_error'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
+    provisional=c.execute('SELECT symbol FROM hw_provisional_feed_links WHERE watch_row_id=?',(r['id'],)).fetchone()
+    unverified=bool(provisional and req.get('provider')=='eodhd' and req.get('provider_symbol')==provisional['symbol'])
+    sample=c.execute("SELECT json_extract(payload,'$.verification') AS verification FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 1",(r['id'],)).fetchone()
+    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'updated_at':r['updated'],'last_data_at':r['last_data'],'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
    else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
   more=len(opened)>session_limit
   return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}
@@ -517,6 +542,9 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   killed=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
   if killed and killed['killed']:raise EngineError('kill_switch_active',409)
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:raise EngineError('operator_kill_switch',409)
+  provisional=c.execute('SELECT symbol FROM hw_provisional_feed_links WHERE watch_row_id=?',(row['id'],)).fetchone()
+  if provisional and isinstance(sample,dict) and request.get('provider')=='eodhd' and request.get('provider_symbol')==provisional['symbol']:
+   sample=dict(sample);sample['verification']='unverified';sample.pop('bar_history',None);sample.pop('bar_evidence',None)
   if request['end_at'] and stamp(request['end_at'])<=now:
    c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']));event(c,row,'WATCH_EXPIRED',now,'Session deadline reached');return {'ok':True,'expired':True}
   sample_errors(sample,request,now)
@@ -578,7 +606,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   adaptive='CRITICAL' if result['risk_level']=='critical' else 'ACTIVE' if metrics.get('breakout') or nextstate.get('volume_spike') else 'IDLE' if sample['market_status'] in ['CLOSED','HALTED'] else request['profile']
   nextstate['adaptive_profile']=adaptive
   nextstate['provider_floor_s']=provider_floor(request['provider'])
-  interval=max(PROFILES[adaptive],nextstate['provider_floor_s'])
+  interval=effective_poll_interval(c,request,adaptive)
   if sample['market_status'] in ['CLOSED','HALTED']:interval=max(interval,300)
   c.execute('UPDATE hw_sessions SET status=?,state=?,updated=?,last_data=?,last_calculation=?,next_due=?,failures=0,last_error=NULL,lease_owner=NULL,lease_until=0 WHERE id=?',(new_status,canonical(nextstate),now.isoformat(),sample['event_time'],now.isoformat(),now.timestamp()+interval,row['id']))
   return {'ok':True,'duplicate':False,'calculation':result,'session':view(c,row_for(c,uid,wid,mode),now)}
@@ -623,7 +651,7 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
    c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']));event(c,row,'WATCH_EXPIRED',now,'Session deadline reached');return
   if row['last_error']!=code:event(c,row,'DATA_STALE' if code=='DATA_STALE' else 'DATA_ERROR',now,code,severity='warning',data_time=row['last_data'])
   failures=min(row['failures']+1,10);floor=provider_floor(request['provider']);interval=min(1800,max(floor,PROFILES[request['profile']])*2**min(failures-1,5));state.update(signal='NO_DATA',pending=None,confirmations=0)
-  if code=='PROVIDER_RATE_BUDGET':interval=60
+  if code=='PROVIDER_RATE_BUDGET':interval=max(60,effective_poll_interval(c,request)) if request['provider']=='eodhd' else 60
   if retry_after_s is not None:interval=max(interval,max(0,retry_after_s))
   if row['last_error']!=code:
    previous=json.loads(row['strategy']);result={'signal':'NO_DATA','reason_codes':[code],'human_readable_explanation':code,'supporting_metrics':{'quote_age_s':(now-stamp(row['last_data'])).total_seconds() if row['last_data'] else None},'calculation_timestamp':now.isoformat(),'data_timestamp':row['last_data'],'strategy_id':previous['strategy_id'],'strategy_version':previous['version'],'strategy_checksum':checksum(previous),'confidence_score':0,'risk_level':'critical' if set(state.get('alert_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE'} else 'high','rules_score_note':'No valid current market input','critical_override':False}
@@ -649,8 +677,10 @@ def claim(connect,now=None,watch_id=None):
   return dict(row,lease_owner=owner,request_data=request)
 
 def release(connect,job,now=None):
- now=now or utc();request=job['request_data'];interval=max(PROFILES[request['profile']],provider_floor(request['provider']))
- with connect() as c:c.execute('UPDATE hw_sessions SET next_due=?,lease_owner=NULL,lease_until=0 WHERE id=? AND lease_owner=?',(now.timestamp()+interval,job['id'],job['lease_owner']))
+ now=now or utc();request=job['request_data']
+ with connect() as c:
+  interval=effective_poll_interval(c,request)
+  c.execute('UPDATE hw_sessions SET next_due=?,lease_owner=NULL,lease_until=0 WHERE id=? AND lease_owner=?',(now.timestamp()+interval,job['id'],job['lease_owner']))
 
 
 def system_kill(connect,enabled,reason,now=None):

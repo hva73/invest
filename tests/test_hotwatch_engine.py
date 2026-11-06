@@ -145,6 +145,17 @@ class HotWatch(unittest.TestCase):
   self.assertEqual(features([first,last],BASELINE['parameters'])['sample_count'],1)
   last['feed_type']=first['feed_type'];last['price_time_kind']='bar_open'
   self.assertEqual(features([first,last],BASELINE['parameters'])['sample_count'],1)
+ def test_verified_and_provisional_observations_never_share_history(self):
+  first=tick(self.now-timedelta(minutes=1),0,'100');last=tick(self.now,1,'101')
+  first['verification']='unverified'
+  self.assertEqual(features([first,last],BASELINE['parameters'])['sample_count'],1)
+  self.assertIsNone(observation_status([first,last],self.now,120,'NO_DATA','DEGRADED')['since_last_pct'])
+  first['verification']='verified';last['verification']='unverified'
+  self.assertEqual(features([first,last],BASELINE['parameters'])['sample_count'],1)
+  self.assertEqual(observation_status([first,last],self.now,120,'NO_DATA','DEGRADED')['price_status'],'UNVERIFIED')
+  del first['verification'];last['verification']='verified'
+  self.assertEqual(features([first,last],BASELINE['parameters'])['sample_count'],1)
+  self.assertEqual(observation_status([first],self.now,120,'NO_DATA','DEGRADED')['price_status'],'UNVERIFIED')
  def test_session_view_keeps_price_when_signal_waits_for_data(self):
   result=self.put(tick(self.now))
   self.assertEqual(result['session']['signal'],'NO_DATA')
@@ -235,6 +246,26 @@ class HotWatch(unittest.TestCase):
    with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM hw_sessions').fetchone()[0],40)
    item=copy.deepcopy(self.req);item.update(watch_id='capacity-watch-over',purpose='capacity overflow')
    with self.assertRaisesRegex(EngineError,'global_capacity_limit'):engine.create(app.connect,1,item,self.now)
+ def test_many_provisional_sessions_use_honest_budget_aware_cadence(self):
+  settings={'ESCAPE_HW_REQUESTS_PER_MINUTE':'12','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_BARS_ENABLED':'1'}
+  with patch.dict(os.environ,settings,clear=True):
+   for index in range(24):
+    item=copy.deepcopy(self.req);item.update(watch_id='budget-provisional-'+str(index),purpose='budget '+str(index),provider='eodhd',provider_symbol='MERC.US')
+    engine.create(app.connect,1,item,self.now)
+    with app.connect() as c:
+     row=c.execute('SELECT id FROM hw_sessions WHERE watch_id=?',(item['watch_id'],)).fetchone()
+     c.execute('INSERT INTO hw_provisional_feed_links VALUES(?,?,?,?)',(row['id'],'MERC.US','{}',self.now.isoformat()))
+   with app.connect() as c:
+    self.assertEqual(engine.effective_poll_interval(c,item),160)
+   sample=tick(self.now);sample.update(source='eodhd',market_status='UNKNOWN',session_key='test:UNKNOWN',feed_type='synthetic EODHD snapshot',bid=None,ask=None,interval_s=160)
+   result=engine.ingest(app.connect,1,item['watch_id'],True,sample,self.now)
+   self.assertEqual(result['session']['effective_min_interval_s'],160)
+   with app.connect() as c:
+    due=c.execute('SELECT next_due FROM hw_sessions WHERE watch_id=?',(item['watch_id'],)).fetchone()['next_due']
+   self.assertEqual(due-self.now.timestamp(),160)
+   verified=copy.deepcopy(self.req);verified.update(watch_id='budget-verified',purpose='verified budget',provider='eodhd',provider_symbol='MERC.US')
+   engine.create(app.connect,1,verified,self.now)
+   with app.connect() as c:self.assertEqual(engine.effective_poll_interval(c,verified),200)
  def test_fast_eodhd_polling_is_explicit_bounded_and_budgeted(self):
   from hotwatch_contract import provider_floor
   from hotwatch_adapters import providers
@@ -747,12 +778,53 @@ class HotWatch(unittest.TestCase):
    cursor=0
    for _ in range(len(report['candidates'])+2):cursor=auto_discover(app.connect,cursor)
   self.assertEqual(set(seen),{x['candidate_id'] for x in report['candidates']});self.assertEqual(len(seen),len(report['candidates']))
+ def test_discovery_keeps_candidates_from_previous_reports_and_uses_latest_assessment(self):
+  from hotwatch_service import auto_discover
+  with app.connect() as c:
+   for name,cid,offset in [('old-A','A',20),('new-B','B',10),('new-A','A',5)]:
+    at=(engine.utc()-timedelta(seconds=offset)).timestamp();payload={'report_id':name,'candidates':[{'candidate_id':cid}]}
+    row=c.execute('INSERT INTO ingested_reports(user_id,report_id,received,payload,digest,is_test,generated_epoch,report_type) VALUES(?,?,?,?,?,?,?,?)',(1,name,engine.utc().isoformat(),json.dumps(payload),name,0,at,'legacy')).lastrowid
+    c.execute('INSERT INTO report_candidate_links VALUES(?,?,?,?,?)',(1,0,cid,row,at))
+  seen=[]
+  def activate(connect,uid,mode,report,candidate):seen.append((candidate['candidate_id'],report['report_id']));return {'status':'ALREADY_ACTIVE'}
+  with patch.dict(os.environ,{'ESCAPE_HW_AUTOSTART_ENABLED':'1','ESCAPE_HW_AUTOSTART_AFTER':(engine.utc()-timedelta(minutes=1)).isoformat()}),patch('hotwatch_service.auto_activate_candidate',side_effect=activate):
+   cursor=0
+   for _ in range(4):cursor=auto_discover(app.connect,cursor)
+  self.assertEqual(set(seen),{('A','new-A'),('B','new-B')});self.assertEqual(len(seen),2)
+ def test_discovery_does_not_replay_unattempted_historical_reports_on_first_start(self):
+  from hotwatch_service import auto_discover
+  with app.connect() as c:
+   for name,cid,offset in [('old-report','OLD',120),('latest-report','LATEST',60)]:
+    at=engine.utc()-timedelta(seconds=offset);payload={'report_id':name,'candidates':[{'candidate_id':cid}]}
+    row=c.execute('INSERT INTO ingested_reports(user_id,report_id,received,payload,digest,is_test,generated_epoch,report_type) VALUES(?,?,?,?,?,?,?,?)',(1,name,at.isoformat(),json.dumps(payload),name,0,at.timestamp(),'legacy')).lastrowid
+    c.execute('INSERT INTO report_candidate_links VALUES(?,?,?,?,?)',(1,0,cid,row,at.timestamp()))
+  seen=[]
+  with patch.dict(os.environ,{'ESCAPE_HW_AUTOSTART_ENABLED':'1'},clear=False),patch('hotwatch_service.auto_activate_candidate',side_effect=lambda connect,uid,mode,report,candidate:seen.append(candidate['candidate_id']) or {'status':'NOT_NEW'}):
+   cursor=0
+   for _ in range(4):cursor=auto_discover(app.connect,cursor)
+  self.assertEqual(seen,['LATEST'])
+ def test_automatic_discovery_checks_currentness_before_provider_calls(self):
+  from hotwatch_service import auto_activate_candidate
+  report=merc_report(False);report['report_id']='expired-candidate-before-lookup';report_ingest.save(app.connect,1,report);candidate=report['candidates'][0]
+  with patch('intel_workflows.candidate_currentness',return_value={'status':'COLD'}):
+   result=auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:self.fail('expired candidate must not access provider'),lambda *_:self.fail('expired candidate must not access provider'))
+  self.assertEqual(result['status'],'NOT_NEW')
  def test_discovery_verifies_asset_without_assuming_trading_permission(self):
   from hotwatch_service import verified_discovery_instrument
   candidate={'asset_id':'synthetic-MERC','ticker':'MERC','exchange':'NASDAQ'}
   raw={'asset':{'id':'synthetic-MERC','ticker':'MERC','exchange':'NASDAQ','currency':'USD','isin':'US1234567890'},'buyBy':{'shares':True}}
   with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',side_effect=[[{'id':'synthetic-MERC','ticker':'MERC'}],raw]),patch('trade_service.fresh_permission',side_effect=AssertionError('No trading permission check for read-only monitoring')):
    self.assertEqual(verified_discovery_instrument(app.connect,1,candidate)['asset_id'],'synthetic-MERC')
+ def test_discovery_uses_isin_from_exact_pluto_search_match_without_guessing(self):
+  from hotwatch_service import verified_discovery_instrument
+  candidate={'asset_id':'synthetic-MERC','ticker':'MERC','exchange':'NASDAQ'}
+  match={'id':'synthetic-MERC','ticker':'MERC','exchange':'NASDAQ','currency':'USD','isin':'US1234567890'}
+  asset={'asset':{'id':'synthetic-MERC','ticker':'MERC'}}
+  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',side_effect=[[match],asset]):
+   result=verified_discovery_instrument(app.connect,1,candidate)
+  self.assertEqual(result['isin'],'US1234567890');self.assertEqual(result['currency'],'USD')
+  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',side_effect=[[match],{'asset':{'id':'synthetic-MERC','ticker':'MERC','currency':'EUR'}}]):
+   self.assertIsNone(verified_discovery_instrument(app.connect,1,candidate))
  def test_tradability_requires_matching_asset_sizing_and_fresh_account_permission(self):
   adapter=PlutoAdapter(app.connect,1);portfolio={'id':123};raw={'asset':{'id':self.req['asset_id'],'ticker':'MERC','exchange':'NASDAQ','currency':'USD'},'buyBy':{'shares':True}}
   with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value=raw),patch('trade_service.fresh_permission',side_effect=ValueError('not permitted')):
