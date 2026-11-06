@@ -1,11 +1,37 @@
 """Run this file from an extracted ZIP under escape_app/opdatering.
 Stop the application first. The motor starts when Passenger starts the app.
 """
-import os,shutil,sqlite3,tempfile
+import os,shutil,sqlite3,tempfile,fcntl,time
+from contextlib import contextmanager
 from datetime import datetime,timezone
 from pathlib import Path
 
 FILES=('static/journal-ui.js','journal_projection.py','dashboard_projection.py','display_policy.py','static/dashboard-ui.js','candidate_lifecycle.py','static/candidate-ui.js','hotwatch_api.py','hotwatch_contract.py','hotwatch_engine.py','hotwatch_features.py','hotwatch_strategy.py','hotwatch_adapters.py','eodhd_feeds.py','hotwatch_service.py','hotwatch_supervisor.py','static/engine-ui.js','intel_workflows.py','intel_contract.py','static/intel-ui.js','app.py','static/overview-ui.js','market_data.py','static/market-ui.js','trade_service.py','pluto_trade_contract.json','static/trade-ui.js','report_ingest.py','report_v2.py','report_validation.py','position_reports.py','static/position-ui.js','mcp_reports.py','asset_quotes.py','pending_orders.py','portfolio_data.py','portfolios.py','mcp_client.py','pluto.py','oauth.py','jobs.py','news.py','worker.py','setup_runtime.py','requirements.txt','passenger_wsgi.py','static/app.js','static/report-ui.js','static/index.html','static/style.css','static/manifest.json','static/sw.js','static/icon.svg')
+
+@contextmanager
+def quiesce_hotwatch(target,timeout=30):
+    """Stop the detached supervisor and refuse to replace code under a worker."""
+    var=target/'var';disabled=var/'hotwatch-autostart.disabled';created=False;locks=[]
+    try:
+        if disabled.is_symlink():raise ValueError('Uventet HOT WATCH-statusfil')
+        try:
+            fd=os.open(disabled,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0),0o600)
+            os.close(fd);created=True
+        except FileExistsError:pass
+        deadline=time.monotonic()+timeout
+        for name in ('supervisor','worker'):
+            fd=os.open(var/('hotwatch-'+name+'.lock'),os.O_RDWR|os.O_CREAT|getattr(os,'O_NOFOLLOW',0),0o600)
+            locks.append(fd)
+            while True:
+                try:
+                    fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);break
+                except BlockingIOError:
+                    if time.monotonic()>=deadline:raise RuntimeError('HOT WATCH-motoren standsede ikke; ingen kodefiler er ændret')
+                    time.sleep(.2)
+        yield
+    finally:
+        for fd in reversed(locks):os.close(fd)
+        if created:disabled.unlink(missing_ok=True)
 
 def apply(source,target):
     source=Path(source).resolve();target=Path(target).resolve()
@@ -34,7 +60,7 @@ def apply(source,target):
         if destination.exists():
             saved=backup/'code'/name;saved.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(destination,saved);existed.append(name)
     # Stage everything before replacing the first code file.
-    with tempfile.TemporaryDirectory(prefix='.update-stage-',dir=target) as stage:
+    with quiesce_hotwatch(target), tempfile.TemporaryDirectory(prefix='.update-stage-',dir=target) as stage:
         stage=Path(stage)
         for name in FILES:
             file=stage/name;file.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source/name,file);os.chmod(file,0o644)

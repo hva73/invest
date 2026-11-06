@@ -26,6 +26,8 @@ def init(c):
   c.execute('INSERT INTO hw_context_events SELECT * FROM hw_context_events_legacy')
   c.execute('DROP TABLE hw_context_events_legacy')
  c.execute('CREATE INDEX IF NOT EXISTS hw_samples_time ON hw_samples(watch_row_id,event_epoch,id)')
+ c.execute('CREATE TABLE IF NOT EXISTS hw_feed_recovery(watch_row_id INTEGER PRIMARY KEY REFERENCES hw_sessions(id),next_attempt REAL NOT NULL,status TEXT NOT NULL,updated TEXT NOT NULL)')
+ c.execute('CREATE TABLE IF NOT EXISTS hw_verified_feed_links(user_id INTEGER NOT NULL,asset_id TEXT NOT NULL,ticker TEXT NOT NULL,currency TEXT NOT NULL,exchange TEXT NOT NULL,symbol TEXT NOT NULL,isin TEXT NOT NULL,verified_epoch REAL NOT NULL,PRIMARY KEY(user_id,asset_id))')
  c.execute('CREATE TABLE IF NOT EXISTS hw_calculations(id INTEGER PRIMARY KEY,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),sample_row_id INTEGER REFERENCES hw_samples(id),calculated TEXT NOT NULL,payload TEXT NOT NULL,strategy_checksum TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_events(id INTEGER PRIMARY KEY,event_id TEXT NOT NULL UNIQUE,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),event_type TEXT NOT NULL,severity TEXT NOT NULL,created TEXT NOT NULL,data_timestamp TEXT,payload TEXT NOT NULL)')
  c.execute('CREATE INDEX IF NOT EXISTS hw_event_history ON hw_events(watch_row_id,id)')
@@ -38,6 +40,7 @@ def init(c):
  c.execute("INSERT OR IGNORE INTO hw_system_control VALUES(1,0,'','')")
  c.execute('CREATE TABLE IF NOT EXISTS hw_control(user_id INTEGER PRIMARY KEY REFERENCES users(id),killed INTEGER NOT NULL,changed TEXT NOT NULL,reason TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_request_budget(user_id INTEGER NOT NULL,source TEXT NOT NULL,window INTEGER NOT NULL,used INTEGER NOT NULL,PRIMARY KEY(user_id,source,window))')
+ c.execute('CREATE TABLE IF NOT EXISTS hw_pluto_budget_lane(user_id INTEGER NOT NULL,window INTEGER NOT NULL,lane TEXT NOT NULL,used INTEGER NOT NULL,PRIMARY KEY(user_id,window,lane))')
  c.execute('CREATE TABLE IF NOT EXISTS hw_provider_health(user_id INTEGER NOT NULL,is_test INTEGER NOT NULL,source TEXT NOT NULL,attempted TEXT NOT NULL,succeeded TEXT,code TEXT,payload TEXT NOT NULL,PRIMARY KEY(user_id,is_test,source))')
  c.execute('CREATE TABLE IF NOT EXISTS hw_heartbeat(id INTEGER PRIMARY KEY CHECK(id=1),updated TEXT NOT NULL,status TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_supervisor_status(id INTEGER PRIMARY KEY CHECK(id=1),updated TEXT NOT NULL,status TEXT NOT NULL,reason TEXT,attempts INTEGER NOT NULL DEFAULT 0)')
@@ -419,7 +422,8 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
   for r in opened[:session_limit]:
    req=json.loads(r['request']);purpose=req.get('purpose','');source='holding' if req.get('watch_mode')=='exit' or req.get('report_id')=='automatic-holdings' or purpose in ('automatic holding watch',) or purpose.startswith('retained exit ') else 'manual' if req.get('report_id')=='manual-pluto' else 'candidate'
    if summary_only:
-    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'updated_at':r['updated'],'last_data_at':r['last_data']})
+    recovery=c.execute('SELECT status,next_attempt FROM hw_feed_recovery WHERE watch_row_id=?',(r['id'],)).fetchone()
+    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'updated_at':r['updated'],'last_data_at':r['last_data'],'provider':req.get('provider'),'last_error':r['last_error'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
    else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
   more=len(opened)>session_limit
   return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}

@@ -81,6 +81,36 @@ class HoldingAutowatch(unittest.TestCase):
    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now)
    for _ in range(2):reserve(app.connect,1,'eodhd',self.now,purpose='holding_identity')
    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now,purpose='holding_identity')
+ def test_pluto_budget_preserves_room_for_scan_and_identity_in_either_order(self):
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  with app.connect() as c:
+   c.execute("UPDATE hw_sessions SET request=json_set(request,'$.provider','pluto'),next_due=?",(self.now.timestamp(),))
+   c.execute("UPDATE hw_holding_autowatch SET status='VERIFYING'")
+  with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12'}):
+   for at,first,second in [(self.now,'scan','identity'),(self.now+timedelta(minutes=1),'identity','scan')]:
+    amounts={'scan':5,'identity':7}
+    for _ in range(amounts[first]):reserve(app.connect,1,'pluto',at,purpose=first)
+    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'pluto',at,purpose=first)
+    for _ in range(amounts[second]):reserve(app.connect,1,'pluto',at,purpose=second)
+    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'pluto',at,purpose=second)
+ def test_old_discovery_attempt_does_not_permanently_reserve_pluto_budget(self):
+  with app.connect() as c:
+   c.execute('INSERT INTO hw_discovery_attempts VALUES(?,?,?,?,?,?,?,?)',(1,0,'old-candidate','old-report','PROVIDER_RATE_BUDGET',self.now.isoformat(),self.now.timestamp(),None))
+  with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12'}):
+   for _ in range(12):reserve(app.connect,1,'pluto',self.now,purpose='scan')
+   with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'pluto',self.now,purpose='scan')
+ def test_candidate_and_holding_checks_take_turns_when_both_wait(self):
+  with app.connect() as c:
+   c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(1,self.pid,'synthetic-asset','VERIFYING',None,self.now.timestamp()+300,self.now.isoformat()))
+   c.execute('INSERT INTO hw_discovery_attempts VALUES(?,?,?,?,?,?,?,?)',(1,0,'candidate','trade-source','PROVIDER_RATE_BUDGET',self.now.isoformat(),self.now.timestamp(),None))
+  at=self.now
+  if int(at.timestamp()//60)%2:at+=timedelta(minutes=1)
+  with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12'}):
+   reserve(app.connect,1,'pluto',at,purpose='candidate_identity')
+   with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'pluto',at,purpose='holding_identity')
+   at+=timedelta(minutes=1)
+   reserve(app.connect,1,'pluto',at,purpose='holding_identity')
+   with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'pluto',at,purpose='candidate_identity')
  def test_exchange_check_gets_one_reserved_call_without_increasing_budget(self):
   with app.connect() as c:c.execute('INSERT INTO hw_exchange_status(exchange,next_attempt) VALUES(?,?)',('CO',self.now.timestamp()+60))
   with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12'}):
@@ -155,6 +185,67 @@ class HoldingAutowatch(unittest.TestCase):
   with app.connect() as c:
    requests=[json.loads(r['request']) for r in c.execute('SELECT request FROM hw_sessions ORDER BY id')]
   self.assertEqual([r['watch_mode'] for r in requests],['entry','exit']);self.assertEqual(requests[1]['provider_symbol'],'TEST.US')
+ def test_empty_automatic_session_recovers_only_from_recent_verified_identity(self):
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  with app.connect() as c:
+   old=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(old['request']);req.update(watch_mode='entry',purpose='candidate',watch_id='historical-candidate',candidate_id='historical-candidate')
+   c.execute("UPDATE hw_sessions SET watch_id=?,candidate_id=?,purpose=?,request=?,status='COMPLETED' WHERE id=?",('historical-candidate','historical-candidate','candidate',json.dumps(req),old['id']))
+   c.execute('DELETE FROM hw_holding_autowatch')
+   sample={'verification':'verified','asset_id':'synthetic-asset','ticker':'TEST','currency':'USD'}
+   c.execute('INSERT INTO hw_samples(watch_row_id,source,sample_id,event_epoch,received,payload,digest) VALUES(?,?,?,?,?,?,?)',(old['id'],'eodhd','evidence',self.now.timestamp(),self.now.isoformat(),json.dumps(sample),'digest'))
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=None):
+   with app.connect() as c:c.execute('DELETE FROM hw_verified_feed_links')
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+   service.remember_verified_feed(app.connect,1,self.instrument,'TEST.US',self.now)
+   with app.connect() as c:c.execute("UPDATE hw_verified_feed_links SET verified_epoch=?",((self.now-timedelta(days=8)).timestamp(),))
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+   with app.connect() as c:
+    c.execute("UPDATE hw_verified_feed_links SET verified_epoch=?,currency='EUR'",(self.now.timestamp(),))
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+   with app.connect() as c:
+    c.execute("UPDATE hw_verified_feed_links SET currency='USD'")
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),1)
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+  with app.connect() as c:
+   row=c.execute("SELECT * FROM hw_sessions WHERE purpose='automatic holding watch'").fetchone();req=json.loads(row['request'])
+   self.assertEqual((req['provider'],req['provider_symbol']),('eodhd','TEST.US'))
+   self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE watch_row_id=? AND event_type='PROVIDER_CHANGED'",(row['id'],)).fetchone()[0],1)
+ def test_recovery_matches_isin_and_currency_without_prior_observation(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  choices={'choices':[{'symbol':'TEST.US','isin':self.instrument['isin'],'currency':'USD'}]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=self.instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),1)
+  with app.connect() as c:
+   row=c.execute('SELECT request FROM hw_sessions').fetchone();self.assertEqual(json.loads(row['request'])['provider_symbol'],'TEST.US')
+ def test_recovery_does_not_guess_ambiguous_isin_match(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  choices={'choices':[{'symbol':'TEST.US','isin':self.instrument['isin'],'currency':'USD'},{'symbol':'TEST.X','isin':self.instrument['isin'],'currency':'USD'}]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=self.instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT status FROM hw_feed_recovery').fetchone()['status'],'EODHD_IDENTITY_UNCERTAIN')
+   self.assertEqual(json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()['request'])['provider'],'pluto')
+ def test_recovery_reports_missing_isin_without_guessing(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  instrument=dict(self.instrument,isin=None)
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',side_effect=AssertionError('cannot match without ISIN')):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+  with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM hw_feed_recovery').fetchone()['status'],'PLUTO_ISIN_MISSING')
+ def test_recovery_respects_global_and_user_kill_switches(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',side_effect=AssertionError('must not call provider')):
+   with app.connect() as c:c.execute('UPDATE hw_system_control SET killed=1 WHERE id=1')
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+   with app.connect() as c:
+    c.execute('UPDATE hw_system_control SET killed=0 WHERE id=1')
+    c.execute("INSERT INTO hw_control VALUES(1,1,'test',?) ON CONFLICT(user_id) DO UPDATE SET killed=1",(self.now.isoformat(),))
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
  def test_rate_budget_retry_waits_until_next_minute_not_five_minutes(self):
   def blocked(*_):raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
   self.assertEqual(self.tick(verify=self.verify,lookup=blocked),'PROVIDER_RATE_BUDGET')
@@ -179,6 +270,17 @@ class HoldingAutowatch(unittest.TestCase):
   with patch('market_data.quote',return_value=quote) as get_quote,patch.object(PlutoAdapter,'context',return_value=unknown_context()):
    sample=PlutoAdapter(app.connect,1).poll({'request_data':req})
   self.assertEqual(sample['source'],'pluto');self.assertEqual(sample['event_time'],self.now.isoformat());self.assertEqual(get_quote.call_args.args[2],{'holding_portfolio_id':self.pid,'holding_asset_id':'synthetic-asset'})
+ def test_budget_blocked_broker_context_does_not_discard_timestamped_price(self):
+  from hotwatch_adapters import PlutoAdapter
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with app.connect() as c:req=json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()['request'])
+  quote={'asset_id':'synthetic-asset','ticker':'TEST','currency':'USD','exchange':'NASDAQ','price':'100','price_time':self.now.isoformat()}
+  with patch('market_data.quote',return_value=quote),patch.object(PlutoAdapter,'context',side_effect=DataUnavailable('PROVIDER_RATE_BUDGET',429)):
+   sample=PlutoAdapter(app.connect,1).poll({'request_data':req})
+  self.assertEqual(sample['price'],'100');self.assertEqual(sample['event_time'],self.now.isoformat())
+  self.assertEqual(sample['context']['status'],'unknown');self.assertEqual(sample['context']['tradability'],'unknown')
+  self.assertEqual(sample['context']['diagnostic'],'PROVIDER_RATE_BUDGET')
  def test_old_snapshot_is_not_used(self):
   with app.connect() as c:
    payload={'positions_complete':True,'observed':(self.now-timedelta(minutes=6)).isoformat(),'positions':[self.holding]}

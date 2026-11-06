@@ -14,6 +14,23 @@ def reserve(connect,uid,source,now=None,purpose=None):
  with connect() as c:
   c.execute('BEGIN IMMEDIATE');c.execute('DELETE FROM hw_request_budget WHERE window<?',(window-2,))
   row=c.execute('SELECT used FROM hw_request_budget WHERE user_id=? AND source=? AND window=?',(uid,source,window)).fetchone()
+  lane_name='identity' if purpose in ('identity','candidate_identity','holding_identity') else purpose
+  if source=='pluto' and lane_name in ('identity','scan') and limit>=10:
+   c.execute('DELETE FROM hw_pluto_budget_lane WHERE window<?',(window-2,))
+   if purpose=='candidate_identity' and window%2:
+    waiting=c.execute("SELECT 1 FROM hw_holding_autowatch WHERE user_id=? AND status NOT IN ('LINKED','STOPPED','POSITION_CLOSED','AMBIGUOUS') AND (status='VERIFYING' OR next_attempt<=?) UNION ALL SELECT 1 FROM hw_feed_recovery f JOIN hw_sessions s ON s.id=f.watch_row_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND f.status!='MATCHED' AND f.next_attempt<=? LIMIT 1",(uid,now.timestamp()+60,uid,now.timestamp()+60)).fetchone()
+    if waiting:raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+   if purpose=='holding_identity' and not window%2:
+    waiting=c.execute("SELECT 1 FROM hw_discovery_attempts d WHERE d.user_id=? AND d.is_test=0 AND d.report_id=(SELECT report_id FROM ingested_reports WHERE user_id=d.user_id AND is_test=0 AND report_type!='deep_analysis' ORDER BY generated_epoch DESC,id DESC LIMIT 1) AND d.status NOT IN ('CREATED','ACTIVE','ALREADY_ACTIVE','NOT_NEW','REJECTED') AND d.next_attempt<=? LIMIT 1",(uid,now.timestamp()+60)).fetchone()
+    if waiting:raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+   if lane_name=='identity':
+    competing=c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=0 AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND json_extract(request,'$.provider')='pluto' AND next_due<=? LIMIT 1",(uid,now.timestamp()+60)).fetchone()
+    cap=limit-max(4,limit*5//12)
+   else:
+    competing=c.execute("SELECT 1 FROM hw_holding_autowatch WHERE user_id=? AND status NOT IN ('LINKED','STOPPED','POSITION_CLOSED','AMBIGUOUS') AND (status='VERIFYING' OR next_attempt<=?) UNION ALL SELECT 1 FROM hw_discovery_attempts d WHERE d.user_id=? AND d.is_test=0 AND d.report_id=(SELECT report_id FROM ingested_reports WHERE user_id=d.user_id AND is_test=0 AND report_type!='deep_analysis' ORDER BY generated_epoch DESC,id DESC LIMIT 1) AND d.status NOT IN ('CREATED','ACTIVE','ALREADY_ACTIVE','NOT_NEW','REJECTED') AND d.next_attempt<=? UNION ALL SELECT 1 FROM hw_feed_recovery f JOIN hw_sessions s ON s.id=f.watch_row_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND f.status!='MATCHED' AND f.next_attempt<=? LIMIT 1",(uid,now.timestamp()+60,uid,now.timestamp()+60,uid,now.timestamp()+60)).fetchone()
+    cap=max(4,limit*5//12)
+   lane=c.execute('SELECT used FROM hw_pluto_budget_lane WHERE user_id=? AND window=? AND lane=?',(uid,window,lane_name)).fetchone()
+   if competing and lane and lane['used']>=cap:raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
   # Leave room within the existing shared limit for identity and exchange
   # checks; neither kind of request may exceed the provider-wide budget.
   if source=='eodhd' and limit>3:
@@ -25,6 +42,8 @@ def reserve(connect,uid,source,now=None,purpose=None):
    limit=max(1,limit-reserved)
   if row and row['used']>=limit:raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
   c.execute('INSERT INTO hw_request_budget VALUES(?,?,?,1) ON CONFLICT(user_id,source,window) DO UPDATE SET used=used+1',(uid,source,window))
+  if source=='pluto' and lane_name in ('identity','scan'):
+   c.execute('INSERT INTO hw_pluto_budget_lane VALUES(?,?,?,1) ON CONFLICT(user_id,window,lane) DO UPDATE SET used=used+1',(uid,window,lane_name))
 
 def unknown_context(diagnostic=None):
  result={'tradability':'unknown','status':'unknown','as_of':None,'position':'unknown','quantity':None,'cost_price':None,'portfolio_equity_dkk':None,'exposure_dkk':None,'fx_to_dkk':None,'fees_dkk':None,'orders':[]}
@@ -95,11 +114,15 @@ def search_eodhd_symbols(connect,uid,data,opener=None,candidate_override=None):
  return {'ticker':ticker,'choices':choices}
 
 class PlutoAdapter:
- def __init__(self,connect,uid):self.connect=connect;self.uid=uid;self.gateway=None;self.order_cache={};self.permission_cache={}
+ def __init__(self,connect,uid,purpose='scan'):self.connect=connect;self.uid=uid;self.purpose=purpose;self.gateway=None;self.order_cache={};self.permission_cache={}
+ def safe_context(self,request,currency):
+  try:return self.context(request,currency)
+  except DataUnavailable as error:return unknown_context(error.code if error.code=='PROVIDER_RATE_BUDGET' else 'BROKER_CONTEXT_UNAVAILABLE')
+  except Exception:return unknown_context('BROKER_CONTEXT_UNAVAILABLE')
  def factory(self,token):
   if self.gateway and self.gateway.token==token:return self.gateway
   from mcp_client import MCP
-  connect=self.connect;uid=self.uid
+  connect=self.connect;uid=self.uid;purpose=self.purpose
   class ReadOnlyGateway(MCP):
    allowed={'search_assets','get_asset','get_portfolio_value','get_accounts','get_positions','get_collection','list_orders','list_portfolios','list_collections','get_collection_activity'}
    def __init__(self,token):super().__init__(token);self.catalog=None
@@ -111,7 +134,7 @@ class PlutoAdapter:
      name=(params or {}).get('name');metadata=next((t for t in self.catalog or [] if t['name']==name),None)
      if name not in self.allowed or not metadata or metadata.get('annotations',{}).get('readOnlyHint') is not True:raise DataUnavailable('PLUTO_WRITE_OR_UNKNOWN_TOOL_BLOCKED')
     elif method not in ['initialize','notifications/initialized','tools/list']:raise DataUnavailable('PLUTO_METHOD_BLOCKED')
-    reserve(connect,uid,'pluto');return super().request(method,params,notification)
+    reserve(connect,uid,'pluto',purpose=purpose);return super().request(method,params,notification)
   self.gateway=ReadOnlyGateway(token);return self.gateway
  def tradability(self,request,currency,portfolios):
   """Only use current read-only Pluto instrument and account evidence."""
@@ -220,7 +243,7 @@ class PlutoAdapter:
   if q.get('pending'):raise DataUnavailable('PLUTO_REQUEST_PENDING')
   if q.get('selection_required') or q.get('asset_id')!=r['asset_id'] or str(q.get('ticker','')).casefold()!=r['ticker'].casefold():raise DataUnavailable('PLUTO_ASSET_NOT_CONFIRMED')
   if q.get('last_error'):raise DataUnavailable('PLUTO_PROVIDER_ERROR')
-  context=self.context(r,q['currency'])
+  context=self.safe_context(r,q['currency'])
   if not q.get('price_time'):
    error=DataUnavailable('PLUTO_QUOTE_TIME_UNKNOWN');error.position_context=context;raise error
   at=stamp(q['price_time'])
@@ -274,7 +297,7 @@ class EODHDAdapter:
     if valid:
      trade=max(valid,key=lambda x:stamp(x['event_time']));at=stamp(trade['event_time']);currency=r.get('quote_currency')
      if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):raise DataUnavailable('EODHD_CURRENCY_UNCONFIRMED')
-     context_started=time.perf_counter();context=self.pluto.context(r,currency);context_ms=(time.perf_counter()-context_started)*1000
+     context_started=time.perf_counter();context=self.pluto.safe_context(r,currency);context_ms=(time.perf_counter()-context_started)*1000
      self.last_telemetry={'websocket_capture_ms':round(stream_ms,3),'pluto_context_ms':round(context_ms,3),'event_to_websocket_receive_ms':round((stamp(trade['received_at'])-at).total_seconds()*1000,3) if trade.get('received_at') else None}
      state=json.loads(session.get('state') or '{}');profile=state.get('adaptive_profile') or r['profile']
      interval=max(PROFILES.get(profile,PROFILES[r['profile']]),provider_floor('eodhd'))
@@ -362,9 +385,9 @@ class EODHDAdapter:
      if session.get('id') is not None:
       with self.connect() as c:old=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(session['id'],'eodhd',sample_id)).fetchone()
      if old:
-      previous=json.loads(old['payload']);previous['context']=self.pluto.context(r,currency);return previous
+      previous=json.loads(old['payload']);previous['context']=self.pluto.safe_context(r,currency);return previous
      if not session.get('last_data') or at>stamp(session['last_data']):
-      context=self.pluto.context(r,currency)
+      context=self.pluto.safe_context(r,currency)
       return {'sample_id':sample_id,'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':None,'currency':currency,'event_time':bar['bar_open_at'],'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD '+kind+' closed 1m bar; time is bar open','documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':60,'price':bar['close'],'bid':None,'ask':None,'volume':bar.get('volume'),'volume_type':'interval','open':bar['open'],'high':bar['high'],'low':bar['low'],'close':bar['close'],'context':context,'price_time_kind':'bar_open'}
   # Exchange is an explicit EODHD code, not inferred from a display name.
   reserve(self.connect,self.uid,'eodhd');url='https://eodhd.com/api/real-time/'+quote(symbol,safe='')+'?'+urlencode({'api_token':key,'fmt':'json'})
@@ -411,7 +434,7 @@ class EODHDAdapter:
    with self.connect() as c:
     old=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(session['id'],'eodhd',sample_id)).fetchone()
    if old:old_sample=json.loads(old['payload']);volume=old_sample.get('volume')
-  context_started=time.perf_counter();context=self.pluto.context(r,currency);context_ms=(time.perf_counter()-context_started)*1000
+  context_started=time.perf_counter();context=self.pluto.safe_context(r,currency);context_ms=(time.perf_counter()-context_started)*1000
   self.last_telemetry={'eodhd_http_ms':round(http_ms,3),'pluto_context_ms':round(context_ms,3),'event_to_http_receive_ms':round((received-at).total_seconds()*1000,3)}
   state=json.loads(session.get('state') or '{}');profile=state.get('adaptive_profile') or r['profile']
   interval=max(PROFILES.get(profile,PROFILES[r['profile']]),provider_floor('eodhd'))

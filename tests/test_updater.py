@@ -1,4 +1,4 @@
-import sqlite3,tempfile,unittest
+import sqlite3,tempfile,unittest,os,fcntl
 from pathlib import Path
 from unittest.mock import patch
 import apply_update
@@ -37,3 +37,13 @@ class Updater(unittest.TestCase):
    source,target=self.fixture(Path(d));(target/'var/hotwatch-autostart.disabled').touch()
    apply_update.apply(source,target)
    self.assertFalse((target/'var/hotwatch-autostart.enabled').exists())
+ def test_running_unmanaged_worker_blocks_update_and_restores_marker(self):
+  with tempfile.TemporaryDirectory() as d:
+   source,target=self.fixture(Path(d));fd=os.open(target/'var/hotwatch-worker.lock',os.O_RDWR|os.O_CREAT,0o600)
+   try:
+    fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    with self.assertRaisesRegex(RuntimeError,'standsede ikke'):
+     with apply_update.quiesce_hotwatch(target,timeout=0):self.fail('must not replace code')
+    self.assertEqual((target/'app.py').read_text(),'old code')
+    self.assertFalse((target/'var/hotwatch-autostart.disabled').exists())
+   finally:os.close(fd)
