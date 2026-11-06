@@ -29,6 +29,16 @@ from hotwatch_adapters import PlutoAdapter, search_eodhd_symbols
 if not Path(app.DB).is_file():
     raise SystemExit('Motorens database blev ikke fundet.')
 
+secrets_to_hide = [os.environ.get('ESCAPE_EODHD_API_KEY', '').strip()]
+
+def public_text(value):
+    if not isinstance(value, str):
+        return 'ukendt'
+    for secret in secrets_to_hide:
+        if secret:
+            value = value.replace(secret, '[skjult]')
+    return ''.join(ch for ch in value if ch.isprintable())[:120]
+
 for ticker in ('NOVOB', 'TSM'):
     try:
         with app.connect() as con:
@@ -41,6 +51,7 @@ for ticker in ('NOVOB', 'TSM'):
         if not auth or auth['expires'] <= time.time() + 60:
             print(ticker, 'Pluto-adgang mangler eller udløber snart; intet opslag udført'); continue
         token = oauth.unseal(uid, auth['payload'])['token']['access_token']
+        secrets_to_hide.append(token)
         adapter = PlutoAdapter(app.connect, uid)
         client = adapter.factory(token)
         tools = {item['name']: item for item in client.tools()}
@@ -64,6 +75,8 @@ for ticker in ('NOVOB', 'TSM'):
             print(ticker, 'Plutos ISIN-felter er modstridende'); continue
         isin = raw_isin if valid(raw_isin) else search_isin if valid(search_isin) else None
         name = node.get('name') or (exact[0].get('name') if len(exact) == 1 else None)
+        print(ticker, 'Pluto-navn:', public_text(name), 'ticker:', public_text(node.get('ticker') or ticker),
+              'børs:', public_text(node.get('exchange')), 'valuta:', public_text(node.get('currency') or req.get('quote_currency')))
         result = search_eodhd_symbols(app.connect, uid, {'quote_currency': req['quote_currency']},
                                       candidate_override={'ticker': ticker, 'company_name': name})
         choices = result.get('choices', [])
@@ -71,6 +84,9 @@ for ticker in ('NOVOB', 'TSM'):
         print(ticker, 'EODHD-kandidater:', len(choices),
               'med ISIN:', sum(valid(x.get('isin')) for x in choices),
               'entydige ISIN/valuta-match:', count if count is not None else 'kan ikke afgøres uden Pluto-ISIN')
+        for item in choices[:15]:
+            print(' ', public_text(item.get('symbol')), '|', public_text(item.get('name')),
+                  '|', public_text(item.get('exchange')), '|', public_text(item.get('currency')))
     except Exception as error:
         code = getattr(error, 'code', type(error).__name__)
         print(ticker, 'opslag:', code if isinstance(code, str) and re.fullmatch('[A-Za-z0-9_]{1,80}', code) else type(error).__name__)
