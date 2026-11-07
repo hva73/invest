@@ -9,6 +9,20 @@ class Response:
 class Opener:
  def open(self,*args,**kwargs):return Response()
 class SymbolLookup(unittest.TestCase):
+ def test_missing_currency_is_distinct_from_invalid_currency(self):
+  class Reply:
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,size):return json.dumps([{'Code':'ASML','Exchange':'AS','Name':'ASML Holding NV','ISIN':'NL0010273215'},{'Code':'ASML','Exchange':'F','Name':'ASML Holding NV','Currency':'US$','ISIN':'NL0010273215'}]).encode()
+  class Client:
+   def __init__(self):self.calls=0
+   def open(self,*args,**kwargs):self.calls+=1;return Reply()
+  client=Client()
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY'}),patch('market_data.candidate',return_value={'ticker':'ASML'}),patch.object(adapter,'reserve'):
+   result=adapter.search_eodhd_symbols(None,1,{'candidate_id':'c','quote_currency':'EUR'},client)
+  self.assertEqual([item['symbol'] for item in result['choices']],['ASML.AS'])
+  self.assertIsNone(result['choices'][0]['currency'])
+  self.assertEqual(client.calls,2)
  def test_symbol_choices_exact_ticker_and_distinct_exchanges(self):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-SECRET'}),patch('market_data.candidate',return_value={'ticker':'AMD'}),patch.object(adapter,'reserve'):
    result=adapter.search_eodhd_symbols(None,1,{'candidate_id':'c'},Opener())

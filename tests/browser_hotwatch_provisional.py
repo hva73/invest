@@ -44,7 +44,7 @@ def main():
                 page.locator('nav [data-view=hot-watch]').click()
                 page.locator('#watch-mode').select_option('true')
                 card = page.locator('.engine-list-row')
-                expect(card).to_contain_text('INSTRUMENT IKKE BEKRÆFTET')
+                expect(card).to_contain_text('KURSKILDE IKKE BEKRÆFTET')
                 expect(card).to_contain_text('100 USD')
                 expect(card).to_contain_text('NASDAQ')
                 for width in (390,1440):

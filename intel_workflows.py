@@ -60,8 +60,10 @@ def candidate_currentness(c,uid,mode,cid,at=None,report_fallback=False):
     else:
         row=c.execute('SELECT generated FROM report_candidate_links WHERE user_id=? AND is_test=? AND candidate_id=? AND generated<=? ORDER BY generated DESC LIMIT 1',(uid,int(mode),cid,at.timestamp())).fetchone() if report_fallback else None
         if not row:return {'status':'UNKNOWN','reason':'Tidsstemplet vurdering mangler','deadline':None,'assessed_at':None}
-        assessment=datetime.fromtimestamp(row['generated'],timezone.utc);deadline=assessment+timedelta(hours=24)
-        reason='frist udløbet · revurdering mangler' if deadline+timedelta(hours=24)<=at else None
+        # A report containing a candidate is not necessarily a new assessment.
+        # Preserve it as discovery evidence without inventing a decision time
+        # or closing a watch after a deadline the sender never supplied.
+        return {'status':'REPORT_ONLY','reason':'Tidsstemplet vurdering mangler','deadline':None,'assessed_at':None,'report_seen_at':datetime.fromtimestamp(row['generated'],timezone.utc).isoformat()}
     return {'status':'COLD' if reason else 'REVIEW_DUE' if deadline<=at else 'CURRENT','reason':reason or ('revurdering forfalder' if deadline<=at else None),'deadline':deadline.isoformat(),'assessed_at':assessment.isoformat()}
 
 def decision_errors(decision,path,at,previous=None):

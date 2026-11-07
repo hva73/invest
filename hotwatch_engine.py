@@ -12,6 +12,23 @@ def capacity():
  try:return max(1,min(40,int(os.environ.get('ESCAPE_HW_CAPACITY','40'))))
  except (TypeError,ValueError):return 40
 
+def valid_cxe_evidence(c,uid,request,now):
+ """None means no CXE proof; False means proof exists but cannot be used."""
+ row=c.execute('SELECT * FROM hw_cxe_feed_evidence WHERE user_id=? AND asset_id=?',(uid,request.get('asset_id'))).fetchone()
+ if not row:return None
+ try:
+  data=json.loads(row['payload']);pluto=data['pluto'];source=stamp(data['reference_created_at'])
+  link=c.execute('SELECT isin,currency,symbol FROM hw_verified_feed_links WHERE user_id=? AND asset_id=?',(uid,request.get('asset_id'))).fetchone()
+  keys=(('asset_id','asset_id'),('ticker','ticker'),('exchange','exchange'),('currency','quote_currency'))
+  common=bool(row['status']=='MATCHED' and row['symbol']==request.get('provider_symbol') and 0<=now.timestamp()-row['verified_epoch']<=86400 and -300<=(now-source).total_seconds()<=72*3600 and data.get('reference_source')=='https://accounteu.cboe.com/cxe/market_data/symbol_listing/csv/' and data.get('symbol')==row['symbol'] and all(pluto.get(a) and str(pluto[a]).casefold()==str(request.get(b,'')).casefold() for a,b in keys) and link and link['symbol']==row['symbol'] and link['isin']==data.get('isin') and link['currency']==data.get('currency')==request.get('quote_currency'))
+  if not common:return False
+  if data.get('basis')=='pluto_asset_cxe_security_reference_eodhd_isin':return data.get('cxe_asset_class')=='EQTY' and pluto.get('type')=='CS'
+  if data.get('basis')=='pluto_asset_us_catalog_cxe_security_isin':
+   received=stamp(data['catalog_received_at'])
+   return bool(-300<=(now-received).total_seconds()<=86400 and data.get('catalog_source')=='https://eodhd.com/api/exchange-symbol-list/US' and pluto.get('type') in ('CS','ADRC') and data.get('pluto_type')==pluto.get('type') and data.get('catalog_type')=='Common Stock' and data.get('catalog_exchange')==request.get('exchange') and data.get('catalog_ticker')==request.get('ticker') and data.get('symbol')==request.get('ticker')+'.US' and data.get('cxe_symbols'))
+  return False
+ except (KeyError,ValueError,TypeError,AttributeError):return False
+
 def effective_poll_interval(c,request,profile=None):
  """Budget-aware cadence; never raise the provider request limit."""
  source=request['provider'];profile=profile or request['profile'];minimum=max(PROFILES.get(profile,PROFILES[request['profile']]),provider_floor(source))
@@ -43,12 +60,14 @@ def init(c):
  c.execute('CREATE INDEX IF NOT EXISTS hw_samples_time ON hw_samples(watch_row_id,event_epoch,id)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_feed_recovery(watch_row_id INTEGER PRIMARY KEY REFERENCES hw_sessions(id),next_attempt REAL NOT NULL,status TEXT NOT NULL,updated TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_verified_feed_links(user_id INTEGER NOT NULL,asset_id TEXT NOT NULL,ticker TEXT NOT NULL,currency TEXT NOT NULL,exchange TEXT NOT NULL,symbol TEXT NOT NULL,isin TEXT NOT NULL,verified_epoch REAL NOT NULL,PRIMARY KEY(user_id,asset_id))')
+ c.execute('CREATE TABLE IF NOT EXISTS hw_cxe_feed_evidence(user_id INTEGER NOT NULL,asset_id TEXT NOT NULL,symbol TEXT NOT NULL,payload TEXT NOT NULL,verified_epoch REAL NOT NULL,next_attempt REAL NOT NULL,status TEXT NOT NULL,PRIMARY KEY(user_id,asset_id))')
  c.execute('CREATE TABLE IF NOT EXISTS hw_provisional_feed_links(watch_row_id INTEGER PRIMARY KEY REFERENCES hw_sessions(id),symbol TEXT NOT NULL,evidence TEXT NOT NULL,created TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_calculations(id INTEGER PRIMARY KEY,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),sample_row_id INTEGER REFERENCES hw_samples(id),calculated TEXT NOT NULL,payload TEXT NOT NULL,strategy_checksum TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_events(id INTEGER PRIMARY KEY,event_id TEXT NOT NULL UNIQUE,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),event_type TEXT NOT NULL,severity TEXT NOT NULL,created TEXT NOT NULL,data_timestamp TEXT,payload TEXT NOT NULL)')
  c.execute('CREATE INDEX IF NOT EXISTS hw_event_history ON hw_events(watch_row_id,id)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_discovery_control(id INTEGER PRIMARY KEY CHECK(id=1),started_at TEXT NOT NULL)')
  c.execute('INSERT OR IGNORE INTO hw_discovery_control VALUES(1,?)',(utc().isoformat(),))
+ c.execute('CREATE TABLE IF NOT EXISTS hw_discovery_resets(user_id INTEGER PRIMARY KEY REFERENCES users(id),reset_at TEXT NOT NULL,generation TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_discovery_attempts(user_id INTEGER NOT NULL,is_test INTEGER NOT NULL,candidate_id TEXT NOT NULL,report_id TEXT NOT NULL,status TEXT NOT NULL,updated TEXT NOT NULL,next_attempt REAL NOT NULL,watch_id TEXT,PRIMARY KEY(user_id,is_test,candidate_id))')
  c.execute('CREATE TABLE IF NOT EXISTS hw_admin_events(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),kind TEXT NOT NULL,created TEXT NOT NULL,payload TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_operator_events(id INTEGER PRIMARY KEY,created TEXT NOT NULL,killed INTEGER NOT NULL,reason TEXT NOT NULL)')
@@ -154,9 +173,17 @@ def _create_in_transaction(c,uid,data,now,holding=False,manual=False):
   if data.get('watch_mode','both')!='exit':
    from intel_workflows import candidate_currentness
    currentness=candidate_currentness(c,uid,data['is_test'],data['candidate_id'],now,report_fallback=data.get('purpose')=='automatic discovery')
-   if currentness['status']!='CURRENT':raise EngineError('candidate_not_current',409)
+   if currentness['status']!='CURRENT' and not (data.get('purpose')=='automatic discovery' and currentness['status']=='REPORT_ONLY'):raise EngineError('candidate_not_current',409)
+   if currentness['status']=='REPORT_ONLY' and (now-stamp(currentness['report_seen_at'])).total_seconds()>86400:raise EngineError('candidate_not_current',409)
+   reset=c.execute('SELECT reset_at FROM hw_discovery_resets WHERE user_id=?',(uid,)).fetchone() if not data['is_test'] and data.get('purpose')=='automatic discovery' else None
+   if reset:
+    if not currentness.get('assessed_at') or stamp(currentness['assessed_at'])<=stamp(reset['reset_at']) or stamp(json.loads(report['payload'])['generated_at'])<=stamp(reset['reset_at']):raise EngineError('candidate_not_current',409)
+    from hotwatch_service import pending_holding_slots
+    pending=pending_holding_slots(c,uid,now)
+    opened=c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]
+    if pending and opened>=max(0,capacity()-pending):raise EngineError('HOLDINGS_PRIORITY',409)
    stopped=c.execute("SELECT e.created FROM hw_sessions s JOIN hw_events e ON e.watch_row_id=s.id AND e.event_type IN ('WATCH_COMPLETED','CANDIDATE_WATCH_EXPIRED') WHERE s.user_id=? AND s.is_test=? AND s.candidate_id=? ORDER BY e.id DESC LIMIT 1",(uid,int(data['is_test']),data['candidate_id'])).fetchone()
-   if stopped and (not data.get('reactivation_reason') or stamp(currentness['assessed_at'])<=stamp(stopped['created'])):raise EngineError('new_assessment_and_reactivation_reason_required',409)
+   if stopped and (not data.get('reactivation_reason') or not currentness.get('assessed_at') or stamp(currentness['assessed_at'])<=stamp(stopped['created'])):raise EngineError('new_assessment_and_reactivation_reason_required',409)
  for pid in data['portfolio_ids']:
   if not c.execute("SELECT 1 FROM portfolios WHERE id=? AND user_id=? AND active=1 AND source='pluto'",(pid,uid)).fetchone():raise EngineError('portfolio_reference_not_found')
  import candidate_lifecycle
@@ -299,7 +326,7 @@ def reported_daily_from_history(history,request,price):
 
 def view(c,row,now=None):
  now=now or utc()
- request=json.loads(row['request']);state=json.loads(row['state']);sample=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone();currency=json.loads(sample['payload'])['currency'] if sample else None;context=json.loads(sample['payload'])['context'] if sample else None;extra=c.execute('SELECT payload FROM hw_context_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
+ request=json.loads(row['request']);state=json.loads(row['state']);sample=c.execute('SELECT payload,received FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone();currency=json.loads(sample['payload'])['currency'] if sample else None;context=json.loads(sample['payload'])['context'] if sample else None;extra=c.execute('SELECT payload FROM hw_context_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
  if extra:
   newer=json.loads(extra['payload'])
   if context is None or newer['as_of'] and (not context['as_of'] or stamp(newer['as_of'])>=stamp(context['as_of'])):context=newer
@@ -370,11 +397,38 @@ def view(c,row,now=None):
   from intel_workflows import candidate_currentness
   candidate_review=candidate_currentness(c,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery')
   if candidate_review['status']=='REVIEW_DUE' and row['status']!='PAUSED':display_status='REVURDERING FORFALDET'
+  if candidate_review['status']=='REPORT_ONLY' and row['status']!='PAUSED':display_status='MANGLER VURDERING'
  provisional=c.execute('SELECT symbol,evidence FROM hw_provisional_feed_links WHERE watch_row_id=?',(row['id'],)).fetchone()
- if provisional and request.get('provider')=='eodhd' and request.get('provider_symbol')==provisional['symbol']:
+ if provisional and request.get('provider')=='eodhd':
   data_status['identity_verification']='unverified';data_status['identity_evidence']=json.loads(provisional['evidence'])
+  if not row['is_test']:
+   data_status.update(price=None,bid=None,ask=None,daily_change_pct=None,since_last_pct=None,momentum_pct={str(n):None for n in (1,5,15,30)},price_status='UNVERIFIED')
  if (data_status.get('identity_verification')=='unverified' or latest_payload and latest_payload.get('verification')!='verified') and row['status']!='PAUSED':
-  display_status='INSTRUMENT IKKE BEKRÆFTET';display_reasons.append('DATA_UNVERIFIED')
+  display_status='KURSKILDE IKKE BEKRÆFTET';display_reasons.append('DATA_UNVERIFIED')
+ holding_verified=None
+ if context and context.get('status')=='verified' and context.get('as_of'):
+  try:
+   if context.get('position') in ('held','none') and 0<=(now-stamp(context['as_of'])).total_seconds()<=300:holding_verified=context.get('position')=='held'
+  except (ValueError,TypeError):pass
+ link=c.execute('SELECT symbol,verified_epoch FROM hw_verified_feed_links WHERE user_id=? AND asset_id=?',(row['user_id'],request.get('asset_id'))).fetchone()
+ instrument_match_verified=bool(link and request.get('provider')=='eodhd' and link['symbol']==request.get('provider_symbol') and 0<=now.timestamp()-link['verified_epoch']<=7*86400)
+ cxe_link=c.execute('SELECT symbol,verified_epoch,status,payload FROM hw_cxe_feed_evidence WHERE user_id=? AND asset_id=?',(row['user_id'],request.get('asset_id'))).fetchone()
+ if cxe_link:instrument_match_verified=bool(instrument_match_verified and valid_cxe_evidence(c,row['user_id'],request,now))
+ evidence=None
+ if cxe_link:
+  try:
+   stored_evidence=json.loads(cxe_link['payload']);evidence={key:stored_evidence.get(key) for key in ('basis','reference_source','reference_created_at','cxe_symbol','cxe_symbols','cxe_references','primary_ticker','primary_mic','cxe_asset_class','catalog_source','catalog_received_at','catalog_exchange','catalog_type','pluto_type','type_note','symbol','isin','currency','currency_basis','last_revalidation_error')};pluto_evidence=stored_evidence.get('pluto') or {};evidence['pluto']={key:pluto_evidence.get(key) for key in ('ticker','name','exchange','currency','type')}
+  except (ValueError,TypeError,AttributeError):instrument_match_verified=False
+ quote_feed_verified=bool(latest_payload and latest_payload.get('source')=='eodhd' and latest_payload.get('verification')=='verified' and instrument_match_verified and stamp(sample['received']).timestamp()>=link['verified_epoch'])
+ if cxe_link and request.get('provider')=='eodhd' and not quote_feed_verified:
+  if row['status']!='PAUSED':effective='NO_DATA';display_status='DATA MANGLER';data_status['signal_status']='WAITING_FOR_DATA'
+  data_status.update(identity_verification='unverified',price=None,bid=None,ask=None,daily_change_pct=None,since_last_pct=None,momentum_pct={str(n):None for n in (1,5,15,30)},price_status='UNVERIFIED')
+  display_reasons.append('EODHD_INSTRUMENT_REVALIDATION_REQUIRED' if not instrument_match_verified else 'WAITING_FOR_NEW_VERIFIED_QUOTE')
+ quote_freshness='UNKNOWN'
+ if latest_payload and latest_payload.get('event_time'):
+  age=(now-stamp(latest_payload['event_time'])).total_seconds()
+  quote_freshness='FUTURE' if age<0 else 'FRESH' if age<=request['risk']['max_quote_age_s'] else 'STALE'
+ data_status.update(holding_verified=holding_verified,instrument_match_verified=instrument_match_verified,instrument_match_evidence=evidence,quote_feed_verified=quote_feed_verified,quote_freshness=quote_freshness)
  return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,budget_interval),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
 def sessions(connect,uid,mode=False,after=0,limit=50):
@@ -446,9 +500,14 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
    if summary_only:
     recovery=c.execute('SELECT status,next_attempt FROM hw_feed_recovery WHERE watch_row_id=?',(r['id'],)).fetchone()
     provisional=c.execute('SELECT symbol FROM hw_provisional_feed_links WHERE watch_row_id=?',(r['id'],)).fetchone()
-    unverified=bool(provisional and req.get('provider')=='eodhd' and req.get('provider_symbol')==provisional['symbol'])
+    unverified=bool(provisional and req.get('provider')=='eodhd')
     sample=c.execute("SELECT json_extract(payload,'$.verification') AS verification FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 1",(r['id'],)).fetchone()
-    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'updated_at':r['updated'],'last_data_at':r['last_data'],'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
+    review=None
+    if source=='candidate':
+     from intel_workflows import candidate_currentness
+     review=candidate_currentness(c,uid,mode,r['candidate_id'],now,report_fallback=purpose=='automatic discovery')
+    data_status=view(c,r,now)['data_status']
+    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
    else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
   more=len(opened)>session_limit
   return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}
@@ -466,7 +525,7 @@ def control(connect,uid,wid,mode,action,now=None):
    if request['end_at'] and stamp(request['end_at'])<=now:raise EngineError('watch_expired',409)
    if request.get('watch_mode','both')=='entry' and request.get('report_id')!='manual-pluto':
     from intel_workflows import candidate_currentness
-    if candidate_currentness(c,uid,mode,row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery')['status'] not in ('CURRENT','REVIEW_DUE'):raise EngineError('candidate_not_current',409)
+    if candidate_currentness(c,uid,mode,row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery')['status'] not in ('CURRENT','REVIEW_DUE','REPORT_ONLY'):raise EngineError('candidate_not_current',409)
    new='VALIDATING'
   elif action=='stop':new='COMPLETED'
   else:raise EngineError('unknown_action')
@@ -475,6 +534,26 @@ def control(connect,uid,wid,mode,action,now=None):
   c.execute('UPDATE hw_sessions SET status=?,updated=?,revision=revision+1,lease_owner=NULL,lease_until=0,next_due=?,state=? WHERE id=?',(new,now.isoformat(),now.timestamp(),canonical({**json.loads(row['state']),'signal':'PAUSE' if action=='pause' else 'NO_DATA','pending':None,'confirmations':0}),row['id']))
   event(c,row,{'pause':'WATCH_PAUSED','resume':'WATCH_RESUMED','stop':'WATCH_COMPLETED'}[action],now,action)
   return {'ok':True,'duplicate':False,'session':view(c,row_for(c,uid,wid,mode),now)}
+
+def reset_automatic_candidates(connect,uid,now=None):
+ """Explicit operator reset of running entry-only radar watches, not holdings."""
+ now=now or utc();closed=[];paused=0;generation=secrets.token_hex(16)
+ with connect() as c:
+  c.execute('BEGIN IMMEDIATE')
+  if not c.execute('SELECT 1 FROM users WHERE id=? AND active=1',(uid,)).fetchone():raise EngineError('user_not_found',404)
+  rows=c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=0 AND purpose='automatic discovery' AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,)).fetchall()
+  for row in rows:
+   request=json.loads(row['request'])
+   if request.get('watch_mode')!='entry':continue
+   if row['status']=='PAUSED':paused+=1;continue
+   c.execute("UPDATE hw_sessions SET status='COMPLETED',updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']))
+   event(c,row,'WATCH_RESET',now,'Brugerbestilt nulstilling af rapportkandidat; historik og beholdningsovervågning bevares')
+   closed.append({'watch_id':row['watch_id'],'candidate_id':row['candidate_id'],'ticker':request.get('ticker')})
+  previous=c.execute('SELECT reset_at FROM hw_discovery_resets WHERE user_id=?',(uid,)).fetchone()
+  if not closed and previous:return {'reset_at':previous['reset_at'],'closed':[],'paused_preserved':paused,'new_assessment_required':True,'duplicate':True}
+  c.execute("UPDATE hw_holding_autowatch SET next_attempt=? WHERE user_id=? AND status='CAPACITY_LIMIT'",(now.timestamp(),uid))
+  c.execute('INSERT INTO hw_discovery_resets VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET reset_at=excluded.reset_at,generation=excluded.generation',(uid,now.isoformat(),generation))
+ return {'reset_at':now.isoformat(),'closed':closed,'paused_preserved':paused,'new_assessment_required':True,'duplicate':False}
 
 def kill(connect,uid,enabled,reason,now=None):
  now=now or utc()
@@ -542,8 +621,11 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   killed=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
   if killed and killed['killed']:raise EngineError('kill_switch_active',409)
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:raise EngineError('operator_kill_switch',409)
+  if request.get('provider')=='eodhd':
+   if valid_cxe_evidence(c,uid,request,now) is False:raise EngineError('EODHD_INSTRUMENT_REVALIDATION_REQUIRED',409)
   provisional=c.execute('SELECT symbol FROM hw_provisional_feed_links WHERE watch_row_id=?',(row['id'],)).fetchone()
-  if provisional and isinstance(sample,dict) and request.get('provider')=='eodhd' and request.get('provider_symbol')==provisional['symbol']:
+  if provisional and isinstance(sample,dict) and request.get('provider')=='eodhd':
+   if not mode:raise EngineError('EODHD_INSTRUMENT_UNVERIFIED',409)
    sample=dict(sample);sample['verification']='unverified';sample.pop('bar_history',None);sample.pop('bar_evidence',None)
   if request['end_at'] and stamp(request['end_at'])<=now:
    c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']));event(c,row,'WATCH_EXPIRED',now,'Session deadline reached');return {'ok':True,'expired':True}

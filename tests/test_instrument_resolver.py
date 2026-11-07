@@ -1,0 +1,89 @@
+import unittest
+from datetime import datetime,timezone,timedelta
+from instrument_resolver import resolve_instrument,resolve_cxe,resolve_us
+from cxe_reference import parse_reference,ReferenceUnavailable
+
+class InstrumentResolver(unittest.TestCase):
+ def test_observed_novob_and_tsm_without_broker_identifier_stay_unverified(self):
+  cases=[({'asset_id':'novo','ticker':'NOVOB','name':'Novo Nordisk A/S','exchange':'CHIX','currency':'DKK'}, {'symbol':'NOVO-B.CO','ticker':'NOVO-B','name':'Novo Nordisk A/S','exchange':'CO','currency':'DKK','isin':'DK0062498333'}),({'asset_id':'tsm','ticker':'TSM','name':'Taiwan Semiconductor Manufacturing Company Ltd.','exchange':'NYSE','currency':'USD'}, {'symbol':'TSM.US','ticker':'TSM','name':'Taiwan Semiconductor Manufacturing','exchange':'US','currency':'USD','isin':'US8740391003'})]
+  for pluto,eodhd in cases:
+   with self.subTest(ticker=pluto['ticker']):
+    result=resolve_instrument(pluto,[eodhd]);self.assertEqual(result['status'],'UNVERIFIED');self.assertIsNone(result['symbol']);self.assertIn('isin',result['candidates'][0]['missing']);self.assertIn('currency',result['candidates'][0]['matches'])
+ def test_scho_and_tsla_missing_metadata_cannot_be_guessed(self):
+  for ticker,currency in [('SCHO','DKK'),('TSLA','USD')]:
+   with self.subTest(ticker=ticker):
+    result=resolve_instrument({'asset_id':'asset-'+ticker,'ticker':ticker,'currency':currency},[{'symbol':ticker+'.TEST','currency':currency}])
+    self.assertEqual(result['status'],'UNVERIFIED');self.assertIn('isin',result['candidates'][0]['missing'])
+ def test_common_isin_or_figi_requires_currency_and_no_conflicting_class(self):
+  broker={'asset_id':'x','isin':'US0000000001','currency':'USD','share_class':'A'}
+  feed={'symbol':'X.US','isin':'US0000000001','currency':'USD','share_class':'A'}
+  self.assertEqual(resolve_instrument(broker,[feed])['status'],'VERIFIED')
+  self.assertEqual(resolve_instrument(broker,[dict(feed,share_class='B')])['status'],'UNVERIFIED')
+  self.assertEqual(resolve_instrument(broker,[dict(feed,isin='US0000000002')])['status'],'UNVERIFIED')
+  self.assertEqual(resolve_instrument({'asset_id':'x','figi':'BBG000000001','currency':'USD'},[{'symbol':'X.US','figi':'BBG000000001','currency':'USD'}])['status'],'VERIFIED')
+  self.assertEqual(resolve_instrument(broker,[feed,dict(feed,symbol='X.ALT')])['status'],'AMBIGUOUS')
+ def test_cxe_confirms_novo_and_schouw_without_pluto_isin(self):
+  for ticker,name,isin,eodhd in [('NOVOB','Novo Nordisk A/S','DK0062498333','NOVO-B.CO'),('SCHO','Schouw & Co A/S','DK0010253921','SCHO.CO')]:
+   with self.subTest(ticker=ticker):
+    pluto={'asset_id':'synthetic-'+ticker,'ticker':ticker,'name':name,'currency':'DKK','exchange':'CHIX','type':'CS'}
+    row={'symbol':ticker+'c','primary_ticker':ticker,'name':name,'isin':isin,'currency':'DKK','instrument_type':'EQTY','mic':'XCSE'}
+    feed={'symbol':eodhd,'isin':isin,'currency':'DKK','exchange':'CO'}
+    self.assertEqual(resolve_cxe(pluto,[feed],[row])['symbol'],eodhd)
+    self.assertEqual(resolve_cxe(pluto,[feed],[row,dict(row)])['status'],'AMBIGUOUS')
+    self.assertEqual(resolve_cxe(pluto,[feed],[dict(row,primary_ticker=ticker+'A')])['status'],'UNVERIFIED')
+    self.assertEqual(resolve_cxe(dict(pluto,type='ADRC'),[feed],[row])['status'],'UNVERIFIED')
+    self.assertEqual(resolve_cxe(dict(pluto,isin='DK0000000001'),[feed],[row])['status'],'UNVERIFIED')
+    self.assertEqual(resolve_cxe(pluto,[dict(feed,currency='USD')],[row])['status'],'UNVERIFIED')
+ def test_asml_selects_amsterdam_listing_not_milan_or_leveraged_product(self):
+  pluto={'asset_id':'asset-asml','ticker':'ASML','name':'ASML Holding NV','currency':'EUR','exchange':'CHIX','type':'CS'}
+  rows=[{'symbol':'ASMLa','primary_ticker':'ASML','name':'ASML Holding NV','isin':'NL0010273215','currency':'EUR','instrument_type':'EQTY','mic':'XAMS'}, {'symbol':'1ASMLm','primary_ticker':'1ASML','name':'ASML Holding NV','isin':'NL0010273215','currency':'EUR','instrument_type':'EQTY','mic':'MTAA'}, {'symbol':'3ASML','primary_ticker':'ASML','name':'Leverage Shares 3x Long ASML ETP','isin':'XS3068790065','currency':'EUR','instrument_type':'ETN','mic':'XLON'}]
+  choices=[{'symbol':'ASML.AS','exchange':'AS','currency':'EUR','isin':'NL0010273215'},{'symbol':'ASML.F','exchange':'F','currency':'EUR','isin':'NL0010273215'}]
+  self.assertEqual(resolve_cxe(pluto,choices,rows)['symbol'],'ASML.AS')
+  no_currency=dict(choices[0],currency=None)
+  self.assertEqual(resolve_cxe(pluto,[no_currency],rows)['currency_basis'],'cxe_primary_listing')
+  self.assertEqual(resolve_cxe(pluto,[dict(choices[0],currency='USD')],rows)['status'],'UNVERIFIED')
+  us_adr=dict(pluto,asset_id='synthetic-us-adr',name='ASML Holding N.V. New York Registry Shares',exchange='NASDAQ',currency='USD',type='ADRC')
+  self.assertEqual(resolve_cxe(us_adr,choices,rows)['status'],'UNVERIFIED')
+ def test_known_primary_market_mapping_does_not_merge_euro_venues(self):
+  pluto={'asset_id':'synthetic','ticker':'EXMP','name':'Example Corporation','currency':'EUR','exchange':'CHIX','type':'CS'}
+  row={'symbol':'EXMPd','primary_ticker':'EXMP','name':'Example Corporation','isin':'DE0000000001','currency':'EUR','instrument_type':'EQTY','mic':'XETR'}
+  choices=[{'symbol':'EXMP.XETRA','exchange':'XETRA','currency':'EUR','isin':row['isin']},{'symbol':'EXMP.F','exchange':'F','currency':'EUR','isin':row['isin']}]
+  self.assertEqual(resolve_cxe(pluto,choices,[row])['symbol'],'EXMP.XETRA')
+  self.assertEqual(resolve_cxe(pluto,choices,[dict(row,mic='UNKNOWN')])['status'],'UNVERIFIED')
+ def test_cxe_parser_checks_production_schema_and_freshness(self):
+  now=datetime(2026,11,6,18,30,tzinfo=timezone.utc)
+  content=('environment=PROD,created=2026-11-06,time=18:25Z,warning=\n'
+           'company_name,bats_name,isin,currency,mic,bloomberg_primary,asset_class,live,corporate_action_status\n'
+           'ASML Holding NV,ASMLa,NL0010273215,EUR,XAMS,ASML NA Equity,EQTY,t,\n').encode()
+  parsed=parse_reference(content,now);self.assertEqual(parsed['rows'][0]['primary_ticker'],'ASML')
+  with self.assertRaises(ReferenceUnavailable):parse_reference(content,now+timedelta(days=4))
+  with self.assertRaises(ReferenceUnavailable):parse_reference(content.replace(b'environment=PROD',b'environment=TEST'),now)
+  with self.assertRaises(ReferenceUnavailable):parse_reference(content.replace(b'asset_class',b'unknown'),now)
+  with self.assertRaises(ReferenceUnavailable):parse_reference(content.replace(b'EQTY,t,\n',b'EQTY,t,PENDING\n'),now)
+ def test_observed_cxe_rows_resolve_novo_scho_and_asml(self):
+  now=datetime(2026,11,6,18,30,tzinfo=timezone.utc)
+  content=('environment=PROD,created=2026-11-06,time=18:25Z,warning=\n'
+           'company_name,bats_name,isin,currency,mic,reuters_exchange_code,lis_local,live,tick_type,reference_price,bats_prev_close,live_date,bloomberg_primary,bloomberg_bats,mifid_share,asset_class,corporate_action_status\n'
+           'Novo Nordisk A/S,NOVOBc,DK0062498333,DKK,XCSE,CO,4854785,t,mifid_6,271.1,271.1,2008-12-05,NOVOB DC Equity,NOVOBC IX Equity,t,EQTY,\n'
+           'Schouw & Co A/S,SCHOc,DK0010253921,DKK,XCSE,CO,746890,t,mifid_3,839,781,2013-10-14,SCHO DC Equity,SCHOC IX Equity,t,EQTY,\n'
+           'ASML Holding NV,ASMLa,NL0010273215,EUR,XAMS,AS,650000,t,mifid_6,1244,1244,2008-11-14,ASML NA Equity,ASMLA IX Equity,t,EQTY,\n').encode()
+  rows=parse_reference(content,now)['rows']
+  cases=[('NOVOB','Novo Nordisk A/S','DKK','DK0062498333','NOVO-B.CO','CO'),('SCHO','Schouw & Co A/S','DKK','DK0010253921','SCHO.CO','CO'),('ASML','ASML Holding NV','EUR','NL0010273215','ASML.AS','AS')]
+  for ticker,name,currency,isin,symbol,exchange in cases:
+   with self.subTest(ticker=ticker):
+    pluto={'asset_id':'synthetic-'+ticker,'ticker':ticker,'name':name,'exchange':'CHIX','currency':currency,'type':'CS'}
+    self.assertEqual(resolve_cxe(pluto,[{'symbol':symbol,'exchange':exchange,'currency':None,'isin':isin}],rows)['symbol'],symbol)
+ def test_us_catalog_distinguishes_tsm_adr_and_tesla_common(self):
+  cases=[('TSM','Taiwan Semiconductor Manufacturing Company Ltd.','Taiwan Semiconductor Manufacturing','Taiwan Semiconductor Manufacturing Co Ltd','NYSE','ADRC','US8740391003','TSFAd'),('TSLA','Tesla Inc.','Tesla Inc','Tesla Inc','NASDAQ','CS','US88160R1014','TL0d')]
+  for ticker,name,catalog_name,cxe_name,venue,kind,isin,cxe_symbol in cases:
+   with self.subTest(ticker=ticker):
+    pluto={'asset_id':'synthetic-'+ticker,'ticker':ticker,'name':name,'exchange':venue,'currency':'USD','type':kind}
+    catalog={'Code':ticker,'Name':catalog_name,'Country':'USA','Exchange':venue,'Currency':'USD','Type':'Common Stock','Isin':isin}
+    choice={'symbol':ticker+'.US','exchange':'US','currency':'USD','isin':isin}
+    cxe={'symbol':cxe_symbol,'name':cxe_name,'isin':isin,'currency':'EUR','instrument_type':'EQTY'}
+    result=resolve_us(pluto,[choice],[catalog],[cxe]);self.assertEqual(result['status'],'VERIFIED');self.assertEqual(result['pluto_type'],kind)
+    self.assertEqual(resolve_us(dict(pluto,exchange='NASDAQ' if venue=='NYSE' else 'NYSE'),[choice],[catalog],[cxe])['status'],'UNVERIFIED')
+    self.assertEqual(resolve_us(pluto,[dict(choice,isin='US0000000001')],[catalog],[cxe])['status'],'UNVERIFIED')
+    self.assertEqual(resolve_us(pluto,[choice],[catalog],[dict(cxe,name='Other Company')])['status'],'UNVERIFIED')
+    self.assertEqual(resolve_us(pluto,[choice],[catalog,catalog],[cxe])['status'],'AMBIGUOUS')
+    if kind=='ADRC':self.assertIn('ADR',result['type_note'])

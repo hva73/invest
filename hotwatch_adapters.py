@@ -4,7 +4,7 @@ from datetime import datetime,timedelta,timezone
 from decimal import Decimal,InvalidOperation
 from urllib.parse import quote,urlencode
 from hotwatch_contract import EngineError,checksum,stamp,provider_floor,PROFILES
-from hotwatch_engine import utc,effective_poll_interval
+from hotwatch_engine import utc,effective_poll_interval,valid_cxe_evidence
 
 class DataUnavailable(EngineError):pass
 
@@ -19,16 +19,16 @@ def reserve(connect,uid,source,now=None,purpose=None):
    candidate_report="SELECT r.report_id FROM report_candidate_links l JOIN ingested_reports r ON r.id=l.report_row_id WHERE l.user_id=d.user_id AND l.is_test=0 AND l.candidate_id=d.candidate_id AND r.report_type!='deep_analysis' ORDER BY l.generated DESC,r.id DESC LIMIT 1"
    c.execute('DELETE FROM hw_pluto_budget_lane WHERE window<?',(window-2,))
    if purpose=='candidate_identity' and window%2:
-    waiting=c.execute("SELECT 1 FROM hw_holding_autowatch WHERE user_id=? AND status NOT IN ('LINKED','STOPPED','POSITION_CLOSED','AMBIGUOUS') AND (status='VERIFYING' OR next_attempt<=?) UNION ALL SELECT 1 FROM hw_feed_recovery f JOIN hw_sessions s ON s.id=f.watch_row_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND f.status!='MATCHED' AND f.next_attempt<=? LIMIT 1",(uid,now.timestamp()+60,uid,now.timestamp()+60)).fetchone()
+    waiting=c.execute("SELECT 1 FROM hw_holding_autowatch WHERE user_id=? AND status NOT IN ('LINKED','STOPPED','POSITION_CLOSED','AMBIGUOUS','CAPACITY_LIMIT') AND (status='VERIFYING' OR next_attempt<=?) UNION ALL SELECT 1 FROM hw_feed_recovery f JOIN hw_sessions s ON s.id=f.watch_row_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND f.status!='MATCHED' AND f.next_attempt<=? LIMIT 1",(uid,now.timestamp()+60,uid,now.timestamp()+60)).fetchone()
     if waiting:raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
    if purpose=='holding_identity' and not window%2:
-    waiting=c.execute("SELECT 1 FROM hw_discovery_attempts d WHERE d.user_id=? AND d.is_test=0 AND d.report_id=("+candidate_report+") AND d.status NOT IN ('CREATED','ACTIVE','ALREADY_ACTIVE','NOT_NEW','REJECTED') AND d.next_attempt BETWEEN ? AND ? LIMIT 1",(uid,now.timestamp()-60,now.timestamp()+60)).fetchone()
+    waiting=c.execute("SELECT 1 FROM hw_discovery_attempts d WHERE d.user_id=? AND d.is_test=0 AND d.report_id=("+candidate_report+") AND d.status NOT IN ('CREATED','ACTIVE','ALREADY_ACTIVE','NOT_NEW','REJECTED','global_capacity_limit','capacity_limit') AND d.next_attempt BETWEEN ? AND ? LIMIT 1",(uid,now.timestamp()-60,now.timestamp()+60)).fetchone()
     if waiting:raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
    if lane_name=='identity':
     competing=c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=0 AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND json_extract(request,'$.provider')='pluto' AND next_due<=? LIMIT 1",(uid,now.timestamp()+60)).fetchone()
     cap=limit-max(4,limit*5//12)
    else:
-    competing=c.execute("SELECT 1 FROM hw_holding_autowatch WHERE user_id=? AND status NOT IN ('LINKED','STOPPED','POSITION_CLOSED','AMBIGUOUS') AND (status='VERIFYING' OR next_attempt<=?) UNION ALL SELECT 1 FROM hw_discovery_attempts d WHERE d.user_id=? AND d.is_test=0 AND d.report_id=("+candidate_report+") AND d.status NOT IN ('CREATED','ACTIVE','ALREADY_ACTIVE','NOT_NEW','REJECTED') AND d.next_attempt BETWEEN ? AND ? UNION ALL SELECT 1 FROM hw_feed_recovery f JOIN hw_sessions s ON s.id=f.watch_row_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND f.status!='MATCHED' AND f.next_attempt<=? LIMIT 1",(uid,now.timestamp()+60,uid,now.timestamp()-60,now.timestamp()+60,uid,now.timestamp()+60)).fetchone()
+    competing=c.execute("SELECT 1 FROM hw_holding_autowatch WHERE user_id=? AND status NOT IN ('LINKED','STOPPED','POSITION_CLOSED','AMBIGUOUS','CAPACITY_LIMIT') AND (status='VERIFYING' OR next_attempt<=?) UNION ALL SELECT 1 FROM hw_discovery_attempts d WHERE d.user_id=? AND d.is_test=0 AND d.report_id=("+candidate_report+") AND d.status NOT IN ('CREATED','ACTIVE','ALREADY_ACTIVE','NOT_NEW','REJECTED','global_capacity_limit','capacity_limit') AND d.next_attempt BETWEEN ? AND ? UNION ALL SELECT 1 FROM hw_feed_recovery f JOIN hw_sessions s ON s.id=f.watch_row_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND f.status!='MATCHED' AND f.next_attempt<=? LIMIT 1",(uid,now.timestamp()+60,uid,now.timestamp()-60,now.timestamp()+60,uid,now.timestamp()+60)).fetchone()
     cap=max(4,limit*5//12)
    lane=c.execute('SELECT used FROM hw_pluto_budget_lane WHERE user_id=? AND window=? AND lane=?',(uid,window,lane_name)).fetchone()
    if competing and lane and lane['used']>=cap:raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
@@ -91,6 +91,7 @@ def search_eodhd_symbols(connect,uid,data,opener=None,candidate_override=None,pu
    if not isinstance(row,dict):continue
    code=row.get('Code');exchange=row.get('Exchange');name=row.get('Name');currency=row.get('Currency');isin=row.get('ISIN')
    if not isinstance(code,str) or not isinstance(exchange,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}',code) or not re.fullmatch(r'[A-Za-z0-9_-]{1,16}',exchange):continue
+   if currency not in (None,'') and (not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency)):continue
    base=code.rsplit('.',1)[0] if code.upper().endswith('.'+exchange.upper()) else code
    ticker_equivalent=allow_ticker_alias and re.sub(r'[^a-z0-9]','',base.casefold())==re.sub(r'[^a-z0-9]','',ticker.casefold())
    if base.casefold()!=ticker.casefold() and not ticker_equivalent and not (allow_alias and issuer_key and name_key(name)==issuer_key):continue
@@ -282,19 +283,21 @@ class EODHDAdapter:
   r=session['request_data'];symbol=r.get('provider_symbol')
   if not symbol:raise DataUnavailable('EODHD_SYMBOL_MAPPING_REQUIRED')
   if not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',symbol):raise DataUnavailable('EODHD_SYMBOL_MAPPING_REQUIRED')
+  cxe_valid=None
+  if self.connect is not None:
+   with self.connect() as c:cxe_valid=valid_cxe_evidence(c,self.uid,r,utc())
+  if cxe_valid is False:
+   failure=DataUnavailable('EODHD_INSTRUMENT_REVALIDATION_REQUIRED')
+   failure.position_context=self.pluto.safe_context(r,r.get('quote_currency'))
+   raise failure
   self.last_feed_diagnostics={};self.last_telemetry={}
   provisional=None
   if session.get('id') is not None:
    with self.connect() as c:provisional=c.execute('SELECT symbol FROM hw_provisional_feed_links WHERE watch_row_id=?',(session['id'],)).fetchone()
-  if provisional and provisional['symbol']==symbol:
-   snapshot=self.feeds().snapshot(symbol);status=snapshot.get('status')
-   self.last_feed_diagnostics={'snapshot_status':status}
-   if status=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
-   if status=='RATE_LIMIT':
-    failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
-   if status!='OK':raise DataUnavailable('EODHD_PROVISIONAL_'+str(status or 'UNAVAILABLE'))
-   at=stamp(snapshot['event_time']);currency=r.get('quote_currency');profile=json.loads(session.get('state') or '{}').get('adaptive_profile') or r['profile']
-   return {'sample_id':'eodhd-provisional-'+hashlib.sha256((symbol+snapshot['event_time']).encode()).hexdigest()[:24],'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':'EODHD:'+symbol.rsplit('.',1)[-1],'currency':currency,'event_time':snapshot['event_time'],'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD REST snapshot; instrument identity unverified','documented_delay_s':None,'verification':'unverified','error_code':None,'interval_s':self.interval(r,profile),'price':snapshot['price'],'bid':None,'ask':None,'volume':snapshot.get('volume'),'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':self.pluto.safe_context(r,currency),'price_time_kind':'snapshot'}
+  if provisional:
+   failure=DataUnavailable('EODHD_INSTRUMENT_UNVERIFIED')
+   failure.position_context=self.pluto.safe_context(r,r.get('quote_currency'))
+   raise failure
   # Explicit opt-in: one bounded live trade capture. If unavailable, use the
   # unchanged REST adapter. No inferred venue/session or fabricated bid/ask.
   exchange=symbol.rsplit('.',1)[1].upper() if '.' in symbol else ''

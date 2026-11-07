@@ -111,6 +111,14 @@ class HoldingAutowatch(unittest.TestCase):
    at+=timedelta(minutes=1)
    reserve(app.connect,1,'pluto',at,purpose='holding_identity')
    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'pluto',at,purpose='candidate_identity')
+ def test_candidates_waiting_for_capacity_do_not_block_existing_identity_recovery(self):
+  with app.connect() as c:
+   c.execute('INSERT INTO hw_discovery_attempts VALUES(?,?,?,?,?,?,?,?)',(1,0,self.fixture.report['candidates'][0]['candidate_id'],'trade-source','global_capacity_limit',self.now.isoformat(),self.now.timestamp(),None))
+  at=self.now
+  if int(at.timestamp()//60)%2:at+=timedelta(minutes=1)
+  with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12'}):
+   for _ in range(12):reserve(app.connect,1,'pluto',at,purpose='holding_identity')
+   with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'pluto',at,purpose='holding_identity')
  def test_exchange_check_gets_one_reserved_call_without_increasing_budget(self):
   with app.connect() as c:c.execute('INSERT INTO hw_exchange_status(exchange,next_attempt) VALUES(?,?)',('CO',self.now.timestamp()+60))
   with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12'}):
@@ -138,6 +146,30 @@ class HoldingAutowatch(unittest.TestCase):
   with patch.object(engine,'capacity',return_value=0):
    status=self.tick(verify=lambda *_:self.fail('capacity must be checked first'),lookup=self.lookup)
   self.assertEqual(status,'CAPACITY_LIMIT')
+ def test_reset_prioritizes_uncovered_holdings_and_retries_capacity_promptly(self):
+  with app.connect() as c:
+   self.assertTrue(service.pending_holding_slots(c,1,self.now))
+   c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(1,self.pid,'synthetic-asset','CAPACITY_LIMIT',None,self.now.timestamp()+300,self.now.isoformat()))
+  engine.reset_automatic_candidates(app.connect,1,self.now)
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT next_attempt FROM hw_holding_autowatch').fetchone()[0],self.now.timestamp())
+   self.assertTrue(service.pending_holding_slots(c,1,self.now))
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  with app.connect() as c:self.assertFalse(service.pending_holding_slots(c,1,self.now))
+ def test_candidate_waits_for_known_holding_after_reset(self):
+  import report_ingest
+  from test_intel_workflows import merc_report
+  report=merc_report(False);report.update(report_id='priority-report',generated_at=self.now.isoformat(),positions=[],orders=[])
+  candidate=report['candidates'][0];candidate.update(candidate_id='priority-scho',ticker='SCHO',company_name='Schouw & Co A/S',asset_id='priority-asset',exchange='CHIX')
+  candidate['decision'].update(decided_at=self.now.isoformat(),data_as_of=self.now.isoformat(),deadline=(self.now+timedelta(hours=24)).isoformat())
+  self.assertTrue(report_ingest.save(app.connect,1,report)[1]['ok'])
+  engine.reset_automatic_candidates(app.connect,1,self.now-timedelta(seconds=1))
+  with patch.object(engine,'capacity',return_value=1):blocked=service.auto_activate_candidate(app.connect,1,False,report,candidate,verify=lambda *_:self.fail('last slot belongs to owned holding'))
+  self.assertEqual(blocked['status'],'HOLDINGS_PRIORITY')
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  instrument={'asset_id':'priority-asset','ticker':'SCHO','name':'Schouw & Co A/S','exchange':'CHIX','currency':'DKK','type':'CS','isin':None}
+  result=service.auto_activate_candidate(app.connect,1,False,report,candidate,verify=lambda *_:instrument)
+  self.assertEqual(result['status'],'CREATED')
  def test_missing_eodhd_key_uses_verified_pluto_without_eodhd_lookup(self):
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
    status=service.auto_holdings_tick(app.connect,verify=self.verify,lookup=lambda *_:self.fail('must not call EODHD'),now=self.now)
@@ -282,9 +314,10 @@ class HoldingAutowatch(unittest.TestCase):
    self.assertEqual(service.auto_holdings_tick(app.connect,verify=lambda *_:instrument,now=self.now),'LINKED')
   choices={'choices':[{'symbol':'TSM.US','name':'Taiwan Semiconductor Manufacturing','exchange':'US','currency':'USD'}]}
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices):
-   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),1)
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
   with app.connect() as c:
-   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);req['risk']['stop_price']='105';c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps(req),row['id']))
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol='TSM.US');req['risk']['stop_price']='105';c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps(req),row['id']))
+   c.execute('INSERT INTO hw_provisional_feed_links VALUES(?,?,?,?)',(row['id'],'TSM.US',json.dumps({'pluto_venue':'NYSE','eodhd_venue':'US'}),self.now.isoformat()))
    self.assertEqual(req['provider_symbol'],'TSM.US')
    self.assertEqual(c.execute('SELECT count(*) FROM hw_provisional_feed_links WHERE watch_row_id=?',(row['id'],)).fetchone()[0],1)
   from hotwatch_adapters import EODHDAdapter,unknown_context
@@ -294,24 +327,30 @@ class HoldingAutowatch(unittest.TestCase):
    def capture(self,*args,**kwargs):raise AssertionError('unverified source must use one snapshot')
   self_now=self.now;adapter=EODHDAdapter(app.connect,1)
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch.object(adapter,'feeds',return_value=Feed()),patch.object(adapter.pluto,'context',return_value=unknown_context()):
-   observed=adapter.poll({'id':row['id'],'request_data':req,'state':'{}'})
-  self.assertEqual(calls,['TSM.US']);self.assertEqual(observed['verification'],'unverified');self.assertEqual(observed['event_time'],self.now.isoformat())
+   with self.assertRaisesRegex(DataUnavailable,'EODHD_INSTRUMENT_UNVERIFIED'):
+    adapter.poll({'id':row['id'],'request_data':req,'state':'{}'})
+  self.assertEqual(calls,[])
   sample=tick(self.now,1,price='100',held=True)
   sample.update(source='eodhd',ticker='TSM',asset_id='synthetic-asset',market_status='UNKNOWN',session_key='test:UNKNOWN',feed_type='synthetic EODHD snapshot',bid=None,ask=None)
-  result=engine.ingest(app.connect,1,req['watch_id'],False,sample,self.now)
+  with self.assertRaisesRegex(engine.EngineError,'EODHD_INSTRUMENT_UNVERIFIED'):
+   engine.ingest(app.connect,1,req['watch_id'],False,sample,self.now)
+  # Simulate an already persisted observation from an older installed version.
+  sample['verification']='unverified'
   with app.connect() as c:
+   c.execute('INSERT INTO hw_samples(watch_row_id,source,sample_id,event_epoch,received,payload,digest) VALUES(?,?,?,?,?,?,?)',(row['id'],'eodhd',sample['sample_id'],self.now.timestamp(),self.now.isoformat(),json.dumps(sample),engine.checksum(sample)))
+   c.execute('UPDATE hw_sessions SET last_data=? WHERE id=?',(self.now.isoformat(),row['id']))
    stored=json.loads(c.execute('SELECT payload FROM hw_samples').fetchone()['payload'])
+  result=engine.item(app.connect,1,req['watch_id'],False)
   self.assertEqual(stored['verification'],'unverified')
-  self.assertEqual(result['calculation']['signal'],'NO_DATA')
-  self.assertIn('DATA_UNVERIFIED',result['calculation']['reason_codes'])
-  self.assertNotIn('STOP_BREACHED',result['calculation']['reason_codes'])
-  self.assertEqual(result['session']['data_status']['price'],'100')
+  self.assertEqual(result['session']['signal'],'NO_DATA')
+  self.assertIn('DATA_UNVERIFIED',result['session']['display_reason_codes'])
+  self.assertIsNone(result['session']['data_status']['price'])
   self.assertEqual(result['session']['data_status']['price_status'],'UNVERIFIED')
-  self.assertEqual(result['session']['display_status'],'INSTRUMENT IKKE BEKRÆFTET')
+  self.assertEqual(result['session']['display_status'],'KURSKILDE IKKE BEKRÆFTET')
   import dashboard_projection
   with app.connect() as c:
    position=dashboard_projection.position_hotwatch(c,1,self.pid,'synthetic-asset',None)
-  self.assertEqual(position['session']['display_status'],'INSTRUMENT IKKE BEKRÆFTET')
+  self.assertEqual(position['session']['display_status'],'KURSKILDE IKKE BEKRÆFTET')
   self.assertIsNone(position['session']['warmup'])
   synced=engine.sync(app.connect,1,False,summary_only=True)
   self.assertEqual(synced['open_sessions'][0]['identity_verification'],'unverified')
@@ -337,6 +376,94 @@ class HoldingAutowatch(unittest.TestCase):
    self.assertEqual(json.loads(c.execute('SELECT payload FROM hw_samples ORDER BY id DESC LIMIT 1').fetchone()['payload'])['verification'],'verified')
   self.assertEqual(refreshed['calculation']['supporting_metrics']['sample_count'],1)
   self.assertEqual(engine.sync(app.connect,1,False,summary_only=True)['open_sessions'][0]['identity_verification'],'verified')
+ def test_asml_cxe_recovery_revalidates_and_blocks_changed_identity(self):
+  holding=dict(self.holding,ticker='ASML')
+  with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[holding]}),))
+  instrument={'asset_id':'synthetic-asset','ticker':'ASML','name':'ASML Holding NV','exchange':'CHIX','currency':'EUR','type':'CS','isin':None}
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=lambda *_:instrument,now=self.now),'LINKED')
+  with app.connect() as c:before=c.execute('SELECT watch_id FROM hw_sessions').fetchone()['watch_id']
+  from cxe_reference import parse_reference
+  raw=('environment=PROD,created='+self.now.strftime('%Y-%m-%d')+',time='+self.now.strftime('%H:%MZ')+',warning=\n'
+       'company_name,bats_name,isin,currency,mic,bloomberg_primary,asset_class,live,corporate_action_status\n'
+       'ASML Holding NV,ASMLa,NL0010273215,EUR,XAMS,ASML NA Equity,EQTY,t,\n').encode()
+  reference=parse_reference(raw,self.now)
+  choices={'choices':[{'symbol':'ASML.AS','exchange':'AS','currency':None,'isin':'NL0010273215'},{'symbol':'ASML.F','exchange':'F','currency':'EUR','isin':'NL0010273215'}]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices),patch('cxe_reference.get_reference',return_value=reference):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),1)
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);self.assertEqual(row['watch_id'],before);self.assertEqual(req['provider_symbol'],'ASML.AS')
+   evidence=c.execute('SELECT * FROM hw_cxe_feed_evidence').fetchone();self.assertEqual(evidence['status'],'MATCHED');self.assertEqual(json.loads(evidence['payload'])['isin'],'NL0010273215');self.assertEqual(json.loads(evidence['payload'])['currency_basis'],'cxe_primary_listing')
+   c.execute('UPDATE hw_cxe_feed_evidence SET next_attempt=0')
+  from test_hotwatch_engine import tick
+  sample=tick(self.now,1,held=True);sample.update(source='eodhd',ticker='ASML',asset_id='synthetic-asset',currency='EUR',venue='EODHD:AS',market_status='UNKNOWN',feed_type='synthetic EODHD quote',bid=None,ask=None)
+  engine.ingest(app.connect,1,before,False,sample,self.now)
+  state=engine.item(app.connect,1,before,False)['session']['data_status']
+  self.assertEqual((state['holding_verified'],state['instrument_match_verified'],state['quote_feed_verified'],state['quote_freshness']),(True,True,True,'FRESH'))
+  with app.connect() as c:
+   original=c.execute('SELECT payload FROM hw_cxe_feed_evidence').fetchone()['payload'];tampered=json.loads(original);tampered['pluto']['currency']='USD'
+   c.execute('UPDATE hw_cxe_feed_evidence SET payload=?',(json.dumps(tampered),))
+  with self.assertRaisesRegex(engine.EngineError,'EODHD_INSTRUMENT_REVALIDATION_REQUIRED'):
+   engine.ingest(app.connect,1,before,False,dict(sample,sample_id='tampered-evidence'),self.now)
+  with app.connect() as c:c.execute('UPDATE hw_cxe_feed_evidence SET payload=?',(original,))
+  from cxe_reference import ReferenceUnavailable
+  with patch('hotwatch_service.holding_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices),patch('cxe_reference.get_reference',side_effect=ReferenceUnavailable('CXE_REFERENCE_UNAVAILABLE')):
+   self.assertEqual(service.verify_cxe_feeds(app.connect,self.now+timedelta(minutes=1)),0)
+  with app.connect() as c:
+   retry=c.execute('SELECT status,payload FROM hw_cxe_feed_evidence').fetchone();self.assertEqual(retry['status'],'MATCHED');self.assertEqual(json.loads(retry['payload'])['last_revalidation_error'],'CXE_REFERENCE_UNAVAILABLE')
+   c.execute('UPDATE hw_cxe_feed_evidence SET next_attempt=0')
+  with patch('hotwatch_service.holding_instrument',return_value=dict(instrument,type='ADRC')),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices):
+   self.assertEqual(service.verify_cxe_feeds(app.connect,self.now+timedelta(minutes=1)),0)
+  with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM hw_cxe_feed_evidence').fetchone()['status'],'CONFLICT')
+  failed=engine.item(app.connect,1,before,False)['session'];self.assertFalse(failed['data_status']['instrument_match_verified']);self.assertFalse(failed['data_status']['quote_feed_verified']);self.assertEqual(failed['signal'],'NO_DATA')
+  with self.assertRaisesRegex(engine.EngineError,'EODHD_INSTRUMENT_REVALIDATION_REQUIRED'):
+   engine.ingest(app.connect,1,before,False,dict(sample,sample_id='inflight-after-conflict'),self.now+timedelta(minutes=1))
+  from hotwatch_adapters import EODHDAdapter,unknown_context
+  adapter=EODHDAdapter(app.connect,1)
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch.object(adapter.pluto,'context',return_value=unknown_context()):
+   with self.assertRaisesRegex(DataUnavailable,'EODHD_INSTRUMENT_REVALIDATION_REQUIRED'):adapter.poll({'id':row['id'],'request_data':req,'state':'{}'})
+ def test_tsm_adr_recovers_from_us_catalog_and_preserves_adr_evidence(self):
+  holding=dict(self.holding,ticker='TSM')
+  with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[holding]}),))
+  instrument={'asset_id':'synthetic-asset','ticker':'TSM','name':'Taiwan Semiconductor Manufacturing Company Ltd.','exchange':'NYSE','currency':'USD','type':'ADRC','isin':None}
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=lambda *_:instrument,now=self.now),'LINKED')
+  reference={'created_at':self.now.isoformat(),'rows':[{'symbol':'TSFAd','name':'Taiwan Semiconductor Manufacturing Co Ltd','isin':'US8740391003','currency':'EUR','instrument_type':'EQTY','mic':'XFRA'}]}
+  catalog={'received_at':self.now.isoformat(),'rows':[{'Code':'TSM','Name':'Taiwan Semiconductor Manufacturing','Country':'USA','Exchange':'NYSE','Currency':'USD','Type':'Common Stock','Isin':'US8740391003'}]}
+  choices={'choices':[{'symbol':'TSM.US','exchange':'US','currency':'USD','isin':'US8740391003'}]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices),patch('cxe_reference.get_reference',return_value=reference),patch('eodhd_us_reference.get_reference',return_value=catalog):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),1)
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();request=json.loads(row['request']);self.assertEqual(request['provider_symbol'],'TSM.US')
+   evidence=json.loads(c.execute('SELECT payload FROM hw_cxe_feed_evidence').fetchone()['payload']);self.assertEqual(evidence['pluto_type'],'ADRC');self.assertEqual(evidence['catalog_type'],'Common Stock');self.assertIn('ADR',evidence['type_note'])
+  from test_hotwatch_engine import tick
+  sample=tick(self.now,1,held=True);sample.update(source='eodhd',ticker='TSM',asset_id='synthetic-asset',currency='USD',venue='EODHD:US',market_status='UNKNOWN',feed_type='synthetic EODHD quote',bid=None,ask=None)
+  engine.ingest(app.connect,1,row['watch_id'],False,sample,self.now)
+  status=engine.sync(app.connect,1,False,summary_only=True)['open_sessions'][0]
+  self.assertTrue(status['instrument_match_verified']);self.assertTrue(status['quote_feed_verified']);self.assertEqual(status['instrument_match_evidence']['pluto_type'],'ADRC')
+  self.assertEqual(status['status'],'DEGRADED')
+  calculation=engine.item(app.connect,1,row['watch_id'],False)['session']['latest_calculation']
+  self.assertEqual(calculation['signal'],'NO_DATA');self.assertIn('MARKET_STATUS_UNKNOWN',calculation['reason_codes'])
+ def test_existing_novob_provisional_is_rechecked_without_losing_history(self):
+  holding=dict(self.holding,ticker='NOVOB')
+  with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[holding]}),))
+  instrument={'asset_id':'synthetic-asset','ticker':'NOVOB','name':'Novo Nordisk A/S','exchange':'CHIX','currency':'DKK','type':'CS','isin':None}
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=lambda *_:instrument,now=self.now),'LINKED')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol='NOVO-B.CO')
+   c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps(req),row['id']))
+   c.execute('INSERT INTO hw_provisional_feed_links VALUES(?,?,?,?)',(row['id'],'NOVO-B.CO','{}',self.now.isoformat()))
+   c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?)',(row['id'],self.now.timestamp()+21600,'PLUTO_ISIN_MISSING',self.now.isoformat()))
+  reference={'created_at':self.now.isoformat(),'rows':[{'symbol':'NOVOBc','primary_ticker':'NOVOB','name':'Novo Nordisk A/S','isin':'DK0062498333','currency':'DKK','instrument_type':'EQTY','mic':'XCSE'}]}
+  choices={'choices':[{'symbol':'NOVO-B.CO','exchange':'CO','currency':'DKK','isin':'DK0062498333'}]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices),patch('cxe_reference.get_reference',return_value=reference):
+   self.assertEqual(service.verify_provisional_feeds(app.connect,self.now),1)
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT watch_id FROM hw_sessions').fetchone()['watch_id'],row['watch_id'])
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_provisional_feed_links').fetchone()[0],0)
+   self.assertEqual(c.execute('SELECT isin FROM hw_verified_feed_links').fetchone()['isin'],'DK0062498333')
+   self.assertTrue(c.execute("SELECT 1 FROM hw_events WHERE event_type='INSTRUMENT_VERIFIED'").fetchone())
  def test_recovery_respects_global_and_user_kill_switches(self):
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
    self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
