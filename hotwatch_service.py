@@ -316,7 +316,7 @@ def cxe_verified_match(instrument,choices,now=None,connect=None,uid=None):
  from instrument_resolver import resolve_cxe,resolve_us
  exchange=str(instrument.get('exchange','')).upper();kind=str(instrument.get('type','')).upper()
  if not (exchange=='CHIX' and kind=='CS' or exchange in ('NYSE','NASDAQ') and kind in ('CS','ADRC')):return None
- reference=get_reference(now)
+ reference=get_reference(now,connect=connect)
  if exchange=='CHIX':match=resolve_cxe(instrument,choices,reference['rows']);extra={}
  else:
   if connect is None or uid is None:return None

@@ -18,7 +18,9 @@ def parse_reference(raw,now=None):
  try:
   stream=io.StringIO(raw.decode('utf-8-sig'));metadata=next(csv.reader([stream.readline()]))
   fields=dict(item.split('=',1) for item in metadata if '=' in item)
-  if fields.get('environment')!='PROD' or fields.get('warning'):raise ValueError()
+  if fields.get('environment')!='PROD':raise ValueError()
+  if fields.get('warning')=='T:Downloaded prior to 7am Europe/London':raise ReferenceUnavailable('CXE_REFERENCE_NOT_READY')
+  if fields.get('warning'):raise ValueError()
   created=datetime.strptime(fields['created']+' '+fields['time'],'%Y-%m-%d %H:%MZ').replace(tzinfo=timezone.utc)
   if created>now+timedelta(minutes=5) or now-created>timedelta(hours=72):raise ReferenceUnavailable('CXE_REFERENCE_STALE')
   reader=csv.DictReader(stream)
@@ -36,7 +38,7 @@ def parse_reference(raw,now=None):
  except ReferenceUnavailable:raise
  except (KeyError,ValueError,TypeError,UnicodeError,StopIteration,csv.Error):raise ReferenceUnavailable('CXE_REFERENCE_INVALID') from None
 
-def get_reference(now=None,opener=None):
+def get_reference(now=None,opener=None,connect=None):
  global _cache
  now=now or datetime.now(timezone.utc)
  with _lock:
@@ -47,7 +49,22 @@ def get_reference(now=None,opener=None):
    with client.open(urllib.request.Request(URL,headers={'Accept':'text/csv','User-Agent':'Mozilla/5.0'}),timeout=15) as response:
     raw=response.read(LIMIT+1)
    result=parse_reference(raw,now)
-  except ReferenceUnavailable:raise
+   if connect:
+    with connect() as c:c.execute('INSERT INTO hw_reference_cache(id,raw) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET raw=excluded.raw',(raw,))
+  except ReferenceUnavailable as error:
+   if str(error)!='CXE_REFERENCE_NOT_READY':raise
+   # Cboe sometimes serves an empty morning file. A previously validated
+   # production file is reusable only while its own source date is valid.
+   if _cache:
+    cached=_cache[1]
+    age=now-datetime.fromisoformat(cached['created_at'])
+    if timedelta(minutes=-5)<=age<=timedelta(hours=72):return cached
+   if connect:
+    with connect() as c:row=c.execute('SELECT raw FROM hw_reference_cache WHERE id=1').fetchone()
+    if row:
+     try:return parse_reference(row[0],now)
+     except ReferenceUnavailable:pass
+   raise
   except Exception:raise ReferenceUnavailable('CXE_REFERENCE_UNAVAILABLE') from None
   if opener is None:_cache=(time.monotonic(),result)
   return result

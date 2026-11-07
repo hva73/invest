@@ -66,6 +66,7 @@ def init(c):
   c.execute('DROP TABLE hw_context_events_legacy')
  c.execute('CREATE INDEX IF NOT EXISTS hw_samples_time ON hw_samples(watch_row_id,event_epoch,id)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_feed_recovery(watch_row_id INTEGER PRIMARY KEY REFERENCES hw_sessions(id),next_attempt REAL NOT NULL,status TEXT NOT NULL,updated TEXT NOT NULL)')
+ c.execute('CREATE TABLE IF NOT EXISTS hw_reference_cache(id INTEGER PRIMARY KEY CHECK(id=1),raw BLOB NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_verified_feed_links(user_id INTEGER NOT NULL,asset_id TEXT NOT NULL,ticker TEXT NOT NULL,currency TEXT NOT NULL,exchange TEXT NOT NULL,symbol TEXT NOT NULL,isin TEXT NOT NULL,verified_epoch REAL NOT NULL,PRIMARY KEY(user_id,asset_id))')
  c.execute('CREATE TABLE IF NOT EXISTS hw_cxe_feed_evidence(user_id INTEGER NOT NULL,asset_id TEXT NOT NULL,symbol TEXT NOT NULL,payload TEXT NOT NULL,verified_epoch REAL NOT NULL,next_attempt REAL NOT NULL,status TEXT NOT NULL,PRIMARY KEY(user_id,asset_id))')
  c.execute('CREATE TABLE IF NOT EXISTS hw_provisional_feed_links(watch_row_id INTEGER PRIMARY KEY REFERENCES hw_sessions(id),symbol TEXT NOT NULL,evidence TEXT NOT NULL,created TEXT NOT NULL)')

@@ -60,6 +60,30 @@ class InstrumentResolver(unittest.TestCase):
   with self.assertRaises(ReferenceUnavailable):parse_reference(content.replace(b'environment=PROD',b'environment=TEST'),now)
   with self.assertRaises(ReferenceUnavailable):parse_reference(content.replace(b'asset_class',b'unknown'),now)
   with self.assertRaises(ReferenceUnavailable):parse_reference(content.replace(b'EQTY,t,\n',b'EQTY,t,PENDING\n'),now)
+ def test_empty_early_cxe_file_reuses_only_recent_valid_persisted_reference(self):
+  import io, sqlite3, tempfile
+  from unittest.mock import patch
+  from cxe_reference import get_reference
+  now=datetime(2026,11,6,18,30,tzinfo=timezone.utc)
+  valid=('environment=PROD,created=2026-11-06,time=18:25Z,warning=\n'
+         'company_name,bats_name,isin,currency,mic,bloomberg_primary,asset_class,live,corporate_action_status\n'
+         'ASML Holding NV,ASMLa,NL0010273215,EUR,XAMS,ASML NA Equity,EQTY,t,\n').encode()
+  morning=b'environment=PROD,created=2026-11-07,time=01:26Z,warning=T:Downloaded prior to 7am Europe/London\ncompany_name,bats_name\n'
+  class Opener:
+   def __init__(self,data):self.data=data
+   def open(self,*a,**kw):return io.BytesIO(self.data)
+  with tempfile.TemporaryDirectory() as tmp:
+   def connect():return sqlite3.connect(tmp+'/test.db')
+   with connect() as c:c.execute('CREATE TABLE hw_reference_cache(id INTEGER PRIMARY KEY,raw BLOB NOT NULL)')
+   with patch('cxe_reference._cache',None):
+    self.assertEqual(get_reference(now,Opener(valid),connect)['rows'][0]['isin'],'NL0010273215')
+    later=now+timedelta(hours=7)
+    self.assertEqual(get_reference(later,Opener(morning),connect)['rows'][0]['isin'],'NL0010273215')
+    with self.assertRaisesRegex(ReferenceUnavailable,'CXE_REFERENCE_NOT_READY'):
+     get_reference(now+timedelta(days=4),Opener(morning),connect)
+    with connect() as c:c.execute('DELETE FROM hw_reference_cache')
+    with self.assertRaisesRegex(ReferenceUnavailable,'CXE_REFERENCE_NOT_READY'):
+     get_reference(later,Opener(morning),connect)
  def test_observed_cxe_rows_resolve_novo_scho_and_asml(self):
   now=datetime(2026,11,6,18,30,tzinfo=timezone.utc)
   content=('environment=PROD,created=2026-11-06,time=18:25Z,warning=\n'
