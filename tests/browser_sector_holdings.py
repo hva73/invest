@@ -15,7 +15,14 @@ server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(tar
 try:
  with sync_playwright() as p:
   browser=p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':1440,'height':900});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
-  page.add_init_script('Date.now = (() => { const actual = Date.now; return () => actual() + 3600000; })();');page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();page.locator('nav [data-view=sectors]').click();page.locator('[data-sector-market="XLU.US"]').click();expect(page.locator('[role=dialog]')).to_be_visible();print('USA opened:',page.locator('[role=dialog]').inner_text()[:120])
+  page.add_init_script('Date.now = (() => { const actual = Date.now; return () => actual() + 3600000; })();');page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();page.locator('nav [data-view=sectors]').click();page.locator('[data-sector-market="XLU.US"]').wait_for()
+  expect(page.locator('.si-market-period [data-sector-period="30"]')).to_have_attribute('aria-pressed','true')
+  page.locator('.si-market-period [data-sector-period="7"]').click()
+  expect(page.locator('.si-market-period [data-sector-period="7"]')).to_have_attribute('aria-pressed','true')
+  expect(page.locator('.si-filter-bar [data-sector-period="7"]')).to_have_class('active')
+  page.locator('.si-market-period [data-sector-period="30"]').click()
+  expect(page.locator('[data-sector-market="XLU.US"]')).to_contain_text('01.10.2026 →')
+  page.locator('[data-sector-market="XLU.US"]').click();expect(page.locator('[role=dialog]')).to_be_visible();print('USA opened:',page.locator('[role=dialog]').inner_text()[:120])
   with patch('ssga_holdings.fetch',return_value={'rows':[{'name':'NextEra Energy','ticker':'NEE','weight':13.5,'identifier':'65339F101'}],'as_of':'2026-11-05'}):sector.refresh_tick(app.connect)
   expect(page.locator('[role=dialog]')).to_contain_text('NextEra Energy',timeout=18000);print('USA list:',page.locator('.si-etf-holding').count())
   with app.connect() as c:c.execute("UPDATE sector_holding_prices SET status='OK',payload=?,updated=? WHERE ticker='NEE'",(json.dumps({'periods':{'30':{'value':10,'from':'2026-10-01','to':today}},'basis':'justeret'}),time.time()))
