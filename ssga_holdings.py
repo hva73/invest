@@ -73,6 +73,7 @@ def parse(raw,symbol):
     name=find({'name','holding name','security name','company name','security description','description'})
     ticker=find({'ticker','symbol','ticker symbol','identifier'})
     weight=find({'weight','weight %','weight percent','weight percentage','portfolio weight','portfolio weight %','% of fund','percent of fund'})
+    identifier=find({'identifier','cusip'})
     if None in (name,ticker,weight):continue
     result=[];seen=set()
     for cells in tables[i+1:]:
@@ -81,7 +82,9 @@ def parse(raw,symbol):
      try:value=float(w.replace(',','').replace('%',''))*(100 if percent and '%' not in w else 1)
      except ValueError:continue
      if not n or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.\-/]{0,19}',t) or not math.isfinite(value) or not 0<value<=100 or t.upper() in seen:continue
-     seen.add(t.upper());result.append({'ticker':t,'name':n[:200],'exchange':None,'weight':value})
+     identity=cells[identifier][0].upper() if identifier is not None and identifier<len(cells) else None
+     if not identity or not re.fullmatch(r'[A-Z0-9]{9}',identity):identity=None
+     seen.add(t.upper());result.append({'ticker':t,'name':n[:200],'exchange':None,'weight':value,'identifier':identity})
     if result:return {'rows':sorted(result,key=lambda r:(-r['weight'],r['ticker'])),'as_of':as_of}
   raise HoldingsUnavailable('ISSUER_FORMAT_UNRECOGNIZED')
  except HoldingsUnavailable:raise

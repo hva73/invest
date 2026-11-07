@@ -220,7 +220,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,{'candidates':rows,'is_test':mode[0]=='true'})
             if self.path=='/api/sector-intelligence/holdings':
                 import sector_intelligence
-                try:result=sector_intelligence.request_benchmark_holdings(connect,user_id,data.get('symbol'))
+                try:result=sector_intelligence.request_benchmark_holdings(connect,user_id,data.get('symbol'),data.get('limit',20))
                 except ValueError as error:return self.send(400,{'error':str(error)})
                 return self.send(200,result)
             if self.path=='/api/reports/hot-watch':
@@ -339,7 +339,7 @@ class Handler(BaseHTTPRequestHandler):
             user_id=s['user_id']
             if self.path=='/api/sector-intelligence/holdings':
                 import sector_intelligence
-                try:result=sector_intelligence.request_benchmark_holdings(connect,user_id,data.get('symbol'))
+                try:result=sector_intelligence.request_benchmark_holdings(connect,user_id,data.get('symbol'),data.get('limit',20))
                 except ValueError as error:return self.send(400,{'error':str(error)})
                 return self.send(200,result)
             if self.path=='/api/reports/hot-watch':

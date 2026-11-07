@@ -12,6 +12,7 @@ class MarketError(ValueError):pass
 def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS market_asset_links(user_id INTEGER NOT NULL REFERENCES users(id),candidate_id TEXT NOT NULL,expected_ticker TEXT NOT NULL,asset_id TEXT NOT NULL,PRIMARY KEY(user_id,candidate_id))')
     c.execute('CREATE TABLE IF NOT EXISTS market_asset_cache(user_id INTEGER NOT NULL REFERENCES users(id),asset_id TEXT NOT NULL,payload TEXT,fetched REAL,attempted REAL NOT NULL,last_error TEXT,PRIMARY KEY(user_id,asset_id))')
+    c.execute('CREATE TABLE IF NOT EXISTS market_asset_period_cache(user_id INTEGER NOT NULL REFERENCES users(id),asset_id TEXT NOT NULL,period TEXT NOT NULL,payload TEXT,fetched REAL,attempted REAL NOT NULL,last_error TEXT,PRIMARY KEY(user_id,asset_id,period))')
 
 def decimal(value,positive=False):
     if value is None:return None
@@ -30,7 +31,7 @@ def stamp(value):
         return dt.astimezone(timezone.utc)
     except ValueError:raise MarketError('Kurshistorikken indeholder et ukendt tidspunkt.')
 
-def normalized(raw,asset_id,now=None):
+def normalized(raw,asset_id,now=None,expected_period='ONE_WEEK'):
     now=now or datetime.now(timezone.utc)
     if not isinstance(raw,dict) or not isinstance(raw.get('asset'),dict):raise MarketError('Ukendt Pluto-aktivformat. Ingen kurser gættes.')
     asset=raw['asset']
@@ -50,7 +51,7 @@ def normalized(raw,asset_id,now=None):
     if not isinstance(performance,dict) or not isinstance(performance.get('series'),list):
         result['series_error']='Pluto har ikke leveret en kurshistorik.';return result
     try:
-        if performance.get('period')!='ONE_WEEK':raise MarketError('Den returnerede grafperiode er ikke den anmodede uge.')
+        if performance.get('period')!=expected_period:raise MarketError('Den returnerede grafperiode er ikke den anmodede periode.')
         if not result['currency'] or performance.get('currency')!=result['currency']:raise MarketError('Grafens valuta kan ikke matches til aktivets valuta.')
         lower=stamp(performance.get('from'));upper=stamp(performance.get('to'))
         if lower>upper:raise MarketError('Grafens tidsinterval er ugyldigt.')
@@ -67,7 +68,8 @@ def normalized(raw,asset_id,now=None):
             if key in by_time and by_time[key]['price']!=value:raise MarketError('Samme tidspunkt har modstridende kurser.')
             by_time[key]={'timestamp':key,'source_timestamp':p['timestamp'],'epoch':at.timestamp(),'price':value,'date':at.astimezone(COPENHAGEN).date().isoformat()}
         result['series']=sorted(by_time.values(),key=lambda p:p['epoch'])
-        result['week_change_percent']=decimal(performance.get('returnPct'))
+        result['week_change_percent']=decimal(performance.get('returnPct')) if expected_period=='ONE_WEEK' else None
+        result['series_period']=expected_period
     except MarketError as error:result['series']=[];result['series_error']=str(error)
     return result
 
@@ -116,6 +118,8 @@ def holding_candidate(connect,user_id,data):
     return {'candidate_id':f'holding:{pid}:{aid}','ticker':matches[0].get('ticker') or '', 'company_name':matches[0].get('name') or '', 'asset_id':aid}
 
 def quote(connect,user_id,data,factory=None):
+    requested_period=data.get('period','ONE_WEEK')
+    if requested_period not in ('ONE_WEEK','ONE_MONTH','ONE_YEAR'):raise MarketError('Ukendt grafperiode.')
     c=holding_candidate(connect,user_id,data) if 'holding_portfolio_id' in data else candidate(connect,user_id,data);ticker=c['ticker'].strip().upper();selected=data.get('asset_id')
     if selected is not None and (not isinstance(selected,str) or not 1<=len(selected)<=200):raise MarketError('Vælg et gyldigt aktiv fra Pluto-søgningen.')
     with connect() as db:link=db.execute('SELECT * FROM market_asset_links WHERE user_id=? AND candidate_id=?',(user_id,c['candidate_id'])).fetchone()
@@ -140,23 +144,28 @@ def quote(connect,user_id,data,factory=None):
                 if not options:raise MarketError('Ingen genkendelige aktivfund hos Pluto.')
                 return {'selection_required':True,'choices':options,'candidate_ticker':c['ticker']}
         aid=match['asset_id']
+    period_cache=requested_period!='ONE_WEEK'
+    table='market_asset_period_cache' if period_cache else 'market_asset_cache'
+    where='user_id=? AND asset_id=? AND period=?' if period_cache else 'user_id=? AND asset_id=?'
+    cache_key=(user_id,aid,requested_period) if period_cache else (user_id,aid)
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
-        cached=db.execute('SELECT * FROM market_asset_cache WHERE user_id=? AND asset_id=?',(user_id,aid)).fetchone()
+        cached=db.execute('SELECT * FROM '+table+' WHERE '+where,cache_key).fetchone()
         wait=30 if data.get('refresh') is True else 300
         if cached and cached['attempted']>time.time()-wait:
             if cached['payload']:
                 response=json.loads(cached['payload']);response['cached']=True;response['last_error']=cached['last_error'];db.execute('INSERT INTO market_asset_links VALUES(?,?,?,?) ON CONFLICT(user_id,candidate_id) DO UPDATE SET expected_ticker=excluded.expected_ticker,asset_id=excluded.asset_id',(user_id,c['candidate_id'],ticker,aid));return response
             if not cached['last_error'] and cached['attempted']>time.time()-30:return {'pending':True,'retry_after':2}
             raise MarketError(cached['last_error'] or 'Kursopslaget er allerede i gang. Prøv igen om lidt.')
-        db.execute('INSERT INTO market_asset_cache(user_id,asset_id,attempted) VALUES(?,?,?) ON CONFLICT(user_id,asset_id) DO UPDATE SET attempted=excluded.attempted',(user_id,aid,time.time()))
+        if period_cache:db.execute('INSERT INTO market_asset_period_cache(user_id,asset_id,period,attempted) VALUES(?,?,?,?) ON CONFLICT(user_id,asset_id,period) DO UPDATE SET attempted=excluded.attempted',(*cache_key,time.time()))
+        else:db.execute('INSERT INTO market_asset_cache(user_id,asset_id,attempted) VALUES(?,?,?) ON CONFLICT(user_id,asset_id) DO UPDATE SET attempted=excluded.attempted',(user_id,aid,time.time()))
     try:
         if cl is None:cl,tools=trade_service.client(connect,user_id,factory)
-        raw=trade_service.call(cl,tools,'get_asset',{'assetId':aid,'period':'ONE_WEEK'})
-        result=normalized(raw,aid)
+        raw=trade_service.call(cl,tools,'get_asset',{'assetId':aid,'period':requested_period})
+        result=normalized(raw,aid,expected_period=requested_period)
         with connect() as db:
             db.execute('INSERT INTO market_asset_links VALUES(?,?,?,?) ON CONFLICT(user_id,candidate_id) DO UPDATE SET expected_ticker=excluded.expected_ticker,asset_id=excluded.asset_id',(user_id,c['candidate_id'],ticker,aid))
-            db.execute('UPDATE market_asset_cache SET payload=?,fetched=?,last_error=NULL WHERE user_id=? AND asset_id=?',(json.dumps(result),time.time(),user_id,aid))
+            db.execute('UPDATE '+table+' SET payload=?,fetched=?,last_error=NULL WHERE '+where,(json.dumps(result),time.time(),*cache_key))
         return result
     except Exception as error:
         # A local budget denial is not a failed Pluto response. Preserve the
@@ -164,11 +173,11 @@ def quote(connect,user_id,data,factory=None):
         from hotwatch_contract import EngineError
         if isinstance(error, EngineError) and error.code == 'PROVIDER_RATE_BUDGET':
             with connect() as db:
-                db.execute('UPDATE market_asset_cache SET attempted=?,last_error=? WHERE user_id=? AND asset_id=?',
-                           (cached['attempted'] if cached else 0, cached['last_error'] if cached else None, user_id, aid))
+                db.execute('UPDATE '+table+' SET attempted=?,last_error=? WHERE '+where,
+                           (cached['attempted'] if cached else 0, cached['last_error'] if cached else None, *cache_key))
             raise
         message='Pluto-kursopslaget fejlede. Tidligere data kan være forældede.'
-        with connect() as db:db.execute('UPDATE market_asset_cache SET last_error=? WHERE user_id=? AND asset_id=?',(message,user_id,aid))
+        with connect() as db:db.execute('UPDATE '+table+' SET last_error=? WHERE '+where,(message,*cache_key))
         if cached and cached['payload']:
             response=json.loads(cached['payload']);response['cached']=True;response['last_error']=message;return response
         raise MarketError(message)

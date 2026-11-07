@@ -51,6 +51,20 @@ class Quotes(unittest.TestCase):
   result=market_data.quote(app.connect,1,request,self.factory)
   self.assertEqual(result['asset_id'],'synthetic-chart-asset');self.assertEqual(len(result['series']),82)
   self.assertEqual([c['name'] for c in self.calls],['get_asset'])
+ def test_month_and_year_use_separate_cached_pluto_periods(self):
+  case=self
+  class Extended(self.factory):
+   def request(self,method,params):
+    if params['name']=='get_asset' and params['arguments']['period'] in ('ONE_MONTH','ONE_YEAR'):
+     case.calls.append(params);raw=copy.deepcopy(case.raw);raw['performance']['period']=params['arguments']['period'];return {'structuredContent':raw}
+    return super().request(method,params)
+  week=market_data.quote(app.connect,1,self.request,Extended)
+  month=market_data.quote(app.connect,1,{**self.request,'period':'ONE_MONTH'},Extended)
+  year=market_data.quote(app.connect,1,{**self.request,'period':'ONE_YEAR'},Extended)
+  cached=market_data.quote(app.connect,1,{**self.request,'period':'ONE_MONTH'},Extended)
+  self.assertEqual((week['series_period'],month['series_period'],year['series_period']),('ONE_WEEK','ONE_MONTH','ONE_YEAR'))
+  self.assertTrue(cached['cached']);self.assertEqual([c['arguments']['period'] for c in self.calls if c['name']=='get_asset'],['ONE_WEEK','ONE_MONTH','ONE_YEAR'])
+  with self.assertRaises(market_data.MarketError):market_data.quote(app.connect,1,{**self.request,'period':'INVALID'},Extended)
  def test_actual_shape_missing_quote_time_and_daily_not_week(self):
   q=market_data.normalized(self.raw,'synthetic-chart-asset',self.fixed)
   self.assertEqual(q['price'],'18.636');self.assertEqual(q['daily_change'],'0.225');self.assertGreater(float(q['daily_change_percent']),0);self.assertLess(float(q['week_change_percent']),0)

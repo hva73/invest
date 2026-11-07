@@ -166,6 +166,33 @@ class SectorIntelligenceTest(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'test'}),patch.object(sector,'_client',return_value=Client()):sector.refresh_tick(self.connect);sector.refresh_tick(self.connect)
   with self.connect() as c:row=c.execute('SELECT * FROM sector_benchmark_holdings').fetchone()
   self.assertTrue(json.loads(row['payload'])['top10_only']);self.assertEqual(row['status'],'OK')
+ def test_holding_prices_require_matching_cusip_and_produce_period_changes(self):
+  now=time.time();identifier='65339F101'
+  with self.connect() as c:
+   sector._queue_holding_prices(c,[{'ticker':'NEE','identifier':identifier}],20,now)
+  class Client:
+   def _http(self,base,path,params):
+    if path=='/search/NEE':return {'status':'OK','payload':[{'Code':'NEE','Exchange':'US','Type':'Common Stock','ISIN':'US65339F1012'}]}
+    if path=='/eod/NEE.US':return {'status':'OK','payload':[{'date':'2026-10-01','close':100,'adjusted_close':100},{'date':'2026-11-06','close':110,'adjusted_close':110}]}
+    raise AssertionError(path)
+  with patch.object(sector,'_client',return_value=Client()):
+   with self.connect() as c:item=c.execute('SELECT * FROM sector_holding_prices').fetchone()
+   sector._refresh_holding_price(self.connect,item,now)
+   with self.connect() as c:item=c.execute('SELECT * FROM sector_holding_prices').fetchone()
+   self.assertEqual(item['status'],'TRY_HISTORY')
+   sector._refresh_holding_price(self.connect,item,now+1)
+  with self.connect() as c:item=c.execute('SELECT * FROM sector_holding_prices').fetchone()
+  data=json.loads(item['payload']);self.assertEqual(item['status'],'OK');self.assertAlmostEqual(data['periods']['30']['value'],10);self.assertEqual(data['periods']['30']['to'],'2026-11-06')
+ def test_holding_prices_reject_wrong_identity(self):
+  now=time.time()
+  with self.connect() as c:sector._queue_holding_prices(c,[{'ticker':'NEE','identifier':'65339F101'}],20,now)
+  class Client:
+   def _http(self,*args):return {'status':'OK','payload':[{'Code':'NEE','Exchange':'US','Type':'Common Stock','ISIN':'US0000000001'}]}
+  with patch.object(sector,'_client',return_value=Client()):
+   with self.connect() as c:item=c.execute('SELECT * FROM sector_holding_prices').fetchone()
+   sector._refresh_holding_price(self.connect,item,now)
+  with self.connect() as c:item=c.execute('SELECT * FROM sector_holding_prices').fetchone()
+  self.assertEqual(item['status'],'IDENTITY_UNVERIFIED');self.assertIsNone(item['payload'])
  def test_previously_redirected_us_fund_is_requeued_once(self):
   now=time.time()
   with self.connect() as c:
