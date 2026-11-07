@@ -2,8 +2,8 @@
 window.MarketUI=(()=>{
  let api,esc,money,stamp,owner,connected,now,age;let activeOwner=null,running=0;const records=new Map(),queue=[];
  const $=s=>document.querySelector(s);
- const clock=v=>new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',hour:'2-digit',minute:'2-digit'}).format(new Date(v));
- const dayDate=v=>new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',day:'numeric',month:'short'}).format(new Date(v));
+ const clock=v=>new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(v));
+ const dayDate=v=>new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(v));
  const dateKey=v=>{const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Copenhagen',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(v));return ['year','month','day'].map(k=>parts.find(p=>p.type===k).value).join('-')};
  const tone=v=>v===null||v===undefined||!Number.isFinite(Number(v))?'neutral':Number(v)>0?'positive':Number(v)<0?'negative':/[1-9]/.test(String(v).split(/[eE]/)[0])?(String(v).startsWith('-')?'negative':'positive'):'neutral';
  const percent=v=>{if(v===null||v===undefined)return '—';const n=Number(v);if(!Number.isFinite(n)||n===0&&/[1-9]/.test(String(v)))return esc(v)+' %';return (n>0?'+':'')+new Intl.NumberFormat('da-DK',n!==0&&Math.abs(n)<.01?{maximumSignificantDigits:2}:{maximumFractionDigits:2}).format(n)+' %'};

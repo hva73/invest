@@ -30,6 +30,14 @@ try:
   page.locator('.portfolio-detail-hero').wait_for()
   page.locator('.portfolio-detail-hero [data-view="portfolios"]').click()
   page.locator('.portfolio-catalog-heading').wait_for()
+  page.evaluate('''() => {
+   const rows=[['TAB','-8'],['GEVINST','4'],['UKENDT',null],['LILLE TAB','-1']].map(([ticker,p])=>({ticker,name:ticker,key:ticker,portfolio_name:'Test',portfolio_kind:ticker==='GEVINST'?'collection':'portfolio',unrealized:{amount:p,currency:'DKK'},unrealized_percent:p,value:{amount:'100',currency:'DKK'},conflicts:[],hot_watch:{}}));
+   const html=window.DashboardUI.render({dashboard:{positions:rows,totals:[],warnings:[],orders:[],critical_sessions:[],accounts:[]}}),doc=new DOMParser().parseFromString(html,'text/html');
+   const order=Array.from(doc.querySelectorAll('.dash-instrument strong'),n=>n.childNodes[0].textContent).join(',');
+   if(order!=='GEVINST,LILLE TAB,TAB,UKENDT')throw Error('Incorrect result sorting: '+order);
+   if(doc.querySelectorAll('.dash-collection-mark').length!==1||doc.querySelector('.dash-collection-mark').textContent!=='©')throw Error('Collection marker missing');
+   const date=formatTime('2026-11-07T20:05:09Z');if(!date.includes('07.11.2026')||!date.includes('21.05.09'))throw Error('Incorrect Danish date/time: '+date);
+  }''')
   page.evaluate('''async () => {
    const scope=document.createElement('section');scope.className='desk-radar';
    scope.innerHTML=window.CandidateUI.filters()+'<div class="desk-candidate" data-candidate-active="true" data-candidate-lifecycle="DISCOVERED" data-candidate-position="false" data-attention="green"></div><div class="desk-candidate" data-candidate-active="true" data-candidate-lifecycle="POSITION_OPEN" data-candidate-position="true" data-attention="yellow"></div>';

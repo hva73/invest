@@ -5,7 +5,7 @@ window.PositionUI=(()=>{
  const tone=a=>['SÆLG','REDUCÉR'].includes(a)?'red':a==='BEHOLD'?'green':['AFVENT','OVERVÅG'].includes(a)?'yellow':'missing';
  const risks={low:'Lav',medium:'Middel',high:'Høj',unknown:'Ukendt'};
  const quality={verified:'Verificeret af afsender',mixed:'Blandet grundlag',unverified:'Ubekræftet',historical:'Historisk',unknown:'Ukendt grundlag'};
- const shortTime=v=>v?new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}).format(new Date(v)):'Ikke oplyst';
+ const shortTime=v=>v?new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(v)):'Ikke oplyst';
  const short=(v,n=125)=>v?esc(String(v).slice(0,n))+(String(v).length>n?'…':''):'Vurderingsdata mangler';
  function baseView(report){const d=report.data,groups=d.portfolios.map(p=>({portfolio:p,positions:d.positions.filter(x=>x.portfolio_id===p.portfolio_id&&x.position_status!=='closed'&&(x.quantity===null||Number(x.quantity)!==0)).map(position=>({position,assessment:position.assessment,assessment_status:position.assessment&&['verified','mixed'].includes(position.assessment.data_quality.status)?position.assessment.action:position.assessment?'IKKE VURDERET':'DATA MANGLER',assessment_report_id:d.report_id,assessment_generated_at:d.generated_at,sources:d.sources,orders:[]}))}));return {groups:groups.filter(g=>g.positions.length),past:[],changes:[],count:groups.reduce((n,g)=>n+g.positions.length,0),report_id:d.report_id,generated_at:d.generated_at,is_test:d.is_test}}
  function badge(status){return `<span class="position-badge attention-${tone(status)}">${esc(status)}</span>`}
