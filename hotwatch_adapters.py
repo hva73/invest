@@ -473,6 +473,14 @@ class EODHDAdapter:
   interval=self.interval(r,profile)
   if old_sample:interval=old_sample['interval_s']
   result={'sample_id':sample_id,'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':venue,'currency':currency,'event_time':at.isoformat(),'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD REST real-time endpoint; entitlement/cadence unconfirmed; currency='+('provider' if d.get('currency') else 'explicit session instrument'),'documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':interval,'price':format(price,'f'),'bid':None,'ask':None,'volume':volume,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context}
+  # Repeated readings of the same price and event time retain their original
+  # market evidence across software upgrades; only broker context is current.
+  # A changed price remains a conflict, never a fabricated new observation.
+  if old_sample:
+   try:
+    same=all(old_sample.get(k)==result.get(k) for k in ('source','ticker','asset_id','currency','event_time')) and Decimal(old_sample['price'])==price
+    if same:return dict(old_sample,context=context)
+   except (KeyError,TypeError,ValueError,ArithmeticError):pass
   previous=old_sample.get('previous_close') if old_sample else str(d.get('previousClose')) if type(d.get('previousClose')) in (int,str) else None
   if previous is not None and re.fullmatch(r'\d{1,18}(?:\.\d{1,12})?',previous) and Decimal(previous)>0:result['previous_close']=previous
   return result

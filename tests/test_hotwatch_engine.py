@@ -555,9 +555,13 @@ class HotWatch(unittest.TestCase):
   row['request_data']=r;payload={'code':'MERC.US','timestamp':int(self.now.timestamp()),'close':'12.34','currency':'USD'}
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY'}),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):
    adapter=EODHDAdapter(app.connect,1,Opener());old=adapter.poll(row)
+   old['feed_type']='EODHD REST real-time endpoint; legacy metadata';old['price']='12.3400'
    engine.ingest(app.connect,1,r['watch_id'],True,old,self.now)
    payload['volume']=12345;repeated=adapter.poll(row)
    self.assertIsNone(repeated['volume']);self.assertTrue(engine.ingest(app.connect,1,r['watch_id'],True,repeated,self.now)['duplicate'])
+   payload['close']='12.35';conflict=adapter.poll(row)
+   with self.assertRaisesRegex(EngineError,'sample_id_conflict'):engine.ingest(app.connect,1,r['watch_id'],True,conflict,self.now)
+   payload['close']='12.34'
    payload['timestamp']+=1;fresh=adapter.poll(row)
    self.assertEqual(fresh['volume'],'12345');self.assertEqual(fresh['volume_type'],'unknown');self.assertIsNone(fresh['bid']);self.assertIsNone(fresh['ask'])
    result=engine.ingest(app.connect,1,r['watch_id'],True,fresh,self.now+timedelta(seconds=1))

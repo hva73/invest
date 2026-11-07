@@ -247,6 +247,7 @@ class HoldingAutowatch(unittest.TestCase):
     self.assertEqual(sample['currency'],'USD');self.assertEqual(sample['context']['quantity'],quantities[req['portfolio_ids'][0]])
     out=engine.ingest(app.connect,1,row['watch_id'],False,sample,self.now)
     self.assertEqual(out['calculation']['signal'],'NO_DATA')
+    self.assertEqual(out['session']['display_status'],'KURS MODTAGET · AFVENTER SIGNALDATA')
   with app.connect() as c:
    self.assertEqual(c.execute('SELECT count(*) FROM hw_samples').fetchone()[0],4)
    current=c.execute('SELECT * FROM hw_sessions WHERE id=?',(after[-1]['id'],)).fetchone();stale=engine.view(c,current,self.now+timedelta(seconds=131))
