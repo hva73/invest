@@ -9,7 +9,7 @@ from hotwatch_adapters import reserve
 PROXIES = {
  'USA': [('XLK.US','Teknologi'),('XLV.US','Sundhed'),('XLF.US','Finans'),('XLI.US','Industri'),('XLE.US','Energi'),('XLY.US','Forbrug, cyklisk'),('XLP.US','Forbrug, stabilt'),('XLB.US','Materialer'),('XLU.US','Forsyning'),('XLRE.US','Ejendomme'),('XLC.US','Kommunikation')],
  'Globalt': [('IXN.US','Teknologi'),('IXJ.US','Sundhed'),('IXG.US','Finans'),('EXI.US','Industri'),('IXC.US','Energi'),('RXI.US','Forbrug, cyklisk'),('KXI.US','Forbrug, stabilt'),('MXI.US','Materialer'),('JXI.US','Forsyning'),('IXP.US','Kommunikation')],
- 'Europa': [('EUFN.US','Finans')], 'Asien': []}
+ 'Europa': [('EUFN.US','Finans'),('EXH4.XETRA','Industri'),('EXH1.XETRA','Energi'),('EXV6.XETRA','Råvarer'),('EXH6.XETRA','Medier')], 'Asien': []}
 SECTORS={'information technology':'Teknologi','technology':'Teknologi','health care':'Sundhed','healthcare':'Sundhed','financial services':'Finans','financials':'Finans','industrials':'Industri','energy':'Energi','consumer discretionary':'Forbrug, cyklisk','consumer cyclicals':'Forbrug, cyklisk','consumer cyclical':'Forbrug, cyklisk','consumer staples':'Forbrug, stabilt','consumer defensive':'Forbrug, stabilt','materials':'Materialer','basic materials':'Materialer','utilities':'Forsyning','real estate':'Ejendomme','communication services':'Kommunikation'}
 
 def init(c):
@@ -174,6 +174,11 @@ def _benchmark_identity(region,sector,symbol,general):
  if not isinstance(general,dict):return False
  code=str(general.get('Code') or '').upper();name=str(general.get('Name') or '');upper=name.upper()
  exchange=str(general.get('Exchange') or '').upper().strip();currency=str(general.get('CurrencyCode') or '').upper()
+ european_xetra={'EXH4.XETRA':('Industri','INDUSTRIAL GOODS'), 'EXH1.XETRA':('Energi','OIL & GAS'), 'EXV6.XETRA':('Råvarer','BASIC RESOURCES'), 'EXH6.XETRA':('Medier','MEDIA')}
+ if region=='Europa' and symbol in european_xetra:
+  label,term=european_xetra[symbol]
+  typ=re.sub(r'[^A-Z0-9]','',str(general.get('Type') or '').upper())
+  return sector==label and code==symbol.split('.')[0] and exchange=='XETRA' and currency=='EUR' and typ in ('ETF','ETP','FUND') and 'ISHARES' in upper and 'STOXX EUROPE 600' in upper and term in upper
  typ=re.sub(r'[^A-Z0-9]','',str(general.get('Type') or '').upper())
  if code!=symbol.rsplit('.',1)[0] or currency!='USD' or typ not in ('ETF','ETP','FUND') or exchange not in ('NYSE ARCA','NYSEARCA','NASDAQ','NYSE','BATS','CBOE','ARCA','US'):return False
  if region=='USA' and ('SELECT SECTOR' not in upper or 'SPDR' not in upper):return False

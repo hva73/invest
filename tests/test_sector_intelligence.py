@@ -169,6 +169,13 @@ class SectorIntelligenceTest(unittest.TestCase):
   with self.connect() as c:
    b=c.execute('SELECT * FROM sector_benchmarks').fetchone();m=c.execute('SELECT * FROM sector_market').fetchone()
   self.assertEqual((b['status'],b['proof_source']),('VERIFIED','EODHD instrumentsøgning'));self.assertEqual(m['status'],'OK')
+ def test_european_xetra_benchmarks_use_search_proof(self):
+  cases=[('EXH4','Industri','Industrial Goods & Services'),('EXH1','Energi','Oil & Gas'),('EXV6','Råvarer','Basic Resources'),('EXH6','Medier','Media')]
+  for code,sector_name,name in cases:
+   row={'Code':code,'Exchange':'XETRA','Name':'iShares STOXX Europe 600 '+name+' UCITS ETF (DE)','CurrencyCode':'EUR','Type':'ETF'}
+   self.assertTrue(sector._benchmark_identity('Europa',sector_name,code+'.XETRA',row))
+   row['Exchange']='F'
+   self.assertFalse(sector._benchmark_identity('Europa',sector_name,code+'.XETRA',row))
  def test_global_communications_abbreviation_is_recognized(self):
   row={'Code':'IXP','Exchange':'US','Name':'iShares Global Comm Services ETF','CurrencyCode':'USD','Type':'ETF'}
   self.assertTrue(sector._benchmark_identity('Globalt','Kommunikation','IXP.US',row))
