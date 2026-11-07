@@ -43,7 +43,7 @@ class HotWatch(unittest.TestCase):
    c.execute('UPDATE hw_sessions SET is_test=0,request=? WHERE id=?',(json.dumps(req),row['id']))
    c.execute('INSERT INTO hw_exchange_calendar VALUES(?,?,?,?)',('CO','2026-11-05T15:00:00+00:00','Europe/Copenhagen',json.dumps(cal)))
    row=c.execute('SELECT * FROM hw_sessions WHERE id=?',(row['id'],)).fetchone();result=engine.view(c,row,at)
-  self.assertEqual(result['data_status']['regular_session']['status'],'CLOSED');self.assertEqual(result['display_status'],'ORDINÆR HANDEL LUKKET');self.assertTrue(result['data_stale'])
+  self.assertEqual(result['data_status']['regular_session']['status'],'CLOSED');self.assertEqual(result['display_status'],'MARKED LUKKET (ORDINÆR HANDEL)');self.assertTrue(result['data_stale'])
  def test_manual_pluto_search_creates_one_non_report_watch(self):
   import hotwatch_service as service
   asset={'id':'manual-asset','ticker':'ABC','exchange':'NASDAQ','currency':'USD','name':'ABC Company'}
@@ -76,7 +76,7 @@ class HotWatch(unittest.TestCase):
    c.execute('UPDATE hw_sessions SET is_test=0,request=? WHERE id=?',(json.dumps(req),row['id']))
    c.execute('INSERT INTO hw_exchange_status VALUES(?,?,?,?)',('US',(self.now+timedelta(seconds=121)).isoformat(),0,self.now.timestamp()+421))
    view=engine.view(c,engine.row_for(c,1,self.req['watch_id'],False),self.now+timedelta(seconds=121))
-   self.assertEqual(view['display_status'],'ORDINÆR HANDEL LUKKET');self.assertEqual(view['data_status']['regular_session']['status'],'CLOSED');self.assertTrue(view['data_stale'])
+   self.assertEqual(view['display_status'],'MARKED LUKKET (ORDINÆR HANDEL)');self.assertEqual(view['data_status']['regular_session']['status'],'CLOSED');self.assertTrue(view['data_stale'])
    data=json.loads(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=?',(row['id'],)).fetchone()[0]);data.update(market_status='PRE',status_at=self.now.isoformat());c.execute('UPDATE hw_samples SET payload=? WHERE watch_row_id=?',(json.dumps(data),row['id']))
    view=engine.view(c,engine.row_for(c,1,self.req['watch_id'],False),self.now+timedelta(seconds=121))
    self.assertEqual(view['data_status']['market_status'],'UNKNOWN')
@@ -85,14 +85,14 @@ class HotWatch(unittest.TestCase):
    self.assertEqual(view['data_status']['regular_session']['status'],'UNKNOWN');self.assertEqual(view['display_status'],'DATA FOR GAMLE')
    c.execute('UPDATE hw_exchange_status SET received=? WHERE exchange=?',(self.now.isoformat(),'US'))
    view=engine.view(c,engine.row_for(c,1,self.req['watch_id'],False),self.now+timedelta(seconds=60))
-   self.assertEqual(view['data_status']['market_status'],'PREMARKET');self.assertNotEqual(view['display_status'],'ORDINÆR HANDEL LUKKET')
+   self.assertEqual(view['data_status']['market_status'],'PREMARKET');self.assertNotEqual(view['display_status'],'MARKED LUKKET (ORDINÆR HANDEL)')
    data.update(market_status='REGULAR',status_at=self.now.isoformat());c.execute('UPDATE hw_samples SET payload=? WHERE watch_row_id=?',(json.dumps(data),row['id']))
    c.execute('UPDATE hw_exchange_status SET received=? WHERE exchange=?',((self.now-timedelta(seconds=1)).isoformat(),'US'))
    view=engine.view(c,engine.row_for(c,1,self.req['watch_id'],False),self.now+timedelta(seconds=1))
-   self.assertEqual(view['data_status']['regular_session']['status'],'UNKNOWN');self.assertNotEqual(view['display_status'],'ORDINÆR HANDEL LUKKET')
+   self.assertEqual(view['data_status']['regular_session']['status'],'UNKNOWN');self.assertNotEqual(view['display_status'],'MARKED LUKKET (ORDINÆR HANDEL)')
    c.execute('UPDATE hw_exchange_status SET received=? WHERE exchange=?',((self.now+timedelta(seconds=1)).isoformat(),'US'))
    view=engine.view(c,engine.row_for(c,1,self.req['watch_id'],False),self.now+timedelta(seconds=2))
-   self.assertEqual(view['data_status']['market_status'],'UNKNOWN');self.assertEqual(view['display_status'],'ORDINÆR HANDEL LUKKET')
+   self.assertEqual(view['data_status']['market_status'],'UNKNOWN');self.assertEqual(view['display_status'],'MARKED LUKKET (ORDINÆR HANDEL)')
  def test_exchange_status_refresh_is_cached_and_failed_read_does_not_refresh_old_evidence(self):
   import hotwatch_service as service
   with app.connect() as c:

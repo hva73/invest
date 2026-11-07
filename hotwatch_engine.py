@@ -391,7 +391,7 @@ def view(c,row,now=None):
  if effective in ('NO_DATA','PAUSE') and data_status['market_status'] in ('CLOSED','HALTED') and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED'):
   display_status='MARKED LUKKET' if data_status['market_status']=='CLOSED' else 'HANDEL STANDSET'
  if effective in ('NO_DATA','PAUSE') and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED') and regular['status']=='CLOSED' and data_status['market_status'] not in ('PREMARKET','AFTERHOURS','HALTED'):
-  display_status='ORDINÆR HANDEL LUKKET'
+  display_status='MARKED LUKKET (ORDINÆR HANDEL)'
  candidate_review=None
  if request.get('report_id')!='manual-pluto' and request.get('watch_mode','both')!='exit' and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED','PAUSED'):
   from intel_workflows import candidate_currentness
