@@ -13,6 +13,7 @@ class Updater(unittest.TestCase):
   with tempfile.TemporaryDirectory() as d:
    source,target=self.fixture(Path(d));backup=apply_update.apply(source,target)
    self.assertEqual((target/'app.py').read_text(),'new code');self.assertEqual((backup/'code/app.py').read_text(),'old code')
+   self.assertEqual((target/'hotwatch_warmup.py').read_text(),'new code')
    self.assertTrue((target/'var/hotwatch-autostart.enabled').is_file())
    for path in [target/'var/escape.db',backup/'escape.db']:
     with sqlite3.connect(path) as c:self.assertEqual(c.execute('SELECT value FROM preserved').fetchone()[0],'private-data')

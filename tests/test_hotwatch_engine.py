@@ -436,6 +436,47 @@ class HotWatch(unittest.TestCase):
   rows=[tick(self.now+timedelta(minutes=i),i,str(100+i%2)) for i in range(40)];f=features(rows,BASELINE['parameters']);self.assertIsNotNone(f['rsi']);self.assertIsNotNone(f['macd_signal']);self.assertIsNotNone(f['atr']);self.assertIsNotNone(f['ema_short']);self.assertEqual(f['relative_volume'],'1')
   before=features(rows[:35],BASELINE['parameters']);rows[-1]['price']='100000';self.assertEqual(before,features(rows[:35],BASELINE['parameters']))
   no_volume=copy.deepcopy(rows[:35]);no_volume[-1]['volume']=None;self.assertIsNone(features(no_volume,BASELINE['parameters'])['relative_volume'])
+ def test_historical_warmup_never_generates_current_trading_signals(self):
+  req=copy.deepcopy(self.req);req.update(watch_id='history-isolation',purpose='history isolation',provider='eodhd',provider_symbol='MERC.US')
+  engine.create(app.connect,1,req,self.now)
+  with app.connect() as c:
+   row=c.execute('SELECT id FROM hw_sessions WHERE watch_id=?',(req['watch_id'],)).fetchone()
+   bars=[{'bar_open_at':(self.now-timedelta(minutes=34-i)).isoformat(),'open':'100','high':'102','low':'99','close':'101','volume':'20'} for i in range(34)]
+   c.execute('INSERT INTO hw_warmup_history VALUES(?,?,?,?,?,?)',(row['id'],'MERC.US',self.now.isoformat(),json.dumps(bars),self.now.timestamp()+300,'OK'))
+  sample=tick(self.now);sample.update(source='eodhd',price_time_kind='trade',status_at=self.now.isoformat(),bid_at=self.now.isoformat(),ask_at=self.now.isoformat())
+  result=engine.ingest(app.connect,1,req['watch_id'],True,sample,self.now)
+  self.assertEqual(result['calculation']['supporting_metrics']['sample_count'],1);self.assertEqual(result['calculation']['signal'],'NO_DATA');self.assertIn('WARMUP',result['calculation']['reason_codes'])
+ def test_verified_history_is_used_only_with_a_new_current_observation(self):
+  req=copy.deepcopy(self.req);req.update(watch_id='history-live',purpose='history live',provider='eodhd',provider_symbol='MERC.US')
+  engine.create(app.connect,1,req,self.now);end=self.now.replace(second=0,microsecond=0);at=end+timedelta(seconds=59)
+  bars=[{'bar_open_at':(end-timedelta(minutes=34-i)).isoformat(),'open':'100','high':'102','low':'99','close':'101','volume':'20'} for i in range(34)]
+  with app.connect() as c:
+   row=c.execute('SELECT id FROM hw_sessions WHERE watch_id=?',(req['watch_id'],)).fetchone()
+   c.execute('INSERT INTO hw_verified_feed_links VALUES(?,?,?,?,?,?,?,?)',(1,req['asset_id'],req['ticker'],req['quote_currency'],req['exchange'],req['provider_symbol'],'US1234567890',self.now.timestamp()))
+   c.execute('INSERT INTO hw_warmup_history VALUES(?,?,?,?,?,?)',(row['id'],'MERC.US',self.now.isoformat(),json.dumps(bars),self.now.timestamp()+300,'OK'))
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_calculations WHERE watch_row_id=?',(row['id'],)).fetchone()[0],0)
+  sample=tick(at);sample.update(source='eodhd',market_status='UNKNOWN',session_key='fixture:UNKNOWN',bid=None,ask=None,interval_s=60)
+  result=engine.ingest(app.connect,1,req['watch_id'],True,sample,at)
+  self.assertEqual(result['calculation']['supporting_metrics']['sample_count'],34)
+  self.assertEqual(result['calculation']['supporting_metrics']['bar_history_count'],34)
+  self.assertEqual(result['calculation']['signal'],'NO_DATA');self.assertIn('MARKET_STATUS_UNKNOWN',result['calculation']['reason_codes'])
+ def test_history_can_seed_a_fresh_regular_session_without_skipping_risk_rules(self):
+  base=datetime(2026,11,4,15,30,tzinfo=timezone.utc);at=base+timedelta(seconds=59)
+  req=copy.deepcopy(self.req);req.update(watch_id='history-regular',purpose='history regular',provider='eodhd',provider_symbol='MERC.US')
+  engine.create(app.connect,1,req,base)
+  bars=[{'bar_open_at':(base-timedelta(minutes=34-i)).isoformat(),'open':'100','high':'102','low':'99','close':'101','volume':'20'} for i in range(34)]
+  calendar={'open':'09:30:00','close':'16:00:00','working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[]}
+  with app.connect() as c:
+   row=c.execute('SELECT id FROM hw_sessions WHERE watch_id=?',(req['watch_id'],)).fetchone()
+   c.execute('INSERT INTO hw_verified_feed_links VALUES(?,?,?,?,?,?,?,?)',(1,req['asset_id'],req['ticker'],req['quote_currency'],req['exchange'],req['provider_symbol'],'US1234567890',base.timestamp()))
+   c.execute('INSERT INTO hw_warmup_history VALUES(?,?,?,?,?,?)',(row['id'],'MERC.US',base.isoformat(),json.dumps(bars),base.timestamp()+300,'OK'))
+   c.execute('INSERT INTO hw_exchange_calendar VALUES(?,?,?,?)',('US',at.isoformat(),'America/New_York',json.dumps(calendar)))
+  sample=tick(at);sample.update(source='eodhd',feed_type='test real-time trade',price_time_kind='trade',status_at=at.isoformat(),status_feed='us-status',bid_at=at.isoformat(),ask_at=at.isoformat(),quote_feed='us-quotes')
+  result=engine.ingest(app.connect,1,req['watch_id'],True,sample,at)
+  self.assertEqual(result['calculation']['supporting_metrics']['sample_count'],34)
+  self.assertEqual(result['calculation']['supporting_metrics']['bar_history_count'],34)
+  self.assertNotIn('WARMUP',result['calculation']['reason_codes'])
+  self.assertFalse(result['calculation']['critical_override'])
  def test_market_phase_source_currency_interval_and_gaps_reset_features(self):
   rows=[tick(self.now+timedelta(minutes=i),i) for i in range(40)]
   for key,value in [('source','eodhd'),('currency','DKK'),('market_status','PRE'),('session_key','NEXT'),('interval_s',15)]:

@@ -79,6 +79,8 @@ def effective_poll_interval(c,request,profile=None):
   return max(minimum,(other_units*60+remaining-1)//remaining)
  return max(minimum,(units*60+available-1)//available)
 def init(c):
+ import hotwatch_warmup
+ hotwatch_warmup.init(c)
  c.execute('CREATE TABLE IF NOT EXISTS hw_strategies(owner_id INTEGER NOT NULL,strategy_id TEXT NOT NULL,version TEXT NOT NULL,payload TEXT NOT NULL,checksum TEXT NOT NULL,created TEXT NOT NULL,author TEXT NOT NULL,validation_status TEXT NOT NULL,PRIMARY KEY(owner_id,strategy_id,version))')
  c.execute('INSERT OR IGNORE INTO hw_strategies VALUES(0,?,?,?,?,?,?,?)',(BASELINE['strategy_id'],BASELINE['version'],canonical(BASELINE),checksum(BASELINE),utc().isoformat(),'ESCAPE builtin','baseline_tested'))
  c.execute('CREATE TABLE IF NOT EXISTS hw_sessions(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),watch_id TEXT NOT NULL,is_test INTEGER NOT NULL,candidate_id TEXT NOT NULL,purpose TEXT NOT NULL,status TEXT NOT NULL,request TEXT NOT NULL,digest TEXT NOT NULL,strategy TEXT NOT NULL,state TEXT NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL,last_data TEXT,last_calculation TEXT,next_due REAL NOT NULL,lease_owner TEXT,lease_until REAL NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 0,failures INTEGER NOT NULL DEFAULT 0,last_error TEXT,UNIQUE(user_id,watch_id))')
@@ -472,6 +474,8 @@ def view(c,row,now=None):
  if evidence and evidence.get('basis')=='user_authorized_btc_monitoring' and quote_feed_verified and quote_freshness=='FRESH' and effective=='NO_DATA' and not row['last_error'] and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED'):
   display_status='KURS MODTAGET · MARKEDSSTATUS UKENDT' if data_status['market_status']=='UNKNOWN' else 'KURS MODTAGET · AFVENTER SIGNALDATA'
  data_status.update(holding_verified=holding_verified,instrument_match_verified=instrument_match_verified,instrument_match_evidence=evidence,quote_feed_verified=quote_feed_verified,quote_freshness=quote_freshness)
+ import hotwatch_warmup
+ data_status['analysis_warmup']=hotwatch_warmup.status(c,row,request,now)
  return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':budget_interval,'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
 def sessions(connect,uid,mode=False,after=0,limit=50):
@@ -701,6 +705,15 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   metrics=features(bar_samples if bar_samples is not None else samples,strategy_data['parameters'])
   if bar_samples is not None:
    live_metrics=features([sample],strategy_data['parameters']);metrics.update(price=sample['price'],spread=live_metrics.get('spread'),spread_pct=live_metrics.get('spread_pct'),bar_history_count=len(bar_samples))
+  elif new_market_event and sample.get('source')=='eodhd' and sample.get('verification')=='verified':
+   # Historical bars provide indicator context only for a new, genuinely
+   # observed live sample. All existing market, freshness and risk gates in
+   # calculate() remain mandatory; a history fetch never runs calculate().
+   import hotwatch_warmup
+   history=hotwatch_warmup.status(c,row,request,now)
+   safe_session=sample.get('market_status') in ('UNKNOWN','CLOSED','HALTED') or history and hotwatch_warmup.signal_session_verified(c,request,sample,history,now)
+   if history and safe_session and history['historical_count']>0 and history['state']=='WARMUP COMPLETE' and history['freshness']=='FRESH' and history.get('latest_live_sample_id')==sample['sample_id']:
+    live_metrics=features([sample],strategy_data['parameters']);metrics=dict(history['metrics']);metrics.update(price=sample['price'],spread=live_metrics.get('spread'),spread_pct=live_metrics.get('spread_pct'),bar_history_count=history['historical_count'])
   import intel_workflows,candidate_lifecycle
   decision=intel_workflows.prior_decision(c,uid,mode,request['candidate_id'])
   from intel_workflows import candidate_currentness

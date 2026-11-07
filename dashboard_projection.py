@@ -146,6 +146,11 @@ def position_hotwatch(c,uid,portfolio_id,asset_id,report_position):
    warmup={'count':count,'required':required,'remaining':required-count}
    if current.get('display_status')!='WARMUP':warmup['historical']=True
    elif ((current.get('data_status') or {}).get('instrument_match_evidence') or {}).get('basis')=='user_authorized_btc_monitoring' and (current.get('data_status') or {}).get('market_status')=='UNKNOWN':warmup['market_status_unknown']=True
+ if current:
+  quality=current.get('data_status') or {};analysis=quality.get('analysis_warmup')
+  if analysis:
+   regular_closed=(quality.get('regular_session') or {}).get('status')=='CLOSED'
+   warmup={'count':analysis['count'],'required':analysis['required'],'remaining':analysis['remaining'],'analysis_only':True,'complete':analysis['state']=='WARMUP COMPLETE','data_stale':analysis['freshness']=='DATA STALE' or bool(current.get('last_data_at') and current.get('data_stale')),'data_missing':not current.get('last_data_at'),'data_error':bool(current.get('last_error') and current['last_error']!='DATA_STALE'),'market_status_unknown':quality.get('market_status')=='UNKNOWN' and not regular_closed,'regular_closed':regular_closed}
  return {'auto_status':dict(auto) if auto else None,'candidate_id':candidate_id,'trade_cycle_id':cycle,'lifecycle':dict(lifecycle) if lifecycle else None,'session':({'watch_id':current['watch_id'],'status':current['status'],'last_data_at':current['last_data_at'],'signal':current['signal'],'display_status':current['display_status'],'warmup':warmup} if current else None),'link_basis':'unique_asset_and_portfolio_scope' if asset_fallback else 'candidate_id+asset_id+portfolio' if report_position and report_position.get('candidate_id') else 'asset_id+portfolio+trade_cycle_id' if candidate_id and cycle else 'unique_asset_and_portfolio_scope' if session else None}
 
 def build(connect,uid,owned,snapshots,now=None):

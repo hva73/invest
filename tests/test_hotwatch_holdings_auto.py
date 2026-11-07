@@ -261,6 +261,51 @@ class HoldingAutowatch(unittest.TestCase):
     pid=json.loads(row['request'])['portfolio_ids'][0]
     displayed=dashboard_projection.position_hotwatch(c,1,pid,aid,None)['session']
     self.assertEqual(displayed['display_status'],'WARMUP');self.assertEqual(displayed['warmup']['count'],1);self.assertTrue(displayed['warmup']['market_status_unknown']);self.assertNotIn('historical',displayed['warmup'])
+  from hotwatch_warmup import refresh
+  end=self.now.replace(second=0,microsecond=0)
+  bars=[{'bar_open_at':(end-timedelta(minutes=34-i)).isoformat(),'open':'100','high':'102','low':'99','close':'101','volume':'20'} for i in range(34)]
+  class History:
+   def intraday(self,symbol,interval,start,end):
+    self.assertion=(symbol,interval);return {'status':'OK','bars':bars}
+  feed=History();job=dict(after[-1]);job['request_data']=json.loads(job['request'])
+  from unittest.mock import Mock
+  runner=service.Runner(app.connect);adapter_stub=Mock();adapter_stub.poll.return_value=sample;runner.adapters[(1,'eodhd')]=adapter_stub;runner.health=Mock();runner.log=Mock()
+  runner_job=dict(job,lease_owner='test-lease')
+  with patch('hotwatch_service.engine.claim',return_value=runner_job),patch('hotwatch_service.engine.ingest',return_value={'calculation':{'signal':'NO_DATA'}}),patch('hotwatch_warmup.refresh') as refresh_call:
+   self.assertTrue(runner.once(self.now));self.assertEqual(refresh_call.call_count,1)
+  class ChangingIdentity:
+   def intraday(self,symbol,interval,start,end):
+    with app.connect() as c:c.execute('UPDATE hw_verified_feed_links SET verified_epoch=verified_epoch+1 WHERE asset_id=?',(aid,))
+    return {'status':'OK','bars':bars}
+  self.assertIsNone(refresh(app.connect,job,self.now,ChangingIdentity()))
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_warmup_history').fetchone()[0],0)
+   c.execute('UPDATE hw_verified_feed_links SET verified_epoch=verified_epoch-1 WHERE asset_id=?',(aid,))
+  self.assertEqual(refresh(app.connect,job,self.now,feed),'OK');self.assertEqual(feed.assertion,('BTC-USD.CC','1m'))
+  with app.connect() as c:
+   current=c.execute('SELECT * FROM hw_sessions WHERE id=?',(job['id'],)).fetchone();view=engine.view(c,current,self.now);warm=view['data_status']['analysis_warmup']
+   self.assertEqual(warm['state'],'WARMUP COMPLETE');self.assertEqual(warm['count'],34);self.assertEqual(warm['freshness'],'FRESH');self.assertIsNotNone(warm['metrics']['ema_long']);self.assertEqual(view['signal'],'NO_DATA')
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_samples').fetchone()[0],4)
+   self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
+   displayed=dashboard_projection.position_hotwatch(c,1,json.loads(job['request'])['portfolio_ids'][0],aid,None)['session'];self.assertTrue(displayed['warmup']['complete']);self.assertTrue(displayed['warmup']['market_status_unknown'])
+  class WrongSymbol:
+   def intraday(self,symbol,interval,start,end):return {'status':'OK','bars':[dict(bars[-1],symbol='OTHER-USD.CC')]}
+  self.assertEqual(refresh(app.connect,job,self.now+timedelta(seconds=301),WrongSymbol()),'NO_VALID_BARS')
+  with app.connect() as c:
+   saved=c.execute('SELECT bars,status FROM hw_warmup_history WHERE watch_row_id=?',(job['id'],)).fetchone();self.assertEqual(len(json.loads(saved['bars'])),34);self.assertEqual(saved['status'],'NO_VALID_BARS')
+  class PartialHistory:
+   def intraday(self,symbol,interval,start,end):return {'status':'OK','bars':bars[-3:]}
+  partial_job=dict(after[0]);partial_job['request_data']=json.loads(partial_job['request'])
+  self.assertEqual(refresh(app.connect,partial_job,self.now,PartialHistory()),'OK')
+  with app.connect() as c:
+   for i in (1,2):
+    at=end+timedelta(minutes=i);live=dict(sample,event_time=at.isoformat(),sample_id='future-fixture-'+str(i),price='102')
+    c.execute('INSERT INTO hw_samples(watch_row_id,source,sample_id,event_epoch,received,payload,digest) VALUES(?,?,?,?,?,?,?)',(partial_job['id'],'eodhd',live['sample_id'],at.timestamp(),at.isoformat(),json.dumps(live),engine.checksum(live)))
+   current=c.execute('SELECT * FROM hw_sessions WHERE id=?',(partial_job['id'],)).fetchone()
+   from hotwatch_warmup import status as warmup_status
+   partial=warmup_status(c,current,partial_job['request_data'],end+timedelta(minutes=2,seconds=1))
+   self.assertEqual(partial['count'],5);self.assertEqual(partial['state'],'WARMUP');self.assertEqual(partial['remaining'],29)
+  with app.connect() as c:
    current=c.execute('SELECT * FROM hw_sessions WHERE id=?',(after[-1]['id'],)).fetchone();stale=engine.view(c,current,self.now+timedelta(seconds=131))
    self.assertEqual(stale['data_status']['quote_freshness'],'STALE');self.assertEqual(stale['signal'],'NO_DATA')
    c.execute('DELETE FROM hw_cxe_feed_evidence')
@@ -281,6 +326,9 @@ class HoldingAutowatch(unittest.TestCase):
   data=engine.item(app.connect,1,row['watch_id'],False)['session']['data_status'];self.assertEqual(data['reference_candidate']['symbol'],'PEPE24478-USD.CC');self.assertFalse(data['reference_candidate']['verified'])
   with app.connect() as c:
    req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol='PEPE24478-USD.CC');c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps(req),row['id']))
+  from hotwatch_warmup import refresh
+  pepe_job=dict(row);pepe_job['request_data']=req
+  self.assertIsNone(refresh(app.connect,pepe_job,self.now,client=object()))
   with self.assertRaisesRegex(engine.EngineError,'EODHD_INSTRUMENT_UNVERIFIED'):engine.ingest(app.connect,1,row['watch_id'],False,{},self.now)
  def test_complete_broker_identity_does_not_spend_second_lookup_for_missing_isin(self):
   raw={'asset':{'id':'synthetic-asset','ticker':'TEST','name':'Test Inc','exchange':'NASDAQ','currency':'USD','type':'CS'}}
@@ -563,6 +611,15 @@ class HoldingAutowatch(unittest.TestCase):
    self.assertTrue(engine.valid_cxe_evidence(c,1,request,self.now))
    c.execute('INSERT INTO hw_exchange_status(exchange,received,is_open,next_attempt) VALUES(?,?,?,?)',('US',self.now.isoformat(),0,self.now.timestamp()+300))
    view=engine.view(c,row,self.now);self.assertEqual(view['display_status'],'MARKED LUKKET (ORDINÆR HANDEL)');self.assertEqual(view['signal'],'NO_DATA');self.assertIsNone(view['data_status']['price'])
+  from hotwatch_warmup import refresh
+  end=self.now.replace(second=0,microsecond=0)
+  bars=[{'bar_open_at':(end-timedelta(minutes=34-i)).isoformat(),'open':'100','high':'102','low':'99','close':'101','volume':'20'} for i in range(34)]
+  class Feed:
+   def intraday(self,symbol,interval,start,end):return {'status':'OK','bars':bars}
+  job=dict(row);job['request_data']=request;self.assertEqual(refresh(app.connect,job,self.now,Feed()),'OK')
+  with app.connect() as c:
+   actual=c.execute('SELECT * FROM hw_sessions WHERE id=?',(row['id'],)).fetchone();view=engine.view(c,actual,self.now)
+   self.assertEqual(view['data_status']['analysis_warmup']['state'],'WARMUP COMPLETE');self.assertEqual(view['signal'],'NO_DATA');self.assertIsNone(view['latest_calculation'])
  def test_tsm_adr_recovers_from_us_catalog_and_preserves_adr_evidence(self):
   holding=dict(self.holding,ticker='TSM')
   with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[holding]}),))

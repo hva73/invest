@@ -680,6 +680,14 @@ class Runner:
    engine.fault(self.connect,uid,wid,mode,error.code,lease=lease,retry_after_s=getattr(error,'retry_after_s',None));self.health(job,None,error.code);self.log(job,'degraded',error.code)
   except Exception:
    engine.fault(self.connect,uid,wid,mode,'PROVIDER_OR_PROCESSING_ERROR',lease=lease);self.health(job,None,'PROVIDER_OR_PROCESSING_ERROR');self.log(job,'degraded','PROVIDER_OR_PROCESSING_ERROR')
+  finally:
+   # The live scan and its risk decision finish first. Historical analysis
+   # cannot create signals, and its failure cannot fault the live scan.
+   if r['provider']=='eodhd' and not mode:
+    try:
+     import hotwatch_warmup
+     hotwatch_warmup.refresh(self.connect,job,engine.utc())
+    except Exception:logging.getLogger('escape.hotwatch').warning('historical warmup unavailable')
   return True
  def health(self,job,sample,code,measurement=None):
   caps={'endpoint_access':True,'price_time':bool(sample.get('event_time')),'bid_ask':sample['bid'] is not None and sample['ask'] is not None,'interval_volume':sample['volume_type']=='interval','market_status':sample['market_status']!='UNKNOWN'} if sample else {}
