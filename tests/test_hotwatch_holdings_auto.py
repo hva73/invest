@@ -377,7 +377,7 @@ class HoldingAutowatch(unittest.TestCase):
    recovery=c.execute('SELECT next_attempt FROM hw_feed_recovery').fetchone()
    self.assertEqual(recovery['next_attempt'],check_at.timestamp()+300)
    # Existing installations may still have a six-hour retry from older code.
-   c.execute('UPDATE hw_feed_recovery SET next_attempt=?',(check_at.timestamp()+21600,))
+   c.execute("UPDATE hw_feed_recovery SET next_attempt=?,status='CXE_REFERENCE_INVALID'",(check_at.timestamp()+21600,))
   right={'choices':[{'symbol':'TSM.US','name':'Taiwan Semiconductor Manufacturing','exchange':'US','currency':'USD','isin':'US1234567890'}]}
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=verified),patch('hotwatch_adapters.search_eodhd_symbols',return_value=right):
    self.assertEqual(service.verify_provisional_feeds(app.connect,check_at+timedelta(minutes=4)),0)
