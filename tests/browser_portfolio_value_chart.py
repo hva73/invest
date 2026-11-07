@@ -17,6 +17,15 @@ def main():
     browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':1440,'height':1000});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click()
     expect(page.locator('.dash-chart-svg')).to_be_visible();expect(page.locator('.dash-chart-change')).to_contain_text('+10,00')
+    page.evaluate('''() => {
+     const points=[{at:'2026-11-07T23:04:00Z',amount:'2830',reported_result:'-169.44',currency:'DKK'},{at:'2026-11-07T23:10:00Z',amount:'2830',reported_result:'-169.25',currency:'DKK'}];
+     const chart=p=>new DOMParser().parseFromString(window.DashboardUI.portfolioChart({portfolio_value_history:{day_start:'2026-11-07T23:00:00Z',day_end:'2026-11-08T23:00:00Z',periods:{day:p}}}),'text/html');
+     const doc=chart(points),dots=doc.querySelectorAll('.dash-chart-point');
+     if(dots.length!==2||Number(dots[1].getAttribute('cx'))>5)throw Error('Day chart does not use full-day axis');
+     if(Math.abs(Number(dots[0].getAttribute('cy'))-Number(dots[1].getAttribute('cy')))>12)throw Error('Small changes are exaggerated');
+     if(!doc.querySelector('.dash-chart-scale')||!doc.querySelector('.dash-chart-dates').textContent.includes('24.00'))throw Error('Day scale is missing');
+     if(chart(points.slice(0,1)).querySelectorAll('.dash-chart-point').length!==1)throw Error('First daily observation not displayed');
+    }''')
     page.locator('[data-dashboard-range=year]').click();expect(page.locator('[data-dashboard-range=year]')).to_have_attribute('aria-pressed','true');expect(page.locator('.dash-chart-svg')).to_be_visible()
     for width in (320,390,768,1440):
      page.set_viewport_size({'width':width,'height':1000});assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),width

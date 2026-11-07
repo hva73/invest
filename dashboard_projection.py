@@ -54,7 +54,7 @@ def portfolio_value_history(c,uid,now):
  fresh_snapshot=bool(current)
  if not current:current=portfolio_value_snapshot(c,uid,allow_failed=True)
  if not current:return {'periods':{},'reported_result':None}
- local=now.astimezone(ZoneInfo('Europe/Copenhagen'));midnight=local.replace(hour=0,minute=0,second=0,microsecond=0).astimezone(timezone.utc)
+ local=now.astimezone(ZoneInfo('Europe/Copenhagen'));local_midnight=local.replace(hour=0,minute=0,second=0,microsecond=0);midnight=local_midnight.astimezone(timezone.utc);next_midnight=(local_midnight+timedelta(days=1)).astimezone(timezone.utc)
  def months_before(months):
   index=local.year*12+local.month-1-months;year,month=divmod(index,12);month+=1
   return local.replace(year=year,month=month,day=min(local.day,monthrange(year,month)[1])).astimezone(timezone.utc)
@@ -66,7 +66,7 @@ def portfolio_value_history(c,uid,now):
   points=([first] if first and (not rows or first['observed_epoch']!=rows[0]['observed_epoch']) else [])+list(rows)
   periods[name]=[{'at':r['observed'],'amount':r['amount'],'currency':r['currency'],'source_time':r['source_time'],'reported_result':r['reported_result']} for r in points]
  result=current['reported_result'] if fresh_snapshot else None
- return {'periods':periods,'reported_result':{'amount':str(result),'currency':current['currency']} if result is not None else None}
+ return {'periods':periods,'day_start':midnight.isoformat(),'day_end':next_midnight.isoformat(),'reported_result':{'amount':str(result),'currency':current['currency']} if result is not None else None}
 
 def observation(row,received_at=None):
  price=row.get('price') or {};meta=row.get('market_context') or {}

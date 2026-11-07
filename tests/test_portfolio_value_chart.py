@@ -13,6 +13,12 @@ class PortfolioValueChart(unittest.TestCase):
  def save(self,pid,value,at,currency='DKK',result=None):
   data={'observed':at.isoformat(),'value':{'value':{'amount':value,'currency':currency},'source_time':at.isoformat(),'reported_result':{'amount':result,'currency':currency}},'positions':[],'positions_complete':True,'complete':True}
   with app.connect() as c:portfolio_data.save(c,1,pid,data)
+ def test_daily_axis_uses_copenhagen_midnights_across_daylight_saving(self):
+  for now,hours in [(datetime(2026,3,29,12,tzinfo=timezone.utc),23),(datetime(2026,10,25,12,tzinfo=timezone.utc),25)]:
+   self.save(self.root,'1000',now,result='20')
+   with app.connect() as c:history=dashboard.portfolio_value_history(c,1,now)
+   start=datetime.fromisoformat(history['day_start']);end=datetime.fromisoformat(history['day_end'])
+   self.assertEqual((end-start).total_seconds(),hours*3600)
  def test_root_history_does_not_double_count_collection_and_reports_real_points(self):
   self.save(self.root,'1000',self.now-timedelta(minutes=10),result='20');self.save(self.child,'300',self.now-timedelta(minutes=9));self.save(self.root,'1100',self.now,result='30')
   with app.connect() as c:
