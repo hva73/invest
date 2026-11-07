@@ -14,6 +14,9 @@ def _issuer(value):
  import unicodedata
  if not isinstance(value,str):return None
  words=re.findall(r'[A-Z0-9]+',unicodedata.normalize('NFKD',value).upper())
+ # Pluto can append the generic security type to the issuer name, while
+ # EODHD puts that type in a separate field. Preserve class identifiers.
+ if len(words)>=2 and words[-2:]==['COMMON','STOCK']:words=words[:-2]
  while words and words[-1] in ('INC','INCORPORATED','LTD','LIMITED','CO','COMPANY','CORP','CORPORATION','PLC'):words.pop()
  return tuple(words) if words and sum(map(len,words))>=4 else None
 

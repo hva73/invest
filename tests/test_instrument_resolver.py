@@ -111,3 +111,11 @@ class InstrumentResolver(unittest.TestCase):
     self.assertEqual(resolve_us(pluto,[choice],[catalog],[dict(cxe,name='Other Company')])['status'],'UNVERIFIED')
     self.assertEqual(resolve_us(pluto,[choice],[catalog,catalog],[cxe])['status'],'AMBIGUOUS')
     if kind=='ADRC':self.assertIn('ADR',result['type_note'])
+ def test_observed_msft_name_matches_without_erasing_share_class(self):
+  pluto={'asset_id':'synthetic-msft','ticker':'MSFT','name':'Microsoft Corporation Common Stock','exchange':'NASDAQ','currency':'USD','type':'CS','isin':None}
+  catalog={'Code':'MSFT','Name':'Microsoft Corporation','Country':'USA','Exchange':'NASDAQ','Currency':'USD','Type':'Common Stock','Isin':'US5949181045'}
+  choice={'symbol':'MSFT.US','name':'Microsoft Corporation','exchange':'US','currency':'USD','isin':'US5949181045'}
+  self.assertEqual(resolve_us(pluto,[choice],[catalog])['status'],'VERIFIED')
+  self.assertEqual(resolve_us(dict(pluto,name='Microsoft Corporation Class A Common Stock'),[choice],[dict(catalog,Name='Microsoft Corporation Class B')])['status'],'UNVERIFIED')
+  self.assertEqual(resolve_us(pluto,[choice],[dict(catalog,Exchange='NYSE')])['status'],'UNVERIFIED')
+  self.assertEqual(resolve_us(pluto,[dict(choice,isin='US0000000001')],[catalog])['status'],'UNVERIFIED')
