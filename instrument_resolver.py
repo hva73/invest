@@ -17,8 +17,8 @@ def _issuer(value):
  while words and words[-1] in ('INC','INCORPORATED','LTD','LIMITED','CO','COMPANY','CORP','CORPORATION','PLC'):words.pop()
  return tuple(words) if words and sum(map(len,words))>=4 else None
 
-def resolve_us(pluto, eodhd_choices, us_rows, cxe_rows):
- """Verify a US listing with its exact venue and independent security ISIN."""
+def resolve_us(pluto, eodhd_choices, us_rows, cxe_rows=None):
+ """Verify a unique US security using the broker and exact exchange listing."""
  if not isinstance(pluto,dict) or not pluto.get('asset_id'):return {'status':'UNVERIFIED','reason':'PLUTO_ASSET_ID_MISSING'}
  ticker=pluto.get('ticker');exchange=_norm(pluto.get('exchange'));issuer=_issuer(pluto.get('name'));kind=_norm(pluto.get('type'))
  if not isinstance(ticker,str) or not re.fullmatch(r'[A-Z0-9.\-]{1,20}',ticker) or exchange not in ('NYSE','NASDAQ') or _norm(pluto.get('currency'))!='USD' or kind not in ('CS','ADRC') or not issuer:return {'status':'UNVERIFIED','reason':'PLUTO_METADATA_INCOMPLETE'}
@@ -28,9 +28,12 @@ def resolve_us(pluto, eodhd_choices, us_rows, cxe_rows):
  if pluto.get('isin') and _norm(pluto['isin'])!=isin:return {'status':'UNVERIFIED','reason':'PLUTO_ISIN_CONFLICT'}
  choices=[row for row in eodhd_choices if isinstance(row,dict) and row.get('symbol')==ticker+'.US' and _norm(row.get('exchange'))=='US' and (not row.get('currency') or _norm(row['currency'])=='USD') and (not row.get('isin') or _norm(row['isin'])==isin)]
  if len(choices)!=1:return {'status':'AMBIGUOUS' if len(choices)>1 else 'UNVERIFIED','reason':'EODHD_SYMBOL_NOT_UNIQUE'}
- corroborating=[row for row in cxe_rows if isinstance(row,dict) and row.get('isin')==isin and _norm(row.get('instrument_type'))=='EQTY']
- if not corroborating or any(_issuer(row.get('name'))!=issuer for row in corroborating):return {'status':'UNVERIFIED','reason':'CXE_ISIN_NOT_CORROBORATED'}
- return {'status':'VERIFIED','symbol':ticker+'.US','isin':isin,'currency':'USD','currency_basis':'us_catalog_and_pluto','basis':'pluto_asset_us_catalog_cxe_security_isin','catalog_exchange':exchange,'catalog_ticker':ticker,'catalog_type':listing['Type'],'pluto_type':pluto['type'],'type_note':'Pluto angiver ADR; EODHD bruger den brede betegnelse Common Stock.' if kind=='ADRC' else 'Begge kilder angiver en almindelig aktie.','cxe_symbols':sorted({row['symbol'] for row in corroborating if row.get('symbol')}),'cxe_references':[{'symbol':row.get('symbol'),'primary_mic':row.get('mic'),'currency':row.get('currency')} for row in corroborating]}
+ result={'status':'VERIFIED','symbol':ticker+'.US','isin':isin,'currency':'USD','currency_basis':'us_catalog_and_pluto','basis':'pluto_asset_us_listing','catalog_exchange':exchange,'catalog_ticker':ticker,'catalog_type':listing['Type'],'pluto_type':pluto['type'],'type_note':'Pluto angiver ADR; EODHD bruger den brede betegnelse Common Stock.' if kind=='ADRC' else 'Begge kilder angiver en almindelig aktie.'}
+ if cxe_rows is not None:
+  corroborating=[row for row in cxe_rows if isinstance(row,dict) and row.get('isin')==isin and _norm(row.get('instrument_type'))=='EQTY']
+  if not corroborating or any(_issuer(row.get('name'))!=issuer for row in corroborating):return {'status':'UNVERIFIED','reason':'CXE_ISIN_NOT_CORROBORATED'}
+  result.update(basis='pluto_asset_us_catalog_cxe_security_isin',cxe_symbols=sorted({row['symbol'] for row in corroborating if row.get('symbol')}),cxe_references=[{'symbol':row.get('symbol'),'primary_mic':row.get('mic'),'currency':row.get('currency')} for row in corroborating])
+ return result
 
 def resolve_cxe(pluto, eodhd_choices, reference_rows):
  """Cross-check a CHIX common share against normalized official CXE rows.

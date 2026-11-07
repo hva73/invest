@@ -17,15 +17,18 @@ def valid_cxe_evidence(c,uid,request,now):
  row=c.execute('SELECT * FROM hw_cxe_feed_evidence WHERE user_id=? AND asset_id=?',(uid,request.get('asset_id'))).fetchone()
  if not row:return None
  try:
-  data=json.loads(row['payload']);pluto=data['pluto'];source=stamp(data['reference_created_at'])
+  data=json.loads(row['payload']);pluto=data['pluto']
   link=c.execute('SELECT isin,currency,symbol FROM hw_verified_feed_links WHERE user_id=? AND asset_id=?',(uid,request.get('asset_id'))).fetchone()
   keys=(('asset_id','asset_id'),('ticker','ticker'),('exchange','exchange'),('currency','quote_currency'))
-  common=bool(row['status']=='MATCHED' and row['symbol']==request.get('provider_symbol') and 0<=now.timestamp()-row['verified_epoch']<=86400 and -300<=(now-source).total_seconds()<=72*3600 and data.get('reference_source')=='https://accounteu.cboe.com/cxe/market_data/symbol_listing/csv/' and data.get('symbol')==row['symbol'] and all(pluto.get(a) and str(pluto[a]).casefold()==str(request.get(b,'')).casefold() for a,b in keys) and link and link['symbol']==row['symbol'] and link['isin']==data.get('isin') and link['currency']==data.get('currency')==request.get('quote_currency'))
+  common=bool(row['status']=='MATCHED' and row['symbol']==request.get('provider_symbol') and 0<=now.timestamp()-row['verified_epoch']<=7*86400 and data.get('symbol')==row['symbol'] and all(pluto.get(a) and str(pluto[a]).casefold()==str(request.get(b,'')).casefold() for a,b in keys) and link and link['symbol']==row['symbol'] and link['isin']==data.get('isin') and link['currency']==data.get('currency')==request.get('quote_currency'))
   if not common:return False
+  if data.get('basis')=='pluto_asset_cxe_security_reference_eodhd_isin':
+   source=stamp(data['reference_created_at'])
+   if data.get('reference_source')!='https://accounteu.cboe.com/cxe/market_data/symbol_listing/csv/' or not -300<=(now-source).total_seconds()<=72*3600:return False
   if data.get('basis')=='pluto_asset_cxe_security_reference_eodhd_isin':return data.get('cxe_asset_class')=='EQTY' and pluto.get('type')=='CS'
-  if data.get('basis')=='pluto_asset_us_catalog_cxe_security_isin':
+  if data.get('basis') in ('pluto_asset_us_catalog_cxe_security_isin','pluto_asset_us_listing'):
    received=stamp(data['catalog_received_at'])
-   return bool(-300<=(now-received).total_seconds()<=86400 and data.get('catalog_source')=='https://eodhd.com/api/exchange-symbol-list/US' and pluto.get('type') in ('CS','ADRC') and data.get('pluto_type')==pluto.get('type') and data.get('catalog_type')=='Common Stock' and data.get('catalog_exchange')==request.get('exchange') and data.get('catalog_ticker')==request.get('ticker') and data.get('symbol')==request.get('ticker')+'.US' and data.get('cxe_symbols'))
+   return bool(-300<=(now-received).total_seconds()<=7*86400 and data.get('catalog_source')=='https://eodhd.com/api/exchange-symbol-list/US' and pluto.get('type') in ('CS','ADRC') and data.get('pluto_type')==pluto.get('type') and data.get('catalog_type')=='Common Stock' and data.get('catalog_exchange')==request.get('exchange') and data.get('catalog_ticker')==request.get('ticker') and data.get('symbol')==request.get('ticker')+'.US' and (data.get('basis')=='pluto_asset_us_listing' or data.get('cxe_symbols')))
   return False
  except (KeyError,ValueError,TypeError,AttributeError):return False
 
@@ -430,7 +433,7 @@ def view(c,row,now=None):
  quote_feed_verified=bool(latest_payload and latest_payload.get('source')=='eodhd' and latest_payload.get('verification')=='verified' and instrument_match_verified and stamp(sample['received']).timestamp()>=link['verified_epoch'])
  if cxe_link and request.get('provider')=='eodhd' and not quote_feed_verified:
   if row['status']!='PAUSED':effective='NO_DATA';display_status='DATA MANGLER';data_status['signal_status']='WAITING_FOR_DATA'
-  data_status.update(identity_verification='unverified',price=None,bid=None,ask=None,daily_change_pct=None,since_last_pct=None,momentum_pct={str(n):None for n in (1,5,15,30)},price_status='UNVERIFIED')
+  data_status.update(identity_verification='verified' if instrument_match_verified else 'unverified',price=None,bid=None,ask=None,daily_change_pct=None,since_last_pct=None,momentum_pct={str(n):None for n in (1,5,15,30)},price_status='UNVERIFIED')
   display_reasons.append('EODHD_INSTRUMENT_REVALIDATION_REQUIRED' if not instrument_match_verified else 'WAITING_FOR_NEW_VERIFIED_QUOTE')
  quote_freshness='UNKNOWN'
  if latest_payload and latest_payload.get('event_time'):
@@ -676,7 +679,8 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   cycle=request.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':wid})[:24]
   if result['signal']=='BUY' and state.get('signal')!='BUY':candidate_lifecycle.record(c,uid,mode,request['candidate_id'],'BUY_SIGNAL',now.isoformat(),'Deterministisk motor, ikke en udført handel',wid,cycle)
   if sample['source']!='report_inbox':candidate_lifecycle.observe_pluto(c,uid,mode,request['candidate_id'],sample['context'],now.isoformat(),wid,cycle,result['signal'],synthetic=sample['source']=='synthetic')
-  new_status='DEGRADED' if result['signal'] in ['NO_DATA','PAUSE'] else 'ACTIVE'
+  normal_close=result['signal']=='PAUSE' and 'MARKET_CLOSED' in result['reason_codes'] and not (set(result['reason_codes'])-{'MARKET_CLOSED','WARMUP'})
+  new_status='DEGRADED' if result['signal'] in ['NO_DATA','PAUSE'] and not normal_close else 'ACTIVE'
   codes=set(result['reason_codes'])&{'DATA_UNVERIFIED','DATA_STALE','DATA_FUTURE','MARKET_HALTED','MARKET_CLOSED','MARKET_STATUS_UNKNOWN','POSITION_CONTEXT_UNKNOWN','SPREAD_TOO_WIDE','SPREAD_UNKNOWN','LOSS_BUDGET_LIMIT','POSITION_SIZE_LIMIT','EXPOSURE_LIMIT','STOP_BREACHED','EXIT_DEADLINE','RISK_INPUTS_UNKNOWN'}
   oldcodes=set(state.get('alert_codes',[]))
   for code in sorted(codes-oldcodes):event(c,row,'DATA_STALE' if code=='DATA_STALE' else 'RISK_REJECTION',now,code,metrics,'critical' if code in ['STOP_BREACHED','EXIT_DEADLINE'] else 'warning',sample['event_time'])

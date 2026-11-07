@@ -447,11 +447,22 @@ class HoldingAutowatch(unittest.TestCase):
   reference={'created_at':self.now.isoformat(),'rows':[{'symbol':'TSFAd','name':'Taiwan Semiconductor Manufacturing Co Ltd','isin':'US8740391003','currency':'EUR','instrument_type':'EQTY','mic':'XFRA'}]}
   catalog={'received_at':self.now.isoformat(),'rows':[{'Code':'TSM','Name':'Taiwan Semiconductor Manufacturing','Country':'USA','Exchange':'NYSE','Currency':'USD','Type':'Common Stock','Isin':'US8740391003'}]}
   choices={'choices':[{'symbol':'TSM.US','exchange':'US','currency':'USD','isin':'US8740391003'}]}
-  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices),patch('cxe_reference.get_reference',return_value=reference),patch('eodhd_us_reference.get_reference',return_value=catalog):
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices),patch('cxe_reference.get_reference',side_effect=AssertionError('US listing must not depend on Cboe')),patch('eodhd_us_reference.get_reference',return_value=catalog):
    self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),1)
   with app.connect() as c:
    row=c.execute('SELECT * FROM hw_sessions').fetchone();request=json.loads(row['request']);self.assertEqual(request['provider_symbol'],'TSM.US')
    evidence=json.loads(c.execute('SELECT payload FROM hw_cxe_feed_evidence').fetchone()['payload']);self.assertEqual(evidence['pluto_type'],'ADRC');self.assertEqual(evidence['catalog_type'],'Common Stock');self.assertIn('ADR',evidence['type_note'])
+  current=engine.item(app.connect,1,row['watch_id'],False)['session']['data_status']
+  self.assertTrue(current['instrument_match_verified']);self.assertEqual(current['identity_verification'],'verified');self.assertFalse(current['quote_feed_verified'])
+  reused=service.verified_existing_feed(app.connect,1,{'asset_id':'synthetic-asset','ticker':'TSM','currency':'USD'},self.now)
+  self.assertEqual(reused['provider_symbol'],'TSM.US')
+  self.assertIsNone(service.verified_existing_feed(app.connect,1,{'asset_id':'synthetic-asset','ticker':'TSM','currency':'EUR'},self.now))
+  with app.connect() as c:
+   original=c.execute('SELECT payload FROM hw_cxe_feed_evidence').fetchone()['payload'];legacy=json.loads(original)
+   legacy.update(basis='pluto_asset_us_catalog_cxe_security_isin',reference_source='https://accounteu.cboe.com/cxe/market_data/symbol_listing/csv/',reference_created_at=(self.now-timedelta(days=5)).isoformat(),cxe_symbols=['TSFAd'])
+   c.execute('UPDATE hw_cxe_feed_evidence SET payload=?',(json.dumps(legacy),))
+  self.assertTrue(engine.item(app.connect,1,row['watch_id'],False)['session']['data_status']['instrument_match_verified'])
+  with app.connect() as c:c.execute('UPDATE hw_cxe_feed_evidence SET payload=?',(original,))
   from test_hotwatch_engine import tick
   sample=tick(self.now,1,held=True);sample.update(source='eodhd',ticker='TSM',asset_id='synthetic-asset',currency='USD',venue='EODHD:US',market_status='UNKNOWN',feed_type='synthetic EODHD quote',bid=None,ask=None)
   engine.ingest(app.connect,1,row['watch_id'],False,sample,self.now)

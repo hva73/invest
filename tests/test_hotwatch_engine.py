@@ -35,6 +35,11 @@ class HotWatch(unittest.TestCase):
    self.assertIsNone(engine.scheduled_regular_close(c,'CO',datetime(2026,11,6,19,57,tzinfo=timezone.utc)))
    cal['excluded_dates']=['2026-11-05'];c.execute('UPDATE hw_exchange_calendar SET calendar=? WHERE exchange=?',(json.dumps(cal),'CO'))
    self.assertIsNone(engine.scheduled_regular_close(c,'CO',datetime(2026,11,5,19,57,tzinfo=timezone.utc)))
+ def test_closed_market_without_other_errors_is_a_normal_active_session(self):
+  sample=tick(self.now,held=True);sample.update(market_status='CLOSED',session_key='SYNTHETIC-CLOSED')
+  result=engine.ingest(app.connect,1,self.req['watch_id'],True,sample,self.now)
+  self.assertEqual(result['calculation']['signal'],'PAUSE')
+  with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM hw_sessions WHERE watch_id=?',(self.req['watch_id'],)).fetchone()['status'],'ACTIVE')
  def test_novob_shows_closed_regular_session_even_when_quote_is_old(self):
   cal={'open':'09:00:00','close':'17:00:00','working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[]}
   at=datetime(2026,11,5,19,57,tzinfo=timezone.utc)

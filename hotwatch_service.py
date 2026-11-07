@@ -296,7 +296,10 @@ def verified_existing_feed(connect,uid,holding,now=None):
  if cxe:
   try:
    evidence=json.loads(cxe['payload'])['pluto']
-   if cxe['status']!='MATCHED' or not 0<=now.timestamp()-cxe['verified_epoch']<=86400 or any(not holding.get(key) or str(holding[key]).casefold()!=str(evidence.get(key,'')).casefold() for key in ('ticker','name','exchange','currency','type')):return None
+   if not row or not holding.get('ticker') or not holding.get('currency') or any(holding.get(key) and str(holding[key]).casefold()!=str(evidence.get(key,'')).casefold() for key in ('ticker','name','exchange','currency','type')):return None
+   request={'asset_id':aid,'ticker':holding['ticker'],'exchange':holding.get('exchange') or row['exchange'],'quote_currency':holding['currency'],'provider_symbol':row['symbol']}
+   with connect() as c:
+    if not engine.valid_cxe_evidence(c,uid,request,now):return None
   except (KeyError,TypeError,ValueError):return None
  if row and (not holding.get('ticker') or str(holding['ticker']).casefold()==row['ticker'].casefold()) and (not holding.get('currency') or holding['currency']==row['currency']):
   return {'asset_id':aid,'ticker':row['ticker'],'currency':row['currency'],'exchange':row['exchange'],'provider_symbol':row['symbol']}
@@ -316,14 +319,14 @@ def cxe_verified_match(instrument,choices,now=None,connect=None,uid=None):
  from instrument_resolver import resolve_cxe,resolve_us
  exchange=str(instrument.get('exchange','')).upper();kind=str(instrument.get('type','')).upper()
  if not (exchange=='CHIX' and kind=='CS' or exchange in ('NYSE','NASDAQ') and kind in ('CS','ADRC')):return None
- reference=get_reference(now,connect=connect)
- if exchange=='CHIX':match=resolve_cxe(instrument,choices,reference['rows']);extra={}
+ if exchange=='CHIX':
+  reference=get_reference(now,connect=connect);match=resolve_cxe(instrument,choices,reference['rows']);extra={'reference_created_at':reference['created_at'],'reference_source':'https://accounteu.cboe.com/cxe/market_data/symbol_listing/csv/'}
  else:
   if connect is None or uid is None:return None
   from eodhd_us_reference import get_reference as get_us_reference
-  us=get_us_reference(connect,uid);match=resolve_us(instrument,choices,us['rows'],reference['rows']);extra={'catalog_received_at':us['received_at'],'catalog_source':'https://eodhd.com/api/exchange-symbol-list/US'}
+  us=get_us_reference(connect,uid);match=resolve_us(instrument,choices,us['rows']);extra={'catalog_received_at':us['received_at'],'catalog_source':'https://eodhd.com/api/exchange-symbol-list/US'}
  if match.get('status')!='VERIFIED':return None
- return {**match,**extra,'reference_created_at':reference['created_at'],'reference_source':'https://accounteu.cboe.com/cxe/market_data/symbol_listing/csv/','pluto':{k:instrument.get(k) for k in ('asset_id','ticker','name','exchange','currency','type')}}
+ return {**match,**extra,'pluto':{k:instrument.get(k) for k in ('asset_id','ticker','name','exchange','currency','type')}}
 
 def provisional_feed_match(instrument,choices):
  """Choose a unique, clearly unverified quote candidate from multiple independent fields."""
@@ -378,7 +381,7 @@ def recover_automatic_feeds(connect,now=None):
         options=search_eodhd_symbols(connect,row['user_id'],{'quote_currency':holding['currency']},candidate_override={'ticker':holding['ticker'],'company_name':instrument['name']},purpose='holding_identity')
         evidence=cxe_verified_match(instrument,options.get('choices',[]),now,connect,row['user_id'])
         if evidence:
-         known={'provider_symbol':evidence['symbol']};status='MATCHED';reason='Pluto-aktiv er matchet via Cboes aktuelle CXE-reference og samme ISIN hos EODHD'
+         known={'provider_symbol':evidence['symbol']};status='MATCHED';reason='Pluto-instrumentet er matchet til den verificerede EODHD-notering'
          remember_verified_feed(connect,row['user_id'],dict(instrument,isin=evidence['isin']),evidence['symbol'],now,cxe_evidence=evidence)
         else:status='EODHD_IDENTITY_UNCERTAIN'
       else:
@@ -440,7 +443,7 @@ def verify_provisional_feeds(connect,now=None):
     c.execute('INSERT INTO hw_verified_feed_links VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,asset_id) DO UPDATE SET ticker=excluded.ticker,currency=excluded.currency,exchange=excluded.exchange,symbol=excluded.symbol,isin=excluded.isin,verified_epoch=excluded.verified_epoch',(row['user_id'],instrument['asset_id'],instrument['ticker'],instrument['currency'],instrument['exchange'],row['provisional_symbol'],instrument['isin'],now.timestamp()))
     if evidence:c.execute("INSERT INTO hw_cxe_feed_evidence VALUES(?,?,?,?,?,?,'MATCHED') ON CONFLICT(user_id,asset_id) DO UPDATE SET symbol=excluded.symbol,payload=excluded.payload,verified_epoch=excluded.verified_epoch,next_attempt=excluded.next_attempt,status=excluded.status",(row['user_id'],instrument['asset_id'],row['provisional_symbol'],json.dumps(evidence),now.timestamp(),now.timestamp()+43200))
     c.execute('UPDATE hw_sessions SET next_due=? WHERE id=?',(now.timestamp(),row['id']))
-    engine.event(c,current,'INSTRUMENT_VERIFIED',now,('Pluto-aktiv matchet via Cboes CXE-reference og EODHD-ISIN' if evidence else 'EODHD-identitet bekræftet med samme ISIN og valuta')+'; ny signalhistorik starter fra verificerede data')
+    engine.event(c,current,'INSTRUMENT_VERIFIED',now,('Pluto-instrumentet er matchet til den verificerede EODHD-notering' if evidence else 'EODHD-identitet bekræftet med samme ISIN og valuta')+'; ny signalhistorik starter fra verificerede data')
    else:return 0
   delay=60 if status=='PROVIDER_RATE_BUDGET' else 300
   c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?) ON CONFLICT(watch_row_id) DO UPDATE SET next_attempt=excluded.next_attempt,status=excluded.status,updated=excluded.updated',(row['id'],now.timestamp()+delay,status,now.isoformat()))

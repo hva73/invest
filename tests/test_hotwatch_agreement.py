@@ -98,7 +98,7 @@ class Agreement(unittest.TestCase):
   choices={'choices':[{'symbol':'TSLA.US','exchange':'US','currency':'USD','isin':'US88160R1014'}]}
   reference={'created_at':self.now.isoformat(),'rows':[{'symbol':'TL0d','name':'Tesla Inc','isin':'US88160R1014','currency':'EUR','instrument_type':'EQTY','mic':'XETR'}]}
   catalog={'received_at':self.now.isoformat(),'rows':[{'Code':'TSLA','Name':'Tesla Inc','Country':'USA','Exchange':'NASDAQ','Currency':'USD','Type':'Common Stock','Isin':'US88160R1014'}]}
-  with patch.dict('os.environ',{'ESCAPE_HW_AUTOSTART_ENABLED':'1','ESCAPE_HW_AUTOSTART_AFTER':(self.now-timedelta(minutes=1)).isoformat(),'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.verified_discovery_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices),patch('cxe_reference.get_reference',return_value=reference),patch('eodhd_us_reference.get_reference',return_value=catalog):
+  with patch.dict('os.environ',{'ESCAPE_HW_AUTOSTART_ENABLED':'1','ESCAPE_HW_AUTOSTART_AFTER':(self.now-timedelta(minutes=1)).isoformat(),'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.verified_discovery_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices),patch('cxe_reference.get_reference',side_effect=AssertionError('US listing must not depend on Cboe')),patch('eodhd_us_reference.get_reference',return_value=catalog):
    hotwatch_service.auto_discover(app.connect)
    self.assertEqual(hotwatch_service.recover_automatic_feeds(app.connect,self.now),1)
   with app.connect() as c:watch=c.execute("SELECT watch_id FROM hw_sessions WHERE candidate_id='synthetic-tsla'").fetchone()['watch_id']
