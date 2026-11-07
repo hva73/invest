@@ -60,6 +60,8 @@ def init():
         portfolios.init(c)
         import portfolio_data
         portfolio_data.init(c)
+        import sector_intelligence
+        sector_intelligence.init(c)
         import trade_service
         trade_service.init(c)
         import market_data
@@ -254,6 +256,9 @@ class Handler(BaseHTTPRequestHandler):
                 try:result=journal_projection.read(connect,user_id,days=int(q.get('days',['7'])[0]),source=q.get('source',['all'])[0],kind=q.get('kind',['all'])[0],before=q.get('before',[None])[0],limit=int(q.get('limit',['100'])[0]))
                 except (ValueError,OverflowError):return self.send(400,{'error':'Ugyldigt journalfilter'})
                 return self.send(200,result)
+            if self.path=='/api/sector-intelligence':
+                import sector_intelligence
+                return self.send(200,sector_intelligence.read(connect,user_id))
             if self.path=='/api/state':
                 import portfolios
                 with connect() as c:
@@ -273,7 +278,7 @@ class Handler(BaseHTTPRequestHandler):
         if not path:return self.send(404,{'error':'Ikke fundet'})
         kind={'.html':'text/html; charset=utf-8','.js':'application/javascript','.css':'text/css','.json':'application/manifest+json','.svg':'image/svg+xml'}[Path(path).suffix]
         body=(ROOT/'static'/path).read_bytes()
-        if path=='app.js':body=(ROOT/'static/journal-ui.js').read_bytes()+b'\n'+(ROOT/'static/dashboard-ui.js').read_bytes()+b'\n'+(ROOT/'static/candidate-ui.js').read_bytes()+b'\n'+(ROOT/'static/engine-ui.js').read_bytes()+b'\n'+(ROOT/'static/intel-ui.js').read_bytes()+b'\n'+(ROOT/'static/position-ui.js').read_bytes()+b'\n'+(ROOT/'static/overview-ui.js').read_bytes()+b'\n'+(ROOT/'static/market-ui.js').read_bytes()+b'\n'+(ROOT/'static/report-ui.js').read_bytes()+b'\n'+(ROOT/'static/trade-ui.js').read_bytes()+b'\n'+body
+        if path=='app.js':body=(ROOT/'static/sector-ui.js').read_bytes()+b'\n'+(ROOT/'static/journal-ui.js').read_bytes()+b'\n'+(ROOT/'static/dashboard-ui.js').read_bytes()+b'\n'+(ROOT/'static/candidate-ui.js').read_bytes()+b'\n'+(ROOT/'static/engine-ui.js').read_bytes()+b'\n'+(ROOT/'static/intel-ui.js').read_bytes()+b'\n'+(ROOT/'static/position-ui.js').read_bytes()+b'\n'+(ROOT/'static/overview-ui.js').read_bytes()+b'\n'+(ROOT/'static/market-ui.js').read_bytes()+b'\n'+(ROOT/'static/report-ui.js').read_bytes()+b'\n'+(ROOT/'static/trade-ui.js').read_bytes()+b'\n'+body
         self.send(200,body,kind)
     def do_POST(self):
         import hotwatch_api

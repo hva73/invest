@@ -748,6 +748,14 @@ class Runner:
     except Exception:logging.getLogger('escape.hotwatch').exception('cxe_feed_verification_error')
     self.stop.wait(15)
   holding_thread=threading.Thread(target=holdings_loop,name='hotwatch-holdings',daemon=True);holding_thread.start()
+  def sector_loop():
+   while not self.stop.is_set():
+    try:
+     import sector_intelligence
+     sector_intelligence.refresh_tick(self.connect)
+    except Exception:logging.getLogger('escape.hotwatch').error('sector_refresh_error')
+    self.stop.wait(60)
+  sector_thread=threading.Thread(target=sector_loop,name='sector-data',daemon=True);sector_thread.start()
   def discovery_loop():
    cursor=0
    while not self.stop.is_set():
@@ -760,7 +768,7 @@ class Runner:
     self.drain()
     self.stop.wait(interval)
   finally:
-   self.stop.set();thread.join(timeout=6);holding_thread.join(timeout=2);candidate_thread.join(timeout=2);discovery_thread.join(timeout=2)
+   self.stop.set();thread.join(timeout=6);holding_thread.join(timeout=2);candidate_thread.join(timeout=2);discovery_thread.join(timeout=2);sector_thread.join(timeout=2)
    if thread.is_alive():logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'heartbeat_shutdown_timeout'}))
    else:self.heartbeat('stopped')
 

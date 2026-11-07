@@ -10,10 +10,14 @@ READ_TOOLS={'get_accounts':'portfolioId','get_positions':'portfolioId','get_port
 def init(c):
     import dashboard_projection
     dashboard_projection.init(c)
+    import sector_intelligence
+    sector_intelligence.init(c)
     c.execute('CREATE TABLE IF NOT EXISTS pluto_refresh_checks(user_id INTEGER NOT NULL REFERENCES users(id),resource TEXT NOT NULL,attempted REAL NOT NULL,PRIMARY KEY(user_id,resource))')
     c.execute('CREATE TABLE IF NOT EXISTS portfolio_snapshots(portfolio_id INTEGER PRIMARY KEY REFERENCES portfolios(id),user_id INTEGER NOT NULL REFERENCES users(id),observed TEXT NOT NULL,payload TEXT NOT NULL,last_error TEXT,last_attempt TEXT NOT NULL)')
     for row in c.execute('SELECT portfolio_id,user_id,payload FROM portfolio_snapshots'):
-        dashboard_projection.remember(c,row['user_id'],row['portfolio_id'],json.loads(row['payload']))
+        payload=json.loads(row['payload'])
+        dashboard_projection.remember(c,row['user_id'],row['portfolio_id'],payload)
+        sector_intelligence.capture(c,row['user_id'],row['portfolio_id'],payload)
     for row in c.execute('SELECT DISTINCT user_id FROM portfolio_snapshots').fetchall():
         dashboard_projection.remember_portfolio_value(c,row['user_id'])
 
@@ -287,6 +291,8 @@ def save(c,user_id,portfolio_id,payload):
         import dashboard_projection
         dashboard_projection.remember(c,user_id,portfolio_id,payload)
         dashboard_projection.remember_portfolio_value(c,user_id)
+        import sector_intelligence
+        sector_intelligence.capture(c,user_id,portfolio_id,payload)
 
 def snapshots(c,user_id):
     return {str(row['portfolio_id']):{'data':json.loads(row['payload']),'last_error':row['last_error'],'last_attempt':row['last_attempt']} for row in c.execute('SELECT * FROM portfolio_snapshots WHERE user_id=?',(user_id,))}

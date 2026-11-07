@@ -14,9 +14,12 @@ row.hot_watch.session.warmup.market_status_unknown=true;html=ui.render(state);as
 row.hot_watch.session.warmup={analysis_only:true,complete:true,count:34,required:34,market_status_unknown:true,data_stale:false};html=ui.render(state);assert.match(html,/WARMUP COMPLETE · MARKET UNKNOWN/);
 row.hot_watch.session.warmup.data_stale=true;html=ui.render(state);assert.match(html,/WARMUP COMPLETE · DATA STALE/);
 row.hot_watch={session:{watch_id:'synthetic-watch',signal:'WAIT',display_status:'AFVENT'}};html=ui.render(state);assert.match(html,/data-dashboard-watch="synthetic-watch"/);assert.match(html,/AFVENT/);
+assert.match(html,/dash-action-badge signal-wait/);
 state.dashboard.orders=[{ticker:'ORDER_ONLY',status:'ACCEPTED'}];state.dashboard.critical_sessions=[{ticker:'ERROR_ONLY',status:'ERROR'}];
 row.critical=true;row.conflicts=['conflict'];row.action='REDUCÉR';html=ui.render(state);let attention=html.match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];
 assert.doesNotMatch(attention,/ORDER_ONLY|ERROR_ONLY|REDUCÉR|TEST/);assert.match(attention,/Ingen køb eller salg/);
 row.action='SÆLG';html=ui.render(state);attention=html.match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];assert.match(attention,/Vurdering: SÆLG/);assert.match(attention,/TEST/);
-row.action=null;row.hot_watch.session.signal='BUY';html=ui.render(state);attention=html.match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];assert.match(attention,/KØBSSIGNAL/);assert.match(attention,/data-dashboard-watch="synthetic-watch"/);
+row.action=null;row.hot_watch.session.signal='BUY';row.hot_watch.session.display_status='KØBSSIGNAL';html=ui.render(state);attention=html.match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];assert.match(attention,/KØBSSIGNAL/);assert.match(attention,/dash-attention-row signal-buy/);assert.match(html,/dash-action-badge signal-buy/);assert.match(attention,/data-dashboard-watch="synthetic-watch"/);
+row.hot_watch.session.signal='SELL';row.hot_watch.session.display_status='SÆLGSIGNAL';html=ui.render(state);assert.match(html,/dash-attention-row signal-sell/);assert.match(html,/dash-action-badge signal-sell/);
+row.hot_watch.session.signal='NO_DATA';row.hot_watch.session.display_status='DATA FOR GAMLE';html=ui.render(state);assert.doesNotMatch(html,/dash-action-badge signal-(buy|sell|wait)/);
 console.log('PASS: estimated result is labeled, signed values are colored, empty columns are omitted');
