@@ -17,6 +17,7 @@ def init(c):
  if 'identity_version' not in {r[1] for r in c.execute('PRAGMA table_info(sector_assets)')}:c.execute('ALTER TABLE sector_assets ADD COLUMN identity_version INTEGER NOT NULL DEFAULT 0')
  if 'original_sector' not in {r[1] for r in c.execute('PRAGMA table_info(sector_assets)')}:c.execute('ALTER TABLE sector_assets ADD COLUMN original_sector TEXT')
  c.execute('CREATE TABLE IF NOT EXISTS sector_instruments(user_id INTEGER NOT NULL,asset_id TEXT NOT NULL,ticker TEXT,currency TEXT,exchange TEXT,isin TEXT,instrument_type TEXT,name TEXT,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL,PRIMARY KEY(user_id,asset_id))')
+ c.execute('CREATE TABLE IF NOT EXISTS sector_identity_attempts(user_id INTEGER NOT NULL,asset_id TEXT NOT NULL,fingerprint TEXT NOT NULL,next_attempt REAL NOT NULL,PRIMARY KEY(user_id,asset_id))')
  c.execute('CREATE TABLE IF NOT EXISTS sector_fx(currency TEXT PRIMARY KEY, rate REAL, event_time TEXT, status TEXT NOT NULL, updated REAL NOT NULL, next_attempt REAL NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS sector_fund_exposure(user_id INTEGER NOT NULL,asset_id TEXT NOT NULL,symbol TEXT NOT NULL,payload TEXT,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL,PRIMARY KEY(user_id,asset_id))')
  c.execute('CREATE TABLE IF NOT EXISTS sector_benchmarks(symbol TEXT PRIMARY KEY,region TEXT NOT NULL,sector TEXT NOT NULL,name TEXT,currency TEXT,exchange TEXT,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL)')
@@ -74,8 +75,16 @@ def _pluto_candidate(connect,now):
   except (ValueError,TypeError):continue
   for pos in payload.get('positions',[]):
    aid=pos.get('asset_id');old=existing.get((snap['user_id'],aid))
-   changed=old and any(pos.get(key) and old.get(key) and str(pos[key]).casefold()!=str(old[key]).casefold() for key in ('ticker','currency'))
-   if aid and pos.get('kind')!='collection' and (old is None or old['next_attempt']<=now or changed):return snap['user_id'],aid,pos.get('ticker')
+   if not aid or pos.get('kind')=='collection':continue
+   if old is None or old['next_attempt']<=now:return snap['user_id'],aid,pos.get('ticker')
+   changed=any(pos.get(key) and old.get(key) and str(pos[key]).casefold()!=str(old[key]).casefold() for key in ('ticker','currency'))
+   if changed:
+    fingerprint=json.dumps([pos.get('ticker'),pos.get('currency')],separators=(',',':'))
+    with connect() as c:
+     previous=c.execute('SELECT fingerprint,next_attempt FROM sector_identity_attempts WHERE user_id=? AND asset_id=?',(snap['user_id'],aid)).fetchone()
+     if previous and previous['fingerprint']==fingerprint and previous['next_attempt']>now:continue
+     c.execute('INSERT OR REPLACE INTO sector_identity_attempts VALUES(?,?,?,?)',(snap['user_id'],aid,fingerprint,now+300))
+    return snap['user_id'],aid,pos.get('ticker')
  return None
 
 def _kind(kind):

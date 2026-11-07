@@ -100,6 +100,28 @@ class SectorIntelligenceTest(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'test'}),patch.object(sector,'_client',return_value=Client()):sector.refresh_tick(self.connect)
   with self.connect() as c:row=c.execute('SELECT * FROM sector_assets').fetchone()
   self.assertEqual((row['sector'],row['status']),('Teknologi','OK'))
+ def test_conflicting_cached_metadata_cannot_starve_the_market_queue(self):
+  now=time.time()
+  with self.connect() as c:
+   c.execute("INSERT INTO portfolios VALUES(1,1,1,'pluto')")
+   c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?)',(1,1,json.dumps({'positions':[{'asset_id':'a','ticker':'AAA','currency':'USD'}]})))
+   c.execute('INSERT INTO sector_instruments VALUES(?,?,?,?,?,?,?,?,?,?,?)',(1,'a','AAA','EUR','NASDAQ',None,'CS','Example','OK',now,now+3600))
+  self.assertEqual(sector._pluto_candidate(self.connect,now),(1,'a','AAA'))
+  self.assertIsNone(sector._pluto_candidate(self.connect,now+5))
+  self.assertEqual(sector._pluto_candidate(self.connect,now+301),(1,'a','AAA'))
+ def test_market_continues_after_one_unresolved_holding(self):
+  now=time.time();date=__import__('datetime').datetime.fromtimestamp(now,__import__('datetime').timezone.utc).date().isoformat()
+  with self.connect() as c:
+   c.execute("INSERT INTO portfolios VALUES(1,1,1,'pluto')")
+   c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?)',(1,1,json.dumps({'positions':[{'asset_id':'a','ticker':'AAA','currency':'USD'}]})))
+   c.execute('INSERT INTO sector_instruments VALUES(?,?,?,?,?,?,?,?,?,?,?)',(1,'a','AAA','EUR','NASDAQ',None,'CS','Example','OK',now,now+3600))
+   c.execute('INSERT INTO fx_snapshots(source_date,payload) VALUES(?,?)',(date,json.dumps({'rates':{'DKK':7.4,'USD':1.1}})))
+  class Client:
+   def _http(self,base,path,params):return {'status':'OK','payload':[{'date':'2026-11-05','close':10},{'date':'2026-11-06','close':11}]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'test'}),patch.object(sector,'_client',return_value=Client()),patch.object(sector,'_reuse_hotwatch_asset',return_value=True):
+   sector.refresh_tick(self.connect);sector.refresh_tick(self.connect)
+  with self.connect() as c:market=c.execute("SELECT status FROM sector_market WHERE symbol='XLK.US'").fetchone()
+  self.assertIsNotNone(market);self.assertEqual(market['status'],'OK')
  def test_reuses_stored_watch_metadata_without_new_pluto_lookup(self):
   now=time.time();proof={'symbol':'BTC-USD.CC','pluto':{'asset_id':'btc','ticker':'BTC','currency':'USD','exchange':'WINTERMUTE','type':'CRYPTO','name':'Bitcoin'}}
   with self.connect() as c:
