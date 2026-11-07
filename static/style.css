@@ -306,3 +306,5 @@ main,#content,.panel,.grid>*,.formgrid>*,.actions>*{min-width:0}.financial-panel
 #dashboard-detail .market-period-buttons,.market-chart-dialog .market-period-buttons{display:flex;flex-wrap:wrap;gap:6px}
 #dashboard-detail .market-period-buttons button,.market-chart-dialog .market-period-buttons button{min-height:40px;padding:8px 14px}
 @media(max-width:700px){#dashboard-detail,.market-chart-dialog{width:96vw;max-width:96vw}#dashboard-detail .market-slot,.market-chart-dialog .market-slot{padding:14px}#dashboard-detail .market-plot svg,.market-chart-dialog .market-plot svg{height:190px}.market-period-buttons{flex-wrap:wrap}}
+.dash-table-overview th:first-child{width:20%}.dash-table-overview th:nth-child(2){width:auto;text-align:right}.dash-table-overview td:nth-child(2){text-align:right}.dash-table-overview .dash-instrument .dash-warning{display:block;font-size:10px}
+@media(max-width:900px){.dash-table-overview .dash-daily,.dash-table-overview .dash-pnl{grid-row:2}.dash-table-overview .dash-price{grid-row:3}.dash-table-overview .dash-since{grid-row:5}}
