@@ -23,9 +23,15 @@ for key in keys:
 
 import app
 from hotwatch_adapters import EODHDAdapter
+import hotwatch_engine as engine
 
 try:
     with app.connect() as con:
+        btc = con.execute("SELECT * FROM hw_sessions WHERE is_test=0 AND purpose='automatic holding watch' AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND json_extract(request,'$.ticker')='BTC' ORDER BY id").fetchall()
+        print('NU UTC:', engine.utc().isoformat())
+        for item in btc:
+            view = engine.view(con, item)
+            print('BTC:', json.dumps({'session':item['id'], 'kilde':view['request']['provider'], 'kurstid':view['last_data_at'], 'kurstilstand':view['data_status']['quote_freshness'], 'status':view['display_status'], 'interval_sek':view['effective_min_interval_s'], 'næste_scan':view['next_due_at'], 'fejl':view['last_error']}, ensure_ascii=False))
         row = con.execute("SELECT * FROM hw_sessions WHERE is_test=0 AND purpose='automatic holding watch' AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND json_extract(request,'$.ticker')='NOVOB' ORDER BY id DESC LIMIT 1").fetchone()
     if not row:
         raise SystemExit('Ingen aktiv NOVOB-session fundet')
