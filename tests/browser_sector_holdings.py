@@ -21,5 +21,13 @@ try:
   with app.connect() as c:c.execute("UPDATE sector_holding_prices SET status='OK',payload=?,updated=? WHERE ticker='NEE'",(json.dumps({'periods':{'30':{'value':10,'from':'2026-10-01','to':today}},'basis':'justeret'}),time.time()))
   expect(page.locator('.si-etf-metrics strong.positive')).to_contain_text('+10,00 %',timeout=18000);expect(page.locator('.si-etf-metrics small')).to_contain_text('Fondsandel')
   page.locator('[data-sector-holdings-close]').click();page.locator('[data-sector-region="Europa"]').click();page.locator('[data-sector-market="EXH4.XETRA"]').click();expect(page.locator('[role=dialog]')).to_be_visible();print('Europa opened:',page.locator('[role=dialog]').inner_text()[:120])
-  assert not errors,errors;print('PASS: actual sector UI, queued issuer data and one-hour clock skew');browser.close()
+  page.locator('[data-sector-holdings-close]').click()
+  for width in (320,1440):
+   page.set_viewport_size({'width':width,'height':900})
+   for key,title in [('value','Depotværdi'),('result','Resultat oplyst af Pluto'),('best','Bedste sektor'),('worst','Svageste sektor')]:
+    page.locator(f'[data-sector-summary="{key}"]').click()
+    dialog=page.locator('#si-summary-dialog')
+    expect(dialog).to_be_visible();expect(dialog.locator('h2')).to_have_text(title)
+    page.keyboard.press('Escape');expect(dialog).not_to_be_visible()
+  assert not errors,errors;print('PASS: sector holdings, summary dialogs, mobile and desktop');browser.close()
 finally:server.shutdown();server.server_close();case.tearDown()
