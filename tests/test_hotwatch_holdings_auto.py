@@ -251,11 +251,16 @@ class HoldingAutowatch(unittest.TestCase):
     self.assertEqual(sample['currency'],'USD');self.assertEqual(sample['context']['quantity'],quantities[req['portfolio_ids'][0]])
     out=engine.ingest(app.connect,1,row['watch_id'],False,sample,self.now)
     self.assertEqual(out['calculation']['signal'],'NO_DATA')
-    self.assertEqual(out['session']['display_status'],'KURS MODTAGET · AFVENTER SIGNALDATA')
+    self.assertEqual(out['session']['display_status'],'KURS MODTAGET · MARKEDSSTATUS UKENDT')
     self.assertEqual(out['session']['effective_min_interval_s'],60)
     self.assertEqual((engine.stamp(out['session']['next_due_at'])-self.now).total_seconds(),60)
   with app.connect() as c:
    self.assertEqual(c.execute('SELECT count(*) FROM hw_samples').fetchone()[0],4)
+   import dashboard_projection
+   for row in after:
+    pid=json.loads(row['request'])['portfolio_ids'][0]
+    displayed=dashboard_projection.position_hotwatch(c,1,pid,aid,None)['session']
+    self.assertEqual(displayed['display_status'],'WARMUP');self.assertEqual(displayed['warmup']['count'],1);self.assertTrue(displayed['warmup']['market_status_unknown']);self.assertNotIn('historical',displayed['warmup'])
    current=c.execute('SELECT * FROM hw_sessions WHERE id=?',(after[-1]['id'],)).fetchone();stale=engine.view(c,current,self.now+timedelta(seconds=131))
    self.assertEqual(stale['data_status']['quote_freshness'],'STALE');self.assertEqual(stale['signal'],'NO_DATA')
    c.execute('DELETE FROM hw_cxe_feed_evidence')

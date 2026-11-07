@@ -10,6 +10,7 @@ state.dashboard.portfolio_value_history.periods.day[1].amount='90';html=ui.rende
 row.daily={percent:'2',amount:'1',currency:'DKK',basis:'pluto_reported_daily_change',from:null,to:'2026-11-05T12:00:00Z'};html=ui.render(state);assert.match(html,/<th scope="col">I dag<\/th>/);assert.match(html,/dash-change positive/);
 row.hot_watch={auto_status:{status:'PROVIDER_RATE_BUDGET'}};html=ui.render(state);assert.match(html,/data-dashboard-watch-pending="0"/);assert.match(html,/Afventer datakilde/);
 row.hot_watch={session:{watch_id:'synthetic-watch',signal:'NO_DATA',display_status:'WARMUP',warmup:{count:11,required:34}}};html=ui.render(state);assert.match(html,/WARMUP 11 af 34/);
+row.hot_watch.session.warmup.market_status_unknown=true;html=ui.render(state);assert.match(html,/WARMUP 11 af 34 · MARKEDSSTATUS UKENDT/);
 row.hot_watch={session:{watch_id:'synthetic-watch',signal:'WAIT',display_status:'AFVENT'}};html=ui.render(state);assert.match(html,/data-dashboard-watch="synthetic-watch"/);assert.match(html,/AFVENT/);
 state.dashboard.orders=[{ticker:'ORDER_ONLY',status:'ACCEPTED'}];state.dashboard.critical_sessions=[{ticker:'ERROR_ONLY',status:'ERROR'}];
 row.critical=true;row.conflicts=['conflict'];row.action='REDUCÉR';html=ui.render(state);let attention=html.match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];
