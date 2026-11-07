@@ -218,6 +218,11 @@ class Handler(BaseHTTPRequestHandler):
                 if len(mode)!=1 or mode[0] not in ['true','false']:return self.send(400,{'error':'Ugyldig rapporttype'})
                 with connect() as c:rows=intel_workflows.candidates(c,user_id,mode[0]=='true',include_history_market=False)
                 return self.send(200,{'candidates':rows,'is_test':mode[0]=='true'})
+            if self.path=='/api/sector-intelligence/holdings':
+                import sector_intelligence
+                try:result=sector_intelligence.request_benchmark_holdings(connect,user_id,data.get('symbol'))
+                except ValueError as error:return self.send(400,{'error':str(error)})
+                return self.send(200,result)
             if self.path=='/api/reports/hot-watch':
                 import intel_workflows
                 q=parse_qs(request.query);mode=q.get('is_test',['false'])
@@ -332,6 +337,11 @@ class Handler(BaseHTTPRequestHandler):
             if not s:return self.send(401,{'error':'Log ind først'})
             if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),s['csrf']):return self.send(403,{'error':'Ugyldigt sikkerhedstoken'})
             user_id=s['user_id']
+            if self.path=='/api/sector-intelligence/holdings':
+                import sector_intelligence
+                try:result=sector_intelligence.request_benchmark_holdings(connect,user_id,data.get('symbol'))
+                except ValueError as error:return self.send(400,{'error':str(error)})
+                return self.send(200,result)
             if self.path=='/api/reports/hot-watch':
                 import intel_workflows
                 status,result=intel_workflows.record(connect,user_id,data)

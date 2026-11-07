@@ -22,6 +22,7 @@ def init(c):
  c.execute('CREATE TABLE IF NOT EXISTS sector_fund_exposure(user_id INTEGER NOT NULL,asset_id TEXT NOT NULL,symbol TEXT NOT NULL,payload TEXT,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL,PRIMARY KEY(user_id,asset_id))')
  c.execute('CREATE TABLE IF NOT EXISTS sector_benchmarks(symbol TEXT PRIMARY KEY,region TEXT NOT NULL,sector TEXT NOT NULL,name TEXT,currency TEXT,exchange TEXT,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL)')
  if 'proof_source' not in {r[1] for r in c.execute('PRAGMA table_info(sector_benchmarks)')}:c.execute('ALTER TABLE sector_benchmarks ADD COLUMN proof_source TEXT')
+ c.execute('CREATE TABLE IF NOT EXISTS sector_benchmark_holdings(symbol TEXT PRIMARY KEY,payload TEXT,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS sector_market(symbol TEXT PRIMARY KEY,region TEXT NOT NULL,sector TEXT NOT NULL,payload TEXT,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL)')
  if 'price_basis' not in {r[1] for r in c.execute('PRAGMA table_info(sector_market)')}:c.execute('ALTER TABLE sector_market ADD COLUMN price_basis TEXT')
  c.execute('CREATE TABLE IF NOT EXISTS sector_history(user_id INTEGER NOT NULL,portfolio_id INTEGER NOT NULL,bucket INTEGER NOT NULL,observed TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(user_id,portfolio_id,bucket))')
@@ -35,6 +36,10 @@ def init(c):
   c.execute("UPDATE sector_instruments SET next_attempt=0 WHERE status IN ('PLUTO_UNAVAILABLE','PLUTO_TYPE_MISSING')")
   c.execute("UPDATE sector_market SET next_attempt=0 WHERE status='UNVERIFIED_BENCHMARK'")
   c.execute("INSERT INTO sector_migrations VALUES('reuse_verified_feed_v2',?)",(time.time(),))
+ if not c.execute("SELECT 1 FROM sector_migrations WHERE name='benchmark_search_v1'").fetchone():
+  c.execute("UPDATE sector_benchmarks SET status='TRY_SEARCH',next_attempt=0 WHERE region IN ('Globalt','Europa') AND status!='VERIFIED'")
+  c.execute("UPDATE sector_market SET next_attempt=0 WHERE status='UNVERIFIED_BENCHMARK' OR NOT EXISTS (SELECT 1 FROM sector_benchmarks b WHERE b.symbol=sector_market.symbol AND b.status='VERIFIED' AND b.updated>=?)",(time.time()-7*86400,))
+  c.execute("INSERT INTO sector_migrations VALUES('benchmark_search_v1',?)",(time.time(),))
 
 def capture(c,uid,pid,payload):
  if not payload.get('positions_complete') or not payload.get('observed'):return
@@ -165,12 +170,42 @@ def _benchmark_identity(region,sector,symbol,general):
  code=str(general.get('Code') or '').upper();name=str(general.get('Name') or '');upper=name.upper()
  exchange=str(general.get('Exchange') or '').upper().strip();currency=str(general.get('CurrencyCode') or '').upper()
  typ=re.sub(r'[^A-Z0-9]','',str(general.get('Type') or '').upper())
- if code!=symbol.rsplit('.',1)[0] or currency!='USD' or typ not in ('ETF','ETP','FUND') or exchange not in ('NYSE ARCA','NYSEARCA','NASDAQ','NYSE','BATS','CBOE','ARCA'):return False
+ if code!=symbol.rsplit('.',1)[0] or currency!='USD' or typ not in ('ETF','ETP','FUND') or exchange not in ('NYSE ARCA','NYSEARCA','NASDAQ','NYSE','BATS','CBOE','ARCA','US'):return False
  if region=='USA' and ('SELECT SECTOR' not in upper or 'SPDR' not in upper):return False
  if region=='Globalt' and ('GLOBAL' not in upper or 'ISHARES' not in upper):return False
  if region=='Europa' and ('EUROPE' not in upper or 'FINANCIAL' not in upper):return False
  terms={'Teknologi':('TECH',),'Sundhed':('HEALTH',),'Finans':('FINANCIAL',),'Industri':('INDUSTRIAL',),'Energi':('ENERGY',),'Forbrug, cyklisk':('CONSUMER DISCRETIONARY','CONSUMER CYCLICAL'),'Forbrug, stabilt':('CONSUMER STAPLES','CONSUMER DEFENSIVE'),'Materialer':('MATERIAL',),'Forsyning':('UTILIT',),'Ejendomme':('REAL ESTATE',),'Kommunikation':('COMMUNICATION','TELECOM')}
  return any(word in upper for word in terms.get(sector,()))
+
+def request_benchmark_holdings(connect,uid,symbol):
+ """Queue only configured, verified public benchmarks. No broker operations."""
+ allowed={s for items in PROXIES.values() for s,_ in items}
+ if not isinstance(symbol,str) or symbol not in allowed:raise ValueError('Ukendt sektorfond')
+ now=time.time()
+ with connect() as c:
+  benchmark=c.execute('SELECT status,updated FROM sector_benchmarks WHERE symbol=?',(symbol,)).fetchone()
+  if not benchmark or benchmark['status']!='VERIFIED' or not 0<=now-benchmark['updated']<=7*86400:return {'status':'UNVERIFIED_BENCHMARK'}
+  row=c.execute('SELECT status,updated,next_attempt FROM sector_benchmark_holdings WHERE symbol=?',(symbol,)).fetchone()
+  if row and (row['status'] in ('PENDING','TRY_TOP10') or row['status']=='OK' and now-row['updated']<86400 or row['status'] not in ('OK','PENDING','TRY_TOP10') and row['next_attempt']>now):return {'status':row['status']}
+  c.execute('INSERT OR REPLACE INTO sector_benchmark_holdings VALUES(?,?,?,?,?)',(symbol,None,'PENDING',now,now))
+ return {'status':'PENDING'}
+
+def _holding_rows(payload):
+ if not isinstance(payload,(dict,list)):return []
+ if isinstance(payload,dict):
+  if isinstance(payload.get('ETF_Data'),dict):payload=payload['ETF_Data']
+  for key in ('Holdings','Top_10_Holdings'):
+   if isinstance(payload.get(key),(dict,list)):payload=payload[key];break
+ rows=list(payload.values()) if isinstance(payload,dict) else payload
+ result=[];seen=set()
+ for row in rows:
+  if not isinstance(row,dict):continue
+  code=row.get('Code');name=row.get('Name');exchange=row.get('Exchange');weight=_num(row.get('Assets_%'))
+  if not isinstance(code,str) or not code.strip() or not isinstance(name,str) or not name.strip() or weight is None or not 0<=weight<=100:continue
+  identity=(code.casefold(),str(exchange or '').casefold())
+  if identity in seen:continue
+  seen.add(identity);result.append({'ticker':code[:40],'name':name[:200],'exchange':exchange[:40] if isinstance(exchange,str) else None,'weight':weight})
+ return sorted(result,key=lambda r:(-r['weight'],r['ticker']))
 
 def refresh_tick(connect):
  """Do at most one low-priority EODHD request per invocation."""
@@ -178,6 +213,21 @@ def refresh_tick(connect):
  if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1' or not os.environ.get('ESCAPE_EODHD_API_KEY','').strip():
   candidate=_pluto_candidate(connect,now)
   if candidate and not _reuse_hotwatch_asset(connect,candidate,now):_fetch_pluto(connect,candidate,now)
+  return
+ # Only the user's selected verified ETF is queried; results are cached.
+ with connect() as c:
+  pending=c.execute("SELECT * FROM sector_benchmark_holdings WHERE status IN ('PENDING','TRY_TOP10') AND next_attempt<=? ORDER BY updated LIMIT 1",(now,)).fetchone()
+ if pending:
+  symbol=pending['symbol'];fallback=pending['status']=='TRY_TOP10'
+  endpoint='ETF_Data::Top_10_Holdings' if fallback else 'ETF_Data::Holdings'
+  response=_client(connect,0)._http(HTTP_BASE,'/fundamentals/'+quote(symbol,safe=''),{'fmt':'json','filter':endpoint})
+  rows=_holding_rows(response.get('payload')) if response['status']=='OK' else []
+  if rows:status='OK';retry=now+86400;payload=json.dumps({'rows':rows[:50],'total_reported':len(rows),'top10_only':fallback})
+  elif response['status'] in ('LOCAL_BUDGET_EXHAUSTED','RATE_LIMIT','NETWORK_OR_RESPONSE_ERROR'):
+   status=pending['status'];retry=now+_retry_delay(response['status']);payload=None
+  elif not fallback:status='TRY_TOP10';retry=now;payload=None
+  else:status=response['status'] if response['status']!='OK' else 'NO_DATA';retry=now+_retry_delay(status);payload=None
+  with connect() as c:c.execute('INSERT OR REPLACE INTO sector_benchmark_holdings VALUES(?,?,?,?,?)',(symbol,payload,status,now,retry))
   return
  # If ECB reference rates are absent, collect a timestamped EODHD FX quote
  # for each currency actually held. This is separate from trading prices.
@@ -316,13 +366,35 @@ def refresh_tick(connect):
   if benchmark and benchmark['next_attempt']>now:
    with connect() as c:c.execute('INSERT OR REPLACE INTO sector_market(symbol,region,sector,payload,status,updated,next_attempt) VALUES(?,?,?,?,?,?,?)',(symbol,region,sector,None,'UNVERIFIED_BENCHMARK',now,benchmark['next_attempt']))
    return
-  result=_client(connect,0)._http(HTTP_BASE,'/fundamentals/'+quote(symbol,safe=''),{'fmt':'json','filter':'General'})
-  general=result.get('payload');general=general.get('General',general) if isinstance(general,dict) else {}
-  verified=result['status']=='OK' and _benchmark_identity(region,sector,symbol,general)
-  status='VERIFIED' if verified else result['status'] if result['status']!='OK' else 'IDENTITY_UNVERIFIED'
-  retry=now+(7*86400 if verified else 86400)
+  # Search returns the ticker, name, type and currency even on plans that
+  # do not include ETF Fundamentals. Verify once and reuse the result.
+  use_fundamentals=bool(benchmark and benchmark['status']=='TRY_FUNDAMENTALS')
+  if use_fundamentals:
+   result=_client(connect,0)._http(HTTP_BASE,'/fundamentals/'+quote(symbol,safe=''),{'fmt':'json','filter':'General'})
+   general=result.get('payload');general=general.get('General',general) if isinstance(general,dict) else {}
+   verified=result['status']=='OK' and _benchmark_identity(region,sector,symbol,general)
+   status='VERIFIED' if verified else result['status'] if result['status']!='OK' else 'IDENTITY_UNVERIFIED'
+   retry=now+(7*86400 if verified else _retry_delay(status))
+   source='EODHD fundamentals' if verified else None
+  else:
+   code,market_code=symbol.rsplit('.',1)
+   result=_client(connect,0)._http(HTTP_BASE,'/search/'+quote(code,safe=''),{'fmt':'json','limit':'50'})
+   rows=result.get('payload');rows=rows if isinstance(rows,list) else []
+   candidates=[]
+   for row in rows:
+    if not isinstance(row,dict):continue
+    raw_code=str(row.get('Code') or '').upper();exchange=str(row.get('Exchange') or '').upper()
+    if raw_code==symbol.upper():raw_code=code.upper()
+    if raw_code!=code.upper() or exchange!=market_code.upper():continue
+    candidate={'Code':raw_code,'Name':row.get('Name'),'Exchange':exchange,'CurrencyCode':row.get('Currency'),'Type':row.get('Type')}
+    if _benchmark_identity(region,sector,symbol,candidate):candidates.append(candidate)
+   verified=len(candidates)==1
+   general=candidates[0] if verified else {}
+   status='VERIFIED' if verified else 'TRY_FUNDAMENTALS' if result['status'] not in ('LOCAL_BUDGET_EXHAUSTED','RATE_LIMIT','NETWORK_OR_RESPONSE_ERROR') else result['status']
+   retry=now+7*86400 if verified else now if status=='TRY_FUNDAMENTALS' else now+_retry_delay(status)
+   source='EODHD instrumentsøgning' if verified else None
   with connect() as c:
-   c.execute('INSERT OR REPLACE INTO sector_benchmarks(symbol,region,sector,name,currency,exchange,status,updated,next_attempt,proof_source) VALUES(?,?,?,?,?,?,?,?,?,?)',(symbol,region,sector,general.get('Name'),general.get('CurrencyCode'),general.get('Exchange'),status,now,retry,'EODHD fundamentals' if verified else None))
+   c.execute('INSERT OR REPLACE INTO sector_benchmarks(symbol,region,sector,name,currency,exchange,status,updated,next_attempt,proof_source) VALUES(?,?,?,?,?,?,?,?,?,?)',(symbol,region,sector,general.get('Name'),general.get('CurrencyCode'),general.get('Exchange'),status,now,retry,source))
    if not verified:c.execute('INSERT OR REPLACE INTO sector_market(symbol,region,sector,payload,status,updated,next_attempt) VALUES(?,?,?,?,?,?,?)',(symbol,region,sector,None,'UNVERIFIED_BENCHMARK',now,retry))
   return
  start=(datetime.now(timezone.utc).date()-timedelta(days=410)).isoformat()
@@ -331,7 +403,7 @@ def refresh_tick(connect):
  with connect() as c:
   old=c.execute('SELECT payload FROM sector_market WHERE symbol=?',(symbol,)).fetchone()
   payload=json.dumps(series) if series else old['payload'] if old else None
-  c.execute('INSERT OR REPLACE INTO sector_market(symbol,region,sector,payload,status,updated,next_attempt) VALUES(?,?,?,?,?,?,?)',(symbol,region,sector,payload,status,now,now+(3600 if series else 86400)))
+  c.execute('INSERT OR REPLACE INTO sector_market(symbol,region,sector,payload,status,updated,next_attempt) VALUES(?,?,?,?,?,?,?)',(symbol,region,sector,payload,status,now,now+(3600 if series else _retry_delay(status))))
   if series:
    rows=res.get('payload') if isinstance(res.get('payload'),list) else []
    adjusted=bool(rows) and all(_num(row.get('adjusted_close')) is not None and _num(row.get('adjusted_close'))>0 for row in rows if isinstance(row,dict))
@@ -347,6 +419,7 @@ def read(connect,uid):
   links={r['asset_id']:dict(r) for r in c.execute('SELECT * FROM hw_verified_feed_links WHERE user_id=?',(uid,))}
   markets=[dict(r) for r in c.execute('SELECT m.*,b.status AS benchmark_status,b.updated AS benchmark_updated,b.proof_source AS benchmark_source,b.name AS benchmark_name,b.currency AS benchmark_currency,b.exchange AS benchmark_exchange FROM sector_market m LEFT JOIN sector_benchmarks b ON b.symbol=m.symbol')]
   fx_quotes=[dict(r) for r in c.execute('SELECT currency,rate,event_time,status FROM sector_fx')]
+  benchmark_holdings=[dict(r) for r in c.execute('SELECT * FROM sector_benchmark_holdings')]
   history=[dict(r) for r in c.execute('SELECT portfolio_id,observed,payload FROM sector_history WHERE user_id=? AND bucket>=? ORDER BY bucket',(uid,int((time.time()-366*86400)//14400)))]
   fx=c.execute('SELECT payload FROM fx_snapshots ORDER BY source_date DESC,id DESC LIMIT 1').fetchone()
  dashboard=dashboard_projection.build(connect,uid,owned,snapshots)
@@ -368,5 +441,6 @@ def read(connect,uid):
   verified=r.get('benchmark_status')=='VERIFIED' and r.get('benchmark_updated') is not None and 0<=time.time()-r['benchmark_updated']<=7*86400
   r['series']=json.loads(saved or '[]') if verified else []
   if not verified:r['status']='UNVERIFIED_BENCHMARK'
+ for r in benchmark_holdings:r['holdings']=json.loads(r.pop('payload') or '{}')
  for r in history:r['positions']=json.loads(r.pop('payload'))
- return {'dashboard':dashboard,'markets':markets,'history':history,'fx_quotes':fx_quotes,'fx':json.loads(fx['payload']) if fx else None,'regions':list(PROXIES)}
+ return {'dashboard':dashboard,'markets':markets,'history':history,'benchmark_holdings':benchmark_holdings,'fx_quotes':fx_quotes,'fx':json.loads(fx['payload']) if fx else None,'regions':list(PROXIES)}

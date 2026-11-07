@@ -131,6 +131,50 @@ class SectorIntelligenceTest(unittest.TestCase):
   with self.connect() as c:row=c.execute("SELECT * FROM sector_assets WHERE asset_id='btc'").fetchone()
   self.assertEqual(row['sector'],'Krypto (aktivklasse)')
   self.assertFalse(sector._reuse_hotwatch_asset(self.connect,(1,'btc','OTHER'),now))
+ def test_benchmark_holdings_require_verified_known_fund_and_are_cached(self):
+  now=time.time()
+  with self.assertRaises(ValueError):sector.request_benchmark_holdings(self.connect,1,'NOT-ALLOWED.US')
+  self.assertEqual(sector.request_benchmark_holdings(self.connect,1,'XLK.US')['status'],'UNVERIFIED_BENCHMARK')
+  with self.connect() as c:c.execute('INSERT INTO sector_benchmarks(symbol,region,sector,status,updated,next_attempt) VALUES(?,?,?,?,?,?)',('XLK.US','USA','Teknologi','VERIFIED',now,now+1000))
+  self.assertEqual(sector.request_benchmark_holdings(self.connect,1,'XLK.US')['status'],'PENDING')
+  class Client:
+   def _http(self,base,path,params):
+    assert path=='/fundamentals/XLK.US' and params['filter']=='ETF_Data::Holdings'
+    return {'status':'OK','payload':{'LOW.US':{'Code':'LOW','Name':'Low Co','Exchange':'US','Assets_%':1.0},'HIGH.US':{'Code':'HIGH','Name':'High Co','Exchange':'US','Assets_%':5.0}}}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'test'}),patch.object(sector,'_client',return_value=Client()):sector.refresh_tick(self.connect)
+  with self.connect() as c:row=c.execute('SELECT * FROM sector_benchmark_holdings').fetchone()
+  self.assertEqual(row['status'],'OK');payload=json.loads(row['payload'])
+  self.assertEqual([x['ticker'] for x in payload['rows']],['HIGH','LOW']);self.assertEqual(payload['total_reported'],2)
+  self.assertEqual(sector.request_benchmark_holdings(self.connect,1,'XLK.US')['status'],'OK')
+ def test_benchmark_holdings_fall_back_to_top_10(self):
+  now=time.time()
+  with self.connect() as c:
+   c.execute('INSERT INTO sector_benchmarks(symbol,region,sector,status,updated,next_attempt) VALUES(?,?,?,?,?,?)',('XLK.US','USA','Teknologi','VERIFIED',now,now+1000))
+  sector.request_benchmark_holdings(self.connect,1,'XLK.US')
+  class Client:
+   def _http(self,base,path,params):
+    if params['filter']=='ETF_Data::Holdings':return {'status':'RESPONSE_TOO_LARGE'}
+    return {'status':'OK','payload':{'MSFT.US':{'Code':'MSFT','Name':'Microsoft','Exchange':'US','Assets_%':12}}}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'test'}),patch.object(sector,'_client',return_value=Client()):sector.refresh_tick(self.connect);sector.refresh_tick(self.connect)
+  with self.connect() as c:row=c.execute('SELECT * FROM sector_benchmark_holdings').fetchone()
+  self.assertTrue(json.loads(row['payload'])['top10_only']);self.assertEqual(row['status'],'OK')
+ def test_global_benchmark_uses_provider_search_before_fundamentals(self):
+  class Client:
+   def _http(self,base,path,params):
+    if path=='/search/IXN':return {'status':'OK','payload':[{'Code':'IXN','Exchange':'US','Name':'iShares Global Tech ETF','Currency':'USD','Type':'ETF'}]}
+    if path=='/eod/IXN.US':return {'status':'OK','payload':[{'date':'2026-11-05','close':10},{'date':'2026-11-06','close':11}]}
+    raise AssertionError('Unexpected request '+path)
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'test'}),patch.object(sector,'PROXIES',{'Globalt':[('IXN.US','Teknologi')]}),patch.object(sector,'_client',return_value=Client()):
+   sector.refresh_tick(self.connect);sector.refresh_tick(self.connect)
+  with self.connect() as c:
+   b=c.execute('SELECT * FROM sector_benchmarks').fetchone();m=c.execute('SELECT * FROM sector_market').fetchone()
+  self.assertEqual((b['status'],b['proof_source']),('VERIFIED','EODHD instrumentsøgning'));self.assertEqual(m['status'],'OK')
+ def test_global_benchmark_search_rejects_wrong_sector(self):
+  class Client:
+   def _http(self,base,path,params):return {'status':'OK','payload':[{'Code':'IXN','Exchange':'US','Name':'iShares Global Healthcare ETF','Currency':'USD','Type':'ETF'}]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'test'}),patch.object(sector,'PROXIES',{'Globalt':[('IXN.US','Teknologi')]}),patch.object(sector,'_client',return_value=Client()):sector.refresh_tick(self.connect)
+  with self.connect() as c:b=c.execute('SELECT * FROM sector_benchmarks').fetchone()
+  self.assertEqual(b['status'],'TRY_FUNDAMENTALS')
  def test_published_us_benchmark_does_not_require_fundamentals_permission(self):
   class Client:
    def _http(self,base,path,params):
