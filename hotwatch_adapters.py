@@ -311,6 +311,8 @@ class EODHDAdapter:
   # unchanged REST adapter. No inferred venue/session or fabricated bid/ask.
   exchange=symbol.rsplit('.',1)[1].upper() if '.' in symbol else ''
   eu_exchanges={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}
+  # CC is EODHD's virtual crypto market, not a supported EU equity stream.
+  eu_exchanges.discard('CC')
   if os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and exchange and exchange!='US' and exchange not in eu_exchanges:self.last_feed_diagnostics={'websocket_trade_status':'MARKET_MAPPING_UNVERIFIED'}
   if os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and (exchange=='US' or exchange in eu_exchanges):
    market='us' if exchange=='US' else 'eu';stream_symbol=symbol[:-3] if market=='us' else symbol
@@ -466,6 +468,8 @@ class EODHDAdapter:
   if session.get('id') is not None:
    with self.connect() as c:
     old=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(session['id'],'eodhd',sample_id)).fetchone()
+    if not old and session.get('last_data') and stamp(session['last_data'])==at:
+     old=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND event_epoch=? ORDER BY id DESC LIMIT 1',(session['id'],'eodhd',at.timestamp())).fetchone()
    if old:old_sample=json.loads(old['payload']);volume=old_sample.get('volume')
   context_started=time.perf_counter();context=self.pluto.safe_context(r,currency);context_ms=(time.perf_counter()-context_started)*1000
   self.last_telemetry={'eodhd_http_ms':round(http_ms,3),'pluto_context_ms':round(context_ms,3),'event_to_http_receive_ms':round((received-at).total_seconds()*1000,3)}
@@ -478,7 +482,7 @@ class EODHDAdapter:
   # A changed price remains a conflict, never a fabricated new observation.
   if old_sample:
    try:
-    same=all(old_sample.get(k)==result.get(k) for k in ('source','ticker','asset_id','currency','event_time')) and Decimal(old_sample['price'])==price
+    same=all(old_sample.get(k)==result.get(k) for k in ('source','ticker','asset_id','currency')) and stamp(old_sample['event_time'])==at and Decimal(old_sample['price'])==price
     if same:return dict(old_sample,context=context)
    except (KeyError,TypeError,ValueError,ArithmeticError):pass
   previous=old_sample.get('previous_close') if old_sample else str(d.get('previousClose')) if type(d.get('previousClose')) in (int,str) else None

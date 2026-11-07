@@ -51,7 +51,8 @@ def effective_poll_interval(c,request,profile=None):
  # enough for the unchanged 120-second freshness gate; retain budget limits.
  # An operator-configured fast-poll floor remains authoritative.
  from instrument_resolver import BTC_PLUTO_ASSET_ID
- if source=='eodhd' and request.get('purpose')=='automatic holding watch' and request.get('asset_id')==BTC_PLUTO_ASSET_ID and request.get('provider_symbol')=='BTC-USD.CC' and os.environ.get('ESCAPE_HW_EODHD_FAST_POLL_ENABLED')!='1':floor=60
+ btc_monitor=source=='eodhd' and request.get('purpose')=='automatic holding watch' and request.get('asset_id')==BTC_PLUTO_ASSET_ID and request.get('provider_symbol')=='BTC-USD.CC'
+ if btc_monitor and os.environ.get('ESCAPE_HW_EODHD_FAST_POLL_ENABLED')!='1':floor=60
  minimum=max(PROFILES.get(profile,PROFILES[request['profile']]),floor)
  if source!='eodhd':return minimum
  limit=provider_request_limit(source)
@@ -62,6 +63,20 @@ def effective_poll_interval(c,request,profile=None):
  verified_cost=1+(3 if ws and fuse else 0)+(2 if bars else 0)
  row=c.execute("SELECT COALESCE(SUM(CASE WHEN p.watch_row_id IS NOT NULL AND p.symbol=json_extract(s.request,'$.provider_symbol') THEN 1 ELSE ? END),0) AS units FROM hw_sessions s LEFT JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND json_extract(s.request,'$.provider')='eodhd'",(verified_cost,)).fetchone()
  units=max(1,row['units'] or 0)
+ # BTC's .CC REST scan costs one request; reserve capacity for it and share
+ # the remainder across other scans without exceeding the common budget.
+ rows=c.execute("SELECT s.request,p.symbol AS provisional_symbol FROM hw_sessions s LEFT JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND json_extract(s.request,'$.provider')='eodhd'").fetchall()
+ btc_count=0;other_units=0
+ for item in rows:
+  req=json.loads(item['request']);symbol=req.get('provider_symbol') or ''
+  if req.get('purpose')=='automatic holding watch' and req.get('asset_id')==BTC_PLUTO_ASSET_ID and symbol=='BTC-USD.CC':btc_count+=1;continue
+  other_units+=1 if symbol.endswith('.CC') or item['provisional_symbol']==symbol else verified_cost
+ if btc_count:
+  if available==1 and other_units:return max(minimum,((btc_count+other_units)*60+available-1)//available)
+  btc_share=min(btc_count,max(1,available//2) if other_units else available)
+  if btc_monitor:return max(minimum,(btc_count*60+btc_share-1)//btc_share)
+  remaining=max(1,available-btc_share)
+  return max(minimum,(other_units*60+remaining-1)//remaining)
  return max(minimum,(units*60+available-1)//available)
 def init(c):
  c.execute('CREATE TABLE IF NOT EXISTS hw_strategies(owner_id INTEGER NOT NULL,strategy_id TEXT NOT NULL,version TEXT NOT NULL,payload TEXT NOT NULL,checksum TEXT NOT NULL,created TEXT NOT NULL,author TEXT NOT NULL,validation_status TEXT NOT NULL,PRIMARY KEY(owner_id,strategy_id,version))')
@@ -447,7 +462,7 @@ def view(c,row,now=None):
   except (ValueError,TypeError,AttributeError):instrument_match_verified=False
  quote_feed_verified=bool(latest_payload and latest_payload.get('source')=='eodhd' and latest_payload.get('verification')=='verified' and instrument_match_verified and stamp(sample['received']).timestamp()>=link['verified_epoch'])
  if cxe_link and request.get('provider')=='eodhd' and not quote_feed_verified:
-  if row['status']!='PAUSED':effective='NO_DATA';display_status='DATA MANGLER';data_status['signal_status']='WAITING_FOR_DATA'
+  if row['status']!='PAUSED':effective='NO_DATA';display_status='MARKED LUKKET (ORDINÆR HANDEL)' if instrument_match_verified and regular['status']=='CLOSED' else 'DATA MANGLER';data_status['signal_status']='WAITING_FOR_DATA'
   data_status.update(identity_verification='verified' if instrument_match_verified else 'unverified',price=None,bid=None,ask=None,daily_change_pct=None,since_last_pct=None,momentum_pct={str(n):None for n in (1,5,15,30)},price_status='UNVERIFIED')
   display_reasons.append('EODHD_INSTRUMENT_REVALIDATION_REQUIRED' if not instrument_match_verified else 'WAITING_FOR_NEW_VERIFIED_QUOTE')
  quote_freshness='UNKNOWN'

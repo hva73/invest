@@ -556,6 +556,8 @@ class HoldingAutowatch(unittest.TestCase):
   with app.connect() as c:
    row=c.execute('SELECT * FROM hw_sessions').fetchone();request=json.loads(row['request']);self.assertEqual(row['watch_id'],before);self.assertEqual(request['provider_symbol'],'FCX.US')
    self.assertTrue(engine.valid_cxe_evidence(c,1,request,self.now))
+   c.execute('INSERT INTO hw_exchange_status(exchange,received,is_open,next_attempt) VALUES(?,?,?,?)',('US',self.now.isoformat(),0,self.now.timestamp()+300))
+   view=engine.view(c,row,self.now);self.assertEqual(view['display_status'],'MARKED LUKKET (ORDINÆR HANDEL)');self.assertEqual(view['signal'],'NO_DATA');self.assertIsNone(view['data_status']['price'])
  def test_tsm_adr_recovers_from_us_catalog_and_preserves_adr_evidence(self):
   holding=dict(self.holding,ticker='TSM')
   with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[holding]}),))
