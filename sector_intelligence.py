@@ -1,5 +1,5 @@
 """Read-only sector data; background collection never places or changes orders."""
-import json, math, os, re, time
+import json, math, os, re, sqlite3, time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 from eodhd_feeds import EODHDFeeds, HTTP_BASE
@@ -20,9 +20,20 @@ def init(c):
  c.execute('CREATE TABLE IF NOT EXISTS sector_fx(currency TEXT PRIMARY KEY, rate REAL, event_time TEXT, status TEXT NOT NULL, updated REAL NOT NULL, next_attempt REAL NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS sector_fund_exposure(user_id INTEGER NOT NULL,asset_id TEXT NOT NULL,symbol TEXT NOT NULL,payload TEXT,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL,PRIMARY KEY(user_id,asset_id))')
  c.execute('CREATE TABLE IF NOT EXISTS sector_benchmarks(symbol TEXT PRIMARY KEY,region TEXT NOT NULL,sector TEXT NOT NULL,name TEXT,currency TEXT,exchange TEXT,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL)')
+ if 'proof_source' not in {r[1] for r in c.execute('PRAGMA table_info(sector_benchmarks)')}:c.execute('ALTER TABLE sector_benchmarks ADD COLUMN proof_source TEXT')
  c.execute('CREATE TABLE IF NOT EXISTS sector_market(symbol TEXT PRIMARY KEY,region TEXT NOT NULL,sector TEXT NOT NULL,payload TEXT,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL)')
  if 'price_basis' not in {r[1] for r in c.execute('PRAGMA table_info(sector_market)')}:c.execute('ALTER TABLE sector_market ADD COLUMN price_basis TEXT')
  c.execute('CREATE TABLE IF NOT EXISTS sector_history(user_id INTEGER NOT NULL,portfolio_id INTEGER NOT NULL,bucket INTEGER NOT NULL,observed TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(user_id,portfolio_id,bucket))')
+ c.execute('CREATE TABLE IF NOT EXISTS sector_migrations(name TEXT PRIMARY KEY,applied REAL NOT NULL)')
+ if not c.execute("SELECT 1 FROM sector_migrations WHERE name='reuse_hotwatch_proof_v1'").fetchone():
+  c.execute("UPDATE sector_assets SET next_attempt=0 WHERE status IN ('PLUTO_IDENTITY_INCOMPLETE','IDENTITY_OR_SECTOR_UNKNOWN','ENTITLEMENT_UNVERIFIED')")
+  c.execute("UPDATE sector_market SET next_attempt=0 WHERE status='UNVERIFIED_BENCHMARK'")
+  c.execute("INSERT INTO sector_migrations VALUES('reuse_hotwatch_proof_v1',?)",(time.time(),))
+ if not c.execute("SELECT 1 FROM sector_migrations WHERE name='reuse_verified_feed_v2'").fetchone():
+  c.execute("UPDATE sector_assets SET next_attempt=0 WHERE status IN ('PLUTO_IDENTITY_INCOMPLETE','IDENTITY_OR_SECTOR_UNKNOWN','ENTITLEMENT_UNVERIFIED','PLUTO_UNAVAILABLE')")
+  c.execute("UPDATE sector_instruments SET next_attempt=0 WHERE status IN ('PLUTO_UNAVAILABLE','PLUTO_TYPE_MISSING')")
+  c.execute("UPDATE sector_market SET next_attempt=0 WHERE status='UNVERIFIED_BENCHMARK'")
+  c.execute("INSERT INTO sector_migrations VALUES('reuse_verified_feed_v2',?)",(time.time(),))
 
 def capture(c,uid,pid,payload):
  if not payload.get('positions_complete') or not payload.get('observed'):return
@@ -100,8 +111,45 @@ def _fetch_pluto(connect,candidate,now):
   status='OK' if asset_kind!='unknown' else 'PLUTO_TYPE_MISSING'
  except Exception:pass
  with connect() as c:
-  c.execute('INSERT OR REPLACE INTO sector_instruments VALUES(?,?,?,?,?,?,?,?,?,?,?)',(uid,aid,instrument.get('ticker'),instrument.get('currency'),instrument.get('exchange'),instrument.get('isin'),instrument.get('instrument_type'),instrument.get('name'),status,now,now+(7*86400 if status=='OK' else 86400)))
+  c.execute('INSERT OR REPLACE INTO sector_instruments VALUES(?,?,?,?,?,?,?,?,?,?,?)',(uid,aid,instrument.get('ticker'),instrument.get('currency'),instrument.get('exchange'),instrument.get('isin'),instrument.get('instrument_type'),instrument.get('name'),status,now,now+(7*86400 if status=='OK' else _retry_delay(status))))
   if sector:c.execute('INSERT OR REPLACE INTO sector_assets(user_id,asset_id,symbol,sector,industry,source,status,updated,next_attempt,identity_version,original_sector) VALUES(?,?,?,?,?,?,?,?,?,1,?)',(uid,aid,None,sector,industry,'Pluto get_asset','OK',now,now+7*86400,raw_sector))
+
+def _verified_stock_basis(connect,uid,instrument,link,now):
+ """Reuse the asset-specific listing already verified by HOT WATCH.
+
+ Sector display does not place orders. Missing fields are not treated as a
+ contradiction; explicit ticker, currency, exchange or ISIN conflicts are.
+ """
+ if not link or instrument.get('asset_id')!=link.get('asset_id'):return None
+ isin=link.get('isin')
+ if not isinstance(isin,str) or not re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',isin):return None
+ for key in ('ticker','currency','exchange','isin'):
+  left=instrument.get(key);right=link.get(key)
+  if left and right and str(left).casefold()!=str(right).casefold():return None
+ return 'previously_verified_hotwatch_link'
+
+def _retry_delay(status):
+ if status in ('LOCAL_BUDGET_EXHAUSTED','PROVIDER_RATE_BUDGET','RATE_LIMIT'):return 120
+ if status in ('NETWORK_OR_RESPONSE_ERROR','HTTP_ERROR','PLUTO_UNAVAILABLE'):return 300
+ if status in ('ENTITLEMENT_UNVERIFIED','KEY_MISSING'):return 3600
+ return 21600
+
+def _reuse_hotwatch_asset(connect,candidate,now):
+ """Copy broker metadata from an already verified watch; no provider call."""
+ uid,aid,ticker=candidate
+ try:
+  with connect() as c:
+   row=c.execute('SELECT e.payload,e.symbol,e.status,l.symbol AS linked_symbol,l.currency AS linked_currency FROM hw_cxe_feed_evidence e JOIN hw_verified_feed_links l ON l.user_id=e.user_id AND l.asset_id=e.asset_id WHERE e.user_id=? AND e.asset_id=?',(uid,aid)).fetchone()
+   if not row or row['status']!='MATCHED' or row['symbol']!=row['linked_symbol']:return False
+   proof=json.loads(row['payload']);asset=proof.get('pluto') or {}
+   if proof.get('symbol')!=row['symbol'] or asset.get('asset_id')!=aid or not asset.get('ticker') or ticker and str(asset['ticker']).casefold()!=str(ticker).casefold() or asset.get('currency')!=row['linked_currency']:return False
+   kind=_kind(asset.get('type'))
+   if kind=='unknown':return False
+   c.execute('INSERT OR REPLACE INTO sector_instruments VALUES(?,?,?,?,?,?,?,?,?,?,?)',(uid,aid,asset.get('ticker'),asset.get('currency'),asset.get('exchange'),asset.get('isin'),asset.get('type'),asset.get('name'),'OK',now,now+7*86400))
+   category={'crypto':'Krypto (aktivklasse)','fund':'Fonde og ETF (aktivklasse)','cash':'Kontanter (aktivklasse)','commodity':'Råvarer (aktivklasse)'}.get(kind)
+   if category:c.execute('INSERT OR REPLACE INTO sector_assets(user_id,asset_id,symbol,sector,industry,source,status,updated,next_attempt,identity_version,original_sector) VALUES(?,?,?,?,?,?,?,?,?,1,?)',(uid,aid,None,category,None,'Pluto / HOT WATCH','OK',now,now+7*86400,None))
+  return True
+ except (ValueError,TypeError,sqlite3.Error):return False
 
 def _benchmark_identity(region,sector,symbol,general):
  if not isinstance(general,dict):return False
@@ -120,7 +168,7 @@ def refresh_tick(connect):
  now=time.time()
  if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1' or not os.environ.get('ESCAPE_EODHD_API_KEY','').strip():
   candidate=_pluto_candidate(connect,now)
-  if candidate:_fetch_pluto(connect,candidate,now)
+  if candidate and not _reuse_hotwatch_asset(connect,candidate,now):_fetch_pluto(connect,candidate,now)
   return
  # If ECB reference rates are absent, collect a timestamped EODHD FX quote
  # for each currency actually held. This is separate from trading prices.
@@ -152,46 +200,66 @@ def refresh_tick(connect):
   return
  candidate=_pluto_candidate(connect,now)
  if candidate:
-  _fetch_pluto(connect,candidate,now);return
+  if not _reuse_hotwatch_asset(connect,candidate,now):_fetch_pluto(connect,candidate,now)
+  return
  with connect() as c:
   # Only reuse identities already checked by the existing HOT WATCH engine.
-  candidates=c.execute('''SELECT l.*,i.isin AS pluto_isin,i.ticker AS pluto_ticker,i.currency AS pluto_currency,i.exchange AS pluto_exchange,i.instrument_type AS pluto_type,i.name AS pluto_name FROM hw_verified_feed_links l JOIN users u ON u.id=l.user_id AND u.active=1 JOIN sector_instruments i ON i.user_id=l.user_id AND i.asset_id=l.asset_id
+  candidates=c.execute('''SELECT l.*,i.isin AS pluto_isin,i.ticker AS pluto_ticker,i.currency AS pluto_currency,i.exchange AS pluto_exchange,i.instrument_type AS pluto_type,i.name AS pluto_name,a.status AS sector_phase,a.symbol AS previous_symbol FROM hw_verified_feed_links l JOIN users u ON u.id=l.user_id AND u.active=1 JOIN sector_instruments i ON i.user_id=l.user_id AND i.asset_id=l.asset_id
     LEFT JOIN sector_assets a ON a.user_id=l.user_id AND a.asset_id=l.asset_id
-    WHERE l.verified_epoch BETWEEN ? AND ? AND UPPER(COALESCE(i.instrument_type,'')) IN ('CS','ADRC','ADR','COMMON_STOCK','COMMON STOCK','ORDINARY SHARES','STOCK','EQUITY') AND (a.asset_id IS NULL OR a.next_attempt<=? OR a.identity_version!=1 OR (a.source!='Pluto get_asset' AND COALESCE(a.symbol,'')!=l.symbol))
-    ORDER BY COALESCE(a.next_attempt,0) LIMIT 1''',(now-7*86400,now,now)).fetchone()
+    WHERE UPPER(COALESCE(i.instrument_type,'')) IN ('CS','ADRC','ADR','COMMON_STOCK','COMMON STOCK','ORDINARY SHARES','STOCK','EQUITY') AND (a.asset_id IS NULL OR a.next_attempt<=? OR a.identity_version!=1 OR (a.source!='Pluto get_asset' AND COALESCE(a.symbol,'')!=l.symbol))
+    ORDER BY COALESCE(a.next_attempt,0) LIMIT 1''',(now,)).fetchone()
  if candidates:
   item=dict(candidates);symbol=item['symbol']
   if not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',symbol):return
   def same(a,b):return isinstance(a,str) and isinstance(b,str) and bool(a.strip()) and a.strip().casefold()==b.strip().casefold()
-  pluto_verified=all(same(item['pluto_'+key],item[key]) for key in ('ticker','currency','exchange','isin'))
-  if not pluto_verified:
+  instrument={'asset_id':item['asset_id'],'ticker':item['pluto_ticker'],'currency':item['pluto_currency'],'exchange':item['pluto_exchange'],'isin':item['pluto_isin'],'instrument_type':item['pluto_type'],'name':item['pluto_name']}
+  basis=_verified_stock_basis(connect,item['user_id'],instrument,item,now)
+  if not basis:
    with connect() as c:c.execute('INSERT OR REPLACE INTO sector_assets(user_id,asset_id,symbol,sector,industry,source,status,updated,next_attempt,identity_version) VALUES(?,?,?,?,?,?,?,?,?,1)',(item['user_id'],item['asset_id'],symbol,None,None,None,'PLUTO_IDENTITY_INCOMPLETE',now,now+86400))
+   return
+  # Reuse the same verified symbol for EODHD's documented stock screener
+  # if the account cannot return Fundamentals or the sector is absent.
+  if item.get('sector_phase')=='TRY_EODHD_SCREENER' and item.get('previous_symbol')==symbol:
+   code,exchange=symbol.rsplit('.',1)
+   filters=json.dumps([['code','=',code],['exchange','=',exchange.lower()]],separators=(',',':'))
+   res=_client(connect,item['user_id'])._http(HTTP_BASE,'/screener',{'filters':filters,'limit':'100','fmt':'json'})
+   payload=res.get('payload');rows=payload.get('data',[]) if isinstance(payload,dict) else payload if isinstance(payload,list) else []
+   allowed={exchange.upper(),str(item['exchange']).upper()}
+   if exchange.upper()=='US':allowed.update(('US','USA','NYSE','NASDAQ'))
+   complete=not isinstance(payload,dict) or not isinstance(payload.get('count'),int) or payload['count']<=len(rows)
+   matches=[r for r in rows if isinstance(r,dict) and str(r.get('code') or '').upper()==code.upper() and str(r.get('exchange') or '').upper() in allowed]
+   raw=matches[0].get('sector') if complete and len(matches)==1 else None
+   sector=SECTORS.get(raw.casefold().strip(),raw.strip()) if isinstance(raw,str) and raw.strip() and raw.strip().lower() not in ('none','n/a') else None
+   industry=matches[0].get('industry') if sector and isinstance(matches[0].get('industry'),str) else None
+   status='OK' if sector else res['status'] if res['status']!='OK' else 'SECTOR_NOT_RETURNED'
+   with connect() as c:c.execute('INSERT OR REPLACE INTO sector_assets(user_id,asset_id,symbol,sector,industry,source,status,updated,next_attempt,identity_version,original_sector) VALUES(?,?,?,?,?,?,?,?,?,1,?)',(item['user_id'],item['asset_id'],symbol,sector,industry,'EODHD stock screener' if sector else None,status,now,now+(7*86400 if sector else _retry_delay(status)),raw if sector else None))
    return
   res=_client(connect,item['user_id'])._http(HTTP_BASE,'/fundamentals/'+quote(symbol,safe=''),{'fmt':'json','filter':'General'})
   general=res.get('payload');general=general.get('General',general) if isinstance(general,dict) else {}
   code=str(general.get('Code') or '').upper(); expected=symbol.rsplit('.',1)[0].upper()
   isin=str(general.get('ISIN') or '').upper(); currency=str(general.get('CurrencyCode') or '').upper()
-  from instrument_resolver import _us_issuer
-  names_match=bool(_us_issuer(item.get('pluto_name'))[0] and _us_issuer(item.get('pluto_name'))==_us_issuer(general.get('Name')))
   source_exchange=str(general.get('Exchange') or '').upper().strip()
   source_type=re.sub(r'[^A-Z0-9]','',str(general.get('Type') or '').upper())
-  pluto_type=re.sub(r'[^A-Z0-9]','',str(item.get('pluto_type') or '').upper())
-  type_match=(source_type in ('COMMONSTOCK','ORDINARYSHARES','STOCK','EQUITY') and pluto_type in ('CS','COMMONSTOCK','ORDINARYSHARES','STOCK','EQUITY')) or (source_type in ('ADR','ADRC') and pluto_type in ('ADR','ADRC'))
-  identity=(code==expected and isin==item['isin'].upper() and currency==item['currency'].upper() and source_exchange==item['exchange'].upper() and names_match and type_match)
+  conflicting_type=source_type in ('ETF','ETP','FUND','MUTUALFUND','CRYPTO','CURRENCY')
+  exchange_conflict=bool(source_exchange and source_exchange not in (item['exchange'].upper(),'US','USA'))
+  identity=(code==expected and (not isin or isin==item['isin'].upper()) and (not currency or currency==item['currency'].upper()) and not exchange_conflict and not conflicting_type)
   raw=general.get('Sector');sector=SECTORS.get(raw.casefold().strip(),raw.strip()) if identity and isinstance(raw,str) and raw.strip() and raw.strip().lower() not in ('none','n/a') else None
   industry=general.get('Industry') if sector and isinstance(general.get('Industry'),str) else None
-  status='OK' if sector else res['status'] if res['status']!='OK' else 'IDENTITY_OR_SECTOR_UNKNOWN'
-  with connect() as c:c.execute('INSERT OR REPLACE INTO sector_assets(user_id,asset_id,symbol,sector,industry,source,status,updated,next_attempt,identity_version,original_sector) VALUES(?,?,?,?,?,?,?,?,?,1,?)',(item['user_id'],item['asset_id'],symbol,sector,industry,'EODHD fundamentals' if sector else None,status,now,now+(7*86400 if sector else 86400),raw if sector else None))
+  explicit_conflict=res['status']=='OK' and bool(general) and not identity
+  status='OK' if sector else 'IDENTITY_OR_SECTOR_UNKNOWN' if explicit_conflict else 'TRY_EODHD_SCREENER' if res['status'] not in ('LOCAL_BUDGET_EXHAUSTED','RATE_LIMIT','NETWORK_OR_RESPONSE_ERROR') else res['status']
+  next_attempt=now if status=='TRY_EODHD_SCREENER' else now+(7*86400 if sector else _retry_delay(status))
+  with connect() as c:c.execute('INSERT OR REPLACE INTO sector_assets(user_id,asset_id,symbol,sector,industry,source,status,updated,next_attempt,identity_version,original_sector) VALUES(?,?,?,?,?,?,?,?,?,1,?)',(item['user_id'],item['asset_id'],symbol,sector,industry,'EODHD fundamentals' if sector else None,status,now,next_attempt,raw if sector else None))
   return
  with connect() as c:
   fund=c.execute('''SELECT i.*,l.symbol,l.isin AS linked_isin,l.ticker AS linked_ticker,l.currency AS linked_currency,l.exchange AS linked_exchange,f.status AS phase,f.symbol AS phase_symbol,f.next_attempt AS due
    FROM sector_instruments i JOIN hw_verified_feed_links l ON l.user_id=i.user_id AND l.asset_id=i.asset_id
    LEFT JOIN sector_fund_exposure f ON f.user_id=i.user_id AND f.asset_id=i.asset_id
-   WHERE UPPER(COALESCE(i.instrument_type,'')) IN ('ETF','ETP','FUND','MUTUALFUND','INVESTMENTFUND') AND l.verified_epoch BETWEEN ? AND ? AND (f.asset_id IS NULL OR f.next_attempt<=? OR f.symbol!=l.symbol) LIMIT 1''',(now-7*86400,now,now)).fetchone()
+   WHERE UPPER(COALESCE(i.instrument_type,'')) IN ('ETF','ETP','FUND','MUTUALFUND','INVESTMENTFUND') AND (f.asset_id IS NULL OR f.next_attempt<=? OR f.symbol!=l.symbol) LIMIT 1''',(now,)).fetchone()
  if fund:
   item=dict(fund);symbol=item['symbol'];uid=item['user_id'];aid=item['asset_id']
   def same(a,b):return isinstance(a,str) and isinstance(b,str) and bool(a.strip()) and a.strip().casefold()==b.strip().casefold()
-  matched=all(same(item[k],item['linked_'+k]) for k in ('isin','ticker','currency','exchange'))
+  link={'asset_id':aid,'isin':item['linked_isin'],'ticker':item['linked_ticker'],'currency':item['linked_currency'],'exchange':item['linked_exchange'],'symbol':symbol}
+  matched=bool(_verified_stock_basis(connect,uid,item,link,now))
   payload=None;status='PLUTO_IDENTITY_INCOMPLETE';retry=now+86400
   if matched and item.get('phase')=='IDENTITY_VERIFIED' and item.get('phase_symbol')==symbol:
    response=_client(connect,uid)._http(HTTP_BASE,'/fundamentals/'+quote(symbol,safe=''),{'fmt':'json','filter':'ETF_Data'})
@@ -211,9 +279,8 @@ def refresh_tick(connect):
   elif matched:
    response=_client(connect,uid)._http(HTTP_BASE,'/fundamentals/'+quote(symbol,safe=''),{'fmt':'json','filter':'General'})
    g=response.get('payload');g=g.get('General',g) if isinstance(g,dict) else {}
-   from instrument_resolver import _us_issuer
-   names=_us_issuer(item.get('name'))
-   valid=(str(g.get('Code') or '').upper()==symbol.rsplit('.',1)[0].upper() and same(g.get('ISIN'),item['isin']) and same(g.get('CurrencyCode'),item['currency']) and same(g.get('Exchange'),item['exchange']) and names[0] and names==_us_issuer(g.get('Name')) and str(g.get('Type') or '').upper() in ('ETF','ETP','FUND'))
+   kind=str(g.get('Type') or '').upper();gisin=g.get('ISIN');gc=g.get('CurrencyCode');gx=g.get('Exchange')
+   valid=(str(g.get('Code') or '').upper()==symbol.rsplit('.',1)[0].upper() and (not gisin or same(gisin,link['isin'])) and (not gc or same(gc,link['currency'])) and (not gx or same(gx,link['exchange']) or str(gx).upper() in ('US','USA')) and (not kind or kind in ('ETF','ETP','FUND')))
    status='IDENTITY_VERIFIED' if valid else response['status'] if response['status']!='OK' else 'IDENTITY_OR_SECTOR_UNKNOWN'
    if valid:retry=now
   with connect() as c:c.execute('INSERT OR REPLACE INTO sector_fund_exposure VALUES(?,?,?,?,?,?,?)',(uid,aid,symbol,payload,status,now,retry))
@@ -228,6 +295,14 @@ def refresh_tick(connect):
   else:return
  region,symbol,sector=target
  with connect() as c:benchmark=c.execute('SELECT * FROM sector_benchmarks WHERE symbol=?',(symbol,)).fetchone()
+ # The eleven US tickers are the issuer's published S&P 500 sector funds.
+ # The EODHD history still has to be fetched and validated independently.
+ issuer_source='https://www.ssga.com/us/en/individual/capabilities/equities/sector-investing/gics-sector-and-industry-map'
+ issuer_verified=region=='USA' and (symbol,sector) in PROXIES['USA']
+ if issuer_verified and (not benchmark or benchmark['proof_source']!=issuer_source or benchmark['next_attempt']<=now):
+  with connect() as c:
+   c.execute('INSERT OR REPLACE INTO sector_benchmarks(symbol,region,sector,name,currency,exchange,status,updated,next_attempt,proof_source) VALUES(?,?,?,?,?,?,?,?,?,?)',(symbol,region,sector,'Select Sector SPDR · S&P 500',None,None,'VERIFIED',now,now+7*86400,issuer_source))
+   benchmark=c.execute('SELECT * FROM sector_benchmarks WHERE symbol=?',(symbol,)).fetchone()
  if not benchmark or benchmark['status']!='VERIFIED' or benchmark['next_attempt']<=now:
   if benchmark and benchmark['next_attempt']>now:
    with connect() as c:c.execute('INSERT OR REPLACE INTO sector_market(symbol,region,sector,payload,status,updated,next_attempt) VALUES(?,?,?,?,?,?,?)',(symbol,region,sector,None,'UNVERIFIED_BENCHMARK',now,benchmark['next_attempt']))
@@ -238,7 +313,7 @@ def refresh_tick(connect):
   status='VERIFIED' if verified else result['status'] if result['status']!='OK' else 'IDENTITY_UNVERIFIED'
   retry=now+(7*86400 if verified else 86400)
   with connect() as c:
-   c.execute('INSERT OR REPLACE INTO sector_benchmarks VALUES(?,?,?,?,?,?,?,?,?)',(symbol,region,sector,general.get('Name'),general.get('CurrencyCode'),general.get('Exchange'),status,now,retry))
+   c.execute('INSERT OR REPLACE INTO sector_benchmarks(symbol,region,sector,name,currency,exchange,status,updated,next_attempt,proof_source) VALUES(?,?,?,?,?,?,?,?,?,?)',(symbol,region,sector,general.get('Name'),general.get('CurrencyCode'),general.get('Exchange'),status,now,retry,'EODHD fundamentals' if verified else None))
    if not verified:c.execute('INSERT OR REPLACE INTO sector_market(symbol,region,sector,payload,status,updated,next_attempt) VALUES(?,?,?,?,?,?,?)',(symbol,region,sector,None,'UNVERIFIED_BENCHMARK',now,retry))
   return
  start=(datetime.now(timezone.utc).date()-timedelta(days=410)).isoformat()
@@ -260,8 +335,8 @@ def read(connect,uid):
   assets={r['asset_id']:dict(r) for r in c.execute('SELECT * FROM sector_assets WHERE user_id=? AND identity_version=1',(uid,))}
   instruments={r['asset_id']:dict(r) for r in c.execute('SELECT * FROM sector_instruments WHERE user_id=?',(uid,))}
   funds={r['asset_id']:dict(r) for r in c.execute('SELECT * FROM sector_fund_exposure WHERE user_id=? AND status=\'OK\'',(uid,))}
-  links={r['asset_id']:dict(r) for r in c.execute('SELECT * FROM hw_verified_feed_links WHERE user_id=? AND verified_epoch BETWEEN ? AND ?',(uid,time.time()-7*86400,time.time()))}
-  markets=[dict(r) for r in c.execute('SELECT m.*,b.status AS benchmark_status,b.updated AS benchmark_updated,b.name AS benchmark_name,b.currency AS benchmark_currency,b.exchange AS benchmark_exchange FROM sector_market m LEFT JOIN sector_benchmarks b ON b.symbol=m.symbol')]
+  links={r['asset_id']:dict(r) for r in c.execute('SELECT * FROM hw_verified_feed_links WHERE user_id=?',(uid,))}
+  markets=[dict(r) for r in c.execute('SELECT m.*,b.status AS benchmark_status,b.updated AS benchmark_updated,b.proof_source AS benchmark_source,b.name AS benchmark_name,b.currency AS benchmark_currency,b.exchange AS benchmark_exchange FROM sector_market m LEFT JOIN sector_benchmarks b ON b.symbol=m.symbol')]
   fx_quotes=[dict(r) for r in c.execute('SELECT currency,rate,event_time,status FROM sector_fx')]
   history=[dict(r) for r in c.execute('SELECT portfolio_id,observed,payload FROM sector_history WHERE user_id=? AND bucket>=? ORDER BY bucket',(uid,int((time.time()-366*86400)//14400)))]
   fx=c.execute('SELECT payload FROM fx_snapshots ORDER BY source_date DESC,id DESC LIMIT 1').fetchone()
@@ -275,9 +350,9 @@ def read(connect,uid):
  for row in dashboard['positions']:
   aid=row.get('asset_id');instrument=instruments.get(aid,{});mismatch=any(row.get(k) and instrument.get(k) and str(row[k]).casefold()!=str(instrument[k]).casefold() for k in ('ticker','currency'));a=assets.get(aid,{}) if instrument.get('status')=='OK' and not mismatch else {};fund=funds.get(aid);link=links.get(aid,{})
   if mismatch:a={'status':'IDENTITY_EXPIRED'}
-  identity_current=bool(link and all(instrument.get(k) and str(instrument[k]).casefold()==str(link.get(k,'')).casefold() for k in ('isin','ticker','currency','exchange')))
-  if a.get('source')=='EODHD fundamentals' and (not identity_current or a.get('symbol')!=link.get('symbol')):a={'status':'IDENTITY_EXPIRED'}
-  valid_fund=bool(fund and not mismatch and fund.get('payload') and 0<=time.time()-fund['updated']<=7*86400 and instrument.get('status')=='OK' and _kind(instrument.get('instrument_type'))=='fund' and fund['symbol']==link.get('symbol') and all(instrument.get(k) and str(instrument[k]).casefold()==str(link.get(k,'')).casefold() for k in ('isin','ticker','currency','exchange')))
+  identity_current=bool(link and _verified_stock_basis(connect,uid,instrument,link,time.time())) if _kind(instrument.get('instrument_type'))=='stock' else bool(link and _verified_stock_basis(connect,uid,instrument,link,time.time()))
+  if a.get('source') in ('EODHD fundamentals','EODHD stock screener') and (not identity_current or a.get('symbol')!=link.get('symbol')):a={'status':'IDENTITY_EXPIRED'}
+  valid_fund=bool(fund and not mismatch and fund.get('payload') and 0<=time.time()-fund['updated']<=7*86400 and instrument.get('status')=='OK' and _kind(instrument.get('instrument_type'))=='fund' and fund['symbol']==link.get('symbol') and _verified_stock_basis(connect,uid,instrument,link,time.time()))
   row['sector_intelligence']={'sector':a.get('sector'),'industry':a.get('industry'),'original_sector':a.get('original_sector'),'source':a.get('source'),'status':a.get('status') or instrument.get('status','AFVENTER'),'updated':a.get('updated'),'instrument_type':instrument.get('instrument_type'),'isin':instrument.get('isin'),'exchange':instrument.get('exchange'),'fund_exposure':{**json.loads(fund['payload']),'observed':fund['updated'],'symbol':fund['symbol']} if valid_fund else None}
  for r in markets:
   saved=r.pop('payload')
