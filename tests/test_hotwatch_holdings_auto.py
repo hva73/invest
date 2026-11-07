@@ -274,6 +274,22 @@ class HoldingAutowatch(unittest.TestCase):
    row=c.execute("SELECT * FROM hw_sessions WHERE purpose='automatic holding watch'").fetchone();req=json.loads(row['request'])
    self.assertEqual((req['provider'],req['provider_symbol']),('eodhd','TEST.US'))
    self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE watch_row_id=? AND event_type='PROVIDER_CHANGED'",(row['id'],)).fetchone()[0],1)
+ def test_feed_recovery_chooses_oldest_due_attempt_before_session_id(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with app.connect() as c:
+   first=dict(c.execute('SELECT * FROM hw_sessions').fetchone());first_id=first.pop('id')
+   req=json.loads(first['request']);req.update(asset_id='synthetic-second',ticker='SECOND',watch_id='second-watch',candidate_id='second-candidate')
+   first.update(watch_id='second-watch',candidate_id='second-candidate',request=json.dumps(req),digest='second-digest')
+   cols=list(first);c.execute('INSERT INTO hw_sessions('+','.join(cols)+') VALUES('+','.join('?' for _ in cols)+')',tuple(first.values()))
+   second_id=c.execute("SELECT id FROM hw_sessions WHERE watch_id='second-watch'").fetchone()['id']
+   c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?)',(first_id,self.now.timestamp()-1,'PROVIDER_RATE_BUDGET',self.now.isoformat()))
+   c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?)',(second_id,self.now.timestamp()-120,'PROVIDER_RATE_BUDGET',self.now.isoformat()))
+  seen=[]
+  def check(connect,uid,holding):seen.append(holding['ticker']);return None
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',side_effect=check):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+  self.assertEqual(seen,['SECOND'])
  def test_recovery_matches_isin_and_currency_without_prior_observation(self):
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
    self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')

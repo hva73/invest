@@ -361,7 +361,7 @@ def recover_automatic_feeds(connect,now=None):
  now=now or engine.utc();changed=0;lookup_attempted=False
  with connect() as c:
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return 0
-  rows=c.execute("SELECT s.* FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.is_test=0 AND COALESCE(k.killed,0)=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.lease_until<=? AND json_extract(s.request,'$.provider')='pluto' AND s.purpose IN ('automatic discovery','automatic holding watch') AND NOT EXISTS (SELECT 1 FROM hw_samples p WHERE p.watch_row_id=s.id) ORDER BY s.id LIMIT 40",(now.timestamp(),)).fetchall()
+  rows=c.execute("SELECT s.* FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id LEFT JOIN hw_feed_recovery f ON f.watch_row_id=s.id WHERE s.is_test=0 AND COALESCE(k.killed,0)=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.lease_until<=? AND json_extract(s.request,'$.provider')='pluto' AND s.purpose IN ('automatic discovery','automatic holding watch') AND NOT EXISTS (SELECT 1 FROM hw_samples p WHERE p.watch_row_id=s.id) ORDER BY COALESCE(f.next_attempt,0), CASE WHEN s.purpose='automatic holding watch' THEN 0 ELSE 1 END, s.id LIMIT 40",(now.timestamp(),)).fetchall()
  for row in rows:
   try:
    req=json.loads(row['request']);holding={'asset_id':req['asset_id'],'ticker':req['ticker'],'currency':req['quote_currency']}
