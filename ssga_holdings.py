@@ -4,7 +4,7 @@ from datetime import datetime
 from xml.etree import ElementTree as ET
 
 ALLOWED={'XLK','XLV','XLF','XLI','XLE','XLY','XLP','XLB','XLU','XLRE','XLC'}
-BASE='https://www.ssga.com/us/en/intermediary/etfs/library-content/products/fund-data/etfs/us/holdings-daily-us-en-'
+BASE='https://www.ssga.com/library-content/products/fund-data/etfs/us/holdings-daily-us-en-'
 NS={'s':'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
 MAX_FILE=5*1024*1024
 MAX_XML=12*1024*1024

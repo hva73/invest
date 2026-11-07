@@ -19,7 +19,7 @@ class SectorHoldingsHttp(unittest.TestCase):
    c.execute('INSERT INTO sector_benchmarks(symbol,region,sector,status,updated,next_attempt) VALUES(?,?,?,?,?,?)',('XLK.US','USA','Teknologi','VERIFIED',now,now+3600))
    before=c.execute('SELECT COUNT(*) FROM broker_proposals').fetchone()[0]
   status,result,_=self.http.request(path,{'symbol':'XLK.US'},auth)
-  self.assertEqual((status,result['status']),(200,'TRY_ISSUER'))
+  self.assertEqual((status,result['status']),(200,'TRY_ISSUER'));self.assertIsInstance(result['updated'],float)
   with app.connect() as c:
    self.assertEqual(c.execute('SELECT symbol FROM sector_benchmark_holdings').fetchone()[0],'XLK.US')
    self.assertEqual(c.execute('SELECT COUNT(*) FROM broker_proposals').fetchone()[0],before)

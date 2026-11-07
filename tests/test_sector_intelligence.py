@@ -166,6 +166,14 @@ class SectorIntelligenceTest(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'test'}),patch.object(sector,'_client',return_value=Client()):sector.refresh_tick(self.connect);sector.refresh_tick(self.connect)
   with self.connect() as c:row=c.execute('SELECT * FROM sector_benchmark_holdings').fetchone()
   self.assertTrue(json.loads(row['payload'])['top10_only']);self.assertEqual(row['status'],'OK')
+ def test_previously_redirected_us_fund_is_requeued_once(self):
+  now=time.time()
+  with self.connect() as c:
+   c.execute("DELETE FROM sector_migrations WHERE name='ssga_canonical_url_v1'")
+   c.execute("INSERT INTO sector_benchmark_holdings VALUES(?,NULL,?,?,?)",('XLU.US','ISSUER_HTTP_301',now,now+3600))
+   sector.init(c)
+   row=c.execute("SELECT status,next_attempt FROM sector_benchmark_holdings WHERE symbol='XLU.US'").fetchone()
+  self.assertEqual((row['status'],row['next_attempt']),('TRY_ISSUER',0))
  def test_us_holdings_use_issuer_and_cache(self):
   now=time.time()
   with self.connect() as c:c.execute('INSERT INTO sector_benchmarks(symbol,region,sector,status,updated,next_attempt) VALUES(?,?,?,?,?,?)',('XLU.US','USA','Forsyning','VERIFIED',now,now+1000))
@@ -178,7 +186,7 @@ class SectorIntelligenceTest(unittest.TestCase):
    def read(self,size):return raw
   class Opener:
    def open(self,request,timeout):
-    self.url=request.full_url;self.asserted=request.full_url.endswith('holdings-daily-us-en-xlu.xlsx')
+    self.url=request.full_url;self.asserted=request.full_url=='https://www.ssga.com/library-content/products/fund-data/etfs/us/holdings-daily-us-en-xlu.xlsx'
     if not self.asserted:raise AssertionError('wrong fund URL')
     return Response()
   with patch('ssga_holdings.urllib.request.build_opener',return_value=Opener()):sector.refresh_tick(self.connect)

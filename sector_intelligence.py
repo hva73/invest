@@ -60,6 +60,11 @@ def init(c):
    c.execute("UPDATE sector_benchmark_holdings SET status='TRY_ISSUER',next_attempt=0 WHERE symbol=? AND status IN ('ENTITLEMENT_UNVERIFIED','NO_DATA','RESPONSE_TOO_LARGE','PROVIDER_REJECTED')",(symbol,))
   c.execute("INSERT INTO sector_migrations VALUES('ssga_holdings_v1',?)",(time.time(),))
 
+ if not c.execute("SELECT 1 FROM sector_migrations WHERE name='ssga_canonical_url_v1'").fetchone():
+  for symbol,_ in PROXIES['USA']:
+   c.execute("UPDATE sector_benchmark_holdings SET status='TRY_ISSUER',next_attempt=0 WHERE symbol=? AND status IN ('ISSUER_HTTP_301','ISSUER_HTTP_302','ISSUER_HTTP_303','ISSUER_HTTP_307','ISSUER_HTTP_308')",(symbol,))
+  c.execute("INSERT INTO sector_migrations VALUES('ssga_canonical_url_v1',?)",(time.time(),))
+
 def capture(c,uid,pid,payload):
  if not payload.get('positions_complete') or not payload.get('observed'):return
  try:bucket=int(datetime.fromisoformat(payload['observed'].replace('Z','+00:00')).timestamp())//14400
@@ -220,10 +225,10 @@ def request_benchmark_holdings(connect,uid,symbol):
   benchmark=c.execute('SELECT status,updated FROM sector_benchmarks WHERE symbol=?',(symbol,)).fetchone()
   if not benchmark or benchmark['status']!='VERIFIED' or not 0<=now-benchmark['updated']<=7*86400:return {'status':'UNVERIFIED_BENCHMARK'}
   row=c.execute('SELECT status,updated,next_attempt FROM sector_benchmark_holdings WHERE symbol=?',(symbol,)).fetchone()
-  if row and (row['status'] in ('PENDING','TRY_TOP10','TRY_ISSUER') or row['status']=='OK' and now-row['updated']<86400 or row['status'] not in ('OK','PENDING','TRY_TOP10','TRY_ISSUER') and row['next_attempt']>now):return {'status':row['status']}
+  if row and (row['status'] in ('PENDING','TRY_TOP10','TRY_ISSUER') or row['status']=='OK' and now-row['updated']<86400 or row['status'] not in ('OK','PENDING','TRY_TOP10','TRY_ISSUER') and row['next_attempt']>now):return {'status':row['status'],'updated':row['updated']}
   status='TRY_ISSUER' if symbol in {s for s,_ in PROXIES['USA']} else 'PENDING'
   c.execute('INSERT OR REPLACE INTO sector_benchmark_holdings VALUES(?,?,?,?,?)',(symbol,None,status,now,now))
- return {'status':status}
+ return {'status':status,'updated':now}
 
 def _holding_rows(payload):
  if not isinstance(payload,(dict,list)):return []
