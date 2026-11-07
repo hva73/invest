@@ -16,13 +16,13 @@ def main():
    with patch('mcp_client.MCP.request',side_effect=AssertionError('No broker calls in browser test')),sync_playwright() as pw:
     browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':1440,'height':1000});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click()
-    expect(page.locator('.dash-chart-svg')).to_be_visible();expect(page.locator('.dash-chart-change')).to_contain_text('+10,00 %')
+    expect(page.locator('.dash-chart-svg')).to_be_visible();expect(page.locator('.dash-chart-change')).to_contain_text('+10,00')
     page.locator('[data-dashboard-range=year]').click();expect(page.locator('[data-dashboard-range=year]')).to_have_attribute('aria-pressed','true');expect(page.locator('.dash-chart-svg')).to_be_visible()
     for width in (320,390,768,1440):
      page.set_viewport_size({'width':width,'height':1000});assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),width
      if width in (390,1440):page.locator('.dash-hero').screenshot(path=f'/tmp/escape-value-chart-{width}.png')
     assert not errors,errors;browser.close()
-   print('PASS: real recorded value chart, range selection, signs and mobile widths')
+   print('PASS: recorded portfolio result chart, range selection, signs and mobile widths')
   finally:server.shutdown();server.server_close()
  finally:case.tearDown()
 if __name__=='__main__':main()

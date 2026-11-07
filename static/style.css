@@ -289,3 +289,7 @@ main,#content,.panel,.grid>*,.formgrid>*,.actions>*{min-width:0}.financial-panel
 @media(max-width:700px){.si-etf-overlay{padding:10px}.si-etf-overlay .si-etf-holdings{max-height:94dvh;padding:16px}}
 .si-rotation-hit{pointer-events:stroke;cursor:help}.si-rotation-line:hover>polyline:first-child,.si-rotation-line:focus-within>polyline:first-child{stroke-width:4}
 .sector-row.is-donut-hover{background:#214143;border-radius:8px;outline:1px solid #72bfae}
+/* Let the portfolio curve dissolve softly into the surrounding hero. */
+.dash-chart-line{stroke:url(#dash-line-fade)}
+.dash-chart-area{fill:url(#dash-area-fade);opacity:1}
+.dash-chart-grid{stroke-opacity:.38}

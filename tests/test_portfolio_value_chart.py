@@ -17,7 +17,7 @@ class PortfolioValueChart(unittest.TestCase):
   self.save(self.root,'1000',self.now-timedelta(minutes=10),result='20');self.save(self.child,'300',self.now-timedelta(minutes=9));self.save(self.root,'1100',self.now,result='30')
   with app.connect() as c:
    history=dashboard.portfolio_value_history(c,1,self.now);total=c.execute('SELECT count(*) FROM display_portfolio_values').fetchone()[0]
-  self.assertEqual(total,2);self.assertEqual([p['amount'] for p in history['periods']['week']],['1000','1100']);self.assertEqual(history['reported_result'],{'amount':'30','currency':'DKK'})
+  self.assertEqual(total,2);self.assertEqual([p['amount'] for p in history['periods']['week']],['1000','1100']);self.assertEqual(history['reported_result'],{'amount':'30','currency':'DKK'});self.assertEqual([p['reported_result'] for p in history['periods']['week']],['20','30'])
  def test_missing_currency_mixed_roots_and_failed_snapshots_do_not_fabricate_totals(self):
   self.save(self.root,'1000',self.now)
   with app.connect() as c:
