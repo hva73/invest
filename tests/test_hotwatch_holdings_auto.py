@@ -230,6 +230,10 @@ class HoldingAutowatch(unittest.TestCase):
    self.assertEqual({tuple(json.loads(r['request'])['portfolio_ids']) for r in after},{(self.fixture.root,),(self.fixture.child,)})
    for row in after:
     req=json.loads(row['request']);self.assertEqual(req['provider_symbol'],'BTC-USD.CC');self.assertTrue(engine.valid_cxe_evidence(c,1,req,self.now))
+   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'0','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_FUSE_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'0','ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE':'30'}):
+    self.assertEqual(engine.effective_poll_interval(c,req),60)
+    self.assertEqual(engine.effective_poll_interval(c,dict(req,asset_id='other-asset')),300)
+    self.assertEqual(req['risk']['max_quote_age_s'],120)
   class Response:
    def __enter__(self):return self
    def __exit__(self,*args):return False
@@ -241,13 +245,15 @@ class HoldingAutowatch(unittest.TestCase):
   adapter=EODHDAdapter(app.connect,1,Opener())
   def context(req,currency):
    ctx=tick(self.now,held=True)['context'];ctx['quantity']=quantities[req['portfolio_ids'][0]];return ctx
-  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}),patch('hotwatch_adapters.reserve'),patch.object(adapter.pluto,'safe_context',side_effect=context):
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'0','ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE':'30','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}),patch('hotwatch_adapters.reserve'),patch.object(adapter.pluto,'safe_context',side_effect=context):
    for row in after:
     req=json.loads(row['request']);sample=adapter.poll({'id':row['id'],'request_data':req,'state':row['state']})
     self.assertEqual(sample['currency'],'USD');self.assertEqual(sample['context']['quantity'],quantities[req['portfolio_ids'][0]])
     out=engine.ingest(app.connect,1,row['watch_id'],False,sample,self.now)
     self.assertEqual(out['calculation']['signal'],'NO_DATA')
     self.assertEqual(out['session']['display_status'],'KURS MODTAGET · AFVENTER SIGNALDATA')
+    self.assertEqual(out['session']['effective_min_interval_s'],60)
+    self.assertEqual((engine.stamp(out['session']['next_due_at'])-self.now).total_seconds(),60)
   with app.connect() as c:
    self.assertEqual(c.execute('SELECT count(*) FROM hw_samples').fetchone()[0],4)
    current=c.execute('SELECT * FROM hw_sessions WHERE id=?',(after[-1]['id'],)).fetchone();stale=engine.view(c,current,self.now+timedelta(seconds=131))

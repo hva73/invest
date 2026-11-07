@@ -46,7 +46,13 @@ def provider_request_limit(source):
 
 def effective_poll_interval(c,request,profile=None):
  """Budget-aware cadence; never raise the provider request limit."""
- source=request['provider'];profile=profile or request['profile'];minimum=max(PROFILES.get(profile,PROFILES[request['profile']]),provider_floor(source))
+ source=request['provider'];profile=profile or request['profile'];floor=provider_floor(source)
+ # The explicitly approved BTC monitoring feed is continuous. Poll it often
+ # enough for the unchanged 120-second freshness gate; retain budget limits.
+ # An operator-configured fast-poll floor remains authoritative.
+ from instrument_resolver import BTC_PLUTO_ASSET_ID
+ if source=='eodhd' and request.get('purpose')=='automatic holding watch' and request.get('asset_id')==BTC_PLUTO_ASSET_ID and request.get('provider_symbol')=='BTC-USD.CC' and os.environ.get('ESCAPE_HW_EODHD_FAST_POLL_ENABLED')!='1':floor=60
+ minimum=max(PROFILES.get(profile,PROFILES[request['profile']]),floor)
  if source!='eodhd':return minimum
  limit=provider_request_limit(source)
  available=max(1,limit-3 if limit>3 else limit)
@@ -364,7 +370,6 @@ def view(c,row,now=None):
      if not 0<=(now-bar_end).total_seconds()<=max_age or not 0<=(now-stamp(latest_sample['bar_evidence']['schedule_received_at'])).total_seconds()<=max_age:effective='NO_DATA';display_reasons.append('BAR_EVIDENCE_STALE')
     except (KeyError,TypeError,ValueError,IndexError):effective='NO_DATA';display_reasons.append('BAR_EVIDENCE_STALE')
  profile=state.get('adaptive_profile',request['profile'])
- minimum=state.get('provider_floor_s',provider_floor(request['provider']))
  budget_interval=effective_poll_interval(c,request,profile)
  latest_payload=json.loads(sample['payload']) if sample else None
  if latest_payload and latest_payload.get('bar_history'):
@@ -452,7 +457,7 @@ def view(c,row,now=None):
  if evidence and evidence.get('basis')=='user_authorized_btc_monitoring' and quote_feed_verified and quote_freshness=='FRESH' and effective=='NO_DATA' and not row['last_error'] and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED'):
   display_status='KURS MODTAGET · AFVENTER SIGNALDATA'
  data_status.update(holding_verified=holding_verified,instrument_match_verified=instrument_match_verified,instrument_match_evidence=evidence,quote_feed_verified=quote_feed_verified,quote_freshness=quote_freshness)
- return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':max(minimum,budget_interval),'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
+ return {'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':budget_interval,'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
 def sessions(connect,uid,mode=False,after=0,limit=50):
  with connect() as c:
