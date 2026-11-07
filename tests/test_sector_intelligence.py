@@ -169,6 +169,11 @@ class SectorIntelligenceTest(unittest.TestCase):
   with self.connect() as c:
    b=c.execute('SELECT * FROM sector_benchmarks').fetchone();m=c.execute('SELECT * FROM sector_market').fetchone()
   self.assertEqual((b['status'],b['proof_source']),('VERIFIED','EODHD instrumentsøgning'));self.assertEqual(m['status'],'OK')
+ def test_global_communications_abbreviation_is_recognized(self):
+  row={'Code':'IXP','Exchange':'US','Name':'iShares Global Comm Services ETF','CurrencyCode':'USD','Type':'ETF'}
+  self.assertTrue(sector._benchmark_identity('Globalt','Kommunikation','IXP.US',row))
+  row['Name']='iShares Global Healthcare ETF'
+  self.assertFalse(sector._benchmark_identity('Globalt','Kommunikation','IXP.US',row))
  def test_global_benchmark_search_rejects_wrong_sector(self):
   class Client:
    def _http(self,base,path,params):return {'status':'OK','payload':[{'Code':'IXN','Exchange':'US','Name':'iShares Global Healthcare ETF','Currency':'USD','Type':'ETF'}]}

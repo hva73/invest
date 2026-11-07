@@ -41,6 +41,11 @@ def init(c):
   c.execute("UPDATE sector_market SET next_attempt=0 WHERE status='UNVERIFIED_BENCHMARK' OR NOT EXISTS (SELECT 1 FROM sector_benchmarks b WHERE b.symbol=sector_market.symbol AND b.status='VERIFIED' AND b.updated>=?)",(time.time()-7*86400,))
   c.execute("INSERT INTO sector_migrations VALUES('benchmark_search_v1',?)",(time.time(),))
 
+ if not c.execute("SELECT 1 FROM sector_migrations WHERE name='ixp_comm_name_v1'").fetchone():
+  c.execute("UPDATE sector_benchmarks SET status='TRY_SEARCH',next_attempt=0 WHERE symbol='IXP.US' AND status!='VERIFIED'")
+  c.execute("UPDATE sector_market SET next_attempt=0 WHERE symbol='IXP.US' AND status='UNVERIFIED_BENCHMARK'")
+  c.execute("INSERT INTO sector_migrations VALUES('ixp_comm_name_v1',?)",(time.time(),))
+
 def capture(c,uid,pid,payload):
  if not payload.get('positions_complete') or not payload.get('observed'):return
  try:bucket=int(datetime.fromisoformat(payload['observed'].replace('Z','+00:00')).timestamp())//14400
@@ -174,7 +179,7 @@ def _benchmark_identity(region,sector,symbol,general):
  if region=='USA' and ('SELECT SECTOR' not in upper or 'SPDR' not in upper):return False
  if region=='Globalt' and ('GLOBAL' not in upper or 'ISHARES' not in upper):return False
  if region=='Europa' and ('EUROPE' not in upper or 'FINANCIAL' not in upper):return False
- terms={'Teknologi':('TECH',),'Sundhed':('HEALTH',),'Finans':('FINANCIAL',),'Industri':('INDUSTRIAL',),'Energi':('ENERGY',),'Forbrug, cyklisk':('CONSUMER DISCRETIONARY','CONSUMER CYCLICAL'),'Forbrug, stabilt':('CONSUMER STAPLES','CONSUMER DEFENSIVE'),'Materialer':('MATERIAL',),'Forsyning':('UTILIT',),'Ejendomme':('REAL ESTATE',),'Kommunikation':('COMMUNICATION','TELECOM')}
+ terms={'Teknologi':('TECH',),'Sundhed':('HEALTH',),'Finans':('FINANCIAL',),'Industri':('INDUSTRIAL',),'Energi':('ENERGY',),'Forbrug, cyklisk':('CONSUMER DISCRETIONARY','CONSUMER CYCLICAL'),'Forbrug, stabilt':('CONSUMER STAPLES','CONSUMER DEFENSIVE'),'Materialer':('MATERIAL',),'Forsyning':('UTILIT',),'Ejendomme':('REAL ESTATE',),'Kommunikation':('COMMUNICATION','COMM SERVICES','TELECOM')}
  return any(word in upper for word in terms.get(sector,()))
 
 def request_benchmark_holdings(connect,uid,symbol):
