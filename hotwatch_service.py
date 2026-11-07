@@ -1,5 +1,6 @@
 """Standalone read-only HOT WATCH service. Never scheduled by legacy worker.py."""
 import json,signal,threading,logging,hashlib,time,os,re,secrets
+from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
 import app,hotwatch_engine as engine
 from hotwatch_adapters import PlutoAdapter,EODHDAdapter,InboxAdapter,DataUnavailable
@@ -403,7 +404,7 @@ def verify_provisional_feeds(connect,now=None):
  now=now or engine.utc()
  with connect() as c:
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return 0
-  row=c.execute("SELECT s.*,p.symbol AS provisional_symbol FROM hw_sessions s JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id LEFT JOIN hw_feed_recovery f ON f.watch_row_id=s.id LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.is_test=0 AND COALESCE(k.killed,0)=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.lease_until<=? AND json_extract(s.request,'$.provider')='eodhd' AND json_extract(s.request,'$.provider_symbol')=p.symbol AND (COALESCE(f.next_attempt,0)<=? OR (f.status='PLUTO_ISIN_MISSING' AND json_extract(s.request,'$.exchange') IN ('CHIX','NYSE','NASDAQ'))) ORDER BY COALESCE(f.next_attempt,0),s.id LIMIT 1",(now.timestamp(),now.timestamp())).fetchone()
+  row=c.execute("SELECT s.*,p.symbol AS provisional_symbol FROM hw_sessions s JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id LEFT JOIN hw_feed_recovery f ON f.watch_row_id=s.id LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.is_test=0 AND COALESCE(k.killed,0)=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.lease_until<=? AND json_extract(s.request,'$.provider')='eodhd' AND json_extract(s.request,'$.provider_symbol')=p.symbol AND (COALESCE(f.next_attempt,0)<=? OR (f.status='PLUTO_ISIN_MISSING' AND json_extract(s.request,'$.exchange') IN ('CHIX','NYSE','NASDAQ')) OR (f.status IN ('REFERENCE_EVIDENCE_INCOMPLETE','EODHD_IDENTITY_UNCERTAIN','VERIFICATION_FAILED') AND f.updated<=?)) ORDER BY COALESCE(f.next_attempt,0),s.id LIMIT 1",(now.timestamp(),now.timestamp(),(now-timedelta(minutes=5)).isoformat())).fetchone()
  if not row:return 0
  req=json.loads(row['request']);holding={'asset_id':req['asset_id'],'ticker':req['ticker'],'currency':req['quote_currency']};status='PLUTO_IDENTITY_UNVERIFIED';instrument=None;evidence=None
  try:
@@ -435,7 +436,7 @@ def verify_provisional_feeds(connect,now=None):
     c.execute('UPDATE hw_sessions SET next_due=? WHERE id=?',(now.timestamp(),row['id']))
     engine.event(c,current,'INSTRUMENT_VERIFIED',now,('Pluto-aktiv matchet via Cboes CXE-reference og EODHD-ISIN' if evidence else 'EODHD-identitet bekræftet med samme ISIN og valuta')+'; ny signalhistorik starter fra verificerede data')
    else:return 0
-  delay=60 if status=='PROVIDER_RATE_BUDGET' else 21600
+  delay=60 if status=='PROVIDER_RATE_BUDGET' else 300
   c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?) ON CONFLICT(watch_row_id) DO UPDATE SET next_attempt=excluded.next_attempt,status=excluded.status,updated=excluded.updated',(row['id'],now.timestamp()+delay,status,now.isoformat()))
  return 1 if status=='MATCHED' else 0
 

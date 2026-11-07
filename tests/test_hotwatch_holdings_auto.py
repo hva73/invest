@@ -362,12 +362,16 @@ class HoldingAutowatch(unittest.TestCase):
    self.assertEqual(service.verify_provisional_feeds(app.connect,check_at),0)
   with app.connect() as c:
    self.assertEqual(c.execute('SELECT count(*) FROM hw_provisional_feed_links').fetchone()[0],1)
-   c.execute('UPDATE hw_feed_recovery SET next_attempt=0')
+   recovery=c.execute('SELECT next_attempt FROM hw_feed_recovery').fetchone()
+   self.assertEqual(recovery['next_attempt'],check_at.timestamp()+300)
+   # Existing installations may still have a six-hour retry from older code.
+   c.execute('UPDATE hw_feed_recovery SET next_attempt=?',(check_at.timestamp()+21600,))
   right={'choices':[{'symbol':'TSM.US','name':'Taiwan Semiconductor Manufacturing','exchange':'US','currency':'USD','isin':'US1234567890'}]}
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=verified),patch('hotwatch_adapters.search_eodhd_symbols',return_value=right):
-   self.assertEqual(service.verify_provisional_feeds(app.connect,check_at),1)
+   self.assertEqual(service.verify_provisional_feeds(app.connect,check_at+timedelta(minutes=4)),0)
+   self.assertEqual(service.verify_provisional_feeds(app.connect,check_at+timedelta(minutes=6)),1)
   self.assertEqual(engine.sync(app.connect,1,False,summary_only=True)['open_sessions'][0]['identity_verification'],'unverified')
-  at=check_at+timedelta(minutes=1);new_sample=tick(at,2,price='101',held=True)
+  at=check_at+timedelta(minutes=7);new_sample=tick(at,2,price='101',held=True)
   new_sample.update(source='eodhd',ticker='TSM',asset_id='synthetic-asset',market_status='UNKNOWN',session_key='test:UNKNOWN',feed_type='synthetic EODHD snapshot',bid=None,ask=None)
   refreshed=engine.ingest(app.connect,1,req['watch_id'],False,new_sample,at)
   with app.connect() as c:
