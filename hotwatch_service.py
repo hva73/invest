@@ -378,7 +378,7 @@ def recover_automatic_feeds(connect,now=None):
        status='PLUTO_ISIN_MISSING'
        if instrument.get('name'):
         from hotwatch_adapters import search_eodhd_symbols
-        options=search_eodhd_symbols(connect,row['user_id'],{'quote_currency':holding['currency']},candidate_override={'ticker':holding['ticker'],'company_name':instrument['name']},purpose='holding_identity')
+        options=search_eodhd_symbols(connect,row['user_id'],{'quote_currency':holding['currency']},candidate_override={'ticker':holding['ticker'],'company_name':instrument['name'],'asset_type':instrument.get('type')},purpose='holding_identity')
         evidence=cxe_verified_match(instrument,options.get('choices',[]),now,connect,row['user_id'])
         if evidence:
          known={'provider_symbol':evidence['symbol']};status='MATCHED';reason='Pluto-instrumentet er matchet til den verificerede EODHD-notering'
@@ -423,7 +423,7 @@ def verify_provisional_feeds(connect,now=None):
     status='REFERENCE_EVIDENCE_INCOMPLETE' if instrument.get('exchange') in ('CHIX','NYSE','NASDAQ') else 'PLUTO_ISIN_MISSING'
     if instrument.get('name'):
      from hotwatch_adapters import search_eodhd_symbols
-     options=search_eodhd_symbols(connect,row['user_id'],{'quote_currency':holding['currency']},candidate_override={'ticker':holding['ticker'],'company_name':instrument['name']},purpose='holding_identity')
+     options=search_eodhd_symbols(connect,row['user_id'],{'quote_currency':holding['currency']},candidate_override={'ticker':holding['ticker'],'company_name':instrument['name'],'asset_type':instrument.get('type')},purpose='holding_identity')
      evidence=cxe_verified_match(instrument,options.get('choices',[]),now,connect,row['user_id'])
      if evidence and evidence['symbol']==row['provisional_symbol']:
       instrument=dict(instrument,isin=evidence['isin']);status='MATCHED'

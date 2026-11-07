@@ -9,6 +9,17 @@ class Response:
 class Opener:
  def open(self,*args,**kwargs):return Response()
 class SymbolLookup(unittest.TestCase):
+ def test_crypto_pair_search_is_currency_specific_and_does_not_prove_identity(self):
+  class Reply:
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,size):return json.dumps([{'Code':'BTC-USD','Exchange':'CC','Type':'Currency','Name':'Bitcoin','Currency':'USD'},{'Code':'BTC-EUR','Exchange':'CC','Type':'Currency','Name':'Bitcoin EUR','Currency':'EUR'},{'Code':'BTC-USDT','Exchange':'CC','Type':'Currency','Name':'Bitcoin USDT','Currency':'USDT'},{'Code':'BTC-USD','Exchange':'US','Type':'Common Stock','Name':'Other','Currency':'USD'},{'Code':'BTC2-USD','Exchange':'CC','Type':'Currency','Name':'Other Bitcoin','Currency':'USD'}]).encode()
+  class Client:
+   def open(self,*args,**kwargs):return Reply()
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY'}),patch.object(adapter,'reserve'):
+   result=adapter.search_eodhd_symbols(None,1,{'quote_currency':'USD'},Client(),candidate_override={'ticker':'BTC','company_name':'Bitcoin','asset_type':'CRYPTO'})
+  self.assertEqual([x['symbol'] for x in result['choices']],['BTC-USD.CC'])
+  self.assertNotIn('verified',str(result).lower())
  def test_missing_currency_is_distinct_from_invalid_currency(self):
   class Reply:
    def __enter__(self):return self

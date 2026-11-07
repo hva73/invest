@@ -71,6 +71,9 @@ def search_eodhd_symbols(connect,uid,data,opener=None,candidate_override=None,pu
  if not isinstance(ticker,str) or not re.fullmatch(r'[A-Za-z0-9.\-]{1,32}',ticker):raise DataUnavailable('EODHD_SYMBOL_MAPPING_REQUIRED')
  name_key=lambda x:re.sub(r'[^a-z0-9]','',x.casefold()) if isinstance(x,str) else ''
  issuer=candidate.get('company_name');issuer_key=name_key(issuer)
+ expected_currency=data.get('quote_currency')
+ if not isinstance(expected_currency,str) or not re.fullmatch('[A-Z]{3}',expected_currency):expected_currency=None
+ crypto=str(candidate.get('asset_type') or '').upper()=='CRYPTO'
  choices=[];seen=set();client=opener or urllib.request.build_opener(NoRedirect());not_found=[];successful=[]
  def search(query,allow_alias=False,allow_ticker_alias=False):
   reserve(connect,uid,'eodhd',purpose=purpose or ('holding_identity' if 'holding_portfolio_id' in data else None))
@@ -94,13 +97,13 @@ def search_eodhd_symbols(connect,uid,data,opener=None,candidate_override=None,pu
    if currency not in (None,'') and (not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency)):continue
    base=code.rsplit('.',1)[0] if code.upper().endswith('.'+exchange.upper()) else code
    ticker_equivalent=allow_ticker_alias and re.sub(r'[^a-z0-9]','',base.casefold())==re.sub(r'[^a-z0-9]','',ticker.casefold())
-   if base.casefold()!=ticker.casefold() and not ticker_equivalent and not (allow_alias and issuer_key and name_key(name)==issuer_key):continue
+   # A quoted crypto pair is a search candidate, not an identity proof.
+   crypto_pair=bool(crypto and expected_currency and exchange.upper()=='CC' and str(row.get('Type','')).casefold()=='currency' and base.upper()==ticker.upper()+'-'+expected_currency and currency in (None,'',expected_currency))
+   if base.casefold()!=ticker.casefold() and not ticker_equivalent and not crypto_pair and not (allow_alias and issuer_key and name_key(name)==issuer_key):continue
    symbol=code if code.upper().endswith('.'+exchange.upper()) else code+'.'+exchange
    if symbol.casefold() in seen:continue
    seen.add(symbol.casefold());choices.append({'symbol':symbol,'name':name[:200] if isinstance(name,str) else None,'exchange':exchange,'currency':currency if isinstance(currency,str) and re.fullmatch('[A-Z]{3}',currency) else None,'isin':isin[:32] if isinstance(isin,str) else None})
  search(ticker)
- expected_currency=data.get('quote_currency')
- if not isinstance(expected_currency,str) or not re.fullmatch('[A-Z]{3}',expected_currency):expected_currency=None
  needs_issuer=not choices or (expected_currency and not any(x['currency']==expected_currency for x in choices))
  # Search terms are path components: slashes in legal names can be rejected by
  # web servers. Search by the first two words and require the complete issuer

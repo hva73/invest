@@ -189,6 +189,18 @@ class HoldingAutowatch(unittest.TestCase):
   self.assertIsNone(instrument['isin']);self.assertEqual(instrument['asset_id'],'synthetic-asset')
   self.assertEqual(self.tick(verify=lambda *_:instrument,lookup=lambda *_:self.fail('No ISIN means no automatic EODHD match')),'LINKED')
   with app.connect() as c:self.assertEqual(json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()[0])['provider'],'pluto')
+ def test_crypto_search_candidate_does_not_enable_unverified_price_feed(self):
+  instrument={'asset_id':'synthetic-asset','ticker':'BTC','name':'Bitcoin','exchange':'WINTERMUTE','currency':'USD','type':'CRYPTO','isin':None}
+  holding=dict(self.holding,ticker='BTC',name='Bitcoin')
+  with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[holding]}),))
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=lambda *_:instrument,now=self.now),'LINKED')
+  choices={'choices':[{'symbol':'BTC-USD.CC','name':'Bitcoin','exchange':'CC','currency':'USD','isin':None}]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+  with app.connect() as c:
+   self.assertEqual(json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()['request'])['provider'],'pluto')
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_verified_feed_links').fetchone()[0],0)
  def test_complete_broker_identity_does_not_spend_second_lookup_for_missing_isin(self):
   raw={'asset':{'id':'synthetic-asset','ticker':'TEST','name':'Test Inc','exchange':'NASDAQ','currency':'USD','type':'CS'}}
   with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value=raw) as call:
