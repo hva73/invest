@@ -23,6 +23,11 @@ def init(c):
  c.execute('CREATE TABLE IF NOT EXISTS sector_benchmarks(symbol TEXT PRIMARY KEY,region TEXT NOT NULL,sector TEXT NOT NULL,name TEXT,currency TEXT,exchange TEXT,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL)')
  if 'proof_source' not in {r[1] for r in c.execute('PRAGMA table_info(sector_benchmarks)')}:c.execute('ALTER TABLE sector_benchmarks ADD COLUMN proof_source TEXT')
  c.execute('CREATE TABLE IF NOT EXISTS sector_benchmark_holdings(symbol TEXT PRIMARY KEY,payload TEXT,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL)')
+ c.execute('CREATE TABLE IF NOT EXISTS sector_europe_discovery(code TEXT PRIMARY KEY,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL)')
+ for prefix in ('EXV','EXH'):
+  for number in range(1,10):
+   code=prefix+str(number)
+   if (code+'.XETRA') not in {symbol for symbol,_ in PROXIES['Europa']}:c.execute("INSERT OR IGNORE INTO sector_europe_discovery VALUES(?,'PENDING',0,0)",(code,))
  c.execute('CREATE TABLE IF NOT EXISTS sector_market(symbol TEXT PRIMARY KEY,region TEXT NOT NULL,sector TEXT NOT NULL,payload TEXT,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL)')
  if 'price_basis' not in {r[1] for r in c.execute('PRAGMA table_info(sector_market)')}:c.execute('ALTER TABLE sector_market ADD COLUMN price_basis TEXT')
  c.execute('CREATE TABLE IF NOT EXISTS sector_history(user_id INTEGER NOT NULL,portfolio_id INTEGER NOT NULL,bucket INTEGER NOT NULL,observed TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(user_id,portfolio_id,bucket))')
@@ -45,6 +50,12 @@ def init(c):
   c.execute("UPDATE sector_benchmarks SET status='TRY_SEARCH',next_attempt=0 WHERE symbol='IXP.US' AND status!='VERIFIED'")
   c.execute("UPDATE sector_market SET next_attempt=0 WHERE symbol='IXP.US' AND status='UNVERIFIED_BENCHMARK'")
   c.execute("INSERT INTO sector_migrations VALUES('ixp_comm_name_v1',?)",(time.time(),))
+
+ if not c.execute("SELECT 1 FROM sector_migrations WHERE name='ssga_holdings_v1'").fetchone():
+  symbols=[symbol for symbol,_ in PROXIES['USA']]
+  for symbol in symbols:
+   c.execute("UPDATE sector_benchmark_holdings SET status='TRY_ISSUER',next_attempt=0 WHERE symbol=? AND status IN ('ENTITLEMENT_UNVERIFIED','NO_DATA','RESPONSE_TOO_LARGE','PROVIDER_REJECTED')",(symbol,))
+  c.execute("INSERT INTO sector_migrations VALUES('ssga_holdings_v1',?)",(time.time(),))
 
 def capture(c,uid,pid,payload):
  if not payload.get('positions_complete') or not payload.get('observed'):return
@@ -187,18 +198,29 @@ def _benchmark_identity(region,sector,symbol,general):
  terms={'Teknologi':('TECH',),'Sundhed':('HEALTH',),'Finans':('FINANCIAL',),'Industri':('INDUSTRIAL',),'Energi':('ENERGY',),'Forbrug, cyklisk':('CONSUMER DISCRETIONARY','CONSUMER CYCLICAL'),'Forbrug, stabilt':('CONSUMER STAPLES','CONSUMER DEFENSIVE'),'Materialer':('MATERIAL',),'Forsyning':('UTILIT',),'Ejendomme':('REAL ESTATE',),'Kommunikation':('COMMUNICATION','COMM SERVICES','TELECOM')}
  return any(word in upper for word in terms.get(sector,()))
 
+def _europe_discovery(row,code):
+ """Accept only the exact XETRA listing of a named STOXX Europe 600 ETF."""
+ if not isinstance(row,dict) or str(row.get('Code','')).upper()!=code or str(row.get('Exchange','')).upper()!='XETRA' or str(row.get('Currency','')).upper()!='EUR' or str(row.get('Type','')).upper() not in ('ETF','ETP','FUND'):return None
+ name=str(row.get('Name') or '').upper()
+ if 'ISHARES' not in name or 'STOXX EUROPE 600' not in name:return None
+ terms=(('INDUSTRIAL GOODS','Industri'),('OIL & GAS','Energi'),('BASIC RESOURCES','Råvarer'),('MEDIA','Medier'),('TECHNOLOGY','Teknologi'),('HEALTH CARE','Sundhed'),('HEALTHCARE','Sundhed'),('UTILITIES','Forsyning'),('CHEMICALS','Kemikalier'),('CONSTRUCTION & MATERIALS','Byggeri og materialer'),('AUTOMOBILES','Biler'),('BANKS','Banker'),('FINANCIAL SERVICES','Finansielle tjenester'),('INSURANCE','Forsikring'),('FOOD & BEVERAGE','Fødevarer'),('PERSONAL & HOUSEHOLD','Personlige og husholdningsvarer'),('REAL ESTATE','Ejendomme'),('RETAIL','Detailhandel'),('TELECOMMUNICATIONS','Telekommunikation'),('TRAVEL & LEISURE','Rejser og fritid'))
+ matches=[label for term,label in terms if term in name]
+ return matches[0] if len(set(matches))==1 else None
+
 def request_benchmark_holdings(connect,uid,symbol):
  """Queue only configured, verified public benchmarks. No broker operations."""
  allowed={s for items in PROXIES.values() for s,_ in items}
+ with connect() as c:allowed.update(r['symbol'] for r in c.execute("SELECT symbol FROM sector_benchmarks WHERE region='Europa' AND status='VERIFIED' AND proof_source='EODHD instrumentsøgning · europæisk fond'"))
  if not isinstance(symbol,str) or symbol not in allowed:raise ValueError('Ukendt sektorfond')
  now=time.time()
  with connect() as c:
   benchmark=c.execute('SELECT status,updated FROM sector_benchmarks WHERE symbol=?',(symbol,)).fetchone()
   if not benchmark or benchmark['status']!='VERIFIED' or not 0<=now-benchmark['updated']<=7*86400:return {'status':'UNVERIFIED_BENCHMARK'}
   row=c.execute('SELECT status,updated,next_attempt FROM sector_benchmark_holdings WHERE symbol=?',(symbol,)).fetchone()
-  if row and (row['status'] in ('PENDING','TRY_TOP10') or row['status']=='OK' and now-row['updated']<86400 or row['status'] not in ('OK','PENDING','TRY_TOP10') and row['next_attempt']>now):return {'status':row['status']}
-  c.execute('INSERT OR REPLACE INTO sector_benchmark_holdings VALUES(?,?,?,?,?)',(symbol,None,'PENDING',now,now))
- return {'status':'PENDING'}
+  if row and (row['status'] in ('PENDING','TRY_TOP10','TRY_ISSUER') or row['status']=='OK' and now-row['updated']<86400 or row['status'] not in ('OK','PENDING','TRY_TOP10','TRY_ISSUER') and row['next_attempt']>now):return {'status':row['status']}
+  status='TRY_ISSUER' if symbol in {s for s,_ in PROXIES['USA']} else 'PENDING'
+  c.execute('INSERT OR REPLACE INTO sector_benchmark_holdings VALUES(?,?,?,?,?)',(symbol,None,status,now,now))
+ return {'status':status}
 
 def _holding_rows(payload):
  if not isinstance(payload,(dict,list)):return []
@@ -220,7 +242,20 @@ def _holding_rows(payload):
 def refresh_tick(connect):
  """Do at most one low-priority EODHD request per invocation."""
  now=time.time()
- if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1' or not os.environ.get('ESCAPE_EODHD_API_KEY','').strip():
+ # US sector ETFs publish their actual holdings directly. Fetch only on request.
+ with connect() as c:
+  issuer=c.execute("SELECT * FROM sector_benchmark_holdings WHERE status='TRY_ISSUER' AND next_attempt<=? ORDER BY updated LIMIT 1",(now,)).fetchone()
+ if issuer:
+  import ssga_holdings
+  try:
+   result=ssga_holdings.fetch(issuer['symbol']);rows=result['rows']
+   payload=json.dumps({'rows':rows[:50],'total_reported':len(rows),'source':'State Street / SPDR','as_of':result['as_of']})
+   status='OK';retry=now+86400
+  except ssga_holdings.HoldingsUnavailable as error:
+   payload=None;status=str(error);retry=now+3600
+  with connect() as c:c.execute('INSERT OR REPLACE INTO sector_benchmark_holdings VALUES(?,?,?,?,?)',(issuer['symbol'],payload,status,now,retry))
+  return
+ if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1'  or not os.environ.get('ESCAPE_EODHD_API_KEY','').strip():
   candidate=_pluto_candidate(connect,now)
   if candidate and not _reuse_hotwatch_asset(connect,candidate,now):_fetch_pluto(connect,candidate,now)
   return
@@ -355,13 +390,28 @@ def refresh_tick(connect):
   with connect() as c:c.execute('INSERT OR REPLACE INTO sector_fund_exposure VALUES(?,?,?,?,?,?,?)',(uid,aid,symbol,payload,status,now,retry))
   return
  with connect() as c:
+  dynamic=[(r['symbol'],r['sector']) for r in c.execute("SELECT symbol,sector FROM sector_benchmarks WHERE region='Europa' AND status='VERIFIED' AND proof_source='EODHD instrumentsøgning · europæisk fond' AND updated>=?",(now-7*86400,))]
+  configured={s for s,_ in PROXIES.get('Europa',[])}
+  target=None
   for region,items in PROXIES.items():
-   for symbol,sector in items:
+   for symbol,sector in list(items)+([(s,n) for s,n in dynamic if s not in configured] if region=='Europa' else []):
     row=c.execute('SELECT next_attempt FROM sector_market WHERE symbol=?',(symbol,)).fetchone()
     if not row or row['next_attempt']<=now:target=(region,symbol,sector);break
-   else:continue
-   break
-  else:return
+   if target:break
+  discovery=c.execute('SELECT * FROM sector_europe_discovery WHERE next_attempt<=? ORDER BY next_attempt,code LIMIT 1',(now,)).fetchone() if target is None else None
+ if target is None:
+  if not discovery:return
+  code=discovery['code'];result=_client(connect,0)._http(HTTP_BASE,'/search/'+quote(code,safe=''),{'fmt':'json','limit':'50'})
+  rows=result.get('payload') if result['status']=='OK' else []
+  candidates=[(r,_europe_discovery(r,code)) for r in rows if isinstance(r,dict)] if isinstance(rows,list) else []
+  candidates=[(r,label) for r,label in candidates if label]
+  with connect() as c:
+   if len(candidates)==1:
+    row,label=candidates[0];symbol=code+'.XETRA'
+    c.execute('INSERT OR REPLACE INTO sector_benchmarks(symbol,region,sector,name,currency,exchange,status,updated,next_attempt,proof_source) VALUES(?,?,?,?,?,?,?,?,?,?)',(symbol,'Europa',label,row.get('Name'),'EUR','XETRA','VERIFIED',now,now+7*86400,'EODHD instrumentsøgning · europæisk fond'))
+   status='OK' if len(candidates)==1 else result['status'] if result['status']!='OK' else 'NOT_FOUND'
+   c.execute('INSERT OR REPLACE INTO sector_europe_discovery VALUES(?,?,?,?)',(code,status,now,now+(7*86400 if result['status']=='OK' else _retry_delay(status))))
+  return
  region,symbol,sector=target
  with connect() as c:benchmark=c.execute('SELECT * FROM sector_benchmarks WHERE symbol=?',(symbol,)).fetchone()
  # The eleven US tickers are the issuer's published S&P 500 sector funds.
@@ -432,6 +482,13 @@ def read(connect,uid):
   benchmark_holdings=[dict(r) for r in c.execute('SELECT * FROM sector_benchmark_holdings')]
   history=[dict(r) for r in c.execute('SELECT portfolio_id,observed,payload FROM sector_history WHERE user_id=? AND bucket>=? ORDER BY bucket',(uid,int((time.time()-366*86400)//14400)))]
   fx=c.execute('SELECT payload FROM fx_snapshots ORDER BY source_date DESC,id DESC LIMIT 1').fetchone()
+ # Show every configured fund while it is waiting for its first lookup.
+ # Do not invent prices: the worker fills these entries only from EODHD.
+ known={r['symbol'] for r in markets}
+ for region,items in PROXIES.items():
+  for symbol,sector in items:
+   if symbol not in known:
+    markets.append({'symbol':symbol,'region':region,'sector':sector,'payload':None,'status':'PENDING','benchmark_status':None,'benchmark_updated':None,'benchmark_source':None,'benchmark_name':None,'benchmark_currency':None,'benchmark_exchange':None})
  dashboard=dashboard_projection.build(connect,uid,owned,snapshots)
  for account in dashboard['accounts']:
   portfolio=next((p for p in owned if p['id']==account['id']),{})
@@ -450,7 +507,7 @@ def read(connect,uid):
   saved=r.pop('payload')
   verified=r.get('benchmark_status')=='VERIFIED' and r.get('benchmark_updated') is not None and 0<=time.time()-r['benchmark_updated']<=7*86400
   r['series']=json.loads(saved or '[]') if verified else []
-  if not verified:r['status']='UNVERIFIED_BENCHMARK'
+  if not verified and r.get('status')!='PENDING':r['status']='UNVERIFIED_BENCHMARK'
  for r in benchmark_holdings:r['holdings']=json.loads(r.pop('payload') or '{}')
  for r in history:r['positions']=json.loads(r.pop('payload'))
  return {'dashboard':dashboard,'markets':markets,'history':history,'benchmark_holdings':benchmark_holdings,'fx_quotes':fx_quotes,'fx':json.loads(fx['payload']) if fx else None,'regions':list(PROXIES)}

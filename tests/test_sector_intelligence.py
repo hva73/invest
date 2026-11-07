@@ -15,6 +15,12 @@ class SectorIntelligenceTest(unittest.TestCase):
  def tearDown(self):self.tmp.cleanup()
  def connect(self):
   c=sqlite3.connect(self.path);c.row_factory=sqlite3.Row;return c
+ def test_europe_configured_funds_are_visible_while_waiting(self):
+  with patch('portfolios.list_owned',return_value=[]),patch('portfolio_data.snapshots',return_value={}),patch('dashboard_projection.build',return_value={'accounts':[],'positions':[]}):
+   result=sector.read(self.connect,1)
+  rows=[x for x in result['markets'] if x['region']=='Europa']
+  self.assertEqual(len(rows),len(sector.PROXIES['Europa']))
+  self.assertTrue(all(x['status']=='PENDING' and x['series']==[] for x in rows))
  def test_history_stays_owner_and_depot_scoped_and_skips_incomplete(self):
   data={'observed':'2026-11-07T10:00:00+00:00','positions_complete':True,'positions':[{'asset_id':'btc','kind':'holding'},{'asset_id':'collection','kind':'collection'}]}
   with self.connect() as c:
@@ -136,7 +142,8 @@ class SectorIntelligenceTest(unittest.TestCase):
   with self.assertRaises(ValueError):sector.request_benchmark_holdings(self.connect,1,'NOT-ALLOWED.US')
   self.assertEqual(sector.request_benchmark_holdings(self.connect,1,'XLK.US')['status'],'UNVERIFIED_BENCHMARK')
   with self.connect() as c:c.execute('INSERT INTO sector_benchmarks(symbol,region,sector,status,updated,next_attempt) VALUES(?,?,?,?,?,?)',('XLK.US','USA','Teknologi','VERIFIED',now,now+1000))
-  self.assertEqual(sector.request_benchmark_holdings(self.connect,1,'XLK.US')['status'],'PENDING')
+  self.assertEqual(sector.request_benchmark_holdings(self.connect,1,'XLK.US')['status'],'TRY_ISSUER')
+  with self.connect() as c:c.execute("UPDATE sector_benchmark_holdings SET status='PENDING' WHERE symbol='XLK.US'")
   class Client:
    def _http(self,base,path,params):
     assert path=='/fundamentals/XLK.US' and params['filter']=='ETF_Data::Holdings'
@@ -151,6 +158,7 @@ class SectorIntelligenceTest(unittest.TestCase):
   with self.connect() as c:
    c.execute('INSERT INTO sector_benchmarks(symbol,region,sector,status,updated,next_attempt) VALUES(?,?,?,?,?,?)',('XLK.US','USA','Teknologi','VERIFIED',now,now+1000))
   sector.request_benchmark_holdings(self.connect,1,'XLK.US')
+  with self.connect() as c:c.execute("UPDATE sector_benchmark_holdings SET status='PENDING' WHERE symbol='XLK.US'")
   class Client:
    def _http(self,base,path,params):
     if params['filter']=='ETF_Data::Holdings':return {'status':'RESPONSE_TOO_LARGE'}
@@ -158,6 +166,25 @@ class SectorIntelligenceTest(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'test'}),patch.object(sector,'_client',return_value=Client()):sector.refresh_tick(self.connect);sector.refresh_tick(self.connect)
   with self.connect() as c:row=c.execute('SELECT * FROM sector_benchmark_holdings').fetchone()
   self.assertTrue(json.loads(row['payload'])['top10_only']);self.assertEqual(row['status'],'OK')
+ def test_us_holdings_use_issuer_and_cache(self):
+  now=time.time()
+  with self.connect() as c:c.execute('INSERT INTO sector_benchmarks(symbol,region,sector,status,updated,next_attempt) VALUES(?,?,?,?,?,?)',('XLU.US','USA','Forsyning','VERIFIED',now,now+1000))
+  self.assertEqual(sector.request_benchmark_holdings(self.connect,1,'XLU.US')['status'],'TRY_ISSUER')
+  from test_ssga_holdings import IssuerHoldingsTest
+  raw=IssuerHoldingsTest().workbook()
+  class Response:
+   def __enter__(self):return self
+   def __exit__(self,*args):pass
+   def read(self,size):return raw
+  class Opener:
+   def open(self,request,timeout):
+    self.url=request.full_url;self.asserted=request.full_url.endswith('holdings-daily-us-en-xlu.xlsx')
+    if not self.asserted:raise AssertionError('wrong fund URL')
+    return Response()
+  with patch('ssga_holdings.urllib.request.build_opener',return_value=Opener()):sector.refresh_tick(self.connect)
+  with self.connect() as c:row=c.execute('SELECT * FROM sector_benchmark_holdings').fetchone()
+  self.assertEqual(row['status'],'OK');self.assertEqual(json.loads(row['payload'])['source'],'State Street / SPDR');self.assertEqual(json.loads(row['payload'])['rows'][0]['ticker'],'NEE')
+  self.assertEqual(sector.request_benchmark_holdings(self.connect,1,'XLU.US')['status'],'OK')
  def test_global_benchmark_uses_provider_search_before_fundamentals(self):
   class Client:
    def _http(self,base,path,params):
@@ -169,6 +196,25 @@ class SectorIntelligenceTest(unittest.TestCase):
   with self.connect() as c:
    b=c.execute('SELECT * FROM sector_benchmarks').fetchone();m=c.execute('SELECT * FROM sector_market').fetchone()
   self.assertEqual((b['status'],b['proof_source']),('VERIFIED','EODHD instrumentsøgning'));self.assertEqual(m['status'],'OK')
+ def test_discovery_checks_listing_and_sector_before_loading(self):
+  row={'Code':'EXH2','Exchange':'XETRA','Name':'iShares STOXX Europe 600 Technology UCITS ETF (DE)','Currency':'EUR','Type':'ETF'}
+  self.assertEqual(sector._europe_discovery(row,'EXH2'),'Teknologi')
+  self.assertIsNone(sector._europe_discovery({**row,'Exchange':'F'},'EXH2'))
+  self.assertIsNone(sector._europe_discovery({**row,'Name':'Unrelated Technology Fund'},'EXH2'))
+  with self.connect() as c:
+   c.execute("UPDATE sector_europe_discovery SET next_attempt=?",(time.time()+86400,))
+   c.execute("UPDATE sector_europe_discovery SET next_attempt=0 WHERE code='EXH2'")
+  class Client:
+   def _http(self,base,path,params):
+    if path=='/search/EXH2':return {'status':'OK','payload':[row]}
+    if path=='/eod/EXH2.XETRA':return {'status':'OK','payload':[{'date':'2026-11-05','close':10},{'date':'2026-11-06','close':11}]}
+    raise AssertionError(path)
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'test'}),patch.object(sector,'PROXIES',{'Europa':[]}),patch.object(sector,'_client',return_value=Client()):
+   sector.refresh_tick(self.connect);sector.refresh_tick(self.connect)
+  with self.connect() as c:
+   b=c.execute('SELECT * FROM sector_benchmarks WHERE symbol=?',('EXH2.XETRA',)).fetchone()
+   m=c.execute('SELECT * FROM sector_market WHERE symbol=?',('EXH2.XETRA',)).fetchone()
+  self.assertEqual((b['sector'],b['status']),('Teknologi','VERIFIED'));self.assertEqual(m['status'],'OK')
  def test_european_xetra_benchmarks_use_search_proof(self):
   cases=[('EXH4','Industri','Industrial Goods & Services'),('EXH1','Energi','Oil & Gas'),('EXV6','Råvarer','Basic Resources'),('EXH6','Medier','Media')]
   for code,sector_name,name in cases:
