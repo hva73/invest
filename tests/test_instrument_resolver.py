@@ -119,3 +119,7 @@ class InstrumentResolver(unittest.TestCase):
   self.assertEqual(resolve_us(dict(pluto,name='Microsoft Corporation Class A Common Stock'),[choice],[dict(catalog,Name='Microsoft Corporation Class B')])['status'],'UNVERIFIED')
   self.assertEqual(resolve_us(pluto,[choice],[dict(catalog,Exchange='NYSE')])['status'],'UNVERIFIED')
   self.assertEqual(resolve_us(pluto,[dict(choice,isin='US0000000001')],[catalog])['status'],'UNVERIFIED')
+  self.assertEqual(resolve_us(dict(pluto,name='Microsoft Corporation Class A Common Stock'),[choice],[catalog])['status'],'VERIFIED')
+  self.assertEqual(resolve_us(dict(pluto,name='Microsoft Corporation Ordinary Shares'),[choice],[catalog])['status'],'VERIFIED')
+  self.assertEqual(resolve_us(dict(pluto,name='Microsoft Corporation Class A Common Stock'),[choice],[dict(catalog,Name='Microsoft Corporation Class B Common Stock')])['status'],'UNVERIFIED')
+  self.assertEqual(resolve_us(dict(pluto,name='Different Corporation Class A Common Stock'),[choice],[catalog])['status'],'UNVERIFIED')

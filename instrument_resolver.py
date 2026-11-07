@@ -20,12 +20,28 @@ def _issuer(value):
  while words and words[-1] in ('INC','INCORPORATED','LTD','LIMITED','CO','COMPANY','CORP','CORPORATION','PLC'):words.pop()
  return tuple(words) if words and sum(map(len,words))>=4 else None
 
+def _us_issuer(value):
+ """Separate generic share descriptions and retain any explicit class."""
+ import unicodedata
+ if not isinstance(value,str):return None,None
+ words=re.findall(r'[A-Z0-9]+',unicodedata.normalize('NFKD',value).upper())
+ for suffix in (['COMMON','STOCK'],['COMMON','SHARES'],['ORDINARY','SHARES'],['ORDINARY','SHARE']):
+  if words[-len(suffix):]==suffix:
+   words=words[:-len(suffix)];break
+ share_class=None
+ if len(words)>=2 and words[-2]=='CLASS' and re.fullmatch(r'[A-Z0-9]{1,3}',words[-1]):
+  share_class=words[-1];words=words[:-2]
+ return _issuer(' '.join(words)),share_class
+
 def resolve_us(pluto, eodhd_choices, us_rows, cxe_rows=None):
  """Verify a unique US security using the broker and exact exchange listing."""
  if not isinstance(pluto,dict) or not pluto.get('asset_id'):return {'status':'UNVERIFIED','reason':'PLUTO_ASSET_ID_MISSING'}
- ticker=pluto.get('ticker');exchange=_norm(pluto.get('exchange'));issuer=_issuer(pluto.get('name'));kind=_norm(pluto.get('type'))
+ ticker=pluto.get('ticker');exchange=_norm(pluto.get('exchange'));issuer,share_class=_us_issuer(pluto.get('name'));kind=_norm(pluto.get('type'))
  if not isinstance(ticker,str) or not re.fullmatch(r'[A-Z0-9.\-]{1,20}',ticker) or exchange not in ('NYSE','NASDAQ') or _norm(pluto.get('currency'))!='USD' or kind not in ('CS','ADRC') or not issuer:return {'status':'UNVERIFIED','reason':'PLUTO_METADATA_INCOMPLETE'}
- matches=[row for row in us_rows if isinstance(row,dict) and row.get('Code')==ticker and _norm(row.get('Exchange'))==exchange and _norm(row.get('Currency'))=='USD' and _norm(row.get('Country'))=='USA' and _norm(row.get('Type'))=='COMMONSTOCK' and _issuer(row.get('Name'))==issuer and isinstance(row.get('Isin'),str) and re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',row['Isin'])]
+ def same_issuer(row):
+  other,other_class=_us_issuer(row.get('Name'))
+  return other==issuer and not (share_class and other_class and share_class!=other_class)
+ matches=[row for row in us_rows if isinstance(row,dict) and row.get('Code')==ticker and _norm(row.get('Exchange'))==exchange and _norm(row.get('Currency'))=='USD' and _norm(row.get('Country'))=='USA' and _norm(row.get('Type'))=='COMMONSTOCK' and same_issuer(row) and isinstance(row.get('Isin'),str) and re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',row['Isin'])]
  if len(matches)!=1:return {'status':'AMBIGUOUS' if len(matches)>1 else 'UNVERIFIED','reason':'US_LISTING_NOT_UNIQUE'}
  listing=matches[0];isin=listing['Isin']
  if pluto.get('isin') and _norm(pluto['isin'])!=isin:return {'status':'UNVERIFIED','reason':'PLUTO_ISIN_CONFLICT'}
