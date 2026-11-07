@@ -182,6 +182,11 @@ class HoldingAutowatch(unittest.TestCase):
   self.assertIsNone(instrument['isin']);self.assertEqual(instrument['asset_id'],'synthetic-asset')
   self.assertEqual(self.tick(verify=lambda *_:instrument,lookup=lambda *_:self.fail('No ISIN means no automatic EODHD match')),'LINKED')
   with app.connect() as c:self.assertEqual(json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()[0])['provider'],'pluto')
+ def test_complete_broker_identity_does_not_spend_second_lookup_for_missing_isin(self):
+  raw={'asset':{'id':'synthetic-asset','ticker':'TEST','name':'Test Inc','exchange':'NASDAQ','currency':'USD','type':'CS'}}
+  with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value=raw) as call:
+   instrument=service.holding_instrument(app.connect,1,dict(self.holding,currency='USD'))
+  self.assertIsNone(instrument['isin']);self.assertEqual(instrument['type'],'CS');self.assertEqual(call.call_count,1)
  def test_missing_exchange_is_recovered_only_from_same_pluto_asset_id(self):
   raw={'asset':{'id':'synthetic-asset','ticker':'TEST','currency':'USD'}}
   matches=[{'id':'another-asset','ticker':'TEST','exchange':'OTHER','currency':'USD'},{'id':'synthetic-asset','ticker':'TEST','exchange':'NASDAQ','currency':'USD'}]

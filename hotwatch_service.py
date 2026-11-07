@@ -256,7 +256,13 @@ def holding_instrument(connect,uid,holding,diagnostic=None):
  isin,isin_conflict=pluto_isin(asset,raw)
  if isin_conflict:return invalid('PLUTO_ASSET_METADATA_MISSING')
  currency=asset_currency or outer_currency or holding.get('currency');exchange=asset.get('exchange') or raw.get('exchange');ticker=asset.get('ticker') or raw.get('ticker') or holding.get('ticker');name=asset.get('name') or raw.get('name')
- if (not exchange or not ticker or not currency or not isin) and holding.get('ticker'):
+ # A complete broker identity can be checked against the independent listing
+ # reference without a second Pluto search just to look for a missing ISIN.
+ # Keep searching when other identity fields are missing or the reference
+ # resolver cannot handle this venue/type.
+ kind=asset.get('type') if isinstance(asset.get('type'),str) else ''
+ reference_capable=(str(exchange).upper()=='CHIX' and kind.upper()=='CS' or str(exchange).upper() in ('NYSE','NASDAQ') and kind.upper() in ('CS','ADRC'))
+ if (not exchange or not ticker or not currency or not isin and not (name and reference_capable)) and holding.get('ticker'):
   try:
    from market_data import choices
    found=trade_service.call(client,tools,'search_assets',{'query':holding['ticker'],'limit':10,'assetType':'ALL'});options=choices(found)
