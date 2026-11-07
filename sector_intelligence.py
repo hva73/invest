@@ -24,6 +24,9 @@ def init(c):
  if 'proof_source' not in {r[1] for r in c.execute('PRAGMA table_info(sector_benchmarks)')}:c.execute('ALTER TABLE sector_benchmarks ADD COLUMN proof_source TEXT')
  c.execute('CREATE TABLE IF NOT EXISTS sector_benchmark_holdings(symbol TEXT PRIMARY KEY,payload TEXT,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS sector_europe_discovery(code TEXT PRIMARY KEY,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL)')
+ c.execute('CREATE TABLE IF NOT EXISTS sector_europe_queries(query TEXT PRIMARY KEY,status TEXT NOT NULL,updated REAL NOT NULL,next_attempt REAL NOT NULL)')
+ for query in ('STOXX Europe 600','Travel & Leisure','EXH','EXV'):
+  c.execute("INSERT OR IGNORE INTO sector_europe_queries VALUES(?,'PENDING',0,0)",(query,))
  for prefix in ('EXV','EXH'):
   for number in range(1,10):
    code=prefix+str(number)
@@ -203,7 +206,7 @@ def _europe_discovery(row,code):
  if not isinstance(row,dict) or str(row.get('Code','')).upper()!=code or str(row.get('Exchange','')).upper()!='XETRA' or str(row.get('Currency','')).upper()!='EUR' or str(row.get('Type','')).upper() not in ('ETF','ETP','FUND'):return None
  name=str(row.get('Name') or '').upper()
  if 'ISHARES' not in name or 'STOXX EUROPE 600' not in name:return None
- terms=(('INDUSTRIAL GOODS','Industri'),('OIL & GAS','Energi'),('BASIC RESOURCES','Råvarer'),('MEDIA','Medier'),('TECHNOLOGY','Teknologi'),('HEALTH CARE','Sundhed'),('HEALTHCARE','Sundhed'),('UTILITIES','Forsyning'),('CHEMICALS','Kemikalier'),('CONSTRUCTION & MATERIALS','Byggeri og materialer'),('AUTOMOBILES','Biler'),('BANKS','Banker'),('FINANCIAL SERVICES','Finansielle tjenester'),('INSURANCE','Forsikring'),('FOOD & BEVERAGE','Fødevarer'),('PERSONAL & HOUSEHOLD','Personlige og husholdningsvarer'),('REAL ESTATE','Ejendomme'),('RETAIL','Detailhandel'),('TELECOMMUNICATIONS','Telekommunikation'),('TRAVEL & LEISURE','Rejser og fritid'))
+ terms=(('INDUSTRIAL GOODS','Industri'),('OIL & GAS','Energi'),('BASIC RESOURCES','Råvarer'),('MEDIA','Medier'),('TECHNOLOGY','Teknologi'),('HEALTH CARE','Sundhed'),('HEALTHCARE','Sundhed'),('UTILITIES','Forsyning'),('CHEMICALS','Kemikalier'),('CONSTRUCTION & MATERIALS','Byggeri og materialer'),('AUTOMOBILES','Biler'),('BANKS','Banker'),('FINANCIAL SERVICES','Finansielle tjenester'),('INSURANCE','Forsikring'),('FOOD & BEVERAGE','Fødevarer'),('PERSONAL & HOUSEHOLD','Personlige og husholdningsvarer'),('REAL ESTATE','Ejendomme'),('RETAIL','Detailhandel'),('TELECOMMUNICATIONS','Telekommunikation'),('TRAVEL & LEISURE','Rejser og fritid'),('TRAVEL AND LEISURE','Rejser og fritid'))
  matches=[label for term,label in terms if term in name]
  return matches[0] if len(set(matches))==1 else None
 
@@ -398,7 +401,30 @@ def refresh_tick(connect):
     row=c.execute('SELECT next_attempt FROM sector_market WHERE symbol=?',(symbol,)).fetchone()
     if not row or row['next_attempt']<=now:target=(region,symbol,sector);break
    if target:break
-  discovery=c.execute('SELECT * FROM sector_europe_discovery WHERE next_attempt<=? ORDER BY next_attempt,code LIMIT 1',(now,)).fetchone() if target is None else None
+  query=c.execute('SELECT * FROM sector_europe_queries WHERE next_attempt<=? ORDER BY next_attempt,query LIMIT 1',(now,)).fetchone() if target is None else None
+  discovery=c.execute('SELECT * FROM sector_europe_discovery WHERE next_attempt<=? ORDER BY next_attempt,code LIMIT 1',(now,)).fetchone() if target is None and not query else None
+ if target is None and query:
+  term=query['query'];result=_client(connect,0)._http(HTTP_BASE,'/search/'+quote(term,safe=''),{'fmt':'json','limit':'100'})
+  rows=result.get('payload') if result['status']=='OK' else []
+  candidates={}
+  for row in rows if isinstance(rows,list) else []:
+   if not isinstance(row,dict):continue
+   code=str(row.get('Code') or '').upper()
+   if not re.fullmatch(r'[A-Z0-9][A-Z0-9-]{0,15}',code):continue
+   label=_europe_discovery(row,code)
+   if label:candidates.setdefault(code,[]).append((row,label))
+  configured={s for items in PROXIES.values() for s,_ in items}
+  with connect() as c:
+   for code,matches in candidates.items():
+    symbol=code+'.XETRA'
+    if symbol in configured or len(matches)!=1:continue
+    row,label=matches[0]
+    existing=c.execute('SELECT status,proof_source,updated FROM sector_benchmarks WHERE symbol=?',(symbol,)).fetchone()
+    if existing and existing['status']=='VERIFIED' and existing['proof_source']!='EODHD instrumentsøgning · europæisk fond':continue
+    c.execute('INSERT OR REPLACE INTO sector_benchmarks(symbol,region,sector,name,currency,exchange,status,updated,next_attempt,proof_source) VALUES(?,?,?,?,?,?,?,?,?,?)',(symbol,'Europa',label,row.get('Name'),'EUR','XETRA','VERIFIED',now,now+7*86400,'EODHD instrumentsøgning · europæisk fond'))
+   status='OK' if result['status']=='OK' else result['status']
+   c.execute('INSERT OR REPLACE INTO sector_europe_queries VALUES(?,?,?,?)',(term,status,now,now+(7*86400 if status=='OK' else _retry_delay(status))))
+  return
  if target is None:
   if not discovery:return
   code=discovery['code'];result=_client(connect,0)._http(HTTP_BASE,'/search/'+quote(code,safe=''),{'fmt':'json','limit':'50'})

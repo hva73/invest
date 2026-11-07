@@ -196,12 +196,32 @@ class SectorIntelligenceTest(unittest.TestCase):
   with self.connect() as c:
    b=c.execute('SELECT * FROM sector_benchmarks').fetchone();m=c.execute('SELECT * FROM sector_market').fetchone()
   self.assertEqual((b['status'],b['proof_source']),('VERIFIED','EODHD instrumentsøgning'));self.assertEqual(m['status'],'OK')
+ def test_europe_name_search_discovers_verified_travel_fund(self):
+  valid={'Code':'EXXY','Exchange':'XETRA','Name':'iShares STOXX Europe 600 Travel & Leisure UCITS ETF (DE)','Currency':'EUR','Type':'ETF'}
+  wrong={**valid,'Code':'OTHER','Exchange':'US'}
+  with self.connect() as c:
+   c.execute('UPDATE sector_europe_queries SET next_attempt=?',(time.time()+86400,))
+   c.execute("UPDATE sector_europe_queries SET next_attempt=0 WHERE query='Travel & Leisure'")
+  class Client:
+   def _http(self,base,path,params):
+    if path=='/search/Travel%20%26%20Leisure':return {'status':'OK','payload':[valid,wrong]}
+    if path=='/eod/EXXY.XETRA':return {'status':'OK','payload':[{'date':'2026-11-05','close':10},{'date':'2026-11-06','close':11}]}
+    raise AssertionError(path)
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'test'}),patch.object(sector,'PROXIES',{'Europa':[]}),patch.object(sector,'_client',return_value=Client()):
+   sector.refresh_tick(self.connect);sector.refresh_tick(self.connect)
+  with self.connect() as c:
+   result=c.execute("SELECT * FROM sector_benchmarks WHERE symbol='EXXY.XETRA'").fetchone()
+   market=c.execute("SELECT * FROM sector_market WHERE symbol='EXXY.XETRA'").fetchone()
+   none=c.execute("SELECT * FROM sector_benchmarks WHERE symbol='OTHER.XETRA'").fetchone()
+  self.assertEqual((result['sector'],result['status']),('Rejser og fritid','VERIFIED'))
+  self.assertEqual(market['status'],'OK');self.assertIsNone(none)
  def test_discovery_checks_listing_and_sector_before_loading(self):
   row={'Code':'EXH2','Exchange':'XETRA','Name':'iShares STOXX Europe 600 Technology UCITS ETF (DE)','Currency':'EUR','Type':'ETF'}
   self.assertEqual(sector._europe_discovery(row,'EXH2'),'Teknologi')
   self.assertIsNone(sector._europe_discovery({**row,'Exchange':'F'},'EXH2'))
   self.assertIsNone(sector._europe_discovery({**row,'Name':'Unrelated Technology Fund'},'EXH2'))
   with self.connect() as c:
+   c.execute("UPDATE sector_europe_queries SET next_attempt=?",(time.time()+86400,))
    c.execute("UPDATE sector_europe_discovery SET next_attempt=?",(time.time()+86400,))
    c.execute("UPDATE sector_europe_discovery SET next_attempt=0 WHERE code='EXH2'")
   class Client:
