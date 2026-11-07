@@ -359,7 +359,11 @@ class EODHDAdapter:
         failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
        phase=extended_session(trade,schedule,utc(),max_age)
        if phase:
-        sample.update(market_status=phase,session_key=at.date().isoformat()+':'+phase,status_at=trade['event_time'],status_feed=market+'_trades')
+        # After-hours trading can cross midnight UTC while remaining on the
+        # same exchange-local trading day. Do not split its warmup history.
+        from zoneinfo import ZoneInfo
+        local_day=at.astimezone(ZoneInfo(schedule['timezone'])).date().isoformat()
+        sample.update(market_status=phase,session_key=local_day+':'+phase,status_at=trade['event_time'],status_feed=market+'_trades')
       if sample['market_status']=='REGULAR' and os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1':
        schedule=client.market_status(exchange);self.last_feed_diagnostics['exchange_status']=schedule['status']
        if schedule['status']=='LOCAL_BUDGET_EXHAUSTED':return sample

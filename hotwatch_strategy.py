@@ -84,7 +84,9 @@ def _risk_gate(sample,metrics,risk,now,raw):
   if not risk.get('exit_allowed',True):return 'WAIT',['EXIT_OUTSIDE_WATCH_SCOPE'],critical
   return 'SELL',([] if sample['market_status']=='REGULAR' else ['EXTENDED_HOURS_EXECUTION_UNCONFIRMED']),critical
  if raw in ['SELL','REDUCE'] and not risk.get('exit_allowed',True):return 'WAIT',['EXIT_OUTSIDE_WATCH_SCOPE'],critical
- if raw!='BUY':return raw,codes,critical
+ if raw!='BUY':
+  if raw in ('SELL','REDUCE') and sample['market_status'] in ('PRE','AFTER'):codes.append('EXTENDED_HOURS_EXECUTION_UNCONFIRMED')
+  return raw,codes,critical
  if context.get('tradability')!='available':codes.append('TRADABILITY_UNCONFIRMED')
  if not risk.get('entry_allowed',True):codes.append('ENTRY_NOT_AUTHORIZED_BY_CANDIDATE_DECISION')
  if metrics.get('volatility_pct') is not None and Decimal(metrics['volatility_pct'])>5:codes.append('VOLATILITY_LIMIT')

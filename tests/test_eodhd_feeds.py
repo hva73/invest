@@ -151,6 +151,8 @@ class FeedTests(unittest.TestCase):
   self.assertIsNone(extended_session(trade,dict(schedule,received_at=(now-timedelta(minutes=3)).isoformat()),now,120))
   holiday=dict(schedule,calendar={**schedule['calendar'],'excluded_dates':['2026-11-05']});self.assertIsNone(extended_session(trade,holiday,now,120))
   self.assertIsNone(extended_session(trade,dict(schedule,exchange_open=True),now,120))
+  weekend=datetime(2026,11,7,13,15,tzinfo=timezone.utc)
+  self.assertIsNone(extended_session({'event_time':weekend.isoformat(),'market_session':'extended-hours'},dict(schedule,received_at=weekend.isoformat()),weekend,120))
  def test_adapter_marks_verified_premarket_trade_without_buy_permission(self):
   from test_hotwatch_engine import request,good_metrics,tick
   from hotwatch_engine import sample_errors
@@ -166,6 +168,40 @@ class FeedTests(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=tick(now)['context']),patch('hotwatch_adapters.utc',return_value=now):sample=adapter.poll({'request_data':req})
   sample_errors(sample,req,now);self.assertEqual(sample['market_status'],'PRE');self.assertEqual(sample['status_at'],now.isoformat())
   signal,codes,_=risk_gate(sample,good_metrics(),req['risk'],now,'BUY');self.assertEqual(signal,'WAIT');self.assertIn('OUTSIDE_REGULAR_SESSION',codes)
+  sample['context']=tick(now,held=True)['context']
+  signal,codes,_=risk_gate(sample,good_metrics(),req['risk'],now,'SELL');self.assertEqual(signal,'SELL');self.assertIn('EXTENDED_HOURS_EXECUTION_UNCONFIRMED',codes)
+ def test_afterhours_warmup_does_not_split_at_utc_midnight(self):
+  from datetime import datetime,timezone,timedelta
+  from test_hotwatch_engine import request,tick
+  from hotwatch_features import features
+  from hotwatch_strategy import BASELINE
+  req=request();req.update(provider='eodhd',provider_symbol='MERC.US')
+  adapter=EODHDAdapter(None,1,Opener({}));first=datetime(2026,11,6,23,59,tzinfo=timezone.utc)
+  class Feeds:
+   def capture(self,feed,*args,**kwargs):
+    if feed.endswith('trades'):return {'status':'OK','messages':[{'event_time':self.at.isoformat(),'price':'100','market_session':'extended-hours'}]}
+    return {'status':'NO_MESSAGES','messages':[]}
+   def market_status(self,exchange):
+    return {'status':'OK','exchange_open':False,'timezone':'America/New_York','received_at':self.at.isoformat(),'calendar':{'open':'09:30:00','close':'16:00:00','working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[]}}
+  feed=Feeds();samples=[]
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'0'}),patch.object(adapter,'feeds',return_value=feed):
+   for at in (first,first+timedelta(minutes=1)):
+    feed.at=at
+    with patch('hotwatch_adapters.PlutoAdapter.context',return_value=tick(at)['context']),patch('hotwatch_adapters.utc',return_value=at):samples.append(adapter.poll({'request_data':req}))
+  self.assertEqual([s['session_key'] for s in samples],['2026-11-06:AFTER','2026-11-06:AFTER'])
+  self.assertEqual(features(samples,BASELINE['parameters'])['sample_count'],2)
+ def test_extended_trade_does_not_override_unclear_instrument_status(self):
+  from test_hotwatch_engine import request,tick
+  req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime(2026,11,6,22,0,tzinfo=timezone.utc)
+  adapter=EODHDAdapter(None,1,Opener({}))
+  class Feeds:
+   def capture(self,feed,*args,**kwargs):
+    if feed.endswith('trades'):return {'status':'OK','messages':[{'event_time':now.isoformat(),'price':'100','market_session':'extended-hours'}]}
+    if feed.endswith('status'):return {'status':'OK','messages':[{'event_time':now.isoformat(),'trading_status':'S'}]}
+    return {'status':'NO_MESSAGES','messages':[]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=tick(now)['context']),patch('hotwatch_adapters.utc',return_value=now):
+   sample=adapter.poll({'request_data':req})
+  self.assertEqual(sample['market_status'],'UNKNOWN')
  def test_closed_bar_uses_actual_bar_open_time_without_inventing_trade_time(self):
   from test_hotwatch_engine import request
   import hotwatch_engine
