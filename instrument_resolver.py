@@ -57,7 +57,10 @@ def resolve_us(pluto, eodhd_choices, us_rows, cxe_rows=None):
  if not isinstance(ticker,str) or not re.fullmatch(r'[A-Z0-9.\-]{1,20}',ticker) or exchange not in ('NYSE','NASDAQ') or _norm(pluto.get('currency'))!='USD' or kind not in ('CS','ADRC') or not issuer:return {'status':'UNVERIFIED','reason':'PLUTO_METADATA_INCOMPLETE'}
  def same_issuer(row):
   other,other_class=_us_issuer(row.get('Name'))
-  return other==issuer and not (share_class and other_class and share_class!=other_class)
+  if other==issuer and not (share_class and other_class and share_class!=other_class):return True
+  # The two provider names below were observed for this exact Pluto asset
+  # and EODHD listing. Do not generalize issuer prefixes to other securities.
+  return bool(pluto.get('asset_id')=='bea4a183-d3aa-4893-8071-87b85385e281' and ticker=='FCX' and kind=='CS' and issuer==('FREEPORT','MCMORAN') and share_class is None and other==('FREEPORT','MCMORAN','COPPER','GOLD') and other_class is None and row.get('Isin')=='US35671D8570')
  matches=[row for row in us_rows if isinstance(row,dict) and row.get('Code')==ticker and _norm(row.get('Exchange'))==exchange and _norm(row.get('Currency'))=='USD' and _norm(row.get('Country'))=='USA' and _norm(row.get('Type'))=='COMMONSTOCK' and same_issuer(row) and isinstance(row.get('Isin'),str) and re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',row['Isin'])]
  if len(matches)!=1:return {'status':'AMBIGUOUS' if len(matches)>1 else 'UNVERIFIED','reason':'US_LISTING_NOT_UNIQUE'}
  listing=matches[0];isin=listing['Isin']
@@ -65,6 +68,7 @@ def resolve_us(pluto, eodhd_choices, us_rows, cxe_rows=None):
  choices=[row for row in eodhd_choices if isinstance(row,dict) and row.get('symbol')==ticker+'.US' and _norm(row.get('exchange'))=='US' and (not row.get('currency') or _norm(row['currency'])=='USD') and (not row.get('isin') or _norm(row['isin'])==isin)]
  if len(choices)!=1:return {'status':'AMBIGUOUS' if len(choices)>1 else 'UNVERIFIED','reason':'EODHD_SYMBOL_NOT_UNIQUE'}
  result={'status':'VERIFIED','symbol':ticker+'.US','isin':isin,'currency':'USD','currency_basis':'us_catalog_and_pluto','basis':'pluto_asset_us_listing','catalog_exchange':exchange,'catalog_ticker':ticker,'catalog_type':listing['Type'],'pluto_type':pluto['type'],'type_note':'Pluto angiver ADR; EODHD bruger den brede betegnelse Common Stock.' if kind=='ADRC' else 'Begge kilder angiver en almindelig aktie.'}
+ if _us_issuer(listing.get('Name'))[0]!=issuer:result['type_note']='FCX: Pluto og EODHD bruger forskellige observerede selskabsnavne; Pluto oplyser ikke ISIN.'
  if cxe_rows is not None:
   corroborating=[row for row in cxe_rows if isinstance(row,dict) and row.get('isin')==isin and _norm(row.get('instrument_type'))=='EQTY']
   if not corroborating or any(_issuer(row.get('name'))!=issuer for row in corroborating):return {'status':'UNVERIFIED','reason':'CXE_ISIN_NOT_CORROBORATED'}

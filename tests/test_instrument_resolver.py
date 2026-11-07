@@ -131,3 +131,14 @@ class InstrumentResolver(unittest.TestCase):
   self.assertEqual(resolve_us(dict(pluto,name='Microsoft Corporation Ordinary Shares'),[choice],[catalog])['status'],'VERIFIED')
   self.assertEqual(resolve_us(dict(pluto,name='Microsoft Corporation Class A Common Stock'),[choice],[dict(catalog,Name='Microsoft Corporation Class B Common Stock')])['status'],'UNVERIFIED')
   self.assertEqual(resolve_us(dict(pluto,name='Different Corporation Class A Common Stock'),[choice],[catalog])['status'],'UNVERIFIED')
+ def test_observed_fcx_names_only_match_the_specific_asset_and_listing(self):
+  pluto={'asset_id':'bea4a183-d3aa-4893-8071-87b85385e281','ticker':'FCX','name':'Freeport-McMoran Inc.','exchange':'NYSE','currency':'USD','type':'CS','isin':None}
+  catalog={'Code':'FCX','Name':'Freeport-McMoran Copper & Gold Inc','Country':'USA','Exchange':'NYSE','Currency':'USD','Type':'Common Stock','Isin':'US35671D8570'}
+  choice={'symbol':'FCX.US','exchange':'US','currency':'USD','isin':'US35671D8570'}
+  result=resolve_us(pluto,[choice],[catalog]);self.assertEqual(result['symbol'],'FCX.US');self.assertIn('Pluto oplyser ikke ISIN',result['type_note'])
+  for changed in (dict(pluto,asset_id='another'),dict(pluto,exchange='NASDAQ'),dict(pluto,currency='EUR'),dict(pluto,type='ADRC'),dict(pluto,name='Freeport-McMoran Class A Common Stock')):
+   self.assertNotEqual(resolve_us(changed,[choice],[catalog])['status'],'VERIFIED')
+  for changed in (dict(catalog,Isin='US0000000001'),dict(catalog,Name='Freeport-McMoran Copper Inc'),dict(catalog,Exchange='NASDAQ')):
+   self.assertNotEqual(resolve_us(pluto,[choice],[changed])['status'],'VERIFIED')
+  self.assertEqual(resolve_us(pluto,[choice],[catalog,catalog])['status'],'AMBIGUOUS')
+  self.assertNotEqual(resolve_us(pluto,[dict(choice,isin='US0000000001')],[catalog])['status'],'VERIFIED')

@@ -542,6 +542,20 @@ class HoldingAutowatch(unittest.TestCase):
   adapter=EODHDAdapter(app.connect,1)
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch.object(adapter.pluto,'context',return_value=unknown_context()):
    with self.assertRaisesRegex(DataUnavailable,'EODHD_INSTRUMENT_REVALIDATION_REQUIRED'):adapter.poll({'id':row['id'],'request_data':req,'state':'{}'})
+ def test_observed_fcx_recovery_uses_exact_pluto_asset_and_catalog(self):
+  aid='bea4a183-d3aa-4893-8071-87b85385e281';holding=dict(self.holding,asset_id=aid,ticker='FCX')
+  with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[holding]}),))
+  instrument={'asset_id':aid,'ticker':'FCX','name':'Freeport-McMoran Inc.','exchange':'NYSE','currency':'USD','type':'CS','isin':None}
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=lambda *_:instrument,now=self.now),'LINKED')
+  catalog={'received_at':self.now.isoformat(),'rows':[{'Code':'FCX','Name':'Freeport-McMoran Copper & Gold Inc','Country':'USA','Exchange':'NYSE','Currency':'USD','Type':'Common Stock','Isin':'US35671D8570'}]}
+  choices={'choices':[{'symbol':'FCX.US','exchange':'US','currency':'USD','isin':'US35671D8570'},{'symbol':'FCX.MX','exchange':'MX','currency':'MXN','isin':None}]}
+  with app.connect() as c:before=c.execute('SELECT watch_id FROM hw_sessions').fetchone()['watch_id']
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices),patch('eodhd_us_reference.get_reference',return_value=catalog):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),1)
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();request=json.loads(row['request']);self.assertEqual(row['watch_id'],before);self.assertEqual(request['provider_symbol'],'FCX.US')
+   self.assertTrue(engine.valid_cxe_evidence(c,1,request,self.now))
  def test_tsm_adr_recovers_from_us_catalog_and_preserves_adr_evidence(self):
   holding=dict(self.holding,ticker='TSM')
   with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[holding]}),))
