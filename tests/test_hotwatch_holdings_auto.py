@@ -81,6 +81,13 @@ class HoldingAutowatch(unittest.TestCase):
    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now)
    for _ in range(2):reserve(app.connect,1,'eodhd',self.now,purpose='holding_identity')
    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now,purpose='holding_identity')
+ def test_eodhd_budget_has_separate_default_and_respects_explicit_settings(self):
+  with patch.dict(os.environ,{},clear=True):
+   self.assertEqual(engine.provider_request_limit('eodhd'),30)
+   self.assertEqual(engine.provider_request_limit('pluto'),12)
+  with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12','ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE':'40'},clear=True):
+   self.assertEqual(engine.provider_request_limit('eodhd'),40)
+   self.assertEqual(engine.provider_request_limit('pluto'),12)
  def test_pluto_budget_preserves_room_for_scan_and_identity_in_either_order(self):
   self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
   with app.connect() as c:

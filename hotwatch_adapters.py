@@ -4,13 +4,13 @@ from datetime import datetime,timedelta,timezone
 from decimal import Decimal,InvalidOperation
 from urllib.parse import quote,urlencode
 from hotwatch_contract import EngineError,checksum,stamp,provider_floor,PROFILES
-from hotwatch_engine import utc,effective_poll_interval,valid_cxe_evidence
+from hotwatch_engine import utc,effective_poll_interval,valid_cxe_evidence,provider_request_limit
 
 class DataUnavailable(EngineError):pass
 
 def reserve(connect,uid,source,now=None,purpose=None):
  uid=0 if source=='eodhd' else uid
- now=now or utc();window=int(now.timestamp()//60);limit=max(1,min(120,int(os.environ.get('ESCAPE_HW_REQUESTS_PER_MINUTE','12'))))
+ now=now or utc();window=int(now.timestamp()//60);limit=provider_request_limit(source)
  with connect() as c:
   c.execute('BEGIN IMMEDIATE');c.execute('DELETE FROM hw_request_budget WHERE window<?',(window-2,))
   row=c.execute('SELECT used FROM hw_request_budget WHERE user_id=? AND source=? AND window=?',(uid,source,window)).fetchone()

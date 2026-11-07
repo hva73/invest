@@ -29,12 +29,19 @@ def valid_cxe_evidence(c,uid,request,now):
   return False
  except (KeyError,ValueError,TypeError,AttributeError):return False
 
+def provider_request_limit(source):
+ """Respect explicit settings; EODHD has a separate, higher default."""
+ default='30' if source=='eodhd' else '12'
+ value=os.environ.get('ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE') if source=='eodhd' else None
+ if value is None:value=os.environ.get('ESCAPE_HW_REQUESTS_PER_MINUTE',default)
+ try:return max(1,min(120,int(value)))
+ except (TypeError,ValueError):return int(default)
+
 def effective_poll_interval(c,request,profile=None):
  """Budget-aware cadence; never raise the provider request limit."""
  source=request['provider'];profile=profile or request['profile'];minimum=max(PROFILES.get(profile,PROFILES[request['profile']]),provider_floor(source))
  if source!='eodhd':return minimum
- try:limit=max(1,min(120,int(os.environ.get('ESCAPE_HW_REQUESTS_PER_MINUTE','12'))))
- except (TypeError,ValueError):limit=12
+ limit=provider_request_limit(source)
  available=max(1,limit-3 if limit>3 else limit)
  ws=os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1';fuse=os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1';bars=os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1'
  # A verified scan can use trade, quote, status, schedule and bar endpoints.
