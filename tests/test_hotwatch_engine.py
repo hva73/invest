@@ -851,6 +851,9 @@ class HotWatch(unittest.TestCase):
    result=adapter.context(self.req,'USD')
    self.assertEqual((result['status'],result['position'],result['quantity']),('verified','none','0'))
    self.assertIsNone(result['portfolio_equity_dkk'])
+   with patch.object(adapter,'tradability',side_effect=AssertionError('exit-only monitoring needs no buy permission')):
+    exit_context=adapter.context(dict(self.req,watch_mode='exit'),'USD')
+   self.assertEqual((exit_context['status'],exit_context['tradability']),('verified','unknown'))
    with app.connect() as c:
     row=c.execute('SELECT payload FROM portfolio_snapshots WHERE portfolio_id=?',(ids[0],)).fetchone();payload=json.loads(row['payload']);payload['positions']=[{'asset_id':self.req['asset_id'],'ticker':'MERC','quantity':'2'}];c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),ids[0]))
    overlap=adapter.context(self.req,'USD');self.assertEqual(overlap['status'],'unknown');self.assertEqual(overlap['diagnostic'],'HOLDING_SCOPE_OVERLAP')

@@ -182,7 +182,11 @@ class PlutoAdapter:
   # Parent and collection snapshots may overlap. Their complete absence can
   # establish zero holdings, but a matching position cannot be safely summed.
   if overlap and found:return unknown_context('HOLDING_SCOPE_OVERLAP')
-  result['tradability'],tradability_at=self.tradability(request,currency,portfolios)
+  # Buy permissions are irrelevant to exit-only holding watches and each
+  # unnecessary check competes with identity/quote requests for Pluto budget.
+  # Keep the value unknown rather than claiming a permission was checked.
+  tradability_at=None
+  if request.get('watch_mode')!='exit':result['tradability'],tradability_at=self.tradability(request,currency,portfolios)
   if any(p['quantity'] is None for p in found):return unknown_context('HOLDING_QUANTITY_MISSING')
   if any(p.get('ticker') and p['ticker'].casefold()!=request['ticker'].casefold() for p in found):raise DataUnavailable('PLUTO_ASSET_NOT_CONFIRMED')
   if any(Decimal(p['quantity'])<0 for p in found):raise DataUnavailable('PLUTO_SHORT_POSITION_NOT_SUPPORTED')
