@@ -293,7 +293,9 @@ class EODHDAdapter:
   cxe_valid=None
   if self.connect is not None:
    with self.connect() as c:cxe_valid=valid_cxe_evidence(c,self.uid,r,utc())
-  if cxe_valid is False:
+  from instrument_resolver import BTC_PLUTO_ASSET_ID,PEPE_PLUTO_ASSET_ID
+  if r.get('asset_id')==PEPE_PLUTO_ASSET_ID:raise DataUnavailable('EODHD_INSTRUMENT_UNVERIFIED')
+  if cxe_valid is False or r.get('asset_id')==BTC_PLUTO_ASSET_ID and cxe_valid is not True:
    failure=DataUnavailable('EODHD_INSTRUMENT_REVALIDATION_REQUIRED')
    failure.position_context=self.pluto.safe_context(r,r.get('quote_currency'))
    raise failure
@@ -428,7 +430,8 @@ class EODHDAdapter:
     if len(raw)>131072:raise ValueError()
     received=utc();http_ms=(time.perf_counter()-http_started)*1000
     d=json.loads(raw,parse_float=str)
-   if not isinstance(d,dict) or d.get('code') not in [symbol,r['ticker']] or not isinstance(d.get('timestamp'),(int,str)) or type(d.get('timestamp')) is bool:raise ValueError()
+   permitted_codes=[symbol,symbol.rsplit('.',1)[0]]+([] if symbol.upper().endswith('.CC') else [r['ticker']])
+   if not isinstance(d,dict) or d.get('code') not in permitted_codes or not isinstance(d.get('timestamp'),(int,str)) or type(d.get('timestamp')) is bool:raise ValueError()
    at=datetime.fromtimestamp(int(d['timestamp']),timezone.utc);price=Decimal(str(d['close']))
    if not price.is_finite() or price<=0:raise ValueError()
   except urllib.error.HTTPError as error:

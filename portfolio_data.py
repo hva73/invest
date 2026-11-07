@@ -14,6 +14,8 @@ def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS portfolio_snapshots(portfolio_id INTEGER PRIMARY KEY REFERENCES portfolios(id),user_id INTEGER NOT NULL REFERENCES users(id),observed TEXT NOT NULL,payload TEXT NOT NULL,last_error TEXT,last_attempt TEXT NOT NULL)')
     for row in c.execute('SELECT portfolio_id,user_id,payload FROM portfolio_snapshots'):
         dashboard_projection.remember(c,row['user_id'],row['portfolio_id'],json.loads(row['payload']))
+    for row in c.execute('SELECT DISTINCT user_id FROM portfolio_snapshots').fetchall():
+        dashboard_projection.remember_portfolio_value(c,row['user_id'])
 
 def claim_refresh(connect,user_id,resource,automatic=False):
     """Share a five-minute read budget across tabs and Passenger processes."""
@@ -284,6 +286,7 @@ def save(c,user_id,portfolio_id,payload):
     if changed.rowcount:
         import dashboard_projection
         dashboard_projection.remember(c,user_id,portfolio_id,payload)
+        dashboard_projection.remember_portfolio_value(c,user_id)
 
 def snapshots(c,user_id):
     return {str(row['portfolio_id']):{'data':json.loads(row['payload']),'last_error':row['last_error'],'last_attempt':row['last_attempt']} for row in c.execute('SELECT * FROM portfolio_snapshots WHERE user_id=?',(user_id,))}

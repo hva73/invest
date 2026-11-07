@@ -1,9 +1,17 @@
 import unittest
 from datetime import datetime,timezone,timedelta
-from instrument_resolver import resolve_instrument,resolve_cxe,resolve_us
+from instrument_resolver import resolve_instrument,resolve_cxe,resolve_us,crypto_reference
 from cxe_reference import parse_reference,ReferenceUnavailable
 
 class InstrumentResolver(unittest.TestCase):
+ def test_owner_authorized_crypto_reference_is_pinned_to_broker_asset_and_currency(self):
+  btc={'asset_id':'54368e0b-2d53-401e-bf68-1033a5b84b08','ticker':'BTC','name':'Bitcoin','type':'CRYPTO','currency':'USD','exchange':'WINTERMUTE'}
+  pepe={'asset_id':'4cde5f75-df03-4abc-9063-cfc588e31c11','ticker':'PEPE','name':'Pepe','type':'CRYPTO','currency':'USD','exchange':'UKENDT'}
+  self.assertEqual(crypto_reference(btc)['symbol'],'BTC-USD.CC');self.assertTrue(crypto_reference(btc)['approved'])
+  self.assertEqual(crypto_reference(pepe)['symbol'],'PEPE24478-USD.CC');self.assertFalse(crypto_reference(pepe)['approved'])
+  for field,value in [('asset_id','other'),('ticker','WBTC'),('name','Wrapped Bitcoin'),('currency','EUR'),('type','STOCK'),('exchange','OTHER')]:
+   with self.subTest(field=field):self.assertIsNone(crypto_reference(dict(btc,**{field:value})))
+  self.assertIsNone(crypto_reference(dict(pepe,asset_id='unrelated-pepe')))
  def test_observed_novob_and_tsm_without_broker_identifier_stay_unverified(self):
   cases=[({'asset_id':'novo','ticker':'NOVOB','name':'Novo Nordisk A/S','exchange':'CHIX','currency':'DKK'}, {'symbol':'NOVO-B.CO','ticker':'NOVO-B','name':'Novo Nordisk A/S','exchange':'CO','currency':'DKK','isin':'DK0062498333'}),({'asset_id':'tsm','ticker':'TSM','name':'Taiwan Semiconductor Manufacturing Company Ltd.','exchange':'NYSE','currency':'USD'}, {'symbol':'TSM.US','ticker':'TSM','name':'Taiwan Semiconductor Manufacturing','exchange':'US','currency':'USD','isin':'US8740391003'})]
   for pluto,eodhd in cases:

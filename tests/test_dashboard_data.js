@@ -3,7 +3,10 @@ const ctx={window:{},Intl,Number,String,Date,console};vm.runInNewContext(fs.read
 const ui=ctx.window.DashboardUI;ui.setup({api:()=>{},escape:v=>String(v),formatTime:v=>v||'Ukendt',formatQuantity:v=>String(v),state:()=>({})});
 const row={key:'x',ticker:'TEST',name:'Test',portfolio_name:'Test depot',critical:false,verification:'broker_snapshot',price:{amount:'10',currency:'DKK'},value:{amount:'20',currency:'DKK'},unrealized:{amount:'-2',currency:'DKK'},unrealized_percent:'-10',unrealized_estimated:true,conflicts:[],hot_watch:{},analysis_freshness:{}};
 const state={dashboard:{positions:[row],accounts:[],totals:[],warnings:[],orders:[],critical_sessions:[]},report_desk:null};
+state.dashboard.portfolio_value_history={periods:{day:[{at:'2026-11-06T10:00:00Z',amount:'100',currency:'DKK'},{at:'2026-11-06T11:00:00Z',amount:'110',currency:'DKK'}]},reported_result:{amount:'-2',currency:'DKK'}};
 let html=ui.render(state);assert.match(html,/Estimat/);assert.match(html,/dash-change negative/);assert.doesNotMatch(html,/<th scope="col">I dag<\/th>/);assert.doesNotMatch(html,/<th scope="col">Vurdering<\/th>/);
+assert.match(html,/data-dashboard-range="day"/);assert.match(html,/data-dashboard-range="year"/);assert.match(html,/dash-chart-change positive/);assert.match(html,/\+10,00 %/);assert.match(html,/ikke nødvendigvis dit afkast/);assert.match(html,/Resultat oplyst af Pluto/);
+state.dashboard.portfolio_value_history.periods.day[1].amount='90';html=ui.render(state);assert.match(html,/dash-chart-change negative/);assert.match(html,/-10,00 %/);
 row.daily={percent:'2',amount:'1',currency:'DKK',basis:'pluto_reported_daily_change',from:null,to:'2026-11-05T12:00:00Z'};html=ui.render(state);assert.match(html,/<th scope="col">I dag<\/th>/);assert.match(html,/dash-change positive/);
 row.hot_watch={auto_status:{status:'PROVIDER_RATE_BUDGET'}};html=ui.render(state);assert.match(html,/data-dashboard-watch-pending="0"/);assert.match(html,/Afventer datakilde/);
 row.hot_watch={session:{watch_id:'synthetic-watch',signal:'NO_DATA',display_status:'WARMUP',warmup:{count:11,required:34}}};html=ui.render(state);assert.match(html,/WARMUP 11 af 34/);

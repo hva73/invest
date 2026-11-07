@@ -1,11 +1,12 @@
 """Authoritative broker holdings + optional exact report assessments. Read-only dashboard."""
 import json,hashlib
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from decimal import Decimal
 import display_policy as policy
 
 def init(c):
  c.execute('CREATE TABLE IF NOT EXISTS display_holdings_cache(portfolio_id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL,observed TEXT NOT NULL,payload TEXT NOT NULL)')
+ c.execute('CREATE TABLE IF NOT EXISTS display_portfolio_values(user_id INTEGER NOT NULL,scope TEXT NOT NULL,observed_epoch REAL NOT NULL,observed TEXT NOT NULL,amount TEXT NOT NULL,currency TEXT NOT NULL,source_time TEXT,reported_result TEXT,PRIMARY KEY(user_id,scope,observed_epoch))')
  exists=c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='display_price_observations'").fetchone()
  columns={r['name']:dict(r) for r in c.execute('PRAGMA table_info(display_price_observations)')} if exists else {}
  if exists and ('received_at' not in columns or columns.get('event_time',{}).get('notnull')):
@@ -19,6 +20,53 @@ def init(c):
   c.execute('DROP TABLE display_price_observations_legacy')
  c.execute('CREATE TABLE IF NOT EXISTS display_price_observations(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL,portfolio_id INTEGER NOT NULL,asset_id TEXT NOT NULL,event_time TEXT,received_at TEXT NOT NULL,payload TEXT NOT NULL,digest TEXT NOT NULL,UNIQUE(user_id,portfolio_id,digest))')
  c.execute('CREATE INDEX IF NOT EXISTS display_price_history ON display_price_observations(user_id,portfolio_id,asset_id,id)')
+
+def portfolio_value_snapshot(c,uid,allow_failed=False):
+ """Aggregate only complete, comparable root snapshots; collections are included."""
+ rows=c.execute("SELECT p.id,s.observed,s.payload,s.last_error FROM portfolios p LEFT JOIN portfolio_snapshots s ON s.portfolio_id=p.id AND s.user_id=p.user_id WHERE p.user_id=? AND p.source='pluto' AND p.active=1 AND p.kind='portfolio' ORDER BY p.id",(uid,)).fetchall()
+ if not rows:return None
+ amounts=[];times=[];source_times=[];profits=[];currency=None
+ for row in rows:
+  if (row['last_error'] and not allow_failed) or not row['payload']:return None
+  try:
+   payload=json.loads(row['payload']);value=payload.get('value') or {};money=value.get('value') or {};amount=policy.decimal(money.get('amount'));code=money.get('currency');observed=policy.stamp(row['observed'])
+   if amount is None or not isinstance(code,str) or not observed or currency and currency!=code:return None
+   currency=code;amounts.append(amount);times.append(observed)
+   source=policy.stamp(value.get('source_time'));source_times.append(source)
+   profit=value.get('reported_result') or {};p=policy.decimal(profit.get('amount'))
+   profits.append(p if p is not None and profit.get('currency')==code else None)
+  except (ValueError,TypeError,AttributeError):return None
+ if (max(times)-min(times)).total_seconds()>300:return None
+ scope=hashlib.sha256(('|'.join(str(row['id']) for row in rows)+'|'+currency).encode()).hexdigest()
+ return {'scope':scope,'observed':max(times),'amount':sum(amounts,Decimal(0)),'currency':currency,'source_time':min(source_times).isoformat() if all(source_times) else None,'reported_result':sum(profits,Decimal(0)) if all(x is not None for x in profits) else None}
+
+def remember_portfolio_value(c,uid):
+ value=portfolio_value_snapshot(c,uid)
+ if not value:return
+ at=value['observed']
+ c.execute('INSERT OR IGNORE INTO display_portfolio_values VALUES(?,?,?,?,?,?,?,?)',(uid,value['scope'],at.timestamp(),at.isoformat(),str(value['amount']),value['currency'],value['source_time'],str(value['reported_result']) if value['reported_result'] is not None else None))
+
+def portfolio_value_history(c,uid,now):
+ """Return recorded, scope-matched points with bounded sampling per period."""
+ from calendar import monthrange
+ from zoneinfo import ZoneInfo
+ current=portfolio_value_snapshot(c,uid)
+ fresh_snapshot=bool(current)
+ if not current:current=portfolio_value_snapshot(c,uid,allow_failed=True)
+ if not current:return {'periods':{},'reported_result':None}
+ local=now.astimezone(ZoneInfo('Europe/Copenhagen'));midnight=local.replace(hour=0,minute=0,second=0,microsecond=0).astimezone(timezone.utc)
+ def months_before(months):
+  index=local.year*12+local.month-1-months;year,month=divmod(index,12);month+=1
+  return local.replace(year=year,month=month,day=min(local.day,monthrange(year,month)[1])).astimezone(timezone.utc)
+ periods={}
+ for name,start,bucket in [('day',midnight,300),('week',(local-timedelta(days=7)).astimezone(timezone.utc),3600),('month',months_before(1),21600),('year',months_before(12),86400)]:
+  args=(uid,current['scope'],start.timestamp(),now.timestamp())
+  first=c.execute('SELECT observed_epoch,observed,amount,currency,source_time FROM display_portfolio_values WHERE user_id=? AND scope=? AND observed_epoch BETWEEN ? AND ? ORDER BY observed_epoch LIMIT 1',args).fetchone()
+  rows=c.execute('SELECT observed_epoch,observed,amount,currency,source_time FROM display_portfolio_values WHERE user_id=? AND scope=? AND observed_epoch IN (SELECT MAX(observed_epoch) FROM display_portfolio_values WHERE user_id=? AND scope=? AND observed_epoch BETWEEN ? AND ? GROUP BY CAST(observed_epoch / ? AS INTEGER)) ORDER BY observed_epoch',(uid,current['scope'],*args,bucket)).fetchall()
+  points=([first] if first and (not rows or first['observed_epoch']!=rows[0]['observed_epoch']) else [])+list(rows)
+  periods[name]=[{'at':r['observed'],'amount':r['amount'],'currency':r['currency'],'source_time':r['source_time']} for r in points]
+ result=current['reported_result'] if fresh_snapshot else None
+ return {'periods':periods,'reported_result':{'amount':str(result),'currency':current['currency']} if result is not None else None}
 
 def observation(row,received_at=None):
  price=row.get('price') or {};meta=row.get('market_context') or {}
@@ -173,9 +221,10 @@ def build(connect,uid,owned,snapshots,now=None):
    for row in c.execute("SELECT watch_id,status,last_error,last_data,request FROM hw_sessions WHERE user_id=? AND is_test=0 AND status IN ('DEGRADED','ERROR')",(uid,)):
     item=dict(row);req=json.loads(item.pop('request'));item.update(ticker=req.get('ticker'),provider=req.get('provider'));sessions.append(item)
   except Exception:sessions=[]
+  value_history=portfolio_value_history(c,uid,now)
  currencies={r['value'].get('currency') for r in result if r['value']}
  result.sort(key=lambda r:(not r['critical'],r['portfolio_name'].casefold(),r['value'].get('currency') or '',-(policy.decimal(r['value'].get('amount')) or Decimal(0)),r['ticker'] or ''))
- return {'policy':{'version':'1.0.0','limits':policy.LIMITS},'version':'design-1','positions':result,'count':len(result),'accounts':accounts,'totals':[{'currency':k,'amount':str(v)} for k,v in totals.items()],'daily_result':None,'daily_result_reason':'Pengestrømme og dokumenteret dagsreference er ikke tilgængelige','orders':orders,'warnings':warnings,'critical_sessions':sessions,'snapshot_at':max((a['snapshot_at'] for a in accounts if a['snapshot_at']),default=None),'mixed_value_currencies':len(currencies)>1}
+ return {'policy':{'version':'1.0.0','limits':policy.LIMITS},'version':'design-1','positions':result,'count':len(result),'accounts':accounts,'totals':[{'currency':k,'amount':str(v)} for k,v in totals.items()],'portfolio_value_history':value_history,'daily_result':None,'daily_result_reason':'Pengestrømme og dokumenteret dagsreference er ikke tilgængelige','orders':orders,'warnings':warnings,'critical_sessions':sessions,'snapshot_at':max((a['snapshot_at'] for a in accounts if a['snapshot_at']),default=None),'mixed_value_currencies':len(currencies)>1}
 
 
 def engine_session_view(connect,uid,mode,group,limit=100,before=None):

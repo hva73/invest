@@ -1,6 +1,23 @@
 """Conservative cross-provider identity checks; inputs are provider metadata."""
 import re
 
+# Explicitly authorized by the account owner for price monitoring. The PEPE
+# entry is a candidate only; ticker/name/price similarity is not token proof.
+BTC_PLUTO_ASSET_ID='54368e0b-2d53-401e-bf68-1033a5b84b08'
+PEPE_PLUTO_ASSET_ID='4cde5f75-df03-4abc-9063-cfc588e31c11'
+CRYPTO_REFERENCES={
+ BTC_PLUTO_ASSET_ID:{'ticker':'BTC','name':'Bitcoin','currency':'USD','symbol':'BTC-USD.CC','provider':'WINTERMUTE','approved':True},
+ PEPE_PLUTO_ASSET_ID:{'ticker':'PEPE','name':'Pepe','currency':'USD','symbol':'PEPE24478-USD.CC','provider':None,'approved':False},
+}
+
+def crypto_reference(instrument):
+ if not isinstance(instrument,dict):return None
+ ref=CRYPTO_REFERENCES.get(instrument.get('asset_id'))
+ if not ref or str(instrument.get('type','')).upper()!='CRYPTO':return None
+ if any(str(instrument.get(key,'')).casefold()!=ref[key].casefold() for key in ('ticker','name','currency')):return None
+ if ref['provider'] and str(instrument.get('exchange','')).upper()!=ref['provider']:return None
+ return dict(ref)
+
 def _value(row, *keys):
  for key in keys:
   value=row.get(key)

@@ -297,7 +297,7 @@ def verified_existing_feed(connect,uid,holding,now=None):
   try:
    evidence=json.loads(cxe['payload'])['pluto']
    if not row or not holding.get('ticker') or not holding.get('currency') or any(holding.get(key) and str(holding[key]).casefold()!=str(evidence.get(key,'')).casefold() for key in ('ticker','name','exchange','currency','type')):return None
-   request={'asset_id':aid,'ticker':holding['ticker'],'exchange':holding.get('exchange') or row['exchange'],'quote_currency':holding['currency'],'provider_symbol':row['symbol']}
+   request={'asset_id':aid,'ticker':holding['ticker'],'exchange':holding.get('exchange') or row['exchange'],'quote_currency':holding['currency'],'provider_symbol':row['symbol'],'watch_mode':'exit','purpose':'automatic holding watch'}
    with connect() as c:
     if not engine.valid_cxe_evidence(c,uid,request,now):return None
   except (KeyError,TypeError,ValueError):return None
@@ -316,7 +316,18 @@ def remember_verified_feed(connect,uid,instrument,symbol,now=None,cxe_evidence=N
 def cxe_verified_match(instrument,choices,now=None,connect=None,uid=None):
  """Match against current public reference evidence and a unique EODHD listing."""
  from cxe_reference import get_reference
- from instrument_resolver import resolve_cxe,resolve_us
+ from instrument_resolver import resolve_cxe,resolve_us,crypto_reference
+ crypto=crypto_reference(instrument)
+ if crypto and crypto['approved']:
+  if connect is None or uid is None:return None
+  from eodhd_feeds import EODHDFeeds
+  from hotwatch_adapters import reserve
+  feed=EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),reserve=lambda:reserve(connect,uid,'eodhd',purpose='holding_identity'))
+  quote=feed.snapshot(crypto['symbol'])
+  if quote['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+  if quote['status']=='RATE_LIMIT':raise DataUnavailable('EODHD_RATE_LIMIT',429)
+  if quote['status']!='OK':raise DataUnavailable('EODHD_CRYPTO_QUOTE_UNAVAILABLE')
+  return {'status':'VERIFIED','basis':'user_authorized_btc_monitoring','symbol':crypto['symbol'],'isin':'','currency':crypto['currency'],'currency_basis':'explicit_BTC_USD_pair','type_note':'Brugerbekræftet BTC-kursmapping; uafhængig dokumentation for netværk mangler.','pluto':{k:instrument.get(k) for k in ('asset_id','ticker','name','exchange','currency','type')}}
  exchange=str(instrument.get('exchange','')).upper();kind=str(instrument.get('type','')).upper()
  if not (exchange=='CHIX' and kind=='CS' or exchange in ('NYSE','NASDAQ') and kind in ('CS','ADRC')):return None
  if exchange=='CHIX':
@@ -357,15 +368,17 @@ def provisional_feed_match(instrument,choices):
 
 def recover_automatic_feeds(connect,now=None):
  """Recover empty automatic sessions, labeling field-only matches as unverified."""
+ from instrument_resolver import crypto_reference,CRYPTO_REFERENCES
  if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1' or not os.environ.get('ESCAPE_EODHD_API_KEY','').strip():return 0
  now=now or engine.utc();changed=0;lookup_attempted=False
  with connect() as c:
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return 0
-  rows=c.execute("SELECT s.* FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id LEFT JOIN hw_feed_recovery f ON f.watch_row_id=s.id WHERE s.is_test=0 AND COALESCE(k.killed,0)=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.lease_until<=? AND json_extract(s.request,'$.provider')='pluto' AND s.purpose IN ('automatic discovery','automatic holding watch') AND NOT EXISTS (SELECT 1 FROM hw_samples p WHERE p.watch_row_id=s.id) ORDER BY COALESCE(f.next_attempt,0), CASE WHEN s.purpose='automatic holding watch' THEN 0 ELSE 1 END, s.id LIMIT 40",(now.timestamp(),)).fetchall()
+  rows=c.execute("SELECT s.* FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id LEFT JOIN hw_feed_recovery f ON f.watch_row_id=s.id WHERE s.is_test=0 AND COALESCE(k.killed,0)=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.lease_until<=? AND json_extract(s.request,'$.provider')='pluto' AND s.purpose IN ('automatic discovery','automatic holding watch') AND (NOT EXISTS (SELECT 1 FROM hw_samples p WHERE p.watch_row_id=s.id) OR (s.purpose='automatic holding watch' AND json_extract(s.request,'$.asset_id') IN (?,?))) ORDER BY COALESCE(f.next_attempt,0), CASE WHEN s.purpose='automatic holding watch' THEN 0 ELSE 1 END, s.id LIMIT 40",(now.timestamp(),*CRYPTO_REFERENCES)).fetchall()
  for row in rows:
   try:
    req=json.loads(row['request']);holding={'asset_id':req['asset_id'],'ticker':req['ticker'],'currency':req['quote_currency']}
    known=verified_existing_feed(connect,row['user_id'],holding,now);reason='EODHD-match genbrugt fra en nylig kontrol af ISIN og valuta'
+   if known and holding['asset_id']=='54368e0b-2d53-401e-bf68-1033a5b84b08':reason='Brugerbekræftet BTC-kursmapping genbrugt for denne beholdning'
    if not known and not lookup_attempted:
     with connect() as c:retry=c.execute('SELECT next_attempt FROM hw_feed_recovery WHERE watch_row_id=?',(row['id'],)).fetchone()
     if retry and retry['next_attempt']>now.timestamp():continue
@@ -374,7 +387,19 @@ def recover_automatic_feeds(connect,now=None):
      if row['purpose']=='automatic holding watch':instrument=holding_instrument(connect,row['user_id'],holding)
      else:instrument=verified_discovery_instrument(connect,row['user_id'],holding)
      if instrument and instrument.get('asset_id')==holding['asset_id'] and str(instrument.get('ticker','')).casefold()==holding['ticker'].casefold() and instrument.get('currency')==holding['currency']:
-      if not instrument.get('isin'):
+      crypto=crypto_reference(instrument) if row['purpose']=='automatic holding watch' else None
+      if crypto and crypto['approved']:
+       evidence=cxe_verified_match(instrument,[],now,connect,row['user_id'])
+       if evidence:
+        known={'provider_symbol':evidence['symbol']};status='MATCHED';reason='BTC-kurskilde godkendt af brugeren; kildetid kontrolleres for hver observation'
+        remember_verified_feed(connect,row['user_id'],dict(instrument,isin=''),evidence['symbol'],now,cxe_evidence=evidence)
+      elif crypto:
+       evidence={'basis':'user_supplied_provisional_crypto','asset_id':instrument['asset_id'],'symbol':crypto['symbol'],'currency':crypto['currency'],'note':'Foreløbig reference; tokenidentitet er ikke verificeret og anvendes ikke til signaler.'}
+       with connect() as c:
+        added=c.execute('INSERT OR IGNORE INTO hw_provisional_feed_links VALUES(?,?,?,?)',(row['id'],crypto['symbol'],json.dumps(evidence),now.isoformat()))
+        if added.rowcount:engine.event(c,row,'REFERENCE_CANDIDATE_REGISTERED',now,evidence['note'])
+       status='CRYPTO_IDENTITY_UNVERIFIED'
+      elif not instrument.get('isin'):
        status='PLUTO_ISIN_MISSING'
        if instrument.get('name'):
         from hotwatch_adapters import search_eodhd_symbols
@@ -394,13 +419,13 @@ def recover_automatic_feeds(connect,now=None):
        else:status='EODHD_IDENTITY_UNCERTAIN'
      else:status='PLUTO_IDENTITY_UNVERIFIED'
     except Exception as error:status=reference_error_code(error)
-    delay=60 if status=='PROVIDER_RATE_BUDGET' else 300
+    delay=60 if status=='PROVIDER_RATE_BUDGET' else 43200 if status=='CRYPTO_IDENTITY_UNVERIFIED' else 300
     with connect() as c:c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?) ON CONFLICT(watch_row_id) DO UPDATE SET next_attempt=excluded.next_attempt,status=excluded.status,updated=excluded.updated',(row['id'],now.timestamp()+delay,status,now.isoformat()))
    if not known:continue
    updated=dict(req,provider='eodhd',provider_symbol=known['provider_symbol'])
    with connect() as c:
     c.execute('BEGIN IMMEDIATE')
-    result=c.execute("UPDATE hw_sessions SET request=?,next_due=? WHERE id=? AND request=? AND lease_until<=? AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND NOT EXISTS (SELECT 1 FROM hw_samples p WHERE p.watch_row_id=hw_sessions.id) AND NOT EXISTS (SELECT 1 FROM hw_system_control g WHERE g.id=1 AND g.killed=1) AND NOT EXISTS (SELECT 1 FROM hw_control k WHERE k.user_id=hw_sessions.user_id AND k.killed=1)",(json.dumps(updated),now.timestamp(),row['id'],row['request'],now.timestamp()))
+    result=c.execute("UPDATE hw_sessions SET request=?,next_due=? WHERE id=? AND request=? AND lease_until<=? AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND (NOT EXISTS (SELECT 1 FROM hw_samples p WHERE p.watch_row_id=hw_sessions.id) OR (purpose='automatic holding watch' AND json_extract(request,'$.asset_id')=?)) AND NOT EXISTS (SELECT 1 FROM hw_system_control g WHERE g.id=1 AND g.killed=1) AND NOT EXISTS (SELECT 1 FROM hw_control k WHERE k.user_id=hw_sessions.user_id AND k.killed=1)",(json.dumps(updated),now.timestamp(),row['id'],row['request'],now.timestamp(),'54368e0b-2d53-401e-bf68-1033a5b84b08'))
     if result.rowcount:
      if known.get('provisional'):c.execute('INSERT INTO hw_provisional_feed_links VALUES(?,?,?,?)',(row['id'],known['provider_symbol'],json.dumps(known['provisional']),now.isoformat()))
      engine.event(c,row,'PROVIDER_CHANGED',now,reason);changed+=1
@@ -463,9 +488,13 @@ def verify_cxe_feeds(connect,now=None):
   instrument=holding_instrument(connect,row['user_id'],holding) if row['purpose']=='automatic holding watch' else verified_discovery_instrument(connect,row['user_id'],holding)
   if not instrument:status='CONFLICT'
   else:
-   from hotwatch_adapters import search_eodhd_symbols
-   options=search_eodhd_symbols(connect,row['user_id'],{'quote_currency':holding['currency']},candidate_override={'ticker':holding['ticker'],'company_name':instrument.get('name')},purpose='holding_identity')
-   evidence=cxe_verified_match(instrument,options.get('choices',[]),now,connect,row['user_id'])
+   from instrument_resolver import crypto_reference
+   crypto=crypto_reference(instrument)
+   if crypto and crypto['approved']:evidence=cxe_verified_match(instrument,[],now,connect,row['user_id'])
+   else:
+    from hotwatch_adapters import search_eodhd_symbols
+    options=search_eodhd_symbols(connect,row['user_id'],{'quote_currency':holding['currency']},candidate_override={'ticker':holding['ticker'],'company_name':instrument.get('name')},purpose='holding_identity')
+    evidence=cxe_verified_match(instrument,options.get('choices',[]),now,connect,row['user_id'])
    if not evidence or evidence['symbol']!=row['symbol']:status='CONFLICT'
  except Exception as error:status='RETRY';retry_code=reference_error_code(error)
  with connect() as c:

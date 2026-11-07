@@ -22,6 +22,10 @@ def valid_cxe_evidence(c,uid,request,now):
   keys=(('asset_id','asset_id'),('ticker','ticker'),('exchange','exchange'),('currency','quote_currency'))
   common=bool(row['status']=='MATCHED' and row['symbol']==request.get('provider_symbol') and 0<=now.timestamp()-row['verified_epoch']<=7*86400 and data.get('symbol')==row['symbol'] and all(pluto.get(a) and str(pluto[a]).casefold()==str(request.get(b,'')).casefold() for a,b in keys) and link and link['symbol']==row['symbol'] and link['isin']==data.get('isin') and link['currency']==data.get('currency')==request.get('quote_currency'))
   if not common:return False
+  if data.get('basis')=='user_authorized_btc_monitoring':
+   from instrument_resolver import crypto_reference
+   ref=crypto_reference(pluto)
+   return bool(ref and ref['approved'] and ref['symbol']==row['symbol'] and request.get('watch_mode')=='exit' and request.get('purpose')=='automatic holding watch' and data.get('isin')=='' and data.get('currency')=='USD')
   if data.get('basis')=='pluto_asset_cxe_security_reference_eodhd_isin':
    source=stamp(data['reference_created_at'])
    if data.get('reference_source')!='https://accounteu.cboe.com/cxe/market_data/symbol_listing/csv/' or not -300<=(now-source).total_seconds()<=72*3600:return False
@@ -410,6 +414,12 @@ def view(c,row,now=None):
   if candidate_review['status']=='REVIEW_DUE' and row['status']!='PAUSED':display_status='REVURDERING FORFALDET'
   if candidate_review['status']=='REPORT_ONLY' and row['status']!='PAUSED':display_status='MANGLER VURDERING'
  provisional=c.execute('SELECT symbol,evidence FROM hw_provisional_feed_links WHERE watch_row_id=?',(row['id'],)).fetchone()
+ if provisional and request.get('provider')=='pluto':
+  try:
+   reference=json.loads(provisional['evidence'])
+   if reference.get('basis')=='user_supplied_provisional_crypto' and reference.get('asset_id')==request.get('asset_id'):
+    data_status['reference_candidate']={'symbol':provisional['symbol'],'verified':False,'note':reference.get('note')}
+  except (ValueError,TypeError,AttributeError):pass
  if provisional and request.get('provider')=='eodhd':
   data_status['identity_verification']='unverified';data_status['identity_evidence']=json.loads(provisional['evidence'])
   if not row['is_test']:
@@ -518,7 +528,7 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
      from intel_workflows import candidate_currentness
      review=candidate_currentness(c,uid,mode,r['candidate_id'],now,report_fallback=purpose=='automatic discovery')
     data_status=view(c,r,now)['data_status']
-    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
+    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
    else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
   more=len(opened)>session_limit
   return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}
@@ -633,7 +643,10 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   if killed and killed['killed']:raise EngineError('kill_switch_active',409)
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:raise EngineError('operator_kill_switch',409)
   if request.get('provider')=='eodhd':
-   if valid_cxe_evidence(c,uid,request,now) is False:raise EngineError('EODHD_INSTRUMENT_REVALIDATION_REQUIRED',409)
+   from instrument_resolver import BTC_PLUTO_ASSET_ID,PEPE_PLUTO_ASSET_ID
+   valid=valid_cxe_evidence(c,uid,request,now)
+   if request.get('asset_id')==PEPE_PLUTO_ASSET_ID:raise EngineError('EODHD_INSTRUMENT_UNVERIFIED',409)
+   if valid is False or request.get('asset_id')==BTC_PLUTO_ASSET_ID and valid is not True:raise EngineError('EODHD_INSTRUMENT_REVALIDATION_REQUIRED',409)
   provisional=c.execute('SELECT symbol FROM hw_provisional_feed_links WHERE watch_row_id=?',(row['id'],)).fetchone()
   if provisional and isinstance(sample,dict) and request.get('provider')=='eodhd':
    if not mode:raise EngineError('EODHD_INSTRUMENT_UNVERIFIED',409)

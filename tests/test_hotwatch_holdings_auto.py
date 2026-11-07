@@ -201,6 +201,75 @@ class HoldingAutowatch(unittest.TestCase):
   with app.connect() as c:
    self.assertEqual(json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()['request'])['provider'],'pluto')
    self.assertEqual(c.execute('SELECT count(*) FROM hw_verified_feed_links').fetchone()[0],0)
+ def test_owner_approved_btc_mapping_preserves_two_depots_and_existing_history(self):
+  from test_hotwatch_engine import tick
+  from hotwatch_adapters import EODHDAdapter
+  aid='54368e0b-2d53-401e-bf68-1033a5b84b08';instrument={'asset_id':aid,'ticker':'BTC','name':'Bitcoin','type':'CRYPTO','exchange':'WINTERMUTE','currency':'USD','isin':None}
+  quantities={self.fixture.root:'0.00019026',self.fixture.child:'0.0001914'}
+  with app.connect() as c:
+   for pid,qty in quantities.items():
+    data={'positions_complete':True,'complete':True,'observed':self.now.isoformat(),'positions':[{'kind':'holding','asset_id':aid,'ticker':'BTC','name':'Bitcoin','quantity':qty}]}
+    import portfolio_data
+    portfolio_data.save(c,1,pid,data)
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=lambda *_:instrument,now=self.now),'LINKED')
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=lambda *_:instrument,now=self.now),'LINKED')
+  with app.connect() as c:
+   before=c.execute('SELECT * FROM hw_sessions ORDER BY id').fetchall();self.assertEqual(len(before),2)
+   for row in before:
+    s=tick(self.now-timedelta(seconds=20),held=True);s.update(source='pluto',asset_id=aid,ticker='BTC',sample_id='historical-'+str(row['id']),market_status='UNKNOWN',session_key='legacy',bid=None,ask=None)
+    c.execute('INSERT INTO hw_samples(watch_row_id,source,sample_id,event_epoch,received,payload,digest) VALUES(?,?,?,?,?,?,?)',(row['id'],'pluto',s['sample_id'],(self.now-timedelta(seconds=20)).timestamp(),self.now.isoformat(),json.dumps(s),engine.checksum(s)))
+    c.execute('UPDATE hw_sessions SET last_data=? WHERE id=?',(s['event_time'],row['id']))
+  quote={'status':'OK','price':'75946.0234375','event_time':(self.now-timedelta(seconds=10)).isoformat()}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=instrument),patch('eodhd_feeds.EODHDFeeds.snapshot',return_value=quote):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),2)
+  with app.connect() as c:
+   after=c.execute('SELECT * FROM hw_sessions ORDER BY id').fetchall();self.assertEqual([r['watch_id'] for r in after],[r['watch_id'] for r in before])
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_samples').fetchone()[0],2)
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_verified_feed_links').fetchone()[0],1)
+   self.assertEqual({tuple(json.loads(r['request'])['portfolio_ids']) for r in after},{(self.fixture.root,),(self.fixture.child,)})
+   for row in after:
+    req=json.loads(row['request']);self.assertEqual(req['provider_symbol'],'BTC-USD.CC');self.assertTrue(engine.valid_cxe_evidence(c,1,req,self.now))
+  class Response:
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,size):return json.dumps({'code':'BTC-USD','timestamp':int(self.now.timestamp())-10,'close':'75946.0234375','currency':'USD'}).encode()
+  outer=self
+  class Opener:
+   def open(self,*args,**kwargs):
+    response=Response();response.now=outer.now;return response
+  adapter=EODHDAdapter(app.connect,1,Opener())
+  def context(req,currency):
+   ctx=tick(self.now,held=True)['context'];ctx['quantity']=quantities[req['portfolio_ids'][0]];return ctx
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}),patch('hotwatch_adapters.reserve'),patch.object(adapter.pluto,'safe_context',side_effect=context):
+   for row in after:
+    req=json.loads(row['request']);sample=adapter.poll({'id':row['id'],'request_data':req,'state':row['state']})
+    self.assertEqual(sample['currency'],'USD');self.assertEqual(sample['context']['quantity'],quantities[req['portfolio_ids'][0]])
+    out=engine.ingest(app.connect,1,row['watch_id'],False,sample,self.now)
+    self.assertEqual(out['calculation']['signal'],'NO_DATA')
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_samples').fetchone()[0],4)
+   current=c.execute('SELECT * FROM hw_sessions WHERE id=?',(after[-1]['id'],)).fetchone();stale=engine.view(c,current,self.now+timedelta(seconds=131))
+   self.assertEqual(stale['data_status']['quote_freshness'],'STALE');self.assertEqual(stale['signal'],'NO_DATA')
+   c.execute('DELETE FROM hw_cxe_feed_evidence')
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch.object(adapter.pluto,'safe_context',return_value=tick(self.now,held=True)['context']):
+   with self.assertRaisesRegex(DataUnavailable,'EODHD_INSTRUMENT_REVALIDATION_REQUIRED'):adapter.poll({'id':after[-1]['id'],'request_data':req,'state':after[-1]['state']})
+  with self.assertRaisesRegex(engine.EngineError,'EODHD_INSTRUMENT_REVALIDATION_REQUIRED'):engine.ingest(app.connect,1,after[-1]['watch_id'],False,sample,self.now)
+ def test_pepe_is_a_provisional_reference_and_cannot_use_external_prices(self):
+  aid='4cde5f75-df03-4abc-9063-cfc588e31c11';instrument={'asset_id':aid,'ticker':'PEPE','name':'Pepe','type':'CRYPTO','exchange':'UKENDT','currency':'USD','isin':None}
+  with app.connect() as c:
+   c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[{'kind':'holding','asset_id':aid,'ticker':'PEPE','quantity':'1'}]}),))
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=lambda *_:instrument,now=self.now),'LINKED')
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=instrument),patch('eodhd_feeds.EODHDFeeds.snapshot',side_effect=AssertionError('PEPE must not use external quotes')):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();self.assertEqual(json.loads(row['request'])['provider'],'pluto')
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_verified_feed_links').fetchone()[0],0)
+  data=engine.item(app.connect,1,row['watch_id'],False)['session']['data_status'];self.assertEqual(data['reference_candidate']['symbol'],'PEPE24478-USD.CC');self.assertFalse(data['reference_candidate']['verified'])
+  with app.connect() as c:
+   req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol='PEPE24478-USD.CC');c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps(req),row['id']))
+  with self.assertRaisesRegex(engine.EngineError,'EODHD_INSTRUMENT_UNVERIFIED'):engine.ingest(app.connect,1,row['watch_id'],False,{},self.now)
  def test_complete_broker_identity_does_not_spend_second_lookup_for_missing_isin(self):
   raw={'asset':{'id':'synthetic-asset','ticker':'TEST','name':'Test Inc','exchange':'NASDAQ','currency':'USD','type':'CS'}}
   with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value=raw) as call:
