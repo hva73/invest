@@ -178,3 +178,41 @@ setInterval(async()=>{
   if(JSON.stringify(previous)!==JSON.stringify(next)){state={...state,...current};if(editingData())pendingAutoRender=true;else render()}
  }catch{}finally{storedPollBusy=false}
 },30000);
+
+// Explanations are attached to the existing signal controls, including controls
+// rendered later by the radar and HOT WATCH views.
+function attachSignalHelp(root=document){
+ const selector='button[data-trade-watch],button[data-trade-candidate],button[data-trade-test-buy]';
+ const buttons=[];if(root.matches?.(selector))buttons.push(root);if(root.querySelectorAll)buttons.push(...root.querySelectorAll(selector));
+ for(const b of buttons){
+  if(b.dataset.signalHelpAttached==='true')continue;
+  b.dataset.signalHelpAttached='true';const help=document.createElement('button');help.type='button';help.className='signal-help';help.textContent='?';help.setAttribute('aria-label','Hvorfor dette signal?');
+  if(b.dataset.tradeWatch)help.dataset.explainWatch=b.dataset.tradeWatch;
+  else if(b.dataset.tradeCandidate){help.dataset.explainReport=b.dataset.tradeReport;help.dataset.explainCandidate=b.dataset.tradeCandidate}
+  else help.dataset.explainTest='true';
+  b.insertAdjacentElement('afterend',help);
+ }
+}
+const signalReasons={ENTRY_RULES:'Strategiens betingelser for køb er opfyldt. De ser på kursens retning, styrke, handelsaktivitet og eventuelle kursbrud.',EXIT_RULES:'Strategiens betingelser for salg er opfyldt.',TRAILING_EXIT:'Kursen er faldet til strategiens grænse i forhold til den seneste top.',STOP_BREACHED:'Den fastsatte stopgrænse er overskredet.',EXIT_DEADLINE:'Den fastsatte frist for at forlade positionen er nået.',HYSTERESIS_HOLD:'Købssignalet holdes kortvarigt, mens den målte styrke fortsat opfylder strategiens fastholdelsesregel.',WARMUP:'Der er endnu ikke nok sammenlignelige observationer til beregningen.',DATA_STALE:'Kursdata er for gamle til et aktuelt signal.',DATA_UNVERIFIED:'Kurskilden er endnu ikke verificeret.',NO_TRIGGER:'Ingen af strategiens betingelser har udløst et signal.',CONFIRMATION_PENDING:'Signalerne mangler endnu de krævede bekræftelser.',SPREAD_TOO_WIDE:'Forskellen mellem købs- og salgskurs er større end den tilladte grænse.',POSITION_CONTEXT_UNKNOWN:'Den aktuelle depotposition kunne ikke bekræftes.'};
+async function explainSignal(b){
+ const user=state?.user?.username;let title='Hvorfor dette signal?',body='';
+ if(b.hasAttribute('data-explain-test')){title='PEPE · testsignal';body='<p>Dette signal er oprettet til at afprøve handelsforløbet. Det bygger ikke på en markedsberegning og er ikke en købs- eller salgsvurdering.</p>'}
+ else if(b.dataset.explainWatch){
+  const result=await api('v1/hotwatch/sessions/'+encodeURIComponent(b.dataset.explainWatch)+'?is_test=false');if(state?.user?.username!==user||!b.isConnected)return;
+  const s=result.session||{},c=s.latest_calculation||{},codes=Array.isArray(c.reason_codes)?c.reason_codes:[],display=Array.isArray(s.display_reason_codes)?s.display_reason_codes:[],changed=s.signal!==c.signal;
+  title=(s.request?.ticker||'Instrument')+' · signalets begrundelse';
+  const descriptions=codes.map(code=>signalReasons[code]||'Der findes endnu ingen dansk forklaring på årsagen: '+code+'.');
+  const metrics=c.supporting_metrics||{},fmt=v=>new Intl.NumberFormat('da-DK',{maximumFractionDigits:2}).format(Number(v));
+  const values=[['Kursændring over de seneste tre observationsintervaller',metrics.return_3_pct,'%'],['Relativ handelsvolumen',metrics.relative_volume,' gange'],['Afstand til seneste top',metrics.distance_high_pct,'%']].filter(([,v])=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v)));
+  body=`<p><strong>Aktuel status: ${escape(s.display_status||'Ikke oplyst')}</strong></p>${changed?'<p>Den seneste beregning er ikke det aktuelle signal. Status kan være ændret af datakvalitet eller andre kontroller.</p>':''}<p>${escape(descriptions.join(' ')||'Der er endnu ikke gemt en begrundelse for beregningen.')}</p>${display.length?`<p>Aktuelle forhold: ${escape(display.map(code=>signalReasons[code]||'Se detaljer om '+code).join(' · '))}</p>`:''}${values.length?`<ul>${values.map(([label,value,unit])=>`<li>${escape(label)}: ${escape(fmt(value))}${escape(unit)}</li>`).join('')}</ul>`:''}<p class="muted">Beregnet: ${escape(c.calculation_timestamp?formatTime(c.calculation_timestamp):'ikke oplyst')} · Kursdata: ${escape(c.data_timestamp?formatTime(c.data_timestamp):'ikke oplyst')}</p><p class="muted">Tallene beskriver den seneste gemte beregning; de er ikke en garanti for fremtidig udvikling.</p>`;
+ }else{
+  const record=[...(state?.report_desk?.candidates||[]),...(state?.report_desk?.dormant_candidates||[])].find(r=>r.report_id===b.dataset.explainReport&&r.candidate?.candidate_id===b.dataset.explainCandidate);
+  const decision=record?.decision||record?.candidate?.decision,candidate=record?.candidate||{};title=(candidate.ticker||'Instrument')+' · rapportens vurdering';
+  const why=decision?.reason||candidate.assessment;body=`<p><strong>Kilde: rapportens vurdering</strong></p><p>${escape(why||'Rapporten indeholder ingen begrundelse, der kan vises her.')}</p>${decision?.next_trigger?`<p><strong>Det næste, der holdes øje med:</strong> ${escape(decision.next_trigger)}</p>`:''}<p class="muted">Vurderet: ${escape(decision?.decided_at?formatTime(decision.decided_at):record?.generated_at?formatTime(record.generated_at):'ikke oplyst')}. Rapportens vurdering er ikke det samme som et beregnet HOT WATCH-signal.</p>`;
+ }
+ let dialog=document.getElementById('signal-explanation-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='signal-explanation-dialog';dialog.className='quick-trade-dialog signal-explanation-dialog';document.body.append(dialog)}
+ dialog.innerHTML=`<div class="overview-detail-header"><h2>${escape(title)}</h2><button type="button" data-explanation-close aria-label="Luk forklaring">✕</button></div>${body}`;dialog.showModal();dialog.querySelector('[data-explanation-close]')?.focus();
+}
+document.addEventListener('click',async e=>{const close=e.target.closest('[data-explanation-close]');if(close){close.closest('dialog')?.close();return}const b=e.target.closest('[data-explain-watch],[data-explain-candidate],[data-explain-test]');if(!b)return;try{await explainSignal(b)}catch(error){notice('Forklaringen kunne ikke hentes: '+error.message,'error')}});
+new MutationObserver(records=>{for(const r of records)for(const n of r.addedNodes)if(n.nodeType===1)attachSignalHelp(n)}).observe(document.body,{childList:true,subtree:true});
+attachSignalHelp();

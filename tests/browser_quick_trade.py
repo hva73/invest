@@ -21,9 +21,10 @@ try:
    calls.append(('send',route.request.post_data_json));route.fulfill(json={'proposal':{'status':'sent'}})
   page.route('**/api/trade/estimate',estimate);page.route('**/api/trade/send',send)
   page.route('**/api/trade/search',lambda route:route.fulfill(json={'assets':[{'asset_id':'asset-test','name':'Synthetic PEPE','ticker':'PEPE','isin':'','currency':'USD'}]}))
-  page.route('**/api/v1/hotwatch/sessions/watch-1?*',lambda route:route.fulfill(json={'session':{'signal':'BUY','request':{'ticker':'TEST','asset_id':'asset-test'}}}))
+  page.route('**/api/v1/hotwatch/sessions/watch-1?*',lambda route:route.fulfill(json={'session':{'signal':'BUY','display_status':'KØBSSIGNAL','request':{'ticker':'TEST','asset_id':'asset-test'},'latest_calculation':{'signal':'BUY','reason_codes':['ENTRY_RULES'],'supporting_metrics':{'return_3_pct':'2.5'}}}}))
   page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();page.locator('.dashboard-v1').wait_for()
   page.evaluate("pid => state.dashboard.positions.push({portfolio_id:pid,ticker:'PEPE',asset_id:'asset-test',verification:'broker_snapshot'})",case.root)
+  expect(page.locator('.dash-attention [data-explain-test]')).to_be_visible();page.locator('.dash-attention [data-explain-test]').click();expect(page.locator('#signal-explanation-dialog')).to_contain_text('ikke på en markedsberegning');page.locator('[data-explanation-close]').click()
   expect(page.locator('.dash-attention [data-trade-test-buy]')).to_be_visible();page.locator('.dash-attention [data-trade-test-buy]').click();dialog=page.locator('#quick-trade-dialog');expect(dialog).to_be_visible()
   expect(dialog.locator('[name=size]')).to_have_value('');dialog.locator('[name=size]').fill('20');expect(dialog.locator('[name=portfolio_id]')).to_have_value(str(case.root))
   expect(dialog.locator('#quick-trade-query')).to_have_count(0);expect(dialog.locator('[name=asset_id]')).to_have_value('asset-test')
@@ -31,6 +32,8 @@ try:
   dialog.locator('button[type=submit]').click();expect(dialog).to_contain_text('Åbn Pluto')
   assert calls[-2][1]['report_id']=='@manual-buy' and calls[-2][1]['size']=='20' and calls[-1][0]=='send'
   dialog.locator('[data-quick-close]').click()
+  page.evaluate("() => {const b=document.createElement('button');b.dataset.tradeWatch='watch-1';b.textContent='KØB';document.body.append(b)}")
+  expect(page.locator('[data-explain-watch="watch-1"]')).to_be_visible();page.locator('[data-explain-watch="watch-1"]').click();expect(page.locator('#signal-explanation-dialog')).to_contain_text('betingelser for køb er opfyldt');expect(page.locator('#signal-explanation-dialog')).to_contain_text('2,5%');page.locator('[data-explanation-close]').click()
   for side,size,expected in [('BUY','100,50','amount'),('SELL','50','percent')]:
    page.evaluate("side=>window.TradeUI.openQuick({report_id:'@hotwatch',candidate_id:'watch-1',ticker:'TEST',asset_id:'asset-test',signal:side})",side)
    dialog=page.locator('#quick-trade-dialog');expect(dialog).to_be_visible();dialog.locator('[name=size]').fill(size)
