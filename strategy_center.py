@@ -3,6 +3,8 @@ from hotwatch_contract import EngineError
 
 DEFAULT_ID='escape_momentum'
 DEFAULT_VERSION='1.0.0'
+EARLY_EDITABLE=('news_max_age_minutes','watch_gain_pct','watch_volume','watch_no_news_volume','momentum_window_minutes','momentum_pct','min_relative_volume','min_acceleration','confirmation_count','minimum_signal_s','max_spread_pct','use_macd_confirmation','rsi_cap','heat_limit_pct','heat_high_pct')
+LEGACY_EDITABLE=('momentum_pct','min_relative_volume','max_spread_pct')
 
 
 def init(c):
@@ -32,7 +34,7 @@ def preferences(connect,uid):
         import json
         for item in result['strategies']:
             raw=c.execute('SELECT payload FROM hw_strategies WHERE owner_id=? AND strategy_id=? AND version=?',(item['owner_id'],item['strategy_id'],item['version'])).fetchone()
-            spec=json.loads(raw['payload']);item['description']=spec['description'];item['parameters']={k:spec['parameters'][k] for k in ('momentum_pct','min_relative_volume','max_spread_pct')};item['supports_example']=any(r.get('metric')=='catalyst_verified' for r in spec['entry_rules'].get('all',[]))
+            spec=json.loads(raw['payload']);item['description']=spec['description'];item['schema_version']=spec['schema_version'];item['editable']=list(EARLY_EDITABLE if spec['schema_version']==2 else LEGACY_EDITABLE);item['parameters']={k:spec['parameters'][k] for k in item['editable']};item['supports_example']=spec['schema_version']==1 and any(r.get('metric')=='catalyst_verified' for r in spec['entry_rules'].get('all',[]))
     return {'preference':dict(row) if row else {'mode':'auto','strategy_id':None,'version':None},'selection':resolve(connect,uid),**result}
 
 
@@ -57,21 +59,33 @@ def draft(connect,uid,data):
     import hotwatch_engine
     if set(data)!={'source_id','source_version','description','parameters'}:raise ValueError('Ugyldige strategioplysninger.')
     sid=data['source_id'];version=data['source_version'];description=data['description'];changes=data['parameters']
-    if not isinstance(sid,str) or not isinstance(version,str) or not isinstance(description,str) or not description.strip() or len(description)>400 or not isinstance(changes,dict) or set(changes)!={'momentum_pct','min_relative_volume','max_spread_pct'}:raise ValueError('Udfyld beskrivelsen og de tre grænser.')
+    if not isinstance(sid,str) or not isinstance(version,str) or not isinstance(description,str) or not description.strip() or len(description)>400 or not isinstance(changes,dict):raise ValueError('Udfyld beskrivelsen og alle strategiindstillinger.')
     if any(not isinstance(v,str) or len(v)>30 for v in changes.values()):raise ValueError('Grænserne skal være tal.')
     with connect() as c:
         source=c.execute('SELECT * FROM hw_strategies WHERE owner_id IN (0,?) AND strategy_id=? AND version=? ORDER BY owner_id DESC LIMIT 1',(uid,sid,version)).fetchone()
         if not source:raise ValueError('Strategien blev ikke fundet.')
         spec=json.loads(source['payload'])
+        editable=EARLY_EDITABLE if spec['schema_version']==2 else LEGACY_EDITABLE
+        if set(changes)!=set(editable):raise ValueError('Udfyld alle strategiindstillinger.')
         if source['owner_id']==0:
             spec['strategy_id']='custom-'+secrets.token_hex(12);spec['version']='0.1.0'
         else:
             versions=c.execute('SELECT version FROM hw_strategies WHERE owner_id=? AND strategy_id=?',(uid,sid)).fetchall()
             numbers=[tuple(map(int,r['version'].split('.'))) for r in versions]
             major,minor,patch=max(numbers);spec['version']=f'{major}.{minor}.{patch+1}'
-    spec=copy.deepcopy(spec);spec['description']=description.strip();spec['parameters'].update(changes)
+    spec=copy.deepcopy(spec);spec['description']=description.strip()
+    for key,value in changes.items():
+        if type(spec['parameters'][key]) is bool:
+            if value not in ('true','false'):raise ValueError('Vælg ja eller nej til MACD-bekræftelse.')
+            value=value=='true'
+        if type(spec['parameters'][key]) is int:
+            try:
+                if not value.isdecimal():raise ValueError()
+                value=int(value)
+            except ValueError:raise ValueError('Antal og minutter skal være hele tal.')
+        spec['parameters'][key]=value
     from hotwatch_strategy import validate_strategy
-    if validate_strategy(spec):raise ValueError('Kontrollér at alle grænser er positive og højst 1000.')
+    if validate_strategy(spec):raise ValueError('Kontrollér strategiindstillingerne, herunder grænser og tidsintervaller.')
     result=hotwatch_engine.upload_strategy(connect,uid,'Bruger',spec)
     return {'ok':True,'strategy_id':spec['strategy_id'],'version':spec['version'],'checksum':result['checksum'],'status':'draft'}
 

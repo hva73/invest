@@ -41,8 +41,8 @@ class StrategyHandoff(unittest.TestCase):
   self.assertEqual(handoff['handoff_status'],'SESSION_PRESENT');self.assertEqual(handoff['discovery_attempt']['status'],'CREATED');self.assertEqual(handoff['session']['strategy_id'],'escape_momentum')
   with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
  def test_unqualified_and_unknown_are_stored_but_never_auto_started(self):
-  for strategy,version in [('escape_early_catalyst','0.1.0'),('does-not-exist','1.0.0')]:
-   self.report['report_id']='report-'+strategy;self.candidate['candidate_id']='candidate-'+strategy;self.candidate['strategy_proposal'].update(strategy_id=strategy,version=version)
+  for strategy,version in [('escape_early_catalyst','0.1.0'),('escape_early_catalyst','1.0.0'),('does-not-exist','1.0.0')]:
+   self.report['report_id']='report-'+strategy+'-'+version;self.candidate['candidate_id']='candidate-'+strategy+'-'+version;self.candidate['strategy_proposal'].update(strategy_id=strategy,version=version)
    validation=self.rpc('validate_report',self.report)['structuredContent'];self.assertTrue(validation['valid']);self.assertTrue(any(x['code'].startswith('strategy_') for x in validation['warnings']))
    receipt=self.rpc('send_report',self.report)['structuredContent'];expected='UNQUALIFIED' if strategy.startswith('escape_') else 'NOT_FOUND';self.assertEqual(receipt['strategy_proposals'][0]['qualification'],expected)
    with patch('hotwatch_service.verified_discovery_instrument',side_effect=AssertionError('Should not verify instrument')):

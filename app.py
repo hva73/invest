@@ -214,6 +214,9 @@ class Handler(BaseHTTPRequestHandler):
             if self.path=='/api/push/config':
                 import web_push
                 return self.send(200,web_push.config(connect,user_id))
+            if self.path=='/api/strategy-center/lab':
+                import strategy_lab
+                return self.send(200,strategy_lab.available(connect,user_id))
             if self.path=='/api/strategy-center':
                 import strategy_center
                 return self.send(200,strategy_center.preferences(connect,user_id))
@@ -395,6 +398,11 @@ class Handler(BaseHTTPRequestHandler):
                     else:result=web_push.send_test(connect,user_id,data.get('endpoint'))
                 except ValueError as error:return self.send(400,{'error':str(error)})
                 except Exception:return self.send(503,{'error':'Notifikationen kunne ikke gennemføres. Kontrollér enhed og serveropsætning.'})
+                return self.send(200,result)
+            if self.path=='/api/strategy-center/lab':
+                import strategy_lab
+                try:result=strategy_lab.compare(connect,user_id,data)
+                except ValueError as error:return self.send(400,{'error':str(error)})
                 return self.send(200,result)
             if self.path in ('/api/strategy-center/draft','/api/strategy-center/simulate'):
                 import strategy_center

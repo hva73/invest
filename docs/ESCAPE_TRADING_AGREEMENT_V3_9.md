@@ -105,3 +105,19 @@ Kør `validate_report`, og ret eventuelle fejl. `send_report` kvitterer for modt
 En kvalificeret strategi i en aktuel hovedrapport kan overtages af den eksisterende automatiske kandidatmotor, hvis den kører og kontrollen af identitet, marked, datagrundlag, kapacitet og gældende øvrige regler tillader det. Ukendt eller ukvalificeret strategi gemmes som rapportoplysning og blokerer automatisk opstart for kandidaten; der vælges ikke en anden strategi i stedet. Eksisterende sessioner ændres ikke, og en afvigelse vises i readback. Analyse-/testdata starter ikke automatisk driftsovervågning. `get_strategy_catalog` og `get_hot_watch` kræver den relevante læseadgang. Klienten skal genindlæse MCP-værktøjerne efter installation, før udvidelsen kan anvendes.
 
 Early Catalyst er en skabelon til forskning. Den har endnu ingen verificeret live-katalysatorindgang, historisk vinder-/tabertest eller godkendelse til drift. Fiktive eksempler er ikke backtest, og en bestået regelprøve er ikke et købssignal. Globale risikogrænser og eksisterende kontrol af datakvalitet skal gælde uanset strategi.
+
+
+## 10. Strategy Lab — afgrænset genafspilning
+
+Strategy Lab kan sammenligne én til tre versionslåste strategier på op til 240 beregninger, som allerede er gemt for brugerens egen HOT WATCH-overvågning. Hver beregning bruger kun sin gemte observation, dens modtagelses-/beregningstid og den tidsstemplede risikokontekst; ugyldig eller fremtidig information springes over, og beregningsforløbet nulstilles. Aktive sessioner, ordrer og brokerdata ændres ikke. Test og drift holdes adskilt.
+
+Resultatet er signaloptællinger og begrundelser, ikke dokumenteret afkast eller en simulering af handelsudførelse. Fuld historisk warmup, alle øvrige hændelser, nyhedskontekst, omkostninger og spreadhistorik er ikke nødvendigvis dækket, og manglende indikatorer skal vises. Et resultat er ikke automatisk kvalifikation til drift. ChatGPT må ikke omtale genafspilningen som dokumenteret historisk performance eller påstå, at en handel ville være gennemført.
+
+## 11. Early Catalyst v1.0 — brugerens regler og teststatus
+
+Ejeren har beskrevet en versionsstyret Early Catalyst-strategi med et EARLY WATCH-trin og et særskilt BUY READY-trin. Startværdierne er dokumenteret i `docs/EARLY_CATALYST_V1.md` og kan justeres i en privat kladde i Strategy Center. EARLY WATCH er overvågning og giver aldrig i sig selv ordre eller købssignal. Den eksisterende Momentum-version er uændret. Strategien kræver fortsat eksisterende risikogates og endelig særskilt brugergodkendelse i Pluto.
+
+Version 1.0.0 er **ikke kvalificeret til drift**: eksisterende leverandør- og motorinput leverer endnu ikke alle nødvendige tidsstemplede nyheds-, aktietype-, Pluto-, referencekurs- og opsætningsbeviser. Den medfølgende datapakke indeholder ikke de fulde historiske tidsserier, historisk bid/ask eller dokumenterede nyhedstider, og femminutterscandles kan ikke alene dokumentere treminuttersændring og 15 sekunders varighed. GOGO, STAK, KRMN, CIIT, Aelis Farma og Air France-KLM har derfor status **NOT RUN / utilstrækkelige data** for historiske aktiveringstidspunkter. Syntetisk regeltest er ikke dokumenteret markedsperformance. ChatGPT skal ikke opfinde de manglende resultater eller hævde, at et signal ville have ført til en handel.
+
+
+For Early Catalyst er overophedningens reference den seneste verificerede ordinære lukkekurs før handelssessionen. Offentliggøres en katalysator efter luk, anvendes den seneste ordinære lukkekurs før offentliggørelsen. Under en igangværende session registreres også verificeret kurs umiddelbart før nyheden, så dagens samlede ændring og reaktionen på nyheden vises separat. Er kilde eller tidspunkt ukendt, må værdien ikke opfindes.

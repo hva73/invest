@@ -16,6 +16,7 @@ class Updater(unittest.TestCase):
    self.assertEqual((target/'hotwatch_warmup.py').read_text(),'new code')
    self.assertIn('web_push.py',apply_update.FILES);self.assertEqual((target/'web_push.py').read_text(),'new code')
    self.assertIn('strategy_center.py',apply_update.FILES);self.assertEqual((target/'strategy_center.py').read_text(),'new code')
+   self.assertIn('strategy_lab.py',apply_update.FILES);self.assertEqual((target/'strategy_lab.py').read_text(),'new code')
    self.assertIn('data/dk_postcodes.json',apply_update.FILES)
    self.assertEqual((target/'data/dk_postcodes.json').read_text(),'new code')
    self.assertIn('user_profile.py',apply_update.FILES)

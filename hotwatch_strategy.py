@@ -5,7 +5,7 @@ from hotwatch_contract import EngineError,GLOBAL_RISK,checksum
 from report_validation import stamp
 
 PARAMETERS={'min_relative_volume':'1.8','max_spread_pct':'0.8','momentum_pct':'0.3','min_acceleration':'0','max_volatility_pct':'3','short_period':5,'long_period':13,'rsi_period':14,'atr_period':14,'breakout_window':10,'min_samples':34,'confirmation_count':3,'cooldown_s':60,'minimum_signal_s':15,'release_momentum_pct':'0.1','exit_return_pct':'-0.8','trailing_pct':'2','allow_reduce':False}
-METRICS={'sample_count','price','trend_up','return_1_pct','return_3_pct','return_5_pct','return_10_pct','velocity_pct_s','acceleration_pct_s2','sma_short','sma_long','ema_short','ema_long','rsi','macd','macd_signal','macd_histogram','breakout','breakdown','range_position_pct','distance_high_pct','distance_low_pct','volatility_pct','atr','spread','spread_pct','interval_volume','relative_volume','volume_acceleration','rising_price_falling_volume','catalyst_verified','catalyst_age_minutes'}
+METRICS={'sample_count','price','trend_up','return_1_pct','return_3_pct','return_5_pct','return_10_pct','velocity_pct_s','acceleration_pct_s2','sma_short','sma_long','ema_short','ema_long','rsi','macd','macd_signal','macd_histogram','breakout','breakdown','range_position_pct','distance_high_pct','distance_low_pct','volatility_pct','atr','spread','spread_pct','interval_volume','relative_volume','volume_acceleration','rising_price_falling_volume','catalyst_verified','catalyst_age_minutes','ordinary_share','pluto_tradable','no_verified_news','reference_gain_pct','news_reaction_pct','return_window_pct','earnings_previous_session','consolidating','new_breakout','new_setup'}
 OPERATORS={'>=','<=','>','<','==','!='}
 BASELINE={'schema_version':1,'strategy_id':'escape_momentum','version':'1.0.0','description':'Konservativ kausal momentum-baseline; ingen dokumenteret profitabilitet.','parameters':PARAMETERS,'entry_rules':{'all':[{'metric':'return_3_pct','operator':'>=','parameter':'momentum_pct'},{'metric':'acceleration_pct_s2','operator':'>=','parameter':'min_acceleration'},{'metric':'relative_volume','operator':'>=','parameter':'min_relative_volume'},{'metric':'spread_pct','operator':'<=','parameter':'max_spread_pct'},{'metric':'volatility_pct','operator':'<=','parameter':'max_volatility_pct'},{'metric':'breakout','operator':'==','value':True},{'metric':'macd_histogram','operator':'>','value':'0'},{'metric':'trend_up','operator':'==','value':True},{'metric':'rsi','operator':'<=','value':'80'}]},'exit_rules':{'all':[{'metric':'return_3_pct','operator':'<=','parameter':'exit_return_pct'},{'metric':'breakdown','operator':'==','value':True}]}}
 
@@ -17,23 +17,38 @@ EARLY_CATALYST=copy.deepcopy(BASELINE)
 EARLY_CATALYST.update(strategy_id='escape_early_catalyst',version='0.1.0',description='Forsøgsstrategi: bekræftet selskabsnyhed med kursreaktion, volumen og spread. Kun til test, ikke kvalificeret til drift.')
 EARLY_CATALYST['entry_rules']={'all':[{'metric':'catalyst_verified','operator':'==','value':True},{'metric':'catalyst_age_minutes','operator':'<=','value':'30'},{'metric':'return_3_pct','operator':'>=','parameter':'momentum_pct'},{'metric':'relative_volume','operator':'>=','parameter':'min_relative_volume'},{'metric':'spread_pct','operator':'<=','parameter':'max_spread_pct'}]}
 
+
+# v1.0 is an inactive, declarative research version until the verified news,
+# historic market inputs and qualification process are available.
+EARLY_PARAMETERS={**PARAMETERS,'min_relative_volume':'1.8','momentum_pct':'0.5','max_spread_pct':'0.8','min_samples':2,'confirmation_count':2,'minimum_signal_s':15,'news_max_age_minutes':120,'momentum_window_minutes':3,'use_macd_confirmation':False,'watch_gain_pct':'1','watch_volume':'1.5','watch_no_news_volume':'3','rsi_cap':'90','heat_limit_pct':'15','heat_high_pct':'30'}
+def rule(metric,operator,parameter=None,value=None):
+ return {'metric':metric,'operator':operator,**({'parameter':parameter} if parameter is not None else {'value':value})}
+EARLY_CATALYST_V1={'schema_version':2,'strategy_id':'escape_early_catalyst','version':'1.0.0','description':'Early Catalyst: tidlig observation og særskilt købsklarhed. Forsøgsstrategi, ikke godkendt til drift.','parameters':EARLY_PARAMETERS,
+ 'watch_rules':{'all':[rule('ordinary_share','==',value=True),rule('pluto_tradable','==',value=True),{'any':[{'all':[rule('catalyst_verified','==',value=True),{'any':[{'all':[rule('catalyst_age_minutes','>=',value='0'),rule('catalyst_age_minutes','<=','news_max_age_minutes')]},rule('earnings_previous_session','==',value=True)]},{'any':[rule('news_reaction_pct','>=','watch_gain_pct'),rule('relative_volume','>=','watch_volume')]}]},{'all':[rule('no_verified_news','==',value=True),rule('reference_gain_pct','>=','watch_gain_pct'),rule('relative_volume','>=','watch_no_news_volume')]}]}]},
+ 'entry_rules':{'all':[rule('return_window_pct','>=','momentum_pct'),rule('relative_volume','>=','min_relative_volume'),rule('acceleration_pct_s2','>','min_acceleration'),rule('spread_pct','<=','max_spread_pct'),rule('rsi','<=','rsi_cap'),{'any':[rule('reference_gain_pct','<=','heat_limit_pct'),{'all':[rule('reference_gain_pct','>','heat_limit_pct'),rule('reference_gain_pct','<=','heat_high_pct'),{'any':[rule('consolidating','==',value=True),rule('new_breakout','==',value=True)]}]},{'all':[rule('reference_gain_pct','>','heat_high_pct'),rule('new_setup','==',value=True)]}]}]},
+ 'exit_rules':copy.deepcopy(BASELINE['exit_rules'])}
+
 def validate_strategy(data):
  errors=[];nodes=0
  def error(path,message):errors.append({'path':path,'code':'invalid_strategy','message':message})
  if not isinstance(data,dict):return [{'path':'$','code':'invalid_type','message':'Expected strategy object'}]
- keys={'schema_version','strategy_id','version','description','parameters','entry_rules','exit_rules'}
+ schema=data.get('schema_version');is_early=schema==2 and type(schema) is int
+ keys={'schema_version','strategy_id','version','description','parameters','entry_rules','exit_rules'}|({'watch_rules'} if is_early else set())
  if set(data)!=keys:error('$','Exact strategy members required')
- if data.get('schema_version')!=1 or type(data.get('schema_version')) is not int:error('schema_version','Expected 1')
+ if type(schema) is not int or schema not in (1,2):error('schema_version','Expected 1 or 2')
  for field,pattern in [('strategy_id',r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}'),('version',r'\d{1,4}\.\d{1,4}\.\d{1,4}')]:
   if not isinstance(data.get(field),str) or not re.fullmatch(pattern,data[field]):error(field,'Invalid stable ID or semantic version')
  if not isinstance(data.get('description'),str) or not 1<=len(data['description'])<=4000:error('description','Expected nonempty description up to 4000 characters')
  p=data.get('parameters');p=p if isinstance(p,dict) else {}
- if set(p)!=set(PARAMETERS):error('parameters','Exact documented parameter set required')
- integers={'short_period':(2,30),'long_period':(3,60),'rsi_period':(2,30),'atr_period':(2,30),'breakout_window':(3,60),'min_samples':(34,120),'confirmation_count':(2,10),'cooldown_s':(30,3600),'minimum_signal_s':(5,600)}
+ parameter_names=set(EARLY_PARAMETERS if is_early else PARAMETERS)
+ if set(p)!=parameter_names:error('parameters','Exact documented parameter set required')
+ integers={'short_period':(2,30),'long_period':(3,60),'rsi_period':(2,30),'atr_period':(2,30),'breakout_window':(3,60),'min_samples':(2 if is_early else 34,120),'confirmation_count':(2,10),'cooldown_s':(30,3600),'minimum_signal_s':(5,600)}
+ if is_early:integers.update(news_max_age_minutes=(1,1440),momentum_window_minutes=(1,30))
  for name,(lo,hi) in integers.items():
   if type(p.get(name)) is not int or not lo<=p[name]<=hi:error('parameters.'+name,f'Expected integer {lo}..{hi}')
  if type(p.get('allow_reduce')) is not bool:error('parameters.allow_reduce','Expected boolean')
- for name in set(PARAMETERS)-set(integers)-{'allow_reduce'}:
+ if is_early and type(p.get('use_macd_confirmation')) is not bool:error('parameters.use_macd_confirmation','Expected boolean')
+ for name in parameter_names-set(integers)-{'allow_reduce','use_macd_confirmation'}:
   try:
    if type(p.get(name)) not in [str,int,float]:raise ValueError()
    v=Decimal(str(p[name]))
@@ -41,11 +56,17 @@ def validate_strategy(data):
    if name not in ['min_acceleration','exit_return_pct'] and v<=0:raise ValueError()
    if name=='exit_return_pct' and v>=0:raise ValueError()
   except (ValueError,InvalidOperation):error('parameters.'+name,'Expected bounded finite numeric threshold')
+ if is_early:
+  try:
+   if Decimal(str(p['min_acceleration']))<0:error('parameters.min_acceleration','Acceleration threshold must not be negative')
+   if Decimal(str(p['rsi_cap']))>100:error('parameters.rsi_cap','RSI must be at most 100')
+   if Decimal(str(p['heat_limit_pct']))>=Decimal(str(p['heat_high_pct'])):error('parameters.heat_high_pct','Must exceed first heat threshold')
+  except (KeyError,InvalidOperation,ValueError):pass
  if type(p.get('short_period')) is int and type(p.get('long_period')) is int and p['short_period']>=p['long_period']:error('parameters.long_period','Must exceed short period')
  def rule(r,path,depth):
   nonlocal nodes
   nodes+=1
-  if nodes>64 or depth>4:error(path,'Maximum 64 rule nodes and depth 4');return
+  if nodes>96 or depth>(6 if is_early else 4):error(path,'Rule tree is too large or deep');return
   if not isinstance(r,dict):error(path,'Expected rule object');return
   if set(r) in [{'all'},{'any'}]:
    field=next(iter(r));items=r[field]
@@ -54,14 +75,14 @@ def validate_strategy(data):
   else:
    if set(r) not in [{'metric','operator','value'},{'metric','operator','parameter'}]:error(path,'Expected metric/operator and exactly one value or parameter');return
    if not isinstance(r.get('metric'),str) or r['metric'] not in METRICS or not isinstance(r.get('operator'),str) or r['operator'] not in OPERATORS:error(path,'Unknown indicator or operator')
-   if 'parameter' in r and (not isinstance(r['parameter'],str) or r['parameter'] not in PARAMETERS):error(path,'Unknown parameter')
+   if 'parameter' in r and (not isinstance(r['parameter'],str) or r['parameter'] not in parameter_names):error(path,'Unknown parameter')
    if 'value' in r:
     if type(r['value']) is bool:return
     try:
      v=Decimal(str(r['value']))
      if not v.is_finite() or abs(v)>1000000000:raise ValueError()
     except (InvalidOperation,ValueError,TypeError):error(path,'Expected finite numeric or boolean constant')
- for key in ['entry_rules','exit_rules']:rule(data.get(key),key,1)
+ for key in (['watch_rules','entry_rules','exit_rules'] if is_early else ['entry_rules','exit_rules']):rule(data.get(key),key,1)
  return errors
 
 def matches(rule,metrics,parameters):
@@ -74,7 +95,12 @@ def matches(rule,metrics,parameters):
  else:a=Decimal(str(a));b=Decimal(str(b))
  op=rule['operator'];return {'>=':lambda:a>=b,'<=':lambda:a<=b,'>':lambda:a>b,'<':lambda:a<b,'==':lambda:a==b,'!=':lambda:a!=b}[op]()
 
-def _risk_gate(sample,metrics,risk,now,raw):
+def early_watch(strategy,metrics):
+ """Research-only early gate; absence of an input never becomes evidence."""
+ if strategy.get('schema_version')!=2:raise ValueError('Early Watch requires a version 2 strategy')
+ return matches(strategy['watch_rules'],metrics,strategy['parameters'])
+
+def _risk_gate(sample,metrics,risk,now,raw,require_macd=True):
  """Mandatory for every strategy version. Session limits only tighten globals."""
  codes=[];critical=[];price=Decimal(sample['price']) if sample['price'] is not None else None
  age=now.timestamp()-stamp(sample['event_time']).timestamp();context=sample['context'];held=context['position']=='held'
@@ -103,7 +129,7 @@ def _risk_gate(sample,metrics,risk,now,raw):
  spread=metrics.get('spread_pct')
  if spread is None:codes.append('SPREAD_UNKNOWN')
  elif Decimal(spread)>min(Decimal(risk['max_spread_pct']),Decimal(GLOBAL_RISK['max_spread_pct'])):codes.append('SPREAD_TOO_WIDE')
- required=['relative_volume','volatility_pct','return_3_pct','acceleration_pct_s2','macd_histogram']
+ required=['relative_volume','volatility_pct','acceleration_pct_s2']+(['return_3_pct','macd_histogram'] if require_macd else ['return_window_pct'])
  if any(metrics.get(k) is None for k in required):codes.append('FEATURES_INSUFFICIENT')
  qty=risk['proposed_quantity'];fx=context['fx_to_dkk'];fees=context['fees_dkk'];equity=context['portfolio_equity_dkk'];exposure=context['exposure_dkk'];stop=risk['stop_price']
  if any(v is None for v in [qty,fx,fees,equity,exposure,stop]):codes.append('RISK_INPUTS_UNKNOWN')
@@ -117,19 +143,19 @@ def _risk_gate(sample,metrics,risk,now,raw):
    if (current+notional)/capital*100>min(Decimal(risk['max_position_fraction_pct']),Decimal(GLOBAL_RISK['max_position_fraction_pct'])):codes.append('EXPOSURE_LIMIT')
  return ('WAIT' if codes else 'BUY'),codes,critical
 
-def risk_gate(sample,metrics,risk,now,raw):
+def risk_gate(sample,metrics,risk,now,raw,require_macd=True):
  with localcontext() as context:
   context.prec=80
-  return _risk_gate(sample,metrics,risk,now,raw)
+  return _risk_gate(sample,metrics,risk,now,raw,require_macd)
 
 def calculate(sample,metrics,strategy,risk,state,now,killed=False,new_market_event=True):
  p=strategy['parameters'];held=sample['context']['position']=='held';raw='WAIT';reasons=[]
  if metrics.get('sample_count',0)<p['min_samples']:raw='NO_DATA';reasons.append('WARMUP')
  elif held and matches(strategy['exit_rules'],metrics,p):raw='REDUCE' if p['allow_reduce'] else 'SELL';reasons.append('EXIT_RULES')
- elif not held and matches(strategy['entry_rules'],metrics,p):raw='BUY';reasons.append('ENTRY_RULES')
+ elif not held and (strategy.get('schema_version')!=2 or matches(strategy['watch_rules'],metrics,p) and (not p['use_macd_confirmation'] or metrics.get('macd_histogram') is not None and Decimal(str(metrics['macd_histogram']))>0)) and matches(strategy['entry_rules'],metrics,p):raw='BUY';reasons.append('ENTRY_RULES')
  if held and metrics.get('distance_high_pct') is not None and Decimal(metrics['distance_high_pct'])<=-Decimal(str(p['trailing_pct'])):raw='SELL';reasons.append('TRAILING_EXIT')
  check='BUY' if raw=='WAIT' and not held else raw
- signal,risk_codes,critical=risk_gate(sample,metrics,risk,now,check)
+ signal,risk_codes,critical=risk_gate(sample,metrics,risk,now,check,require_macd=strategy.get('schema_version')!=2)
  if raw=='WAIT' and signal=='BUY':signal='WAIT'
  if killed:signal='PAUSE';risk_codes=['KILL_SWITCH'];critical=[]
  reasons+=risk_codes+critical;at=now.timestamp();previous=state.get('signal','NO_DATA');newstate=dict(state)
@@ -143,7 +169,7 @@ def calculate(sample,metrics,strategy,risk,state,now,killed=False,new_market_eve
  else:newstate.update(pending=None,confirmations=0,pending_since=None)
  # Hysteresis only on valid, risk-approved data. Never retain BUY through a
  # stale quote, risk rejection, changed position or trading halt.
- if signal=='WAIT' and previous=='BUY' and not held and not risk_codes and metrics.get('return_3_pct') is not None and Decimal(metrics['return_3_pct'])>=Decimal(str(p['release_momentum_pct'])) and at-state.get('last_signal_at',0)<p['minimum_signal_s']:signal='BUY';reasons.append('HYSTERESIS_HOLD')
+ if signal=='WAIT' and previous=='BUY' and not held and not risk_codes and (strategy.get('schema_version')!=2 or matches(strategy['watch_rules'],metrics,p) and matches(strategy['entry_rules'],metrics,p) and (not p['use_macd_confirmation'] or metrics.get('macd_histogram') is not None and Decimal(str(metrics['macd_histogram']))>0)) and metrics.get('return_3_pct') is not None and Decimal(metrics['return_3_pct'])>=Decimal(str(p['release_momentum_pct'])) and at-state.get('last_signal_at',0)<p['minimum_signal_s']:signal='BUY';reasons.append('HYSTERESIS_HOLD')
  if signal in ['BUY','SELL','REDUCE'] and signal!=previous and not critical and at-state.get('hour_started',at)<3600 and state.get('hour_signals',0)>=20:signal='WAIT';reasons.append('SIGNAL_RATE_LIMIT')
  if at-state.get('hour_started',at)>=3600 or 'hour_started' not in state:newstate.update(hour_started=at,hour_signals=0)
  if signal!=previous:

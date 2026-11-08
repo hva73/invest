@@ -112,6 +112,10 @@ def features(samples,parameters):
   for n in [1,3,5,10]:f['return_'+str(n)+'_pct']=(p/prices[-n-1]-1)*100 if len(prices)>n else None
   from report_validation import stamp
   times=[stamp(r['event_time']).timestamp() for r in rows]
+  window_seconds=int(parameters.get('momentum_window_minutes',3))*60
+  previous_window=[i for i in range(len(times)-1) if abs((times[-1]-times[i])-window_seconds)<=5]
+  best_window=min(previous_window,key=lambda i:abs((times[-1]-times[i])-window_seconds)) if previous_window else None
+  f['return_window_pct']=(p/prices[best_window]-1)*100 if best_window is not None else None
   speeds=[r/Decimal(str(b-a)) for r,a,b in zip(returns,times,times[1:]) if b>a]
   f['velocity_pct_s']=speeds[-1] if speeds else None;f['acceleration_pct_s2']=(speeds[-1]-speeds[-2])/Decimal(str(times[-1]-times[-2])) if len(speeds)>=2 else None
   short=int(parameters['short_period']);long=int(parameters['long_period'])

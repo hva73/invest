@@ -1,0 +1,20 @@
+{
+  "dataset": "ESCAPE Early Catalyst historical test fixtures",
+  "version": "1.0",
+  "date": "2026-11-06",
+  "history_window_utc": {"from": "2026-11-05", "to_exclusive": "2026-11-07"},
+  "candle_interval": "5m",
+  "data_source": "EODHD get_intraday_historical_data",
+  "purpose": "Historical signal replay; no future-looking features and no assertion of executable bid/ask prices",
+  "pluto_gate": "Pluto search_assets(assetType=CS) results checked 2026-11-08; get_asset and actual tradability at historical time must be rechecked by Codex",
+  "cases": [
+    {"ticker":"GOGO.US","name":"Gogo Inc.","catalyst":"news / license / refinancing / earnings","pluto_asset_id":"de1ce433-8a30-4e7b-91a7-8a36db09299d","pluto_search_match":true,"pluto_collection_eligible":true,"friday_candles":79,"first_friday_utc":"2026-11-06 14:30:00","first_friday_open":2.24,"first_friday_close":2.63,"last_friday_close":3.884999},
+    {"ticker":"STAK.US","name":"STAK Inc.","catalyst":"company announcement / news breakout","pluto_asset_id":"61dfd6c9-fb2b-45e8-9731-f0a395714a9a","pluto_search_match":true,"pluto_collection_eligible":false,"pluto_note":"Whole shares only; not eligible for cash-amount collection orders","friday_candles":79,"first_friday_utc":"2026-11-06 14:30:00","first_friday_open":2.049999,"first_friday_close":1.965,"last_friday_close":3.259999},
+    {"ticker":"KRMN.US","name":"Karman Holdings Inc.","catalyst":"earnings / guidance","pluto_asset_id":"115dc48a-6199-477e-aee7-88c8c2eb16c8","pluto_search_match":true,"pluto_collection_eligible":true,"friday_candles":79,"first_friday_utc":"2026-11-06 14:30:00","first_friday_open":35.900001,"first_friday_close":34.365001,"last_friday_close":45.61},
+    {"ticker":"CIIT.US","name":"Tianci International Inc.","catalyst":"earnings / volume breakout","pluto_asset_id":"d755f1e6-adeb-4656-b9d2-77f93384a657","pluto_search_match":true,"pluto_collection_eligible":false,"pluto_note":"Whole shares only; not eligible for cash-amount collection orders","friday_candles":79,"first_friday_utc":"2026-11-06 14:30:00","first_friday_open":2.470099,"first_friday_close":2.4416,"last_friday_close":2.4},
+    {"ticker":"AF.PA","name":"Air France-KLM","catalyst":"earnings continuation / analyst revision","pluto_asset_id":null,"pluto_search_match":false,"pluto_collection_eligible":null,"pluto_note":"Not found by exact company-name or AF search; NOT verified tradable on Pluto","friday_candles":103,"first_friday_utc":"2026-11-06 08:00:00","first_friday_open":12.845,"first_friday_close":12.854999,"last_friday_close":13.529999},
+    {"ticker":"AELIS.PA","name":"Aelis Farma","catalyst":"biotech research news","pluto_asset_id":null,"pluto_search_match":false,"pluto_collection_eligible":null,"pluto_note":"No Pluto match for Aelis; NOT verified tradable on Pluto","friday_candles":103,"valid_friday_close_candles":38,"first_friday_utc":"2026-11-06 08:00:00","first_friday_open":0.779999,"first_friday_close":0.763,"last_friday_close":1.019999}
+  ],
+  "news_timestamps": "Not verified in this dataset; Codex must obtain publication-time evidence before running catalyst-timing backtests",
+  "important": "5-minute OHLCV can identify historical price/volume triggers but cannot prove news detection timing, real bid/ask, fill price, premarket signal, or Pluto tradability on 2026-11-06. Some candles have null volume/price."
+}
