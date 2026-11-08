@@ -51,6 +51,12 @@ try:
   page.locator('.dash-attention [data-trade-test-buy]').click();dialog=page.locator('#quick-trade-dialog');expect(dialog.locator('h2')).to_contain_text('Sælg')
   expect(dialog.locator('[name=size]')).to_have_value('');dialog.locator('[name=size]').fill('10');dialog.locator('button[type=submit]').click();expect(dialog).to_contain_text('Åbn Pluto')
   assert calls[-2][1]['report_id']=='@manual-sell' and calls[-2][1]['size_mode']=='percent' and calls[-2][1]['size']=='10'
+  dialog.locator('[data-quick-close]').click()
+  page.route('**/api/trade/estimate',lambda route:route.fulfill(json={'duplicate':True,'proposal':{'status':'sent'}}))
+  page.evaluate("() => window.TradeUI.openQuick({report_id:'@manual-buy',ticker:'TEST',asset_id:'asset-test',signal:'BUY'})")
+  dialog=page.locator('#quick-trade-dialog');dialog.locator('[name=size]').fill('20');sent_count=len([x for x in calls if x[0]=='send'])
+  dialog.locator('button[type=submit]').click();expect(dialog).to_contain_text('Der er ikke sendt et nyt forslag')
+  assert len([x for x in calls if x[0]=='send'])==sent_count
   assert not errors,errors
   browser.close()
  print('PASS: synthetic buy and percentage sell review and send flow on mobile')

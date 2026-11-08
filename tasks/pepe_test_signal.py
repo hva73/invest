@@ -18,4 +18,4 @@ if __name__=='__main__':
  parser=argparse.ArgumentParser(description='Vis et tydeligt PEPE-købstestsignal i én time. Opretter ingen ordre.')
  parser.add_argument('--user',default='owner');parser.add_argument('--portfolio',default='Heine Vindum Andersen');parser.add_argument('--db',default='var/escape.db');parser.add_argument('--side',choices=['BUY','SELL'],default='BUY')
  args=parser.parse_args();enable(args.db,args.user,args.portfolio,side=args.side)
- print('PEPE-testsignal aktiveret i én time. Ingen handel eller Pluto-kald er foretaget. Opdatér forsiden.')
+ print('PEPE-testsignal: '+('SÆLG' if args.side=='SELL' else 'KØB')+' · aktivt i én time. Ingen handel eller Pluto-kald er foretaget. Genindlæs forsiden.')
