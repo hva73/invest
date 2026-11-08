@@ -1,7 +1,7 @@
 let csrf='',state=null,view='overview',selectedPortfolio=null,portfolioSection=null,serverClockOffset=0,userRefreshBusy=false,sessionEpoch=0,pendingAutoRender=false,nextAutomaticAt=0,currentRefreshPromise=null,currentRefreshAll=false;
 let expandedUi=new Set(),touchedUi=new Set(),expandedUiOwner=null;
 const $=s=>document.querySelector(s),escape=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-async function api(path,data,extraHeaders={}){const r=await fetch('/api/'+path,{method:data?'POST':'GET',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,...extraHeaders},body:data?JSON.stringify(data):undefined});const b=await r.json();if(!r.ok){const error=Error(b.error||'Serverfejl');error.status=r.status;error.details=b;throw error}return b}
+async function api(path,data,extraHeaders={}){const post=Boolean(data),resource=path.split('?')[0];let r;try{r=await fetch('/api/'+path,{method:post?'POST':'GET',headers:post?{'Content-Type':'application/json','X-CSRF-Token':csrf,...extraHeaders}:extraHeaders,body:post?JSON.stringify(data):undefined})}catch(error){throw Error('Kunne ikke hente '+resource+': '+error.message)}let b;try{b=await r.json()}catch{throw Error('Serverens svar fra '+resource+' kunne ikke læses (HTTP '+r.status+').')}if(!r.ok){const error=Error(b.error||'Serverfejl');error.status=r.status;error.details=b;throw error}return b}
 function notice(t,kind='info'){$('#notice').textContent=t;$('#notice').dataset.kind=kind}
 const displayDate=v=>String(v??'—').replace(/^(\d{4})-(\d{2})-(\d{2})(?=$|[ T])/, '$3.$2.$1');
 const empty=(title,text)=>`<div class="empty"><div class="symbol">⌁</div><h3>${title}</h3><p>${text}</p></div>`;
