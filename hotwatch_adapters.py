@@ -205,8 +205,11 @@ class PlutoAdapter:
   observed=[p['observed'] for p in rows]+([datetime.fromtimestamp(tradability_at,timezone.utc).isoformat()] if tradability_at is not None else [])
   result.update(status='verified',as_of=min(observed,key=stamp),position='held' if quantity>0 else 'none',quantity=format(quantity,'f'),fx_to_dkk='1' if currency=='DKK' else None)
   if len(found)==1 and found[0].get('average_entry',{}).get('currency')==currency:result['cost_price']=found[0]['average_entry']['amount']
-  values=[p.get('value',{}).get('value') for p in rows]
-  if not overlap and all(v and v['amount'] is not None and v['currency']=='DKK' for v in values):result['portfolio_equity_dkk']=format(sum(Decimal(v['amount']) for v in values),'f')
+  # A Pluto main portfolio already includes its collections. Only exclude a
+  # collection when its parent is present; standalone scopes remain included.
+  parent_ids={p['external_id'] for p in portfolios if p.get('kind')=='portfolio'}
+  values=[snapshot.get('value',{}).get('value') for p,snapshot in zip(portfolios,rows) if not (p.get('kind')=='collection' and p.get('parent_external_id') in parent_ids)]
+  if values and all(v and v['amount'] is not None and v['currency']=='DKK' for v in values):result['portfolio_equity_dkk']=format(sum(Decimal(v['amount']) for v in values),'f')
   exposures=[p.get('value_in_portfolio_currency') for p in found]
   if not found:result['exposure_dkk']='0'
   elif all(v and v['amount'] is not None and v['currency']=='DKK' for v in exposures):result['exposure_dkk']=format(sum(Decimal(v['amount']) for v in exposures),'f')

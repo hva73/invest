@@ -911,7 +911,7 @@ class HotWatch(unittest.TestCase):
   with patch.object(adapter,'tradability',return_value=('unknown',None)),patch.object(adapter,'inactive_orders',return_value=[]):
    result=adapter.context(self.req,'USD')
    self.assertEqual((result['status'],result['position'],result['quantity']),('verified','none','0'))
-   self.assertIsNone(result['portfolio_equity_dkk'])
+   self.assertEqual(result['portfolio_equity_dkk'],'1000')
    with patch.object(adapter,'tradability',side_effect=AssertionError('exit-only monitoring needs no buy permission')):
     exit_context=adapter.context(dict(self.req,watch_mode='exit'),'USD')
    self.assertEqual((exit_context['status'],exit_context['tradability']),('verified','unknown'))

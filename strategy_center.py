@@ -322,5 +322,8 @@ def early_inputs(c,row,request,sample,metrics,now):
     for key,label in [('ordinary_share','Pluto har ikke bekræftet almindelig aktie'),('pluto_tradable','Pluto-handelsbarhed er ikke bekræftet'),('catalyst_verified','Nyhed er ikke uafhængigt verificeret'),('reference_gain_pct','Verificeret ordinær lukkekurs mangler'),('news_reaction_pct','Verificeret kurs før nyheden mangler'),('relative_volume','Sammenlignelig relativ volumen mangler'),('return_window_pct','Kursdata for tidsvinduet mangler'),('spread_pct','Frisk bid/ask mangler'),('rsi','RSI-grundlag mangler')]:
         if metrics.get(key) is None:missing.append(label)
     risk=request.get('risk') or {}
-    if any(context.get(k) is None for k in ('fx_to_dkk','fees_dkk','portfolio_equity_dkk','exposure_dkk')) or risk.get('proposed_quantity') is None or risk.get('stop_price') is None:missing.append('Købsbeløb, stop eller verificeret valuta-, gebyr- og risikogrundlag mangler')
+    for key,label in [('proposed_quantity','Handelsstørrelse til risikokontrol mangler'),('stop_price','Stopkurs til risikokontrol mangler')]:
+        if risk.get(key) is None:missing.append(label)
+    for key,label in [('fx_to_dkk','Bekræftet valutakurs til kroner mangler'),('fees_dkk','Bekræftede handelsomkostninger mangler'),('portfolio_equity_dkk','Bekræftet depotværdi i kroner mangler'),('exposure_dkk','Bekræftet eksponering i kroner mangler')]:
+        if context.get(key) is None:missing.append(label)
     return {'mode':'live_pilot','watch_state':'BLOCKED' if ordinary is False or tradable is False else 'WAITING_FOR_EVIDENCE','missing':missing,'reported_evidence':reported,'note':'En eventuel nyhedskontrol er oplyst af rapportens afsender og er ikke uafhængigt verificeret af ESCAPE. Kurs, Pluto og risikokontrol kontrolleres særskilt.'}
