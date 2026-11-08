@@ -11,6 +11,11 @@ class TradeError(ValueError):pass
 def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS broker_proposals(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),fingerprint TEXT NOT NULL,report_id TEXT NOT NULL,candidate_id TEXT NOT NULL,kind TEXT NOT NULL,portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),payload TEXT NOT NULL,status TEXT NOT NULL,created REAL NOT NULL,estimated REAL,review_token TEXT,estimate TEXT,asset TEXT,intent_id TEXT,response TEXT,error TEXT,UNIQUE(user_id,fingerprint))')
     if 'sell_basis' not in {r[1] for r in c.execute('PRAGMA table_info(broker_proposals)')}:c.execute('ALTER TABLE broker_proposals ADD COLUMN sell_basis TEXT')
+    c.execute('CREATE TABLE IF NOT EXISTS manual_test_signals(user_id INTEGER PRIMARY KEY REFERENCES users(id),portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),ticker TEXT NOT NULL,amount TEXT NOT NULL,expires REAL NOT NULL)')
+
+def active_test_signal(c,user_id,now=None):
+    row=c.execute("SELECT t.portfolio_id,t.ticker,t.amount,t.expires FROM manual_test_signals t JOIN portfolios p ON p.id=t.portfolio_id AND p.user_id=t.user_id WHERE t.user_id=? AND t.expires>? AND p.active=1 AND p.source='pluto' AND p.kind='portfolio'",(user_id,time.time() if now is None else now)).fetchone()
+    return dict(row) if row else None
 
 def structural(v):
     if isinstance(v,dict):return {k:structural(x) for k,x in v.items() if k not in ['description','title','$schema','default','examples']}
@@ -82,6 +87,9 @@ def candidate(connect,user_id,report_id,candidate_id):
     return {**record['candidate'],'signal':signal}
 
 def signal_source(connect,user_id,report_id,candidate_id):
+    if report_id=='@manual-buy':
+        if not isinstance(candidate_id,str) or not 1<=len(candidate_id)<=200 or any(ord(x)<33 for x in candidate_id):raise TradeError('Vælg et gyldigt Pluto-aktiv.')
+        return {'signal':'KØB','asset_id':candidate_id}
     if report_id!='@hotwatch':return candidate(connect,user_id,report_id,candidate_id)
     import hotwatch_engine
     try:session=hotwatch_engine.item(connect,user_id,candidate_id,False)['session']
@@ -251,6 +259,9 @@ def direct_sell_basis(connect,user_id,pid,asset_id,percentage,factory=None):
 
 def estimate(connect,user_id,data,factory=None):
     basis=None
+    if data.get('report_id')=='@manual-buy':
+        if data.get('kind')!='direct' or data.get('size_mode')!='amount':raise TradeError('Et manuelt køb skal være et direkte køb for et beløb.')
+        data={**data,'candidate_id':data.get('asset_id')}
     if data.get('kind')=='direct' and data.get('size_mode')=='percent':
         c=signal_source(connect,user_id,str(data.get('report_id','')),str(data.get('candidate_id','')))
         if c['signal']!='SÆLG':raise TradeError('Procent af en beholdning kan kun bruges til salg.')

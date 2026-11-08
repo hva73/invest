@@ -127,6 +127,28 @@ class Trading(unittest.TestCase):
   with patch('trade_service.candidate',return_value={'signal':'SÆLG'}):
    with self.assertRaisesRegex(trade.TradeError,'retning'):self.send(proposal)
   self.assertFalse(self.writes())
+ def test_manual_buy_requires_asset_amount_review_and_can_only_buy(self):
+  request=dict(self.request,report_id='@manual-buy',candidate_id='',size_mode='amount',size='20',order_type='MARKET')
+  proposal=self.estimate(request)
+  self.assertEqual(proposal['candidate_id'],'asset-test')
+  self.assertEqual(proposal['payload']['orders'][0]['side'],'BUY')
+  self.assertEqual(proposal['payload']['orders'][0]['amount'],'20')
+  self.assertFalse(self.writes())
+  with self.assertRaises(trade.TradeError):trade.send(app.connect,1,{'id':proposal['id'],'confirm':False,'review_token':proposal['review_token']},self.factory)
+  self.assertFalse(self.writes())
+  self.assertEqual(self.send(proposal)['status'],'sent')
+  self.assertEqual(len(self.writes()),1)
+  with self.assertRaises(trade.TradeError):self.estimate(dict(request,size_mode='shares'))
+ def test_test_signal_is_scoped_temporary_and_does_not_trade(self):
+  from tasks.pepe_test_signal import enable
+  enable(app.DB,'owner','Root',now=1000)
+  with app.connect() as c:
+   signal=trade.active_test_signal(c,1,now=1001)
+   self.assertEqual((signal['ticker'],signal['amount'],signal['portfolio_id']),('PEPE','20',self.root))
+   self.assertIsNone(trade.active_test_signal(c,1,now=4601))
+   self.assertIsNone(trade.active_test_signal(c,2,now=1001))
+  with self.assertRaises(ValueError):enable(app.DB,'owner','Unknown',now=1000)
+  self.assertFalse(self.writes());self.assertEqual(trade.history(app.connect,1),[])
  def test_preview_provider_error_and_credentials(self):
   original=self.factory
   class Failed(original):

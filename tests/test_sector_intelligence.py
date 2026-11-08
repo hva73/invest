@@ -239,6 +239,18 @@ class SectorIntelligenceTest(unittest.TestCase):
   fetch.assert_called_once_with('EXH8.XETRA',name)
   with self.connect() as c:row=c.execute("SELECT * FROM sector_benchmark_holdings WHERE symbol='EXH8.XETRA'").fetchone()
   self.assertEqual(row['status'],'OK');self.assertEqual(json.loads(row['payload'])['source'],'iShares / BlackRock')
+ def test_missing_ishares_module_does_not_leave_request_pending(self):
+  import builtins
+  now=time.time()
+  with self.connect() as c:c.execute('INSERT INTO sector_benchmarks(symbol,region,sector,status,updated,next_attempt) VALUES(?,?,?,?,?,?)',('IXJ.US','Globalt','Sundhed','VERIFIED',now,now+1000))
+  sector.request_benchmark_holdings(self.connect,1,'IXJ.US')
+  original=builtins.__import__
+  def missing(name,*args,**kwargs):
+   if name=='ishares_holdings':raise ModuleNotFoundError('synthetic missing module')
+   return original(name,*args,**kwargs)
+  with patch('builtins.__import__',side_effect=missing):sector.refresh_tick(self.connect)
+  with self.connect() as c:row=c.execute("SELECT status FROM sector_benchmark_holdings WHERE symbol='IXJ.US'").fetchone()
+  self.assertEqual(row['status'],'ISHARES_MODULE_MISSING')
  def test_global_benchmark_uses_provider_search_before_fundamentals(self):
   class Client:
    def _http(self,base,path,params):

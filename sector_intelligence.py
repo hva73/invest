@@ -313,13 +313,21 @@ def refresh_tick(connect):
  with connect() as c:
   issuer=c.execute("SELECT h.*,b.name AS benchmark_name FROM sector_benchmark_holdings h LEFT JOIN sector_benchmarks b ON b.symbol=h.symbol WHERE h.status IN ('TRY_ISSUER','TRY_ISHARES','TRY_ISHARES_EU') AND h.next_attempt<=? ORDER BY h.updated LIMIT 1",(now,)).fetchone()
  if issuer:
-  import ssga_holdings,ishares_holdings
+  is_ishares=issuer['status'] in ('TRY_ISHARES','TRY_ISHARES_EU')
   try:
-   is_ishares=issuer['status'] in ('TRY_ISHARES','TRY_ISHARES_EU');result=ishares_holdings.fetch_europe(issuer['symbol'],issuer['benchmark_name']) if issuer['status']=='TRY_ISHARES_EU' else (ishares_holdings if is_ishares else ssga_holdings).fetch(issuer['symbol']);rows=result['rows']
+   if is_ishares:
+    import ishares_holdings
+    result=ishares_holdings.fetch_europe(issuer['symbol'],issuer['benchmark_name']) if issuer['status']=='TRY_ISHARES_EU' else ishares_holdings.fetch(issuer['symbol'])
+   else:
+    import ssga_holdings
+    result=ssga_holdings.fetch(issuer['symbol'])
+   rows=result['rows']
    payload=json.dumps({'rows':rows[:50],'total_reported':len(rows),'source':'iShares / BlackRock' if is_ishares else 'State Street / SPDR','as_of':result['as_of']})
    status='OK';retry=now+86400
-  except (ssga_holdings.HoldingsUnavailable,ishares_holdings.HoldingsUnavailable) as error:
-   payload=None;status=str(error);retry=now+3600
+  except (ImportError,AttributeError):
+   payload=None;status='ISHARES_MODULE_MISSING' if is_ishares else 'ISSUER_MODULE_MISSING';retry=now+3600
+  except ValueError as error:
+   value=str(error);payload=None;status=value if re.fullmatch(r'(?:ISHARES|ISSUER)_[A-Z0-9_]+',value) else 'ISSUER_INVALID_RESPONSE';retry=now+3600
   with connect() as c:
    c.execute('INSERT OR REPLACE INTO sector_benchmark_holdings VALUES(?,?,?,?,?)',(issuer['symbol'],payload,status,now,retry))
    if status=='OK':_queue_holding_prices(c,rows,20,now)

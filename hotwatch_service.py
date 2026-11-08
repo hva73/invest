@@ -753,7 +753,7 @@ class Runner:
     try:
      import sector_intelligence
      sector_intelligence.refresh_tick(self.connect)
-    except Exception:logging.getLogger('escape.hotwatch').error('sector_refresh_error')
+    except Exception as error:logging.getLogger('escape.hotwatch').error('sector_refresh_error: %s',type(error).__name__)
     self.stop.wait(5)
   sector_thread=threading.Thread(target=sector_loop,name='sector-data',daemon=True);sector_thread.start()
   def discovery_loop():
