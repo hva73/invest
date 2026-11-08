@@ -99,15 +99,15 @@ function refreshCurrent(options={}){
 async function performRefresh({automatic=false,all=false}={}){
  if(userRefreshBusy||!state)return;
  if(document.querySelector('dialog[open]')||document.activeElement?.matches('input,textarea,select')){notice('Afslut feltet eller luk dialogen før opdatering.');return}
- const epoch=sessionEpoch,target=view,pid=selectedPortfolio,status=$('#refresh-status'),button=$('#refresh-current');userRefreshBusy=true;button.disabled=true;status.dataset.kind='loading';status.textContent='Opdaterer…';let failures=0,done=0,plutoMessage='',plutoAttempted=false,paused=false;
+ const epoch=sessionEpoch,target=view,pid=selectedPortfolio,status=$('#refresh-status'),button=$('#refresh-current');userRefreshBusy=true;button.disabled=true;status.dataset.kind='loading';status.textContent='Opdaterer…';let failures=0,done=0,plutoMessage='',plutoAttempted=false,paused=false;const issueDetails=[];
  try{
   if((all||automatic||['overview','portfolios','portfolio-detail'].includes(target))&&state.connection.has_tokens){
    plutoAttempted=true;
    // Refresh existing account data, including the list, without opening new consent.
-   if(all||automatic||target!=='portfolio-detail'){try{await api('portfolios/sync',{automatic})}catch(error){if(error.status===409||error.status===401)throw error;failures++;plutoMessage=error.message}}
+   if(all||automatic||target!=='portfolio-detail'){try{await api('portfolios/sync',{automatic})}catch(error){if(error.status===409||error.status===401)throw error;failures++;issueDetails.push('Kontoliste: '+error.message)}}
    const latest=await api('state');if(epoch!==sessionEpoch||!state)return;
    const items=latest.portfolios.filter(p=>p.source==='pluto'&&p.active&&(all||automatic||target!=='portfolio-detail'||p.id===pid));
-   for(const p of items){if(epoch!==sessionEpoch||!state)break;if(automatic&&document.hidden){paused=true;break}status.textContent=(automatic?'Opdaterer automatisk · ':'Henter Pluto · ')+p.name+'…';try{const r=await api('portfolios/data',{id:p.id,automatic});if(!r.cached)done++;if(r.complete===false)failures++}catch(error){if(error.status===409||error.status===401)throw error;failures++;plutoMessage=error.message}}
+   for(const p of items){if(epoch!==sessionEpoch||!state)break;if(automatic&&document.hidden){paused=true;break}status.textContent=(automatic?'Opdaterer automatisk · ':'Henter Pluto · ')+p.name+'…';try{const r=await api('portfolios/data',{id:p.id,automatic});if(!r.cached)done++;if(r.complete===false){failures++;issueDetails.push(p.name+': '+(r.errors?.length?r.errors.join(' · '):'Ordre- eller beholdningsoversigten er ikke bekræftet fuldstændig'))}}catch(error){if(error.status===409||error.status===401)throw error;failures++;issueDetails.push(p.name+': '+error.message)}}
   }
   if(epoch!==sessionEpoch||!state)return;
   await refresh({background:automatic});
@@ -115,8 +115,9 @@ async function performRefresh({automatic=false,all=false}={}){
   if(!automatic&&['inbox','reports','report-archive'].includes(view))await window.ReportUI.load();
   if(!automatic)await window.MarketUI.refreshVisible();
   if(epoch!==sessionEpoch||!state)return;
-  if(state.report_desk?.unavailable)failures++;
-  if(automatic&&state.portfolios.filter(p=>p.source==='pluto'&&p.active).some(p=>{const s=state.portfolio_snapshots[String(p.id)];return s&&(s.last_error||s.data.errors.length||s.data.order_errors?.length)}))failures++;
+  if(state.report_desk?.unavailable){failures++;issueDetails.push('Analyserapporter kunne ikke indlæses')}
+  if(automatic)for(const p of state.portfolios.filter(p=>p.source==='pluto'&&p.active)){const snapshot=state.portfolio_snapshots[String(p.id)],issues=[snapshot?.last_error,...(snapshot?.data?.errors||[]),...(snapshot?.data?.order_errors||[])].filter(Boolean);if(issues.length&&!issueDetails.some(x=>x.startsWith(p.name+': '))){failures++;issueDetails.push(p.name+': '+issues.join(' · '))}}
+  plutoMessage=[...new Set(issueDetails)].slice(0,3).join(' · ');
   status.dataset.kind=failures?'warning':paused?'info':'success';status.textContent=paused?'Automatisk opdatering er sat på pause, mens appen er skjult.':failures?'Opdatering med fejl eller delvise data — kontrollér datamærker og Pluto-forbindelsen. '+plutoMessage:done?(automatic?'Pluto opdateret automatisk kl. ':'Pluto hentet kl. ')+new Date().toLocaleTimeString('da-DK',{timeZone:'Europe/Copenhagen'})+' · kildetider vises ved tallene.':automatic?'Gemte Pluto-data genindlæst. Automatisk læsning højst hvert femte minut; se kildetider ved tallene.':'Visning og rapporter genindlæst. Pluto-kontodata er ikke hentet.';
  }catch(error){if(epoch!==sessionEpoch||!state)return;status.dataset.kind='error';status.textContent='Opdatering mislykkedes — tidligere data kan være forældede. '+error.message;try{await refresh({background:automatic})}catch{}}
  finally{if(plutoAttempted&&epoch===sessionEpoch)nextAutomaticAt=paused?0:Date.now()+300000;userRefreshBusy=false;button.disabled=false}

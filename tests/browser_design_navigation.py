@@ -68,6 +68,12 @@ try:
   assert page.locator('.engine-list-row').count()==2
   page.locator('[data-engine-own]').click()
   assert page.locator('.engine-list-row').count()==1
+  page.route('**/api/portfolios/sync',lambda route:route.fulfill(json={'ok':True}))
+  page.route('**/api/portfolios/data',lambda route:route.fulfill(json={'cached':False,'complete':False,'errors':['positions: Beholdningslisten er ufuldstændig']}))
+  page.evaluate('state.connection.has_tokens=true')
+  page.locator('#refresh-current').click()
+  page.locator('#refresh-status[data-kind="warning"]').wait_for()
+  assert 'positions: Beholdningslisten er ufuldstændig' in page.locator('#refresh-status').inner_text()
   assert not errors, errors
   print('NAVIGATION',','.join(targets));print('JAVASCRIPT',errors)
   browser.close()
