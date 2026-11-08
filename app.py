@@ -49,6 +49,7 @@ def init():
         c.execute('CREATE TABLE IF NOT EXISTS connection_checks(user_id INTEGER PRIMARY KEY REFERENCES users(id), checked REAL NOT NULL)')
         import user_profile
         user_profile.init(c)
+        c.execute('CREATE TABLE IF NOT EXISTS admin_actions(id INTEGER PRIMARY KEY, admin_id INTEGER NOT NULL REFERENCES users(id), target_id INTEGER NOT NULL REFERENCES users(id), action TEXT NOT NULL, created TEXT NOT NULL)')
         import report_ingest
         report_ingest.init(c)
         import hotwatch_engine
@@ -208,6 +209,24 @@ class Handler(BaseHTTPRequestHandler):
             s=self.session()
             if not s: return self.send(401,{'error':'Log ind først'})
             user_id=s['user_id']
+            if self.path=='/api/admin/users':
+                if s['role']!='admin':return self.send(403,{'error':'Kun administratoren kan se brugere'})
+                import user_profile
+                with connect() as c:
+                    rows=c.execute('SELECT id,username,role,active FROM users ORDER BY username COLLATE NOCASE').fetchall()
+                    users=[{**dict(row),'profile':user_profile.read(c,row['id'])} for row in rows]
+                return self.send(200,{'users':users})
+            if self.path=='/api/profile/postcode':
+                import re,urllib.request
+                q=parse_qs(request.query);code=q.get('code',[])
+                if set(q)!={'code'} or len(code)!=1 or not re.fullmatch(r'[0-9]{4}',code[0]):return self.send(400,{'error':'Indtast et dansk postnummer med fire cifre.'})
+                try:
+                    req=urllib.request.Request('https://api.dataforsyningen.dk/postnumre/'+code[0],headers={'Accept':'application/json','User-Agent':'ESCAPE/1.0'})
+                    with urllib.request.urlopen(req,timeout=4) as response:result=json.loads(response.read(65536))
+                    city=result.get('navn') if isinstance(result,dict) else None
+                    if not isinstance(city,str) or not city.strip() or len(city)>120:raise ValueError('Ugyldigt svar')
+                except Exception:return self.send(503,{'error':'Postnummeret kunne ikke slås op. Skriv byen selv.'})
+                return self.send(200,{'city':city})
             if self.path=='/api/reports/candidate-lifecycle':
                 import candidate_lifecycle
                 q=parse_qs(request.query);mode=q.get('is_test',['false'])
@@ -343,6 +362,24 @@ class Handler(BaseHTTPRequestHandler):
             if not s:return self.send(401,{'error':'Log ind først'})
             if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),s['csrf']):return self.send(403,{'error':'Ugyldigt sikkerhedstoken'})
             user_id=s['user_id']
+            if self.path=='/api/admin/reset-password':
+                if s['role']!='admin':return self.send(403,{'error':'Kun administratoren kan ændre brugerens adgangskode'})
+                if self.throttled():return self.send(429,{'error':'Prøv igen om fem minutter'})
+                target=data.get('user_id');password=data.get('new_password');current=data.get('admin_password')
+                if type(target) is not int or not isinstance(password,str) or not 14<=len(password)<=1024 or not isinstance(current,str) or len(current)>1024:
+                    return self.send(400,{'error':'Udfyld din adgangskode og en ny adgangskode på 14–1024 tegn.'})
+                with connect() as c:
+                    c.execute('BEGIN IMMEDIATE')
+                    actor=c.execute("SELECT salt,hash FROM users WHERE id=? AND role='admin' AND active=1",(user_id,)).fetchone()
+                    if not actor or not hmac.compare_digest(password_hash(current,actor['salt']),actor['hash']):
+                        c.execute('INSERT INTO login_failures VALUES(?,?)',(self.client_address[0],time.time()));return self.send(403,{'error':'Din administratoradgangskode er forkert.'})
+                    row=c.execute("SELECT id FROM users WHERE id=? AND role='member' AND active=1",(target,)).fetchone()
+                    if not row:return self.send(404,{'error':'Aktiv bruger blev ikke fundet.'})
+                    salt=secrets.token_hex(16);digest=password_hash(password,salt)
+                    c.execute('UPDATE users SET salt=?,hash=? WHERE id=?',(salt,digest,target))
+                    c.execute('DELETE FROM sessions WHERE user_id=?',(target,))
+                    c.execute("INSERT INTO admin_actions(admin_id,target_id,action,created) VALUES(?,?,'password_reset',?)",(user_id,target,now()))
+                return self.send(200,{'ok':True})
             if self.path in ('/api/profile/start','/api/profile/save'):
                 import user_profile
                 try:
