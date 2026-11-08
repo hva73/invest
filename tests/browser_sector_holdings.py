@@ -11,6 +11,7 @@ with app.connect() as c:
  for symbol,region,sectorname,src in [('XLU.US','USA','Forsyning','x'),('EXH4.XETRA','Europa','Industri','x'),('IXN.US','Globalt','Teknologi','x')]:
   c.execute('INSERT INTO sector_benchmarks(symbol,region,sector,status,updated,next_attempt,proof_source) VALUES(?,?,?,?,?,?,?)',(symbol,region,sectorname,'VERIFIED',now,now+86400,src))
   c.execute('INSERT INTO sector_market(symbol,region,sector,payload,status,updated,next_attempt,price_basis) VALUES(?,?,?,?,?,?,?,?)',(symbol,region,sectorname,series,'OK',now,now+86400,'close'))
+ c.execute("UPDATE sector_benchmarks SET name=?,exchange='XETRA' WHERE symbol='EXH4.XETRA'",('iShares STOXX Europe 600 Industrial Goods & Services UCITS ETF (DE)',))
 server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
 try:
  with sync_playwright() as p:
@@ -28,6 +29,9 @@ try:
   with app.connect() as c:c.execute("UPDATE sector_holding_prices SET status='OK',payload=?,updated=? WHERE ticker='NEE'",(json.dumps({'periods':{'30':{'value':10,'from':'2026-10-01','to':today}},'basis':'justeret'}),time.time()))
   expect(page.locator('.si-etf-metrics strong.positive')).to_contain_text('+10,00 %',timeout=18000);expect(page.locator('.si-etf-metrics small')).to_contain_text('Fondsandel')
   page.locator('[data-sector-holdings-close]').click();page.locator('[data-sector-region="Europa"]').click();page.locator('[data-sector-market="EXH4.XETRA"]').click();expect(page.locator('[role=dialog]')).to_be_visible();print('Europa opened:',page.locator('[role=dialog]').inner_text()[:120])
+  with patch('ishares_holdings.fetch_europe',return_value={'rows':[{'name':'European holding','ticker':'EXAMPLE','weight':5.0,'identifier':None}],'as_of':today}):sector.refresh_tick(app.connect)
+  expect(page.locator('[role=dialog]')).to_contain_text('European holding',timeout=18000)
+  expect(page.locator('[role=dialog]')).to_contain_text('iShares / BlackRock')
   page.locator('[data-sector-holdings-close]').click();page.locator('[data-sector-region="Globalt"]').click();page.locator('[data-sector-market="IXN.US"]').wait_for()
   page.locator('[data-sector-market="IXN.US"]').click()
   with patch('ishares_holdings.fetch',return_value={'rows':[{'name':'Synthetic holding','ticker':'TEST','weight':12.0,'identifier':None}],'as_of':today}):sector.refresh_tick(app.connect)

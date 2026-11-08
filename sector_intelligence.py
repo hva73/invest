@@ -76,6 +76,10 @@ def init(c):
    c.execute("UPDATE sector_benchmark_holdings SET status='TRY_ISHARES',next_attempt=0 WHERE symbol=? AND status IN ('ENTITLEMENT_UNVERIFIED','NO_DATA','RESPONSE_TOO_LARGE','PROVIDER_REJECTED','PENDING','TRY_TOP10')",(symbol,))
   c.execute("INSERT INTO sector_migrations VALUES('ishares_us_holdings_v1',?)",(time.time(),))
 
+ if not c.execute("SELECT 1 FROM sector_migrations WHERE name='ishares_europe_holdings_v1'").fetchone():
+  c.execute("UPDATE sector_benchmark_holdings SET status='TRY_ISHARES_EU',next_attempt=0 WHERE symbol IN (SELECT symbol FROM sector_benchmarks WHERE region='Europa' AND status='VERIFIED' AND exchange='XETRA') AND status IN ('ENTITLEMENT_UNVERIFIED','NO_DATA','RESPONSE_TOO_LARGE','PROVIDER_REJECTED','PENDING','TRY_TOP10')")
+  c.execute("INSERT INTO sector_migrations VALUES('ishares_europe_holdings_v1',?)",(time.time(),))
+
 def capture(c,uid,pid,payload):
  if not payload.get('positions_complete') or not payload.get('observed'):return
  try:bucket=int(datetime.fromisoformat(payload['observed'].replace('Z','+00:00')).timestamp())//14400
@@ -243,14 +247,14 @@ def request_benchmark_holdings(connect,uid,symbol,limit=20):
  if type(limit) is not int or limit not in (20,30,50):raise ValueError('Ugyldigt antal')
  now=time.time()
  with connect() as c:
-  benchmark=c.execute('SELECT status,updated FROM sector_benchmarks WHERE symbol=?',(symbol,)).fetchone()
+  benchmark=c.execute('SELECT status,updated,region,exchange FROM sector_benchmarks WHERE symbol=?',(symbol,)).fetchone()
   if not benchmark or benchmark['status']!='VERIFIED' or not 0<=now-benchmark['updated']<=7*86400:return {'status':'UNVERIFIED_BENCHMARK'}
   row=c.execute('SELECT status,updated,next_attempt,payload FROM sector_benchmark_holdings WHERE symbol=?',(symbol,)).fetchone()
   if row and row['status']=='OK' and row['payload'] and symbol in {s for s,_ in PROXIES['USA']}:
    try:_queue_holding_prices(c,json.loads(row['payload']).get('rows',[]),limit,now)
    except (TypeError,ValueError,AttributeError):pass
-  if row and (row['status'] in ('PENDING','TRY_TOP10','TRY_ISSUER','TRY_ISHARES') or row['status']=='OK' and now-row['updated']<86400 or row['status'] not in ('OK','PENDING','TRY_TOP10','TRY_ISSUER','TRY_ISHARES') and row['next_attempt']>now):return {'status':row['status'],'updated':row['updated']}
-  status='TRY_ISSUER' if symbol in {s for s,_ in PROXIES['USA']} else 'TRY_ISHARES' if symbol in {s for s,_ in PROXIES['Globalt']}|{'EUFN.US'} else 'PENDING'
+  if row and (row['status'] in ('PENDING','TRY_TOP10','TRY_ISSUER','TRY_ISHARES','TRY_ISHARES_EU') or row['status']=='OK' and now-row['updated']<86400 or row['status'] not in ('OK','PENDING','TRY_TOP10','TRY_ISSUER','TRY_ISHARES','TRY_ISHARES_EU') and row['next_attempt']>now):return {'status':row['status'],'updated':row['updated']}
+  status='TRY_ISSUER' if symbol in {s for s,_ in PROXIES['USA']} else 'TRY_ISHARES' if symbol in {s for s,_ in PROXIES['Globalt']}|{'EUFN.US'} else 'TRY_ISHARES_EU' if benchmark['region']=='Europa' and benchmark['exchange']=='XETRA' else 'PENDING'
   c.execute('INSERT OR REPLACE INTO sector_benchmark_holdings VALUES(?,?,?,?,?)',(symbol,None,status,now,now))
  return {'status':status,'updated':now}
 
@@ -307,11 +311,11 @@ def refresh_tick(connect):
  now=time.time()
  # US sector ETFs publish their actual holdings directly. Fetch only on request.
  with connect() as c:
-  issuer=c.execute("SELECT * FROM sector_benchmark_holdings WHERE status IN ('TRY_ISSUER','TRY_ISHARES') AND next_attempt<=? ORDER BY updated LIMIT 1",(now,)).fetchone()
+  issuer=c.execute("SELECT h.*,b.name AS benchmark_name FROM sector_benchmark_holdings h LEFT JOIN sector_benchmarks b ON b.symbol=h.symbol WHERE h.status IN ('TRY_ISSUER','TRY_ISHARES','TRY_ISHARES_EU') AND h.next_attempt<=? ORDER BY h.updated LIMIT 1",(now,)).fetchone()
  if issuer:
   import ssga_holdings,ishares_holdings
   try:
-   is_ishares=issuer['status']=='TRY_ISHARES';result=(ishares_holdings if is_ishares else ssga_holdings).fetch(issuer['symbol']);rows=result['rows']
+   is_ishares=issuer['status'] in ('TRY_ISHARES','TRY_ISHARES_EU');result=ishares_holdings.fetch_europe(issuer['symbol'],issuer['benchmark_name']) if issuer['status']=='TRY_ISHARES_EU' else (ishares_holdings if is_ishares else ssga_holdings).fetch(issuer['symbol']);rows=result['rows']
    payload=json.dumps({'rows':rows[:50],'total_reported':len(rows),'source':'iShares / BlackRock' if is_ishares else 'State Street / SPDR','as_of':result['as_of']})
    status='OK';retry=now+86400
   except (ssga_holdings.HoldingsUnavailable,ishares_holdings.HoldingsUnavailable) as error:

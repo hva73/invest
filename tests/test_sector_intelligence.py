@@ -230,6 +230,15 @@ class SectorIntelligenceTest(unittest.TestCase):
   with self.connect() as c:row=c.execute("SELECT * FROM sector_benchmark_holdings WHERE symbol='IXJ.US'").fetchone()
   self.assertEqual(row['status'],'OK');self.assertEqual(json.loads(row['payload'])['source'],'iShares / BlackRock');self.assertEqual(json.loads(row['payload'])['rows'][0]['ticker'],'TEST')
   self.assertEqual(sector.request_benchmark_holdings(self.connect,1,'IXJ.US')['status'],'OK')
+ def test_europe_ishares_holdings_use_verified_name_and_ticker(self):
+  now=time.time();name='iShares STOXX Europe 600 Retail UCITS ETF (DE)'
+  with self.connect() as c:c.execute('INSERT INTO sector_benchmarks(symbol,region,sector,name,exchange,status,updated,next_attempt,proof_source) VALUES(?,?,?,?,?,?,?,?,?)',('EXH8.XETRA','Europa','Detailhandel',name,'XETRA','VERIFIED',now,now+1000,'EODHD instrumentsøgning · europæisk fond'))
+  self.assertEqual(sector.request_benchmark_holdings(self.connect,1,'EXH8.XETRA')['status'],'TRY_ISHARES_EU')
+  result={'as_of':'2026-11-05','rows':[{'ticker':'ITX','name':'INDITEX','weight':27.95,'exchange':'Madrid','identifier':None}]}
+  with patch('ishares_holdings.fetch_europe',return_value=result) as fetch:sector.refresh_tick(self.connect)
+  fetch.assert_called_once_with('EXH8.XETRA',name)
+  with self.connect() as c:row=c.execute("SELECT * FROM sector_benchmark_holdings WHERE symbol='EXH8.XETRA'").fetchone()
+  self.assertEqual(row['status'],'OK');self.assertEqual(json.loads(row['payload'])['source'],'iShares / BlackRock')
  def test_global_benchmark_uses_provider_search_before_fundamentals(self):
   class Client:
    def _http(self,base,path,params):
