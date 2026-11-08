@@ -16,7 +16,7 @@ def main():
    with patch('mcp_client.MCP.request',side_effect=AssertionError('No broker calls in browser test')),sync_playwright() as pw:
     browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':1440,'height':1000});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click()
-    expect(page.locator('.dash-chart-svg')).to_be_visible();expect(page.locator('.dash-chart-change')).to_contain_text('+10,00')
+    expect(page.locator('.dash-chart-svg')).to_be_visible();expect(page.locator('.dash-chart-change')).to_contain_text('+10,00');expect(page.locator('.dash-chart-summary .dash-result-share').first).to_contain_text('+1,00 %');expect(page.locator('.dash-chart-summary .dash-result-share').last).to_contain_text('+2,73 %');assert page.locator('.dash-chart-summary .dash-result-share').first.evaluate('(n)=>getComputedStyle(n).color')=='rgb(139, 223, 184)'
     page.evaluate('''() => {
      const points=[{at:'2026-11-07T23:04:00Z',amount:'2830',reported_result:'-169.44',currency:'DKK'},{at:'2026-11-07T23:10:00Z',amount:'2830',reported_result:'-169.25',currency:'DKK'}];
      const chart=p=>new DOMParser().parseFromString(window.DashboardUI.portfolioChart({portfolio_value_history:{day_start:'2026-11-07T23:00:00Z',day_end:'2026-11-08T23:00:00Z',periods:{day:p}}}),'text/html');
@@ -24,6 +24,7 @@ def main():
      if(dots.length!==2||Number(dots[1].getAttribute('cx'))>5)throw Error('Day chart does not use full-day axis');
      if(Math.abs(Number(dots[0].getAttribute('cy'))-Number(dots[1].getAttribute('cy')))>12)throw Error('Small changes are exaggerated');
      if(!doc.querySelector('.dash-chart-scale')||!doc.querySelector('.dash-chart-dates').textContent.includes('24.00'))throw Error('Day scale is missing');
+     const negative=new DOMParser().parseFromString(window.DashboardUI.resultShare({amount:'-163.94',currency:'DKK'},{amount:'2836.06',currency:'DKK'}),'text/html').body.firstElementChild;if(!negative||!negative.classList.contains('negative')||!negative.textContent.includes('-5,78 %'))throw Error('Negative result share incorrect');if(window.DashboardUI.resultShare({amount:'1',currency:'EUR'},{amount:'100',currency:'DKK'})||window.DashboardUI.resultShare({amount:'1',currency:'DKK'},{amount:'0',currency:'DKK'}))throw Error('Invalid comparison shown');
      const marker=doc.querySelector('.dash-chart-latest-time');if(!marker||!marker.textContent.includes('00.10')||marker.textContent.includes('00.10.00'))throw Error('Last timestamp is not shown in hours and minutes');
      if(Number(marker.getAttribute('x'))!==22||Number(marker.getAttribute('y'))>=Number(dots[1].getAttribute('cy')))throw Error('Last timestamp is not above the recorded point');
      const later=chart([points[0],{...points[1],at:'2026-11-08T17:00:00Z'}]);if(Number(later.querySelector('.dash-chart-latest-time').getAttribute('x'))!==Number(later.querySelectorAll('.dash-chart-point')[1].getAttribute('cx')))throw Error('Time does not follow later chart point');

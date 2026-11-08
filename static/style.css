@@ -362,3 +362,4 @@ body.pull-refresh-visible #refresh-status{display:none}
 .quick-buying-power{padding:14px 16px;border:1px solid #8a6c49;border-radius:12px;background:#372b21;color:#f4d4a5}.quick-buying-power p{margin:0 0 12px;color:#f0d4b2}.quick-buying-power button{border-color:#a9875c;color:#ffe2bb}.quick-buying-power[hidden]{display:none}
 .quick-buying-power button+button{margin-left:8px}
 @media(max-width:420px){.quick-buying-power button+button{margin-left:0;margin-top:8px}.quick-buying-power button{width:100%}}
+.dash-result-share{display:block;margin-top:3px;font-size:12px;font-weight:650;line-height:1.4;font-variant-numeric:tabular-nums}.dash-result-share.positive{color:#8bdfb8}.dash-result-share.negative{color:#f09aa6}.dash-result-share.neutral{color:#a8bdcd}.dash-result-share>span{font-size:10px;font-weight:450;letter-spacing:0;color:inherit}.si-metrics .dash-result-share{font-size:12px}

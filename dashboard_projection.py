@@ -66,7 +66,7 @@ def portfolio_value_history(c,uid,now):
   points=([first] if first and (not rows or first['observed_epoch']!=rows[0]['observed_epoch']) else [])+list(rows)
   periods[name]=[{'at':r['observed'],'amount':r['amount'],'currency':r['currency'],'source_time':r['source_time'],'reported_result':r['reported_result']} for r in points]
  result=current['reported_result'] if fresh_snapshot else None
- return {'periods':periods,'day_start':midnight.isoformat(),'day_end':next_midnight.isoformat(),'reported_result':{'amount':str(result),'currency':current['currency']} if result is not None else None}
+ return {'periods':periods,'day_start':midnight.isoformat(),'day_end':next_midnight.isoformat(),'current_value':{'amount':str(current['amount']),'currency':current['currency']} if fresh_snapshot else None,'reported_result':{'amount':str(result),'currency':current['currency']} if result is not None else None}
 
 def observation(row,received_at=None):
  price=row.get('price') or {};meta=row.get('market_context') or {}
