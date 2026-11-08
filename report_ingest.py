@@ -20,6 +20,7 @@ def init(c):
     c.execute('CREATE INDEX IF NOT EXISTS report_generated_order ON ingested_reports(user_id,is_test,generated_epoch,id)')
     c.execute('CREATE TABLE IF NOT EXISTS report_candidate_links(user_id INTEGER NOT NULL REFERENCES users(id),is_test INTEGER NOT NULL,candidate_id TEXT NOT NULL,report_row_id INTEGER NOT NULL REFERENCES ingested_reports(id),generated REAL NOT NULL,PRIMARY KEY(user_id,is_test,candidate_id,report_row_id))')
     c.execute('CREATE INDEX IF NOT EXISTS report_candidate_history ON report_candidate_links(user_id,is_test,candidate_id,generated)')
+    c.execute('CREATE TABLE IF NOT EXISTS radar_resets(user_id INTEGER PRIMARY KEY REFERENCES users(id),report_cutoff INTEGER NOT NULL,reset_at TEXT NOT NULL)')
     c.execute('CREATE INDEX IF NOT EXISTS ingested_reports_mode ON ingested_reports(user_id,is_test,id)')
     import position_reports
     position_reports.init(c)
@@ -88,6 +89,24 @@ def latest(connect,user_id,is_test=False):
     return {'report':{'id':row['id'],'received':row['received'],'data':json.loads(row['payload'])} if row else None}
 
 def row_view(row):return {'id':row['id'],'received':row['received'],'data':json.loads(row['payload'])}
+
+def reset_radar(connect,user_id):
+    """Start a new candidate generation, retaining reports and owned holdings."""
+    import hotwatch_engine,secrets
+    now=datetime.now(timezone.utc);closed=0
+    with connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        cutoff=c.execute('SELECT COALESCE(MAX(id),0) FROM ingested_reports WHERE user_id=? AND is_test=0',(user_id,)).fetchone()[0]
+        rows=c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=0 AND purpose='automatic discovery' AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(user_id,)).fetchall()
+        for row in rows:
+            if json.loads(row['request']).get('watch_mode')!='entry':continue
+            c.execute("UPDATE hw_sessions SET status='COMPLETED',updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']))
+            hotwatch_engine.event(c,row,'WATCH_RESET',now,'Radar nulstillet af brugeren; rapporthistorik og beholdningsovervågning bevares')
+            closed+=1
+        c.execute('INSERT INTO radar_resets VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET report_cutoff=excluded.report_cutoff,reset_at=excluded.reset_at',(user_id,cutoff,now.isoformat()))
+        c.execute('INSERT INTO hw_discovery_resets VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET reset_at=excluded.reset_at,generation=excluded.generation',(user_id,now.isoformat(),secrets.token_hex(16)))
+        c.execute("UPDATE hw_holding_autowatch SET next_attempt=? WHERE user_id=? AND status='CAPACITY_LIMIT'",(now.timestamp(),user_id))
+    return {'reset_at':now.isoformat(),'closed_watches':closed}
 
 def item(connect,user_id,report_id,is_test=False,include_views=True,record_readback=False):
     with connect() as c:
@@ -209,6 +228,19 @@ def desk(connect,user_id):
         positions=position_reports.projection(c,user_id,main,previous)
         import intel_workflows
         registry=intel_workflows.candidates(c,user_id,include_history_market=False)
+        # A ticker-only match is not proof of identity, but hide it by default
+        # until the user explicitly includes possible own positions.
+        held_tickers=set()
+        for snap in c.execute("SELECT s.payload FROM portfolio_snapshots s JOIN portfolios p ON p.id=s.portfolio_id AND p.user_id=s.user_id WHERE s.user_id=? AND p.source='pluto' AND p.active=1 AND s.last_error IS NULL",(user_id,)):
+            try:
+                snapshot=json.loads(snap['payload'])
+                if not snapshot.get('positions_complete'):continue
+                for p in snapshot.get('positions',[]):
+                    if p.get('ticker') and p.get('quantity') is not None and Decimal(str(p['quantity']))>0:held_tickers.add(p['ticker'].casefold())
+            except (ValueError,TypeError,ArithmeticError,AttributeError):continue
+        for entry in registry:
+            candidate=entry.get('candidate') or {}
+            entry['possible_own_position']=not candidate.get('asset_id') and str(candidate.get('ticker') or '').casefold() in held_tickers and not entry.get('has_confirmed_position')
         main_order={x['candidate_id']:i for i,x in enumerate(main['data'].get('candidates',[]))} if main and main['data']['schema_version']==2 else {}
         registry.sort(key=lambda x:(main_order.get(x['candidate']['candidate_id'],len(main_order)),x['candidate']['candidate_id']))
         for entry in registry:
@@ -216,6 +248,17 @@ def desk(connect,user_id):
         dormant=[x for x in registry if not x['active']]
         # v1 stays unchanged; modern candidates persist independently of a single report.
         if main and main['data']['schema_version']==2:candidates=[x for x in registry if x['active']]
+        elif main:
+            reset=c.execute('SELECT report_cutoff FROM radar_resets WHERE user_id=?',(user_id,)).fetchone()
+            if reset:
+                if main['id']<=reset['report_cutoff']:candidates=[]
+                else:
+                    old=set()
+                    for row in c.execute('SELECT payload FROM ingested_reports WHERE user_id=? AND is_test=0 AND id<=?',(user_id,reset['report_cutoff'])):
+                        data=json.loads(row['payload'])
+                        if data.get('schema_version')!=1:continue
+                        old.update((str(x.get('symbol','')).casefold(),str(x.get('market','')).casefold()) for x in data.get('candidates',[]))
+                    candidates=[x for x in candidates if (str(x['candidate'].get('symbol','')).casefold(),str(x['candidate'].get('market','')).casefold()) not in old]
         account_projection=intel_workflows.account_projection(main)
         delivery=intel_workflows.delivery(c,main['id']) if main else {'status':'unknown','events':{}}
         journal=[];seen=set()

@@ -30,6 +30,10 @@ try:
   page.locator('.portfolio-detail-hero').wait_for()
   page.locator('.portfolio-detail-hero [data-view="portfolios"]').click()
   page.locator('.portfolio-catalog-heading').wait_for()
+  assert page.locator('nav [data-view="journal"]').count()==0
+  page.locator('nav [data-view="trade"]').click();page.locator('.broker-trade [data-view="journal"]').click();page.locator('.unified-journal').wait_for()
+  assert 'active' in (page.locator('nav [data-view="trade"]').get_attribute('class') or '')
+  page.locator('.unified-journal [data-view="trade"]').click();page.locator('.broker-trade').wait_for()
   page.evaluate('''() => {
    const rows=[['TAB','-8'],['GEVINST','4'],['UKENDT',null],['LILLE TAB','-1']].map(([ticker,p])=>({ticker,name:ticker,key:ticker,portfolio_name:'Test',portfolio_kind:ticker==='GEVINST'?'collection':'portfolio',unrealized:{amount:p,currency:'DKK'},unrealized_percent:p,value:{amount:'100',currency:'DKK'},conflicts:[],hot_watch:{}}));
    const html=window.DashboardUI.render({dashboard:{positions:rows,totals:[],warnings:[],orders:[],critical_sessions:[],accounts:[]}}),doc=new DOMParser().parseFromString(html,'text/html');
@@ -50,7 +54,9 @@ try:
    document.body.append(scope);const cards=scope.querySelectorAll('.desk-candidate'),toggle=scope.querySelector('[data-candidate-own]');
    window.CandidateUI.applyFilters(scope);if(cards[0].hidden||!cards[1].hidden)throw Error('Default filter failed');
    await window.CandidateUI.click(toggle);if(cards[1].hidden||toggle.getAttribute('aria-pressed')!=='true')throw Error('Own positions toggle failed');
-   await window.CandidateUI.click(toggle);await window.CandidateUI.click(scope.querySelector('[data-candidate-filter="position"]'));if(!cards[0].hidden||cards[1].hidden)throw Error('Position filter failed');
+   await window.CandidateUI.click(toggle);if(cards[0].hidden||!cards[1].hidden)throw Error('Hiding own positions failed');
+   await window.CandidateUI.click(scope.querySelector('[data-candidate-filter=waiting]'));if(!cards[0].hidden||!cards[1].hidden)throw Error('Waiting filter failed');
+   await window.CandidateUI.click(scope.querySelector('[data-candidate-filter=active]'));if(cards[0].hidden||!cards[1].hidden)throw Error('Active filter failed');
    scope.remove();
   }''')
   def sessions_route(route):

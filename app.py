@@ -47,6 +47,8 @@ def init():
         c.execute('CREATE TABLE IF NOT EXISTS invitations(token_hash TEXT PRIMARY KEY, created_by INTEGER NOT NULL REFERENCES users(id), expires REAL NOT NULL, used INTEGER NOT NULL DEFAULT 0)')
         c.execute("CREATE TABLE IF NOT EXISTS connections(user_id INTEGER PRIMARY KEY REFERENCES users(id), provider TEXT NOT NULL DEFAULT 'pluto', status TEXT NOT NULL, requested TEXT NOT NULL)")
         c.execute('CREATE TABLE IF NOT EXISTS connection_checks(user_id INTEGER PRIMARY KEY REFERENCES users(id), checked REAL NOT NULL)')
+        import user_profile
+        user_profile.init(c)
         import report_ingest
         report_ingest.init(c)
         import hotwatch_engine
@@ -279,7 +281,9 @@ class Handler(BaseHTTPRequestHandler):
                 import trade_service,hotwatch_adapters
                 provider_status=hotwatch_adapters.providers(connect,user_id,False)
                 with connect() as c:test_trade_signal=trade_service.active_test_signal(c,user_id)
-                return self.send(200,{'provider_status':provider_status,'dashboard':dashboard,'test_trade_signal':test_trade_signal,'broker_proposals':trade_service.summaries(connect,user_id),'portfolio_snapshots':snapshots,'portfolio_summary':summary,'portfolios':owned,'user':{'username':s['username'],'role':s['role']},'connection':connection_state(user_id),'opportunities':opportunities,'proposals':p,'journal':j,'time':now(),'integrations':{'Pluto Markets':'Ikke tilsluttet','Markedsdata':'Ikke tilsluttet','Nyheder og AI':'Ikke tilsluttet'},'reports':{'timezone':'Europe/Copenhagen','schedule':['08:00','14:00','22:00'],'status':'Afventer datakilder og scheduler'}})
+                import user_profile
+                with connect() as c: profile=user_profile.read(c,user_id)
+                return self.send(200,{'profile':profile,'provider_status':provider_status,'dashboard':dashboard,'test_trade_signal':test_trade_signal,'broker_proposals':trade_service.summaries(connect,user_id),'portfolio_snapshots':snapshots,'portfolio_summary':summary,'portfolios':owned,'user':{'username':s['username'],'role':s['role']},'connection':connection_state(user_id),'opportunities':opportunities,'proposals':p,'journal':j,'time':now(),'integrations':{'Pluto Markets':'Ikke tilsluttet','Markedsdata':'Ikke tilsluttet','Nyheder og AI':'Ikke tilsluttet'},'reports':{'timezone':'Europe/Copenhagen','schedule':['08:00','14:00','22:00'],'status':'Afventer datakilder og scheduler'}})
             return self.send(404,{'error':'Ukendt endpoint'})
         path={'/':'index.html','/app.js':'app.js','/report-ui.js':'report-ui.js','/style.css':'style.css','/manifest.json':'manifest.json','/sw.js':'sw.js','/icon.svg':'icon.svg'}.get(self.path)
         if not path:return self.send(404,{'error':'Ikke fundet'})
@@ -339,6 +343,17 @@ class Handler(BaseHTTPRequestHandler):
             if not s:return self.send(401,{'error':'Log ind først'})
             if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),s['csrf']):return self.send(403,{'error':'Ugyldigt sikkerhedstoken'})
             user_id=s['user_id']
+            if self.path in ('/api/profile/start','/api/profile/save'):
+                import user_profile
+                try:
+                    with connect() as c:
+                        profile=user_profile.start(c,user_id) if self.path.endswith('/start') else user_profile.save(c,user_id,data,now())
+                except ValueError as error:return self.send(400,{'error':str(error)})
+                return self.send(200,{'profile':profile})
+            if self.path=='/api/reports/reset-radar':
+                if data.get('confirm') is not True:return self.send(400,{'error':'Bekræft nulstillingen først.'})
+                import report_ingest
+                return self.send(200,report_ingest.reset_radar(connect,user_id))
             if self.path=='/api/sector-intelligence/holdings':
                 import sector_intelligence
                 try:result=sector_intelligence.request_benchmark_holdings(connect,user_id,data.get('symbol'),data.get('limit',20))

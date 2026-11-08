@@ -24,6 +24,8 @@ def main():
      if(dots.length!==2||Number(dots[1].getAttribute('cx'))>5)throw Error('Day chart does not use full-day axis');
      if(Math.abs(Number(dots[0].getAttribute('cy'))-Number(dots[1].getAttribute('cy')))>12)throw Error('Small changes are exaggerated');
      if(!doc.querySelector('.dash-chart-scale')||!doc.querySelector('.dash-chart-dates').textContent.includes('24.00'))throw Error('Day scale is missing');
+     const marker=doc.querySelector('.dash-chart-latest-time');if(!marker||!marker.textContent.includes('00.10')||marker.textContent.includes('00.10.00'))throw Error('Last timestamp is not shown in hours and minutes');
+     if(!marker.getAttribute('style').includes('0.694%'))throw Error('Last timestamp is not aligned to the recorded point');
      if(chart(points.slice(0,1)).querySelectorAll('.dash-chart-point').length!==1)throw Error('First daily observation not displayed');
     }''')
     page.locator('[data-dashboard-range=year]').click();expect(page.locator('[data-dashboard-range=year]')).to_have_attribute('aria-pressed','true');expect(page.locator('.dash-chart-svg')).to_be_visible()

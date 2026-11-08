@@ -250,10 +250,18 @@ def watch(connect,uid,is_test=False,candidate_id=None):
                 if order['order_id'] not in orders:orders[order['order_id']]=dict(order,display_status=order_state(order),report_id=row['report_id'])
             group['orders']=list(orders.values())
         registry=candidates(c,uid,is_test,candidate_id,include_history_market=False)
+        if not is_test and candidate_id is None and c.execute('SELECT 1 FROM radar_resets WHERE user_id=?',(uid,)).fetchone():
+            allowed={r['candidate']['candidate_id'] for r in registry}
+            groups={cid:group for cid,group in groups.items() if cid in allowed}
         return {'waiting_candidates':[r for r in registry if r.get('display_group')=='waiting'],'active_candidates':[r for r in registry if r.get('display_group') in ['active','buy','exit']],'candidate_status_note':'Kandidatstatus og observationsgrupper bekræfter ikke, at en motorsession findes eller kører. Brug sync_hot_watch med reports:read eller hotwatch:read og kontrollér watch_id, status og motorens heartbeat. En beholdningssession og en kandidatsession er særskilte.','engine_sessions_checked':False,'groups':sorted(groups.values(),key=lambda x:stamp(x['observations'][0]['data']['observed_at']).timestamp(),reverse=True),'is_test':is_test,'history_truncated':len(rows)>500}
 
 def candidates(c,uid,mode=False,candidate_id=None,include_history_market=True):
     ids=[candidate_id] if candidate_id is not None else [r[0] for r in c.execute('SELECT DISTINCT candidate_id FROM report_candidate_links WHERE user_id=? AND is_test=?',(uid,int(mode)))]
+    if not mode and candidate_id is None:
+        reset=c.execute('SELECT report_cutoff FROM radar_resets WHERE user_id=?',(uid,)).fetchone()
+        if reset:
+            old={r[0] for r in c.execute('SELECT DISTINCT candidate_id FROM report_candidate_links WHERE user_id=? AND is_test=0 AND report_row_id<=?',(uid,reset['report_cutoff']))}
+            ids=[cid for cid in ids if cid not in old]
     result=[]
     query='SELECT r.payload,r.report_id,r.received,l.generated FROM report_candidate_links l JOIN ingested_reports r ON r.id=l.report_row_id WHERE l.user_id=? AND l.is_test=? AND l.candidate_id=? '
     for cid in ids:

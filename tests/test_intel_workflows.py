@@ -23,6 +23,24 @@ class Workflows(unittest.TestCase):
   with app.connect() as c:return flow.validate_observation(d,c,1)
  def snapshot(self):
   with app.connect() as c:return list(c.iterdump())
+ def test_radar_reset_hides_old_candidates_but_preserves_reports_and_new_ids(self):
+  before=report_ingest.desk(app.connect,1);self.assertGreater(len(before['candidates']),0)
+  result=report_ingest.reset_radar(app.connect,1);self.assertIn('reset_at',result)
+  self.assertEqual(report_ingest.desk(app.connect,1)['candidates'],[])
+  self.assertIsNotNone(report_ingest.item(app.connect,1,self.r['report_id'])['report'])
+  newer=copy.deepcopy(self.r);newer['report_id']='SYNTHETIC-NEW-GENERATION';newer['candidates'][-1]['candidate_id']='synthetic-brand-new-candidate'
+  report_ingest.save(app.connect,1,newer)
+  candidates=report_ingest.desk(app.connect,1)['candidates']
+  self.assertEqual([x['candidate']['candidate_id'] for x in candidates],['synthetic-brand-new-candidate'])
+ def test_radar_marks_ticker_match_as_possible_position_without_claiming_identity(self):
+  import portfolios,portfolio_data
+  with app.connect() as c:
+   portfolios.replace_pluto(c,1,[{'id':'portfolios:test-root','name':'Root','kind':'portfolio','can_trade':False}])
+   pid=c.execute("SELECT id FROM portfolios WHERE external_id='portfolios:test-root'").fetchone()[0]
+   payload={'source':'synthetic','observed':AT,'positions_complete':True,'positions':[{'kind':'holding','asset_id':'different-asset','ticker':'VRTX','quantity':'1'}],'accounts':[],'errors':[]}
+   portfolio_data.save(c,1,pid,payload)
+  matches=[x for x in report_ingest.desk(app.connect,1)['candidates'] if x['candidate']['ticker']=='VRTX']
+  self.assertEqual(len(matches),1);self.assertTrue(matches[0]['possible_own_position']);self.assertFalse(matches[0]['has_confirmed_position'])
  def test_old_v1_v2_and_production_check_immutable(self):
   from test_report_delivery import synthetic
   d=synthetic(True);d['report_id']='escape-v2-production-check-001';report_ingest.save(app.connect,1,d)
@@ -99,6 +117,11 @@ class HotWatchHTTP(unittest.TestCase):
   self.assertEqual(self.http.request('/api/reports/hot-watch',None)[0],401)
   status,result,_=self.http.request('/api/reports/hot-watch?is_test=false',None,auth);self.assertEqual(status,200);self.assertEqual(len(result['groups']),1)
   self.assertEqual(self.http.request('/api/reports/hot-watch?is_test=true',None,auth)[1]['groups'],[]);self.assertEqual(self.http.request('/api/reports/hot-watch?is_test=bad',None,auth)[0],400)
+ def test_radar_reset_requires_session_csrf_and_explicit_action(self):
+  path='/api/reports/reset-radar';self.assertEqual(self.http.request(path,{'confirm':True})[0],401)
+  auth=self.http.login();self.assertEqual(self.http.request(path,{'confirm':True},{'Cookie':auth['Cookie']})[0],403)
+  self.assertEqual(self.http.request(path,{},auth)[0],400);self.assertGreater(len(report_ingest.desk(app.connect,1)['candidates']),0)
+  self.assertEqual(self.http.request(path,{'confirm':True},auth)[0],200);self.assertEqual(report_ingest.desk(app.connect,1)['candidates'],[])
  def test_mcp_receive_readback_and_immutable_conflict(self):
   _,tokens,_=self.http.granted();d=observation(self.r);result=self.http.call(tokens['access_token'],'record_hot_watch',d)[1]['result'];self.assertFalse(result['isError']);self.assertEqual(self.http.call(tokens['access_token'],'get_hot_watch',{'is_test':False})[1]['result']['structuredContent']['groups'][0]['observations'][0]['data'],d)
   before=self.snapshot();d['note']='Changed';result=self.http.call(tokens['access_token'],'record_hot_watch',d)[1]['result'];self.assertTrue(result['isError']);self.assertIn('observation_id_conflict',{e['code'] for e in result['structuredContent']['errors']})
