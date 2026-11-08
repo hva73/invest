@@ -236,7 +236,7 @@ def direct_sell_basis(connect,user_id,pid,asset_id,percentage,factory=None):
     import portfolio_data
     p=owned(connect,user_id,pid)
     if p['kind']!='portfolio':raise TradeError('Enkeltaktier sælges separat fra salg af en hel Collection.')
-    try: snapshot=portfolio_data.read(connect,user_id,pid,client_factory=factory)
+    try: snapshot=portfolio_data.read(connect,user_id,pid,client_factory=factory,strict_positions=True)
     except Exception as error:raise TradeError('Plutos aktuelle beholdning kunne ikke kontrolleres. Intet forslag er sendt.') from error
     if not snapshot.get('positions_complete'):raise TradeError('Plutos beholdningsliste er ufuldstændig. Intet forslag er sendt.')
     matches=[r for r in snapshot.get('positions',[]) if r.get('kind')=='holding' and r.get('asset_id')==asset_id]

@@ -92,6 +92,9 @@ class Trading(unittest.TestCase):
     return super().request(method,args)
   request=dict(self.request,size_mode='percent',size='25',order_type='MARKET')
   with patch('trade_service.candidate',return_value={'signal':'SÆLG'}),patch('pending_orders.enrich'):
+   display=portfolio_data.read(app.connect,1,self.root,client_factory=Truncated)
+   self.assertTrue(display['positions_complete'])
+   self.assertEqual(len(display['positions']),1)
    with self.assertRaisesRegex(trade.TradeError,'ufuldstændig'):trade.estimate(app.connect,1,request,Truncated)
   self.assertFalse(self.writes())
  def test_hotwatch_signal_is_rechecked_and_asset_is_bound(self):
