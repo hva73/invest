@@ -11,9 +11,21 @@ import app,trade_service
 
 class ProbeError(Exception):pass
 
-def shape(value):
- if isinstance(value,dict):return {str(k):(v if k in {'currency','priceCurrency','orderCurrency','commissionCurrency','feeCurrency','base','quote'} and isinstance(v,str) and re.fullmatch('[A-Z]{3}',v) else shape(v)) for k,v in value.items() if k in {'orders','items','data','holding','asset','amount','value','currency','priceCurrency','orderCurrency','commissionCurrency','feeCurrency','base','quote','rate','commission','notional','accountNotional','filledAccountNotional','assetBankFx','orderId','status','filledQuantity','requestedQuantity','averageFillPrice','statusChangedAt','updatedAt','side','assetId'}}
- if isinstance(value,list):return [shape(value[0])] if value else []
+def shape(value,depth=0):
+ if depth>8:return 'dybdegrænse'
+ if isinstance(value,dict):
+  allowed={'orders','items','data','holding','asset','amount','value','currency','priceCurrency','orderCurrency','commissionCurrency','feeCurrency','base','quote','rate','commission','notional','accountNotional','filledAccountNotional','assetBankFx','orderId','status','filledQuantity','requestedQuantity','averageFillPrice','statusChangedAt','updatedAt','side','assetId'}
+  codes={'currency','priceCurrency','orderCurrency','commissionCurrency','feeCurrency','base','quote'}
+  result={str(k):(v if k in codes and isinstance(v,str) and re.fullmatch('[A-Z]{3}',v) else shape(v,depth+1)) for k,v in value.items() if k in allowed}
+  # Pluto may wrap the estimate in differently named objects. Search inside
+  # them without printing unrecognised names or any of their scalar values.
+  nested=[shape(v,depth+1) for k,v in value.items() if k not in allowed and isinstance(v,(dict,list))]
+  nested=[v for v in nested if v not in ({},[])]
+  if nested:result['_skjulte_omslag']=nested[:20]
+  unknown=[type(v).__name__ for k,v in value.items() if k not in allowed and not isinstance(v,(dict,list))]
+  if unknown:result['_ovrige_felter_typer']=sorted(set(unknown))
+  return result
+ if isinstance(value,list):return [shape(value[0],depth+1)] if value else []
  return type(value).__name__
 
 def run(username,ticker):
