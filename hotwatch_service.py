@@ -141,6 +141,11 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
  import candidate_lifecycle
  cid=candidate.get('candidate_id');asset=candidate.get('asset_id')
  if not cid:return {'status':'IDENTITY_OR_DECISION_UNAVAILABLE'}
+ proposal=candidate.get('strategy_proposal')
+ if proposal:
+  import strategy_center
+  with connect() as c:qualified=strategy_center.qualification(c,uid,proposal)
+  if qualified!='QUALIFIED':return {'status':'STRATEGY_'+qualified}
  if (candidate.get('decision') or {}).get('status')=='FRAVÆLG':return {'status':'REJECTED'}
  with connect() as c:
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return {'status':'operator_kill_switch'}
@@ -202,7 +207,8 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
   portfolio_ids=[p['id'] for p in portfolios] if len(portfolios)<=30 and not overlapping else []
   req={'watch_id':watch,'report_id':report['report_id'],'candidate_id':cid,'is_test':mode,'purpose':'automatic discovery','ticker':candidate['ticker'],'exchange':instrument['exchange'],'asset_id':asset,'quote_currency':instrument['currency'],'portfolio_ids':portfolio_ids,'priority':'NORMAL','profile':'NORMAL','provider':provider,'provider_symbol':symbol,'end_at':None,'activation_reason':'Automatisk overvågning efter verificeret Pluto-aktiv og handelsbarhed','strategy_id':'escape_momentum','strategy_version':'1.0.0','risk':risk,'watch_mode':'entry'}
   import strategy_center
-  selected=strategy_center.resolve(connect,uid);req.update(strategy_id=selected['strategy_id'],strategy_version=selected['version'],activation_reason=req['activation_reason']+' · '+selected['reason'])
+  selected={'strategy_id':proposal['strategy_id'],'version':proposal['version'],'reason':'Strategiforslag fra rapport: '+proposal['reason']} if proposal else strategy_center.resolve(connect,uid)
+  req.update(strategy_id=selected['strategy_id'],strategy_version=selected['version'],activation_reason=(req['activation_reason']+' · '+selected['reason'])[:4000])
   if existing_cycle:req['trade_cycle_id']=existing_cycle
   result=engine.create(connect,uid,req);return {'status':result['session']['status'] if not result['duplicate'] else 'ALREADY_ACTIVE','watch_id':watch}
  except EngineError as error:return {'status':error.code}

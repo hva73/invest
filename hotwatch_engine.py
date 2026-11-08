@@ -217,6 +217,11 @@ def _create_in_transaction(c,uid,data,now,holding=False,manual=False):
   candidate=next((x for x in json.loads(report['payload']).get('candidates',[]) if x.get('candidate_id')==data['candidate_id']),None)
   if not candidate:raise EngineError('candidate_reference_not_found',404)
   if candidate.get('ticker','').casefold()!=data['ticker'].casefold():raise EngineError('candidate_ticker_mismatch',409)
+  if data.get('purpose')=='automatic discovery':
+   latest=c.execute("SELECT r.report_id,r.payload FROM report_candidate_links l JOIN ingested_reports r ON r.id=l.report_row_id WHERE l.user_id=? AND l.is_test=? AND l.candidate_id=? AND r.report_type!='deep_analysis' ORDER BY l.generated DESC,r.id DESC LIMIT 1",(uid,int(data['is_test']),data['candidate_id'])).fetchone()
+   if not latest or latest['report_id']!=data['report_id']:raise EngineError('candidate_report_superseded',409)
+   proposed=candidate.get('strategy_proposal')
+   if proposed and (proposed['strategy_id']!=data['strategy_id'] or proposed['version']!=data['strategy_version']):raise EngineError('strategy_proposal_mismatch',409)
   if data.get('watch_mode','both')!='exit':
    from intel_workflows import candidate_currentness
    currentness=candidate_currentness(c,uid,data['is_test'],data['candidate_id'],now,report_fallback=data.get('purpose')=='automatic discovery')

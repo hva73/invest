@@ -96,3 +96,32 @@ def simulate(connect,uid,data):
     if spec['strategy_id']=='escape_momentum' or not any(rule.get('metric')=='catalyst_verified' for rule in spec['entry_rules'].get('all',[])):raise ValueError('Eksemplet er kun til Early Catalyst og kopier af den.')
     verdict=matches(spec['entry_rules'],m,spec['parameters'])
     return {'matches':verdict,'checksum':row['checksum'],'notice':'Fiktivt eksempel. Ingen historisk test, risikokontrol, købssignal eller ordre.'}
+
+
+def qualification(c,uid,proposal):
+    """Qualification is server-owned, never supplied by the report."""
+    row=c.execute('SELECT validation_status FROM hw_strategies WHERE owner_id IN (0,?) AND strategy_id=? AND version=? ORDER BY owner_id DESC LIMIT 1',(uid,proposal['strategy_id'],proposal['version'])).fetchone()
+    return 'QUALIFIED' if row and row['validation_status']=='baseline_tested' else 'UNQUALIFIED' if row else 'NOT_FOUND'
+
+
+def handoff(connect,uid,candidate_id,mode=False):
+    """Read receipt, last discovery attempt and actual pinned session separately."""
+    import json
+    with connect() as c:
+        row=c.execute("SELECT r.report_id,r.payload FROM report_candidate_links l JOIN ingested_reports r ON r.id=l.report_row_id WHERE l.user_id=? AND l.is_test=? AND l.candidate_id=? AND r.report_type!='deep_analysis' ORDER BY l.generated DESC,r.id DESC LIMIT 1",(uid,int(mode),candidate_id)).fetchone()
+        if not row:return {'candidate_id':candidate_id,'delivery':'NOT_FOUND','session':None}
+        candidate=next(x for x in json.loads(row['payload'])['candidates'] if x['candidate_id']==candidate_id)
+        proposed=candidate.get('strategy_proposal');state=qualification(c,uid,proposed) if proposed else 'NOT_SPECIFIED'
+        attempt=c.execute('SELECT report_id,status,updated,watch_id FROM hw_discovery_attempts WHERE user_id=? AND is_test=? AND candidate_id=?',(uid,int(mode),candidate_id)).fetchone()
+        if attempt and attempt['report_id']!=row['report_id']:attempt=None
+        session=c.execute("SELECT watch_id,status,request,updated FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') AND COALESCE(json_extract(request,'$.watch_mode'),'both')!='exit' ORDER BY id DESC LIMIT 1",(uid,int(mode),candidate_id)).fetchone()
+        pinned=None
+        if session:
+            req=json.loads(session['request']);pinned={'watch_id':session['watch_id'],'status':session['status'],'strategy_id':req['strategy_id'],'version':req['strategy_version'],'updated':session['updated']}
+        same=bool(pinned and (not proposed or (pinned['strategy_id']==proposed['strategy_id'] and pinned['version']==proposed['version'])))
+        if pinned:handoff_status='SESSION_PRESENT' if same else 'EXISTING_DIFFERENT_STRATEGY'
+        elif state in ('NOT_FOUND','UNQUALIFIED'):handoff_status='STRATEGY_'+state
+        elif mode:handoff_status='TEST_NOT_AUTO_STARTED'
+        elif attempt:handoff_status=attempt['status']
+        else:handoff_status='AWAITING_DISCOVERY'
+        return {'candidate_id':candidate_id,'report_id':row['report_id'],'delivery':'STORED','proposed_strategy':proposed,'qualification':state,'handoff_status':handoff_status,'discovery_attempt':dict(attempt) if attempt else None,'session':pinned,'note':'Modtaget rapport er ikke bevis for en aktiv session, friske data eller en ordre.'}

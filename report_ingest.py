@@ -60,6 +60,9 @@ def save(connect,user_id,data):
         payload=json.dumps(data,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False)
         digest=hashlib.sha256(payload.encode()).hexdigest()
         receipt={'ok':True,'valid':True,'delivery_status':'stored','report_id':data['report_id'],'schema_version':data['schema_version'],'counts':checked['counts'],'warnings':checked['warnings']}
+        if data['schema_version']==2:
+            from strategy_center import qualification
+            receipt['strategy_proposals']=[{'candidate_id':x['candidate_id'],'strategy_id':x['strategy_proposal']['strategy_id'],'version':x['strategy_proposal']['version'],'qualification':qualification(c,user_id,x['strategy_proposal']),'session_status':'NOT_CONFIRMED'} for x in data['candidates'] if x.get('strategy_proposal')]
         old=c.execute('SELECT id,digest FROM ingested_reports WHERE user_id=? AND report_id=?',(user_id,data['report_id'])).fetchone()
         if old:
             return 200,{**receipt,'id':old['id'],'duplicate':True}

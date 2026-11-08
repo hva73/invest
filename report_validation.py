@@ -199,6 +199,21 @@ def semantic(data,errors,warnings,connection,user_id):
                         if isinstance(portfolio,str) and linked.get('portfolio_id')!=portfolio:add(f'journal[{i}].{field}','reference_mismatch','Journal and referenced object identify different portfolios')
     for i,row in rows('candidates'):
         base=f'candidates[{i}]';market=mapping(row.get('market'));tradable=mapping(row.get('tradability'))
+        proposed=mapping(row.get('strategy_proposal'))
+        if proposed:
+            try:
+                at=stamp(proposed['proposed_at']);generated=stamp(data['generated_at'])
+                if at>generated:add(base+'.strategy_proposal.proposed_at','future_information','Strategy proposal cannot postdate the report')
+                catalyst=mapping(proposed.get('catalyst'))
+                if catalyst:
+                    published=stamp(catalyst['published_at']);available=stamp(catalyst['available_at'])
+                    if published>available or available>at:add(base+'.strategy_proposal.catalyst','future_information','Catalyst must be published and available by proposal time')
+            except (KeyError,ValueError,TypeError):pass # Structural timestamp errors are reported separately.
+            if connection is not None and user_id is not None and isinstance(proposed.get('strategy_id'),str) and isinstance(proposed.get('version'),str):
+                from strategy_center import qualification
+                state=qualification(connection,user_id,proposed)
+                if state!='QUALIFIED':warnings.append(issue(base+'.strategy_proposal','strategy_'+state.lower(),'Strategy proposal is stored but cannot start HOT WATCH until qualified'))
+
         if market.get('verification')=='verified':
             if market.get('as_of') is None:add(base+'.market.as_of','required_evidence','Verified market data requires timestamp')
             if not verified(market.get('source_ids')):add(base+'.market.source_ids','required_evidence','Verified market data requires verified source references')

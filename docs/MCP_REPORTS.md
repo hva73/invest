@@ -162,3 +162,21 @@ Eksempel: `{"candidate_id":"escint20261103185936.B","is_test":true}`. Ældre jou
 `get_hot_watch_engine` kræver fortsat separat `hotwatch:read`; rettelsen udvider ikke rapportforbindelsens adgang til motorstyring. Ingen rapporter, historik, driftsjobs eller strategier skal ændres eller genfremsendes. Opdatér kode, genstart webappen og genindlæs ChatGPT-forbindelsen ved behov. Serverversion vises som 2.5.1.
 
 Verifikation af 2.5.1: 254 Python-tests bestået. Det nye MCP-forløb tester rapport 1 med A/B → rapport 2 med ændret A og udeladt B → identisk genforsøg → kandidatjournal gennem reports:read uden observationsgrupper. Testen kontrollerer også paginering, ukendte/ikke-ejede kandidater, test/drift og ugyldige input. Kun midlertidige lokale databaser; ejerens konkrete produktions-ID’er er ikke slået op fra udviklingsmiljøet.
+
+
+## Strategiforslag og HOT WATCH-overdragelse (v2, valgfri udvidelse)
+
+Brug `get_strategy_catalog` til at læse kontoens strategier og versioner. I en v2-kandidat kan `strategy_proposal` indeholde fx:
+
+```json
+{
+  "strategy_id": "escape_momentum",
+  "version": "1.0.0",
+  "reason": "Observeret momentum; kilder og tid er angivet i rapporten.",
+  "proposed_at": "2026-11-08T10:00:00Z",
+  "source_ids": ["source-1"],
+  "catalyst": {"kind": "regnskab", "published_at": "2026-11-08T09:50:00Z", "available_at": "2026-11-08T09:51:00Z", "source_ids": ["source-1"]}
+}
+```
+
+`catalyst` kan udelades eller være null. Tider og kilder er stadig afsenderens oplysninger; strukturel validering verificerer ikke nyhedens sandhed eller datakildens pålidelighed. `validate_report` advarer om en ukendt/ukvalificeret strategi; rapporten kan gemmes, men automatisk overvågning blokeres for den kandidat. `send_report` kvitterer kun for rapportmodtagelse. Brug `get_hot_watch` med `candidate_id` og `is_test` for `strategy_handoff`: faktisk session, version og opstartsforsøg. Kun eksisterende kvalificerede versioner bruges; ingen ordre oprettes. Pågående sessioner skiftes aldrig automatisk. Automatiske opstartsforsøg gælder aktuelle hovedrapporter i drift, ikke testrapporter eller særskilte deep-analysis-rapporter.

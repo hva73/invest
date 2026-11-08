@@ -26,7 +26,7 @@ def validate(data):
     return data
 
 def material(candidate):
-    return {'decision':candidate.get('decision'),**{key:candidate[key] for key in ['ticker','company_name','signal','assessment','catalysts','risks','next_action','exit_plan','analysis_urls']}|{'tradability':candidate['tradability']['status'],'market_verification':candidate['market']['verification']}}
+    return {'decision':candidate.get('decision'),'strategy_proposal':candidate.get('strategy_proposal'),**{key:candidate[key] for key in ['ticker','company_name','signal','assessment','catalysts','risks','next_action','exit_plan','analysis_urls']}|{'tradability':candidate['tradability']['status'],'market_verification':candidate['market']['verification']}}
 
 # Announce local dependencies already enforced by the backend. Cross-object
 # source/identity checks remain in report_validation, where account data exists.
@@ -106,3 +106,11 @@ strict_patterns(SCHEMA)
 
 # Optional exact provider reference; sender claims do not confer broker authority.
 PORTFOLIO['properties']['broker_reference']=nullable(obj({'provider':enum('pluto'),'external_id':ID}))
+
+# Optional explicit strategy proposal. It is an attributed recommendation,
+# not an authorization to change an existing session or execute a trade.
+STRATEGY_PROPOSAL=obj({'strategy_id':ID,'version':dict(string(30),pattern=r'^\d{1,4}\.\d{1,4}\.\d{1,4}$'),'reason':string(4000),'proposed_at':AT,'source_ids':dict(REFS,minItems=1)})
+STRATEGY_CATALYST=obj({'kind':string(200),'published_at':AT,'available_at':AT,'source_ids':dict(REFS,minItems=1)})
+STRATEGY_PROPOSAL['properties']['catalyst']=nullable(STRATEGY_CATALYST)
+CANDIDATE['properties']['strategy_proposal']=nullable(STRATEGY_PROPOSAL)
+strict_patterns(SCHEMA)
