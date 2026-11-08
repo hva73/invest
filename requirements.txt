@@ -1,2 +1,3 @@
 cryptography==50.0.0
 websockets>=12,<17
+pywebpush==2.0.3

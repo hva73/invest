@@ -107,6 +107,8 @@ def start_manual_pluto(connect,uid,data):
  cid='manual-'+hashlib.sha256((str(uid)+'|'+data['asset_id']).encode()).hexdigest()[:28]
  risk={'max_notional_dkk':'1000','max_loss_dkk':'100','max_spread_pct':'1','max_quote_age_s':120,'max_position_fraction_pct':'20','proposed_quantity':None,'stop_price':None,'exit_deadline':None}
  req={'watch_id':'hw-manual-'+secrets.token_hex(12),'report_id':'manual-pluto','candidate_id':cid,'is_test':False,'purpose':'manual pluto','ticker':asset['ticker'],'exchange':asset['exchange'],'asset_id':asset['id'],'quote_currency':asset['currency'],'portfolio_ids':[],'priority':'NORMAL','profile':'NORMAL','provider':provider,'provider_symbol':symbol,'end_at':None,'activation_reason':'Manuelt valgt Pluto-instrument','reactivation_reason':'Manuelt genvalgt Pluto-instrument','strategy_id':'escape_momentum','strategy_version':'1.0.0','risk':risk,'watch_mode':'entry'}
+ import strategy_center
+ selected=strategy_center.resolve(connect,uid);req.update(strategy_id=selected['strategy_id'],strategy_version=selected['version'],activation_reason=req['activation_reason']+' · '+selected['reason'])
  return engine.create_manual(connect,uid,req)
 
 def pending_holding_slots(c,uid,now):
@@ -199,6 +201,8 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
   overlapping=any(a['external_id']==b.get('parent_external_id') for a in portfolios for b in portfolios)
   portfolio_ids=[p['id'] for p in portfolios] if len(portfolios)<=30 and not overlapping else []
   req={'watch_id':watch,'report_id':report['report_id'],'candidate_id':cid,'is_test':mode,'purpose':'automatic discovery','ticker':candidate['ticker'],'exchange':instrument['exchange'],'asset_id':asset,'quote_currency':instrument['currency'],'portfolio_ids':portfolio_ids,'priority':'NORMAL','profile':'NORMAL','provider':provider,'provider_symbol':symbol,'end_at':None,'activation_reason':'Automatisk overvågning efter verificeret Pluto-aktiv og handelsbarhed','strategy_id':'escape_momentum','strategy_version':'1.0.0','risk':risk,'watch_mode':'entry'}
+  import strategy_center
+  selected=strategy_center.resolve(connect,uid);req.update(strategy_id=selected['strategy_id'],strategy_version=selected['version'],activation_reason=req['activation_reason']+' · '+selected['reason'])
   if existing_cycle:req['trade_cycle_id']=existing_cycle
   result=engine.create(connect,uid,req);return {'status':result['session']['status'] if not result['duplicate'] else 'ALREADY_ACTIVE','watch_id':watch}
  except EngineError as error:return {'status':error.code}
@@ -582,6 +586,8 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
     cid='holding-'+hashlib.sha256((str(uid)+'|'+str(pid)+'|'+aid).encode()).hexdigest()[:28]
     risk={'max_notional_dkk':'1000','max_loss_dkk':'100','max_spread_pct':'1','max_quote_age_s':120,'max_position_fraction_pct':'20','proposed_quantity':None,'stop_price':None,'exit_deadline':None}
     req={'watch_id':watch,'report_id':'automatic-holdings','candidate_id':cid,'is_test':False,'purpose':'automatic holding watch','ticker':instrument['ticker'],'exchange':instrument['exchange'],'asset_id':aid,'quote_currency':instrument['currency'],'portfolio_ids':[pid],'priority':'NORMAL','profile':'NORMAL','provider':provider,'provider_symbol':symbol,'end_at':None,'activation_reason':'Automatisk overvågning af verificeret Pluto-beholdning','strategy_id':'escape_momentum','strategy_version':'1.0.0','risk':risk,'watch_mode':'exit'}
+    import strategy_center
+    selected=strategy_center.resolve(connect,uid,scope='exit');req.update(strategy_id=selected['strategy_id'],strategy_version=selected['version'],activation_reason=req['activation_reason']+' · '+selected['reason'])
     result=engine.create_holding(connect,uid,req,now);status='LINKED';linked=result['session']['watch_id']
  except EngineError as error:status=error.code
  except Exception:status='VERIFICATION_FAILED'
@@ -768,12 +774,24 @@ class Runner:
     except Exception:logging.getLogger('escape.hotwatch').exception('discovery_error')
     self.stop.wait(2)
   discovery_thread=threading.Thread(target=discovery_loop,name='hotwatch-discovery',daemon=True);discovery_thread.start()
+  def push_loop():
+   next_reconcile=0
+   while not self.stop.is_set():
+    try:
+     import web_push
+     if time.monotonic()>=next_reconcile:
+      web_push.reconcile_stale(self.connect);next_reconcile=time.monotonic()+20
+     if not web_push.dispatch_one(self.connect):self.stop.wait(3)
+    except Exception:
+     logging.getLogger('escape.hotwatch').error('push_dispatch_unavailable')
+     self.stop.wait(10)
+  push_thread=threading.Thread(target=push_loop,name='signal-notifications',daemon=True);push_thread.start()
   try:
    while not self.stop.is_set():
     self.drain()
     self.stop.wait(interval)
   finally:
-   self.stop.set();thread.join(timeout=6);holding_thread.join(timeout=2);candidate_thread.join(timeout=2);discovery_thread.join(timeout=2);sector_thread.join(timeout=2)
+   self.stop.set();thread.join(timeout=6);holding_thread.join(timeout=2);candidate_thread.join(timeout=2);discovery_thread.join(timeout=2);sector_thread.join(timeout=2);push_thread.join(timeout=10)
    if thread.is_alive():logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'heartbeat_shutdown_timeout'}))
    else:self.heartbeat('stopped')
 

@@ -14,6 +14,8 @@ class Updater(unittest.TestCase):
    source,target=self.fixture(Path(d));backup=apply_update.apply(source,target)
    self.assertEqual((target/'app.py').read_text(),'new code');self.assertEqual((backup/'code/app.py').read_text(),'old code')
    self.assertEqual((target/'hotwatch_warmup.py').read_text(),'new code')
+   self.assertIn('web_push.py',apply_update.FILES);self.assertEqual((target/'web_push.py').read_text(),'new code')
+   self.assertIn('strategy_center.py',apply_update.FILES);self.assertEqual((target/'strategy_center.py').read_text(),'new code')
    self.assertIn('data/dk_postcodes.json',apply_update.FILES)
    self.assertEqual((target/'data/dk_postcodes.json').read_text(),'new code')
    self.assertIn('user_profile.py',apply_update.FILES)
@@ -23,6 +25,11 @@ class Updater(unittest.TestCase):
    self.assertTrue((target/'var/hotwatch-autostart.enabled').is_file())
    for path in [target/'var/escape.db',backup/'escape.db']:
     with sqlite3.connect(path) as c:self.assertEqual(c.execute('SELECT value FROM preserved').fetchone()[0],'private-data')
+ def test_notification_key_is_backed_up_without_replacement(self):
+  with tempfile.TemporaryDirectory() as d:
+   source,target=self.fixture(Path(d));key=target/'var/keys/push_vapid.pem';key.parent.mkdir(parents=True);key.write_bytes(b'private-test-key')
+   backup=apply_update.apply(source,target)
+   self.assertEqual(key.read_bytes(),b'private-test-key');self.assertEqual((backup/'push_vapid.pem').read_bytes(),b'private-test-key');self.assertEqual((backup/'push_vapid.pem').stat().st_mode&0o777,0o600)
  def test_missing_file_changes_nothing(self):
   with tempfile.TemporaryDirectory() as d:
    source,target=self.fixture(Path(d));(source/'oauth.py').unlink()

@@ -79,8 +79,9 @@ def effective_poll_interval(c,request,profile=None):
   return max(minimum,(other_units*60+remaining-1)//remaining)
  return max(minimum,(units*60+available-1)//available)
 def init(c):
- import hotwatch_warmup
+ import hotwatch_warmup,web_push
  hotwatch_warmup.init(c)
+ web_push.init(c)
  c.execute('CREATE TABLE IF NOT EXISTS hw_strategies(owner_id INTEGER NOT NULL,strategy_id TEXT NOT NULL,version TEXT NOT NULL,payload TEXT NOT NULL,checksum TEXT NOT NULL,created TEXT NOT NULL,author TEXT NOT NULL,validation_status TEXT NOT NULL,PRIMARY KEY(owner_id,strategy_id,version))')
  c.execute('INSERT OR IGNORE INTO hw_strategies VALUES(0,?,?,?,?,?,?,?)',(BASELINE['strategy_id'],BASELINE['version'],canonical(BASELINE),checksum(BASELINE),utc().isoformat(),'ESCAPE builtin','baseline_tested'))
  c.execute('CREATE TABLE IF NOT EXISTS hw_sessions(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),watch_id TEXT NOT NULL,is_test INTEGER NOT NULL,candidate_id TEXT NOT NULL,purpose TEXT NOT NULL,status TEXT NOT NULL,request TEXT NOT NULL,digest TEXT NOT NULL,strategy TEXT NOT NULL,state TEXT NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL,last_data TEXT,last_calculation TEXT,next_due REAL NOT NULL,lease_owner TEXT,lease_until REAL NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 0,failures INTEGER NOT NULL DEFAULT 0,last_error TEXT,UNIQUE(user_id,watch_id))')
@@ -145,7 +146,14 @@ def scheduled_regular_close(c,exchange,now):
 
 def event(c,row,kind,now,reason,metrics=None,severity='info',data_time=None):
  payload={'watch_id':row['watch_id'],'event_type':kind,'reason':reason,'supporting_metrics':metrics or {},'strategy_version':json.loads(row['strategy'])['version']}
- c.execute('INSERT INTO hw_events(event_id,watch_row_id,event_type,severity,created,data_timestamp,payload) VALUES(?,?,?,?,?,?,?)',('hw-'+secrets.token_hex(12),row['id'],kind,severity,now.isoformat(),data_time,canonical(payload)))
+ event_id='hw-'+secrets.token_hex(12)
+ c.execute('INSERT INTO hw_events(event_id,watch_row_id,event_type,severity,created,data_timestamp,payload) VALUES(?,?,?,?,?,?,?)',(event_id,row['id'],kind,severity,now.isoformat(),data_time,canonical(payload)))
+ try:
+  import web_push
+  web_push.enqueue(c,row,kind,event_id,now)
+ except Exception:
+  import logging
+  logging.getLogger('escape.hotwatch').error('push_queue_unavailable')
 
 def strategy(c,uid,sid,version):
  row=c.execute('SELECT * FROM hw_strategies WHERE owner_id IN (0,?) AND strategy_id=? AND version=? ORDER BY owner_id DESC LIMIT 1',(uid,sid,version)).fetchone()

@@ -54,6 +54,8 @@ def init():
         report_ingest.init(c)
         import hotwatch_engine
         hotwatch_engine.init(c)
+        import strategy_center
+        strategy_center.init(c)
         import mcp_reports
         mcp_reports.init(c)
         import jobs
@@ -209,6 +211,12 @@ class Handler(BaseHTTPRequestHandler):
             s=self.session()
             if not s: return self.send(401,{'error':'Log ind først'})
             user_id=s['user_id']
+            if self.path=='/api/push/config':
+                import web_push
+                return self.send(200,web_push.config(connect,user_id))
+            if self.path=='/api/strategy-center':
+                import strategy_center
+                return self.send(200,strategy_center.preferences(connect,user_id))
             if self.path=='/api/admin/users':
                 if s['role']!='admin':return self.send(403,{'error':'Kun administratoren kan se brugere'})
                 import user_profile
@@ -378,6 +386,21 @@ class Handler(BaseHTTPRequestHandler):
                     c.execute('DELETE FROM sessions WHERE user_id=?',(target,))
                     c.execute("INSERT INTO admin_actions(admin_id,target_id,action,created) VALUES(?,?,'password_reset',?)",(user_id,target,now()))
                 return self.send(200,{'ok':True})
+            if self.path in ('/api/push/subscribe','/api/push/unsubscribe','/api/push/device','/api/push/test'):
+                import web_push
+                try:
+                    if self.path.endswith('/subscribe'):result=web_push.subscribe(connect,user_id,data)
+                    elif self.path.endswith('/unsubscribe'):result=web_push.unsubscribe(connect,user_id,data.get('endpoint'))
+                    elif self.path.endswith('/device'):result=web_push.device_preferences(connect,user_id,data.get('endpoint'))
+                    else:result=web_push.send_test(connect,user_id,data.get('endpoint'))
+                except ValueError as error:return self.send(400,{'error':str(error)})
+                except Exception:return self.send(503,{'error':'Notifikationen kunne ikke gennemføres. Kontrollér enhed og serveropsætning.'})
+                return self.send(200,result)
+            if self.path=='/api/strategy-center':
+                import strategy_center
+                try:result=strategy_center.save(connect,user_id,data,now())
+                except ValueError as error:return self.send(400,{'error':str(error)})
+                return self.send(200,result)
             if self.path in ('/api/profile/start','/api/profile/save'):
                 import user_profile
                 try:
