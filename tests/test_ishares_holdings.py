@@ -44,6 +44,13 @@ class IShareHoldings(unittest.TestCase):
   self.assertEqual(result['rows'][0]['ticker'],'ITX');self.assertEqual(get.call_count,3)
   with patch('ishares_holdings._get',side_effect=[EU_SITEMAP,EU_PAGE]):
    with self.assertRaises(h.HoldingsUnavailable):h.fetch_europe('EXV9.XETRA',EU_NAME)
+ def test_europe_travel_and_leisure_name_with_ampersand(self):
+  path='/de/privatanleger/de/produkte/251965/ishares-stoxx-europe-600-travel-leisure-ucits-etf-de-fund'
+  name='iShares STOXX Europe 600 Travel & Leisure UCITS ETF (DE)'
+  sitemap=('<urlset><url><loc>https://www.ishares.com'+path+'</loc></url></urlset>').encode()
+  page=b'''<title>iShares STOXX Europe 600 Travel &amp; Leisure UCITS ETF (DE) | EXV9 | iShares</title><script>{"contentUrl":"http://www.ishares.com/de/privatanleger/de/produkte/251965/ishares-stoxx-europe-600-travel-leisure-ucits-etf-de/latest-holdings.csv"}</script>'''
+  self.assertEqual(h.discover_europe(sitemap,name),path)
+  self.assertIn('/251965/',h.europe_csv_url(page,path,'EXV9',name))
  def test_redirects_stay_on_https_issuer(self):
   class Response:
    def __enter__(self):return self
