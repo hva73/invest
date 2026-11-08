@@ -23,9 +23,10 @@ try:
   page.route('**/api/trade/search',lambda route:route.fulfill(json={'assets':[{'asset_id':'asset-test','name':'Synthetic PEPE','ticker':'PEPE','isin':'','currency':'USD'}]}))
   page.route('**/api/v1/hotwatch/sessions/watch-1?*',lambda route:route.fulfill(json={'session':{'signal':'BUY','request':{'ticker':'TEST','asset_id':'asset-test'}}}))
   page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();page.locator('.dashboard-v1').wait_for()
+  page.evaluate("pid => state.dashboard.positions.push({portfolio_id:pid,ticker:'PEPE',asset_id:'asset-test',verification:'broker_snapshot'})",case.root)
   expect(page.locator('.dash-attention [data-trade-test-buy]')).to_be_visible();page.locator('.dash-attention [data-trade-test-buy]').click();dialog=page.locator('#quick-trade-dialog');expect(dialog).to_be_visible()
   expect(dialog.locator('[name=size]')).to_have_value('20');expect(dialog.locator('[name=portfolio_id]')).to_have_value(str(case.root))
-  expect(dialog.locator('#quick-trade-query')).to_have_value('PEPE');dialog.locator('[data-quick-search]').click();dialog.locator('#quick-trade-assets').select_option('asset-test')
+  expect(dialog.locator('#quick-trade-query')).to_have_count(0);expect(dialog.locator('[name=asset_id]')).to_have_value('asset-test')
   dialog.locator('button[type=submit]').click();expect(dialog.locator('#quick-trade-confirm')).to_be_visible()
   assert calls[-1][1]['report_id']=='@manual-buy' and calls[-1][1]['size']=='20'
   assert not any(x[0]=='send' for x in calls);dialog.locator('[data-quick-close]').click()

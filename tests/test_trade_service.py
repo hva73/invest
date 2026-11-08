@@ -160,6 +160,8 @@ class Trading(unittest.TestCase):
   with self.assertRaises(trade.TradeError) as caught:trade.preview(app.connect,1,request,Failed)
   message=str(caught.exception);self.assertIn('Amount orders are not supported',message);self.assertNotIn('synthetic-secret-token',message);self.assertNotIn('listen er bevaret',message)
   self.assertFalse(self.writes());self.assertEqual(trade.history(app.connect,1),[])
+  permission=trade.estimate_error({'structuredContent':{'error':{'message':'This connection may only read. Reconnect Pluto and tick Also let it propose orders.'}}},Failed('synthetic'))
+  self.assertIn('kun læseadgang',permission);self.assertIn('Forbindelser',permission)
   hidden=trade.estimate_error({'structuredContent':{'error':{'message':'password="two secret words"'}}},Failed('synthetic'))
   self.assertNotIn('secret words',hidden)
  def test_preview_structured_rejection_and_asset_capabilities(self):
