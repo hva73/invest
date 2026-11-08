@@ -525,22 +525,15 @@ def verify_cxe_feeds(connect,now=None):
  return 1 if status is None else 0
 
 def holding_origin(c,uid,pid,asset_id):
- """Link a position only to an unambiguous, Pluto-confirmed HOT WATCH proposal.
+ """No inferred acquisition origin from an accepted proposal.
 
- Confirmation of a proposal is not an execution; the caller independently
- requires a fresh verified holding and never infers a fill from this link.
+ The currently verified Pluto intent contract proves acceptance, not the
+ order/fill-to-intent relationship. A pre-existing holding or another purchase
+ could match the same portfolio and asset. Keep the origin unknown until
+ that broker relationship is available; asset+portfolio exit monitoring is
+ independently verified and continues without this optional attribution.
  """
- rows=c.execute("SELECT p.intent_id,p.response,p.payload,s.candidate_id,s.watch_id,s.request FROM broker_proposals p JOIN hw_sessions s ON s.user_id=p.user_id AND s.watch_id=p.candidate_id AND s.is_test=0 WHERE p.user_id=? AND p.portfolio_id=? AND p.report_id='@hotwatch' AND p.status='sent' AND p.intent_id IS NOT NULL ORDER BY p.id DESC LIMIT 50",(uid,pid)).fetchall()
- links={}
- for row in rows:
-  try:
-   response=json.loads(row['response'] or '{}');payload=json.loads(row['payload']);orders=payload.get('orders') or [];request=json.loads(row['request'])
-   if response.get('orderIntentId')!=row['intent_id'] or str(response.get('status') or '').upper() not in ('ACCEPTED','CONFIRMED'):continue
-   if len(orders)!=1 or orders[0].get('assetId')!=asset_id or orders[0].get('side')!='BUY' or request.get('asset_id')!=asset_id or request.get('watch_mode')!='entry':continue
-   cycle=request.get('trade_cycle_id') or 'cycle:'+engine.checksum({'watch_id':row['watch_id']})[:24]
-   links[(row['candidate_id'],cycle)]={'origin_candidate_id':row['candidate_id'],'origin_trade_cycle_id':cycle,'origin_watch_id':row['watch_id']}
-  except (ValueError,TypeError,AttributeError):continue
- return next(iter(links.values())) if len(links)==1 else None
+ return None
 
 def refresh_holding_origin(connect,uid,pid,asset_id):
  """Refresh at most one matching proposal, read-only at Pluto; never infer a fill."""

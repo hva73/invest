@@ -34,12 +34,16 @@ try:
   dialog.locator('[data-quick-close]').click()
   page.evaluate("() => {const b=document.createElement('button');b.dataset.tradeWatch='watch-1';b.textContent='KØB';document.body.append(b)}")
   expect(page.locator('[data-explain-watch="watch-1"]')).to_be_visible();page.locator('[data-explain-watch="watch-1"]').click();expect(page.locator('#signal-explanation-dialog')).to_contain_text('betingelser for køb er opfyldt');expect(page.locator('#signal-explanation-dialog')).to_contain_text('2,5%');expect(page.locator('#signal-explanation-dialog')).to_contain_text('1.200');expect(page.locator('#signal-explanation-dialog')).to_contain_text('0,25 %');expect(page.locator('#signal-explanation-dialog')).to_contain_text('10,1 USD');expect(page.locator('#signal-explanation-dialog')).to_contain_text('for gamle');page.locator('[data-explanation-close]').click()
-  for side,size,expected in [('BUY','100,50','amount'),('SELL','50','percent')]:
-   page.evaluate("side=>window.TradeUI.openQuick({report_id:'@hotwatch',candidate_id:'watch-1',ticker:'TEST',asset_id:'asset-test',signal:side})",side)
-   dialog=page.locator('#quick-trade-dialog');expect(dialog).to_be_visible();dialog.locator('[name=size]').fill(size)
+  for side,size,expected in [('BUY','1','shares'),('SELL','50','percent')]:
+   page.evaluate("""([side,pid])=>window.TradeUI.openQuick({report_id:'@hotwatch',candidate_id:'watch-1',ticker:'TEST',asset_id:'asset-test',signal:side,risk_plan:side==='BUY'?{portfolio_id:pid,budget_dkk:'100',quantity:'1',limit_price:'12',stop_price:'10'}:null})""",[side,case.root])
+   dialog=page.locator('#quick-trade-dialog');expect(dialog).to_be_visible()
+   if side=='BUY':
+    expect(dialog.locator('[name=size]')).to_be_disabled();expect(dialog).to_contain_text('Din kontrollerede købsplan')
+   else:dialog.locator('[name=size]').fill(size)
    count=len([x for x in calls if x[0]=='send'])
    dialog.locator('button[type=submit]').click();expect(dialog).to_contain_text('Åbn Pluto')
-   assert calls[-2][1]['size_mode']==expected and calls[-2][1]['size']==size.replace(',','.')
+   assert calls[-2][1]['size_mode']==expected and calls[-2][1]['size']==size
+   if side=='BUY':assert calls[-2][1]['order_type']=='LIMIT' and calls[-2][1]['limit_price']=='12'
    assert len([x for x in calls if x[0]=='send'])==count+1
    dialog.locator('[data-quick-close]').click()
   page.evaluate("""() => {

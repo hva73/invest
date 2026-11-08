@@ -44,7 +44,7 @@ class HoldingAutowatch(unittest.TestCase):
   with app.connect() as c:
    modes=[json.loads(row['request'])['watch_mode'] for row in c.execute('SELECT request FROM hw_sessions')]
   self.assertEqual(sorted(modes),['entry','exit'])
- def test_confirmed_proposal_links_verified_holding_to_original_candidate(self):
+ def test_accepted_proposal_does_not_attribute_a_preexisting_holding(self):
   import hotwatch_strategy
   entry={'asset_id':self.holding['asset_id'],'watch_mode':'entry','trade_cycle_id':'cycle-original'}
   with app.connect() as c:
@@ -52,7 +52,7 @@ class HoldingAutowatch(unittest.TestCase):
    payload={'orders':[{'assetId':self.holding['asset_id'],'side':'BUY'}]}
    response={'orderIntentId':'intent-synthetic','status':'ACCEPTED'}
    c.execute("INSERT INTO broker_proposals(user_id,fingerprint,report_id,candidate_id,kind,portfolio_id,payload,status,created,intent_id,response) VALUES(1,'synthetic','@hotwatch','entry-origin','direct',?,?,'sent',?,'intent-synthetic',?)",(self.pid,json.dumps(payload),self.now.timestamp(),json.dumps(response)))
-   self.assertEqual(service.holding_origin(c,1,self.pid,self.holding['asset_id'])['origin_candidate_id'],'candidate-original')
+   self.assertIsNone(service.holding_origin(c,1,self.pid,self.holding['asset_id']))
    c.execute("UPDATE broker_proposals SET response=?",(json.dumps({'orderIntentId':'intent-synthetic','status':'PENDING'}),))
    self.assertIsNone(service.holding_origin(c,1,self.pid,self.holding['asset_id']))
   def read_only_check(connect,uid,proposal_id):
@@ -62,7 +62,7 @@ class HoldingAutowatch(unittest.TestCase):
   self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
   with app.connect() as c:
    row=c.execute("SELECT request FROM hw_sessions WHERE purpose='automatic holding watch'").fetchone();req=json.loads(row['request'])
-   self.assertEqual(req['origin_candidate_id'],'candidate-original');self.assertEqual(req['origin_trade_cycle_id'],'cycle-original');self.assertEqual(req['strategy_id'],'escape_momentum')
+   self.assertNotIn('origin_candidate_id',req);self.assertNotIn('origin_trade_cycle_id',req);self.assertEqual(req['strategy_id'],'escape_momentum');self.assertEqual(req['portfolio_ids'],[self.pid]);self.assertEqual(req['watch_mode'],'exit')
  def test_manual_pause_is_preserved(self):
   self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
   with app.connect() as c:wid=c.execute('SELECT watch_id FROM hw_sessions').fetchone()[0]

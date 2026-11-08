@@ -14,8 +14,8 @@ class ProbeError(Exception):pass
 def shape(value,depth=0):
  if depth>8:return 'dybdegrænse'
  if isinstance(value,dict):
-  allowed={'orders','items','data','holding','asset','amount','value','currency','priceCurrency','orderCurrency','commissionCurrency','feeCurrency','base','quote','rate','commission','notional','accountNotional','filledAccountNotional','assetBankFx','orderId','status','filledQuantity','requestedQuantity','averageFillPrice','statusChangedAt','updatedAt','side','assetId'}
-  codes={'currency','priceCurrency','orderCurrency','commissionCurrency','feeCurrency','base','quote'}
+  allowed={'orders','items','data','holding','asset','amount','value','currency','priceCurrency','orderCurrency','commissionCurrency','feeCurrency','base','quote','rate','commission','notional','accountNotional','filledAccountNotional','accountNotionalCurrency','filledAccountNotionalCurrency','quantity','limitPrice','type','assetBankFx','orderId','status','filledQuantity','requestedQuantity','averageFillPrice','statusChangedAt','updatedAt','side','assetId'}
+  codes={'currency','priceCurrency','orderCurrency','commissionCurrency','feeCurrency','accountNotionalCurrency','filledAccountNotionalCurrency','base','quote'}
   result={str(k):(v if k in codes and isinstance(v,str) and re.fullmatch('[A-Z]{3}',v) else shape(v,depth+1)) for k,v in value.items() if k in allowed}
   # Pluto may wrap the estimate in differently named objects. Search inside
   # them without printing unrecognised names or any of their scalar values.

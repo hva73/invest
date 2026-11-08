@@ -14,6 +14,7 @@ class Updater(unittest.TestCase):
    source,target=self.fixture(Path(d));backup=apply_update.apply(source,target)
    self.assertEqual((target/'app.py').read_text(),'new code');self.assertEqual((backup/'code/app.py').read_text(),'old code')
    self.assertEqual((target/'hotwatch_warmup.py').read_text(),'new code')
+   self.assertEqual((target/'hotwatch_buy_plan.py').read_text(),'new code')
    self.assertIn('web_push.py',apply_update.FILES);self.assertEqual((target/'web_push.py').read_text(),'new code')
    self.assertIn('strategy_center.py',apply_update.FILES);self.assertEqual((target/'strategy_center.py').read_text(),'new code')
    self.assertIn('strategy_lab.py',apply_update.FILES);self.assertEqual((target/'strategy_lab.py').read_text(),'new code')

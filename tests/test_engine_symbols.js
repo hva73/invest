@@ -1,6 +1,6 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 let source=fs.readFileSync('static/engine-ui.js','utf8');
-source=source.replace('return {setup(d){','return {testSet(c,p,a){candidates=c;portfolios=[];portfolioSnapshots={};batchCandidates=[];mode=false;api=a;esc=String;owner=()=>"synthetic"},testItems(){return batchCandidates},addBatchCandidate,resolveInstrument,findEodhdSymbol,change,setup(d){');
+source=source.replace('return {openHoldingStatus,','return {testSet(c,p,a){candidates=c;portfolios=[];portfolioSnapshots={};batchCandidates=[];mode=false;api=a;esc=String;owner=()=>"synthetic"},testItems(){return batchCandidates},addBatchCandidate,resolveInstrument,findEodhdSymbol,change,openHoldingStatus,');
 const form={isConnected:true,elements:{candidate:{value:'0'},provider:{value:'eodhd'},provider_symbol:{value:'AMD.US'},exchange:{},asset_id:{},quote_currency:{},portfolios:{options:[]},watch_mode:{value:'entry'}}};
 const nodes={'engine-create':form,'engine-form-status':{},'engine-batch-list':{},'engine-eodhd-choice':{}};
 const context={window:{},document:{getElementById:id=>nodes[id]},FormData:class{constructor(f){this.f=f}get(k){return this.f.elements[k]?.value}},console};

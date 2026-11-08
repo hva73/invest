@@ -124,8 +124,8 @@ def decision_diagnostics(strategy,metrics,raw,signal,risk_codes,reasons,held):
  data_codes={'DATA_UNVERIFIED','DATA_STALE','DATA_FUTURE','PRICE_MISSING','MARKET_STATUS_UNKNOWN','POSITION_CONTEXT_UNKNOWN','TRADABILITY_UNCONFIRMED','SPREAD_UNKNOWN','FEATURES_INSUFFICIENT','RISK_INPUTS_UNKNOWN'}
  missing=[code for code in risk_codes if code in data_codes]
  blocked=[code for code in risk_codes if code not in data_codes]
- risk='NOT_EVALUATED' if raw!='BUY' else 'MISSING_DATA' if missing else 'BLOCKED' if blocked else 'PASSED'
- return {'strategy':'MET' if decision else 'NOT_MET' if decision is False else 'UNKNOWN','strategy_side':'EXIT' if held else 'ENTRY','risk':risk,'missing_data_codes':missing if raw=='BUY' else [],'blocking_codes':blocked if raw=='BUY' else [],'confirmation_pending':'CONFIRMATION_PENDING' in reasons,'current_signal':signal}
+ risk='MISSING_DATA' if missing else 'BLOCKED' if blocked else 'PASSED' if raw=='BUY' else 'NOT_EVALUATED'
+ return {'strategy':'MET' if decision else 'NOT_MET' if decision is False else 'UNKNOWN','strategy_side':'EXIT' if held else 'ENTRY','risk':risk,'missing_data_codes':missing,'blocking_codes':blocked,'confirmation_pending':'CONFIRMATION_PENDING' in reasons,'current_signal':signal}
 
 def _risk_gate(sample,metrics,risk,now,raw,require_macd=True):
  """Mandatory for every strategy version. Session limits only tighten globals."""
@@ -158,11 +158,14 @@ def _risk_gate(sample,metrics,risk,now,raw,require_macd=True):
  elif Decimal(spread)>min(Decimal(risk['max_spread_pct']),Decimal(GLOBAL_RISK['max_spread_pct'])):codes.append('SPREAD_TOO_WIDE')
  required=['relative_volume','volatility_pct','acceleration_pct_s2']+(['return_3_pct','macd_histogram'] if require_macd else ['return_window_pct'])
  if any(metrics.get(k) is None for k in required):codes.append('FEATURES_INSUFFICIENT')
+ if risk.get('entry_limit') and price>Decimal(risk['entry_limit']):codes.append('ENTRY_LIMIT_EXCEEDED')
+ if risk.get('entry_price') and risk.get('stop_price') and Decimal(risk['stop_price'])>=price:codes.append('RISK_INPUTS_INVALID')
  qty=risk['proposed_quantity'];fx=context['fx_to_dkk'];fees=context['fees_dkk'];equity=context['portfolio_equity_dkk'];exposure=context['exposure_dkk'];stop=risk['stop_price']
  if any(v is None for v in [qty,fx,fees,equity,exposure,stop]):codes.append('RISK_INPUTS_UNKNOWN')
  else:
+  price=max(price,Decimal(risk['entry_price'])) if risk.get('entry_price') else price
   q=Decimal(qty);conversion=Decimal(fx);costs=Decimal(fees);capital=Decimal(equity);current=Decimal(exposure);limit=Decimal(stop)
-  if q<=0 or conversion<=0 or capital<=0 or limit>=price:codes.append('RISK_INPUTS_INVALID')
+  if q<=0 or conversion<=0 or capital<=0 or costs<0 or current<0 or limit<=0 or limit>=price:codes.append('RISK_INPUTS_INVALID')
   else:
    notional=q*price*conversion+costs;loss=q*(price-limit)*conversion+costs
    if notional>min(Decimal(risk['max_notional_dkk']),Decimal(GLOBAL_RISK['max_notional_dkk'])):codes.append('POSITION_SIZE_LIMIT')
@@ -206,5 +209,5 @@ def calculate(sample,metrics,strategy,risk,state,now,killed=False,new_market_eve
  score=0 if signal in ['NO_DATA','PAUSE'] else sum(1 for k in ['return_3_pct','relative_volume','spread_pct','volatility_pct','macd_histogram'] if metrics.get(k) is not None)*20
  explanations={'NO_TRIGGER':'Ingen bekræftet trigger','ENTRY_RULES':'Momentum, volumen, trend og kursbrud opfylder de deklarative indgangsregler','EXIT_RULES':'De deklarative exitbetingelser er opfyldt','WARMUP':'Der mangler sammenlignelige observationer til indikatorerne','CONFIRMATION_PENDING':'Afventer gentagne bekræftelser og minimumsvarighed','COOLDOWN':'Et nyt handlingssignal afventer cooldown','DATA_STALE':'Kursdata er for gamle','DATA_UNVERIFIED':'Kilden er ikke verificeret','STOP_BREACHED':'Den konfigurerede stopgrænse er brudt','EXIT_DEADLINE':'Den konfigurerede exitdeadline er nået','SPREAD_TOO_WIDE':'Spread overstiger den centrale risikogrænse','SPREAD_UNKNOWN':'Bid/ask-grundlaget mangler','POSITION_CONTEXT_UNKNOWN':'Aktuel depotkontekst mangler','TRADABILITY_UNCONFIRMED':'Pluto-handelsbarhed er ikke bekræftet','RISK_INPUTS_UNKNOWN':'Der mangler oplysninger om størrelse, valuta, gebyrer eller risiko','MARKET_STATUS_UNKNOWN':'Handelssessionen er ikke verificeret','NEW_MARKET_CONFIRMATION_REQUIRED':'En opdateret depotstatus tæller ikke som ny kursbekræftelse'}
  result={'signal':signal,'confidence_score':score,'signal_strength':'strong' if signal in ['BUY','SELL','REDUCE'] else 'neutral','reason_codes':list(dict.fromkeys(reasons)) or ['NO_TRIGGER'],'human_readable_explanation':'; '.join(explanations.get(code,code.replace('_',' ').lower()) for code in (list(dict.fromkeys(reasons)) or ['NO_TRIGGER'])),'supporting_metrics':metrics,'invalidating_conditions':['stale/unverified data','risk rejection','changed position','market halt'],'next_trigger':'Ny verificeret observation og opfyldte bekræftelses-/risikoregler','recommended_action':{'BUY':'KØB-signal · kræver særskilt godkendt handelsflow','SELL':'SÆLG-signal · ingen ordre oprettet','REDUCE':'REDUCÉR-signal · ingen ordre oprettet','WAIT':'VENT','NO_DATA':'INGEN DATA','PAUSE':'PAUSE'}[signal],'risk_level':'critical' if critical else 'high' if risk_codes else 'normal','calculation_timestamp':now.isoformat(),'data_timestamp':sample['event_time'],'strategy_id':strategy['strategy_id'],'strategy_version':strategy['version'],'strategy_checksum':checksum(strategy),'critical_override':bool(critical and signal=='SELL' and previous!='SELL'),'rules_score_note':'0–100 datapunktsdækning af fem regelinputs; ikke en statistisk sandsynlighed eller performanceprognose.'}
- if strategy.get('schema_version')==2:result['decision_diagnostics']=decision_diagnostics(strategy,metrics,raw,signal,risk_codes,reasons,held)
+ result['decision_diagnostics']=decision_diagnostics(strategy,metrics,raw,signal,risk_codes,reasons,held)
  return result,newstate

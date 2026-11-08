@@ -79,7 +79,8 @@ def effective_poll_interval(c,request,profile=None):
   return max(minimum,(other_units*60+remaining-1)//remaining)
  return max(minimum,(units*60+available-1)//available)
 def init(c):
- import hotwatch_warmup,web_push
+ import hotwatch_warmup,web_push,hotwatch_buy_plan
+ hotwatch_buy_plan.init(c)
  hotwatch_warmup.init(c)
  web_push.init(c)
  c.execute('CREATE TABLE IF NOT EXISTS hw_strategies(owner_id INTEGER NOT NULL,strategy_id TEXT NOT NULL,version TEXT NOT NULL,payload TEXT NOT NULL,checksum TEXT NOT NULL,created TEXT NOT NULL,author TEXT NOT NULL,validation_status TEXT NOT NULL,PRIMARY KEY(owner_id,strategy_id,version))')
@@ -386,7 +387,10 @@ def reported_daily_from_history(history,request,price):
 
 def view(c,row,now=None):
  now=now or utc()
- request=json.loads(row['request']);state=json.loads(row['state']);sample=c.execute('SELECT payload,received FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone();currency=json.loads(sample['payload'])['currency'] if sample else None;context=json.loads(sample['payload'])['context'] if sample else None;extra=c.execute('SELECT payload FROM hw_context_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
+ request=json.loads(row['request']);
+ if request.get('purpose')=='automatic holding watch':
+  for key in ('origin_candidate_id','origin_trade_cycle_id','origin_watch_id'):request.pop(key,None)
+ state=json.loads(row['state']);sample=c.execute('SELECT payload,received FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone();currency=json.loads(sample['payload'])['currency'] if sample else None;context=json.loads(sample['payload'])['context'] if sample else None;extra=c.execute('SELECT payload FROM hw_context_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
  if extra:
   newer=json.loads(extra['payload'])
   if context is None or newer['as_of'] and (not context['as_of'] or stamp(newer['as_of'])>=stamp(context['as_of'])):context=newer
@@ -518,7 +522,13 @@ def view(c,row,now=None):
  data_status.update(holding_verified=holding_verified,instrument_match_verified=instrument_match_verified,instrument_match_evidence=evidence,quote_feed_verified=quote_feed_verified,quote_freshness=quote_freshness)
  import hotwatch_warmup
  data_status['analysis_warmup']=hotwatch_warmup.status(c,row,request,now)
- return {'last_action_signal':dict(last_action) if last_action else None,'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':budget_interval,'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
+ import hotwatch_buy_plan
+ buy_plan=hotwatch_buy_plan.get(c,row,now)
+ if buy_plan and context:
+  context=dict(context,fx_to_dkk=buy_plan['fx_to_dkk'] if buy_plan['fresh'] else None,fees_dkk=buy_plan['fees_dkk'] if buy_plan['fresh'] else None)
+ if buy_plan and (not buy_plan['fresh'] or not row['last_calculation'] or stamp(row['last_calculation'])<=max(stamp(buy_plan['selected_at']),stamp(buy_plan['verified_at']))) and effective=='BUY':
+  effective='WAIT';display_status='RISIKODATA MANGLER';display_reasons.append('BUY_PLAN_RECHECK_REQUIRED')
+ return {'buy_plan':buy_plan,'last_action_signal':dict(last_action) if last_action else None,'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':budget_interval,'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
 def sessions(connect,uid,mode=False,after=0,limit=50):
  with connect() as c:
@@ -766,20 +776,22 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   from intel_workflows import candidate_currentness
   currentness={'status':'CURRENT'} if request.get('report_id')=='manual-pluto' else candidate_currentness(c,uid,mode,row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery') if request.get('report_id')!='automatic-holdings' else {'status':'UNKNOWN'}
   risk=dict(request['risk'],entry_allowed=request.get('watch_mode','both')!='exit' and currentness['status'] in ('CURRENT','REVIEW_DUE') and (not decision or decision[1]['status']!='FRAVÆLG'),exit_allowed=request.get('watch_mode','both')!='entry')
-  result,nextstate=calculate(sample,metrics,strategy_data,risk,state,now,new_market_event=new_market_event)
+  import hotwatch_buy_plan
+  risk_sample,risk,buy_plan=hotwatch_buy_plan.apply(c,row,request,sample,risk,now)
+  result,nextstate=calculate(risk_sample,metrics,strategy_data,risk,state,now,new_market_event=new_market_event)
   if pilot is not None:
    from hotwatch_strategy import early_watch
    if early_watch(strategy_data,metrics):pilot['watch_state']='EARLY_WATCH'
    result['early_catalyst']=pilot
-  result['position_context']=sample['context'];result['new_market_observation']=new_market_event
-  result.update(engine_version='1.0-phase1-2',feature_version='1.0.0',risk_version='1.0.0',global_risk_limits=GLOBAL_RISK,algorithm_constraints={'max_volatility_pct':'5','max_price_gap_pct':'5','max_action_signals_hour':20,'max_context_age_s':300},risk_parameters=risk,prior_signal_state=state,input_sample_ids=[s['sample_id'] for s in samples])
+  result['position_context']=risk_sample['context'];result['new_market_observation']=new_market_event
+  result.update(engine_version='1.0-phase1-2',feature_version='1.0.0',risk_version='1.1.0',global_risk_limits=GLOBAL_RISK,algorithm_constraints={'max_volatility_pct':'5','max_price_gap_pct':'5','max_action_signals_hour':20,'max_context_age_s':300},risk_parameters=risk,prior_signal_state=state,input_sample_ids=[s['sample_id'] for s in samples])
   metrics['quote_age_s']=format(Decimal(str(now.timestamp()-stamp(sample['event_time']).timestamp())),'f');result['supporting_metrics']=metrics
   c.execute('INSERT INTO hw_calculations(watch_row_id,sample_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?,?)',(row['id'],sample_row_id,now.isoformat(),canonical(result),result['strategy_checksum']))
   cycle=request.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':wid})[:24]
   if result['signal']=='BUY' and state.get('signal')!='BUY':candidate_lifecycle.record(c,uid,mode,request['candidate_id'],'BUY_SIGNAL',now.isoformat(),'Deterministisk motor, ikke en udført handel',wid,cycle)
   if sample['source']!='report_inbox':candidate_lifecycle.observe_pluto(c,uid,mode,request['candidate_id'],sample['context'],now.isoformat(),wid,cycle,result['signal'],synthetic=sample['source']=='synthetic')
-  if request.get('purpose')=='automatic holding watch' and request.get('origin_candidate_id') and request.get('origin_trade_cycle_id') and sample['source'] in ('pluto','eodhd'):
-   candidate_lifecycle.observe_pluto(c,uid,mode,request['origin_candidate_id'],sample['context'],now.isoformat(),wid,request['origin_trade_cycle_id'],result['signal'],price_currency=sample['currency'])
+  # A holding observation proves current ownership, not its acquisition
+  # from an accepted intent. Do not propagate it to an inferred origin cycle.
   normal_close=result['signal']=='PAUSE' and 'MARKET_CLOSED' in result['reason_codes'] and not (set(result['reason_codes'])-{'MARKET_CLOSED','WARMUP'})
   new_status='DEGRADED' if result['signal'] in ['NO_DATA','PAUSE'] and not normal_close else 'ACTIVE'
   codes=set(result['reason_codes'])&{'DATA_UNVERIFIED','DATA_STALE','DATA_FUTURE','MARKET_HALTED','MARKET_CLOSED','MARKET_STATUS_UNKNOWN','POSITION_CONTEXT_UNKNOWN','SPREAD_TOO_WIDE','SPREAD_UNKNOWN','LOSS_BUDGET_LIMIT','POSITION_SIZE_LIMIT','EXPOSURE_LIMIT','STOP_BREACHED','EXIT_DEADLINE','RISK_INPUTS_UNKNOWN'}

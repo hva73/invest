@@ -100,6 +100,11 @@ def handle(h,connect,method):
    elif method=='POST' and len(parts)==3 and parts[2] in ['pause','resume','stop']:
     if set(data)!={'is_test'} or type(data['is_test']) is not bool:raise EngineError('is_test_required')
     result=engine.control(connect,uid,wid,data['is_test'],parts[2])
+   elif method=='POST' and len(parts)==3 and parts[2]=='buy-plan':
+    if kind!='cookie' or mode:raise EngineError('manual_production_plan_required',403)
+    import hotwatch_buy_plan,trade_service
+    try:result=hotwatch_buy_plan.prepare(connect,uid,wid,data)
+    except trade_service.TradeError as error:raise EngineError('BUY_PLAN_ESTIMATE_FAILED',409,[{'path':'buy_plan','code':'broker_estimate','message':str(error)}]) from None
    elif method=='POST' and len(parts)==3 and parts[2]=='samples':
     if role!='admin' or kind!='cookie':raise EngineError('manual_test_ingestion_only',403)
     if not mode:raise EngineError('production_samples_require_trusted_adapter',403)

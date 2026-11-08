@@ -159,9 +159,11 @@ class Trading(unittest.TestCase):
   self.assertEqual(proposal['payload']['orders'][0]['shares'],'2')
   self.assertFalse(self.writes())
  def test_hotwatch_signal_is_rechecked_and_asset_is_bound(self):
-  session={'status':'ACTIVE','signal':'BUY','display_status':'KØBSSIGNAL','request':{'asset_id':'asset-test','ticker':'TEST'}}
+  session={'status':'ACTIVE','signal':'BUY','display_status':'KØBSSIGNAL','request':{'asset_id':'asset-test','ticker':'TEST','portfolio_ids':[self.root]}}
   request=dict(self.request,report_id='@hotwatch',candidate_id='watch-1',size_mode='amount',size='100',order_type='MARKET')
-  with patch('hotwatch_engine.item',return_value={'session':session}):
+  # This test isolates source direction; plan binding is tested against real
+  # disposable sessions in test_hotwatch_buy_plan.
+  with patch('hotwatch_engine.item',return_value={'session':session}),patch('hotwatch_buy_plan.check_proposal'):
    with self.assertRaisesRegex(trade.TradeError,'Aktivet svarer ikke'):self.estimate(dict(request,asset_id='wrong'))
    proposal=self.estimate(request);self.assertFalse(self.writes())
    session['signal']='SELL';session['display_status']='SÆLGSSIGNAL'

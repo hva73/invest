@@ -126,11 +126,12 @@ def signal_source(connect,user_id,report_id,candidate_id):
         raise TradeError('Signalet afventer kontrol eller revurdering. Intet forslag er sendt.')
     asset=request.get('asset_id')
     if not isinstance(asset,str) or not asset:raise TradeError('Signalets Pluto-aktiv er ikke verificeret.')
-    return {'signal':'KØB' if signal=='BUY' else 'SÆLG','asset_id':asset,'ticker':request.get('ticker')}
+    return {'signal':'KØB' if signal=='BUY' else 'SÆLG','asset_id':asset,'ticker':request.get('ticker'),'portfolio_ids':request.get('portfolio_ids',[])}
 
 def verify_proposal_source(connect,user_id,row):
     source=signal_source(connect,user_id,row['report_id'],row['candidate_id'])
     payload=json.loads(row['payload']);orders=payload.get('orders') or []
+    if row['report_id']=='@hotwatch' and source.get('portfolio_ids')!=[row['portfolio_id']]:raise TradeError('Signalets depot stemmer ikke med forslaget.')
     expected='BUY' if source['signal']=='KØB' else 'SELL'
     if row['kind']=='direct' and (len(orders)!=1 or orders[0].get('side')!=expected):
         raise TradeError('Signalets retning er ændret. Hent et nyt estimat.')
@@ -139,6 +140,9 @@ def verify_proposal_source(connect,user_id,row):
     if row['kind']=='collection_buy' and expected!='BUY' or row['kind']=='collection_sell' and expected!='SELL':
         raise TradeError('Signalets retning er ændret. Hent et nyt estimat.')
     if row['report_id']=='@hotwatch':
+        if expected=='BUY':
+            import hotwatch_buy_plan
+            hotwatch_buy_plan.check_proposal(connect,user_id,row['candidate_id'],payload,row['portfolio_id'])
         if row['kind']!='direct' or orders[0].get('assetId')!=source['asset_id']:
             raise TradeError('Signalets aktiv eller retning er ændret. Hent et nyt estimat.')
 
@@ -157,6 +161,7 @@ def build(connect,user_id,data,preview=False):
     try:pid=int(data.get('portfolio_id'))
     except (ValueError,TypeError):raise TradeError('Vælg en aktiv Pluto-enhed før beregningen.')
     p=owned(connect,user_id,pid);kind=data.get('kind')
+    if not preview and data.get('report_id')=='@hotwatch' and c.get('portfolio_ids')!=[pid]:raise TradeError('Vælg det depot, HOT WATCH-signalet gælder for.')
     currency=data.get('currency')
     if currency not in ['DKK','EUR','USD']:raise TradeError('Vælg afregningsvaluta: DKK, EUR eller USD.')
     if kind=='direct':
@@ -338,6 +343,9 @@ def estimate(connect,user_id,data,factory=None):
         pid=row['id']
     override=data.get('allow_insufficient') is True and kind=='direct' and payload['orders'][0].get('side')=='BUY' and bool(payload['orders'][0].get('amount'))
     result,asset=read_estimate(connect,user_id,p,payload,kind,factory,allow_insufficient=override)
+    if data.get('report_id')=='@hotwatch' and kind=='direct' and payload['orders'][0]['side']=='BUY':
+        import hotwatch_buy_plan
+        hotwatch_buy_plan.check_proposal(connect,user_id,data['candidate_id'],payload,p['id'],result['quote'])
     with connect() as c:
         c.execute("UPDATE broker_proposals SET status='estimated',estimated=?,review_token=?,estimate=?,asset=?,sell_basis=?,error=NULL WHERE id=? AND user_id=? AND status IN ('draft','estimated')",(time.time(),secrets.token_urlsafe(24),json.dumps(result),json.dumps(asset),json.dumps(basis) if basis else None,pid,user_id))
     return {'proposal':view(get(connect,user_id,pid))}
@@ -364,6 +372,10 @@ def send(connect,user_id,data,factory=None):
     cl,tools=client(connect,user_id,factory);fresh_permission(cl,tools,connect,user_id,p);context=preflight(cl,tools,p);current_payload=json.loads(row['payload']);orders=current_payload.get('orders') or []
     override=data.get('allow_insufficient') is True and row['kind']=='direct' and len(orders)==1 and orders[0].get('side')=='BUY' and bool(orders[0].get('amount'))
     if not override:check_buying_power(context['accounts'],current_payload,row['kind'])
+    if row['report_id']=='@hotwatch' and row['kind']=='direct' and orders[0]['side']=='BUY':
+        import hotwatch_buy_plan
+        fresh,_=read_estimate(connect,user_id,p,current_payload,'direct',factory)
+        hotwatch_buy_plan.check_proposal(connect,user_id,row['candidate_id'],current_payload,p['id'],fresh['quote'])
     name={'direct':'propose_orders','collection_buy':'propose_buy_collection','collection_sell':'propose_sell_collection'}[row['kind']]
     # Validate write contract before claiming the single send attempt.
     actual=tools.get(name,{})

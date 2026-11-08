@@ -228,3 +228,7 @@ Efter installation: kontrollér Overblik, Porteføljer/Collection-specifikation,
 ## HOT WATCH fase 1–2
 
 Opdateringen kopierer motorens Python-/frontendfiler, men ændrer ikke eksisterende worker/cron eller starter en service. Appstart tilføjer journal-/sessiontabeller og indekserer gamle rapporter uden at ændre payloads. Se [HOT WATCH-drift](HOTWATCH_ENGINE.md) før separat afprøvning af `hotwatch_service.py --once`. Hold motoren stoppet under databasebackup/opdatering. Ved gendannelse skal filbackup og SQLite-backup passe sammen; genindlæs ikke gamle rapportpayloads for at nulstille journalen.
+
+## 8. november 2026 — Early Catalyst-købsplan
+
+Ny installationspakke med brugerbestemt budget, limit og analytisk stop, verificeret antal/valuta/gebyr, bundet HOT WATCH-forslag og uafhængig beholdnings-exit. Installér én frisk ZIP fra `codex/escape-development` med pakkens nye `apply_update.py`; den inkluderer `hotwatch_buy_plan.py`. Databaseændringen er additiv. Ingen nye runtime-afhængigheder eller scopes. Se [installationsvejledning, tests og efterinstallationskontroller](EARLY_CATALYST_INSTALL_2026_11_08.md). Klar til installation betyder ikke LIVE PASS.

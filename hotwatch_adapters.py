@@ -129,7 +129,7 @@ class PlutoAdapter:
   from mcp_client import MCP
   connect=self.connect;uid=self.uid;purpose=self.purpose
   class ReadOnlyGateway(MCP):
-   allowed={'search_assets','get_asset','get_portfolio_value','get_accounts','get_positions','get_collection','list_orders','list_portfolios','list_collections','get_collection_activity'}
+   allowed={'search_assets','get_asset','get_portfolio_value','get_accounts','get_positions','get_collection','list_orders','list_portfolios','list_collections','get_collection_activity','estimate_order'}
    def __init__(self,token):super().__init__(token);self.catalog=None
    def tools(self):
     if self.catalog is None:self.catalog=super().tools()
@@ -219,6 +219,10 @@ class PlutoAdapter:
     if o.get('ticker','').casefold()==request['ticker'].casefold() and o.get('key') and o.get('verified_id'):
      result['orders'].append({'order_id':o['key'].replace('order:','').replace('trade:',''),'status':o['status'],'requested_quantity':o.get('requested_quantity'),'filled_quantity':o.get('filled_quantity'),'side':o.get('side') if o.get('side') in ['BUY','SELL'] else None})
   result['orders_complete']=False
+  if not request.get('is_test') and request.get('watch_mode')=='entry':
+   import hotwatch_buy_plan
+   try:hotwatch_buy_plan.refresh(self.connect,self.uid,request,self.factory)
+   except Exception:pass  # Expired/missing evidence remains blocked centrally.
   try:
    inactive=self.inactive_orders(portfolios,request)
    known={o['order_id']:o for o in result['orders']}
