@@ -69,6 +69,12 @@ def compare(connect,uid,data):
                 metrics=features(bars if bars is not None else window,spec['parameters'])
                 if bars is not None:
                     live=features([sample],spec['parameters']);metrics.update(price=sample['price'],spread=live.get('spread'),spread_pct=live.get('spread_pct'),bar_history_count=len(bars))
+                # Only evidence actually persisted with this historical
+                # calculation is reused; never consult later report state.
+                if spec['schema_version']==2 and isinstance(calc.get('early_catalyst'),dict):
+                    captured=calc.get('supporting_metrics') or {}
+                    keys=('ordinary_share','pluto_tradable','catalyst_verified','catalyst_age_minutes','earnings_previous_session','no_verified_news','reference_gain_pct','news_reaction_pct','consolidating','new_breakout','new_setup')
+                    metrics.update({key:captured.get(key) for key in keys})
                 necessary=required(spec['exit_rules'] if sample['context']['position']=='held' else spec['entry_rules'])
                 if spec['schema_version']==2:necessary|=required(spec['watch_rules'])
                 if spec['schema_version']==2 and spec['parameters']['use_macd_confirmation']:necessary.add('macd_histogram')

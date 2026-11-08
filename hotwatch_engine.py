@@ -175,8 +175,9 @@ def upload_strategy(connect,uid,author,data):
  return {'ok':True,'duplicate':False,'checksum':checksum(data),'validation_status':'schema_validated','deployment_status':'inactive','qualification_required':True}
 
 def strategies(connect,uid):
- with connect() as c:rows=c.execute('SELECT owner_id,strategy_id,version,checksum,created,author,validation_status FROM hw_strategies WHERE owner_id IN (0,?) ORDER BY strategy_id,version',(uid,)).fetchall()
- return {'strategies':[dict(r,deployment_status='available_for_explicit_session_start' if r['validation_status']=='baseline_tested' else 'inactive_requires_phase3_qualification') for r in rows],'capabilities':{'declarative_upload':True,'validation':True,'version_pinning':True,'backtest':False,'shadow':False,'activation_of_uploaded_strategies':False,'rollback':False}}
+ with connect() as c:rows=c.execute('SELECT owner_id,strategy_id,version,checksum,created,author,validation_status,payload FROM hw_strategies WHERE owner_id IN (0,?) ORDER BY strategy_id,version',(uid,)).fetchall()
+ from strategy_center import deployment
+ return {'strategies':[dict({k:r[k] for k in r.keys() if k!='payload'},deployment_status={'QUALIFIED':'available_for_explicit_session_start','PILOT':'live_pilot','UNQUALIFIED':'inactive_requires_phase3_qualification'}[deployment(r)]) for r in rows],'capabilities':{'declarative_upload':True,'validation':True,'version_pinning':True,'backtest':False,'shadow':False,'activation_of_uploaded_strategies':False,'rollback':False}}
 
 def row_for(c,uid,wid,mode):
  row=c.execute('SELECT * FROM hw_sessions WHERE user_id=? AND watch_id=? AND is_test=?',(uid,wid,int(mode))).fetchone()
@@ -243,7 +244,8 @@ def _create_in_transaction(c,uid,data,now,holding=False,manual=False):
  previous_lifecycle=candidate_lifecycle.latest(c,uid,data['is_test'],data['candidate_id'])
  if previous_lifecycle and previous_lifecycle['status'] in ['CLOSED','ARCHIVED'] and data.get('watch_mode','both')!='exit' and not data.get('reactivation_reason'):raise EngineError('reactivation_evidence_required')
  version=strategy(c,uid,data['strategy_id'],data['strategy_version'])
- if version['validation_status']!='baseline_tested':raise EngineError('strategy_qualification_required',409)
+ from strategy_center import deployment
+ if deployment(version) not in ('QUALIFIED','PILOT'):raise EngineError('strategy_qualification_required',409)
  cur=c.execute('INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(uid,data['watch_id'],int(data['is_test']),data['candidate_id'],data['purpose'].strip().casefold(),'CREATED',canonical(data),checksum(data),version['payload'],canonical({'signal':'NO_DATA','alert_codes':[]}),now.isoformat(),now.isoformat(),now.timestamp()))
  row=c.execute('SELECT * FROM hw_sessions WHERE id=?',(cur.lastrowid,)).fetchone();event(c,row,'WATCH_STARTED',now,data['activation_reason']);cycle=data.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':data['watch_id']})[:24];candidate_lifecycle.record(c,uid,data['is_test'],data['candidate_id'],'HOT_WATCH',now.isoformat(),data.get('reactivation_reason') or data['activation_reason'],data['watch_id'],cycle);return {'ok':True,'duplicate':False,'session':view(c,row,now)}
 
@@ -402,6 +404,22 @@ def view(c,row,now=None):
      bar_end=stamp(latest_sample['bar_history'][-1]['bar_open_at'])+timedelta(seconds=60)
      if not 0<=(now-bar_end).total_seconds()<=max_age or not 0<=(now-stamp(latest_sample['bar_evidence']['schedule_received_at'])).total_seconds()<=max_age:effective='NO_DATA';display_reasons.append('BAR_EVIDENCE_STALE')
     except (KeyError,TypeError,ValueError,IndexError):effective='NO_DATA';display_reasons.append('BAR_EVIDENCE_STALE')
+ # A pilot BUY must still satisfy its evidence at the time it is shown or
+ # sent to the manual trading flow, even before the next market sample.
+ if effective=='BUY' and sample and last:
+  strategy_data=json.loads(row['strategy']);stored=json.loads(last['payload'])
+  if strategy_data.get('schema_version')==2:
+   import strategy_center
+   from hotwatch_strategy import early_watch,matches
+   current_sample=json.loads(sample['payload']);current_sample['context']=context or current_sample['context']
+   current_metrics=dict(stored.get('supporting_metrics') or {})
+   try:
+    strategy_center.early_inputs(c,row,request,current_sample,current_metrics,now)
+    extra_macd=not strategy_data['parameters']['use_macd_confirmation'] or current_metrics.get('macd_histogram') is not None and Decimal(str(current_metrics['macd_histogram']))>0
+    if not extra_macd or not early_watch(strategy_data,current_metrics) or not matches(strategy_data['entry_rules'],current_metrics,strategy_data['parameters']):
+     effective='NO_DATA';display_reasons.append('EARLY_EVIDENCE_STALE')
+   except (ValueError,TypeError,KeyError,ArithmeticError):
+    effective='NO_DATA';display_reasons.append('EARLY_EVIDENCE_STALE')
  profile=state.get('adaptive_profile',request['profile'])
  budget_interval=effective_poll_interval(c,request,profile)
  latest_payload=json.loads(sample['payload']) if sample else None
@@ -441,6 +459,9 @@ def view(c,row,now=None):
   if reported_daily is not None:data_status.update(daily_change_pct=reported_daily,daily_change_source='EODHD reported previousClose')
  display_status={'BUY':'KØBSSIGNAL','SELL':'SÆLGSSIGNAL','REDUCE':'EXIT WATCH','WAIT':'AFVENT','NO_DATA':'DATA MANGLER','PAUSE':'DATA MANGLER'}.get(effective,'HOT WATCH')
  if effective=='NO_DATA' and data_status['price'] is not None:display_status='DATA FOR GAMLE' if stale else 'AFVENTER SIGNALDATA'
+ pilot=(json.loads(last['payload']).get('early_catalyst') if last else None)
+ if pilot and not stale and effective in ('WAIT','NO_DATA'):
+  display_status='EARLY WATCH' if pilot.get('watch_state')=='EARLY_WATCH' and 'EARLY_EVIDENCE_STALE' not in display_reasons else 'AFVENTER EARLY WATCH'
  if effective in ('NO_DATA','PAUSE') and data_status['market_status'] in ('CLOSED','HALTED') and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED'):
   display_status='MARKED LUKKET' if data_status['market_status']=='CLOSED' else 'HANDEL STANDSET'
  if effective in ('NO_DATA','PAUSE') and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED') and regular['status']=='CLOSED' and data_status['market_status'] not in ('PREMARKET','AFTERHOURS','HALTED'):
@@ -671,6 +692,7 @@ def sample_errors(sample,request,now):
   if verified_bar_samples(sample,request,now) is None:raise EngineError('bar_evidence_invalid')
  context=sample['context']
  if context['as_of'] and stamp(context['as_of'])>now:raise EngineError('future_position_context')
+ if context.get('instrument_type_at') and stamp(context['instrument_type_at'])>now:raise EngineError('future_position_context')
  if context['position']=='held' and (context['quantity'] is None or Decimal(context['quantity'])<=0):raise EngineError('invalid_position_quantity')
  if context['position']=='none' and context['quantity'] is not None and Decimal(context['quantity'])!=0:raise EngineError('invalid_position_quantity')
  return sample
@@ -730,12 +752,20 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
    safe_session=sample.get('market_status') in ('UNKNOWN','CLOSED','HALTED') or history and hotwatch_warmup.signal_session_verified(c,request,sample,history,now)
    if history and safe_session and history['historical_count']>0 and history['state']=='WARMUP COMPLETE' and history['freshness']=='FRESH' and history.get('latest_live_sample_id')==sample['sample_id']:
     live_metrics=features([sample],strategy_data['parameters']);metrics=dict(history['metrics']);metrics.update(price=sample['price'],spread=live_metrics.get('spread'),spread_pct=live_metrics.get('spread_pct'),bar_history_count=history['historical_count'])
+  pilot=None
+  if strategy_data.get('schema_version')==2:
+   import strategy_center
+   pilot=strategy_center.early_inputs(c,row,request,sample,metrics,now)
   import intel_workflows,candidate_lifecycle
   decision=intel_workflows.prior_decision(c,uid,mode,request['candidate_id'])
   from intel_workflows import candidate_currentness
   currentness={'status':'CURRENT'} if request.get('report_id')=='manual-pluto' else candidate_currentness(c,uid,mode,row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery') if request.get('report_id')!='automatic-holdings' else {'status':'UNKNOWN'}
   risk=dict(request['risk'],entry_allowed=request.get('watch_mode','both')!='exit' and currentness['status'] in ('CURRENT','REVIEW_DUE') and (not decision or decision[1]['status']!='FRAVÆLG'),exit_allowed=request.get('watch_mode','both')!='entry')
   result,nextstate=calculate(sample,metrics,strategy_data,risk,state,now,new_market_event=new_market_event)
+  if pilot is not None:
+   from hotwatch_strategy import early_watch
+   if early_watch(strategy_data,metrics):pilot['watch_state']='EARLY_WATCH'
+   result['early_catalyst']=pilot
   result['position_context']=sample['context'];result['new_market_observation']=new_market_event
   result.update(engine_version='1.0-phase1-2',feature_version='1.0.0',risk_version='1.0.0',global_risk_limits=GLOBAL_RISK,algorithm_constraints={'max_volatility_pct':'5','max_price_gap_pct':'5','max_action_signals_hour':20,'max_context_age_s':300},risk_parameters=risk,prior_signal_state=state,input_sample_ids=[s['sample_id'] for s in samples])
   metrics['quote_age_s']=format(Decimal(str(now.timestamp()-stamp(sample['event_time']).timestamp())),'f');result['supporting_metrics']=metrics

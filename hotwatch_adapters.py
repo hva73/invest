@@ -141,11 +141,13 @@ class PlutoAdapter:
     elif method not in ['initialize','notifications/initialized','tools/list']:raise DataUnavailable('PLUTO_METHOD_BLOCKED')
     reserve(connect,uid,'pluto',purpose=purpose);return super().request(method,params,notification)
   self.gateway=ReadOnlyGateway(token);return self.gateway
+ def permission_key(self,request,currency,portfolios):
+  return (request['asset_id'],request['ticker'].casefold(),str(request.get('exchange') or '').casefold(),currency,tuple(sorted(p['id'] for p in portfolios)),request.get('risk',{}).get('proposed_quantity') is not None)
  def tradability(self,request,currency,portfolios):
   """Only use current read-only Pluto instrument and account evidence."""
   import trade_service
   if not portfolios:return 'unknown',None
-  key=(request['asset_id'],request['ticker'].casefold(),str(request.get('exchange') or '').casefold(),currency,tuple(sorted(p['id'] for p in portfolios)),request.get('risk',{}).get('proposed_quantity') is not None);now=utc().timestamp();cached=self.permission_cache.get(key)
+  key=self.permission_key(request,currency,portfolios);now=utc().timestamp();cached=self.permission_cache.get(key)
   if cached and 0<=now-cached['at']<300:return cached['status'],cached['at']
   try:
    client,tools=trade_service.client(self.connect,self.uid,self.factory);raw=trade_service.call(client,tools,'get_asset',{'assetId':request['asset_id']})
@@ -155,7 +157,9 @@ class PlutoAdapter:
    if not isinstance(buy,dict) or not (buy.get('shares') is True or buy.get('amount') is True):return 'unknown',None
    if request.get('risk',{}).get('proposed_quantity') is not None and buy.get('shares') is not True:return 'unknown',None
    for portfolio in portfolios:trade_service.fresh_permission(client,tools,self.connect,self.uid,portfolio)
-   self.permission_cache[key]={'at':now,'status':'available'};return 'available',now
+   kinds={v.upper() for node in (asset,raw) for field in ('type','assetType') if isinstance((v:=node.get(field)),str) and 1<=len(v)<=100}
+   kind=next(iter(kinds)) if len(kinds)==1 else None
+   self.permission_cache[key]={'at':now,'status':'available','instrument_type':kind};return 'available',now
   except Exception:return 'unknown',None
  def context(self,request,currency):
   import portfolio_data
@@ -189,7 +193,11 @@ class PlutoAdapter:
   # unnecessary check competes with identity/quote requests for Pluto budget.
   # Keep the value unknown rather than claiming a permission was checked.
   tradability_at=None
-  if request.get('watch_mode')!='exit':result['tradability'],tradability_at=self.tradability(request,currency,portfolios)
+  if request.get('watch_mode')!='exit':
+   result['tradability'],tradability_at=self.tradability(request,currency,portfolios)
+   proof=self.permission_cache.get(self.permission_key(request,currency,portfolios)) if tradability_at is not None else None
+   if proof and proof.get('instrument_type'):
+    result['instrument_type']=proof['instrument_type'];result['instrument_type_at']=datetime.fromtimestamp(proof['at'],timezone.utc).isoformat()
   if any(p['quantity'] is None for p in found):return unknown_context('HOLDING_QUANTITY_MISSING')
   if any(p.get('ticker') and p['ticker'].casefold()!=request['ticker'].casefold() for p in found):raise DataUnavailable('PLUTO_ASSET_NOT_CONFIRMED')
   if any(Decimal(p['quantity'])<0 for p in found):raise DataUnavailable('PLUTO_SHORT_POSITION_NOT_SUPPORTED')

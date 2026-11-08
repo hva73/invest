@@ -145,7 +145,7 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
  if proposal:
   import strategy_center
   with connect() as c:qualified=strategy_center.qualification(c,uid,proposal)
-  if qualified!='QUALIFIED':return {'status':'STRATEGY_'+qualified}
+  if qualified not in ('QUALIFIED','PILOT'):return {'status':'STRATEGY_'+qualified}
  if (candidate.get('decision') or {}).get('status')=='FRAVÆLG':return {'status':'REJECTED'}
  with connect() as c:
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return {'status':'operator_kill_switch'}

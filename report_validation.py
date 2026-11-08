@@ -208,11 +208,27 @@ def semantic(data,errors,warnings,connection,user_id):
                 if catalyst:
                     published=stamp(catalyst['published_at']);available=stamp(catalyst['available_at'])
                     if published>available or available>at:add(base+'.strategy_proposal.catalyst','future_information','Catalyst must be published and available by proposal time')
+                for field in ('reference_close','pre_news_price'):
+                    quote=mapping(proposed.get(field))
+                    if quote:
+                        observed=stamp(quote['observed_at']);quote_available=stamp(quote['available_at'])
+                        if observed>quote_available or quote_available>at:add(base+'.strategy_proposal.'+field,'future_information','Quote must be observed and available by proposal time')
+                        if field=='pre_news_price' and catalyst and observed>published:add(base+'.strategy_proposal.'+field,'future_information','Pre-news price cannot postdate news publication')
+                        if field=='reference_close' and catalyst and proposed.get('news_session')=='after_close' and observed>published:add(base+'.strategy_proposal.'+field,'future_information','After-close reference must precede news publication')
+                        currency=mapping(quote.get('price')).get('currency')
+                        if market.get('currency') and currency!=market['currency']:add(base+'.strategy_proposal.'+field+'.price.currency','currency_mismatch','Expected candidate market currency')
+                check=mapping(proposed.get('news_check'))
+                if check and stamp(check['checked_at'])>at:add(base+'.strategy_proposal.news_check.checked_at','future_information','News check cannot postdate proposal')
+                if check.get('status')=='verified_news' and not catalyst:add(base+'.strategy_proposal.news_check','required_evidence','A verified-news claim requires a dated catalyst')
+                if check.get('status')=='verified_news' and catalyst and not set(ids(check.get('source_ids'))).intersection(ids(catalyst.get('source_ids'))):add(base+'.strategy_proposal.news_check.source_ids','reference_mismatch','At least one checked source must support the catalyst')
+                if proposed.get('pre_news_price') and not catalyst:add(base+'.strategy_proposal.pre_news_price','required_evidence','Pre-news price requires a dated catalyst')
+
             except (KeyError,ValueError,TypeError):pass # Structural timestamp errors are reported separately.
             if connection is not None and user_id is not None and isinstance(proposed.get('strategy_id'),str) and isinstance(proposed.get('version'),str):
                 from strategy_center import qualification
                 state=qualification(connection,user_id,proposed)
-                if state!='QUALIFIED':warnings.append(issue(base+'.strategy_proposal','strategy_'+state.lower(),'Strategy proposal is stored but cannot start HOT WATCH until qualified'))
+                if state=='PILOT':warnings.append(issue(base+'.strategy_proposal','strategy_pilot','Live test only; reported evidence remains unverified until checked'))
+                elif state!='QUALIFIED':warnings.append(issue(base+'.strategy_proposal','strategy_'+state.lower(),'Strategy proposal is stored but cannot start HOT WATCH until qualified'))
 
         if market.get('verification')=='verified':
             if market.get('as_of') is None:add(base+'.market.as_of','required_evidence','Verified market data requires timestamp')

@@ -20,6 +20,8 @@ SAMPLE['properties'].update({'bar_history':array(BAR,120),'bar_evidence':BAR_EVI
 CONTEXT['properties']['orders']['items']['properties'].update({'status_time':TIME,'average_fill_price':NUM,'limit_price':NUM,'stop_price':NUM,'order_type':nullable(string(100))})
 CONTEXT['properties']['orders_complete']={'type':'boolean'}
 CONTEXT['properties']['diagnostic']=nullable(string(100))
+# Pluto get_asset type evidence is optional and distinct from sender claims.
+CONTEXT['properties'].update({'instrument_type':nullable(string(100)),'instrument_type_at':TIME})
 for s in [SESSION,SAMPLE]:strict_patterns(s)
 STATES={'CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED','EXPIRED','COMPLETED','ERROR'}
 OPEN_STATES={'CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED'}

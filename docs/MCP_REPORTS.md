@@ -180,3 +180,23 @@ Brug `get_strategy_catalog` til at læse kontoens strategier og versioner. I en 
 ```
 
 `catalyst` kan udelades eller være null. Tider og kilder er stadig afsenderens oplysninger; strukturel validering verificerer ikke nyhedens sandhed eller datakildens pålidelighed. `validate_report` advarer om en ukendt/ukvalificeret strategi; rapporten kan gemmes, men automatisk overvågning blokeres for den kandidat. `send_report` kvitterer kun for rapportmodtagelse. Brug `get_hot_watch` med `candidate_id` og `is_test` for `strategy_handoff`: faktisk session, version og opstartsforsøg. Kun eksisterende kvalificerede versioner bruges; ingen ordre oprettes. Pågående sessioner skiftes aldrig automatisk. Automatiske opstartsforsøg gælder aktuelle hovedrapporter i drift, ikke testrapporter eller særskilte deep-analysis-rapporter.
+
+### Early Catalyst: oplysninger til live-test
+
+På en kandidat kan ChatGPT vælge `strategy_id: "escape_early_catalyst"`, `version: "1.0.0"` eller en tilladt privat version fra `get_strategy_catalog`. Forslaget kan derudover rumme nedenstående objekter; alle tidsangivelser er RFC 3339 med tidszone, og `source_ids` skal referere til rapportens `sources`:
+
+```json
+{
+  "news_check": {"status": "verified_news", "checked_at": "2026-11-09T10:05:00Z", "source_ids": ["news-1"]},
+  "catalyst": {"kind": "earnings", "published_at": "2026-11-09T10:00:00Z", "available_at": "2026-11-09T10:00:10Z", "source_ids": ["news-1"]},
+  "news_session": "during_regular",
+  "reference_close": {"price": {"amount": "100", "currency": "USD"}, "observed_at": "2026-11-06T21:00:00Z", "available_at": "2026-11-06T21:00:01Z", "source_ids": ["close-1"]},
+  "pre_news_price": {"price": {"amount": "102", "currency": "USD"}, "observed_at": "2026-11-09T09:59:45Z", "available_at": "2026-11-09T09:59:46Z", "source_ids": ["quote-1"]}
+}
+```
+
+Disse felter hører til **inde i** `strategy_proposal` sammen med de hidtil obligatoriske strategiidentitetsfelter; eksemplet er et udsnit, ikke en komplet rapport. `news_check.status` kan også være `no_verified_news` eller `unknown`. Ved `verified_news` skal mindst én kilde være fælles med `catalyst`, have rapporteret `verification: "verified"`, `verified_at` senest ved `news_check.checked_at` og `published_at` svarende til nyheden. Priser må ikke være tilgængelige før deres observation, og kursen før nyheden må ikke være observeret efter offentliggørelsen. `proposed_at` skal være efter de medsendte oplysningers tilgængelighed og senest rapportens `generated_at`.
+
+Disse oplysninger er afsenderens kildede vurdering; ESCAPE kontrollerer ikke selv nyhedsartiklens indhold. Den beregnede status angiver denne begrænsning. Pluto-handelsbarhed og almindelig aktietype skal komme fra lokalt verificeret Pluto-data. Referencekursen kræver overensstemmelse med lokale EODHD-data og frisk børskalender; nyhedskurs under åben handel kræver en tilsvarende tidligere lokal observation. Kalenderen bestemmer faktisk fase og overstyrer ikke-bekræftede faseangivelser. Manglende priser, nyheder, spread eller risikodata giver afventning.
+
+Svaret `qualification: "PILOT"` angiver en tilladt live-test, ikke historisk dokumenteret kvalitet. `get_hot_watch` med kandidat-ID læser den faktisk oprettede session tilbage. Intet signal sender i sig selv en ordre. Eksisterende automatiske kandidater har endnu ikke nødvendigvis antal, stop, gebyrer og valuta til den centrale risikokontrol; `RISK_INPUTS_UNKNOWN` blokerer i så fald købssignalet. Brugeren sender først et muligt forslag manuelt, og Pluto kræver endelig godkendelse.

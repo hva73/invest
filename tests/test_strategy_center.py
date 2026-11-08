@@ -44,7 +44,9 @@ class Strategies(unittest.TestCase):
   with app.connect() as c:
    saved=json.loads(c.execute('SELECT payload FROM hw_strategies WHERE owner_id=1 AND strategy_id=?',(result['strategy_id'],)).fetchone()[0]);base=json.loads(c.execute("SELECT payload FROM hw_strategies WHERE owner_id=0 AND strategy_id='escape_early_catalyst' AND version='1.0.0'").fetchone()[0])
   self.assertEqual(saved['parameters']['news_max_age_minutes'],90);self.assertEqual(saved['parameters']['momentum_window_minutes'],4);self.assertEqual(saved['parameters']['confirmation_count'],3);self.assertEqual(base['parameters']['news_max_age_minutes'],120)
-  with self.assertRaises(ValueError):strategy_center.save(app.connect,1,{'mode':'manual','strategy_id':result['strategy_id'],'version':result['version']},app.now())
+  strategy_center.save(app.connect,1,{'mode':'manual','strategy_id':result['strategy_id'],'version':result['version']},app.now())
+  self.assertEqual(strategy_center.resolve(app.connect,1)['strategy_id'],result['strategy_id'])
+  with self.assertRaises(ValueError):strategy_center.save(app.connect,2,{'mode':'manual','strategy_id':result['strategy_id'],'version':result['version']},app.now())
  def test_invalid_draft_leaves_library_unchanged(self):
   with self.assertRaises(ValueError):strategy_center.draft(app.connect,1,{'source_id':'escape_early_catalyst','source_version':'0.1.0','description':'test','parameters':{'momentum_pct':'1','min_relative_volume':'-2','max_spread_pct':'0.4'}})
   with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM hw_strategies WHERE owner_id=1').fetchone()[0],0)

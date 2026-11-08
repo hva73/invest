@@ -41,7 +41,7 @@ class StrategyHandoff(unittest.TestCase):
   self.assertEqual(handoff['handoff_status'],'SESSION_PRESENT');self.assertEqual(handoff['discovery_attempt']['status'],'CREATED');self.assertEqual(handoff['session']['strategy_id'],'escape_momentum')
   with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
  def test_unqualified_and_unknown_are_stored_but_never_auto_started(self):
-  for strategy,version in [('escape_early_catalyst','0.1.0'),('escape_early_catalyst','1.0.0'),('does-not-exist','1.0.0')]:
+  for strategy,version in [('escape_early_catalyst','0.1.0'),('does-not-exist','1.0.0')]:
    self.report['report_id']='report-'+strategy+'-'+version;self.candidate['candidate_id']='candidate-'+strategy+'-'+version;self.candidate['strategy_proposal'].update(strategy_id=strategy,version=version)
    validation=self.rpc('validate_report',self.report)['structuredContent'];self.assertTrue(validation['valid']);self.assertTrue(any(x['code'].startswith('strategy_') for x in validation['warnings']))
    receipt=self.rpc('send_report',self.report)['structuredContent'];expected='UNQUALIFIED' if strategy.startswith('escape_') else 'NOT_FOUND';self.assertEqual(receipt['strategy_proposals'][0]['qualification'],expected)
@@ -49,6 +49,13 @@ class StrategyHandoff(unittest.TestCase):
     self.assertEqual(hotwatch_service.auto_activate_candidate(app.connect,1,False,self.report,self.candidate)['status'],'STRATEGY_'+expected)
    self.assertEqual(strategy_center.handoff(app.connect,1,self.candidate['candidate_id'])['handoff_status'],'STRATEGY_'+expected)
   with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM hw_sessions').fetchone()[0],0)
+ def test_early_pilot_report_starts_only_after_receipt_and_checks(self):
+  self.candidate['strategy_proposal'].update(strategy_id='escape_early_catalyst',version='1.0.0')
+  valid=self.rpc('validate_report',self.report)['structuredContent'];self.assertTrue(valid['valid']);self.assertIn('strategy_pilot',{x['code'] for x in valid['warnings']})
+  receipt=self.rpc('send_report',self.report)['structuredContent'];self.assertEqual(receipt['strategy_proposals'][0]['qualification'],'PILOT')
+  with patch('hotwatch_engine.utc',return_value=self.now):result=hotwatch_service.auto_activate_candidate(app.connect,1,False,self.report,self.candidate,verify=self.instrument)
+  self.assertEqual(result['status'],'CREATED');session=engine.item(app.connect,1,result['watch_id'],False)['session'];self.assertEqual(session['request']['strategy_id'],'escape_early_catalyst');self.assertEqual(session['request']['strategy_version'],'1.0.0')
+  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
  def test_causality_and_source_references(self):
   p=self.candidate['strategy_proposal'];p['source_ids']=['not-in-report'];self.assertFalse(report_ingest.validation(app.connect,1,self.report)['valid'])
   p['source_ids']=['synthetic-source'];p['catalyst']={'kind':'regnskab','published_at':self.now.isoformat(),'available_at':(self.now+timedelta(seconds=1)).isoformat(),'source_ids':['synthetic-source']}

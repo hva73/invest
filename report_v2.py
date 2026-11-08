@@ -114,3 +114,13 @@ STRATEGY_CATALYST=obj({'kind':string(200),'published_at':AT,'available_at':AT,'s
 STRATEGY_PROPOSAL['properties']['catalyst']=nullable(STRATEGY_CATALYST)
 CANDIDATE['properties']['strategy_proposal']=nullable(STRATEGY_PROPOSAL)
 strict_patterns(SCHEMA)
+
+# Optional attributed evidence for Early Catalyst. All values remain sender
+# claims until corroborated by a trusted provider; missing fields remain unknown.
+STRATEGY_QUOTE=obj({'price':NONNEG_MONEY['anyOf'][0],'observed_at':AT,'available_at':AT,'source_ids':dict(REFS,minItems=1)})
+STRATEGY_PROPOSAL['properties'].update({'news_check':nullable(obj({'status':enum('verified_news','no_verified_news','unknown'),'checked_at':AT,'source_ids':dict(REFS,minItems=1)})), 'reference_close':nullable(STRATEGY_QUOTE),'pre_news_price':nullable(deepcopy(STRATEGY_QUOTE)),'news_session':nullable(enum('during_regular','after_close','before_open','unknown'))})
+strict_patterns(SCHEMA)
+STRATEGY_PROPOSAL['properties']['news_check']['description']='Afsenderens kildekontrol: status, checked_at og source_ids. Verified news kræver en dateret catalyst og fælles kilde. Ikke uafhængigt verificeret af ESCAPE.'
+STRATEGY_PROPOSAL['properties']['reference_close']['description']='Oplyst ordinær lukkekurs med valuta, observationstid, tilgængelighedstid og kilde. ESCAPE kræver yderligere lokal bekræftelse.'
+STRATEGY_PROPOSAL['properties']['pre_news_price']['description']='Oplyst kurs umiddelbart før nyhedens offentliggørelse. Kræver dato, valuta, kilde og lokal matchende observation.'
+STRATEGY_PROPOSAL['properties']['news_session']['description']='Afsenderens forslag til markedsfase; ESCAPE bruger selvstændig børskalender når den er tilgængelig.'
