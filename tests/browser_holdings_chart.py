@@ -47,7 +47,7 @@ def main():
    expect(page.locator('#engine-dialog')).to_contain_text('PENDING · motorforløb',timeout=30000);page.locator('[data-engine-close]').click();assert 'WARMUP 1 af 34' in page.locator('[data-dashboard-watch]').first.inner_text();page.locator('[data-dashboard-watch]').first.click();page.locator('#engine-dialog').wait_for(state='visible');assert 'motorforløb' in page.locator('#engine-dialog').inner_text();page.locator('[data-engine-close]').click();page.locator('[data-dashboard-open]').first.click()
    graph=page.locator('#dashboard-detail .market-slot');graph.locator('.market-price').wait_for();assert graph.locator('[data-market-period=day]').get_attribute('aria-pressed')=='true';graph.locator('[data-market-period=week]').click();assert graph.locator('.market-line').get_attribute('d').count('L')==81
    page.locator('[data-dashboard-close]').click();page.locator('nav [data-view=hot-watch]').click();page.locator('[data-engine-new]').click();dialog=page.locator('#engine-dialog');dialog.wait_for(state='visible')
-   assert 'allerede en åben eller pauseret HOT WATCH' in dialog.inner_text(),dialog.inner_text();assert dialog.locator('select[name=candidate] option').count()==0;assert not errors,errors
+   assert 'Søg aktie på Pluto' in dialog.inner_text(),dialog.inner_text();assert dialog.locator('#engine-manual-search').count()==1;assert not errors,errors
    browser.close()
   print('PASS: holding modal chart with day and week; synthetic data')
  finally:server.shutdown();server.server_close();case.tearDown()
