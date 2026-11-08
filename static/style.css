@@ -359,3 +359,4 @@ nav button{display:flex;align-items:center;gap:11px;min-width:0}nav .nav-icon{di
 /* Show one refresh message at a time; errors remain visible in the page. */
 body.pull-refresh-visible #refresh-status{display:none}
 @media(max-width:900px){.pull-refresh-status{top:auto;bottom:calc(env(safe-area-inset-bottom,0px) + 16px);max-width:calc(100vw - 32px);padding:9px 14px;border-radius:12px;font-size:12px;box-shadow:0 8px 24px #0009}}
+.quick-buying-power{padding:14px 16px;border:1px solid #8a6c49;border-radius:12px;background:#372b21;color:#f4d4a5}.quick-buying-power p{margin:0 0 12px;color:#f0d4b2}.quick-buying-power button{border-color:#a9875c;color:#ffe2bb}.quick-buying-power[hidden]{display:none}

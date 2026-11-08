@@ -14,7 +14,7 @@ class Trading(unittest.TestCase):
    c.execute('INSERT INTO oauth_tokens VALUES(?,?,?,?)',(1,oauth.seal(1,{'token':{'access_token':'synthetic'}}),time.time()+3600,time.time()))
   self.report=json.loads((ROOT/'examples/report-v2-test.json').read_text());self.report.update(report_id='trade-source',is_test=False);self.report['data_quality']['status']='mixed';self.report['candidates'][0]['signal']='KØB';report_ingest.save(app.connect,1,self.report)
   self.request={'report_id':'trade-source','candidate_id':self.report['candidates'][0]['candidate_id'],'portfolio_id':self.root,'kind':'direct','asset_id':'asset-test','size_mode':'shares','size':'2','currency':'DKK','order_type':'LIMIT','time_in_force':'DAY','limit_price':'100.50'}
-  self.calls=[];self.can_trade=True;self.write_result={'orderIntentId':'synthetic-intent'};self.fail_send=False;self.changed=False
+  self.account_data={'accounts':[{'currency':'DKK','balance':'1000','buyingPower':'900','reservedForOrders':'100'}]};self.calls=[];self.can_trade=True;self.write_result={'orderIntentId':'synthetic-intent'};self.fail_send=False;self.changed=False
   case=self
   class Client:
    def __init__(self,token):assert token=='synthetic'
@@ -27,7 +27,7 @@ class Trading(unittest.TestCase):
     case.calls.append(args);name=args['name']
     if name=='list_portfolios':result=[{'id':'root','name':'Root','canTrade':case.can_trade}]
     elif name=='list_collections':result=[{'id':'child','name':'Child','portfolioId':'root'}]
-    elif name=='get_accounts':result={'accounts':[{'currency':'DKK','balance':'1000','buyingPower':'900','reservedForOrders':'100'}]}
+    elif name=='get_accounts':result=case.account_data
     elif name=='list_orders':result={'orders':[]}
     elif name=='get_asset':result={'assetId':'asset-test','name':'Synthetic asset','currency':'USD'}
     elif name.startswith('estimate_'):result={'estimatedAmount':'201','currency':'DKK','commission':'0','note':'Synthetic estimate only'}
@@ -43,6 +43,27 @@ class Trading(unittest.TestCase):
  def estimate(self,request=None):return trade.estimate(app.connect,1,request or self.request,self.factory)['proposal']
  def send(self,proposal):return trade.send(app.connect,1,{'id':proposal['id'],'review_token':proposal['review_token'],'confirm':True},self.factory)['proposal']
  def writes(self):return [c for c in self.calls if c['name'].startswith('propose_')]
+ def test_buying_power_checked_per_currency_without_guessing(self):
+  self.account_data={'accounts':[{'currency':'DKK','buyingPower':'100.127','cash':'500'},{'currency':'EUR','buyingPower':'25','cash':'100'},{'currency':'USD','cash':'200','withdrawalPower':'10'}]}
+  request=dict(self.request,report_id='@manual-buy',candidate_id='',size_mode='amount',order_type='MARKET',currency='DKK',size='101')
+  with self.assertRaises(trade.InsufficientBuyingPower) as caught:self.estimate(request)
+  self.assertEqual((caught.exception.available,caught.exception.currency),('100.12','DKK'))
+  self.assertFalse(any(c['name']=='estimate_order' for c in self.calls));self.assertFalse(self.writes())
+  request.update(currency='EUR',size='26')
+  with self.assertRaises(trade.InsufficientBuyingPower) as caught:self.estimate(request)
+  self.assertEqual((caught.exception.available,caught.exception.currency),('25.00','EUR'))
+  request.update(currency='USD',size='150');self.assertEqual(self.estimate(request)['status'],'estimated')
+  self.assertFalse(self.writes())
+ def test_buying_power_rechecked_before_send(self):
+  request=dict(self.request,report_id='@manual-buy',candidate_id='',size_mode='amount',order_type='MARKET',size='500')
+  proposal=self.estimate(request)
+  self.account_data={'accounts':[{'currency':'DKK','buyingPower':'100'}]}
+  with self.assertRaises(trade.InsufficientBuyingPower) as caught:self.send(proposal)
+  self.assertEqual(caught.exception.available,'100.00');self.assertFalse(self.writes())
+ def test_ambiguous_or_partial_cash_is_not_treated_as_buying_power(self):
+  payload={'orders':[{'side':'BUY','amount':'500','currency':'DKK'}]}
+  for accounts in [{'accounts':[{'currency':'DKK','cash':'5','withdrawalPower':'5'}]}, {'accounts':[{'currency':'DKK','buyingPower':'5'},{'currency':'DKK','buyingPower':'5'}]}, {'accounts':[{'currency':'DKK','buyingPower':'5'}],'nextToken':'more'}, {'accounts':[{'currency':'EUR','buyingPower':'5'}]}]:
+   trade.check_buying_power(accounts,payload,'direct')
  def test_percentage_sell_uses_fresh_holding_and_rechecks_before_send(self):
   holding={'positions_complete':True,'observed':'2026-11-08T00:00:00Z','positions':[{'kind':'holding','asset_id':'asset-test','quantity':'2.50000001'}]}
   request=dict(self.request,size_mode='percent',size='40',order_type='MARKET')

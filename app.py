@@ -502,6 +502,7 @@ class Handler(BaseHTTPRequestHandler):
                     elif action=='cancel':result=trade_service.cancel_intent(connect,user_id,data.get('id'))
                     else:return self.send(404,{'error':'Ukendt handelsfunktion'})
                     return self.send(200,result)
+                except trade_service.InsufficientBuyingPower as error:return self.send(409,{'error':str(error),'code':'insufficient_buying_power','available':error.available,'currency':error.currency})
                 except trade_service.TradeError as error:return self.send(400,{'error':str(error)})
                 except oauth.SetupRequired:raise
                 except Exception:return self.send(502,{'error':'Pluto-opslaget kunne ikke gennemføres. Kontrollér forbindelsen, instrumentets begrænsninger og Plutos adgangskrav. Intet forslag er automatisk genafsendt.'})

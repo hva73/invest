@@ -8,6 +8,13 @@ from mcp_client import MCP,decode_result,normalize,compatible
 CONTRACT=json.loads((Path(__file__).parent/'pluto_trade_contract.json').read_text())
 class TradeError(ValueError):pass
 
+class InsufficientBuyingPower(TradeError):
+    def __init__(self, available, currency):
+        self.available=available
+        self.currency=currency
+        super().__init__('Beløbet overstiger den købekraft, Pluto oplyser i den valgte valuta. Intet forslag er sendt.')
+
+
 def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS broker_proposals(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),fingerprint TEXT NOT NULL,report_id TEXT NOT NULL,candidate_id TEXT NOT NULL,kind TEXT NOT NULL,portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),payload TEXT NOT NULL,status TEXT NOT NULL,created REAL NOT NULL,estimated REAL,review_token TEXT,estimate TEXT,asset TEXT,intent_id TEXT,response TEXT,error TEXT,UNIQUE(user_id,fingerprint))')
     if 'sell_basis' not in {r[1] for r in c.execute('PRAGMA table_info(broker_proposals)')}:c.execute('ALTER TABLE broker_proposals ADD COLUMN sell_basis TEXT')
@@ -184,6 +191,31 @@ def preflight(cl,tools,p):
     if not isinstance(accounts,(dict,list)) or not isinstance(orders,(dict,list)):raise TradeError('Pluto har ikke returneret læsbare konto- og ordreobservationer.')
     return {'accounts':accounts,'active_orders':orders,'note':'Aktuelle Pluto-observationer. Ordrelisten er begrænset til 50 poster; den er ikke nødvendigvis fuldstændig. Kontanter, reservationer og købekraft må ikke lægges sammen eller fratrækkes igen.'}
 
+def check_buying_power(accounts,payload,kind):
+    """Compare only an explicit, unambiguous same-currency buying power."""
+    if kind!='direct':return
+    orders=payload.get('orders') or []
+    if len(orders)!=1:return
+    order=orders[0]
+    if order.get('side')!='BUY' or not order.get('amount'):return
+    import portfolio_data
+    try:
+        records=portfolio_data.complete_list(accounts,['accounts','cashAccounts','items','data'])
+        normalized=portfolio_data.normalize_accounts(records)
+        matches=[r for r in normalized if r.get('currency')==order.get('currency')]
+        if len(matches)!=1:return
+        amount=matches[0].get('buying_power') or {}
+        if amount.get('currency')!=order.get('currency') or amount.get('amount') is None:return
+        buying_power=Decimal(amount['amount'])
+        if not buying_power.is_finite():return
+        buying_power=max(Decimal('0'),buying_power)
+        if Decimal(order['amount'])>buying_power:
+            usable=buying_power.quantize(Decimal('0.01'),rounding=ROUND_DOWN)
+            raise InsufficientBuyingPower(format(usable,'f'),order['currency'])
+        return True
+    except InsufficientBuyingPower:raise
+    except (ValueError,TypeError,ArithmeticError,portfolio_data.PortfolioFormatError):return
+
 def view(row):
     r=dict(row)
     for key in ['payload','estimate','asset','response','sell_basis']:r[key]=json.loads(r[key]) if r[key] else None
@@ -220,7 +252,9 @@ def search(connect,user_id,query,factory=None):
     return {'assets':choices}
 
 def read_estimate(connect,user_id,p,payload,kind,factory=None):
-    cl,tools=client(connect,user_id,factory);fresh_permission(cl,tools,connect,user_id,p);context=preflight(cl,tools,p);asset=None
+    cl,tools=client(connect,user_id,factory);fresh_permission(cl,tools,connect,user_id,p);context=preflight(cl,tools,p);checked=check_buying_power(context['accounts'],payload,kind);asset=None
+    if kind=='direct' and payload['orders'][0].get('side')=='BUY' and payload['orders'][0].get('amount'):
+        context['buying_power_checked']=checked is True
     if kind=='direct':
         order=payload['orders'][0];asset=call(cl,tools,'get_asset',{'assetId':order['assetId']})
         node=asset.get('asset',asset) if isinstance(asset,dict) else {}
@@ -311,7 +345,7 @@ def send(connect,user_id,data,factory=None):
     if row['sell_basis']:
         basis=json.loads(row['sell_basis']);current=direct_sell_basis(connect,user_id,row['portfolio_id'],basis['asset_id'],basis['percentage'],factory)
         if Decimal(current['quantity'])!=Decimal(basis['quantity']):raise TradeError('Beholdningens antal er ændret. Hent et nyt estimat før afsendelse.')
-    cl,tools=client(connect,user_id,factory);fresh_permission(cl,tools,connect,user_id,p);preflight(cl,tools,p)
+    cl,tools=client(connect,user_id,factory);fresh_permission(cl,tools,connect,user_id,p);context=preflight(cl,tools,p);check_buying_power(context['accounts'],json.loads(row['payload']),row['kind'])
     name={'direct':'propose_orders','collection_buy':'propose_buy_collection','collection_sell':'propose_sell_collection'}[row['kind']]
     # Validate write contract before claiming the single send attempt.
     actual=tools.get(name,{})
