@@ -5,9 +5,17 @@ from hotwatch_contract import EngineError,GLOBAL_RISK,checksum
 from report_validation import stamp
 
 PARAMETERS={'min_relative_volume':'1.8','max_spread_pct':'0.8','momentum_pct':'0.3','min_acceleration':'0','max_volatility_pct':'3','short_period':5,'long_period':13,'rsi_period':14,'atr_period':14,'breakout_window':10,'min_samples':34,'confirmation_count':3,'cooldown_s':60,'minimum_signal_s':15,'release_momentum_pct':'0.1','exit_return_pct':'-0.8','trailing_pct':'2','allow_reduce':False}
-METRICS={'sample_count','price','trend_up','return_1_pct','return_3_pct','return_5_pct','return_10_pct','velocity_pct_s','acceleration_pct_s2','sma_short','sma_long','ema_short','ema_long','rsi','macd','macd_signal','macd_histogram','breakout','breakdown','range_position_pct','distance_high_pct','distance_low_pct','volatility_pct','atr','spread','spread_pct','interval_volume','relative_volume','volume_acceleration','rising_price_falling_volume'}
+METRICS={'sample_count','price','trend_up','return_1_pct','return_3_pct','return_5_pct','return_10_pct','velocity_pct_s','acceleration_pct_s2','sma_short','sma_long','ema_short','ema_long','rsi','macd','macd_signal','macd_histogram','breakout','breakdown','range_position_pct','distance_high_pct','distance_low_pct','volatility_pct','atr','spread','spread_pct','interval_volume','relative_volume','volume_acceleration','rising_price_falling_volume','catalyst_verified','catalyst_age_minutes'}
 OPERATORS={'>=','<=','>','<','==','!='}
 BASELINE={'schema_version':1,'strategy_id':'escape_momentum','version':'1.0.0','description':'Konservativ kausal momentum-baseline; ingen dokumenteret profitabilitet.','parameters':PARAMETERS,'entry_rules':{'all':[{'metric':'return_3_pct','operator':'>=','parameter':'momentum_pct'},{'metric':'acceleration_pct_s2','operator':'>=','parameter':'min_acceleration'},{'metric':'relative_volume','operator':'>=','parameter':'min_relative_volume'},{'metric':'spread_pct','operator':'<=','parameter':'max_spread_pct'},{'metric':'volatility_pct','operator':'<=','parameter':'max_volatility_pct'},{'metric':'breakout','operator':'==','value':True},{'metric':'macd_histogram','operator':'>','value':'0'},{'metric':'trend_up','operator':'==','value':True},{'metric':'rsi','operator':'<=','value':'80'}]},'exit_rules':{'all':[{'metric':'return_3_pct','operator':'<=','parameter':'exit_return_pct'},{'metric':'breakdown','operator':'==','value':True}]}}
+
+
+# Research template only. News evidence is not yet supplied by the trusted live
+# adapters, and this version cannot be activated until independently qualified.
+import copy
+EARLY_CATALYST=copy.deepcopy(BASELINE)
+EARLY_CATALYST.update(strategy_id='escape_early_catalyst',version='0.1.0',description='Forsøgsstrategi: bekræftet selskabsnyhed med kursreaktion, volumen og spread. Kun til test, ikke kvalificeret til drift.')
+EARLY_CATALYST['entry_rules']={'all':[{'metric':'catalyst_verified','operator':'==','value':True},{'metric':'catalyst_age_minutes','operator':'<=','value':'30'},{'metric':'return_3_pct','operator':'>=','parameter':'momentum_pct'},{'metric':'relative_volume','operator':'>=','parameter':'min_relative_volume'},{'metric':'spread_pct','operator':'<=','parameter':'max_spread_pct'}]}
 
 def validate_strategy(data):
  errors=[];nodes=0

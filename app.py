@@ -396,6 +396,11 @@ class Handler(BaseHTTPRequestHandler):
                 except ValueError as error:return self.send(400,{'error':str(error)})
                 except Exception:return self.send(503,{'error':'Notifikationen kunne ikke gennemføres. Kontrollér enhed og serveropsætning.'})
                 return self.send(200,result)
+            if self.path in ('/api/strategy-center/draft','/api/strategy-center/simulate'):
+                import strategy_center
+                try:result=strategy_center.draft(connect,user_id,data) if self.path.endswith('/draft') else strategy_center.simulate(connect,user_id,data)
+                except ValueError as error:return self.send(400,{'error':str(error)})
+                return self.send(200,result)
             if self.path=='/api/strategy-center':
                 import strategy_center
                 try:result=strategy_center.save(connect,user_id,data,now())

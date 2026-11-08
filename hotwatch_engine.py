@@ -5,7 +5,7 @@ from datetime import datetime,timezone,timedelta
 from decimal import Decimal
 from hotwatch_contract import SESSION,SAMPLE,CONTEXT,ACTIVATION_BATCH,EngineError,require,canonical,checksum,stamp,OPEN_STATES,PROFILES,GLOBAL_RISK,provider_floor
 from hotwatch_features import features,observation_status,verified_bar_samples
-from hotwatch_strategy import BASELINE,validate_strategy,calculate
+from hotwatch_strategy import BASELINE,EARLY_CATALYST,validate_strategy,calculate
 
 def utc():return datetime.now(timezone.utc)
 def capacity():
@@ -84,6 +84,7 @@ def init(c):
  web_push.init(c)
  c.execute('CREATE TABLE IF NOT EXISTS hw_strategies(owner_id INTEGER NOT NULL,strategy_id TEXT NOT NULL,version TEXT NOT NULL,payload TEXT NOT NULL,checksum TEXT NOT NULL,created TEXT NOT NULL,author TEXT NOT NULL,validation_status TEXT NOT NULL,PRIMARY KEY(owner_id,strategy_id,version))')
  c.execute('INSERT OR IGNORE INTO hw_strategies VALUES(0,?,?,?,?,?,?,?)',(BASELINE['strategy_id'],BASELINE['version'],canonical(BASELINE),checksum(BASELINE),utc().isoformat(),'ESCAPE builtin','baseline_tested'))
+ c.execute('INSERT OR IGNORE INTO hw_strategies VALUES(0,?,?,?,?,?,?,?)',(EARLY_CATALYST['strategy_id'],EARLY_CATALYST['version'],canonical(EARLY_CATALYST),checksum(EARLY_CATALYST),utc().isoformat(),'ESCAPE builtin','schema_validated'))
  c.execute('CREATE TABLE IF NOT EXISTS hw_sessions(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),watch_id TEXT NOT NULL,is_test INTEGER NOT NULL,candidate_id TEXT NOT NULL,purpose TEXT NOT NULL,status TEXT NOT NULL,request TEXT NOT NULL,digest TEXT NOT NULL,strategy TEXT NOT NULL,state TEXT NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL,last_data TEXT,last_calculation TEXT,next_due REAL NOT NULL,lease_owner TEXT,lease_until REAL NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 0,failures INTEGER NOT NULL DEFAULT 0,last_error TEXT,UNIQUE(user_id,watch_id))')
  c.execute("CREATE UNIQUE INDEX IF NOT EXISTS hw_active_identity ON hw_sessions(user_id,is_test,candidate_id,purpose) WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')")
  c.execute('CREATE INDEX IF NOT EXISTS hw_due ON hw_sessions(status,next_due,lease_until)')

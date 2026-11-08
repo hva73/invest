@@ -89,3 +89,15 @@ Regressionstest skal mindst afsløre:
 - `docs/END_TO_END_DATA_CONTRACT.md` — eksisterende end-to-end datakontrakt.
 
 **Ændringspolitik:** Nye versioner kræver en dokumenteret ændringsliste, ejerens udtrykkelige godkendelse og opdaterede regressionstests. Uafklarede krav må ikke fortolkes som tilladelse til at ændre strategien.
+
+## 9. Strategivalg i samarbejdet med ChatGPT — tillæg 2026-11-08
+
+Dette tillæg beskriver den aftalte fremtidige aflevering og ændrer ikke det gældende v2-rapportskema eller giver ordre- eller aktiveringsmandat. ChatGPT foreslår en strategi; ESCAPE kontrollerer selv identitet, version, tilgængelighed og kvalifikation. Brugeren bevarer den eksisterende manuelle godkendelse af handelsforslag, og Pluto afgør endelig godkendelse.
+
+For hver relevant kandidat skal den strukturerede aflevering, når rapportkontrakten understøtter det, mindst indeholde kandidatens stabile ID, foreslået `strategy_id` og præcis `version`, en kort dansk begrundelse, datakilder og deres tidspunkt samt, når relevant, katalysatorens type, offentliggørelsestid og tidspunktet hvor oplysningen blev tilgængelig. Oplys om data er verificerede, ukendte eller mangler, og hvad der mangler for en vurdering. Ingen nyhed, kurs, volumen, spread eller senere observation må fremstilles som kendt før sit faktiske tilgængelighedstidspunkt. Et rapporteret strategiforslag er hverken en ordre, en garanti for afkast eller en tilladelse til at aktivere en ikke-kvalificeret strategi.
+
+ESCAPE skal kunne vise den faktisk anvendte strategi og version samt begrundelsen særskilt fra ChatGPTs forslag. Ukendt, utilgængelig eller ukvalificeret strategi må ikke aktiveres automatisk. Hvis der anvendes et standardvalg, skal fallback og begrundelse vises; eksisterende overvågninger beholder deres fastlåste version. En brugers private strategier er kun tilgængelige for denne bruger. Samtidige eller modstridende signaler må ikke i sig selv oprette konkurrerende ordrer.
+
+**Nuværende integrationsstatus: SCHEMA-GAP.** Den eksisterende strenge v2-kandidatmodel indeholder ikke strukturerede felter til foreslået strategi-ID og version eller præcist tidspunkt for hvornår en nyhed blev tilgængelig. ChatGPT skal derfor indtil en udvidet, valideret kontrakt er indført beskrive et forslag og dets kilder i kandidatens eksisterende `assessment`/`source_ids`, og udtrykkeligt angive, at valget ikke er maskinelt overført. Strategitekst i rapporten vælger eller aktiverer ikke en strategi. Nye felter må først anvendes efter implementeret skemaversion, validering, readback og tests af bagudkompatibilitet.
+
+Early Catalyst er en skabelon til forskning. Den har endnu ingen verificeret live-katalysatorindgang, historisk vinder-/tabertest eller godkendelse til drift. Fiktive eksempler er ikke backtest, og en bestået regelprøve er ikke et købssignal. Globale risikogrænser og eksisterende kontrol af datakvalitet skal gælde uanset strategi.
