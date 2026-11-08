@@ -25,9 +25,17 @@ def main():
      if(Math.abs(Number(dots[0].getAttribute('cy'))-Number(dots[1].getAttribute('cy')))>12)throw Error('Small changes are exaggerated');
      if(!doc.querySelector('.dash-chart-scale')||!doc.querySelector('.dash-chart-dates').textContent.includes('24.00'))throw Error('Day scale is missing');
      const marker=doc.querySelector('.dash-chart-latest-time');if(!marker||!marker.textContent.includes('00.10')||marker.textContent.includes('00.10.00'))throw Error('Last timestamp is not shown in hours and minutes');
-     if(!marker.getAttribute('style').includes('0.694%'))throw Error('Last timestamp is not aligned to the recorded point');
+     if(Number(marker.getAttribute('x'))!==22||Number(marker.getAttribute('y'))>=Number(dots[1].getAttribute('cy')))throw Error('Last timestamp is not above the recorded point');
+     const later=chart([points[0],{...points[1],at:'2026-11-08T17:00:00Z'}]);if(Number(later.querySelector('.dash-chart-latest-time').getAttribute('x'))!==Number(later.querySelectorAll('.dash-chart-point')[1].getAttribute('cx')))throw Error('Time does not follow later chart point');
      if(chart(points.slice(0,1)).querySelectorAll('.dash-chart-point').length!==1)throw Error('First daily observation not displayed');
     }''')
+    page.evaluate('''() => {
+     const points=[{at:'2026-11-08T08:00:00Z',reported_result:'-169',currency:'DKK'},{at:'2026-11-08T14:00:00Z',reported_result:'-168',currency:'DKK'}];
+     document.querySelector('#dashboard-value-chart').innerHTML=window.DashboardUI.portfolioChart({portfolio_value_history:{day_start:'2026-11-07T23:00:00Z',day_end:'2026-11-08T23:00:00Z',periods:{day:points}}});
+     const dot=document.querySelectorAll('.dash-chart-point')[1].getBoundingClientRect(),label=document.querySelector('.dash-chart-latest-time').getBoundingClientRect();
+     if(Math.abs((label.left+label.right-dot.left-dot.right)/2)>2||label.bottom>dot.top+3)throw Error('Visible label is not above the latest point');
+    }''')
+    page.evaluate("document.querySelector('#dashboard-value-chart').innerHTML=window.DashboardUI.portfolioChart(state.dashboard)")
     page.locator('[data-dashboard-range=year]').click();expect(page.locator('[data-dashboard-range=year]')).to_have_attribute('aria-pressed','true');expect(page.locator('.dash-chart-svg')).to_be_visible()
     for width in (320,390,768,1440):
      page.set_viewport_size({'width':width,'height':1000});assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),width
