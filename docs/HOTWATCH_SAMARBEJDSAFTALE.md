@@ -33,6 +33,10 @@ ChatGPT-kandidat → verificeret Pluto-instrument → automatisk HOT WATCH → E
 4. Kør den rettede read-only kontrol på applikationsserveren og kontroller adapterens håndtering af de faktiske felter. Dokumenter manglende adgang som en konkret blocker; ingen påstand om gennemført serverkontrol uden resultat.
 5. Opdater status med ændringer, relevante testresultater og resterende fejl, og gennemgå det med Heine. Først derefter startes den samlede live-test med faktiske readbacks ved åbent relevant marked. Godkendelse af live-test er ikke tilladelse til testordrer.
 
+## Night Intelligence Mode — gældende tillæg
+
+Ejerens tillæg af 8. november 2026 er indsat i [den fælles samarbejdsaftale, afsnit 2a](ESCAPE_TRADING_AGREEMENT_V3_9.md#2a-tillæg--night-intelligence-mode). Global scanning og teknisk rapportering fortsætter hver time; rutinemæssige brugerrettede rapporter holdes tilbage kl. 23–06 dansk tid. Kl. 07 leveres Morning Intelligence; kl. 08–22 gælder normal rapportering. Relevante Pluto-verificerede kandidater overdrages straks gennem det validerede flow, også om natten, og faktisk aktivering læses tilbage. Tidskritiske signaler og alvorlige fejl må fortsat meddeles straks. Ingen ændring af risikoregler eller handelsmandat.
+
 ## Ansvar og autoritet
 
 - **Trading Radar / ChatGPT:** opdager og vurderer kandidater med stabilt `candidate_id`, Pluto-verificeret instrument, kilde, observationstid, begrundelse, beslutning (`KØB`/`AFVENT`/`FRAVÆLG`), næste trigger og revurderingsfrist. Ingen ordre uden gældende mandat og faktisk Pluto-flow.
