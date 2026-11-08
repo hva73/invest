@@ -97,6 +97,22 @@ class Trading(unittest.TestCase):
    self.assertEqual(len(display['positions']),1)
    with self.assertRaisesRegex(trade.TradeError,'ufuldstændig'):trade.estimate(app.connect,1,request,Truncated)
   self.assertFalse(self.writes())
+ def test_pluto_total_includes_separate_collections(self):
+  original=self.factory
+  class WithCollection(original):
+   def tools(client):
+    return super().tools()+[{'name':'get_positions','inputSchema':{'type':'object','properties':{'portfolioId':{'type':'string'}},'required':['portfolioId']},'annotations':{'readOnlyHint':True}}]
+   def request(client,method,args):
+    if args['name']=='get_positions':
+     positions=[{'assetId':'asset-test','ticker':'TEST','quantity':'8','currency':'USD'}]+[{'assetId':'other-'+str(i),'ticker':'T'+str(i),'quantity':'1','currency':'USD'} for i in range(12)]
+     return {'structuredContent':{'positions':positions,'collections':[{'collectionId':'child'}],'totalCount':14}}
+    if args['name']=='get_portfolio_value':return {'structuredContent':{'value':'1000','currency':'DKK'}}
+    return super().request(method,args)
+  request=dict(self.request,size_mode='percent',size='25',order_type='MARKET')
+  with patch('trade_service.candidate',return_value={'signal':'SÆLG'}),patch('pending_orders.enrich'):
+   proposal=trade.estimate(app.connect,1,request,WithCollection)['proposal']
+  self.assertEqual(proposal['payload']['orders'][0]['shares'],'2')
+  self.assertFalse(self.writes())
  def test_hotwatch_signal_is_rechecked_and_asset_is_bound(self):
   session={'status':'ACTIVE','signal':'BUY','display_status':'KØBSSIGNAL','request':{'asset_id':'asset-test','ticker':'TEST'}}
   request=dict(self.request,report_id='@hotwatch',candidate_id='watch-1',size_mode='amount',size='100',order_type='MARKET')

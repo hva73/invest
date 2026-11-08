@@ -249,13 +249,16 @@ def read(connect,user_id,portfolio_id,client_factory=None,strict_positions=False
             except PortfolioFormatError as error:payload['errors'].append(section+': '+str(error))
             except Exception:payload['errors'].append(section+': Pluto-opslaget fejlede; ingen gamle værdier vises som nye')
         try:
-            rows=[];cursor=None;seen=set();total=None
+            rows=[];cursor=None;seen=set();total=None;collection_count=0
             for _ in range(30):
                 args={'portfolioId':identifier,'limit':200}
                 if cursor:args['nextToken']=cursor
                 page=call('get_positions',args)
                 batch=list_data(page,['positions','holdings','rows','items','data']);rows.extend(batch)
                 if isinstance(page,dict):
+                    collections=page.get('collections',[])
+                    if strict_positions and not isinstance(collections,list):raise PortfolioFormatError('Ukendt Collection-liste i beholdningssvaret')
+                    if isinstance(collections,list):collection_count+=len(collections)
                     if page.get('hasMore') is True and not page.get('nextToken'):raise PortfolioFormatError('Ufuldstændig beholdningsliste')
                     if page.get('nextCursor'):raise PortfolioFormatError('Ukendt beholdningspagination')
                     total=page.get('totalCount',total);cursor=page.get('nextToken')
@@ -264,7 +267,7 @@ def read(connect,user_id,portfolio_id,client_factory=None,strict_positions=False
                 if not isinstance(cursor,str) or cursor in seen:raise PortfolioFormatError('Gentaget/ugyldig beholdningspagination')
                 seen.add(cursor)
             else:raise PortfolioFormatError('Beholdningslisten overstiger sidegrænsen')
-            if total is not None and (isinstance(total,bool) or not isinstance(total,int) or total<0 or len(rows)>total or strict_positions and len(rows)!=total):raise PortfolioFormatError('Beholdningslistens antal er ugyldigt eller ufuldstændigt')
+            if total is not None and (isinstance(total,bool) or not isinstance(total,int) or total<0 or len(rows)>total or strict_positions and len(rows)+collection_count!=total):raise PortfolioFormatError('Beholdningslistens antal er ugyldigt eller ufuldstændigt')
             payload['positions']=normalize_positions(rows,payload.get('currency'))
             from pending_orders import from_positions
             payload['pending_orders']=from_positions(rows,'get_positions')
