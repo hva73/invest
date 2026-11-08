@@ -202,3 +202,9 @@ Samlet live-test afventer fortsat ejerens gennemgang af det konkrete resultat og
 ### Nulstilling og ny vurdering — 9. november 2026
 
 Efter ejerens udtrykkelige valg blev den aktive radarliste nulstillet. Rapporter og historik bevares, og de 18 observerede beholdningssessioner fortsatte. Den installerede version skjuler også efterfølgende rapporter med de gamle kandidat-ID'er; genafsendelse alene genstarter dem derfor ikke. Koderettelsen på udviklingsgrenen tillader samme stabile ID igen, når en ny hovedrapport indeholder en eksplicit, gyldig og tidsstemplet vurdering efter nulstillingen. Kopier uden ny vurdering forbliver skjult. Eksisterende stop-, identitets-, kapacitets- og risikokontroller gælder stadig. Rettelsen er først aktiv efter installation og dokumenteret readback; en gemt rapport er ikke en startet session.
+
+### Beholdningskontekst og kapacitet — 9. november 2026
+
+Den tidligere oplysning om en standardgrænse på 20 sessioner var forkert for den aktuelle kode: standarden er 40, og serveren kan være særskilt konfigureret lavere. Den faktiske servergrænse er ikke verificeret. Readback har efterfølgende vist frisk Pluto-beholdningskontekst for nogle, men ikke alle, beholdningssessioner. Det er en tidsafhængig observation, ikke bevis for at alle sessioner nu er friske.
+
+En kodefejl er rettet på udviklingsgrenen: Når EODHD-adapteren ved en identitetsfejl ledsager fejlen med frisk kontekst hentet fra Pluto, kan den interne worker journalføre den verificerede brokerkontekst uden at oprette en markedsobservation eller et handelssignal. EODHD-data alene accepteres ikke som brokerkontekst. Kurs-/identitetsfejlen forbliver synlig, og alle eksisterende friskheds- og risikokrav er uændrede. Rettelsen kræver installation og produktions-readback, før effekten kan fastslås.

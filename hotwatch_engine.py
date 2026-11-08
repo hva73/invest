@@ -818,7 +818,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   c.execute('UPDATE hw_sessions SET status=?,state=?,updated=?,last_data=?,last_calculation=?,next_due=?,failures=0,last_error=NULL,lease_owner=NULL,lease_until=0 WHERE id=?',(new_status,canonical(nextstate),now.isoformat(),sample['event_time'],now.isoformat(),now.timestamp()+interval,row['id']))
   return {'ok':True,'duplicate':False,'calculation':result,'session':view(c,row_for(c,uid,wid,mode),now)}
 
-def observe_context(connect,uid,wid,mode,context,now=None,lease=None):
+def observe_context(connect,uid,wid,mode,context,now=None,lease=None,broker_source=None):
  """Trusted adapter evidence only. Never invent a quote or advance signal confirmation."""
  now=now or utc();require(context,CONTEXT)
  if not context['as_of'] or not 0<=now.timestamp()-stamp(context['as_of']).timestamp()<=300:raise EngineError('invalid_position_context_time')
@@ -831,7 +831,7 @@ def observe_context(connect,uid,wid,mode,context,now=None,lease=None):
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:raise EngineError('operator_kill_switch',409)
   killed=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
   if killed and killed['killed']:raise EngineError('kill_switch_active',409)
-  if request['provider'] not in ['pluto','synthetic']:raise EngineError('broker_context_source_required')
+  if request['provider'] not in ['pluto','synthetic'] and not (request['provider']=='eodhd' and broker_source=='pluto'):raise EngineError('broker_context_source_required')
   if request['provider']=='synthetic' and not mode:raise EngineError('synthetic_requires_test_mode')
   if request['end_at'] and stamp(request['end_at'])<=now:raise EngineError('watch_not_running',409)
   previous=c.execute('SELECT payload FROM hw_context_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()

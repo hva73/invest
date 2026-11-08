@@ -403,6 +403,21 @@ class HotWatch(unittest.TestCase):
   with patch('hotwatch_engine.utc',return_value=self.now):self.assertTrue(runner.once(self.now))
   view=engine.item(app.connect,1,r['watch_id'],True)['session'];self.assertEqual(view['status'],'DEGRADED');self.assertEqual(view['signal'],'NO_DATA');self.assertIsNone(view['last_data_at']);self.assertEqual(view['latest_context']['quantity'],'10')
   self.assertEqual(self.counts()['hw_samples'],0)
+ def test_eodhd_failure_keeps_verified_pluto_context_without_market_signal(self):
+  from hotwatch_service import Runner
+  from unittest.mock import Mock
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  r=copy.deepcopy(self.req);r.update(watch_id='eodhd-broker-context',purpose='eodhd broker context',provider='eodhd',provider_symbol='MERC.US')
+  engine.create(app.connect,1,r,self.now)
+  ctx=tick(self.now,held=True)['context']
+  with self.assertRaisesRegex(EngineError,'broker_context_source_required'):engine.observe_context(app.connect,1,r['watch_id'],True,ctx,self.now)
+  error=DataUnavailable('EODHD_INSTRUMENT_REVALIDATION_REQUIRED');error.position_context=ctx
+  adapter=Mock();adapter.poll.side_effect=error;runner=Runner(app.connect);runner.adapters[(1,'eodhd')]=adapter
+  with patch('hotwatch_engine.utc',return_value=self.now),patch('hotwatch_warmup.refresh'):
+   self.assertTrue(runner.once(self.now))
+  view=engine.item(app.connect,1,r['watch_id'],True)['session']
+  self.assertEqual(view['latest_context']['quantity'],'10');self.assertEqual(view['signal'],'NO_DATA');self.assertEqual(view['status'],'DEGRADED')
+  self.assertIsNone(view['last_data_at']);self.assertEqual(self.counts()['hw_samples'],0)
  def test_checkpoint_context_migration_preserves_old_journal(self):
   ctx=tick(self.now)['context'];engine.observe_context(app.connect,1,self.req['watch_id'],True,ctx,self.now)
   with app.connect() as c:

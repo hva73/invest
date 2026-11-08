@@ -725,7 +725,7 @@ class Runner:
    if error.code in ['lease_lost','watch_not_running','kill_switch_active','operator_kill_switch']:
     self.log(job,'cancelled',error.code);return True
    if getattr(error,'position_context',None) is not None:
-    try:engine.observe_context(self.connect,uid,wid,mode,error.position_context,lease=lease)
+    try:engine.observe_context(self.connect,uid,wid,mode,error.position_context,lease=lease,broker_source='pluto' if r['provider']=='eodhd' else None)
     except EngineError as context_error:
      if context_error.code in ['lease_lost','watch_not_running','kill_switch_active','operator_kill_switch']:return True
      self.log(job,'context_rejected',context_error.code)
