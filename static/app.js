@@ -123,9 +123,21 @@ async function performRefresh({automatic=false,all=false}={}){
  }catch(error){if(epoch!==sessionEpoch||!state)return;status.dataset.kind='error';status.textContent='Opdatering mislykkedes — tidligere data kan være forældede. '+error.message;try{await refresh({background:automatic})}catch{}}
  finally{if(plutoAttempted&&epoch===sessionEpoch)nextAutomaticAt=paused?0:Date.now()+300000;userRefreshBusy=false;button.disabled=false}
 }
+// Successful refreshes are transient; warnings stay available until the next refresh.
+let refreshStatusTimer=null;
+const refreshStatus=$('#refresh-status');
+new MutationObserver(()=>{
+ clearTimeout(refreshStatusTimer);
+ if(!state||!refreshStatus.textContent.trim()){refreshStatus.hidden=true;return}
+ refreshStatus.hidden=false;
+ if(['success','info'].includes(refreshStatus.dataset.kind)){
+  const epoch=sessionEpoch;
+  refreshStatusTimer=setTimeout(()=>{if(epoch===sessionEpoch&&['success','info'].includes(refreshStatus.dataset.kind))refreshStatus.hidden=true},3000);
+ }
+}).observe(refreshStatus,{childList:true,characterData:true,subtree:true,attributes:true,attributeFilter:['data-kind']});
 let pullStart=null,pullDistance=0,pullClaimed=false,pullHideTimer=null;
 const pullHint=$('#pull-refresh-status');
-function pullMessage(text){clearTimeout(pullHideTimer);pullHint.textContent=text;pullHint.hidden=!text}
+function pullMessage(text){clearTimeout(pullHideTimer);pullHint.textContent=text;pullHint.hidden=!text;document.body.classList.toggle('pull-refresh-visible',Boolean(text))}
 function resetPull(){pullStart=null;pullDistance=0;pullClaimed=false}
 function atPageTop(){return Math.max(window.scrollY,document.documentElement.scrollTop,document.body.scrollTop)<=2}
 function canPull(target){return Boolean(state&&atPageTop()&&!document.querySelector('dialog[open],#content form[data-dirty="true"]')&&!target.closest('input,textarea,select,[contenteditable]')&&!document.activeElement?.matches('input,textarea,select'))}
@@ -133,7 +145,7 @@ async function finishPull(){
  const epoch=sessionEpoch;resetPull();pullMessage(currentRefreshPromise?'Opdatering er i gang — henter resultatet…':'Opdaterer Pluto-data og rapporter…');
  const status=$('#refresh-status'),observer=new MutationObserver(()=>{if(epoch===sessionEpoch)pullMessage(status.textContent)});observer.observe(status,{childList:true,subtree:true});
  try{await refreshCurrent({all:true});if(epoch===sessionEpoch)pullMessage(status.textContent||'Visningen er genindlæst.')}catch{pullMessage('Opdatering mislykkedes. Prøv knappen Opdatér.')}
- finally{observer.disconnect();if(epoch!==sessionEpoch)pullMessage('');else pullHideTimer=setTimeout(()=>{pullHint.hidden=true},6000)}
+ finally{observer.disconnect();if(epoch!==sessionEpoch)pullMessage('');else pullHideTimer=setTimeout(()=>pullMessage(''),2000)}
 }
 document.addEventListener('touchstart',event=>{resetPull();if(event.touches.length===1&&canPull(event.target))pullStart={x:event.touches[0].clientX,y:event.touches[0].clientY}},{passive:false,capture:true});
 document.addEventListener('touchmove',event=>{
