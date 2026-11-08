@@ -47,7 +47,7 @@ def estimate_error(response,client):
         collect(response.get('error'))
     text=' · '.join(dict.fromkeys(messages))
     if re.search(r'(?i)connection may only read',text) and re.search(r'(?i)propose orders',text):
-        return 'Pluto-forbindelsen har kun læseadgang. Gå til Forbindelser, forbind Pluto igen, og vælg “Also let it propose orders” under godkendelsen. Intet handelsforslag er sendt.'
+        return 'Pluto-forbindelsen har kun læseadgang. Gå til Forbindelser og vælg “Forbind med adgang til handelsforslag”, og godkend hos Pluto. Intet handelsforslag er sendt.'
     for attr in ['token','session']:
         secret=getattr(client,attr,None)
         if isinstance(secret,str) and secret:text=text.replace(secret,'[skjult]')

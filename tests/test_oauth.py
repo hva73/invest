@@ -32,6 +32,16 @@ class OAuth(unittest.TestCase):
   with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM oauth_tokens').fetchone()[0],0)
   query=self.begin()
   with self.assertRaises(ValueError):oauth.finish(app.connect,self.session,query['state'][0],'',error='access_denied')
+ def test_trade_access_requires_explicit_request_and_verified_metadata(self):
+  os.environ['PLUTO_READ_SCOPES']='mcp:read'
+  self.metadata['oauth']['scopes_supported']=['mcp:read','mcp:trade']
+  self.assertEqual(self.begin()['scope'],['mcp:read'])
+  q=parse_qs(urlsplit(oauth.start(app.connect,self.session,self.metadata,trade=True)['authorization_url']).query)
+  self.assertEqual(set(q['scope'][0].split()),{'mcp:read','mcp:trade'})
+  oauth.finish(app.connect,self.session,q['state'][0],'code',post=lambda *a,**k:{'access_token':'test','token_type':'Bearer','expires_in':300,'scope':'mcp:read mcp:trade'})
+  self.assertTrue(app.connection_state(1)['trade_access'])
+  self.metadata['oauth']['scopes_supported']=['mcp:read']
+  with self.assertRaises(oauth.SetupRequired):oauth.start(app.connect,self.session,self.metadata,trade=True)
  def test_dynamic_registration_is_explicit_and_reused(self):
   os.environ['PLUTO_CLIENT_ID']='';self.metadata['oauth']['registration_endpoint']='https://mcp.prod.pluto.markets/register';calls=[]
   def post(url,data):calls.append(data);return {'client_id':'dynamic-test','token_endpoint_auth_method':'none'}

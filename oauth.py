@@ -64,15 +64,16 @@ def post_json(url,data,form=False):
         if not isinstance(parsed,dict):raise ValueError('invalid response')
         return parsed
 
-def start(connect,session,metadata=None,post=None):
+def start(connect,session,metadata=None,post=None,trade=False):
     callback,scopes=settings();cipher()
+    if trade is True:scopes=list(dict.fromkeys([*scopes,'mcp:trade']))
     metadata=metadata or discover();server=metadata.get('oauth',{})
     if not metadata.get('discovery_valid') or not server.get('verified'):
         raise SetupRequired('Plutos autorisationsmetadata skal verificeres først')
     if 'S256' not in server.get('code_challenge_methods_supported',[]):
         raise SetupRequired('Pluto skal understøtte PKCE S256')
     if not set(scopes).issubset(server.get('scopes_supported',[])):
-        raise SetupRequired('De konfigurerede læsescopes findes ikke i Plutos metadata')
+        raise SetupRequired('Den ønskede adgang findes ikke i Plutos verificerede metadata')
     if not all(server.get(k) for k in ['authorization_endpoint','token_endpoint']):
         raise SetupRequired('Plutos login- eller token-endpoint mangler')
     if 'none' not in server.get('token_endpoint_auth_methods_supported',['client_secret_basic']):

@@ -99,10 +99,11 @@ def connection_state(user_id):
     with connect() as c:
         row=c.execute('SELECT status,requested FROM connections WHERE user_id=?',(user_id,)).fetchone()
         token=c.execute('SELECT expires,payload FROM oauth_tokens WHERE user_id=?',(user_id,)).fetchone()
-    connected=bool(token and token['expires']>time.time());renewable=False;refresh_error=None
+    connected=bool(token and token['expires']>time.time());renewable=False;refresh_error=None;trade_access=False
     if token:
         try:
             stored=oauth.unseal(user_id,token['payload'])
+            trade_access='mcp:trade' in stored.get('scopes',[])
             renewable=bool(stored['token'].get('refresh_token') and stored.get('server',{}).get('verified'))
             refresh_error=stored.get('refresh_error')
         except Exception:pass
@@ -115,7 +116,7 @@ def connection_state(user_id):
     if not connected and renewable:reason='Pluto-adgangen skal fornyes. Vi forsøger automatisk ved næste dataopslag.'
     if refresh_error=='temporary':reason='Seneste fornyelse fejlede midlertidigt. Prøv et dataopslag igen om et minut.'
     elif refresh_error=='reconnect':reason='Pluto kræver et nyt login.'
-    return {'provider':'Pluto Markets','connected':connected,'expires_at':token['expires'] if token else None,'can_renew':renewable,'status':'Login godkendt' if connected else ('Fornyelse afventer' if renewable else ('Login udløbet' if token else (row['status'] if row else 'Ikke tilsluttet'))),'requested':row['requested'] if row else None,'can_connect':can_connect,'reason':reason,'requested_access':'Kun konfigurerede læsescopes','has_tokens':bool(token)}
+    return {'provider':'Pluto Markets','connected':connected,'expires_at':token['expires'] if token else None,'can_renew':renewable,'status':'Login godkendt' if connected else ('Fornyelse afventer' if renewable else ('Login udløbet' if token else (row['status'] if row else 'Ikke tilsluttet'))),'requested':row['requested'] if row else None,'can_connect':can_connect,'reason':reason,'requested_access':'Handelsforslag og læsning' if trade_access else 'Kun læsning','trade_access':trade_access,'has_tokens':bool(token)}
 
 def save_opportunity(data,user_id):
     fields=['company','ticker','market','asset','headline','source_url','published','classification','catalyst','risk','next_action']
@@ -416,7 +417,7 @@ class Handler(BaseHTTPRequestHandler):
                 import mcp_client
                 return self.send(200,mcp_client.catalog(connect,user_id))
             if self.path=='/api/pluto/start':
-                return self.send(200,oauth.start(connect,s))
+                return self.send(200,oauth.start(connect,s,trade=data.get('trade') is True))
             if self.path=='/api/pluto/connect':
                 with connect() as c:
                     c.execute('BEGIN IMMEDIATE')
