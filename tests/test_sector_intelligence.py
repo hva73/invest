@@ -220,6 +220,16 @@ class SectorIntelligenceTest(unittest.TestCase):
   with self.connect() as c:row=c.execute('SELECT * FROM sector_benchmark_holdings').fetchone()
   self.assertEqual(row['status'],'OK');self.assertEqual(json.loads(row['payload'])['source'],'State Street / SPDR');self.assertEqual(json.loads(row['payload'])['rows'][0]['ticker'],'NEE')
   self.assertEqual(sector.request_benchmark_holdings(self.connect,1,'XLU.US')['status'],'OK')
+ def test_global_ishares_holdings_use_public_issuer_source(self):
+  now=time.time()
+  with self.connect() as c:c.execute('INSERT INTO sector_benchmarks(symbol,region,sector,status,updated,next_attempt) VALUES(?,?,?,?,?,?)',('IXJ.US','Globalt','Sundhed','VERIFIED',now,now+1000))
+  self.assertEqual(sector.request_benchmark_holdings(self.connect,1,'IXJ.US')['status'],'TRY_ISHARES')
+  result={'as_of':'2026-11-05','rows':[{'ticker':'TEST','name':'Test','weight':12,'exchange':'NYSE','identifier':None}]}
+  with patch('ishares_holdings.fetch',return_value=result) as fetch:sector.refresh_tick(self.connect)
+  fetch.assert_called_once_with('IXJ.US')
+  with self.connect() as c:row=c.execute("SELECT * FROM sector_benchmark_holdings WHERE symbol='IXJ.US'").fetchone()
+  self.assertEqual(row['status'],'OK');self.assertEqual(json.loads(row['payload'])['source'],'iShares / BlackRock');self.assertEqual(json.loads(row['payload'])['rows'][0]['ticker'],'TEST')
+  self.assertEqual(sector.request_benchmark_holdings(self.connect,1,'IXJ.US')['status'],'OK')
  def test_global_benchmark_uses_provider_search_before_fundamentals(self):
   class Client:
    def _http(self,base,path,params):

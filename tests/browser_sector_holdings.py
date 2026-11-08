@@ -28,6 +28,11 @@ try:
   with app.connect() as c:c.execute("UPDATE sector_holding_prices SET status='OK',payload=?,updated=? WHERE ticker='NEE'",(json.dumps({'periods':{'30':{'value':10,'from':'2026-10-01','to':today}},'basis':'justeret'}),time.time()))
   expect(page.locator('.si-etf-metrics strong.positive')).to_contain_text('+10,00 %',timeout=18000);expect(page.locator('.si-etf-metrics small')).to_contain_text('Fondsandel')
   page.locator('[data-sector-holdings-close]').click();page.locator('[data-sector-region="Europa"]').click();page.locator('[data-sector-market="EXH4.XETRA"]').click();expect(page.locator('[role=dialog]')).to_be_visible();print('Europa opened:',page.locator('[role=dialog]').inner_text()[:120])
+  page.locator('[data-sector-holdings-close]').click();page.locator('[data-sector-region="Globalt"]').click();page.locator('[data-sector-market="IXN.US"]').wait_for()
+  page.locator('[data-sector-market="IXN.US"]').click()
+  with patch('ishares_holdings.fetch',return_value={'rows':[{'name':'Synthetic holding','ticker':'TEST','weight':12.0,'identifier':None}],'as_of':today}):sector.refresh_tick(app.connect)
+  expect(page.locator('[role=dialog]')).to_contain_text('Synthetic holding',timeout=18000)
+  expect(page.locator('[role=dialog]')).to_contain_text('iShares / BlackRock')
   page.locator('[data-sector-holdings-close]').click()
   for width in (320,1440):
    page.set_viewport_size({'width':width,'height':900})
