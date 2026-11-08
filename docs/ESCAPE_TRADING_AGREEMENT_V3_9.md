@@ -1,6 +1,6 @@
 # ESCAPE — fælles aftale for Trading Radar, HOT WATCH, Codex og ESCAPE
 
-**Aftalebaseline:** v3.9 · **Dato:** 2026-11-03 · **Status:** Dokumenteret aftalegrundlag, ikke dokumentation for færdig implementering.
+**Aftalebaseline:** v3.9 med Night Intelligence-tillæg · **Dato:** 2026-11-03 · **Tillæg:** 2026-11-08 · **Status:** Dokumenteret aftalegrundlag, ikke dokumentation for færdig implementering.
 
 > Dette dokument fastholder de krav og beslutninger, der er aftalt med ejeren. Det er en krav- og acceptkontrakt, ikke en påstand om at alle krav allerede er implementeret. Ved uoverensstemmelse med en teknisk kontrakt skal forskellen synliggøres og afklares med ejeren; ingen part må stiltiende ændre handelsmandater, datakrav eller rapportdækning.
 
@@ -17,7 +17,7 @@ Ingen stiltiende regelændringer. Ændringer kræver eksplicit ejerbeslutning, v
 
 ## 2. Rapportmodel v3.9 — obligatorisk
 
-- **Timevis rapport** også når datakilder fejler. Detaljerede rapporter kl. **08, 14, 15 og 22 dansk tid**; øvrige timer kortere status, uden at udelade kritiske hændelser.
+- **Timevis global scanning og teknisk rapportering** også når datakilder fejler. Brugerrettede rapporter følger Night Intelligence-tillægget i afsnit 2a: ingen rutinerapporter kl. 23–06, kort morgenrapport kl. 07 og normal rapportering kl. 08–22, inklusive udvidede rapporter kl. **08, 14, 15 og 22 dansk tid**. Kritiske hændelser må meddeles straks.
 - **Kl. 22** er en fuld global gennemgang, inklusive **Asien/Stillehavsområdet** og næste handelsdags katalysatorer. Ingen region må forsvinde ved forkortelse.
 - Regionsdækning: **Europa/Norden, USA/Canada, Asien/Stillehavsområdet og råvarer/metaller**; suppler med valuta, relevante sektorer og markedsforhold.
 - Minimumsbørser: **CO, ST, OL, HE, LSE, US** plus relevante regionale markeder og rotation. Asien omfatter bl.a. **Tokyo, Shanghai/Shenzhen, Hongkong, Sydkorea, Taiwan, Indien, Singapore og Australien**.
@@ -28,6 +28,56 @@ Ingen stiltiende regelændringer. Ændringer kræver eksplicit ejerbeslutning, v
 - Rapporten skal vise begge Pluto-porteføljer, samlet status, kontanter, investeret beløb, realiseret/urealiseret P/L, åbne positioner, aktive/afventende ordrer og risici, hvor felterne faktisk kan verificeres.
 - For relevante tickere: **dagens +/- %**, **siden sidste sammenlignelige observation +/- %**, pris/valuta, kilde, tilgængeligt tidsstempel, trend og beslutning. Mangler sammenligneligt datagrundlag, vis **—**.
 - Særskilt fremhæv beskyttelsesordrer, der ikke er bekræftet aktive, og ordrer uden fill.
+
+## 2a. Tillæg — Night Intelligence Mode
+
+**Gældende fra 8. november 2026. Alle klokkeslæt følger Europe/Copenhagen, inklusive sommer-/vintertid.** Trading Radar arbejder fortsat globalt og scanner hver time døgnet rundt.
+
+### 1. Night Intelligence Mode — kl. 23.00–06.59 dansk tid
+
+Kørslerne kl. 23, 00, 01, 02, 03, 04, 05 og 06 anvendes primært til informationsindsamling og tidlig identifikation af handelsmuligheder.
+
+Prioritér:
+
+- Selskabsnyheder, regnskaber, guidance og børsmeddelelser
+- Eftermarkedet i USA og de asiatiske markeder
+- Kommende katalysatorer og usædvanlig handelsaktivitet
+- Analytikerændringer, sektorbevægelser og relevante rygter
+- Verifikation og prioritering af kandidater til næste handelsdag
+
+Bekræftede nyheder, ubekræftede rygter og analytiske hypoteser skal holdes adskilt.
+
+### 2. Direkte overdragelse til ESCAPE
+
+Finder Trading Radar en relevant, Pluto-verificeret HOT WATCH-kandidat om natten, skal den **afleveres til ESCAPE med det samme** via det eksisterende validerede rapport- og overdragelsesflow. Kandidaten må ikke vente til morgenrapporten.
+
+ESCAPE overtager den tekniske overvågning, når en faktisk HOT WATCH-session er aktiveret og verificeret. Manglende aktivering rapporteres som `BLOCKED` eller `UNKNOWN`.
+
+EARLY WATCH er ikke et købssignal, og ingen automatiske handler introduceres.
+
+### 3. Rapportering
+
+Fra kl. 23 til og med kl. 06 sendes **ingen rutinemæssige brugerrettede timesrapporter**. Væsentlige tidskritiske signaler, alvorlige driftsfejl og forhold, der kræver brugerens beslutning, må fortsat meddeles straks.
+
+Teknisk rapportering, kandidatjournal, porteføljekontrol, ESCAPE-opdateringer og HOT WATCH-overdragelse fortsætter uændret.
+
+Kl. 07 leveres en kort **Morning Intelligence-rapport** med nattens vigtigste dokumenterede fund, status på overdragede kandidater og relevante muligheder før europæisk børsåbning.
+
+Fra kl. 08 til og med kl. 22 gælder den normale rapporteringsmodel, herunder de udvidede rapporter kl. 08, 14, 15 og 22.
+
+### 4. Kontinuitet og sikkerhed
+
+Nattens fund skal så vidt muligt gemmes i ESCAPEs eksisterende journal og rapportstruktur, så de kan genbruges ved efterfølgende kørsler. Manglende lagring eller verifikation skal oplyses tydeligt. Der må ikke antages, at information er bevaret, hvis det ikke kan bekræftes.
+
+Alle eksisterende regler om Pluto-verifikation, datakvalitet, risikokontrol, handelsmandater, kandidat-ID'er og readback gælder uændret.
+
+### 5. Forrang
+
+Dette tillæg erstatter alene den tidligere bestemmelse om obligatoriske brugerrettede timesrapporter i tidsrummet 23.00–06.59. Alle øvrige bestemmelser i samarbejdsaftalen bevares.
+
+**Formål:** Udnytte nattens scanninger til mere effektiv research og tidligere kandidatopdagelse uden at forsinke HOT WATCH-overdragelse eller belaste brugeren med unødvendige natrapporter.
+
+Tillægget er aftalegrundlag. Indsættelsen dokumenterer ikke i sig selv, at den kørende radarautomatisering er opdateret eller verificeret.
 
 ## 3. Datadisciplin — ikke til forhandling
 
