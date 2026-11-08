@@ -68,16 +68,30 @@ def estimate_error(response,client):
     text=' '.join(text.split())[:600]
     return 'Pluto afviste estimatet'+(': '+text if text else '; ingen nærmere begrundelse blev leveret')+'. Intet handelsforslag er oprettet eller sendt hos Pluto af dette opslag.'
 
+def provider_buying_power_error(message,args):
+    """Recognize only Pluto's explicit same-currency buying-power rejection."""
+    if args.get('side')!='BUY' or 'amount' not in args or args.get('currency') not in ('DKK','EUR','USD'):return None
+    pattern=r'Not enough buying power:\s*this order needs\s+(\d+(?:\.\d+)?)\s+(DKK|EUR|USD)\s+but the\s+(DKK|EUR|USD)\s+account has\s+(\d+(?:\.\d+)?)\s+(DKK|EUR|USD)\b'
+    match=re.search(pattern,message,re.I)
+    if not match or any(match.group(i).upper()!=args['currency'] for i in (2,3,5)):return None
+    try:
+        required,available=Decimal(match.group(1)),Decimal(match.group(4))
+        if not (required.is_finite() and available.is_finite() and Decimal('0')<=available<required and available<Decimal('1e12')):return None
+        return InsufficientBuyingPower(format(available.quantize(Decimal('0.01'),rounding=ROUND_DOWN),'f'),args['currency'])
+    except ArithmeticError:return None
+
 def call(client,tools,name,args):
     expected=CONTRACT.get(name);actual=tools.get(name,{})
     if not expected or actual.get('annotations',{}).get('readOnlyHint') is not expected['readOnlyHint'] or structural(actual.get('inputSchema'))!=expected['inputSchema']:
         raise TradeError('Plutos værktøjskontrakt for '+name+' skal gennemgås før brug.')
     response=client.request('tools/call',{'name':name,'arguments':args})
     if name.startswith('estimate_') and isinstance(response,dict) and response.get('isError'):
-        raise TradeError(estimate_error(response,client))
+        message=estimate_error(response,client)
+        raise provider_buying_power_error(message,args) or TradeError(message)
     result=decode_result(response,name)
     if name.startswith('estimate_') and isinstance(result,dict) and (result.get('error') or result.get('success') is False):
-        raise TradeError(estimate_error({'structuredContent':result},client))
+        message=estimate_error({'structuredContent':result},client)
+        raise provider_buying_power_error(message,args) or TradeError(message)
     return result
 
 def positive(value,places=8,maximum='1000000000000'):

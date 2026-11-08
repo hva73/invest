@@ -212,6 +212,18 @@ class Trading(unittest.TestCase):
   self.assertIn('kun læseadgang',permission);self.assertIn('Forbindelser',permission)
   hidden=trade.estimate_error({'structuredContent':{'error':{'message':'password="two secret words"'}}},Failed('synthetic'))
   self.assertNotIn('secret words',hidden)
+ def test_observed_pluto_insufficient_funds_message_is_used_before_submission(self):
+  self.account_data={'accounts':[{'currency':'DKK','cash':'26.94','withdrawalPower':'26.94'}]}
+  original=self.factory
+  class Failed(original):
+   def request(client,method,args):
+    if args['name']=='estimate_order':return {'isError':True,'content':[{'type':'text','text':'Not enough buying power: this order needs 200.00 DKK but the DKK account has 26.94 DKK. Choose another currency account or a smaller amount.'}]}
+    return super().request(method,args)
+  request=dict(self.request,side='BUY',size_mode='amount',size='200',order_type='MARKET')
+  with self.assertRaises(trade.InsufficientBuyingPower) as caught:trade.preview(app.connect,1,request,Failed)
+  self.assertEqual((caught.exception.available,caught.exception.currency),('26.94','DKK'))
+  self.assertIsNone(trade.provider_buying_power_error('Not enough buying power: this order needs 200.00 DKK but the EUR account has 26.94 EUR.',{'side':'BUY','currency':'DKK','amount':'200'}))
+  self.assertFalse(self.writes());self.assertEqual(trade.history(app.connect,1),[])
  def test_preview_structured_rejection_and_asset_capabilities(self):
   original=self.factory
   class Failed(original):
