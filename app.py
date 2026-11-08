@@ -217,16 +217,14 @@ class Handler(BaseHTTPRequestHandler):
                     users=[{**dict(row),'profile':user_profile.read(c,row['id'])} for row in rows]
                 return self.send(200,{'users':users})
             if self.path=='/api/profile/postcode':
-                import re,urllib.request
+                import re
                 q=parse_qs(request.query);code=q.get('code',[])
                 if set(q)!={'code'} or len(code)!=1 or not re.fullmatch(r'[0-9]{4}',code[0]):return self.send(400,{'error':'Indtast et dansk postnummer med fire cifre.'})
-                try:
-                    req=urllib.request.Request('https://api.dataforsyningen.dk/postnumre/'+code[0],headers={'Accept':'application/json','User-Agent':'ESCAPE/1.0'})
-                    with urllib.request.urlopen(req,timeout=4) as response:result=json.loads(response.read(65536))
-                    city=result.get('navn') if isinstance(result,dict) else None
-                    if not isinstance(city,str) or not city.strip() or len(city)>120:raise ValueError('Ugyldigt svar')
-                except Exception:return self.send(503,{'error':'Postnummeret kunne ikke slås op. Skriv byen selv.'})
-                return self.send(200,{'city':city})
+                import user_profile
+                try:city=user_profile.postcode_city(code[0])
+                except (OSError,ValueError,KeyError):return self.send(503,{'error':'Postnummerlisten er ikke tilgængelig. Skriv byen selv.'})
+                if not city:return self.send(404,{'error':'Postnummeret findes ikke i den lokale liste. Skriv byen selv.'})
+                return self.send(200,{'city':city,'source':'GeoNames'})
             if self.path=='/api/reports/candidate-lifecycle':
                 import candidate_lifecycle
                 q=parse_qs(request.query);mode=q.get('is_test',['false'])

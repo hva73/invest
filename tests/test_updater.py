@@ -14,6 +14,8 @@ class Updater(unittest.TestCase):
    source,target=self.fixture(Path(d));backup=apply_update.apply(source,target)
    self.assertEqual((target/'app.py').read_text(),'new code');self.assertEqual((backup/'code/app.py').read_text(),'old code')
    self.assertEqual((target/'hotwatch_warmup.py').read_text(),'new code')
+   self.assertIn('data/dk_postcodes.json',apply_update.FILES)
+   self.assertEqual((target/'data/dk_postcodes.json').read_text(),'new code')
    self.assertIn('user_profile.py',apply_update.FILES)
    self.assertEqual((target/'user_profile.py').read_text(),'new code')
    self.assertIn('ishares_holdings.py',apply_update.FILES)

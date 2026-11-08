@@ -18,6 +18,7 @@ try:
   targets=page.locator('nav [data-view]').evaluate_all('(x)=>x.map(n=>n.dataset.view)')
   for width in (320,390,768,1440):
    page.set_viewport_size({'width':width,'height':900})
+   page.evaluate('''() => {for (const button of document.querySelectorAll('nav button')) {const icon=button.querySelector('svg.nav-icon'),label=button.querySelector('.nav-text');if(!icon||!label||icon.getAttribute('aria-hidden')!=='true')throw Error('Navigation icon missing');const b=button.getBoundingClientRect(),i=icon.getBoundingClientRect(),t=label.getBoundingClientRect();if(b.height<44||b.width<44||i.left<b.left||i.right>b.right||t.left<b.left||t.right>b.right||t.bottom>b.bottom+1)throw Error('Navigation layout is clipped');}}''')
    for target in targets:
     page.locator(f'nav [data-view="{target}"]').click()
     page.wait_for_timeout(150)

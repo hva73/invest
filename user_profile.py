@@ -1,6 +1,9 @@
 """Account profile, scoped to the authenticated user."""
 import re
 from datetime import date
+from functools import lru_cache
+from pathlib import Path
+import json
 
 
 def init(c):
@@ -65,3 +68,15 @@ def save(c, user_id, data, updated):
         street=excluded.street,postal_code=excluded.postal_code,city=excluded.city''',
         (user_id, values['name'], values['email'], values['street'] + ', ' + values['postal_code'] + ' ' + values['city'], values['birth_date'], int(data['contact_consent']), int(data['marketing_consent']), updated, values['street'], values['postal_code'], values['city']))
     return read(c, user_id)
+
+@lru_cache(maxsize=1)
+def _postcodes():
+    with (Path(__file__).parent / 'data' / 'dk_postcodes.json').open(encoding='utf-8') as source:
+        return json.load(source)['postcodes']
+
+
+def postcode_city(code):
+    """Bundled GeoNames data; no per-lookup network dependency."""
+    if not isinstance(code, str) or not re.fullmatch(r'[0-9]{4}', code):
+        raise ValueError('Invalid postal code')
+    return _postcodes().get(code)

@@ -7,6 +7,11 @@ class ProfileTests(unittest.TestCase):
   self.db.execute('CREATE TABLE users(id INTEGER PRIMARY KEY)');self.db.executemany('INSERT INTO users VALUES(?)',[(1,),(2,)])
   user_profile.init(self.db)
   self.valid={'name':'Test Person','email':'person@example.org','street':'Testvej 1','postal_code':'7140','city':'Stouby','birth_date':'1980-02-29','contact_consent':False,'marketing_consent':False}
+ def test_postcode_lookup_uses_local_dataset(self):
+  self.assertEqual(user_profile.postcode_city('7100'),'Vejle')
+  self.assertEqual(user_profile.postcode_city('7140'),'Stouby')
+  self.assertIsNone(user_profile.postcode_city('0000'))
+  with self.assertRaises(ValueError):user_profile.postcode_city('../x')
  def test_start_persists_and_profiles_are_isolated(self):
   self.assertFalse(user_profile.read(self.db,1)['started'])
   self.assertFalse(user_profile.start(self.db,1)['complete'])
