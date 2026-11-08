@@ -26,6 +26,15 @@ class CandidateStatus(unittest.TestCase):
   d=self.report('HOT_WATCH',0);d['candidates'][0]['decision']=decision('FRAVÆLG',d['generated_at']);report_ingest.save(app.connect,1,d);at=self.at+timedelta(minutes=1);ctx=tick(at,held=True)['context']
   with app.connect() as c:model.observe_pluto(c,1,True,self.cid,ctx,at.isoformat(),'synthetic-provider','synthetic-cycle-1',synthetic=True)
   state=self.state();self.assertEqual(state['normalized_decision'],'REJECT');self.assertTrue(state['has_confirmed_position']);self.assertEqual(state['lifecycle']['status'],'POSITION_OPEN');self.assertFalse(state['active'])
+ def test_position_cost_and_quantity_changes_are_preserved_without_refresh_noise(self):
+  report_ingest.save(app.connect,1,self.report('HOT_WATCH',0));at=self.at+timedelta(minutes=1);ctx=tick(at,held=True)['context'];ctx['cost_price']=None
+  with app.connect() as c:
+   model.observe_pluto(c,1,True,self.cid,ctx,at.isoformat(),'exit-watch','synthetic-cycle-1',synthetic=True,price_currency='USD')
+   ctx['cost_price']='98';at+=timedelta(seconds=1);ctx['as_of']=at.isoformat();model.observe_pluto(c,1,True,self.cid,ctx,at.isoformat(),'exit-watch','synthetic-cycle-1',synthetic=True,price_currency='USD')
+   rows=c.execute("SELECT payload FROM candidate_lifecycle_events WHERE candidate_id=? AND status='POSITION_OPEN' ORDER BY id",(self.cid,)).fetchall()
+   self.assertEqual(len(rows),2);details=json.loads(rows[-1]['payload'])['details'];self.assertEqual((details['cost_price'],details['price_currency']),('98','USD'))
+   at+=timedelta(seconds=1);ctx['as_of']=at.isoformat();model.observe_pluto(c,1,True,self.cid,ctx,at.isoformat(),'exit-watch','synthetic-cycle-1',synthetic=True,price_currency='USD')
+   self.assertEqual(c.execute("SELECT count(*) FROM candidate_lifecycle_events WHERE candidate_id=? AND status='POSITION_OPEN'",(self.cid,)).fetchone()[0],2)
  def test_accepted_partial_full_order_and_zero_position_close_separately(self):
   report_ingest.save(app.connect,1,self.report('ORDER_PENDING',0));at=self.at+timedelta(minutes=1)
   ctx=tick(at,held=True)['context'];ctx['orders']=[{'order_id':'synthetic-sell','status':'ACCEPTED','requested_quantity':'10','filled_quantity':'0','side':'SELL'}]

@@ -524,6 +524,41 @@ def verify_cxe_feeds(connect,now=None):
   else:c.execute("UPDATE hw_cxe_feed_evidence SET payload=json_set(payload,'$.last_revalidation_error',?) WHERE user_id=? AND asset_id=? AND symbol=?",(retry_code,row['user_id'],row['asset_id'],row['symbol']))
  return 1 if status is None else 0
 
+def holding_origin(c,uid,pid,asset_id):
+ """Link a position only to an unambiguous, Pluto-confirmed HOT WATCH proposal.
+
+ Confirmation of a proposal is not an execution; the caller independently
+ requires a fresh verified holding and never infers a fill from this link.
+ """
+ rows=c.execute("SELECT p.intent_id,p.response,p.payload,s.candidate_id,s.watch_id,s.request FROM broker_proposals p JOIN hw_sessions s ON s.user_id=p.user_id AND s.watch_id=p.candidate_id AND s.is_test=0 WHERE p.user_id=? AND p.portfolio_id=? AND p.report_id='@hotwatch' AND p.status='sent' AND p.intent_id IS NOT NULL ORDER BY p.id DESC LIMIT 50",(uid,pid)).fetchall()
+ links={}
+ for row in rows:
+  try:
+   response=json.loads(row['response'] or '{}');payload=json.loads(row['payload']);orders=payload.get('orders') or [];request=json.loads(row['request'])
+   if response.get('orderIntentId')!=row['intent_id'] or str(response.get('status') or '').upper() not in ('ACCEPTED','CONFIRMED'):continue
+   if len(orders)!=1 or orders[0].get('assetId')!=asset_id or orders[0].get('side')!='BUY' or request.get('asset_id')!=asset_id or request.get('watch_mode')!='entry':continue
+   cycle=request.get('trade_cycle_id') or 'cycle:'+engine.checksum({'watch_id':row['watch_id']})[:24]
+   links[(row['candidate_id'],cycle)]={'origin_candidate_id':row['candidate_id'],'origin_trade_cycle_id':cycle,'origin_watch_id':row['watch_id']}
+  except (ValueError,TypeError,AttributeError):continue
+ return next(iter(links.values())) if len(links)==1 else None
+
+def refresh_holding_origin(connect,uid,pid,asset_id):
+ """Refresh at most one matching proposal, read-only at Pluto; never infer a fill."""
+ import trade_service
+ with connect() as c:
+  rows=c.execute("SELECT id,intent_id,payload,response FROM broker_proposals WHERE user_id=? AND portfolio_id=? AND report_id='@hotwatch' AND status='sent' AND intent_id IS NOT NULL ORDER BY id DESC LIMIT 50",(uid,pid)).fetchall()
+ matches=[]
+ for row in rows:
+  try:
+   orders=(json.loads(row['payload']).get('orders') or []);response=json.loads(row['response'] or '{}')
+   if len(orders)!=1 or orders[0].get('assetId')!=asset_id or orders[0].get('side')!='BUY':continue
+   if str(response.get('status') or '').upper() in ('ACCEPTED','CONFIRMED','CANCELLED','CANCELED','DECLINED','EXPIRED'):continue
+   matches.append(row['id'])
+  except (ValueError,TypeError,AttributeError):continue
+ if len(matches)!=1:return
+ try:trade_service.check(connect,uid,matches[0])
+ except Exception:pass  # No proof remains no link; the ordinary holding monitor still runs.
+
 def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
  """Activate at most one owned position per tick, with persistent bounded retries."""
  from decimal import Decimal,InvalidOperation
@@ -592,6 +627,9 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
     cid='holding-'+hashlib.sha256((str(uid)+'|'+str(pid)+'|'+aid).encode()).hexdigest()[:28]
     risk={'max_notional_dkk':'1000','max_loss_dkk':'100','max_spread_pct':'1','max_quote_age_s':120,'max_position_fraction_pct':'20','proposed_quantity':None,'stop_price':None,'exit_deadline':None}
     req={'watch_id':watch,'report_id':'automatic-holdings','candidate_id':cid,'is_test':False,'purpose':'automatic holding watch','ticker':instrument['ticker'],'exchange':instrument['exchange'],'asset_id':aid,'quote_currency':instrument['currency'],'portfolio_ids':[pid],'priority':'NORMAL','profile':'NORMAL','provider':provider,'provider_symbol':symbol,'end_at':None,'activation_reason':'Automatisk overvågning af verificeret Pluto-beholdning','strategy_id':'escape_momentum','strategy_version':'1.0.0','risk':risk,'watch_mode':'exit'}
+    refresh_holding_origin(connect,uid,pid,aid)
+    with connect() as c:origin=holding_origin(c,uid,pid,aid)
+    if origin:req.update(origin)
     import strategy_center
     selected=strategy_center.resolve(connect,uid,scope='exit');req.update(strategy_id=selected['strategy_id'],strategy_version=selected['version'],activation_reason=req['activation_reason']+' · '+selected['reason'])
     result=engine.create_holding(connect,uid,req,now);status='LINKED';linked=result['session']['watch_id']

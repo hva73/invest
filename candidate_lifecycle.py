@@ -25,7 +25,11 @@ def record(c,uid,mode,cid,status,at,reason,origin,cycle=None,evidence='analysis'
  epoch=stamp(at).timestamp();previous=latest(c,uid,mode,cid)
  payload={'status':status,'reported_status':reported,'reason':reason,'trade_cycle_id':cycle,'evidence':evidence,'details':details or {}}
  key=hashlib.sha256((cid+canonical(payload)+str(epoch)).encode()).hexdigest()
- if previous and all(previous[k]==v for k,v in [('status',status),('reported_status',reported),('reason',reason),('cycle_id',cycle),('evidence',evidence)]):return False
+ if previous and all(previous[k]==v for k,v in [('status',status),('reported_status',reported),('reason',reason),('cycle_id',cycle),('evidence',evidence)]):
+  # Record material changes to a position, without journaling every refresh.
+  before=json.loads(previous['payload']).get('details') or {};after=details or {}
+  keys=('quantity','cost_price','price_currency')
+  if status not in ('POSITION_OPEN','EXIT_WATCH') or all(before.get(k)==after.get(k) for k in keys):return False
  if cycle:c.execute('INSERT OR IGNORE INTO candidate_trade_cycles VALUES(?,?,?,?,?,?,?)',(uid,int(mode),cid,cycle,at,reason,origin))
  c.execute('INSERT OR IGNORE INTO candidate_lifecycle_events(user_id,is_test,candidate_id,event_key,status,reported_status,occurred,occurred_at,reason,cycle_id,origin,evidence,payload) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(uid,int(mode),cid,key,status,reported,epoch,at,reason,cycle,origin,evidence,canonical(payload)))
  return True
@@ -100,7 +104,7 @@ def semantic(data,errors,warnings,c=None,uid=None):
     warnings.append(issue(f'{collection}[{i}].trade_cycle_id','context_required','Historical trade cycle requires account-scoped validation'));continue
    if not found:errors.append(issue(f'{collection}[{i}].trade_cycle_id','unknown_reference','Expected trade cycle in candidate.lifecycle or owned history in the same category'))
 
-def observe_pluto(c,uid,mode,cid,context,at,origin,cycle,signal=None,synthetic=False):
+def observe_pluto(c,uid,mode,cid,context,at,origin,cycle,signal=None,synthetic=False,price_currency=None):
  if context['status']!='verified' or not context['as_of'] or not 0<=stamp(at).timestamp()-stamp(context['as_of']).timestamp()<=300:return
  evidence='synthetic_test' if synthetic and mode else 'pluto'
  previous=latest(c,uid,mode,cid)
@@ -110,7 +114,7 @@ def observe_pluto(c,uid,mode,cid,context,at,origin,cycle,signal=None,synthetic=F
   record(c,uid,mode,cid,target,at,'Pluto viser ingen position i konteksten; salg udledes ikke uden fyldningsbevis',origin,cycle,evidence,details={'position_state':'none','quantity':'0','as_of':context['as_of']})
  if context['position']=='held':
   target='EXIT_WATCH' if signal in ['SELL','REDUCE'] else 'POSITION_OPEN'
-  record(c,uid,mode,cid,target,at,'Bekræftet depotobservation; adskilt fra nykøbsbeslutning',origin,cycle,evidence,details={'quantity':context['quantity'],'as_of':context['as_of']})
+  record(c,uid,mode,cid,target,at,'Bekræftet depotobservation; adskilt fra nykøbsbeslutning',origin,cycle,evidence,details={'quantity':context['quantity'],'cost_price':context.get('cost_price'),'price_currency':price_currency if context.get('cost_price') is not None else None,'as_of':context['as_of']})
  for order in context['orders']:
   known=c.execute('SELECT cycle_id,status FROM candidate_execution_events WHERE user_id=? AND is_test=? AND candidate_id=? AND order_id=? ORDER BY id LIMIT 1',(uid,int(mode),cid,order['order_id'])).fetchone()
   if known and known['cycle_id'] is not None and known['cycle_id']!=cycle:continue

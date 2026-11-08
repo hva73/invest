@@ -44,6 +44,25 @@ class HoldingAutowatch(unittest.TestCase):
   with app.connect() as c:
    modes=[json.loads(row['request'])['watch_mode'] for row in c.execute('SELECT request FROM hw_sessions')]
   self.assertEqual(sorted(modes),['entry','exit'])
+ def test_confirmed_proposal_links_verified_holding_to_original_candidate(self):
+  import hotwatch_strategy
+  entry={'asset_id':self.holding['asset_id'],'watch_mode':'entry','trade_cycle_id':'cycle-original'}
+  with app.connect() as c:
+   c.execute("INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due) VALUES(1,'entry-origin',0,'candidate-original','automatic discovery','ACTIVE',?,'synthetic',?,'{}',?,?,0)",(json.dumps(entry),json.dumps(hotwatch_strategy.EARLY_CATALYST_V1),self.now.isoformat(),self.now.isoformat()))
+   payload={'orders':[{'assetId':self.holding['asset_id'],'side':'BUY'}]}
+   response={'orderIntentId':'intent-synthetic','status':'ACCEPTED'}
+   c.execute("INSERT INTO broker_proposals(user_id,fingerprint,report_id,candidate_id,kind,portfolio_id,payload,status,created,intent_id,response) VALUES(1,'synthetic','@hotwatch','entry-origin','direct',?,?,'sent',?,'intent-synthetic',?)",(self.pid,json.dumps(payload),self.now.timestamp(),json.dumps(response)))
+   self.assertEqual(service.holding_origin(c,1,self.pid,self.holding['asset_id'])['origin_candidate_id'],'candidate-original')
+   c.execute("UPDATE broker_proposals SET response=?",(json.dumps({'orderIntentId':'intent-synthetic','status':'PENDING'}),))
+   self.assertIsNone(service.holding_origin(c,1,self.pid,self.holding['asset_id']))
+  def read_only_check(connect,uid,proposal_id):
+   with connect() as c:c.execute('UPDATE broker_proposals SET response=? WHERE id=?',(json.dumps(response),proposal_id))
+  with patch('trade_service.check',side_effect=read_only_check) as check:
+   service.refresh_holding_origin(app.connect,1,self.pid,self.holding['asset_id']);self.assertEqual(check.call_count,1)
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  with app.connect() as c:
+   row=c.execute("SELECT request FROM hw_sessions WHERE purpose='automatic holding watch'").fetchone();req=json.loads(row['request'])
+   self.assertEqual(req['origin_candidate_id'],'candidate-original');self.assertEqual(req['origin_trade_cycle_id'],'cycle-original');self.assertEqual(req['strategy_id'],'escape_momentum')
  def test_manual_pause_is_preserved(self):
   self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
   with app.connect() as c:wid=c.execute('SELECT watch_id FROM hw_sessions').fetchone()[0]

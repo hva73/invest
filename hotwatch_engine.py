@@ -203,6 +203,10 @@ def _create_in_transaction(c,uid,data,now,holding=False,manual=False):
  if holding:
   if data['is_test'] or data['watch_mode']!='exit' or data['provider'] not in ('eodhd','pluto') or len(data['portfolio_ids'])!=1:raise EngineError('invalid_holding_watch')
   pid=data['portfolio_ids'][0]
+  origin_keys=('origin_candidate_id','origin_trade_cycle_id','origin_watch_id')
+  if any(data.get(k) for k in origin_keys):
+   from hotwatch_service import holding_origin
+   if {k:data.get(k) for k in origin_keys}!=holding_origin(c,uid,pid,data['asset_id']):raise EngineError('holding_origin_unverified',409)
   for existing in c.execute("SELECT request FROM hw_sessions WHERE user_id=? AND is_test=0 AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') AND json_extract(request,'$.asset_id')=?",(uid,data['asset_id'])):
    other=json.loads(existing['request']);scope=other.get('portfolio_ids',[])
    if other.get('watch_mode','both')!='entry' and (not scope or pid in scope):raise EngineError('holding_watch_already_exists',409)
@@ -211,6 +215,7 @@ def _create_in_transaction(c,uid,data,now,holding=False,manual=False):
   try:fresh=0<=(now-stamp(payload['observed'])).total_seconds()<=300
   except (KeyError,ValueError,TypeError):fresh=False
   if not fresh or not payload.get('positions_complete') or not any(x.get('kind')=='holding' and x.get('asset_id')==data['asset_id'] and x.get('quantity') is not None and Decimal(str(x['quantity']))>0 for x in payload.get('positions',[])):raise EngineError('holding_not_verified',409)
+ elif any(data.get(k) for k in ('origin_candidate_id','origin_trade_cycle_id','origin_watch_id')):raise EngineError('invalid_holding_origin',409)
  elif manual:
   if data['is_test'] or data['report_id']!='manual-pluto' or not data['candidate_id'].startswith('manual-'):raise EngineError('invalid_manual_watch')
  else:
@@ -773,6 +778,8 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   cycle=request.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':wid})[:24]
   if result['signal']=='BUY' and state.get('signal')!='BUY':candidate_lifecycle.record(c,uid,mode,request['candidate_id'],'BUY_SIGNAL',now.isoformat(),'Deterministisk motor, ikke en udført handel',wid,cycle)
   if sample['source']!='report_inbox':candidate_lifecycle.observe_pluto(c,uid,mode,request['candidate_id'],sample['context'],now.isoformat(),wid,cycle,result['signal'],synthetic=sample['source']=='synthetic')
+  if request.get('purpose')=='automatic holding watch' and request.get('origin_candidate_id') and request.get('origin_trade_cycle_id') and sample['source'] in ('pluto','eodhd'):
+   candidate_lifecycle.observe_pluto(c,uid,mode,request['origin_candidate_id'],sample['context'],now.isoformat(),wid,request['origin_trade_cycle_id'],result['signal'],price_currency=sample['currency'])
   normal_close=result['signal']=='PAUSE' and 'MARKET_CLOSED' in result['reason_codes'] and not (set(result['reason_codes'])-{'MARKET_CLOSED','WARMUP'})
   new_status='DEGRADED' if result['signal'] in ['NO_DATA','PAUSE'] and not normal_close else 'ACTIVE'
   codes=set(result['reason_codes'])&{'DATA_UNVERIFIED','DATA_STALE','DATA_FUTURE','MARKET_HALTED','MARKET_CLOSED','MARKET_STATUS_UNKNOWN','POSITION_CONTEXT_UNKNOWN','SPREAD_TOO_WIDE','SPREAD_UNKNOWN','LOSS_BUDGET_LIMIT','POSITION_SIZE_LIMIT','EXPOSURE_LIMIT','STOP_BREACHED','EXIT_DEADLINE','RISK_INPUTS_UNKNOWN'}

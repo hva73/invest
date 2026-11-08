@@ -43,6 +43,21 @@ class EarlyCatalyst(unittest.TestCase):
   self.spec['parameters']['use_macd_confirmation']=True
   blocked,_=calculate(sample,m,self.spec,risk,state,later);self.assertNotEqual(blocked['signal'],'BUY')
   confirmed,_=calculate(sample,{**m,'macd_histogram':'0.1'},self.spec,risk,state,later);self.assertEqual(confirmed['signal'],'BUY')
+ def test_diagnostics_separate_signal_risk_and_missing_data(self):
+  now=datetime.now(timezone.utc);sample=tick(now);risk={**request()['risk'],'entry_allowed':True,'exit_allowed':True}
+  m={**good_metrics(),**self.m,'sample_count':20,'return_window_pct':'0.6','acceleration_pct_s2':'0.1','relative_volume':'2','spread_pct':'0.5','rsi':'60','reference_gain_pct':'2'}
+  wait,_=calculate(sample,{**m,'return_window_pct':'0.1'},self.spec,risk,{},now)
+  self.assertEqual(wait['decision_diagnostics']['strategy'],'NOT_MET');self.assertEqual(wait['decision_diagnostics']['risk'],'NOT_EVALUATED')
+  missing,_=calculate(sample,{**m,'return_window_pct':None},self.spec,risk,{},now)
+  self.assertEqual(missing['decision_diagnostics']['strategy'],'UNKNOWN')
+  sample['context']['fees_dkk']=None
+  unknown,_=calculate(sample,m,self.spec,risk,{},now)
+  self.assertEqual(unknown['decision_diagnostics']['strategy'],'MET');self.assertEqual(unknown['decision_diagnostics']['risk'],'MISSING_DATA');self.assertIn('RISK_INPUTS_UNKNOWN',unknown['decision_diagnostics']['missing_data_codes'])
+  sample['context']['fees_dkk']='1';small={**risk,'max_notional_dkk':'10'}
+  rejected,_=calculate(sample,m,self.spec,small,{},now)
+  self.assertEqual(rejected['decision_diagnostics']['strategy'],'MET');self.assertEqual(rejected['decision_diagnostics']['risk'],'BLOCKED');self.assertIn('POSITION_SIZE_LIMIT',rejected['decision_diagnostics']['blocking_codes'])
+  pending,_=calculate(sample,m,self.spec,risk,{},now)
+  self.assertTrue(pending['decision_diagnostics']['confirmation_pending']);self.assertEqual(pending['decision_diagnostics']['risk'],'PASSED')
  def test_overheat_and_editable_thresholds(self):
   from hotwatch_strategy import matches
   p=self.spec['parameters'];m={**self.m,'return_window_pct':'0.5','relative_volume':'2','acceleration_pct_s2':'1','spread_pct':'0.5','rsi':'80','consolidating':False,'new_breakout':False,'new_setup':False}

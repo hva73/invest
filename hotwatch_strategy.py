@@ -100,6 +100,33 @@ def early_watch(strategy,metrics):
  if strategy.get('schema_version')!=2:raise ValueError('Early Watch requires a version 2 strategy')
  return matches(strategy['watch_rules'],metrics,strategy['parameters'])
 
+def rule_state(rule,metrics,parameters):
+ """Three-valued evaluation for explanations only; never changes a signal."""
+ if 'all' in rule:
+  values=[rule_state(item,metrics,parameters) for item in rule['all']]
+  return False if False in values else None if None in values else True
+ if 'any' in rule:
+  values=[rule_state(item,metrics,parameters) for item in rule['any']]
+  return True if True in values else None if None in values else False
+ if metrics.get(rule['metric']) is None:return None
+ return matches(rule,metrics,parameters)
+
+def decision_diagnostics(strategy,metrics,raw,signal,risk_codes,reasons,held):
+ """Separate analytical readiness from missing data and the risk gate."""
+ p=strategy['parameters'];rules=strategy['exit_rules'] if held else strategy['entry_rules']
+ values=[rule_state(rules,metrics,p)]
+ if not held and strategy.get('schema_version')==2:
+  values.append(rule_state(strategy['watch_rules'],metrics,p))
+  if p['use_macd_confirmation']:
+   macd=metrics.get('macd_histogram');values.append(None if macd is None else Decimal(str(macd))>0)
+ if metrics.get('sample_count',0)<p['min_samples']:values.append(None)
+ decision=False if False in values else None if None in values else True
+ data_codes={'DATA_UNVERIFIED','DATA_STALE','DATA_FUTURE','PRICE_MISSING','MARKET_STATUS_UNKNOWN','POSITION_CONTEXT_UNKNOWN','TRADABILITY_UNCONFIRMED','SPREAD_UNKNOWN','FEATURES_INSUFFICIENT','RISK_INPUTS_UNKNOWN'}
+ missing=[code for code in risk_codes if code in data_codes]
+ blocked=[code for code in risk_codes if code not in data_codes]
+ risk='NOT_EVALUATED' if raw!='BUY' else 'MISSING_DATA' if missing else 'BLOCKED' if blocked else 'PASSED'
+ return {'strategy':'MET' if decision else 'NOT_MET' if decision is False else 'UNKNOWN','strategy_side':'EXIT' if held else 'ENTRY','risk':risk,'missing_data_codes':missing if raw=='BUY' else [],'blocking_codes':blocked if raw=='BUY' else [],'confirmation_pending':'CONFIRMATION_PENDING' in reasons,'current_signal':signal}
+
 def _risk_gate(sample,metrics,risk,now,raw,require_macd=True):
  """Mandatory for every strategy version. Session limits only tighten globals."""
  codes=[];critical=[];price=Decimal(sample['price']) if sample['price'] is not None else None
@@ -179,4 +206,5 @@ def calculate(sample,metrics,strategy,risk,state,now,killed=False,new_market_eve
  score=0 if signal in ['NO_DATA','PAUSE'] else sum(1 for k in ['return_3_pct','relative_volume','spread_pct','volatility_pct','macd_histogram'] if metrics.get(k) is not None)*20
  explanations={'NO_TRIGGER':'Ingen bekræftet trigger','ENTRY_RULES':'Momentum, volumen, trend og kursbrud opfylder de deklarative indgangsregler','EXIT_RULES':'De deklarative exitbetingelser er opfyldt','WARMUP':'Der mangler sammenlignelige observationer til indikatorerne','CONFIRMATION_PENDING':'Afventer gentagne bekræftelser og minimumsvarighed','COOLDOWN':'Et nyt handlingssignal afventer cooldown','DATA_STALE':'Kursdata er for gamle','DATA_UNVERIFIED':'Kilden er ikke verificeret','STOP_BREACHED':'Den konfigurerede stopgrænse er brudt','EXIT_DEADLINE':'Den konfigurerede exitdeadline er nået','SPREAD_TOO_WIDE':'Spread overstiger den centrale risikogrænse','SPREAD_UNKNOWN':'Bid/ask-grundlaget mangler','POSITION_CONTEXT_UNKNOWN':'Aktuel depotkontekst mangler','TRADABILITY_UNCONFIRMED':'Pluto-handelsbarhed er ikke bekræftet','RISK_INPUTS_UNKNOWN':'Der mangler oplysninger om størrelse, valuta, gebyrer eller risiko','MARKET_STATUS_UNKNOWN':'Handelssessionen er ikke verificeret','NEW_MARKET_CONFIRMATION_REQUIRED':'En opdateret depotstatus tæller ikke som ny kursbekræftelse'}
  result={'signal':signal,'confidence_score':score,'signal_strength':'strong' if signal in ['BUY','SELL','REDUCE'] else 'neutral','reason_codes':list(dict.fromkeys(reasons)) or ['NO_TRIGGER'],'human_readable_explanation':'; '.join(explanations.get(code,code.replace('_',' ').lower()) for code in (list(dict.fromkeys(reasons)) or ['NO_TRIGGER'])),'supporting_metrics':metrics,'invalidating_conditions':['stale/unverified data','risk rejection','changed position','market halt'],'next_trigger':'Ny verificeret observation og opfyldte bekræftelses-/risikoregler','recommended_action':{'BUY':'KØB-signal · kræver særskilt godkendt handelsflow','SELL':'SÆLG-signal · ingen ordre oprettet','REDUCE':'REDUCÉR-signal · ingen ordre oprettet','WAIT':'VENT','NO_DATA':'INGEN DATA','PAUSE':'PAUSE'}[signal],'risk_level':'critical' if critical else 'high' if risk_codes else 'normal','calculation_timestamp':now.isoformat(),'data_timestamp':sample['event_time'],'strategy_id':strategy['strategy_id'],'strategy_version':strategy['version'],'strategy_checksum':checksum(strategy),'critical_override':bool(critical and signal=='SELL' and previous!='SELL'),'rules_score_note':'0–100 datapunktsdækning af fem regelinputs; ikke en statistisk sandsynlighed eller performanceprognose.'}
+ if strategy.get('schema_version')==2:result['decision_diagnostics']=decision_diagnostics(strategy,metrics,raw,signal,risk_codes,reasons,held)
  return result,newstate
