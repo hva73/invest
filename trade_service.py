@@ -9,7 +9,8 @@ CONTRACT=json.loads((Path(__file__).parent/'pluto_trade_contract.json').read_tex
 class TradeError(ValueError):pass
 
 class InsufficientBuyingPower(TradeError):
-    def __init__(self, available, currency):
+    def __init__(self, available, currency, provider_message=None):
+        self.provider_message=provider_message
         self.available=available
         self.currency=currency
         super().__init__('Beløbet overstiger den købekraft, Pluto oplyser i den valgte valuta. Intet forslag er sendt.')
@@ -77,7 +78,7 @@ def provider_buying_power_error(message,args):
     try:
         required,available=Decimal(match.group(1)),Decimal(match.group(4))
         if not (required.is_finite() and available.is_finite() and Decimal('0')<=available<required and available<Decimal('1e12')):return None
-        return InsufficientBuyingPower(format(available.quantize(Decimal('0.01'),rounding=ROUND_DOWN),'f'),args['currency'])
+        return InsufficientBuyingPower(format(available.quantize(Decimal('0.01'),rounding=ROUND_DOWN),'f'),args['currency'],message)
     except ArithmeticError:return None
 
 def call(client,tools,name,args):
@@ -265,8 +266,8 @@ def search(connect,user_id,query,factory=None):
     if not choices:raise TradeError('Ingen entydige søgeresultater i det understøttede Pluto-format. Ingen handel er oprettet.')
     return {'assets':choices}
 
-def read_estimate(connect,user_id,p,payload,kind,factory=None):
-    cl,tools=client(connect,user_id,factory);fresh_permission(cl,tools,connect,user_id,p);context=preflight(cl,tools,p);checked=check_buying_power(context['accounts'],payload,kind);asset=None
+def read_estimate(connect,user_id,p,payload,kind,factory=None,allow_insufficient=False):
+    cl,tools=client(connect,user_id,factory);fresh_permission(cl,tools,connect,user_id,p);context=preflight(cl,tools,p);checked=None if allow_insufficient else check_buying_power(context['accounts'],payload,kind);asset=None
     if kind=='direct' and payload['orders'][0].get('side')=='BUY' and payload['orders'][0].get('amount'):
         context['buying_power_checked']=checked is True
     if kind=='direct':
@@ -335,7 +336,8 @@ def estimate(connect,user_id,data,factory=None):
         row=c.execute('SELECT * FROM broker_proposals WHERE user_id=? AND fingerprint=?',(user_id,fingerprint)).fetchone()
         if row['status'] not in ['draft','estimated']:return {'proposal':view(row)}
         pid=row['id']
-    result,asset=read_estimate(connect,user_id,p,payload,kind,factory)
+    override=data.get('allow_insufficient') is True and kind=='direct' and payload['orders'][0].get('side')=='BUY' and bool(payload['orders'][0].get('amount'))
+    result,asset=read_estimate(connect,user_id,p,payload,kind,factory,allow_insufficient=override)
     with connect() as c:
         c.execute("UPDATE broker_proposals SET status='estimated',estimated=?,review_token=?,estimate=?,asset=?,sell_basis=?,error=NULL WHERE id=? AND user_id=? AND status IN ('draft','estimated')",(time.time(),secrets.token_urlsafe(24),json.dumps(result),json.dumps(asset),json.dumps(basis) if basis else None,pid,user_id))
     return {'proposal':view(get(connect,user_id,pid))}
@@ -359,7 +361,9 @@ def send(connect,user_id,data,factory=None):
     if row['sell_basis']:
         basis=json.loads(row['sell_basis']);current=direct_sell_basis(connect,user_id,row['portfolio_id'],basis['asset_id'],basis['percentage'],factory)
         if Decimal(current['quantity'])!=Decimal(basis['quantity']):raise TradeError('Beholdningens antal er ændret. Hent et nyt estimat før afsendelse.')
-    cl,tools=client(connect,user_id,factory);fresh_permission(cl,tools,connect,user_id,p);context=preflight(cl,tools,p);check_buying_power(context['accounts'],json.loads(row['payload']),row['kind'])
+    cl,tools=client(connect,user_id,factory);fresh_permission(cl,tools,connect,user_id,p);context=preflight(cl,tools,p);current_payload=json.loads(row['payload']);orders=current_payload.get('orders') or []
+    override=data.get('allow_insufficient') is True and row['kind']=='direct' and len(orders)==1 and orders[0].get('side')=='BUY' and bool(orders[0].get('amount'))
+    if not override:check_buying_power(context['accounts'],current_payload,row['kind'])
     name={'direct':'propose_orders','collection_buy':'propose_buy_collection','collection_sell':'propose_sell_collection'}[row['kind']]
     # Validate write contract before claiming the single send attempt.
     actual=tools.get(name,{})

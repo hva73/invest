@@ -54,6 +54,24 @@ class Trading(unittest.TestCase):
   self.assertEqual((caught.exception.available,caught.exception.currency),('25.00','EUR'))
   request.update(currency='USD',size='150');self.assertEqual(self.estimate(request)['status'],'estimated')
   self.assertFalse(self.writes())
+ def test_explicit_override_still_requires_pluto_estimate_and_confirmation(self):
+  request=dict(self.request,report_id='@manual-buy',candidate_id='',size_mode='amount',order_type='MARKET',size='1000')
+  with self.assertRaises(trade.InsufficientBuyingPower):self.estimate(request)
+  proposal=self.estimate(dict(request,allow_insufficient=True))
+  self.assertTrue(any(c['name']=='estimate_order' for c in self.calls));self.assertFalse(self.writes())
+  with self.assertRaises(trade.InsufficientBuyingPower):self.send(proposal)
+  sent=trade.send(app.connect,1,{'id':proposal['id'],'review_token':proposal['review_token'],'confirm':True,'allow_insufficient':True},self.factory)['proposal']
+  self.assertEqual(sent['status'],'sent');self.assertEqual(len(self.writes()),1)
+ def test_override_cannot_bypass_pluto_rejection(self):
+  self.account_data={'accounts':[{'currency':'DKK','buyingPower':'25'}]}
+  original=self.factory
+  class Rejects(original):
+   def request(client,method,args):
+    if args['name']=='estimate_order':return {'isError':True,'content':[{'type':'text','text':'Not enough buying power: this order needs 200.00 DKK but the DKK account has 26.94 DKK. Choose another currency account or a smaller amount.'}]}
+    return super().request(method,args)
+  request=dict(self.request,report_id='@manual-buy',candidate_id='',size_mode='amount',order_type='MARKET',size='200',allow_insufficient=True)
+  with self.assertRaises(trade.InsufficientBuyingPower) as caught:trade.estimate(app.connect,1,request,Rejects)
+  self.assertIn('Not enough buying power',caught.exception.provider_message);self.assertFalse(self.writes())
  def test_buying_power_rechecked_before_send(self):
   request=dict(self.request,report_id='@manual-buy',candidate_id='',size_mode='amount',order_type='MARKET',size='500')
   proposal=self.estimate(request)
