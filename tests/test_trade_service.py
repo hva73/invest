@@ -43,6 +43,71 @@ class Trading(unittest.TestCase):
  def estimate(self,request=None):return trade.estimate(app.connect,1,request or self.request,self.factory)['proposal']
  def send(self,proposal):return trade.send(app.connect,1,{'id':proposal['id'],'review_token':proposal['review_token'],'confirm':True},self.factory)['proposal']
  def writes(self):return [c for c in self.calls if c['name'].startswith('propose_')]
+ def test_percentage_sell_uses_fresh_holding_and_rechecks_before_send(self):
+  holding={'positions_complete':True,'observed':'2026-11-08T00:00:00Z','positions':[{'kind':'holding','asset_id':'asset-test','quantity':'2.50000001'}]}
+  request=dict(self.request,size_mode='percent',size='40',order_type='MARKET')
+  with patch('trade_service.candidate',return_value={'signal':'SÆLG'}),patch('portfolio_data.read',return_value=holding):
+   proposal=self.estimate(request)
+   self.assertEqual(proposal['payload']['orders'][0]['shares'],'1')
+   self.assertEqual(proposal['sell_basis']['percentage'],'40')
+   self.assertFalse(self.writes())
+   holding['positions'][0]['quantity']='2'
+   with self.assertRaisesRegex(trade.TradeError,'ændret'):self.send(proposal)
+   self.assertFalse(self.writes())
+ def test_percentage_sell_rejects_ambiguous_or_incomplete_holdings(self):
+  request=dict(self.request,size_mode='percent',size='50')
+  with patch('trade_service.candidate',return_value={'signal':'SÆLG'}),patch('portfolio_data.read',return_value={'positions_complete':False,'positions':[]}):
+   with self.assertRaisesRegex(trade.TradeError,'ufuldstændig'):self.estimate(request)
+  self.assertFalse(self.writes())
+ def test_percentage_sell_sends_only_the_calculated_number_of_shares(self):
+  holding={'positions_complete':True,'observed':'2026-11-08T00:00:00Z','positions':[{'kind':'holding','asset_id':'asset-test','quantity':'8'}]}
+  request=dict(self.request,size_mode='percent',size='25',order_type='MARKET')
+  with patch('trade_service.candidate',return_value={'signal':'SÆLG'}),patch('portfolio_data.read',return_value=holding):
+   proposal=self.estimate(request);sent=self.send(proposal)
+  self.assertEqual(sent['status'],'sent')
+  self.assertEqual(self.writes()[0]['arguments']['orders'][0]['shares'],'2')
+  self.assertEqual(self.writes()[0]['arguments']['orders'][0]['side'],'SELL')
+ def test_percentage_sell_reads_and_normalizes_real_provider_shape(self):
+  original=self.factory
+  class PositionClient(original):
+   def tools(client):
+    return super().tools()+[{'name':'get_positions','inputSchema':{'type':'object','properties':{'portfolioId':{'type':'string'}},'required':['portfolioId']},'annotations':{'readOnlyHint':True}}]
+   def request(client,method,args):
+    if args['name']=='get_positions':return {'structuredContent':{'positions':[{'assetId':'asset-test','ticker':'TEST','quantity':'8','currency':'USD'}]}}
+    if args['name']=='get_portfolio_value':return {'structuredContent':{'value':'1000','currency':'DKK'}}
+    return super().request(method,args)
+  request=dict(self.request,size_mode='percent',size='25',order_type='MARKET')
+  with patch('trade_service.candidate',return_value={'signal':'SÆLG'}),patch('pending_orders.enrich'):
+   proposal=trade.estimate(app.connect,1,request,PositionClient)['proposal']
+  self.assertEqual(proposal['payload']['orders'][0]['shares'],'2')
+  self.assertFalse(self.writes())
+ def test_percentage_sell_rejects_truncated_pluto_position_list(self):
+  original=self.factory
+  class Truncated(original):
+   def tools(client):
+    return super().tools()+[{'name':'get_positions','inputSchema':{'type':'object','properties':{'portfolioId':{'type':'string'}},'required':['portfolioId']},'annotations':{'readOnlyHint':True}}]
+   def request(client,method,args):
+    if args['name']=='get_positions':return {'structuredContent':{'positions':[{'assetId':'asset-test','ticker':'TEST','quantity':'8','currency':'USD'}],'totalCount':2}}
+    if args['name']=='get_portfolio_value':return {'structuredContent':{'value':'1000','currency':'DKK'}}
+    return super().request(method,args)
+  request=dict(self.request,size_mode='percent',size='25',order_type='MARKET')
+  with patch('trade_service.candidate',return_value={'signal':'SÆLG'}),patch('pending_orders.enrich'):
+   with self.assertRaisesRegex(trade.TradeError,'ufuldstændig'):trade.estimate(app.connect,1,request,Truncated)
+  self.assertFalse(self.writes())
+ def test_hotwatch_signal_is_rechecked_and_asset_is_bound(self):
+  session={'status':'ACTIVE','signal':'BUY','display_status':'KØBSSIGNAL','request':{'asset_id':'asset-test','ticker':'TEST'}}
+  request=dict(self.request,report_id='@hotwatch',candidate_id='watch-1',size_mode='amount',size='100',order_type='MARKET')
+  with patch('hotwatch_engine.item',return_value={'session':session}):
+   with self.assertRaisesRegex(trade.TradeError,'Aktivet svarer ikke'):self.estimate(dict(request,asset_id='wrong'))
+   proposal=self.estimate(request);self.assertFalse(self.writes())
+   session['signal']='SELL';session['display_status']='SÆLGSSIGNAL'
+   with self.assertRaisesRegex(trade.TradeError,'retning'):self.send(proposal)
+  self.assertFalse(self.writes())
+ def test_report_signal_reversal_cannot_send_the_old_order(self):
+  proposal=self.estimate()
+  with patch('trade_service.candidate',return_value={'signal':'SÆLG'}):
+   with self.assertRaisesRegex(trade.TradeError,'retning'):self.send(proposal)
+  self.assertFalse(self.writes())
  def test_preview_provider_error_and_credentials(self):
   original=self.factory
   class Failed(original):

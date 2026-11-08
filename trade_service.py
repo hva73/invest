@@ -1,6 +1,6 @@
 """Explicit, user-reviewed Pluto proposals. No direct execution or background writes."""
 import hashlib,json,re,secrets,time
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 import oauth,report_ingest
 from mcp_client import MCP,decode_result,normalize,compatible
@@ -10,6 +10,7 @@ class TradeError(ValueError):pass
 
 def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS broker_proposals(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),fingerprint TEXT NOT NULL,report_id TEXT NOT NULL,candidate_id TEXT NOT NULL,kind TEXT NOT NULL,portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),payload TEXT NOT NULL,status TEXT NOT NULL,created REAL NOT NULL,estimated REAL,review_token TEXT,estimate TEXT,asset TEXT,intent_id TEXT,response TEXT,error TEXT,UNIQUE(user_id,fingerprint))')
+    if 'sell_basis' not in {r[1] for r in c.execute('PRAGMA table_info(broker_proposals)')}:c.execute('ALTER TABLE broker_proposals ADD COLUMN sell_basis TEXT')
 
 def structural(v):
     if isinstance(v,dict):return {k:structural(x) for k,x in v.items() if k not in ['description','title','$schema','default','examples']}
@@ -73,10 +74,40 @@ def positive(value,places=8,maximum='1000000000000'):
 def candidate(connect,user_id,report_id,candidate_id):
     rows=report_ingest.desk(connect,user_id)['candidates']
     record=next((r for r in rows if r['schema_version']==2 and r['report_id']==report_id and r['candidate'].get('candidate_id')==candidate_id),None)
-    if not record or record['candidate']['signal'] not in ['KØB','SÆLG']:raise TradeError('Vælg et aktuelt KØB- eller SÆLG-forslag fra dine driftsrapporter.')
+    if not record:raise TradeError('Vælg et aktuelt KØB- eller SÆLG-forslag fra dine driftsrapporter.')
+    signal=(record.get('decision') or {}).get('status') or record['candidate']['signal']
+    if signal not in ['KØB','SÆLG']:raise TradeError('Vælg et aktuelt KØB- eller SÆLG-forslag fra dine driftsrapporter.')
     report=report_ingest.item(connect,user_id,report_id,False)['report']['data']
     if report.get('report_type')=='historical' or report.get('data_quality',{}).get('status')=='historical':raise TradeError('Historiske rapporter kan ikke sendes som handelsforslag.')
-    return record['candidate']
+    return {**record['candidate'],'signal':signal}
+
+def signal_source(connect,user_id,report_id,candidate_id):
+    if report_id!='@hotwatch':return candidate(connect,user_id,report_id,candidate_id)
+    import hotwatch_engine
+    try:session=hotwatch_engine.item(connect,user_id,candidate_id,False)['session']
+    except Exception as error:raise TradeError('HOT WATCH-signalet kan ikke kontrolleres.') from error
+    signal=session.get('signal');request=session.get('request') or {}
+    if session.get('status')!='ACTIVE' or signal not in ('BUY','SELL','REDUCE'):
+        raise TradeError('HOT WATCH-signalet er ikke længere et aktivt købs- eller salgssignal.')
+    if session.get('display_status')!={'BUY':'KØBSSIGNAL','SELL':'SÆLGSSIGNAL','REDUCE':'EXIT WATCH'}[signal]:
+        raise TradeError('Signalet afventer kontrol eller revurdering. Intet forslag er sendt.')
+    asset=request.get('asset_id')
+    if not isinstance(asset,str) or not asset:raise TradeError('Signalets Pluto-aktiv er ikke verificeret.')
+    return {'signal':'KØB' if signal=='BUY' else 'SÆLG','asset_id':asset,'ticker':request.get('ticker')}
+
+def verify_proposal_source(connect,user_id,row):
+    source=signal_source(connect,user_id,row['report_id'],row['candidate_id'])
+    payload=json.loads(row['payload']);orders=payload.get('orders') or []
+    expected='BUY' if source['signal']=='KØB' else 'SELL'
+    if row['kind']=='direct' and (len(orders)!=1 or orders[0].get('side')!=expected):
+        raise TradeError('Signalets retning er ændret. Hent et nyt estimat.')
+    if row['kind']=='direct' and source.get('asset_id') and orders[0].get('assetId')!=source['asset_id']:
+        raise TradeError('Signalets aktiv er ændret. Hent et nyt estimat.')
+    if row['kind']=='collection_buy' and expected!='BUY' or row['kind']=='collection_sell' and expected!='SELL':
+        raise TradeError('Signalets retning er ændret. Hent et nyt estimat.')
+    if row['report_id']=='@hotwatch':
+        if row['kind']!='direct' or orders[0].get('assetId')!=source['asset_id']:
+            raise TradeError('Signalets aktiv eller retning er ændret. Hent et nyt estimat.')
 
 def owned(connect,user_id,pid):
     with connect() as c:row=c.execute("SELECT * FROM portfolios WHERE id=? AND user_id=? AND source='pluto' AND active=1",(pid,user_id)).fetchone()
@@ -88,7 +119,7 @@ def build(connect,user_id,data,preview=False):
         if data.get('kind')!='direct' or data.get('side') not in ['BUY','SELL']:raise TradeError('Testestimatet kræver et direkte aktiv og en valgt køb/salg-retning.')
         side=data['side']
     else:
-        c=candidate(connect,user_id,str(data.get('report_id','')),str(data.get('candidate_id','')))
+        c=signal_source(connect,user_id,str(data.get('report_id','')),str(data.get('candidate_id','')))
         side='BUY' if c['signal']=='KØB' else 'SELL'
     try:pid=int(data.get('portfolio_id'))
     except (ValueError,TypeError):raise TradeError('Vælg en aktiv Pluto-enhed før beregningen.')
@@ -99,6 +130,7 @@ def build(connect,user_id,data,preview=False):
         if p['kind']!='portfolio':raise TradeError('Direkte aktiver skal handles på hovedporteføljen. Collection-handler er særskilte.')
         aid=data.get('asset_id','')
         if not isinstance(aid,str) or not 1<=len(aid)<=200 or any(ord(x)<33 for x in aid):raise TradeError('Vælg det konkrete aktiv fra Plutos søgeresultater.')
+        if not preview and c.get('asset_id') and aid!=c['asset_id']:raise TradeError('Aktivet svarer ikke til signalet.')
         order={'assetId':aid,'side':side,'currency':currency,'orderType':data.get('order_type'),'timeInForce':data.get('time_in_force'),'extendedHours':False}
         if order['orderType'] not in ['MARKET','LIMIT','STOP','STOP_LIMIT'] or order['timeInForce'] not in ['DAY','GTC']:raise TradeError('Vælg ordretype og gyldighed.')
         if order['orderType']=='MARKET' and order['timeInForce']!='DAY':raise TradeError('Markedsordrer understøttes kun med DAY.')
@@ -109,6 +141,7 @@ def build(connect,user_id,data,preview=False):
         if order['orderType'] in ['STOP','STOP_LIMIT']:order['stopPrice']=positive(data.get('stop_price'),2)
         payload={'portfolioId':p['external_id'].split(':',1)[1],'orders':[order]}
     elif kind in ['collection_buy','collection_sell']:
+        if not preview and data.get('report_id')=='@hotwatch':raise TradeError('Et aktiesignal gælder ikke handel med hele Collectionen.')
         if p['kind']!='collection' or (kind=='collection_buy')!=(side=='BUY'):raise TradeError('Vælg en Collection og en handling, der svarer til rapportens signal.')
         with connect() as db:root=db.execute("SELECT * FROM portfolios WHERE user_id=? AND external_id=? AND source='pluto' AND active=1 AND kind='portfolio'",(user_id,p['parent_external_id'])).fetchone()
         if not root:raise TradeError('Collectionens hovedportefølje er ikke kendt. Opdatér Pluto-listen.')
@@ -142,7 +175,7 @@ def preflight(cl,tools,p):
 
 def view(row):
     r=dict(row)
-    for key in ['payload','estimate','asset','response']:r[key]=json.loads(r[key]) if r[key] else None
+    for key in ['payload','estimate','asset','response','sell_basis']:r[key]=json.loads(r[key]) if r[key] else None
     r.pop('fingerprint',None);r.pop('user_id',None)
     if r['status']!='estimated':r.pop('review_token',None)
     return r
@@ -198,7 +231,33 @@ def preview(connect,user_id,data,factory=None):
     result,asset=read_estimate(connect,user_id,p,payload,'direct',factory)
     return {'read_only':True,'kind':'direct','portfolio_id':p['id'],'payload':payload,'estimate':result,'asset':asset,'estimated':time.time()}
 
+def direct_sell_basis(connect,user_id,pid,asset_id,percentage,factory=None):
+    """Resolve a percentage only against a fresh, complete direct holding."""
+    import portfolio_data
+    p=owned(connect,user_id,pid)
+    if p['kind']!='portfolio':raise TradeError('Enkeltaktier sælges separat fra salg af en hel Collection.')
+    try: snapshot=portfolio_data.read(connect,user_id,pid,client_factory=factory)
+    except Exception as error:raise TradeError('Plutos aktuelle beholdning kunne ikke kontrolleres. Intet forslag er sendt.') from error
+    if not snapshot.get('positions_complete'):raise TradeError('Plutos beholdningsliste er ufuldstændig. Intet forslag er sendt.')
+    matches=[r for r in snapshot.get('positions',[]) if r.get('kind')=='holding' and r.get('asset_id')==asset_id]
+    if len(matches)!=1 or matches[0].get('quantity') is None:raise TradeError('Aktivet findes ikke entydigt i den direkte beholdning. Intet forslag er sendt.')
+    try:
+        quantity=Decimal(str(matches[0]['quantity']));percent=Decimal(positive(percentage,4,'100'))
+        if not quantity.is_finite() or quantity<=0:raise ValueError('quantity')
+        shares=(quantity*percent/Decimal(100)).quantize(Decimal('0.00000001'),rounding=ROUND_DOWN)
+    except Exception as error:raise TradeError('Beholdningens antal eller salgsprocent kan ikke beregnes sikkert.') from error
+    if shares<=0:raise TradeError('Den valgte procent giver et for lille antal at sælge.')
+    return {'asset_id':asset_id,'quantity':format(quantity,'f'),'percentage':format(percent,'f'),'shares':format(shares.normalize(),'f'),'observed':snapshot.get('observed')}
+
 def estimate(connect,user_id,data,factory=None):
+    basis=None
+    if data.get('kind')=='direct' and data.get('size_mode')=='percent':
+        c=signal_source(connect,user_id,str(data.get('report_id','')),str(data.get('candidate_id','')))
+        if c['signal']!='SÆLG':raise TradeError('Procent af en beholdning kan kun bruges til salg.')
+        try:portfolio_id=int(data.get('portfolio_id'))
+        except (ValueError,TypeError):raise TradeError('Vælg et depot.')
+        basis=direct_sell_basis(connect,user_id,portfolio_id,data.get('asset_id'),data.get('size'),factory)
+        data={**data,'size_mode':'shares','size':basis['shares']}
     p,payload=build(connect,user_id,data);kind=data['kind'];fingerprint=hashlib.sha256(json.dumps({'report':data['report_id'],'candidate':data['candidate_id'],'kind':kind,'payload':payload},sort_keys=True).encode()).hexdigest()
     with connect() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -210,7 +269,7 @@ def estimate(connect,user_id,data,factory=None):
         pid=row['id']
     result,asset=read_estimate(connect,user_id,p,payload,kind,factory)
     with connect() as c:
-        c.execute("UPDATE broker_proposals SET status='estimated',estimated=?,review_token=?,estimate=?,asset=?,error=NULL WHERE id=? AND user_id=? AND status IN ('draft','estimated')",(time.time(),secrets.token_urlsafe(24),json.dumps(result),json.dumps(asset),pid,user_id))
+        c.execute("UPDATE broker_proposals SET status='estimated',estimated=?,review_token=?,estimate=?,asset=?,sell_basis=?,error=NULL WHERE id=? AND user_id=? AND status IN ('draft','estimated')",(time.time(),secrets.token_urlsafe(24),json.dumps(result),json.dumps(asset),json.dumps(basis) if basis else None,pid,user_id))
     return {'proposal':view(get(connect,user_id,pid))}
 
 def send(connect,user_id,data,factory=None):
@@ -218,7 +277,10 @@ def send(connect,user_id,data,factory=None):
     if row['status'] in ['sending','sent','uncertain']:return {'proposal':view(row),'duplicate':True}
     if row['status']!='estimated' or time.time()-row['estimated']>120:raise TradeError('Estimatet er udløbet. Hent et nyt estimat før afsendelse.')
     if data.get('confirm') is not True or not secrets.compare_digest(str(data.get('review_token','')),row['review_token'] or ''):raise TradeError('Gennemgå estimatet og bekræft afsendelsen først.')
-    candidate(connect,user_id,row['report_id'],row['candidate_id']);p=owned(connect,user_id,row['portfolio_id'])
+    verify_proposal_source(connect,user_id,row);p=owned(connect,user_id,row['portfolio_id'])
+    if row['sell_basis']:
+        basis=json.loads(row['sell_basis']);current=direct_sell_basis(connect,user_id,row['portfolio_id'],basis['asset_id'],basis['percentage'],factory)
+        if Decimal(current['quantity'])!=Decimal(basis['quantity']):raise TradeError('Beholdningens antal er ændret. Hent et nyt estimat før afsendelse.')
     cl,tools=client(connect,user_id,factory);fresh_permission(cl,tools,connect,user_id,p);preflight(cl,tools,p)
     name={'direct':'propose_orders','collection_buy':'propose_buy_collection','collection_sell':'propose_sell_collection'}[row['kind']]
     # Validate write contract before claiming the single send attempt.
@@ -226,7 +288,7 @@ def send(connect,user_id,data,factory=None):
     if actual.get('annotations',{}).get('readOnlyHint') is not False or structural(actual.get('inputSchema'))!=CONTRACT[name]['inputSchema']:raise TradeError('Plutos forslagskontrakt er ændret. Ingen afsendelse er forsøgt.')
     with connect() as c:
         c.execute('BEGIN IMMEDIATE')
-        candidate(connect,user_id,row['report_id'],row['candidate_id'])
+        verify_proposal_source(connect,user_id,row)
         active=c.execute("SELECT * FROM broker_proposals WHERE user_id=? AND kind=? AND payload=? AND id!=? AND status IN ('sending','sent','uncertain') ORDER BY id DESC LIMIT 1",(user_id,row['kind'],row['payload'],row['id'])).fetchone()
         if active:return {'proposal':view(active),'duplicate':True}
         changed=c.execute("UPDATE broker_proposals SET status='sending',review_token=NULL WHERE id=? AND user_id=? AND status='estimated' AND review_token=? AND estimated>?",(row['id'],user_id,row['review_token'],time.time()-120)).rowcount

@@ -38,6 +38,12 @@ try:
    if(doc.querySelectorAll('.dash-collection-mark').length!==1||doc.querySelector('.dash-collection-mark').textContent!=='©')throw Error('Collection marker missing');
    const date=formatTime('2026-11-07T20:05:09Z');if(!date.includes('07.11.2026')||!date.includes('21.05.09'))throw Error('Incorrect Danish date/time: '+date);
   }''')
+  page.evaluate('''() => {
+   const box=document.createElement('div');box.className='si-summary-dialog';box.innerHTML='<div class="sector-detail"><small class="positive">1</small><small class="negative">-1</small></div>';
+   document.body.append(box);const colors=Array.from(box.querySelectorAll('small'),x=>getComputedStyle(x).color);
+   if(colors[0]!=='rgb(130, 218, 180)'||colors[1]!=='rgb(255, 159, 169)')throw Error('Sector result colors missing: '+colors);
+   box.remove();
+  }''')
   page.evaluate('''async () => {
    const scope=document.createElement('section');scope.className='desk-radar';
    scope.innerHTML=window.CandidateUI.filters()+'<div class="desk-candidate" data-candidate-active="true" data-candidate-lifecycle="DISCOVERED" data-candidate-position="false" data-attention="green"></div><div class="desk-candidate" data-candidate-active="true" data-candidate-lifecycle="POSITION_OPEN" data-candidate-position="true" data-attention="yellow"></div>';

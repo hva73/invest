@@ -264,7 +264,7 @@ def read(connect,user_id,portfolio_id,client_factory=None):
                 if not isinstance(cursor,str) or cursor in seen:raise PortfolioFormatError('Gentaget/ugyldig beholdningspagination')
                 seen.add(cursor)
             else:raise PortfolioFormatError('Beholdningslisten overstiger sidegrænsen')
-            if total is not None and (isinstance(total,bool) or not isinstance(total,int) or total<0 or len(rows)>total):raise PortfolioFormatError('Beholdningslistens antal er ugyldigt')
+            if total is not None and (isinstance(total,bool) or not isinstance(total,int) or total<0 or len(rows)!=total):raise PortfolioFormatError('Beholdningslistens antal er ugyldigt eller ufuldstændigt')
             payload['positions']=normalize_positions(rows,payload.get('currency'))
             from pending_orders import from_positions
             payload['pending_orders']=from_positions(rows,'get_positions')
