@@ -156,8 +156,10 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
   existing_cycle=latest['cycle_id'] if latest else None
   if c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') AND COALESCE(json_extract(request,'$.watch_mode'),'both')!='exit'",(uid,int(mode),cid)).fetchone():return {'status':'ALREADY_ACTIVE'}
   reset=c.execute('SELECT reset_at,generation FROM hw_discovery_resets WHERE user_id=?',(uid,)).fetchone() if not mode else None
-  radar_reset=c.execute('SELECT report_cutoff FROM radar_resets WHERE user_id=?',(uid,)).fetchone() if not mode else None
-  if radar_reset and c.execute('SELECT 1 FROM report_candidate_links WHERE user_id=? AND is_test=0 AND candidate_id=? AND report_row_id<=? LIMIT 1',(uid,cid,radar_reset['report_cutoff'])).fetchone():return {'status':'NOT_NEW'}
+  radar_reset=c.execute('SELECT report_cutoff,reset_at FROM radar_resets WHERE user_id=?',(uid,)).fetchone() if not mode else None
+  if radar_reset and c.execute('SELECT 1 FROM report_candidate_links WHERE user_id=? AND is_test=0 AND candidate_id=? AND report_row_id<=? LIMIT 1',(uid,cid,radar_reset['report_cutoff'])).fetchone():
+   from intel_workflows import radar_reassessed_after_reset
+   if not radar_reassessed_after_reset(c,uid,cid,radar_reset):return {'status':'NOT_NEW'}
   terminal=c.execute("SELECT s.id,EXISTS(SELECT 1 FROM hw_events e WHERE e.watch_row_id=s.id AND e.event_type='WATCH_RESET') AS reset_event FROM hw_sessions s WHERE s.user_id=? AND s.is_test=? AND s.candidate_id=? AND s.status IN ('COMPLETED','EXPIRED','ERROR') AND COALESCE(json_extract(s.request,'$.watch_mode'),'both')!='exit'",(uid,int(mode),cid)).fetchall()
   if terminal and (not reset or any(not row['reset_event'] for row in terminal)):return {'status':'NOT_NEW'}
   from intel_workflows import candidate_currentness
@@ -228,7 +230,7 @@ def auto_discover(connect,cursor=0):
   with connect() as c:
    started=c.execute('SELECT started_at FROM hw_discovery_control WHERE id=1').fetchone()
    latest_report=c.execute("SELECT id FROM ingested_reports WHERE user_id=? AND is_test=0 AND report_type!='deep_analysis' ORDER BY generated_epoch DESC,id DESC LIMIT 1",(uid,)).fetchone()
-   radar_reset=c.execute('SELECT report_cutoff FROM radar_resets WHERE user_id=?',(uid,)).fetchone()
+   radar_reset=c.execute('SELECT report_cutoff,reset_at FROM radar_resets WHERE user_id=?',(uid,)).fetchone()
    cleared={r[0] for r in c.execute('SELECT DISTINCT candidate_id FROM report_candidate_links WHERE user_id=? AND is_test=0 AND report_row_id<=?',(uid,radar_reset['report_cutoff']))} if radar_reset else set()
    rows=c.execute("SELECT l.candidate_id,l.generated,r.id,r.received,r.payload FROM report_candidate_links l JOIN ingested_reports r ON r.id=l.report_row_id WHERE l.user_id=? AND l.is_test=0 AND r.report_type!='deep_analysis' AND l.generated<=? AND NOT EXISTS (SELECT 1 FROM report_candidate_links newer JOIN ingested_reports nr ON nr.id=newer.report_row_id WHERE newer.user_id=l.user_id AND newer.is_test=0 AND newer.candidate_id=l.candidate_id AND nr.report_type!='deep_analysis' AND newer.generated<=? AND (newer.generated>l.generated OR (newer.generated=l.generated AND nr.id>r.id))) ORDER BY l.generated DESC,r.id DESC,(SELECT CAST(j.key AS INTEGER) FROM json_each(r.payload,'$.candidates') j WHERE json_extract(j.value,'$.candidate_id')=l.candidate_id LIMIT 1)",(uid,now.timestamp(),now.timestamp())).fetchall()
   if rows:
@@ -238,7 +240,9 @@ def auto_discover(connect,cursor=0):
      row=rows[(cursor+offset)%len(rows)]
      if after and stamp(row['received'])<=after:continue
      current=json.loads(row['payload']);cid=row['candidate_id']
-     if cid in cleared:continue
+     if cid in cleared:
+      from intel_workflows import radar_reassessed_after_reset
+      if not radar_reassessed_after_reset(c,uid,cid,radar_reset):continue
      item=next((v for v in current.get('candidates',[]) if v.get('candidate_id')==cid),None)
      if not item:continue
      old=c.execute('SELECT report_id,next_attempt FROM hw_discovery_attempts WHERE user_id=? AND is_test=0 AND candidate_id=?',(uid,cid)).fetchone()

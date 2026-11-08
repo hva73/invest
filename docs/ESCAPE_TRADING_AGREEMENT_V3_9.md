@@ -198,3 +198,7 @@ Dette er et statusbilag til de eksisterende krav, ikke en ændring af strategi, 
 - **Dokumenteret forskel:** v5.1-instruktionen afviser et kunstigt loft på 3/5 HOT WATCH-kandidater, mens afsnit 2 sætter et loft på 5 nye kandidater; den aktuelle rapports ID afviger fra afsnit 5. Dette er ikke en ændring af loftet for handlingsrettede forslag. Forskellene er ikke stiltiende omsat til nye krav eller ændret mandat.
 
 Samlet live-test afventer fortsat ejerens gennemgang af det konkrete resultat og afklaring af de dokumenterede blokeringer. Ingen globale risikoregler eller krav til manglende data lempes for at kunne skrive PASS.
+
+### Nulstilling og ny vurdering — 9. november 2026
+
+Efter ejerens udtrykkelige valg blev den aktive radarliste nulstillet. Rapporter og historik bevares, og de 18 observerede beholdningssessioner fortsatte. Den installerede version skjuler også efterfølgende rapporter med de gamle kandidat-ID'er; genafsendelse alene genstarter dem derfor ikke. Koderettelsen på udviklingsgrenen tillader samme stabile ID igen, når en ny hovedrapport indeholder en eksplicit, gyldig og tidsstemplet vurdering efter nulstillingen. Kopier uden ny vurdering forbliver skjult. Eksisterende stop-, identitets-, kapacitets- og risikokontroller gælder stadig. Rettelsen er først aktiv efter installation og dokumenteret readback; en gemt rapport er ikke en startet session.

@@ -148,6 +148,22 @@ class Agreement(unittest.TestCase):
   self.assertEqual(engine.item(app.connect,1,'radar-exit',False)['session']['status'],'CREATED')
   self.assertEqual(hotwatch_service.auto_activate_candidate(app.connect,1,False,report,candidate,verify=lambda *_:self.fail('old candidate must not restart'))['status'],'NOT_NEW')
   self.assertIsNotNone(report_ingest.item(app.connect,1,'radar-reset-source')['report'])
+ def test_radar_reset_requires_new_assessment_before_existing_id_can_return(self):
+  report=merc_report(False);report.update(report_id='radar-original',positions=[],orders=[])
+  candidate=report['candidates'][0];candidate.update(candidate_id='radar-reassess',ticker='SCHO',company_name='Schouw & Co A/S',asset_id='radar-reassess-asset',exchange='CHIX')
+  self.assertTrue(report_ingest.save(app.connect,1,report)[1]['ok'])
+  report_ingest.reset_radar(app.connect,1)
+  copied=copy.deepcopy(report);copied.update(report_id='radar-copied',generated_at=engine.utc().isoformat())
+  self.assertTrue(report_ingest.save(app.connect,1,copied)[1]['ok'])
+  self.assertFalse(report_ingest.desk(app.connect,1)['candidates'])
+  self.assertEqual(hotwatch_service.auto_activate_candidate(app.connect,1,False,copied,copied['candidates'][0],verify=lambda *_:self.fail('stale assessment'))['status'],'NOT_NEW')
+  updated=copy.deepcopy(copied);now=engine.utc();updated.update(report_id='radar-reviewed',generated_at=now.isoformat())
+  updated['candidates'][0]['decision'].update(decided_at=now.isoformat(),data_as_of=now.isoformat(),deadline=(now+timedelta(hours=24)).isoformat())
+  self.assertTrue(report_ingest.save(app.connect,1,updated)[1]['ok'])
+  self.assertEqual([x['candidate']['candidate_id'] for x in report_ingest.desk(app.connect,1)['candidates']],['radar-reassess'])
+  instrument={'asset_id':'radar-reassess-asset','ticker':'SCHO','name':'Schouw & Co A/S','exchange':'CHIX','currency':'DKK','type':'CS','isin':None}
+  self.assertEqual(hotwatch_service.auto_activate_candidate(app.connect,1,False,updated,updated['candidates'][0],verify=lambda *_:instrument)['status'],'CREATED')
+  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
  def test_inflight_discovery_cannot_recreate_old_candidate_after_reset(self):
   initial=self.now-timedelta(seconds=3);cutoff=self.now-timedelta(seconds=2)
   report=merc_report(False);report.update(report_id='reset-race-source',generated_at=initial.isoformat(),positions=[],orders=[])
