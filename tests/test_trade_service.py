@@ -67,6 +67,12 @@ class Trading(unittest.TestCase):
   self.assertEqual(sent['status'],'sent')
   self.assertEqual(self.writes()[0]['arguments']['orders'][0]['shares'],'2')
   self.assertEqual(self.writes()[0]['arguments']['orders'][0]['side'],'SELL')
+ def test_manual_sell_uses_actual_holding_and_chosen_percentage(self):
+  holding={'positions_complete':True,'observed':'2026-11-08T00:00:00Z','positions':[{'kind':'holding','asset_id':'asset-test','quantity':'8'}]}
+  request=dict(self.request,report_id='@manual-sell',candidate_id='',size_mode='percent',size='25',order_type='MARKET')
+  with patch('portfolio_data.read',return_value=holding):
+   proposal=self.estimate(request);self.assertEqual(proposal['payload']['orders'][0]['shares'],'2');self.assertEqual(self.send(proposal)['status'],'sent')
+  self.assertEqual(self.writes()[0]['arguments']['orders'][0]['side'],'SELL')
  def test_percentage_sell_reads_and_normalizes_real_provider_shape(self):
   original=self.factory
   class PositionClient(original):
@@ -144,11 +150,19 @@ class Trading(unittest.TestCase):
   enable(app.DB,'owner','Root',now=1000)
   with app.connect() as c:
    signal=trade.active_test_signal(c,1,now=1001)
-   self.assertEqual((signal['ticker'],signal['amount'],signal['portfolio_id']),('PEPE','20',self.root))
+   self.assertEqual((signal['ticker'],signal['side'],signal['portfolio_id']),('PEPE','BUY',self.root))
    self.assertIsNone(trade.active_test_signal(c,1,now=4601))
    self.assertIsNone(trade.active_test_signal(c,2,now=1001))
   with self.assertRaises(ValueError):enable(app.DB,'owner','Unknown',now=1000)
   self.assertFalse(self.writes());self.assertEqual(trade.history(app.connect,1),[])
+ def test_pluto_batch_reference_matches_exact_order(self):
+  order={'assetId':'known','side':'BUY','orderType':'MARKET','timeInForce':'DAY'}
+  raw={'orderIntents':[{**order,'orderIntentId':'intent-1'}]}
+  self.assertEqual(trade.intent_reference(raw,{'orders':[order]}),'intent-1')
+  self.assertIsNone(trade.intent_reference(raw,{'orders':[{**order,'assetId':'other'}]}))
+  self.assertIsNone(trade.intent_reference({'orderIntents':raw['orderIntents']*2},{'orders':[order]}))
+  row={'payload':json.dumps({'orders':[order]}),'response':json.dumps(raw),'estimate':None,'asset':None,'sell_basis':None,'status':'uncertain','intent_id':None,'error':'uafklaret'}
+  self.assertEqual(trade.view(row)['status'],'sent');self.assertEqual(trade.view(row)['intent_id'],'intent-1')
  def test_preview_provider_error_and_credentials(self):
   original=self.factory
   class Failed(original):

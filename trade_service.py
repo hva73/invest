@@ -12,9 +12,10 @@ def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS broker_proposals(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),fingerprint TEXT NOT NULL,report_id TEXT NOT NULL,candidate_id TEXT NOT NULL,kind TEXT NOT NULL,portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),payload TEXT NOT NULL,status TEXT NOT NULL,created REAL NOT NULL,estimated REAL,review_token TEXT,estimate TEXT,asset TEXT,intent_id TEXT,response TEXT,error TEXT,UNIQUE(user_id,fingerprint))')
     if 'sell_basis' not in {r[1] for r in c.execute('PRAGMA table_info(broker_proposals)')}:c.execute('ALTER TABLE broker_proposals ADD COLUMN sell_basis TEXT')
     c.execute('CREATE TABLE IF NOT EXISTS manual_test_signals(user_id INTEGER PRIMARY KEY REFERENCES users(id),portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),ticker TEXT NOT NULL,amount TEXT NOT NULL,expires REAL NOT NULL)')
+    if 'side' not in {r[1] for r in c.execute('PRAGMA table_info(manual_test_signals)')}:c.execute("ALTER TABLE manual_test_signals ADD COLUMN side TEXT NOT NULL DEFAULT 'BUY'")
 
 def active_test_signal(c,user_id,now=None):
-    row=c.execute("SELECT t.portfolio_id,t.ticker,t.amount,t.expires FROM manual_test_signals t JOIN portfolios p ON p.id=t.portfolio_id AND p.user_id=t.user_id WHERE t.user_id=? AND t.expires>? AND p.active=1 AND p.source='pluto' AND p.kind='portfolio'",(user_id,time.time() if now is None else now)).fetchone()
+    row=c.execute("SELECT t.portfolio_id,t.ticker,t.side,t.expires FROM manual_test_signals t JOIN portfolios p ON p.id=t.portfolio_id AND p.user_id=t.user_id WHERE t.user_id=? AND t.expires>? AND p.active=1 AND p.source='pluto' AND p.kind='portfolio'",(user_id,time.time() if now is None else now)).fetchone()
     return dict(row) if row else None
 
 def structural(v):
@@ -89,9 +90,9 @@ def candidate(connect,user_id,report_id,candidate_id):
     return {**record['candidate'],'signal':signal}
 
 def signal_source(connect,user_id,report_id,candidate_id):
-    if report_id=='@manual-buy':
+    if report_id in ('@manual-buy','@manual-sell'):
         if not isinstance(candidate_id,str) or not 1<=len(candidate_id)<=200 or any(ord(x)<33 for x in candidate_id):raise TradeError('Vælg et gyldigt Pluto-aktiv.')
-        return {'signal':'KØB','asset_id':candidate_id}
+        return {'signal':'KØB' if report_id=='@manual-buy' else 'SÆLG','asset_id':candidate_id}
     if report_id!='@hotwatch':return candidate(connect,user_id,report_id,candidate_id)
     import hotwatch_engine
     try:session=hotwatch_engine.item(connect,user_id,candidate_id,False)['session']
@@ -186,6 +187,9 @@ def preflight(cl,tools,p):
 def view(row):
     r=dict(row)
     for key in ['payload','estimate','asset','response','sell_basis']:r[key]=json.loads(r[key]) if r[key] else None
+    if r['status']=='uncertain' and r['response'] and not r['intent_id']:
+        reference=intent_reference(r['response'],r['payload'])
+        if reference:r['status']='sent';r['intent_id']=reference;r['error']=None
     r.pop('fingerprint',None);r.pop('user_id',None)
     if r['status']!='estimated':r.pop('review_token',None)
     return r
@@ -264,6 +268,9 @@ def estimate(connect,user_id,data,factory=None):
     if data.get('report_id')=='@manual-buy':
         if data.get('kind')!='direct' or data.get('size_mode')!='amount':raise TradeError('Et manuelt køb skal være et direkte køb for et beløb.')
         data={**data,'candidate_id':data.get('asset_id')}
+    if data.get('report_id')=='@manual-sell':
+        if data.get('kind')!='direct' or data.get('size_mode')!='percent':raise TradeError('Et manuelt salg skal angives som procent af en direkte beholdning.')
+        data={**data,'candidate_id':data.get('asset_id')}
     if data.get('kind')=='direct' and data.get('size_mode')=='percent':
         c=signal_source(connect,user_id,str(data.get('report_id','')),str(data.get('candidate_id','')))
         if c['signal']!='SÆLG':raise TradeError('Procent af en beholdning kan kun bruges til salg.')
@@ -284,6 +291,16 @@ def estimate(connect,user_id,data,factory=None):
     with connect() as c:
         c.execute("UPDATE broker_proposals SET status='estimated',estimated=?,review_token=?,estimate=?,asset=?,sell_basis=?,error=NULL WHERE id=? AND user_id=? AND status IN ('draft','estimated')",(time.time(),secrets.token_urlsafe(24),json.dumps(result),json.dumps(asset),json.dumps(basis) if basis else None,pid,user_id))
     return {'proposal':view(get(connect,user_id,pid))}
+
+def intent_reference(raw,payload):
+    if not isinstance(raw,dict):return None
+    intent=raw.get('orderIntentId')
+    if not intent and isinstance(raw.get('orderIntents'),list):
+        items=raw['orderIntents'];orders=payload.get('orders') or []
+        if len(items)==len(orders)==1 and isinstance(items[0],dict):
+            item=items[0];order=orders[0]
+            if all(item.get(k)==order.get(k) for k in ('assetId','side','orderType','timeInForce')):intent=item.get('orderIntentId')
+    return intent if isinstance(intent,str) and 1<=len(intent)<=200 else None
 
 def send(connect,user_id,data,factory=None):
     row=get(connect,user_id,int(data['id']))
@@ -308,8 +325,7 @@ def send(connect,user_id,data,factory=None):
     if not changed:return {'proposal':view(get(connect,user_id,row['id'])),'duplicate':True}
     try:
         raw=call(cl,tools,name,json.loads(row['payload']))
-        intent=raw.get('orderIntentId') if isinstance(raw,dict) else None
-        if not isinstance(intent,str) or not 1<=len(intent)<=200:intent=None
+        intent=intent_reference(raw,json.loads(row['payload']))
         status='sent' if intent else 'uncertain';error=None if intent else 'Pluto har svaret uden en genkendelig reference. Kontrollér i Pluto; forslaget genafsendes ikke.'
         with connect() as c:c.execute('UPDATE broker_proposals SET status=?,intent_id=?,response=?,error=? WHERE id=? AND user_id=?',(status,intent,json.dumps(raw),error,row['id'],user_id))
     except Exception:
@@ -318,10 +334,11 @@ def send(connect,user_id,data,factory=None):
 
 def check(connect,user_id,pid,factory=None):
     row=get(connect,user_id,int(pid))
-    if not row['intent_id']:raise TradeError('Ingen sikker Pluto-reference. Kontrollér forslaget i Pluto-appen.')
-    cl,tools=client(connect,user_id,factory);raw=call(cl,tools,'get_order_intent',{'orderIntentId':row['intent_id']})
+    reference=view(row)['intent_id']
+    if not reference:raise TradeError('Ingen sikker Pluto-reference. Kontrollér forslaget i Pluto-appen.')
+    cl,tools=client(connect,user_id,factory);raw=call(cl,tools,'get_order_intent',{'orderIntentId':reference})
     # Preserve exact provider status separately. Acceptance is never a fill.
-    with connect() as c:c.execute('UPDATE broker_proposals SET response=? WHERE id=? AND user_id=?',(json.dumps(raw),row['id'],user_id))
+    with connect() as c:c.execute("UPDATE broker_proposals SET response=?,intent_id=?,status='sent',error=NULL WHERE id=? AND user_id=?",(json.dumps(raw),reference,row['id'],user_id))
     return {'proposal':view(get(connect,user_id,row['id']))}
 
 
