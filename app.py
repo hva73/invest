@@ -449,6 +449,7 @@ class Handler(BaseHTTPRequestHandler):
                     elif action=='estimate':result=trade_service.estimate(connect,user_id,data)
                     elif action=='send':result=trade_service.send(connect,user_id,data)
                     elif action=='status':result=trade_service.check(connect,user_id,data.get('id'))
+                    elif action=='cancel':result=trade_service.cancel_intent(connect,user_id,data.get('id'))
                     else:return self.send(404,{'error':'Ukendt handelsfunktion'})
                     return self.send(200,result)
                 except trade_service.TradeError as error:return self.send(400,{'error':str(error)})

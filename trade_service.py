@@ -341,12 +341,37 @@ def check(connect,user_id,pid,factory=None):
     with connect() as c:c.execute("UPDATE broker_proposals SET response=?,intent_id=?,status='sent',error=NULL WHERE id=? AND user_id=?",(json.dumps(raw),reference,row['id'],user_id))
     return {'proposal':view(get(connect,user_id,row['id']))}
 
+def cancel_intent(connect,user_id,pid,factory=None):
+    """Withdraw only an owned, unapproved proposal; never cancel an order."""
+    row=get(connect,user_id,int(pid));reference=view(row)['intent_id']
+    if not reference:raise TradeError('Forslaget har ingen verificeret Pluto-reference. Kontrollér det i Pluto.')
+    cl,tools=client(connect,user_id,factory)
+    current=call(cl,tools,'get_order_intent',{'orderIntentId':reference})
+    if not isinstance(current,dict) or current.get('orderIntentId')!=reference:raise TradeError('Pluto bekræftede ikke forslagsidentiteten. Intet er annulleret.')
+    status=str(current.get('status') or '').upper()
+    if status in ('CANCELLED','CANCELED','DECLINED','EXPIRED','ACCEPTED','CONFIRMED'):
+        with connect() as c:c.execute("UPDATE broker_proposals SET response=?,intent_id=?,status='sent',error=NULL WHERE id=? AND user_id=?",(json.dumps(current),reference,row['id'],user_id))
+        return {'proposal':view(get(connect,user_id,row['id'])),'cancelled':status in ('CANCELLED','CANCELED'),'already_final':True}
+    if status not in ('PENDING','WAITING','AWAITING_APPROVAL','PROPOSED'):
+        raise TradeError('Pluto returnerede en ukendt forslagsstatus. Intet er annulleret; kontrollér i Pluto.')
+    try:
+        call(cl,tools,'cancel_order_intent',{'orderIntentId':reference})
+        after=call(cl,tools,'get_order_intent',{'orderIntentId':reference})
+    except Exception:
+        raise TradeError('Resultatet af tilbagetrækningen er uafklaret. Kontrollér status i Pluto.')
+    if not isinstance(after,dict) or after.get('orderIntentId')!=reference:raise TradeError('Plutos svar kunne ikke bekræftes. Kontrollér status i Pluto.')
+    with connect() as c:c.execute("UPDATE broker_proposals SET response=?,intent_id=?,status='sent',error=NULL WHERE id=? AND user_id=?",(json.dumps(after),reference,row['id'],user_id))
+    return {'proposal':view(get(connect,user_id,row['id'])),'cancelled':str(after.get('status') or '').upper() in ('CANCELLED','CANCELED')}
+
 
 def summaries(connect,user_id):
-    with connect() as c:rows=c.execute('SELECT id,report_id,candidate_id,kind,portfolio_id,status,created,intent_id,error,response FROM broker_proposals WHERE user_id=? ORDER BY id DESC LIMIT 50',(user_id,)).fetchall()
+    with connect() as c:rows=c.execute('SELECT * FROM broker_proposals WHERE user_id=? ORDER BY id DESC LIMIT 50',(user_id,)).fetchall()
     result=[]
     for row in rows:
-        item=dict(row);response=json.loads(item.pop('response') or 'null');status=response.get('status') if isinstance(response,dict) else None
+        source=view(row);response=source.get('response');status=response.get('status') if isinstance(response,dict) else None
+        orders=(source.get('payload') or {}).get('orders') or []
+        item={k:source.get(k) for k in ('id','report_id','candidate_id','kind','portfolio_id','status','created','intent_id','error')}
+        item.update(asset_id=orders[0].get('assetId') if len(orders)==1 else None,side=orders[0].get('side') if len(orders)==1 else None,expires_at=response.get('expiresAt') if isinstance(response,dict) else None)
         item['provider_status']=status if isinstance(status,str) and len(status)<=100 else None
         result.append(item)
     return result

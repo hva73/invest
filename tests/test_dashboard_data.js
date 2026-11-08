@@ -11,6 +11,7 @@ row.daily={percent:'2',amount:'1',currency:'DKK',basis:'pluto_reported_daily_cha
 row.portfolio_id=7;state.test_trade_signal={ticker:'TEST',portfolio_id:7,side:'SELL'};html=ui.render(state);let testAction=html.match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];assert.match(testAction,/10,00\s*kr/);assert.match(testAction,/\+2,00 %/);assert.match(testAction,/data-dashboard-open="0"/);assert.match(testAction,/data-trade-test-buy>Sælg/);delete state.test_trade_signal;
 row.hot_watch={auto_status:{status:'PROVIDER_RATE_BUDGET'}};html=ui.render(state);assert.match(html,/data-dashboard-watch-pending="0"/);assert.match(html,/Afventer datakilde/);
 row.hot_watch={session:{watch_id:'synthetic-watch',signal:'NO_DATA',display_status:'WARMUP',warmup:{count:11,required:34}}};html=ui.render(state);assert.match(html,/WARMUP 11 af 34/);
+row.hot_watch.session.last_action_signal={event_type:'BUY_SIGNAL',created:'2026-11-06T10:00:00Z'};html=ui.render(state);assert.match(html,/Tidligere Køb/);assert.match(html,/ikke aktuelt/);
 row.hot_watch.session.warmup.market_status_unknown=true;html=ui.render(state);assert.match(html,/WARMUP 11 af 34 · MARKEDSSTATUS UKENDT/);
 row.hot_watch.session.warmup={analysis_only:true,complete:true,count:34,required:34,market_status_unknown:true,data_stale:false};html=ui.render(state);assert.match(html,/WARMUP COMPLETE · MARKET UNKNOWN/);
 row.hot_watch.session.warmup.data_stale=true;html=ui.render(state);assert.match(html,/WARMUP COMPLETE · DATA STALE/);

@@ -60,6 +60,12 @@ try:
   dialog=page.locator('#quick-trade-dialog');dialog.locator('[name=size]').fill('20');sent_count=len([x for x in calls if x[0]=='send'])
   dialog.locator('button[type=submit]').click();expect(dialog).to_contain_text('Der er ikke sendt et nyt forslag')
   assert len([x for x in calls if x[0]=='send'])==sent_count
+  dialog.locator('[data-quick-close]').click();page.locator('nav [data-view="trade"]').click()
+  sample={'id':9,'status':'sent','intent_id':'synthetic-intent','report_id':'synthetic','portfolio_id':case.root,'kind':'direct','payload':{'orders':[{'assetId':'asset-test','side':'BUY','amount':'20','currency':'DKK','orderType':'MARKET','timeInForce':'DAY'}]},'asset':{'asset':{'name':'Test'}},'response':{'status':'CANCELLED'}}
+  page.route('**/api/trade/history',lambda route:route.fulfill(json={'proposals':[sample]}))
+  page.route('**/api/trade/cancel',lambda route:route.fulfill(json={'cancelled':True,'proposal':sample}))
+  page.locator('details:has(#broker-history) > summary').click();page.locator('#broker-history').click();expect(page.locator('[data-broker-cancel="9"]')).to_be_visible()
+  page.once('dialog',lambda d:d.accept());page.locator('[data-broker-cancel="9"]').click();expect(page.locator('#broker-status')).to_contain_text('trukket tilbage')
   assert not errors,errors
   browser.close()
  print('PASS: synthetic buy and percentage sell review and send flow on mobile')

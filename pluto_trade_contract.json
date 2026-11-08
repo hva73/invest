@@ -391,5 +391,19 @@
         }
       }
     }
+  },
+  "cancel_order_intent": {
+    "readOnlyHint": false,
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "orderIntentId": {
+          "type": "string"
+        },
+        "batchId": {
+          "type": "string"
+        }
+      }
+    }
   }
 }

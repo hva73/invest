@@ -163,6 +163,19 @@ class Trading(unittest.TestCase):
   self.assertIsNone(trade.intent_reference({'orderIntents':raw['orderIntents']*2},{'orders':[order]}))
   row={'payload':json.dumps({'orders':[order]}),'response':json.dumps(raw),'estimate':None,'asset':None,'sell_basis':None,'status':'uncertain','intent_id':None,'error':'uafklaret'}
   self.assertEqual(trade.view(row)['status'],'sent');self.assertEqual(trade.view(row)['intent_id'],'intent-1')
+ def test_cancel_only_own_pending_intent_and_confirm_provider_status(self):
+  proposal=self.send(self.estimate());original=self.factory;state={'status':'PENDING','calls':0}
+  class CancelClient(original):
+   def request(client,method,args):
+    if args['name']=='get_order_intent':return {'structuredContent':{'orderIntentId':'synthetic-intent','status':state['status']}}
+    if args['name']=='cancel_order_intent':state['calls']+=1;state['status']='CANCELLED';return {'structuredContent':{'success':True}}
+    return super().request(method,args)
+  result=trade.cancel_intent(app.connect,1,proposal['id'],CancelClient)
+  self.assertTrue(result['cancelled']);self.assertEqual(result['proposal']['response']['status'],'CANCELLED');self.assertEqual(state['calls'],1)
+  self.assertTrue(trade.cancel_intent(app.connect,1,proposal['id'],CancelClient)['already_final']);self.assertEqual(state['calls'],1)
+  with self.assertRaises(trade.TradeError):trade.cancel_intent(app.connect,2,proposal['id'],CancelClient)
+  state['status']='ACCEPTED';result=trade.cancel_intent(app.connect,1,proposal['id'],CancelClient)
+  self.assertFalse(result['cancelled']);self.assertEqual(state['calls'],1)
  def test_preview_provider_error_and_credentials(self):
   original=self.factory
   class Failed(original):
