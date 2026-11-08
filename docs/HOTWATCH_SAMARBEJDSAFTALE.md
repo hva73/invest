@@ -1,6 +1,37 @@
-# ESCAPE × Trading Radar × HOT WATCH — driftsaftale (klar til implementering)
+# ESCAPE × Trading Radar × HOT WATCH — samarbejds- og driftsaftale
 
-**Mål:** Få hele kæden i produktion nu: RADAR opdager → ESCAPE registrerer → HOT WATCH følger → RADAR revurderer → bruger beslutter eventuel handel. Dette er implementeringsordre til Codex, ikke en påstand om at funktionerne allerede er installeret.
+**Mål:** Færdiggør hele kæden: RADAR opdager → ESCAPE registrerer → HOT WATCH følger → RADAR revurderer → bruger beslutter eventuel handel. Dette er implementeringsordre til Codex, ikke en påstand om at funktionerne allerede er installeret.
+
+
+## Gældende arbejdsordre og status — 8. november 2026
+
+Dette afsnit præciserer og har forrang for tidligere formuleringer om straksinstallation og live-start. Udgangspunktet for gennemgangen er `69d1279` på `codex/escape-development`. Købskæden er **ikke færdig**, og der er ikke dokumenteret samlet LIVE PASS. Implementering og lokale tests fortsætter; resultatet gennemgås med Heine, før den samlede live-test startes. Ingen rigtige ordrer eller Pluto-handelsforslag under denne testfase.
+
+### Handelsforløb og risikogrundlag
+
+ChatGPT-kandidat → verificeret Pluto-instrument → automatisk HOT WATCH → Early Catalyst / dynamisk signal → bruger vælger beløb og sender forslaget → godkendelse i Pluto → verificeret beholdning → separat exit-watch.
+
+- Discovery og EARLY WATCH må starte uden fuldt købsgrundlag. EARLY WATCH er observation og må ikke fremstå som et risikogodkendt køb.
+- Brugeren vælger handelsbeløbet. Et konkret risikogodkendt køb kræver et dokumenteret handelsantal, stop i aktivets valuta, valutaomregning til DKK, gebyrer samt frisk depotværdi og eksponering. Det skal afklares og implementeres, hvordan beløbsvalg og et read-only Pluto-estimat indgår i dette grundlag, uden at skabe en cirkel, hvor beløbet kun kan vælges efter et allerede risikogodkendt signal.
+- Manglende antal må ikke udledes fra et beløb og en udateret kurs. Manglende stop, valuta eller gebyr må ikke erstattes af standardgæt. Stopgrundlag skal have en udtrykkelig, dokumenteret metode eller brugerangivelse; et analytisk stop er ikke en placeret stopordre.
+- De globale risikoregler bevares for alle strategier. Et nyt beløb eller ændret markeds-/depotgrundlag kræver ny kontrol; et tidligere godkendt signal må ikke godkende en anden handelsstørrelse.
+- Vis særskilt: **signalbetingelser ikke opfyldt**, **risikogrænse overskredet** og **data mangler**. Hvis flere forhold gælder samtidig, skal de kunne ses samtidig. Lukket marked og for gamle data er ikke et svagt handelssignal.
+- Kandidat-watch og exit-watch har separate sessioner. En accepteret ordreintention beviser ikke et fill. Kobling til kandidaten må ikke fremstilles som bevis for, at den observerede beholdning kom fra netop dette forslag. Depot + aktiv og frisk, komplet Pluto-beholdning er grundlag for exit-overvågningen; tvetydig oprindelse forbliver ukendt.
+
+### Verificeret i denne gennemgang
+
+- GitHub-grenen er læst ved `69d1279`; eksisterende Early Catalyst, automatisk kandidatoprettelse, risikogate og dele af beholdningskoblingen er inspiceret. Gennemgangen er endnu ikke afsluttet.
+- Pluto, EODHD og Endavu har svaret på read-only opslag for GOGO. EODHD og Endavu leverede daterede historiske/seneste observationer; de er ikke dokumentation for en frisk live-kurs søndag. Pluto-opslaget gav pris uden kurstidspunkt.
+- Pluto `estimate_order` for et kontrolbeløb på 20 DKK returnerede et `estimate`-objekt med `commission`, `commissionCurrency`, `accountNotionalCurrency`, `filledAccountNotionalCurrency`, `assetBankFx` (base/quote/rate) og `quantity: null`. Et særskilt estimat for én aktie blev afvist med utilstrækkelig købekraft. Ingen ordre eller forslag blev oprettet. Kontrolbeløbet er ikke et valgt handelsbeløb eller en sessionsstandard.
+- Den rettede serverscript-kontrol `tasks/pluto_readonly_risk_probe.py` er **stadig ikke kørt mod applikationsserverens forbindelse**. Direkte plugin-opslag dokumenterer et svarformat, men erstatter ikke denne kontrol eller en test af ESCAPEs fortolkning af svaret.
+
+### Resterende arbejde og accept
+
+1. Færdiggør beløbsvalg, verificeret risikogrundlag og genkontrol gennem det eksisterende estimat-/forslagsflow. Test null-antal, manglende/ændret stop, valuta og gebyrer samt globale størrelse-, tabs- og eksponeringsgrænser. Ingen risikoklar status ved ukendte input.
+2. Gennemgå og test hele kandidat → Early Catalyst → dynamisk signal-kæden, inklusive tilbagekaldelse ved for gamle eller ændrede data, revurdering, genbrug af sessioner og respekt for manuel pause/stop. Kontroller, at visningen skelner mellem signal, risiko og datamangler.
+3. Gennemgå og test koblingen til verificerede beholdninger, herunder eksisterende beholdning før et nyt forslag, accepteret men ikke udført forslag, delvise fills, flere depoter, tvetydig oprindelse og solgt position. Exit-watch må ikke stoppe med kandidaten.
+4. Kør den rettede read-only kontrol på applikationsserveren og kontroller adapterens håndtering af de faktiske felter. Dokumenter manglende adgang som en konkret blocker; ingen påstand om gennemført serverkontrol uden resultat.
+5. Opdater status med ændringer, relevante testresultater og resterende fejl, og gennemgå det med Heine. Først derefter startes den samlede live-test med faktiske readbacks ved åbent relevant marked. Godkendelse af live-test er ikke tilladelse til testordrer.
 
 ## Ansvar og autoritet
 
@@ -25,7 +56,7 @@
 
 ## Gå live — færdig implementering, ikke flere dokumentationsrunder
 
-Codex skal **færdiggøre og installere** hele kæden i den eksisterende ESCAPE-arkitektur, migrere eksisterende sessioner uden tab af historik og genstarte relevante services sikkert. Brug eksisterende skemaer, værktøjer, permissions og API'er; udvid dem kun hvor nødvendigt for faktisk aktivering, revurdering, deduplikering, timeout og readback.
+Efter ovenstående gennemgang skal Codex **færdiggøre og installere** hele kæden i den eksisterende ESCAPE-arkitektur, migrere eksisterende sessioner uden tab af historik og genstarte relevante services sikkert. Brug eksisterende skemaer, værktøjer, permissions og API'er; udvid dem kun hvor nødvendigt for faktisk aktivering, revurdering, deduplikering, timeout og readback.
 
 **Definition af færdig:**
 - En ny Pluto-gated `AFVENT`-kandidat i radarrapporten skaber/genbruger én faktisk HOT WATCH-session, som kan læses tilbage som aktiv.
