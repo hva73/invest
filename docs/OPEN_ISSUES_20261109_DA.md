@@ -28,3 +28,8 @@ Kl. 07.42 viste journalen gentagne SQLite OperationalError ved `claim` i `hotwat
 ### Produktionskontrol efter installation — 9. november kl. 07.47 dansk tid
 
 Worker og supervisor viste running med frisk heartbeat ca. 71 sekunder efter seneste registrerede worker-start. Ingen nyere worker-exit var registreret. Dette er en kort kontrol, ikke bevis for vedvarende stabilitet, og den tidligere SQLite OperationalError er endnu ikke identificeret med præcis SQLite-fejlkode. MLYS, HIMS, FLY, LUNR og CABA havde sessioner, men ingen havde en `last_data_at`; MLYS viste `PLUTO_QUOTE_TIME_UNKNOWN` og HIMS `PROVIDER_OR_PROCESSING_ERROR`. Disse datablokeringer skal undersøges uden at slække på friskheds- eller risikokrav. Samlet live-test er ikke godkendt.
+
+
+### Opfølgning kl. 07.54 dansk tid
+
+Journalen har nu vist `worker_database_busy` med SQLite-kode 5 (`SQLITE_BUSY`) og efterfølgende `heartbeat_timeout` samt genstarter. En konkret fejl i supervisorens tidsberegning er rettet på udviklingsgrenen: 45 sekunders grænse måles fra begyndelsen af et sammenhængende manglende heartbeat, ikke fra workerens oprindelige start. Tests dækker både kortvarigt bortfald og vedvarende bortfald. Årsagen til databasekontentionen er endnu ikke identificeret; installation og længere produktionskontrol af rettelsen afventes. HIMS og CABA har nu gamle kursobservationer, der ikke er friske signaler. Øvrige kandidater har fortsat datablokeringer eller begrænset providerbudget. Risikokontroller og friskhedskrav er uændrede.

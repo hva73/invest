@@ -10,6 +10,38 @@ import hotwatch_supervisor as supervisor
 
 
 class WatchdogTests(unittest.TestCase):
+    def test_late_transient_heartbeat_loss_does_not_kill_healthy_worker(self):
+        from unittest.mock import Mock
+        child = Mock()
+        child.poll.return_value = None
+        clock = iter([1, 100, 102, 104])
+        with patch.object(supervisor, 'lock', return_value=os.open(os.devnull, os.O_RDONLY)), \
+             patch.object(supervisor, 'enabled', side_effect=[True, True, True, True, False, False]), \
+             patch.object(supervisor, 'heartbeat', side_effect=[False, True, False, True]), \
+             patch.object(supervisor, 'report'), patch.object(supervisor, 'diagnostic') as diagnostic, \
+             patch.object(supervisor.time, 'monotonic', side_effect=lambda: next(clock)), \
+             patch.object(supervisor.time, 'sleep'), patch.object(supervisor.subprocess, 'Popen', return_value=child), \
+             patch.object(supervisor.signal, 'signal'):
+            supervisor.run()
+        self.assertNotIn('heartbeat_timeout', [call.args[0] for call in diagnostic.call_args_list])
+        self.assertEqual(child.terminate.call_count, 1)  # Normal shutdown only.
+
+    def test_sustained_heartbeat_loss_still_restarts_worker(self):
+        from unittest.mock import Mock
+        child = Mock()
+        child.poll.return_value = None
+        clock = iter([1, 100, 102, 150])
+        with patch.object(supervisor, 'lock', return_value=os.open(os.devnull, os.O_RDONLY)), \
+             patch.object(supervisor, 'enabled', side_effect=[True, True, True, True, False, False]), \
+             patch.object(supervisor, 'heartbeat', side_effect=[False, True, False, False]), \
+             patch.object(supervisor, 'report'), patch.object(supervisor, 'diagnostic') as diagnostic, \
+             patch.object(supervisor.time, 'monotonic', side_effect=lambda: next(clock)), \
+             patch.object(supervisor.time, 'sleep'), patch.object(supervisor.subprocess, 'Popen', return_value=child), \
+             patch.object(supervisor.signal, 'signal'):
+            supervisor.run()
+        self.assertIn('heartbeat_timeout', [call.args[0] for call in diagnostic.call_args_list])
+
+
     def test_worker_exception_records_safe_type_and_location_only(self):
         import hotwatch_service
         with patch.object(supervisor, 'diagnostic') as diagnostic:

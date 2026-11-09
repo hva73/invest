@@ -116,7 +116,7 @@ def run(timeout=300):
     attempts = 0
     failures_since = None
     healthy_since = None
-    last_start = 0
+    unhealthy_since = None
     next_start = 0
     diagnostic('supervisor_started')
     try:
@@ -128,6 +128,7 @@ def run(timeout=300):
                 child = None
                 fresh = False
             if fresh:
+                unhealthy_since = None
                 healthy_since = healthy_since or now
                 if now - healthy_since >= 60:
                     failures_since = None
@@ -135,7 +136,9 @@ def run(timeout=300):
                 report('running', '', attempts)
             else:
                 healthy_since = None
-                if child and now - last_start > 45:
+                if unhealthy_since is None:
+                    unhealthy_since = now
+                if child and now - unhealthy_since > 45:
                     diagnostic('heartbeat_timeout')
                     child.terminate()
                     try:
@@ -145,6 +148,7 @@ def run(timeout=300):
                         child.kill()
                         child.wait()
                     child = None
+                    unhealthy_since = None
                 if child is None and now >= next_start:
                     failures_since = failures_since or now
                     if now - failures_since >= timeout:
@@ -155,7 +159,7 @@ def run(timeout=300):
                     try:
                         child = subprocess.Popen([sys.executable, str(ROOT / 'hotwatch_service.py'), '--interval', '2'], cwd=str(ROOT), env=environment(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
                         diagnostic('worker_started')
-                        last_start = now
+                        unhealthy_since = now
                     except OSError as error:
                         diagnostic('worker_start_failed', error.errno if isinstance(error.errno, int) else None)
                         child = None
