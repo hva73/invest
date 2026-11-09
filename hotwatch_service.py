@@ -272,6 +272,19 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
  except EngineError as error:return {'status':error.code}
  except Exception:return {'status':'DISCOVERY_VERIFICATION_FAILED'}
 
+# Select the latest eligible link once per distinct candidate. The former
+# anti-join repeated the history search for every historical link, holding a
+# read scope for seconds as report history grew.
+DISCOVERY_CANDIDATES_SQL = """WITH candidate_ids AS (SELECT DISTINCT candidate_id FROM report_candidate_links WHERE user_id=? AND is_test=0)
+SELECT l.candidate_id,l.generated,r.id,r.received,r.payload
+FROM candidate_ids ids
+JOIN report_candidate_links l ON l.rowid=(
+ SELECT newer.rowid FROM report_candidate_links newer JOIN ingested_reports nr ON nr.id=newer.report_row_id
+ WHERE newer.user_id=? AND newer.is_test=0 AND newer.candidate_id=ids.candidate_id AND nr.report_type!='deep_analysis' AND newer.generated<=?
+ ORDER BY newer.generated DESC,newer.report_row_id DESC LIMIT 1)
+JOIN ingested_reports r ON r.id=l.report_row_id
+ORDER BY l.generated DESC,r.id DESC,(SELECT CAST(j.key AS INTEGER) FROM json_each(r.payload,'$.candidates') j WHERE json_extract(j.value,'$.candidate_id')=l.candidate_id LIMIT 1)"""
+
 def auto_discover(connect,cursor=0):
  """Optional worker path, bounded by existing capacity and provider budgets."""
  if os.environ.get('ESCAPE_HW_AUTOSTART_ENABLED','1')!='1':return cursor
@@ -288,14 +301,15 @@ def auto_discover(connect,cursor=0):
    latest_report=c.execute("SELECT id FROM ingested_reports WHERE user_id=? AND is_test=0 AND report_type!='deep_analysis' ORDER BY generated_epoch DESC,id DESC LIMIT 1",(uid,)).fetchone()
    radar_reset=c.execute('SELECT report_cutoff,reset_at FROM radar_resets WHERE user_id=?',(uid,)).fetchone()
    cleared={r[0] for r in c.execute('SELECT DISTINCT candidate_id FROM report_candidate_links WHERE user_id=? AND is_test=0 AND report_row_id<=?',(uid,radar_reset['report_cutoff']))} if radar_reset else set()
-   rows=c.execute("SELECT l.candidate_id,l.generated,r.id,r.received,r.payload FROM report_candidate_links l JOIN ingested_reports r ON r.id=l.report_row_id WHERE l.user_id=? AND l.is_test=0 AND r.report_type!='deep_analysis' AND l.generated<=? AND NOT EXISTS (SELECT 1 FROM report_candidate_links newer JOIN ingested_reports nr ON nr.id=newer.report_row_id WHERE newer.user_id=l.user_id AND newer.is_test=0 AND newer.candidate_id=l.candidate_id AND nr.report_type!='deep_analysis' AND newer.generated<=? AND (newer.generated>l.generated OR (newer.generated=l.generated AND nr.id>r.id))) ORDER BY l.generated DESC,r.id DESC,(SELECT CAST(j.key AS INTEGER) FROM json_each(r.payload,'$.candidates') j WHERE json_extract(j.value,'$.candidate_id')=l.candidate_id LIMIT 1)",(uid,now.timestamp(),now.timestamp())).fetchall()
+   rows=c.execute(DISCOVERY_CANDIDATES_SQL,(uid,uid,now.timestamp())).fetchall()
   if rows:
-   candidate=None;report=None
+   candidate=None;report=None;report_cache={}
    with connect() as c:
     for offset in range(len(rows)):
      row=rows[(cursor+offset)%len(rows)]
      if after and stamp(row['received'])<=after:continue
-     current=json.loads(row['payload']);cid=row['candidate_id']
+     if row['id'] not in report_cache:report_cache[row['id']]=json.loads(row['payload'])
+     current=report_cache[row['id']];cid=row['candidate_id']
      if cid in cleared:
       from intel_workflows import radar_reassessed_after_reset
       if not radar_reassessed_after_reset(c,uid,cid,radar_reset):continue
