@@ -1059,6 +1059,20 @@ class HotWatch(unittest.TestCase):
    self.assertIsNone(result['calculation']['supporting_metrics']['interval_volume'])
    payload['volume']=-3;payload['timestamp']+=1
    self.assertIsNone(adapter.poll(row)['volume'])
+ def test_conflicting_sample_is_retried_at_sustainable_interval_without_acceptance(self):
+  wid=self.req['watch_id']
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions WHERE watch_id=?',(wid,)).fetchone()
+   request=json.loads(row['request'])
+   expected=engine.effective_poll_interval(c,request)
+   c.execute('UPDATE hw_sessions SET failures=8 WHERE id=?',(row['id'],))
+  engine.fault(app.connect,1,wid,True,'sample_id_conflict',self.now)
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions WHERE watch_id=?',(wid,)).fetchone()
+   self.assertEqual(row['status'],'DEGRADED')
+   self.assertEqual(row['last_error'],'sample_id_conflict')
+   self.assertAlmostEqual(row['next_due']-self.now.timestamp(),expected)
+   self.assertEqual(json.loads(row['state'])['signal'],'NO_DATA')
  def test_eodhd_rate_limit_retry_after_is_observed_and_secret_redacted(self):
   import urllib.error
   class Limited:
@@ -1275,6 +1289,19 @@ class HotWatch(unittest.TestCase):
   with app.connect() as c:
    attempt=c.execute('SELECT status,watch_id FROM hw_discovery_attempts WHERE user_id=1 AND candidate_id=?',(candidate['candidate_id'],)).fetchone();self.assertEqual(attempt['status'],'CREATED');wid=attempt['watch_id']
   session=engine.item(app.connect,1,wid,False)['session'];self.assertEqual(session['request']['candidate_id'],candidate['candidate_id']);self.assertEqual(session['status'],'CREATED')
+ def test_capacity_released_candidate_can_restart_when_space_returns(self):
+  from hotwatch_service import auto_activate_candidate
+  report=merc_report(False);report['report_id']='capacity-return-fixture';candidate=report['candidates'][0];candidate['asset_id']='synthetic-MERC';candidate['exchange']='NASDAQ';report_ingest.save(app.connect,1,report)
+  verified={'asset_id':'synthetic-MERC','ticker':'MERC','exchange':'NASDAQ','currency':'USD','isin':'US1234567890'}
+  first=auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:verified)
+  self.assertEqual(first['status'],'CREATED')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions WHERE watch_id=?',(first['watch_id'],)).fetchone()
+   c.execute("UPDATE hw_sessions SET status='EXPIRED' WHERE id=?",(row['id'],))
+   engine.event(c,row,'CAPACITY_RELEASED',self.now,'synthetic')
+  second=auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:verified)
+  self.assertEqual(second['status'],'CREATED')
+  self.assertNotEqual(first['watch_id'],second['watch_id'])
  def test_auto_discovery_visits_every_report_candidate_without_replaying_completed_attempts(self):
   from hotwatch_service import auto_discover
   report=merc_report(False);report['report_id']='synthetic-all-candidates';report_ingest.save(app.connect,1,report);seen=[]

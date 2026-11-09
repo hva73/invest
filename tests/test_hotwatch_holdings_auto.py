@@ -45,6 +45,47 @@ class HoldingAutowatch(unittest.TestCase):
    return app.connect()
   self.assertEqual(service.reconcile_closed_holdings(racing_connect,self.now),0)
   with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM hw_sessions').fetchone()[0],'CREATED')
+ def test_full_capacity_prioritizes_verified_holding_over_unowned_idle_entry(self):
+  with app.connect() as c:
+   strategy=c.execute("SELECT payload FROM hw_strategies WHERE strategy_id='escape_momentum' LIMIT 1").fetchone()['payload']
+   req={'watch_mode':'entry','asset_id':'other-asset'}
+   c.execute("INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due) VALUES(1,'entry-capacity',0,'candidate-capacity','automatic discovery','ACTIVE',?,'x',?,'{\"signal\":\"WAIT\"}',?,?,0)",(json.dumps(req),strategy,self.now.isoformat(),self.now.isoformat()))
+   row=c.execute("SELECT id FROM hw_sessions WHERE watch_id='entry-capacity'").fetchone()
+   context={'status':'verified','position':'none','orders':[],'as_of':self.now.isoformat()}
+   c.execute('INSERT INTO hw_context_events(watch_row_id,observed,payload) VALUES(?,?,?)',(row['id'],self.now.isoformat(),json.dumps(context)))
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_CAPACITY':'1','ESCAPE_HW_EODHD_REST_ENABLED':'0'}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with app.connect() as c:
+   self.assertEqual(c.execute("SELECT status FROM hw_sessions WHERE watch_id='entry-capacity'").fetchone()[0],'EXPIRED')
+   self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE event_type='CAPACITY_RELEASED'").fetchone()[0],1)
+   self.assertEqual(c.execute("SELECT count(*) FROM hw_sessions WHERE purpose='automatic holding watch' AND status='CREATED'").fetchone()[0],1)
+ def test_capacity_does_not_release_unknown_held_paused_or_buy_entries(self):
+  with app.connect() as c:
+   strategy=c.execute("SELECT payload FROM hw_strategies WHERE strategy_id='escape_momentum' LIMIT 1").fetchone()['payload']
+   for i,(status,signal,position) in enumerate([('ACTIVE','BUY','none'),('PAUSED','WAIT','none'),('ACTIVE','WAIT','held'),('ACTIVE','WAIT','unknown')]):
+    c.execute("INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due) VALUES(1,?,0,?,'automatic discovery',?,?,'x',?,?,?,?,0)",(f'protected-{i}',f'candidate-{i}',status,json.dumps({'watch_mode':'entry'}),strategy,json.dumps({'signal':signal}),self.now.isoformat(),self.now.isoformat()))
+    rid=c.execute('SELECT last_insert_rowid()').fetchone()[0]
+    c.execute('INSERT INTO hw_context_events(watch_row_id,observed,payload) VALUES(?,?,?)',(rid,self.now.isoformat(),json.dumps({'status':'verified','position':position,'orders':[],'as_of':self.now.isoformat()})))
+   self.assertIsNone(engine.entry_for_holding(c,1,self.now))
+ def test_capacity_uses_newer_held_observation_instead_of_old_absence(self):
+  with app.connect() as c:
+   strategy=c.execute("SELECT payload FROM hw_strategies WHERE strategy_id='escape_momentum' LIMIT 1").fetchone()['payload']
+   c.execute("INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due) VALUES(1,'entry-race',0,'race','automatic discovery','ACTIVE',?,'x',?,'{\"signal\":\"WAIT\"}',?,?,0)",(json.dumps({'watch_mode':'entry'}),strategy,self.now.isoformat(),self.now.isoformat()))
+   rid=c.execute('SELECT last_insert_rowid()').fetchone()[0]
+   old={'status':'verified','position':'none','orders':[],'as_of':(self.now-timedelta(seconds=1)).isoformat()}
+   new={'status':'verified','position':'held','orders':[],'as_of':self.now.isoformat()}
+   c.execute('INSERT INTO hw_context_events(watch_row_id,observed,payload) VALUES(?,?,?)',(rid,old['as_of'],json.dumps(old)))
+   c.execute('INSERT INTO hw_samples(watch_row_id,source,sample_id,event_epoch,received,payload,digest) VALUES(?,?,?,?,?,?,?)',(rid,'eodhd','synthetic',self.now.timestamp(),self.now.isoformat(),json.dumps({'context':new}),'x'))
+   self.assertIsNone(engine.entry_for_holding(c,1,self.now))
+ def test_capacity_release_rejects_pending_buy_and_recent_orders(self):
+  with app.connect() as c:
+   strategy=c.execute("SELECT payload FROM hw_strategies WHERE strategy_id='escape_momentum' LIMIT 1").fetchone()['payload']
+   for i,state in enumerate(({'signal':'WAIT','pending':'BUY'},{'signal':'WAIT'})):
+    c.execute("INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due) VALUES(1,?,0,?,'automatic discovery','ACTIVE',?,'x',?,?,?,?,0)",(f'pending-{i}',f'candidate-pending-{i}',json.dumps({'watch_mode':'entry'}),strategy,json.dumps(state),self.now.isoformat(),self.now.isoformat()))
+    rid=c.execute('SELECT last_insert_rowid()').fetchone()[0]
+    context={'status':'verified','position':'none','orders':[] if i==0 else [{'order_id':'order'}],'as_of':self.now.isoformat()}
+    c.execute('INSERT INTO hw_context_events(watch_row_id,observed,payload) VALUES(?,?,?)',(rid,self.now.isoformat(),json.dumps(context)))
+   self.assertIsNone(engine.entry_for_holding(c,1,self.now))
  def test_reference_errors_are_specific_without_exception_content(self):
   import sqlite3
   for error,expected in [(KeyError('secret'),'REFERENCE_FIELD_MISSING'),(TypeError('secret'),'REFERENCE_TYPE_ERROR'),(ValueError('secret'),'REFERENCE_VALUE_ERROR'),(sqlite3.OperationalError('secret'),'REFERENCE_DATABASE_ERROR')]:

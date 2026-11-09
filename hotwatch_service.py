@@ -221,8 +221,9 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
   if radar_reset and c.execute('SELECT 1 FROM report_candidate_links WHERE user_id=? AND is_test=0 AND candidate_id=? AND report_row_id<=? LIMIT 1',(uid,cid,radar_reset['report_cutoff'])).fetchone():
    from intel_workflows import radar_reassessed_after_reset
    if not radar_reassessed_after_reset(c,uid,cid,radar_reset):return {'status':'NOT_NEW'}
-  terminal=c.execute("SELECT s.id,EXISTS(SELECT 1 FROM hw_events e WHERE e.watch_row_id=s.id AND e.event_type='WATCH_RESET') AS reset_event FROM hw_sessions s WHERE s.user_id=? AND s.is_test=? AND s.candidate_id=? AND s.status IN ('COMPLETED','EXPIRED','ERROR') AND COALESCE(json_extract(s.request,'$.watch_mode'),'both')!='exit'",(uid,int(mode),cid)).fetchall()
-  if terminal and (not reset or any(not row['reset_event'] for row in terminal)):return {'status':'NOT_NEW'}
+  terminal=c.execute("SELECT s.id,EXISTS(SELECT 1 FROM hw_events e WHERE e.watch_row_id=s.id AND e.event_type='WATCH_RESET') AS reset_event,EXISTS(SELECT 1 FROM hw_events e WHERE e.watch_row_id=s.id AND e.event_type='CAPACITY_RELEASED') AS capacity_release FROM hw_sessions s WHERE s.user_id=? AND s.is_test=? AND s.candidate_id=? AND s.status IN ('COMPLETED','EXPIRED','ERROR') AND COALESCE(json_extract(s.request,'$.watch_mode'),'both')!='exit'",(uid,int(mode),cid)).fetchall()
+  if any(not row['capacity_release'] and (not reset or not row['reset_event']) for row in terminal):return {'status':'NOT_NEW'}
+  release_generation=max((row['id'] for row in terminal if row['capacity_release']),default=0)
   from intel_workflows import candidate_currentness
   current=candidate_currentness(c,uid,mode,cid,report_fallback=True)
   if current['status'] not in ('CURRENT','REPORT_ONLY'):return {'status':'NOT_NEW'}
@@ -259,7 +260,7 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
   # perform independent matching after creation when no proof is cached.
   cached=verified_existing_feed(connect,uid,instrument) if not mode else None
   provider='eodhd' if cached else 'pluto';symbol=cached['provider_symbol'] if cached else None
-  watch='hw-auto-'+hashlib.sha256((str(uid)+'|'+str(int(mode))+'|'+cid+('|'+reset['generation'] if reset else '')).encode()).hexdigest()[:28]
+  watch='hw-auto-'+hashlib.sha256((str(uid)+'|'+str(int(mode))+'|'+cid+('|'+reset['generation'] if reset else '')+('|capacity:'+str(release_generation) if release_generation else '')).encode()).hexdigest()[:28]
   risk={'max_notional_dkk':'1000','max_loss_dkk':'100','max_spread_pct':'1','max_quote_age_s':120,'max_position_fraction_pct':'20','proposed_quantity':None,'stop_price':None,'exit_deadline':None}
   with connect() as c:portfolios=[dict(p) for p in c.execute("SELECT id,external_id,parent_external_id FROM portfolios WHERE user_id=? AND active=1 AND source='pluto' ORDER BY id",(uid,))]
   overlapping=any(a['external_id']==b.get('parent_external_id') for a in portfolios for b in portfolios)
@@ -725,36 +726,36 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
   else:return None
  uid,pid,holding,watch=selected;aid=holding['asset_id'];status='IDENTITY_UNVERIFIED';linked=None
  try:
-  with connect() as c:count=c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]
-  if count>=engine.capacity():status='CAPACITY_LIMIT'
-  else:
-   known=verified_existing_feed(connect,uid,holding) if verify is None else None;diagnostic={}
-   instrument=known or (verify(connect,uid,holding) if verify else holding_instrument(connect,uid,holding,diagnostic))
-   if not known and verify is None and instrument:
-    known=verified_existing_feed(connect,uid,instrument)
-   if not instrument:status=diagnostic.get('code','IDENTITY_UNVERIFIED')
-   if instrument and instrument.get('asset_id')==aid:
-    provider='eodhd' if known else 'pluto';symbol=known.get('provider_symbol') if known else None
-    if not known and instrument.get('isin') and os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')=='1' and os.environ.get('ESCAPE_EODHD_API_KEY','').strip():
-     try:
-      opts=(lookup or search_eodhd_symbols)(connect,uid,{'holding_portfolio_id':pid,'holding_asset_id':aid,'quote_currency':instrument['currency']})
-      matches=[item for item in opts.get('choices',[]) if item.get('isin')==instrument['isin'] and item.get('currency')==instrument['currency']]
-      if len(matches)==1:
-       provider='eodhd';symbol=matches[0]['symbol'];remember_verified_feed(connect,uid,instrument,symbol,now)
-     except DataUnavailable as error:
-      if error.code in ('PROVIDER_RATE_BUDGET','EODHD_RATE_LIMIT'):raise
-    cid='holding-'+hashlib.sha256((str(uid)+'|'+str(pid)+'|'+aid).encode()).hexdigest()[:28]
-    risk={'max_notional_dkk':'1000','max_loss_dkk':'100','max_spread_pct':'1','max_quote_age_s':120,'max_position_fraction_pct':'20','proposed_quantity':None,'stop_price':None,'exit_deadline':None}
-    req={'watch_id':watch,'report_id':'automatic-holdings','candidate_id':cid,'is_test':False,'purpose':'automatic holding watch','ticker':instrument['ticker'],'exchange':instrument['exchange'],'asset_id':aid,'quote_currency':instrument['currency'],'portfolio_ids':[pid],'priority':'NORMAL','profile':'NORMAL','provider':provider,'provider_symbol':symbol,'end_at':None,'activation_reason':'Automatisk overvågning af verificeret Pluto-beholdning','strategy_id':'escape_momentum','strategy_version':'1.0.0','risk':risk,'watch_mode':'exit'}
-    refresh_holding_origin(connect,uid,pid,aid)
-    with connect() as c:origin=holding_origin(c,uid,pid,aid)
-    if origin:req.update(origin)
-    import strategy_center
-    selected=strategy_center.resolve(connect,uid,scope='exit');req.update(strategy_id=selected['strategy_id'],strategy_version=selected['version'],activation_reason=req['activation_reason']+' · '+selected['reason'])
-    result=engine.create_holding(connect,uid,req,now);status='LINKED';linked=result['session']['watch_id']
- except EngineError as error:status=error.code
+  with connect() as c:
+   count=c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]
+   if count>=engine.capacity() and not engine.entry_for_holding(c,uid,now):raise EngineError('global_capacity_limit',409)
+  known=verified_existing_feed(connect,uid,holding) if verify is None else None;diagnostic={}
+  instrument=known or (verify(connect,uid,holding) if verify else holding_instrument(connect,uid,holding,diagnostic))
+  if not known and verify is None and instrument:
+   known=verified_existing_feed(connect,uid,instrument)
+  if not instrument:status=diagnostic.get('code','IDENTITY_UNVERIFIED')
+  if instrument and instrument.get('asset_id')==aid:
+   provider='eodhd' if known else 'pluto';symbol=known.get('provider_symbol') if known else None
+   if not known and instrument.get('isin') and os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')=='1' and os.environ.get('ESCAPE_EODHD_API_KEY','').strip():
+    try:
+     opts=(lookup or search_eodhd_symbols)(connect,uid,{'holding_portfolio_id':pid,'holding_asset_id':aid,'quote_currency':instrument['currency']})
+     matches=[item for item in opts.get('choices',[]) if item.get('isin')==instrument['isin'] and item.get('currency')==instrument['currency']]
+     if len(matches)==1:
+      provider='eodhd';symbol=matches[0]['symbol'];remember_verified_feed(connect,uid,instrument,symbol,now)
+    except DataUnavailable as error:
+     if error.code in ('PROVIDER_RATE_BUDGET','EODHD_RATE_LIMIT'):raise
+   cid='holding-'+hashlib.sha256((str(uid)+'|'+str(pid)+'|'+aid).encode()).hexdigest()[:28]
+   risk={'max_notional_dkk':'1000','max_loss_dkk':'100','max_spread_pct':'1','max_quote_age_s':120,'max_position_fraction_pct':'20','proposed_quantity':None,'stop_price':None,'exit_deadline':None}
+   req={'watch_id':watch,'report_id':'automatic-holdings','candidate_id':cid,'is_test':False,'purpose':'automatic holding watch','ticker':instrument['ticker'],'exchange':instrument['exchange'],'asset_id':aid,'quote_currency':instrument['currency'],'portfolio_ids':[pid],'priority':'NORMAL','profile':'NORMAL','provider':provider,'provider_symbol':symbol,'end_at':None,'activation_reason':'Automatisk overvågning af verificeret Pluto-beholdning','strategy_id':'escape_momentum','strategy_version':'1.0.0','risk':risk,'watch_mode':'exit'}
+   refresh_holding_origin(connect,uid,pid,aid)
+   with connect() as c:origin=holding_origin(c,uid,pid,aid)
+   if origin:req.update(origin)
+   import strategy_center
+   selected=strategy_center.resolve(connect,uid,scope='exit');req.update(strategy_id=selected['strategy_id'],strategy_version=selected['version'],activation_reason=req['activation_reason']+' · '+selected['reason'])
+   result=engine.create_holding(connect,uid,req,now);status='LINKED';linked=result['session']['watch_id']
+ except EngineError as error:status='CAPACITY_LIMIT' if error.code in ('global_capacity_limit','capacity_limit') else error.code
  except Exception:status='VERIFICATION_FAILED'
- retry_at=(int(epoch//60)+1)*60+1 if status=='PROVIDER_RATE_BUDGET' else epoch+120 if status=='EODHD_RATE_LIMIT' else epoch+300
+ retry_at=(int(epoch//60)+1)*60+1 if status=='PROVIDER_RATE_BUDGET' else epoch+120 if status=='EODHD_RATE_LIMIT' else epoch+60 if status=='CAPACITY_LIMIT' else epoch+300
  with connect() as c:c.execute("UPDATE hw_holding_autowatch SET status=?,watch_id=?,next_attempt=?,updated=? WHERE user_id=? AND portfolio_id=? AND asset_id=?",(status,linked,retry_at,engine.utc().isoformat(),uid,pid,aid))
  return status
 

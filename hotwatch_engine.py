@@ -227,6 +227,34 @@ def row_for(c,uid,wid,mode):
  if not row:raise EngineError('watch_not_found',404)
  return row
 
+def entry_for_holding(c,uid,now):
+ """Find a confirmed unowned, idle automatic entry watch."""
+ rows=c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=0 AND purpose='automatic discovery' AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND lease_until<=? AND json_extract(request,'$.watch_mode')='entry' ORDER BY updated,id",(uid,now.timestamp())).fetchall()
+ for row in rows:
+  try:
+   state=json.loads(row['state'])
+   if state.get('signal') not in ('WAIT','NO_DATA') or state.get('pending') in ('BUY','SELL','REDUCE'):continue
+   request=json.loads(row['request']);scope=request.get('portfolio_ids',[])
+   active={p['id'] for p in c.execute("SELECT id FROM portfolios WHERE user_id=? AND source='pluto' AND active=1",(uid,))}
+   if not active or scope and set(scope)!=active:continue
+   extra=c.execute('SELECT payload FROM hw_context_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
+   sample=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
+   contexts=([json.loads(extra['payload'])] if extra else [])+([json.loads(sample['payload'])['context']] if sample else [])
+   if not contexts or any(not item.get('as_of') for item in contexts):continue
+   context=max(contexts,key=lambda item:stamp(item['as_of']))
+   if any(stamp(item['as_of'])==stamp(context['as_of']) and (item.get('position')!=context.get('position') or item.get('status')!=context.get('status') or item.get('orders')!=context.get('orders')) for item in contexts):continue
+   if not context or context.get('status')!='verified' or context.get('position')!='none' or context.get('orders') or not context.get('as_of') or not 0<=(now-stamp(context['as_of'])).total_seconds()<=300:continue
+  except (ValueError,TypeError,KeyError):continue
+  return row
+ return None
+
+def release_entry_for_holding(c,uid,now):
+ row=entry_for_holding(c,uid,now)
+ if not row:return False
+ c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']))
+ event(c,row,'CAPACITY_RELEASED',now,'Plads frigivet til en verificeret beholdnings exit-overvågning')
+ return True
+
 def _create_in_transaction(c,uid,data,now,holding=False,manual=False):
  if len(set(data['portfolio_ids']))!=len(data['portfolio_ids']):raise EngineError('duplicate_portfolio_reference')
  if data['provider']=='synthetic' and not data['is_test']:raise EngineError('synthetic_requires_test_mode')
@@ -240,8 +268,8 @@ def _create_in_transaction(c,uid,data,now,holding=False,manual=False):
  if old:
   if old['digest']!=checksum(data):raise EngineError('watch_id_conflict',409)
   return {'ok':True,'duplicate':True,'session':view(c,old,now)}
- if c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]>=capacity():raise EngineError('global_capacity_limit',409)
- if c.execute("SELECT count(*) FROM hw_sessions WHERE user_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,)).fetchone()[0]>=capacity():raise EngineError('capacity_limit',409)
+ if not holding and c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]>=capacity():raise EngineError('global_capacity_limit',409)
+ if not holding and c.execute("SELECT count(*) FROM hw_sessions WHERE user_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,)).fetchone()[0]>=capacity():raise EngineError('capacity_limit',409)
  if c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=? AND purpose=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,int(data['is_test']),data['candidate_id'],data['purpose'].strip().casefold())).fetchone():raise EngineError('active_watch_exists',409)
  if holding:
   if data['is_test'] or data['watch_mode']!='exit' or data['provider'] not in ('eodhd','pluto') or len(data['portfolio_ids'])!=1:raise EngineError('invalid_holding_watch')
@@ -294,6 +322,8 @@ def _create_in_transaction(c,uid,data,now,holding=False,manual=False):
  version=strategy(c,uid,data['strategy_id'],data['strategy_version'])
  from strategy_center import deployment
  if deployment(version) not in ('QUALIFIED','PILOT'):raise EngineError('strategy_qualification_required',409)
+ if holding and c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]>=capacity():
+  if not release_entry_for_holding(c,uid,now):raise EngineError('global_capacity_limit',409)
  initial_state={'signal':'NO_DATA','alert_codes':[]}
  if not holding and not manual and data.get('purpose')=='automatic discovery':
   configured=json.loads(version['payload']).get('parameters',{}).get('news_max_age_minutes')
@@ -1126,8 +1156,10 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   if code=='PROVIDER_RATE_BUDGET':interval=61-now.timestamp()%60 if request['provider']=='eodhd' else 60
   # A stale observation is not a failed provider or rate-limit response.
   # Recheck at the sustainable cadence so repeated closed-market samples do
-  # not push the next check half an hour past a new market event.
-  if code=='DATA_STALE':interval=effective_poll_interval(c,request)
+  # not push the next check half an hour past a new market event. A rejected
+  # same-timestamp conflict also needs a new observation, not a 30-minute
+  # provider-error backoff; the conflicting observation remains rejected.
+  if code in ('DATA_STALE','sample_id_conflict'):interval=effective_poll_interval(c,request)
   # A transient SQLite contention is not a failed market feed. Do not let
   # exponential provider backoff postpone a position or candidate for 30 min.
   if code.startswith('PROCESSING_DATABASE_BUSY_'):interval=60
