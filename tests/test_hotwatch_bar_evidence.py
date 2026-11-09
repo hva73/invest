@@ -20,7 +20,7 @@ class BarEvidenceTests(unittest.TestCase):
   actual=verified_bar_samples(self.sample,self.req,self.now)
   self.assertEqual(len(actual),35);self.assertEqual(actual[-1]['event_time'],self.sample['bar_history'][-1]['bar_open_at']);self.assertEqual(features(actual,BASELINE['parameters'])['interval_volume'],'134')
   display=observation_status([self.sample],self.now,120,'WAIT','ACTIVE');self.assertIsNotNone(display['momentum_pct']['30'])
- def test_future_or_cross_session_bars_are_rejected(self):
+ def test_unusable_history_is_excluded_without_rejecting_valid_observation(self):
   for edit in ('future','holiday','other_symbol','missing_calendar','stale_schedule'):
    sample=copy.deepcopy(self.sample)
    if edit=='future':sample['bar_history'][-1]['bar_open_at']=self.now.isoformat()
@@ -28,14 +28,19 @@ class BarEvidenceTests(unittest.TestCase):
    if edit=='other_symbol':sample['bar_evidence']['provider_symbol']='OTHER.US'
    if edit=='missing_calendar':del sample['bar_evidence']['open']
    if edit=='stale_schedule':sample['bar_evidence']['schedule_received_at']=(self.now-timedelta(seconds=121)).isoformat()
-   with self.subTest(edit=edit),self.assertRaises(EngineError):sample_errors(sample,self.req,self.now)
+   with self.subTest(edit=edit):
+    if edit=='missing_calendar':
+     with self.assertRaises(EngineError):sample_errors(sample,self.req,self.now)
+    else:self.assertEqual(sample_errors(sample,self.req,self.now),sample)
+    self.assertIsNone(verified_bar_samples(sample,self.req,self.now))
  def test_gaps_do_not_generate_fabricated_bars(self):
   sample=copy.deepcopy(self.sample);del sample['bar_history'][-3]
   sample_errors(sample,self.req,self.now)
   self.assertEqual(features(verified_bar_samples(sample,self.req,self.now),BASELINE['parameters'])['sample_count'],2)
- def test_invalid_ohlc_is_rejected(self):
+ def test_invalid_ohlc_is_not_eligible_for_features(self):
   sample=copy.deepcopy(self.sample);sample['bar_history'][-1]['high']='1'
-  with self.assertRaises(EngineError):sample_errors(sample,self.req,self.now)
+  sample_errors(sample,self.req,self.now)
+  self.assertIsNone(verified_bar_samples(sample,self.req,self.now))
  def test_missing_actual_volume_does_not_become_a_buy_input(self):
   sample=copy.deepcopy(self.sample);sample['bar_history'][-1]['volume']=None
   sample_errors(sample,self.req,self.now);metrics=features(verified_bar_samples(sample,self.req,self.now),BASELINE['parameters'])

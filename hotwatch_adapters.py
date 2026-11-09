@@ -314,9 +314,13 @@ class EODHDAdapter:
   return EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),capacity=Capacity(self.connect) if self.connect else None,opener=self.opener,share_status=self._shared_quotes)
  def capture(self,client,feed,symbol,session):
   """Share one bounded stream across due, independently verified watches."""
-  req=session['request_data']
+  req=session['request_data'];capture_started=time.monotonic()
+  def record(value,symbols,reused):
+   if not hasattr(self,'capture_metrics'):self.capture_metrics=[]
+   self.capture_metrics.append({'feed':feed,'subscriptions_sent':0 if reused else value.get('subscriptions_sent'),'connections_opened':0 if reused else value.get('connections_opened'),'batch_symbols':symbols,'capture_attempts':0 if reused else 1,'cache_hit':reused,'status':value.get('status'),'wait_ms':round((time.monotonic()-capture_started)*1000,3),'messages':len(value.get('messages',[]))})
+   return value
   if not self._shared_quotes or self.connect is None or session.get('id') is None or req.get('is_test'):
-   return client.capture(feed,symbol,duration=2)
+   return record(client.capture(feed,symbol,duration=2),1,False)
   credential=hashlib.sha256(os.environ.get('ESCAPE_EODHD_API_KEY','').strip().encode()).digest()
   profile=json.loads(session.get('state') or '{}').get('adaptive_profile') or req['profile']
   cache_ttl=min(20,PROFILES.get(profile,60))
@@ -325,7 +329,7 @@ class EODHDAdapter:
   while True:
    with _ws_batch_lock:
     cached=_ws_batch_cache.get(key);now=time.monotonic()
-    if cached and 0<=now-cached[0]<cache_ttl:return copy.deepcopy(cached[1])
+    if cached and 0<=now-cached[0]<cache_ttl:return record(copy.deepcopy(cached[1]),0,True)
     waiting=_ws_batch_inflight.get(group)
     if waiting is None:
      waiting=threading.Event();_ws_batch_inflight[group]=waiting;leader=True
@@ -339,9 +343,9 @@ class EODHDAdapter:
    # calculation schedule remain unchanged; only raw provider data is shared.
    market='us' if feed.startswith('us_') else 'eu';symbols=[symbol]
    allowed_eu={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}
-   from hotwatch_engine import verified_automatic_feed
+   from hotwatch_engine import verified_automatic_feed,capacity
    with self.connect() as c:
-    rows=c.execute("SELECT s.request FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND s.next_due<=? AND json_extract(s.request,'$.provider')='eodhd' ORDER BY CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,s.next_due,s.id LIMIT 40",(self.uid,utc().timestamp()+15)).fetchall()
+    rows=c.execute("SELECT s.request FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND s.next_due<=? AND json_extract(s.request,'$.provider')='eodhd' ORDER BY CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,s.next_due,s.id LIMIT ?",(self.uid,utc().timestamp()+15,capacity())).fetchall()
     for row in rows:
      candidate=json.loads(row['request']);full=candidate.get('provider_symbol') or ''
      if not isinstance(full,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',full):continue
@@ -351,7 +355,7 @@ class EODHDAdapter:
      if stream not in symbols:symbols.append(stream)
      if len(symbols)>=10:break
 
-   result=client.capture(feed,symbols if len(symbols)>1 else symbol,duration=2,max_messages=250 if len(symbols)>1 else 50)
+   result=record(client.capture(feed,symbols if len(symbols)>1 else symbol,duration=2,max_messages=250 if len(symbols)>1 else 50),len(symbols),False)
    if result.get('status') not in ('OK','NO_MESSAGES'):return result
    with _ws_batch_lock:
     if len(_ws_batch_cache)>=512:_ws_batch_cache.clear()
@@ -367,7 +371,7 @@ class EODHDAdapter:
     _ws_batch_inflight.pop(group,None);waiting.set()
 
  def poll(self,session):
-  self.last_partial_observations=[]
+  self.last_partial_observations=[];self.capture_metrics=[]
   if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':raise DataUnavailable('EODHD_FEED_NOT_ENABLED')
   key=os.environ.get('ESCAPE_EODHD_API_KEY','').strip()
   if not key:raise DataUnavailable('EODHD_KEY_NOT_CONFIGURED')
@@ -379,7 +383,7 @@ class EODHDAdapter:
    with self.connect() as c:
     cxe_valid=valid_cxe_evidence(c,self.uid,r,utc())
     if not r.get('is_test') and r.get('purpose') in ('automatic discovery','automatic holding watch'):
-     from hotwatch_engine import verified_automatic_feed
+     from hotwatch_engine import verified_automatic_feed,capacity
      automatic_missing=not verified_automatic_feed(c,self.uid,r,utc())
   from instrument_resolver import BTC_PLUTO_ASSET_ID,PEPE_PLUTO_ASSET_ID
   if r.get('asset_id')==PEPE_PLUTO_ASSET_ID:raise DataUnavailable('EODHD_INSTRUMENT_UNVERIFIED')
@@ -506,7 +510,7 @@ class EODHDAdapter:
           evidence={'provider_symbol':symbol,'market':market,'exchange':exchange,'timezone':schedule['timezone'],'session_date':local.date().isoformat(),'open':calendar['open'],'close':calendar['close'],'working_days':calendar['working_days'],'excluded_dates':calendar['excluded_dates'],'schedule_received_at':schedule['received_at'],'exchange_open':True,'feed':'eodhd_realtime_history'}
           if same_session:
            sample.update(bar_history=same_session[-120:],bar_evidence=evidence)
-           if verified_bar_samples(sample,r,utc()) is None:sample.pop('bar_history');sample.pop('bar_evidence');self.last_feed_diagnostics['bar_history_status']='EVIDENCE_UNVERIFIED'
+           if verified_bar_samples(sample,r,utc()) is None:self.last_feed_diagnostics['bar_history_status']='EVIDENCE_UNVERIFIED'
            else:self.last_feed_diagnostics['bar_history_status']='VERIFIED'
           else:self.last_feed_diagnostics['bar_history_status']='NO_COMPARABLE_BARS'
          except (KeyError,ValueError,TypeError,ArithmeticError):self.last_feed_diagnostics['bar_history_status']='EVIDENCE_UNVERIFIED'

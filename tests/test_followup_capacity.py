@@ -114,8 +114,8 @@ class FollowupIntegration(unittest.TestCase):
    at=self.now+timedelta(seconds=i*10)
    result,state=calculate(tick(at,held=True),metrics,BASELINE,risk,state,at)
   self.assertEqual(result['signal'],'SELL')
-  self.assertIn('WARMUP',result['reason_codes']);self.assertIn('TRAILING_EXIT',result['reason_codes'])
-  self.assertIn('særskilte exitregler',result['human_readable_explanation'])
+  self.assertNotIn('WARMUP',result['reason_codes']);self.assertIn('TRAILING_EXIT',result['reason_codes'])
+  self.assertIn('toppen i det analyserede kursvindue',result['human_readable_explanation'])
  def test_smaller_report_preserves_archived_candidate_sources_and_session(self):
   original=self.fixture.r;compact=copy.deepcopy(original)
   compact.update(report_id='synthetic-compact-history',candidates=[],journal=[])

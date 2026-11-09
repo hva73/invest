@@ -9,7 +9,7 @@ from hotwatch_strategy import BASELINE,EARLY_CATALYST,EARLY_CATALYST_V1,validate
 
 def utc():return datetime.now(timezone.utc)
 def capacity():
- try:return max(1,min(40,int(os.environ.get('ESCAPE_HW_CAPACITY','40'))))
+ try:return max(1,int(os.environ.get('ESCAPE_HW_CAPACITY','40')))
  except (TypeError,ValueError):return 40
 
 def reported_catalyst_priority_until(candidate,now,max_age_minutes=None):
@@ -420,7 +420,7 @@ def view(c,row,now=None):
   newer=json.loads(extra['payload'])
   if context is None or newer['as_of'] and (not context['as_of'] or stamp(newer['as_of'])>=stamp(context['as_of'])):context=newer
  last=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
- last_action=c.execute("SELECT event_type,created FROM hw_events WHERE watch_row_id=? AND event_type IN ('BUY_SIGNAL','SELL_SIGNAL','REDUCE_SIGNAL') ORDER BY id DESC LIMIT 1",(row['id'],)).fetchone()
+ last_action=c.execute("SELECT event_id,event_type,created,data_timestamp,payload FROM hw_events WHERE watch_row_id=? AND event_type IN ('BUY_SIGNAL','SELL_SIGNAL','REDUCE_SIGNAL') ORDER BY id DESC LIMIT 1",(row['id'],)).fetchone()
  stale=not row['last_data'] or (now-stamp(row['last_data'])).total_seconds()>request['risk']['max_quote_age_s']
  display_reasons=[]
  if row['last_error']:display_reasons.append(row['last_error'])
@@ -432,7 +432,9 @@ def view(c,row,now=None):
   if latest_sample['source']=='eodhd' and latest_sample['market_status']!='UNKNOWN':
    fields=['status_at']+(['bid_at','ask_at'] if effective=='BUY' else [])
    if any(not latest_sample.get(k) or not 0<=(now-stamp(latest_sample[k])).total_seconds()<=max_age for k in fields):effective='NO_DATA';display_reasons.append('MARKET_EVIDENCE_STALE')
-   if latest_sample.get('bar_history'):
+   computed=json.loads(last['payload']) if last else {}
+   price_exit=effective in ('SELL','REDUCE') and (computed.get('signal_basis') in ('price_context','live_price_window') or set(computed.get('reason_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE'})
+   if latest_sample.get('bar_history') and computed.get('analysis_uses_bars',True) and not price_exit:
     from datetime import timedelta
     try:
      bar_end=stamp(latest_sample['bar_history'][-1]['bar_open_at'])+timedelta(seconds=60)
@@ -468,6 +470,8 @@ def view(c,row,now=None):
   previous=c.execute("SELECT json_remove(payload,'$.bar_history','$.bar_evidence') AS payload FROM hw_samples WHERE watch_row_id=? AND event_epoch<? ORDER BY event_epoch DESC,id DESC LIMIT 119",(row['id'],stamp(latest_payload['event_time']).timestamp())).fetchall()
   history=[json.loads(x['payload']) for x in reversed(previous)]+[latest_payload]
  else:history=[json.loads(x['payload']) for x in reversed(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 120',(row['id'],)).fetchall())]
+ if latest_payload and latest_payload.get('bar_history') and verified_bar_samples(latest_payload,request,now) is None:
+  history[-1]={k:v for k,v in latest_payload.items() if k not in ('bar_history','bar_evidence')}
  data_status=observation_status(history,now,request['risk']['max_quote_age_s'],effective,row['status'])
  # Exchange-open evidence is separate from the instrument's session and can
  # never assert that extended-hours trading is unavailable.
@@ -566,7 +570,15 @@ def view(c,row,now=None):
  if effective=='NO_DATA' and display_status=='AFVENTER SIGNALDATA' and not stale and not row['last_error'] and data_status.get('price') is not None and set(calculation.get('reason_codes',[]))=={'WARMUP'} and calculation.get('data_timestamp')==row['last_data']:
   display_status='WARMUP'
  display_status={'PAUSED':'PAUSERET','COMPLETED':'AFSLUTTET','EXPIRED':'UDLØBET','ERROR':'FEJL'}.get(row['status'],display_status)
- return {'buy_plan':buy_plan,'last_action_signal':dict(last_action) if last_action else None,'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':budget_interval,'interval_basis':interval_basis,'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
+ action=None
+ if last_action:
+  event_data=json.loads(last_action['payload']);side=last_action['event_type'].removesuffix('_SIGNAL')
+  active=row['status']=='ACTIVE' and effective==side
+  missing=row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED') and effective=='NO_DATA'
+  acknowledged=c.execute("SELECT created FROM hw_events WHERE watch_row_id=? AND event_type='SIGNAL_ACKNOWLEDGED' AND json_extract(payload,'$.supporting_metrics.action_event_id')=? ORDER BY id DESC LIMIT 1",(row['id'],last_action['event_id'])).fetchone()
+  action={k:last_action[k] for k in ('event_id','event_type','created','data_timestamp')}
+  action.update(signal=side,reason=event_data.get('reason'),state='ACTIVE' if active else 'DATA_MISSING' if missing else 'WITHDRAWN',acknowledged_at=acknowledged['created'] if acknowledged else None,current_reason_codes=list(dict.fromkeys(display_reasons or calculation.get('reason_codes',[]))))
+ return {'buy_plan':buy_plan,'last_action_signal':action,'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':budget_interval,'interval_basis':interval_basis,'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
 def sessions(connect,uid,mode=False,after=0,limit=50):
  with connect() as c:
@@ -630,6 +642,18 @@ def reconcile_candidates(connect,now=None,connection=None):
     event(c,row,'CANDIDATE_WATCH_EXPIRED',now,current['reason']);changed+=1
  return changed
 
+def acknowledge_signal(connect,uid,wid,mode,event_id,now=None):
+ """Acknowledge a historical notice only; never change a session or order."""
+ if type(mode) is not bool or not isinstance(event_id,str) or not re.fullmatch(r'hw-[a-f0-9]{24}',event_id):raise EngineError('invalid_signal_acknowledgement')
+ now=now or utc()
+ with connect() as c:
+  c.execute('BEGIN IMMEDIATE');row=row_for(c,uid,wid,mode)
+  action=c.execute("SELECT 1 FROM hw_events WHERE watch_row_id=? AND event_id=? AND event_type IN ('BUY_SIGNAL','SELL_SIGNAL','REDUCE_SIGNAL')",(row['id'],event_id)).fetchone()
+  if not action:raise EngineError('signal_not_found',404)
+  prior=c.execute("SELECT 1 FROM hw_events WHERE watch_row_id=? AND event_type='SIGNAL_ACKNOWLEDGED' AND json_extract(payload,'$.supporting_metrics.action_event_id')=?",(row['id'],event_id)).fetchone()
+  if not prior:event(c,row,'SIGNAL_ACKNOWLEDGED',now,'Advarsel læst; ingen ændring af signal eller handel',{'action_event_id':event_id})
+ return {'ok':True,'event_id':event_id,'acknowledged':True}
+
 def item(connect,uid,wid,mode=False):
  with connect() as c:return {'session':view(c,row_for(c,uid,wid,mode))}
 
@@ -641,6 +665,7 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
  session_limit=min(session_limit,10);now=utc()
  from hotwatch_supervisor import application_error_fallback
  application_errors=application_error_fallback()
+ from hotwatch_service import recent_scan_log
  with connect() as c:
   c.execute('BEGIN')
   opened=c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=? AND id>? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') ORDER BY id LIMIT ?",(uid,int(mode),sessions_after,session_limit+1)).fetchall()
@@ -679,6 +704,10 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
       timing={k:payload[k] for k in ('begin_wait_ms','work_before_commit_ms','ingest_compute_ms') if isinstance(payload,dict) and type(payload.get(k)) in (int,float) and 0<=payload[k]<=3600000}
       pipeline={k:payload[k] for k in ('provider_ms','pluto_context_ms','websocket_capture_ms','adapter_to_journal_ms','event_to_adapter_receive_ms') if isinstance(payload,dict) and type(payload.get(k)) in (int,float) and 0<=payload[k]<=3600000}
       provider_diagnostics={'scope':'provider_wide_not_session','last_attempt_at':health['attempted'],'last_success_at':health['succeeded'],'last_error':health['code'],'last_successful_feed_statuses':fields,'last_successful_sqlite_timing_ms':timing,'last_successful_pipeline_timing_ms':pipeline}
+      settings=payload.get('worker_settings') if isinstance(payload,dict) else None
+      if isinstance(settings,dict):provider_diagnostics['worker_settings']={k:v for k,v in settings.items() if k.startswith('ESCAPE_HW_') and (v is None or isinstance(v,str) and re.fullmatch(r'[A-Za-z0-9_,.-]{0,100}',v))}
+      for key in ('session_capacity','parallel_scans_default','concurrency_default'):
+       if type(payload.get(key)) is int:provider_diagnostics[key]=payload[key]
       worker_timing=payload.get('worker_database_timing') if isinstance(payload,dict) else None
       if isinstance(worker_timing,dict) and worker_timing.get('scope')=='worker_process':
        safe={'scope':'worker_process','basis':'high_water_since_worker_start'}
@@ -688,11 +717,11 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
      except (ValueError,TypeError):pass
     context_diagnostic=(detail.get('latest_context') or {}).get('diagnostic')
     if not isinstance(context_diagnostic,str) or not re.fullmatch(r'[A-Z0-9_]{1,100}',context_diagnostic):context_diagnostic=None
-    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'last_calculation_at':r['last_calculation'],'last_computed_signal':detail['last_computed_signal'],'signal':detail['signal'],'display_status':detail['display_status'],'context_diagnostic':context_diagnostic,'last_calculation_reason_codes':reasons,'display_reason_codes':detail['display_reason_codes'],'next_due_at':detail['next_due_at'],'effective_min_interval_s':detail['effective_min_interval_s'],'interval_basis':detail['interval_basis'],'provider_feed_diagnostics':provider_diagnostics,'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
+    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'last_calculation_at':r['last_calculation'],'last_computed_signal':detail['last_computed_signal'],'signal':detail['signal'],'display_status':detail['display_status'],'last_action_signal':detail['last_action_signal'],'context_diagnostic':context_diagnostic,'last_calculation_reason_codes':reasons,'display_reason_codes':detail['display_reason_codes'],'next_due_at':detail['next_due_at'],'effective_min_interval_s':detail['effective_min_interval_s'],'interval_basis':detail['interval_basis'],'provider_feed_diagnostics':provider_diagnostics,'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
    else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
   more=len(opened)>session_limit
   from eodhd_capacity import snapshot as capacity_snapshot
-  return {'provider_capacity':capacity_snapshot(c,now.timestamp()),'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'supervisor':supervisor,'supervisor_events':supervisor_events,'application_error_fallback':application_errors,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}
+  return {'worker_scan_log':recent_scan_log(uid,mode,[r['watch_id'] for r in opened[:session_limit]]),'provider_capacity':capacity_snapshot(c,now.timestamp()),'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'supervisor':supervisor,'supervisor_events':supervisor_events,'application_error_fallback':application_errors,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}
 
 def control(connect,uid,wid,mode,action,now=None):
  now=now or utc()
@@ -786,8 +815,8 @@ def sample_errors(sample,request,now):
   if sample['market_status']!='UNKNOWN':
    if not sample.get('status_at') or not sample.get('status_feed'):raise EngineError('market_status_evidence_missing')
    if not 0<=(now-stamp(sample['status_at'])).total_seconds()<=request['risk']['max_quote_age_s']:raise EngineError('market_status_evidence_stale')
- if 'bar_history' in sample or 'bar_evidence' in sample:
-  if verified_bar_samples(sample,request,now) is None:raise EngineError('bar_evidence_invalid')
+ # Optional analytical history cannot invalidate an otherwise valid market
+ # observation. Its eligibility is checked separately before feature calculation.
  context=sample['context']
  if context['as_of'] and stamp(context['as_of'])>now:raise EngineError('future_position_context')
  if context.get('instrument_type_at') and stamp(context['instrument_type_at'])>now:raise EngineError('future_position_context')
@@ -795,8 +824,30 @@ def sample_errors(sample,request,now):
  if context['position']=='none' and context['quantity'] is not None and Decimal(context['quantity'])!=0:raise EngineError('invalid_position_quantity')
  return sample
 
+def analysis_snapshot(c,row,sample,request,now):
+ """Immutable history/version for pure feature work outside the writer lock."""
+ newest=c.execute('SELECT id FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
+ version=(row['request'],row['strategy'],newest['id'] if newest else None)
+ bars=verified_bar_samples(sample,request,now) if sample.get('bar_history') else None
+ if bars is not None:samples=[sample]
+ else:
+  prior=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND event_epoch<? ORDER BY event_epoch DESC,id DESC LIMIT 119',(row['id'],stamp(sample['event_time']).timestamp())).fetchall()
+  samples=[json.loads(r['payload']) for r in reversed(prior)]+[sample]
+ return version,bars,samples
+
 def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True):
- now=now or utc();lock_requested=time.perf_counter()
+ now=now or utc()
+ prepared_version=None
+ try:
+  with connect() as c:
+   preview=row_for(c,uid,wid,mode);preview_request=json.loads(preview['request']);sample_errors(sample,preview_request,now)
+   prepared_version,prepared_bars,prepared_samples=analysis_snapshot(c,preview,sample,preview_request,now)
+  prepared_metrics=features(prepared_bars if prepared_bars is not None else prepared_samples,json.loads(preview['strategy'])['parameters'])
+ except EngineError:
+  # Keep authoritative lease, ownership and identity checks in their original
+  # order below. An invalid input cannot use this optional precomputation.
+  prepared_version=None
+ lock_requested=time.perf_counter()
  with connect() as c:
   c.execute('BEGIN IMMEDIATE');lock_acquired=time.perf_counter();row=row_for(c,uid,wid,mode);request=json.loads(row['request'])
   if lease and (row['lease_owner']!=lease or row['lease_until']<now.timestamp()):raise EngineError('lease_lost',409)
@@ -817,6 +868,8 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   if request['end_at'] and stamp(request['end_at'])<=now:
    c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']));event(c,row,'WATCH_EXPIRED',now,'Session deadline reached');return {'ok':True,'expired':True}
   sample_errors(sample,request,now)
+  newest=c.execute('SELECT id FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
+  same_history=prepared_version==(row['request'],row['strategy'],newest['id'] if newest else None) and sample==prepared_samples[-1]
   old=c.execute('SELECT id,digest,payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(row['id'],sample['source'],sample['sample_id'])).fetchone()
   if old is None and row['last_data'] and stamp(sample['event_time'])==stamp(row['last_data']):old=c.execute('SELECT id,digest,payload FROM hw_samples WHERE watch_row_id=? AND source=? AND event_epoch=? ORDER BY id DESC LIMIT 1',(row['id'],sample['source'],stamp(sample['event_time']).timestamp())).fetchone()
   new_market_event=True
@@ -840,11 +893,17 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
    if row['last_data'] and stamp(sample['event_time'])<=stamp(row['last_data']):raise EngineError('out_of_order_market_data',409)
    cur=c.execute('INSERT INTO hw_samples(watch_row_id,source,sample_id,event_epoch,received,payload,digest) VALUES(?,?,?,?,?,?,?)',(row['id'],sample['source'],sample['sample_id'],stamp(sample['event_time']).timestamp(),now.isoformat(),canonical(sample),checksum(sample)))
    sample_row_id=cur.lastrowid
-  samples=[sample] if sample.get('bar_history') else [json.loads(r['payload']) for r in reversed(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 120',(row['id'],)).fetchall())]
-  strategy_data=json.loads(row['strategy']);state=json.loads(row['state']);bar_samples=verified_bar_samples(sample,request,now) if sample.get('bar_history') else None
-  metrics=features(bar_samples if bar_samples is not None else samples,strategy_data['parameters'])
+  strategy_data=json.loads(row['strategy']);state=json.loads(row['state'])
+  if same_history:
+   bar_samples,samples,metrics=prepared_bars,prepared_samples,prepared_metrics
+  else:
+   # A concurrent update invalidates the prepared calculation; never commit it.
+   _,bar_samples,samples=analysis_snapshot(c,row,sample,request,now)
+   metrics=features(bar_samples if bar_samples is not None else samples,strategy_data['parameters'])
   if bar_samples is not None:
-   live_metrics=features([sample],strategy_data['parameters']);metrics.update(price=sample['price'],spread=live_metrics.get('spread'),spread_pct=live_metrics.get('spread_pct'),bar_history_count=len(bar_samples))
+   live_metrics=features([sample],strategy_data['parameters'])
+   reference=max(Decimal(b['price']) for b in bar_samples[-metrics['sample_count']:])
+   metrics.update(price=sample['price'],distance_high_pct=format((Decimal(sample['price'])/max(reference,Decimal(sample['price']))-1)*100,'f'),spread=live_metrics.get('spread'),spread_pct=live_metrics.get('spread_pct'),bar_history_count=len(bar_samples))
   elif new_market_event and sample.get('source')=='eodhd' and sample.get('verification')=='verified':
    # Historical bars provide indicator context only for a new, genuinely
    # observed live sample. All existing market, freshness and risk gates in
@@ -852,8 +911,9 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
    import hotwatch_warmup
    history=hotwatch_warmup.status(c,row,request,now)
    safe_session=sample.get('market_status') in ('UNKNOWN','CLOSED','HALTED') or history and hotwatch_warmup.signal_session_verified(c,request,sample,history,now)
-   if history and safe_session and history['historical_count']>0 and history['state']=='WARMUP COMPLETE' and history['freshness']=='FRESH' and history.get('latest_live_sample_id')==sample['sample_id']:
+   if history and safe_session and history['historical_count']>0 and history['freshness']=='FRESH' and history.get('latest_live_sample_id')==sample['sample_id']:
     live_metrics=features([sample],strategy_data['parameters']);metrics=dict(history['metrics']);metrics.update(price=sample['price'],spread=live_metrics.get('spread'),spread_pct=live_metrics.get('spread_pct'),bar_history_count=history['historical_count'])
+  if sample.get('bar_history') and bar_samples is None:metrics['bar_history_status']='INVALID_OR_STALE'
   pilot=None
   if strategy_data.get('schema_version')==2:
    import strategy_center
@@ -870,8 +930,9 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
    from hotwatch_strategy import early_watch
    if early_watch(strategy_data,metrics):pilot['watch_state']='EARLY_WATCH'
    result['early_catalyst']=pilot
+  result['analysis_uses_bars']=bar_samples is not None
   result['position_context']=risk_sample['context'];result['new_market_observation']=new_market_event
-  result.update(engine_version='1.0-phase1-2',feature_version='1.0.0',risk_version='1.1.0',global_risk_limits=GLOBAL_RISK,algorithm_constraints={'max_volatility_pct':'5','max_price_gap_pct':'5','max_action_signals_hour':20,'max_context_age_s':300},risk_parameters=risk,prior_signal_state=state,input_sample_ids=[s['sample_id'] for s in samples])
+  result.update(engine_version='1.0-phase1-2',feature_version='1.1.0',risk_version='1.1.0',global_risk_limits=GLOBAL_RISK,algorithm_constraints={'max_volatility_pct':'5','max_price_gap_pct':'5','max_action_signals_hour':20,'max_context_age_s':300},risk_parameters=risk,prior_signal_state=state,input_sample_ids=[s['sample_id'] for s in samples])
   metrics['quote_age_s']=format(Decimal(str(now.timestamp()-stamp(sample['event_time']).timestamp())),'f');result['supporting_metrics']=metrics
   c.execute('INSERT INTO hw_calculations(watch_row_id,sample_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?,?)',(row['id'],sample_row_id,now.isoformat(),canonical(result),result['strategy_checksum']))
   cycle=request.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':wid})[:24]

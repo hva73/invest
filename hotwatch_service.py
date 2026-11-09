@@ -463,7 +463,7 @@ def recover_automatic_feeds(connect,now=None):
  now=now or engine.utc();changed=0;lookup_attempted=False
  with connect() as c:
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return 0
-  rows=c.execute("SELECT s.* FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id LEFT JOIN hw_feed_recovery f ON f.watch_row_id=s.id WHERE s.is_test=0 AND COALESCE(k.killed,0)=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.lease_until<=? AND json_extract(s.request,'$.provider')='pluto' AND s.purpose IN ('automatic discovery','automatic holding watch') AND (NOT EXISTS (SELECT 1 FROM hw_samples p WHERE p.watch_row_id=s.id) OR (s.purpose='automatic holding watch' AND json_extract(s.request,'$.asset_id') IN (?,?))) ORDER BY COALESCE(f.next_attempt,0), CASE WHEN s.purpose='automatic holding watch' THEN 0 ELSE 1 END, s.id LIMIT 40",(now.timestamp(),*CRYPTO_REFERENCES)).fetchall()
+  rows=c.execute("SELECT s.* FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id LEFT JOIN hw_feed_recovery f ON f.watch_row_id=s.id WHERE s.is_test=0 AND COALESCE(k.killed,0)=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.lease_until<=? AND json_extract(s.request,'$.provider')='pluto' AND s.purpose IN ('automatic discovery','automatic holding watch') AND (NOT EXISTS (SELECT 1 FROM hw_samples p WHERE p.watch_row_id=s.id) OR (s.purpose='automatic holding watch' AND json_extract(s.request,'$.asset_id') IN (?,?))) ORDER BY COALESCE(f.next_attempt,0), CASE WHEN s.purpose='automatic holding watch' THEN 0 ELSE 1 END, s.id LIMIT ?",(now.timestamp(),*CRYPTO_REFERENCES,engine.capacity())).fetchall()
  for row in rows:
   try:
    req=json.loads(row['request']);holding={'asset_id':req['asset_id'],'ticker':req['ticker'],'currency':req['quote_currency']}
@@ -527,7 +527,7 @@ def queue_unverified_automatic_feeds(connect,now=None):
  now=now or engine.utc();queued=0
  with connect() as c:
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return 0
-  rows=c.execute("SELECT s.* FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id LEFT JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id WHERE s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.purpose IN ('automatic discovery','automatic holding watch') AND json_extract(s.request,'$.provider')='eodhd' AND COALESCE(k.killed,0)=0 AND p.watch_row_id IS NULL ORDER BY s.id LIMIT 40").fetchall()
+  rows=c.execute("SELECT s.* FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id LEFT JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id WHERE s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.purpose IN ('automatic discovery','automatic holding watch') AND json_extract(s.request,'$.provider')='eodhd' AND COALESCE(k.killed,0)=0 AND p.watch_row_id IS NULL ORDER BY s.id LIMIT ?",(engine.capacity(),)).fetchall()
   pending=[]
   for row in rows:
    req=json.loads(row['request']);symbol=req.get('provider_symbol')
@@ -808,20 +808,58 @@ def exchange_status_tick(connect,client_factory=None,now=None):
   received=stamp(result['received_at']) if result.get('received_at') else None
   if result.get('status')!='OK' or result.get('exchange')!=exchange or type(result.get('exchange_open')) is not bool or not received or not 0<=(engine.utc()-received).total_seconds()<=30:return result.get('status','INVALID_RESPONSE')
   with connect() as c:
-   c.execute('UPDATE hw_exchange_status SET received=?,is_open=?,next_attempt=? WHERE exchange=?',(received.isoformat(),int(result['exchange_open']),epoch+300,exchange))
+   c.execute('UPDATE hw_exchange_status SET received=?,is_open=?,next_attempt=? WHERE exchange=?',(received.isoformat(),int(result['exchange_open']),epoch+60,exchange))
    if result.get('calendar') and result.get('timezone'):
     c.execute('INSERT INTO hw_exchange_calendar VALUES(?,?,?,?) ON CONFLICT(exchange) DO UPDATE SET received=excluded.received,timezone=excluded.timezone,calendar=excluded.calendar',(exchange,received.isoformat(),result['timezone'],json.dumps(result['calendar'])))
   return 'OK'
  except Exception:return 'UNAVAILABLE'
 
+def configure_scan_log():
+ """Keep the existing sanitised worker records when stdout is discarded."""
+ from pathlib import Path
+ from logging.handlers import RotatingFileHandler
+ path=Path(app.DB).resolve().parent/'hotwatch-scans.jsonl';path.parent.mkdir(parents=True,exist_ok=True)
+ fd=os.open(path,os.O_WRONLY|os.O_APPEND|os.O_CREAT|getattr(os,'O_NOFOLLOW',0),0o600);os.close(fd)
+ logger=logging.getLogger('escape.hotwatch')
+ if any(isinstance(h,RotatingFileHandler) and h.baseFilename==str(path) for h in logger.handlers):return
+ class PrivateScanHandler(RotatingFileHandler):
+  def _open(self):
+   fd=os.open(self.baseFilename,os.O_WRONLY|os.O_APPEND|os.O_CREAT|getattr(os,'O_NOFOLLOW',0),0o600)
+   os.fchmod(fd,0o600)
+   return os.fdopen(fd,'a',encoding='utf-8')
+ handler=PrivateScanHandler(path,maxBytes=1024*1024,backupCount=2,encoding='utf-8');handler.setFormatter(logging.Formatter('%(message)s'))
+ logger.addHandler(handler);logger.setLevel(logging.INFO)
+
+def recent_scan_log(uid,mode,watch_ids):
+ """Read only this user's requested sessions; never expose other users' logs."""
+ from pathlib import Path
+ allowed={hashlib.sha256(w.encode()).hexdigest()[:16] for w in watch_ids};rows=[]
+ path=Path(app.DB).resolve().parent/'hotwatch-scans.jsonl'
+ try:
+  with path.open('rb') as f:
+   f.seek(0,2);size=f.tell();f.seek(max(0,size-1024*1024));lines=f.read().decode('utf-8',errors='replace').splitlines()
+  for line in reversed(lines):
+   try:r=json.loads(line)
+   except ValueError:continue
+   if not isinstance(r,dict) or r.get('service')!='hotwatch' or r.get('user_id')!=uid or r.get('is_test') is not mode or r.get('watch_ref') not in allowed:continue
+   rows.append({k:r[k] for k in ('utc','watch_ref','source','status','code','metrics') if k in r})
+   if len(rows)>=30:break
+  return {'status':'AVAILABLE','records':rows,'retention':'rotating 3 x 1 MiB; records may be incomplete'}
+ except OSError:return {'status':'UNAVAILABLE','records':[]}
+
+def worker_settings():
+ keys=('ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE','ESCAPE_HW_REQUESTS_PER_MINUTE','ESCAPE_HW_EODHD_FAST_POLL_ENABLED','ESCAPE_HW_EODHD_MIN_POLL_S','ESCAPE_HW_EODHD_WS_TRADES_ENABLED','ESCAPE_HW_EODHD_FUSE_ENABLED','ESCAPE_HW_EODHD_BARS_ENABLED','ESCAPE_HW_EODHD_WS_EU_EXCHANGES','ESCAPE_HW_PARALLEL_SCANS','ESCAPE_HW_CONCURRENCY','ESCAPE_HW_CAPACITY')
+ return {k:(v if v is None or re.fullmatch(r'[A-Za-z0-9_,.-]{0,100}',v) else 'INVALID') for k in keys for v in [os.environ.get(k)]}
+
 class Runner:
  def __init__(self,connect):self.connect=serialized_database(connect);self.adapters={};self.stop=threading.Event();self._workers=[]
  def once(self,now=None,watch_id=None):
-  now=now or engine.utc();job=engine.claim(self.connect,now,watch_id)
+  now=now or engine.utc();claim_started=time.perf_counter();job=engine.claim(self.connect,now,watch_id);claimed=engine.utc()
   if not job:return False
+  job['scan_timing']={'next_due_at':engine.datetime.fromtimestamp(job['next_due'],engine.timezone.utc).isoformat(),'claimed_at':claimed.isoformat(),'claim_ms':round((time.perf_counter()-claim_started)*1000,3),'queue_ms':max(0,round((claimed.timestamp()-job['next_due'])*1000,3))}
   uid=job['user_id'];r=job['request_data'];wid=job['watch_id'];mode=bool(job['is_test']);lease=job['lease_owner'];adapter=None
   try:
-   poll_started=time.perf_counter()
+   poll_started=time.perf_counter();job['scan_timing']['poll_started_at']=engine.utc().isoformat()
    if r['end_at'] and stamp(r['end_at'])<=now:
     engine.fault(self.connect,uid,wid,mode,'WATCH_EXPIRED',now,lease);return True
    if r['provider']=='synthetic':
@@ -831,13 +869,16 @@ class Runner:
    if not adapter:
     adapter={'pluto':PlutoAdapter,'eodhd':EODHDAdapter,'report_inbox':InboxAdapter}[r['provider']](self.connect,uid);self.adapters[key]=adapter
    sample=adapter.poll(job);adapter_received=engine.utc();provider_done=time.perf_counter()
+   job['scan_timing']['poll_finished_at']=adapter_received.isoformat()
    self.partials(job,adapter)
    adapter_latency_ms=(adapter_received-stamp(sample['event_time'])).total_seconds()*1000 if sample.get('event_time') else None
    # The worker consumes the calculation only. Building a complete dashboard
    # view here would hold the SQLite writer lock during additional reads.
+   job['scan_timing']['ingest_started_at']=engine.utc().isoformat()
    result=engine.ingest(self.connect,uid,wid,mode,sample,now=engine.utc(),lease=lease,include_session=False)
    journaled_at=engine.utc();ingest_done=time.perf_counter()
-   timings={'provider_ms':round((provider_done-poll_started)*1000,3),'adapter_to_journal_ms':round((journaled_at-adapter_received).total_seconds()*1000,3),'ingest_compute_ms':round((ingest_done-provider_done)*1000,3),'event_to_adapter_receive_ms':round(adapter_latency_ms,3) if adapter_latency_ms is not None else None,'market_time_known':bool(sample.get('event_time')),'signal':result.get('calculation',{}).get('signal')}
+   job['scan_timing']['ingest_finished_at']=journaled_at.isoformat()
+   timings={**job['scan_timing'],'websocket':getattr(adapter,'capture_metrics',[]),'provider_ms':round((provider_done-poll_started)*1000,3),'adapter_to_journal_ms':round((journaled_at-adapter_received).total_seconds()*1000,3),'ingest_compute_ms':round((ingest_done-provider_done)*1000,3),'event_to_adapter_receive_ms':round(adapter_latency_ms,3) if adapter_latency_ms is not None else None,'market_time_known':bool(sample.get('event_time')),'signal':result.get('calculation',{}).get('signal')}
    timings.update({k:v for k,v in (result.get('sqlite_timing') or {}).items() if k in ('begin_wait_ms','work_before_commit_ms') and isinstance(v,(int,float))})
    telemetry=getattr(adapter,'last_telemetry',None)
    if isinstance(telemetry,dict):timings.update({k:telemetry[k] for k in ['eodhd_http_ms','pluto_context_ms','event_to_http_receive_ms','websocket_capture_ms','event_to_websocket_receive_ms'] if k in telemetry})
@@ -900,15 +941,17 @@ class Runner:
   caps={'endpoint_access':True,'price_time':bool(sample.get('event_time')),'bid_ask':sample['bid'] is not None and sample['ask'] is not None,'interval_volume':sample['volume_type']=='interval','market_status':sample['market_status']!='UNKNOWN'} if sample else {}
   if measurement:caps.update(measurement)
   caps['worker_database_timing']=self.connect.database_metrics()
+  caps['worker_settings']=worker_settings();caps['session_capacity']=engine.capacity()
+  caps['parallel_scans_default']=2;caps['concurrency_default']=2
   now=engine.utc().isoformat()
   with self.connect() as c:c.execute('INSERT INTO hw_provider_health VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,is_test,source) DO UPDATE SET attempted=excluded.attempted,succeeded=COALESCE(excluded.succeeded,hw_provider_health.succeeded),code=excluded.code,payload=CASE WHEN excluded.succeeded IS NOT NULL THEN excluded.payload ELSE hw_provider_health.payload END',(job['user_id'],job['is_test'],job['request_data']['provider'],now,now if sample else None,code,json.dumps(caps)))
  def log(self,job,status,code,metrics=None):
-  logging.getLogger('escape.hotwatch').info(json.dumps({'service':'hotwatch','utc':engine.utc().isoformat(),'watch_ref':hashlib.sha256(job['watch_id'].encode()).hexdigest()[:16],'source':job['request_data']['provider'],'status':status,'code':code,'metrics':metrics or {}}))
+  logging.getLogger('escape.hotwatch').info(json.dumps({'service':'hotwatch','user_id':job['user_id'],'is_test':bool(job['is_test']),'utc':engine.utc().isoformat(),'watch_ref':hashlib.sha256(job['watch_id'].encode()).hexdigest()[:16],'source':job['request_data']['provider'],'status':status,'code':code,'metrics':{**job.get('scan_timing',{}),**(metrics or {})}}))
  def drain(self,watch_id=None):
   """Drain due work in bounded batches, opt-in for concurrent provider calls."""
   if watch_id:return int(self.once(watch_id=watch_id))
   try:
-   requested=int(os.environ.get('ESCAPE_HW_PARALLEL_SCANS','1'))
+   requested=int(os.environ.get('ESCAPE_HW_PARALLEL_SCANS','2'))
    lease_limit=int(os.environ.get('ESCAPE_HW_CONCURRENCY','2'))
   except (TypeError,ValueError):requested=1;lease_limit=1
   workers=max(1,min(10,engine.capacity(),requested,lease_limit))
@@ -1077,6 +1120,8 @@ def main():
   print(json.dumps(engine.system_kill(app.connect,args.kill_switch=='on',args.reason)));return
  if args.diagnose:
   print(json.dumps(startup_diagnostics(app.connect),sort_keys=True));return
+ try:configure_scan_log()
+ except OSError:logging.getLogger('escape.hotwatch').warning('scan_log_unavailable')
  runner=Runner(app.connect)
  startup_diagnostics(app.connect)
  for name in [signal.SIGINT,signal.SIGTERM]:signal.signal(name,lambda *_:runner.stop.set())

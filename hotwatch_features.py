@@ -94,14 +94,19 @@ def features(samples,parameters):
  if not samples:return {}
  # Caller supplies ascending, unique event times. Do not mix providers,
  # currencies, venues, sessions, bar durations or market phases.
- last=samples[-1];identity=lambda s:tuple(s[k] for k in ['source','asset_id','currency','venue','session_key','market_status','interval_s','feed_type'])+(s.get('price_time_kind'),s.get('verification','unknown'))
+ last=samples[-1];live=last.get('source')=='eodhd' and last.get('price_time_kind')=='trade'
+ # Poll cadence is not a candle duration. Use actual observations approximately
+ # one minute apart; extra fast polls do not reset the analysis window.
+ interval=60 if live else last['interval_s']
+ identity=lambda s:tuple(s[k] for k in ['source','asset_id','currency','venue','session_key','market_status','feed_type'])+(() if live else (s['interval_s'],))+(s.get('price_time_kind'),s.get('verification','unknown'))
  rows=[]
  for s in reversed(samples):
   if identity(s)!=identity(last):break
   if rows:
    from report_validation import stamp
    gap=(stamp(rows[-1]['event_time'])-stamp(s['event_time'])).total_seconds()
-   if gap>last['interval_s']*1.5 or gap<last['interval_s']*0.5:break
+   if live and gap<interval*0.5:continue
+   if gap>interval*1.5 or gap<interval*0.5:break
   rows.append(s)
  rows.reverse();prices=[number(r['price']) for r in rows]
  if any(p is None or p<=0 for p in prices):return {'sample_count':len(rows)}
@@ -132,7 +137,7 @@ def features(samples,parameters):
   for n in range(26,len(prices)+1):macd.append(ema(prices[:n],12)-ema(prices[:n],26))
   f['macd']=macd[-1] if macd else None;f['macd_signal']=ema(macd,9);f['macd_histogram']=f['macd']-f['macd_signal'] if f['macd_signal'] is not None else None
   window=int(parameters['breakout_window']);prior=prices[-window-1:-1]
-  f['breakout']=len(prior)==window and p>max(prior);f['breakdown']=len(prior)==window and p<min(prior)
+  f['breakout']=p>max(prior) if len(prior)==window else None;f['breakdown']=p<min(prior) if len(prior)==window else None
   f['range_position_pct']=(p-min(prices))/(max(prices)-min(prices))*100 if max(prices)>min(prices) else None
   f['distance_high_pct']=(p/max(prices)-1)*100;f['distance_low_pct']=(p/min(prices)-1)*100
   f['volatility_pct']=average([(r-average(returns))**2 for r in returns]).sqrt() if len(returns)>=2 else None

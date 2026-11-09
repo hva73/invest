@@ -234,3 +234,12 @@ Strategiens eksisterende TRAILING_EXIT er fald fra toppen i det analyserede kurs
 ESCAPE må bruge 80 % af den dokumenterede eller aflæste EODHD-kapacitet uden yderligere skjulte buffere. Ved 1000 HTTP-requests/minut er det lokale loft 800; det er et loft, ikke et mål for konstant trafik. Lavere providergrænser, faktisk 429 og Retry-After respekteres. HTTP-requests, dagsforbrug i API-call-enheder og samtidige WebSocket-abonnementer er forskellige størrelser. Ukendt forbrug må ikke fremstilles som målt. Eventuelle eksplicitte driftsindstillinger skal være synlige i diagnostikken.
 
 Data indsamles og analyseres uafhængigt af handelsgodkendelsen. Instrumentidentitet, oprindelige kildetider, likviditet, spread, Pluto-verifikation og globale risikoregler bevares før KØB. Denne kapacitetsændring giver ingen tilladelse til automatiske forslag eller handler. Verifikation af faktisk throughput og kildefriskhed efter installation er fortsat påkrævet, før kæden kan betegnes live-verificeret.
+
+
+## 16. Signaler og historiske advarsler — 9. november 2026
+
+Et aktuelt handelssignal og en tidligere advarsel er forskellige oplysninger. Seneste handlingshændelse vises med oprindeligt tidspunkt, begrundelse og status AKTIVT, BORTFALDET eller DATA MANGLER. En historisk advarsel må ikke blive en handelsknap eller fastholde et ugyldigt signal. Brugeren kan kvittere det konkrete event; kvittering ændrer ikke strategi, overvågning, ordre eller beholdning. Nye hændelser skal vurderes selvstændigt.
+
+Exitregler vurderes på deres egne nødvendige verificerede input. Krav til fuld købsanalyse må ikke blokere en ellers gyldig exitbeskyttelse. Handels-/risikogates og eksisterende tærskler, bekræftelser og cooldown bevares. Rå observationer og valgfri analysehistorik holdes adskilt; ugyldig historik gemmes som ubrugelig og kan ikke bruges til et køb. Manglende minutter eller volumen må ikke opfindes.
+
+Rettelser og testresultater er beskrevet i [installationsnotatet](INSTALL_SIGNAL_FIXES_20261109.md). Lokal test er ikke produktionsaccept. Køtider, faktisk proceskonfiguration, serverversioner og mobilnotifikationer kontrolleres efter installation, og uløste driftsforhold skal fortsat nævnes konkret.

@@ -370,3 +370,5 @@ body.pull-refresh-visible #refresh-status{display:none}
 
 /* Keep the current status and its explanation together in both tables. */
 .signal-control{display:inline-flex;align-items:center;max-width:100%}.signal-control .signal-help{flex-shrink:0}.signal-control .dash-action-badge{min-width:0}
+
+.signal-notice{display:grid;gap:.35rem;margin-top:.6rem;padding:.65rem;border-left:3px solid var(--muted,#b9cbd0);text-align:left;max-width:34rem;white-space:normal}.signal-notice p{margin:0;font-size:.85rem}.signal-notice small{display:block}.signal-notice button{justify-self:start;font-size:.8rem}

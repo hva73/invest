@@ -424,12 +424,14 @@ class HotWatch(unittest.TestCase):
    self.assertEqual(c.execute('SELECT count(*) FROM hw_samples').fetchone()[0],2)
    self.assertEqual(c.execute("SELECT sum(used) FROM hw_request_budget WHERE source='pluto'").fetchone()[0],2)
   self.assertEqual(count,2);self.assertEqual(peak,2)
- def test_parallel_scan_setting_defaults_to_one_and_caps_at_leases(self):
+ def test_parallel_scan_setting_defaults_to_two_and_caps_at_leases(self):
   from hotwatch_service import Runner
   from unittest.mock import Mock
-  runner=Runner(app.connect);runner.once=Mock(return_value=False)
-  with patch.dict(os.environ,{},clear=True):self.assertEqual(runner.drain(),0)
-  self.assertEqual(runner.once.call_count,1)
+  runner=Runner(app.connect)
+  with patch.dict(os.environ,{},clear=True),patch.object(Runner,'once',return_value=False) as once:
+   self.assertEqual(runner.drain(),0);self.assertEqual(once.call_count,2)
+  with patch.dict(os.environ,{'ESCAPE_HW_PARALLEL_SCANS':'6','ESCAPE_HW_CONCURRENCY':'1'}),patch.object(Runner,'once',return_value=False) as once:
+   self.assertEqual(runner.drain(),0);self.assertEqual(once.call_count,1)
  def test_worker_heartbeat_remains_fresh_during_slow_provider_call(self):
   import threading,time
   from hotwatch_service import Runner

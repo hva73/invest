@@ -192,20 +192,23 @@ class EODHDFeeds:
  def websocket_quotes(self,market,symbol,duration=2):return self.capture(str(market)+'_quotes',symbol,duration)
  def websocket_status(self,market,symbol,duration=2):return self.capture(str(market)+'_status',symbol,duration)
  def capture(self,feed,symbol,duration=2,max_messages=50):
+  transport={'connections_opened':0,'subscriptions_sent':0}
+  def measured(*args,**kwargs):return _result(*args,**kwargs,**transport)
   endpoint=WS_FEEDS.get(feed)
   symbols=[symbol] if isinstance(symbol,str) else symbol
-  if not endpoint or not isinstance(symbols,list) or not 1<=len(symbols)<=10 or any(not _valid_symbol(s) for s in symbols) or len(set(symbols))!=len(symbols) or type(duration) is not int or not 1<=duration<=5 or type(max_messages) is not int or not 1<=max_messages<=250:return _result('INVALID_INPUT','/ws')
+  if not endpoint or not isinstance(symbols,list) or not 1<=len(symbols)<=10 or any(not _valid_symbol(s) for s in symbols) or len(set(symbols))!=len(symbols) or type(duration) is not int or not 1<=duration<=5 or type(max_messages) is not int or not 1<=max_messages<=250:return measured('INVALID_INPUT','/ws')
   path='/ws/'+endpoint
-  if not self._key:return _result('KEY_MISSING',path)
+  if not self._key:return measured('KEY_MISSING',path)
   try:
    factory=self._ws_factory
    if factory is None:
     try:from websockets.sync.client import connect as factory
-    except ImportError:return _result('WEBSOCKET_DEPENDENCY_MISSING',path)
+    except ImportError:return measured('WEBSOCKET_DEPENDENCY_MISSING',path)
    url=WS_BASE+'/'+endpoint+'?'+urlencode({'api_token':self._key});messages=[];partial_messages=[]
    with (self._capacity.websocket(len(symbols)) if self._capacity else nullcontext()),factory(url,open_timeout=8,close_timeout=2,max_size=131072,max_queue=16,logger=_WS_LOGGER) as ws:
+    transport['connections_opened']=1
     deadline=time.monotonic()+duration
-    ws.send(json.dumps({'action':'subscribe','symbols':','.join(symbols)}))
+    ws.send(json.dumps({'action':'subscribe','symbols':','.join(symbols)}));transport['subscriptions_sent']=len(symbols)
     while time.monotonic()<deadline and len(messages)<max_messages:
      try:raw=ws.recv(timeout=max(.01,deadline-time.monotonic()))
      except TimeoutError:break
@@ -214,11 +217,11 @@ class EODHDFeeds:
      try:row=json.loads(raw,parse_float=str,parse_constant=lambda _:None)
      except (ValueError,TypeError):continue
      if not isinstance(row,dict):continue
-     if str(row.get('status_code',row.get('status'))) in ('401','402','403'):return _result('ENTITLEMENT_UNVERIFIED',path)
+     if str(row.get('status_code',row.get('status'))) in ('401','402','403'):return measured('ENTITLEMENT_UNVERIFIED',path)
      if str(row.get('status_code'))=='429':
       from eodhd_capacity import retry_seconds
       seconds=self._capacity.ws_limited() if self._capacity else retry_seconds(None)
-      return _result('RATE_LIMIT',path,retry_after_s=seconds)
+      return measured('RATE_LIMIT',path,retry_after_s=seconds)
      actual=row.get('s')
      if actual not in symbols:continue
      at=_timestamp(row.get('t'),1000)
@@ -240,14 +243,14 @@ class EODHDFeeds:
      else:
       status=row.get('h');reason=row.get('r')
       messages.append({'symbol':actual,'event_time':at,'received_at':received_at,'trading_status':status if isinstance(status,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',status) else None,'reason':reason if isinstance(reason,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',reason) else None})
-   return _result('OK' if messages else 'NO_MESSAGES',path,messages=messages,message_count=len(messages),partial_messages=partial_messages)
+   return measured('OK' if messages else 'NO_MESSAGES',path,messages=messages,message_count=len(messages),partial_messages=partial_messages)
   except Exception as error:
    code=getattr(getattr(error,'response',None),'status_code',None)
-   if code in (401,402,403):return _result('ENTITLEMENT_UNVERIFIED',path,http_status=code)
-   if getattr(error,'code',None) in ('PROVIDER_RATE_BUDGET','EODHD_WS_CAPACITY'):return _result('LOCAL_BUDGET_EXHAUSTED',path,budget_reason=error.code,retry_after_s=getattr(error,'retry_after_s',None))
+   if code in (401,402,403):return measured('ENTITLEMENT_UNVERIFIED',path,http_status=code)
+   if getattr(error,'code',None) in ('PROVIDER_RATE_BUDGET','EODHD_WS_CAPACITY'):return measured('LOCAL_BUDGET_EXHAUSTED',path,budget_reason=error.code,retry_after_s=getattr(error,'retry_after_s',None))
    if code==429:
     from eodhd_capacity import retry_seconds
     headers=getattr(error.response,'headers',None)
     seconds=self._capacity.ws_limited(headers) if self._capacity else retry_seconds(headers)
-    return _result('RATE_LIMIT',path,retry_after_s=seconds)
-   return _result('NETWORK_OR_RESPONSE_ERROR',path)
+    return measured('RATE_LIMIT',path,retry_after_s=seconds)
+   return measured('NETWORK_OR_RESPONSE_ERROR',path)

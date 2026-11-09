@@ -100,6 +100,9 @@ def handle(h,connect,method):
    elif method=='POST' and len(parts)==3 and parts[2] in ['pause','resume','stop']:
     if set(data)!={'is_test'} or type(data['is_test']) is not bool:raise EngineError('is_test_required')
     result=engine.control(connect,uid,wid,data['is_test'],parts[2])
+   elif method=='POST' and len(parts)==3 and parts[2]=='ack-signal':
+    if kind!='cookie' or set(data)!={'is_test','event_id'}:raise EngineError('manual_acknowledgement_required',403)
+    result=engine.acknowledge_signal(connect,uid,wid,data['is_test'],data['event_id'])
    elif method=='POST' and len(parts)==3 and parts[2]=='buy-plan':
     if kind!='cookie' or mode:raise EngineError('manual_production_plan_required',403)
     import hotwatch_buy_plan,trade_service

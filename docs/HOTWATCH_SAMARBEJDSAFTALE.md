@@ -82,3 +82,9 @@ Efter ovenstående gennemgang skal Codex **færdiggøre og installere** hele kæ
 **Leverance til brugeren:** Kort besked med `LIVE PASS` eller `BLOCKED`, installeret commit/version, faktisk readback af én kandidat-session og én beholdningssession (hvis en sådan findes), samt højst tre konkrete resterende fejl. Ingen lange statusrapporter eller yderligere designforslag.
 
 **Afgrænsning:** Ingen ændring af radarens eksisterende timeplan, Trading Lab, handelsmandater eller Pluto-ordrer.
+
+
+
+## Rettelsesrunde — 9. november 2026
+
+Ejeren har godkendt implementering og GitHub-installationsleverance af kapacitetsrevisionens konkrete fejl samt stabile historiske salgsadvarsler. Se [installationsnotat](INSTALL_SIGNAL_FIXES_20261109.md) og [fælles aftale, afsnit 16](ESCAPE_TRADING_AGREEMENT_V3_9.md#16-signaler-og-historiske-advarsler--9-november-2026). Forkerte fælles betingelser erstattes; ingen parallel signalmotor eller ny databasearkitektur. Ingen automatiske handler. Produktionens endelige accept står fortsat åben, indtil den installerede version og faktiske resultater er læst tilbage.

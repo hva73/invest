@@ -309,3 +309,10 @@ Ejeren meldte HTTP 500 efter installation. Direkte browserkontrol af /api/health
 **Test:** De to nye installationskontroller fejlede på den publicerede 535550e-installer. Efter rettelsen består alle 11 installer-/WSGI-tests, inklusive reel isoleret opstart, health, login, backup og rollback. De tidligere 795 kildekodetests beviste ikke, at installerens filliste var komplet; den mangel er nu dækket. Diff-kontrol PASS.
 
 **Næste skridt:** Brug apply_update.py fra den nye udpakkede pakke og genstart Python-appen efter det normale installationsflow. Bekræft /api/health, login og MCP-læsning, derefter motorens 80 %-kapacitet, faktisk kildefriskhed og øvrige åbne punkter. Produktionens gendannelse er AFVENTER INSTALLATION/READBACK.
+
+
+## Opfølgning: kapacitetsrevision og JDZG
+
+**Rettet og lokalt testet, afventer installation/readback:** fælles WARMUP foran beregnelige exitregler; uvedkommende bar-friskhed foran stop-SELL; trailing beregnet på gammel bar-close; reset af EODHD-observationshistorik ved hurtig polling; kalender-refresh 300 s mod 120 s gate; uvirksom kapacitetskonfiguration over 40; account-refresh idle-skrivelås; kasseret workerlog; ukendt exchange-details-pris; kortvarige signaler uden vedvarende kvitterbar advarsel. Ren featureberegning er flyttet før skrivetransaktionen med genkontrol af historikversion.
+
+**Fortsat åbent:** serverens faktiske samtidige workerantal og gennemløb, fuld driftsfase-sporing efter logaktivering, konkret eventuel SQLite-låseholder, kørende versionsmatch, fysisk mobilpush og visuel accept. Sparse markedsbars kan fortsat være utilstrækkelige for køb; strategiens tidsbaserede krav er ikke lempet. Standardkapacitet er fortsat 40, og den er ikke hævet blindt. Se [installationsnotat og næste kontroller](INSTALL_SIGNAL_FIXES_20261109.md).

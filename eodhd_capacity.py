@@ -52,7 +52,7 @@ def cost(url):
  if endpoint in ('intraday','technical','news','screener'):return 5
  if endpoint=='fundamentals':return 10
  if endpoint=='real-time':return 1+len([s for s in parse_qs(parsed.query).get('s',[''])[0].split(',') if s])
- if endpoint in ('search','exchanges-list','exchange-symbol-list','calendar','eod','splits','div'):return 1
+ if endpoint in ('search','exchanges-list','exchange-details','exchange-symbol-list','calendar','eod','splits','div'):return 1
  return None
 
 class Capacity:
@@ -141,6 +141,8 @@ def refresh_account(connect,opener=None):
  key=os.environ.get('ESCAPE_EODHD_API_KEY','').strip()
  if not key:return
  now=time.time()
+ with connect() as c:
+  if read(c).get('account_next_at',0)>now:return
  with connect() as c:
   c.execute('BEGIN IMMEDIATE');state=read(c)
   if state.get('account_next_at',0)>now:return
