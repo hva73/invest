@@ -729,11 +729,21 @@ def exchange_status_tick(connect,client_factory=None,now=None):
  """Refresh one EODHD exchange status; this is not instrument tradability."""
  now=now or engine.utc();epoch=now.timestamp()
  if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1' or not os.environ.get('ESCAPE_EODHD_API_KEY','').strip():return None
+ def candidates(c):
+  rows=c.execute("SELECT s.request FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND json_extract(s.request,'$.provider')='eodhd'").fetchall()
+  return sorted({v.rsplit('.',1)[-1].upper() for row in rows if isinstance((v:=json.loads(row['request']).get('provider_symbol')),str) and '.' in v and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',v.rsplit('.',1)[-1])})
+ # Avoid a writer lock on the frequent idle path; every condition is checked
+ # again under the existing transaction before reserving an exchange.
+ with connect() as c:
+  due=False
+  for item in candidates(c):
+   prior=c.execute('SELECT next_attempt FROM hw_exchange_status WHERE exchange=?',(item,)).fetchone()
+   if not prior or prior['next_attempt']<=epoch:due=True;break
+ if not due:return None
  with connect() as c:
   c.execute('BEGIN IMMEDIATE')
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
-  rows=c.execute("SELECT s.request FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND json_extract(s.request,'$.provider')='eodhd'").fetchall()
-  exchanges=sorted({v.rsplit('.',1)[-1].upper() for row in rows if isinstance((v:=json.loads(row['request']).get('provider_symbol')),str) and '.' in v and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',v.rsplit('.',1)[-1])})
+  exchanges=candidates(c)
   exchange=None
   for item in exchanges:
    prior=c.execute('SELECT next_attempt FROM hw_exchange_status WHERE exchange=?',(item,)).fetchone()

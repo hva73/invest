@@ -160,6 +160,11 @@ def dispatch_one(connect,now=None,sender=None):
     from datetime import datetime,timezone
     import hotwatch_engine as engine
     now=now or datetime.now(timezone.utc);t=now.timestamp();owner=secrets.token_hex(16)
+    # Idle polling should not reserve SQLite's only writer. Recheck the job
+    # and expiry under the existing transaction before changing anything.
+    with connect() as c:
+        pending=c.execute("SELECT 1 FROM push_jobs WHERE status='pending' AND created<? UNION ALL SELECT 1 FROM push_jobs j JOIN push_devices d ON d.id=j.device_id JOIN users u ON u.id=d.user_id AND u.active=1 WHERE j.status='pending' AND j.next_attempt<=? AND j.lease_until<? LIMIT 1",(t-300,t,t)).fetchone()
+    if not pending:return False
     with connect() as c:
         c.execute('BEGIN IMMEDIATE')
         c.execute("UPDATE push_jobs SET status='expired' WHERE status='pending' AND created<?",(t-300,))

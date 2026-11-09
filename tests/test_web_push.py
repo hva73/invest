@@ -30,6 +30,20 @@ class Push(unittest.TestCase):
  def test_only_supported_https_push_hosts(self):
   for endpoint in ['http://fcm.googleapis.com/abc','https://fcm.googleapis.com.evil.invalid/','https://127.0.0.1/','https://fcm.googleapis.com:444/']:
    with self.assertRaises(ValueError):web_push.validate_subscription({**self.sub,'endpoint':endpoint})
+ def test_empty_push_queue_does_not_request_writer_lock(self):
+  import sqlite3
+  holder=app.connect()
+  def quick_connect():
+   c=sqlite3.connect(app.DB,timeout=0);c.row_factory=sqlite3.Row;return c
+  try:
+   holder.execute('BEGIN IMMEDIATE')
+   self.assertFalse(web_push.dispatch_one(quick_connect,self.now))
+  finally:holder.rollback();holder.close()
+ def test_idle_preflight_still_expires_old_pending_jobs(self):
+  self.subscribe();self.event('BUY_SIGNAL')
+  with app.connect() as c:c.execute('UPDATE push_jobs SET created=?',(self.now.timestamp()-301,))
+  self.assertFalse(web_push.dispatch_one(app.connect,self.now,lambda *args:self.fail('expired job sent')))
+  with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM push_jobs').fetchone()['status'],'expired')
  def test_action_change_and_deduplication(self):
   self.subscribe();sent=[]
   self.event('BUY_SIGNAL')

@@ -128,6 +128,16 @@ class HotWatch(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}):self.assertEqual(service.exchange_status_tick(app.connect,lambda:Failed(),self.now+timedelta(seconds=301)),'LOCAL_BUDGET_EXHAUSTED')
   with app.connect() as c:
    row=c.execute("SELECT received,is_open FROM hw_exchange_status WHERE exchange='CO'").fetchone();self.assertEqual(row['received'],self.now.isoformat());self.assertEqual(row['is_open'],0)
+ def test_exchange_status_idle_does_not_request_writer_lock(self):
+  import sqlite3,hotwatch_service as service
+  holder=app.connect()
+  def quick_connect():
+   c=sqlite3.connect(app.DB,timeout=0);c.row_factory=sqlite3.Row;return c
+  try:
+   holder.execute('BEGIN IMMEDIATE')
+   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}):
+    self.assertIsNone(service.exchange_status_tick(quick_connect,now=self.now))
+  finally:holder.rollback();holder.close()
  def test_timed_momentum_uses_only_actual_comparable_samples(self):
   samples=[tick(self.now-timedelta(minutes=n),index=i,price=str(100+i)) for i,n in enumerate((30,15,5,1,0))]
   view=observation_status(samples,self.now,120,'WAIT','ACTIVE')
