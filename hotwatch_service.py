@@ -918,4 +918,26 @@ def main():
    print(json.dumps({"service":"hotwatch","error":"worker_already_running"}));return
   try:runner.run(args.interval)
   finally:os.close(fd)
-if __name__=='__main__':main()
+def record_worker_exception(error):
+ """Record class and local source location only, never exception text or values."""
+ import sqlite3
+ from hotwatch_supervisor import diagnostic
+ classes=(sqlite3.OperationalError,sqlite3.IntegrityError,KeyError,ValueError,TypeError,AttributeError,RuntimeError,OSError)
+ diagnostic('worker_exception',next((i for i,cls in enumerate(classes,1) if isinstance(error,cls)),0))
+ frames=[];tb=error.__traceback__
+ while tb:
+  filename=os.path.basename(tb.tb_frame.f_code.co_filename)
+  if filename in ('hotwatch_service.py','hotwatch_engine.py','app.py','hotwatch_adapters.py'):
+   frames.append((filename,tb.tb_lineno))
+  tb=tb.tb_next
+ if frames:
+  filename,line=frames[-1]
+  names={'hotwatch_service.py':'service','hotwatch_engine.py':'engine','app.py':'app','hotwatch_adapters.py':'adapters'}
+  diagnostic('worker_frame_'+names[filename],line)
+ else:diagnostic('worker_frame_other')
+
+if __name__=='__main__':
+ try:main()
+ except Exception as error:
+  record_worker_exception(error)
+  raise

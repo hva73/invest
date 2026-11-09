@@ -84,7 +84,9 @@ def diagnostic(event, code=None):
     """Persist bounded, non-sensitive lifecycle codes; never log exception text."""
     allowed = {'supervisor_started', 'supervisor_signal', 'supervisor_stopped',
                'worker_started', 'worker_exited', 'worker_start_failed',
-               'heartbeat_timeout', 'restart_timeout', 'worker_killed'}
+               'heartbeat_timeout', 'restart_timeout', 'worker_killed',
+               'worker_exception', 'worker_frame_service', 'worker_frame_engine',
+               'worker_frame_app', 'worker_frame_adapters', 'worker_frame_other'}
     if event not in allowed or (code is not None and not isinstance(code, int)):
         raise ValueError('invalid diagnostic event')
     try:

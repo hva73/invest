@@ -10,6 +10,17 @@ import hotwatch_supervisor as supervisor
 
 
 class WatchdogTests(unittest.TestCase):
+    def test_worker_exception_records_safe_type_and_location_only(self):
+        import hotwatch_service
+        with patch.object(supervisor, 'diagnostic') as diagnostic:
+            try:
+                raise sqlite3.OperationalError('secret private value')
+            except sqlite3.OperationalError as error:
+                hotwatch_service.record_worker_exception(error)
+        self.assertEqual(diagnostic.call_args_list[0].args, ('worker_exception', 1))
+        self.assertNotIn('secret', str(diagnostic.call_args_list))
+        self.assertEqual(diagnostic.call_args_list[1].args, ('worker_frame_other',))
+
     def test_diagnostics_are_bounded_structured_and_no_secrets(self):
         with tempfile.TemporaryDirectory() as d:
             db = str(Path(d) / 'diagnostics.db')
