@@ -371,4 +371,9 @@ body.pull-refresh-visible #refresh-status{display:none}
 /* Keep the current status and its explanation together in both tables. */
 .signal-control{display:inline-flex;align-items:center;max-width:100%}.signal-control .signal-help{flex-shrink:0}.signal-control .dash-action-badge{min-width:0}
 
-.signal-notice{display:grid;gap:.35rem;margin-top:.6rem;padding:.65rem;border-left:3px solid var(--muted,#b9cbd0);text-align:left;max-width:34rem;white-space:normal}.signal-notice p{margin:0;font-size:.85rem}.signal-notice small{display:block}.signal-notice button{justify-self:start;font-size:.8rem}
+.signal-alert{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:34px;height:34px;min-height:34px;padding:0;margin-left:8px;vertical-align:middle;border:1px solid currentColor;border-radius:50%;background:transparent;line-height:1;color:#e5bb69}
+.signal-alert svg{display:block;pointer-events:none}.signal-alert--sell{color:#ee93a0}.signal-alert--buy{color:#79d4b6}.signal-alert--read{color:#91a8b3;border-color:#425866}
+.signal-alert--unread{animation:signal-alert-pulse 2.4s ease-in-out infinite}.signal-alert:hover,.signal-alert:focus-visible{background:#263d49;outline:2px solid currentColor;outline-offset:3px}
+@keyframes signal-alert-pulse{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 0 5px color-mix(in srgb,currentColor 22%,transparent)}}
+@media(prefers-reduced-motion:reduce){.signal-alert--unread{animation:none}}
+.signal-notice-details{display:grid;gap:12px;text-align:left;white-space:normal;overflow-wrap:anywhere;padding:12px 0}.signal-notice-details p{margin:0}.signal-notice-details button{justify-self:start}.signal-notice-details small{display:block;color:var(--muted,#b9cbd0)}

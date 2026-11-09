@@ -29,7 +29,13 @@ try:
    }''',[session,now])
   for width in (1300,390):
    page.set_viewport_size({'width':width,'height':900});render()
-   page.evaluate("() => {\n    const menu=document.querySelector('body > aside');\n    for(const notice of document.querySelectorAll('.signal-notice')){\n     const box=notice.getBoundingClientRect(),parent=notice.parentElement.getBoundingClientRect();\n     if(getComputedStyle(notice).position!=='static'||box.left<parent.left-1||box.right>parent.right+1)throw Error('Signal notice escaped its status container');\n    }\n    if(menu.querySelector('.signal-notice'))throw Error('Signal notice inserted in navigation');\n    if(document.documentElement.scrollWidth>innerWidth+1)throw Error('Page overflows viewport');\n   }")
+   page.evaluate("""() => {
+    if(document.querySelector('.dash-table .signal-notice-details'))throw Error('Expanded warning in table');
+    for(const icon of document.querySelectorAll('.signal-alert')){
+     const box=icon.getBoundingClientRect();if(box.width>44||box.height>44)throw Error('Oversized warning icon');
+    }
+    if(document.documentElement.scrollWidth>innerWidth+1)throw Error('Page overflows viewport');
+   }""")
    buttons=page.locator('[data-trade-watch="synthetic-status"]')
    expect(buttons).to_have_count(2)
    for i in range(2):expect(buttons.nth(i)).to_have_text('SÆLGSSIGNAL →')
@@ -48,10 +54,16 @@ try:
   expect(page.locator('#signal-explanation-dialog')).to_contain_text('Aktuel status: DATA FOR GAMLE')
   expect(page.locator('#signal-explanation-dialog')).to_contain_text('Den seneste beregning er ikke det aktuelle signal')
   page.locator('[data-explanation-close]').click()
-  expect(page.locator('.dash-attention')).to_contain_text('Tidligere advarsel: Salg · DATA MANGLER')
-  expect(page.locator('.dash-attention [data-trade-watch]')).to_have_count(0)
+  page.locator('.dash-attention [data-engine-notice]').click()
+  expect(page.locator('#engine-dialog')).to_contain_text('Tidligere advarsel: Salg · DATA MANGLER')
+  expect(page.locator('#engine-dialog [data-trade-watch]')).to_have_count(0)
+  page.locator('[data-engine-close]').click()
   session['last_action_signal']['state']='WITHDRAWN';session.update(status='ACTIVE',signal='WAIT',display_status='AFVENT');render()
-  expect(page.locator('.dash-attention')).to_contain_text('BORTFALDET')
+  page.screenshot(path='/tmp/escape-alert-icon-mobile.png',full_page=True)
+  page.set_viewport_size({'width':1300,'height':900});render()
+  page.screenshot(path='/tmp/escape-alert-icon-desktop.png',full_page=True)
+  page.locator('.dash-attention [data-engine-notice]').click()
+  expect(page.locator('#engine-dialog')).to_contain_text('BORTFALDET')
   ack=[]
   def acknowledge(route):
    ack.append(route.request.post_data_json);route.fulfill(json={'ok':True})
@@ -59,9 +71,14 @@ try:
   page.locator('[data-engine-ack="synthetic-status"]').first.click()
   expect(page.locator('[data-engine-ack="synthetic-status"]').first).to_have_text('Kvitteret')
   assert len(ack)==1 and ack[0]=={'is_test':False,'event_id':'hw-'+'a'*24},ack
+  expect(page.locator('.signal-alert--unread')).to_have_count(0)
+  page.locator('[data-engine-close]').click()
   session['last_action_signal']['acknowledged_at']=now;render()
-  expect(page.locator('.dash-attention .signal-notice')).to_have_count(0)
-  expect(page.locator('.dash-holdings')).to_contain_text('Kvitteret')
+  expect(page.locator('.dash-attention .signal-alert')).to_have_count(0)
+  expect(page.locator('.dash-holdings .signal-alert--read')).to_have_count(1)
+  page.locator('.dash-holdings [data-engine-notice]').click()
+  expect(page.locator('#engine-dialog')).to_contain_text('Kvitteret')
+  page.locator('[data-engine-close]').click()
   page.screenshot(path='/tmp/escape-signal-notice-mobile.png',full_page=True)
   assert not errors,errors
   assert not writes,writes

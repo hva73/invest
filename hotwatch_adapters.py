@@ -118,7 +118,7 @@ def search_eodhd_symbols(connect,uid,data,opener=None,candidate_override=None,pu
  return {'ticker':ticker,'choices':choices}
 
 class PlutoAdapter:
- def __init__(self,connect,uid,purpose='scan'):self.connect=connect;self.uid=uid;self.purpose=purpose;self.gateway=None;self.order_cache={};self.permission_cache={}
+ def __init__(self,connect,uid,purpose='scan'):self.connect=connect;self.uid=uid;self.purpose=purpose;self.gateway=None;self.order_cache={};self.permission_cache={};self.context_lock=threading.RLock()
  def safe_context(self,request,currency):
   try:return self.context(request,currency)
   except DataUnavailable as error:return unknown_context(error.code if error.code=='PROVIDER_RATE_BUDGET' else 'BROKER_CONTEXT_UNAVAILABLE')
@@ -129,7 +129,7 @@ class PlutoAdapter:
   connect=self.connect;uid=self.uid;purpose=self.purpose
   class ReadOnlyGateway(MCP):
    allowed={'search_assets','get_asset','get_portfolio_value','get_accounts','get_positions','get_collection','list_orders','list_portfolios','list_collections','get_collection_activity','estimate_order'}
-   def __init__(self,token):super().__init__(token);self.catalog=None
+   def __init__(self,token):super().__init__(token);self.catalog=None;self.read_cache={}
    def tools(self):
     if self.catalog is None:self.catalog=super().tools()
     return self.catalog
@@ -138,10 +138,17 @@ class PlutoAdapter:
      name=(params or {}).get('name');metadata=next((t for t in self.catalog or [] if t['name']==name),None)
      if name not in self.allowed or not metadata or metadata.get('annotations',{}).get('readOnlyHint') is not True:raise DataUnavailable('PLUTO_WRITE_OR_UNKNOWN_TOOL_BLOCKED')
     elif method not in ['initialize','notifications/initialized','tools/list']:raise DataUnavailable('PLUTO_METHOD_BLOCKED')
-    reserve(connect,uid,'pluto',purpose=purpose);return super().request(method,params,notification)
+    key=None
+    if method=='tools/call' and name in ('list_portfolios','list_collections') and not (params or {}).get('arguments'):
+     key=name;cached=self.read_cache.get(key)
+     if cached and 0<=utc().timestamp()-cached[0]<300:return copy.deepcopy(cached[1])
+    started=utc().timestamp();reserve(connect,uid,'pluto',purpose=purpose);result=super().request(method,params,notification)
+    if key and isinstance(result,dict) and result.get('isError') is not True:self.read_cache[key]=(started,copy.deepcopy(result))
+    return result
+  if self.gateway is not None:self.order_cache.clear();self.permission_cache.clear()
   self.gateway=ReadOnlyGateway(token);return self.gateway
  def permission_key(self,request,currency,portfolios):
-  return (request['asset_id'],request['ticker'].casefold(),str(request.get('exchange') or '').casefold(),currency,tuple(sorted(p['id'] for p in portfolios)),request.get('risk',{}).get('proposed_quantity') is not None)
+  return (request['asset_id'],request['ticker'].casefold(),str(request.get('exchange') or '').casefold(),currency,tuple(sorted((p['id'],p.get('external_id'),p.get('parent_external_id'),p.get('kind')) for p in portfolios)),request.get('risk',{}).get('proposed_quantity') is not None)
  def tradability(self,request,currency,portfolios):
   """Only use current read-only Pluto instrument and account evidence."""
   import trade_service
@@ -158,21 +165,33 @@ class PlutoAdapter:
    for portfolio in portfolios:trade_service.fresh_permission(client,tools,self.connect,self.uid,portfolio)
    kinds={v.upper() for node in (asset,raw) for field in ('type','assetType') if isinstance((v:=node.get(field)),str) and 1<=len(v)<=100}
    kind=next(iter(kinds)) if len(kinds)==1 else None
+   # Cached account evidence retains its original verification time.
+   used={'list_portfolios','list_collections'} if any(p.get('kind')=='collection' for p in portfolios) else {'list_portfolios'}
+   now=min([now]+[v[0] for k,v in getattr(client,'read_cache',{}).items() if k in used])
    self.permission_cache[key]={'at':now,'status':'available','instrument_type':kind};return 'available',now
-  except Exception:return 'unknown',None
+  except Exception:
+   cache=getattr(locals().get('client'),'read_cache',None)
+   if isinstance(cache,dict):cache.clear()
+   return 'unknown',None
  def context(self,request,currency):
+  # Serialize broker refreshes for this user only, never market-data work or
+  # SQLite scopes. The next scan rechecks the shared DB snapshot after waiting.
+  with self.context_lock:return self._context(request,currency)
+ def _context(self,request,currency):
   import portfolio_data
   result=unknown_context();rows=[];portfolios=[];automatic=not request['portfolio_ids']
   with self.connect() as c:
-   if automatic:
-    portfolios=[dict(p) for p in c.execute("SELECT * FROM portfolios WHERE user_id=? AND source='pluto' AND active=1 ORDER BY id",(self.uid,))]
-   else:
-    for pid in request['portfolio_ids']:
-     p=c.execute("SELECT * FROM portfolios WHERE id=? AND user_id=? AND source='pluto' AND active=1",(pid,self.uid)).fetchone()
-     if not p:return unknown_context('PORTFOLIO_NOT_ACTIVE')
-     portfolios.append(dict(p))
+   owned=[dict(p) for p in c.execute("SELECT * FROM portfolios WHERE user_id=? AND source='pluto' AND active=1 ORDER BY id",(self.uid,))]
+   by_id={p['id']:p for p in owned}
+   if any(pid not in by_id for pid in request['portfolio_ids']):return unknown_context('PORTFOLIO_NOT_ACTIVE')
+   portfolios=owned if automatic else [by_id[pid] for pid in request['portfolio_ids']]
+   scope=tuple((p['id'],p['external_id'],p.get('parent_external_id'),p['kind']) for p in owned)
    overlap=any(a['external_id']==b.get('parent_external_id') for a in portfolios for b in portfolios)
    if overlap and not automatic:return unknown_context('PORTFOLIO_SCOPE_OVERLAP')
+  if getattr(self,'portfolio_scope',scope)!=scope:
+   self.permission_cache.clear();self.order_cache.clear()
+   if self.gateway is not None:getattr(self.gateway,'read_cache',{}).clear()
+  self.portfolio_scope=scope
   for p in portfolios:
    with self.connect() as c:row=c.execute('SELECT * FROM portfolio_snapshots WHERE portfolio_id=? AND user_id=?',(p['id'],self.uid)).fetchone()
    payload=json.loads(row['payload']) if row and not row['last_error'] and 0<=(utc()-stamp(row['observed'])).total_seconds()<=300 else None
@@ -238,13 +257,13 @@ class PlutoAdapter:
   import oauth,trade_service,portfolio_data
   result=[];now=utc().timestamp()
   for p in portfolios:
-   cached=self.order_cache.get(p['id'])
+   cache_key=(p['id'],p.get('external_id'),p.get('parent_external_id'),p.get('kind'));cached=self.order_cache.get(cache_key)
    if not cached or now-cached['at']>=300:
     parent=p['external_id'] if p['kind']=='portfolio' else p['parent_external_id']
     if not parent:continue
     cl=self.factory(oauth.access_token(self.connect,self.uid));tools={t['name']:t for t in cl.tools()}
     raw=trade_service.call(cl,tools,'list_orders',{'portfolioId':parent.split(':',1)[1],'statusGroup':'INACTIVE','scope':'DIRECT' if p['kind']=='portfolio' else 'COLLECTION','limit':50})
-    rows=portfolio_data.list_data(raw,['orders','items','data']);cached={'at':now,'rows':rows[:50]};self.order_cache[p['id']]=cached
+    rows=portfolio_data.list_data(raw,['orders','items','data']);cached={'at':now,'rows':rows[:50]};self.order_cache[cache_key]=cached
    for row in cached['rows']:
     if not isinstance(row,dict):continue
     if p['kind']=='collection' and row.get('collectionId')!=p['external_id'].split(':',1)[1]:continue
@@ -259,6 +278,8 @@ class PlutoAdapter:
     result.append({'order_id':identity,'status':status,'requested_quantity':portfolio_data.number(row.get('requestedQuantity',body.get('quantity'))),'filled_quantity':portfolio_data.number(row.get('filledQuantity')),'side':row.get('side') if row.get('side') in ['BUY','SELL'] else None,'status_time':changed})
   return result
  def poll(self,session):
+  with self.context_lock:return self._poll(session)
+ def _poll(self,session):
   import market_data
   r=session['request_data']
   if r['report_id']=='manual-pluto':
@@ -317,7 +338,10 @@ class EODHDAdapter:
   req=session['request_data'];capture_started=time.monotonic()
   def record(value,symbols,reused):
    if not hasattr(self,'capture_metrics'):self.capture_metrics=[]
-   self.capture_metrics.append({'feed':feed,'subscriptions_sent':0 if reused else value.get('subscriptions_sent'),'connections_opened':0 if reused else value.get('connections_opened'),'batch_symbols':symbols,'capture_attempts':0 if reused else 1,'cache_hit':reused,'status':value.get('status'),'wait_ms':round((time.monotonic()-capture_started)*1000,3),'messages':len(value.get('messages',[]))})
+   messages=value.get('messages',[]);latest=max(messages,key=lambda m:stamp(m['event_time'])) if messages else {}
+   age=(utc()-stamp(latest['event_time'])).total_seconds() if latest.get('event_time') else None
+   received_age=(utc()-stamp(latest['received_at'])).total_seconds() if latest.get('received_at') else None
+   self.capture_metrics.append({'source_age_s':round(age,3) if age is not None else None,'received_age_s':round(received_age,3) if received_age is not None else None,'feed':feed,'subscriptions_sent':0 if reused else value.get('subscriptions_sent'),'connections_opened':0 if reused else value.get('connections_opened'),'batch_symbols':symbols,'capture_attempts':0 if reused else 1,'cache_hit':reused,'status':value.get('status'),'wait_ms':round((time.monotonic()-capture_started)*1000,3),'messages':len(value.get('messages',[]))})
    return value
   if not self._shared_quotes or self.connect is None or session.get('id') is None or req.get('is_test'):
    return record(client.capture(feed,symbol,duration=2),1,False)
@@ -329,7 +353,8 @@ class EODHDAdapter:
   while True:
    with _ws_batch_lock:
     cached=_ws_batch_cache.get(key);now=time.monotonic()
-    if cached and 0<=now-cached[0]<cache_ttl:return record(copy.deepcopy(cached[1]),0,True)
+    usable=cached and (cached[1].get('status')=='NO_MESSAGES' or any(m.get('event_time') and 0<=(utc()-stamp(m['event_time'])).total_seconds()<=req['risk']['max_quote_age_s'] for m in cached[1].get('messages',[])))
+    if usable and 0<=now-cached[0]<cache_ttl:return record(copy.deepcopy(cached[1]),0,True)
     waiting=_ws_batch_inflight.get(group)
     if waiting is None:
      waiting=threading.Event();_ws_batch_inflight[group]=waiting;leader=True
@@ -421,6 +446,9 @@ class EODHDAdapter:
   if os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and exchange and exchange!='US' and exchange not in eu_exchanges:self.last_feed_diagnostics={'websocket_trade_status':'MARKET_MAPPING_UNVERIFIED'}
   if os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and (exchange=='US' or exchange in eu_exchanges):
    market='us' if exchange=='US' else 'eu';stream_symbol=realtime_symbol(symbol)
+   # Complete slow broker refreshes before acquiring the actionable trade.
+   # This prevents a fresh source observation aging in a broker/network queue.
+   context_started=time.perf_counter();context=self.pluto.safe_context(r,r.get('quote_currency'));context_ms=(time.perf_counter()-context_started)*1000
    client=self.feeds();stream_started=time.perf_counter();feed=self.capture(client,market+'_trades',stream_symbol,session);stream_ms=(time.perf_counter()-stream_started)*1000
    partial=feed.get('partial_messages',[])
    if partial:
@@ -446,26 +474,12 @@ class EODHDAdapter:
     if valid:
      trade=max(valid,key=lambda x:stamp(x['event_time']));at=stamp(trade['event_time']);currency=r.get('quote_currency')
      if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):raise DataUnavailable('EODHD_CURRENCY_UNCONFIRMED')
-     context_started=time.perf_counter();context=self.pluto.safe_context(r,currency);context_ms=(time.perf_counter()-context_started)*1000
      self.last_telemetry={'websocket_capture_ms':round(stream_ms,3),'pluto_context_ms':round(context_ms,3),'event_to_websocket_receive_ms':round((stamp(trade['received_at'])-at).total_seconds()*1000,3) if trade.get('received_at') else None}
      state=json.loads(session.get('state') or '{}');profile=state.get('adaptive_profile') or r['profile']
      interval=self.interval(r,profile)
      sample={'sample_id':'eodhd-ws-'+hashlib.sha256((symbol+trade['event_time']).encode()).hexdigest()[:28],'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':None,'currency':currency,'event_time':trade['event_time'],'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD WebSocket '+market+' trade; venue not supplied; not necessarily consolidated','documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':interval,'price':trade['price'],'trade_size':trade.get('trade_size'),'bid':None,'ask':None,'volume':None,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context,'price_time_kind':'trade'}
      if trade.get('market_session')=='closed':sample.update(market_status='CLOSED',session_key=at.date().isoformat()+':CLOSED',status_at=trade['event_time'],status_feed=market+'_trades')
      if trade.get('market_session')=='open':sample.update(market_status='REGULAR',session_key=at.date().isoformat()+':REGULAR',status_at=trade['event_time'],status_feed=market+'_trades')
-     if session.get('id') is not None:
-      with self.connect() as c:old=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(session['id'],'eodhd',sample['sample_id'])).fetchone()
-      if old:
-       # The latest trade can be unchanged while the order book moves. Keep
-       # the new quote separately rather than mutating an immutable trade.
-       if os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
-        quote_feed=self.capture(client,market+'_quotes',stream_symbol,session)
-        self.last_feed_diagnostics['websocket_quote_status']=quote_feed.get('status')
-        quotes=quote_feed.get('messages',[])
-        if quotes:
-         q=max(quotes,key=lambda x:stamp(x['event_time']))
-         if q.get('bid') is not None or q.get('ask') is not None:self.last_partial_observations.append({'source':'eodhd','price':None,'currency':currency,'source_time':q['event_time'],'received_at':q.get('received_at'),'quality':'QUOTE_ONLY','bid':q.get('bid'),'ask':q.get('ask')})
-       previous=json.loads(old['payload']);previous['context']=context;return previous
      if os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
       quote_feed=self.capture(client,market+'_quotes',stream_symbol,session)
       partial_quotes=quote_feed.get('partial_messages',[])

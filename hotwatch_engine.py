@@ -98,7 +98,15 @@ def observation_poll_interval(c,request,profile,now,sample):
  """Recheck aging live trades at the existing ACTIVE cadence, within budget."""
  interval=effective_poll_interval(c,request,profile)
  if sample and request['provider']=='eodhd' and sample.get('price_time_kind')=='trade' and sample.get('market_status') in ('REGULAR','PRE','AFTER'):
-  remaining=min(request['risk']['max_quote_age_s'],GLOBAL_RISK['max_quote_age_s'])-(now-stamp(sample['event_time'])).total_seconds()
+  age=min(request['risk']['max_quote_age_s'],GLOBAL_RISK['max_quote_age_s'])
+  deadlines=[stamp(sample['event_time']).timestamp()+age]
+  for key in ('status_at','bid_at','ask_at'):
+   if sample.get(key):deadlines.append(stamp(sample[key]).timestamp()+age)
+  context=sample.get('context') or {}
+  if context.get('as_of'):deadlines.append(stamp(context['as_of']).timestamp()+300)
+  if sample.get('bar_history') and verified_bar_samples(sample,request,now) is not None:
+   deadlines.extend([stamp(sample['bar_history'][-1]['bar_open_at']).timestamp()+60+age,stamp(sample['bar_evidence']['schedule_received_at']).timestamp()+age])
+  remaining=min(deadlines)-now.timestamp()
   if remaining<=interval:
    interval=min(interval,effective_poll_interval(c,request,'ACTIVE'))
  return interval
@@ -818,9 +826,6 @@ def sample_errors(sample,request,now):
  for field in ('bid_at','ask_at','status_at'):
   if sample.get(field) and stamp(sample[field])>now:raise EngineError('future_market_data')
  if sample['source']=='eodhd' and not (request['is_test'] and sample['feed_type']=='synthetic interval bars'):
-  if sample['bid'] is not None or sample['ask'] is not None:
-   if not sample.get('bid_at') or not sample.get('ask_at') or not sample.get('quote_feed'):raise EngineError('quote_evidence_missing')
-   if any(not 0<=(now-stamp(sample[k])).total_seconds()<=request['risk']['max_quote_age_s'] for k in ('bid_at','ask_at')):raise EngineError('quote_evidence_stale')
   if sample['market_status']!='UNKNOWN':
    if not sample.get('status_at') or not sample.get('status_feed'):raise EngineError('market_status_evidence_missing')
    if not 0<=(now-stamp(sample['status_at'])).total_seconds()<=request['risk']['max_quote_age_s']:raise EngineError('market_status_evidence_stale')
@@ -835,14 +840,38 @@ def sample_errors(sample,request,now):
 
 def analysis_snapshot(c,row,sample,request,now):
  """Immutable history/version for pure feature work outside the writer lock."""
- newest=c.execute('SELECT id FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
- version=(row['request'],row['strategy'],newest['id'] if newest else None)
+ newest=c.execute('SELECT id,digest FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
+ version=(row['request'],row['strategy'],(newest['id'],newest['digest']) if newest else None)
  bars=verified_bar_samples(sample,request,now) if sample.get('bar_history') else None
  if bars is not None:samples=[sample]
  else:
   prior=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND event_epoch<? ORDER BY event_epoch DESC,id DESC LIMIT 119',(row['id'],stamp(sample['event_time']).timestamp())).fetchall()
   samples=[json.loads(r['payload']) for r in reversed(prior)]+[sample]
  return version,bars,samples
+
+def refreshed_trade_evidence(previous,current,request,now):
+ """Renew separately timestamped evidence, never the trade or confirmations."""
+ groups=[('bid_at',('bid','ask','bid_at','ask_at','quote_feed')),
+         ('status_at',('market_status','session_key','status_at','status_feed')),
+         ('bar_evidence',('bar_history','bar_evidence'))]
+ auxiliary={'context','sample_id','interval_s'}|{k for _,keys in groups for k in keys}
+ if previous.get('source')!='eodhd' or previous.get('price_time_kind')!='trade':return current
+ if {k:v for k,v in previous.items() if k not in auxiliary}!={k:v for k,v in current.items() if k not in auxiliary}:raise EngineError('sample_id_conflict',409)
+ merged=dict(previous,context=current['context'])
+ for time_key,keys in groups:
+  if time_key=='bar_evidence':
+   if verified_bar_samples(current,request,now) is None:continue
+   old_time=(previous.get('bar_evidence') or {}).get('schedule_received_at');new_time=current['bar_evidence']['schedule_received_at']
+   if previous.get('bar_history') and stamp(current['bar_history'][-1]['bar_open_at'])<stamp(previous['bar_history'][-1]['bar_open_at']):continue
+  else:
+   old_time=previous.get(time_key);new_time=current.get(time_key)
+   if time_key=='bid_at' and previous.get('ask_at') and current.get('ask_at') and stamp(current['ask_at'])<stamp(previous['ask_at']):continue
+  if not new_time or old_time and stamp(new_time)<stamp(old_time):continue
+  if old_time==new_time and time_key!='bar_evidence' and any(previous.get(k)!=current.get(k) for k in keys):raise EngineError('sample_id_conflict',409)
+  for key in keys:
+   if key in current:merged[key]=current[key]
+   else:merged.pop(key,None)
+ return merged
 
 def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True):
  now=now or utc()
@@ -877,27 +906,37 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   if request['end_at'] and stamp(request['end_at'])<=now:
    c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']));event(c,row,'WATCH_EXPIRED',now,'Session deadline reached');return {'ok':True,'expired':True}
   sample_errors(sample,request,now)
-  newest=c.execute('SELECT id FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
-  same_history=prepared_version==(row['request'],row['strategy'],newest['id'] if newest else None) and sample==prepared_samples[-1]
+  newest=c.execute('SELECT id,digest FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
+  same_history=prepared_version==(row['request'],row['strategy'],(newest['id'],newest['digest']) if newest else None) and sample==prepared_samples[-1]
   old=c.execute('SELECT id,digest,payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(row['id'],sample['source'],sample['sample_id'])).fetchone()
   if old is None and row['last_data'] and stamp(sample['event_time'])==stamp(row['last_data']):old=c.execute('SELECT id,digest,payload FROM hw_samples WHERE watch_row_id=? AND source=? AND event_epoch=? ORDER BY id DESC LIMIT 1',(row['id'],sample['source'],stamp(sample['event_time']).timestamp())).fetchone()
   new_market_event=True
   if old:
    if row['last_data'] and stamp(json.loads(old['payload'])['event_time'])!=stamp(row['last_data']):raise EngineError('historical_sample_context_update',409)
-   previous_sample=json.loads(old['payload'])
+   previous_sample=json.loads(old['payload']);incoming=sample
+   sample=refreshed_trade_evidence(previous_sample,sample,request,now)
+   if sample!=incoming:
+    same_history=False;sample_errors(sample,request,now)
    previous_market={k:v for k,v in previous_sample.items() if k not in ['context','sample_id']};current_market={k:v for k,v in sample.items() if k not in ['context','sample_id']}
-   if previous_market!=current_market:raise EngineError('sample_id_conflict',409)
+   evidence_changed=previous_market!=current_market
+   if evidence_changed and not (sample['source']=='eodhd' and sample.get('price_time_kind')=='trade'):raise EngineError('sample_id_conflict',409)
    extra=c.execute('SELECT payload FROM hw_context_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
    prior_context=json.loads(extra['payload']) if extra else previous_sample['context'];current_context=sample['context']
+   if prior_context.get('as_of') and current_context.get('as_of') and stamp(current_context['as_of'])<stamp(prior_context['as_of']):
+    current_context=prior_context;sample=dict(sample,context=prior_context);same_history=False
    material=lambda context:{k:v for k,v in context.items() if k!='as_of'}
    fresh=lambda context:bool(context['as_of'] and 0<=now.timestamp()-stamp(context['as_of']).timestamp()<=300)
    renewed=current_context.get('as_of') and (not prior_context.get('as_of') or stamp(current_context['as_of'])>stamp(prior_context['as_of']))
-   if material(prior_context)==material(current_context) and fresh(prior_context)==fresh(current_context) and not renewed:
+   if material(prior_context)==material(current_context) and fresh(prior_context)==fresh(current_context) and not renewed and not evidence_changed:
     result={'ok':True,'duplicate':True}
     if include_session:result['session']=view(c,row,now)
     return result
-   c.execute('INSERT INTO hw_context_events(watch_row_id,sample_row_id,observed,payload) VALUES(?,?,?,?)',(row['id'],old['id'],now.isoformat(),canonical(current_context)))
-   event(c,row,'BROKER_CONTEXT_UPDATED',now,'Position/order context changed; no new market observation',data_time=current_context['as_of'])
+   if prior_context!=current_context:
+    c.execute('INSERT INTO hw_context_events(watch_row_id,sample_row_id,observed,payload) VALUES(?,?,?,?)',(row['id'],old['id'],now.isoformat(),canonical(current_context)))
+    event(c,row,'BROKER_CONTEXT_UPDATED',now,'Position/order context changed; no new market observation',data_time=current_context['as_of'])
+   if evidence_changed:
+    c.execute('UPDATE hw_samples SET payload=?,digest=? WHERE id=?',(canonical(sample),checksum(sample),old['id']))
+    event(c,row,'MARKET_EVIDENCE_UPDATED',now,'Quote/calendar evidence renewed; original trade time unchanged',metrics={'previous_digest':old['digest'],'current_digest':checksum(sample),'bid_at':sample.get('bid_at'),'ask_at':sample.get('ask_at'),'status_at':sample.get('status_at')},data_time=sample['event_time'])
    sample_row_id=old['id'];new_market_event=False
   else:
    if row['last_data'] and stamp(sample['event_time'])<=stamp(row['last_data']):raise EngineError('out_of_order_market_data',409)
@@ -942,7 +981,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
    result['early_catalyst']=pilot
   result['analysis_uses_bars']=bar_samples is not None
   result['position_context']=risk_sample['context'];result['new_market_observation']=new_market_event
-  result.update(engine_version='1.0-phase1-2',feature_version='1.2.0',risk_version='1.1.0',global_risk_limits=GLOBAL_RISK,algorithm_constraints={'max_volatility_pct':'5','max_price_gap_pct':'5','max_action_signals_hour':20,'max_context_age_s':300},risk_parameters=risk,prior_signal_state=state,input_sample_ids=[s['sample_id'] for s in samples])
+  result.update(engine_version='1.0-phase1-2',feature_version='1.3.0',risk_version='1.1.0',global_risk_limits=GLOBAL_RISK,algorithm_constraints={'max_volatility_pct':'5','max_price_gap_pct':'5','max_action_signals_hour':20,'max_context_age_s':300},risk_parameters=risk,prior_signal_state=state,input_sample_ids=[s['sample_id'] for s in samples])
   metrics['quote_age_s']=format(Decimal(str(now.timestamp()-stamp(sample['event_time']).timestamp())),'f');result['supporting_metrics']=metrics
   c.execute('INSERT INTO hw_calculations(watch_row_id,sample_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?,?)',(row['id'],sample_row_id,now.isoformat(),canonical(result),result['strategy_checksum']))
   cycle=request.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':wid})[:24]

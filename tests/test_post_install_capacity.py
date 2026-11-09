@@ -154,7 +154,7 @@ class LiveCapacity(unittest.TestCase):
   self.f.put(fixtures.tick(self.now))
   with patch('hotwatch_engine.utc',return_value=self.now):
    data=engine.sync(app.connect,1,True,summary_only=True,session_limit=1)['open_sessions'][0]
-  self.assertEqual(data['signal'],'NO_DATA');self.assertEqual(data['display_status'],'WARMUP')
+  self.assertEqual(data['signal'],'NO_DATA');self.assertEqual(data['display_status'],'AFVENTER SIGNALDATA')
   self.assertIn('context_diagnostic',data)
   at=self.now+timedelta(seconds=1)
   self.f.put(fixtures.tick(at,index=1,price='90',held=True),at)

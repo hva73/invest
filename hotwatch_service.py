@@ -852,7 +852,7 @@ def worker_settings():
  return {k:(v if v is None or re.fullmatch(r'[A-Za-z0-9_,.-]{0,100}',v) else 'INVALID') for k in keys for v in [os.environ.get(k)]}
 
 class Runner:
- def __init__(self,connect):self.connect=serialized_database(connect);self.adapters={};self.stop=threading.Event();self._workers=[]
+ def __init__(self,connect):self.connect=serialized_database(connect);self.adapters={};self.brokers={};self.broker_lock=threading.Lock();self.stop=threading.Event();self._workers=[]
  def once(self,now=None,watch_id=None):
   now=now or engine.utc();claim_started=time.perf_counter();job=engine.claim(self.connect,now,watch_id);claimed=engine.utc()
   if not job:return False
@@ -867,7 +867,13 @@ class Runner:
     engine.release(self.connect,job,now);return True
    key=(uid,r['provider']);adapter=self.adapters.get(key)
    if not adapter:
-    adapter={'pluto':PlutoAdapter,'eodhd':EODHDAdapter,'report_inbox':InboxAdapter}[r['provider']](self.connect,uid);self.adapters[key]=adapter
+    adapter={'pluto':PlutoAdapter,'eodhd':EODHDAdapter,'report_inbox':InboxAdapter}[r['provider']](self.connect,uid)
+    if r['provider'] in ('pluto','eodhd'):
+     with self.broker_lock:
+      broker=self.brokers.setdefault(uid,adapter if r['provider']=='pluto' else adapter.pluto)
+     if r['provider']=='pluto':adapter=broker
+     else:adapter.pluto=broker
+    self.adapters[key]=adapter
    sample=adapter.poll(job);adapter_received=engine.utc();provider_done=time.perf_counter()
    job['scan_timing']['poll_finished_at']=adapter_received.isoformat()
    self.partials(job,adapter)
@@ -907,7 +913,8 @@ class Runner:
     except EngineError as context_error:
      if context_error.code in ['lease_lost','watch_not_running','kill_switch_active','operator_kill_switch']:return True
      self.log(job,'context_rejected',context_error.code)
-   engine.fault(self.connect,uid,wid,mode,error.code,lease=lease,retry_after_s=getattr(error,'retry_after_s',None));self.health(job,None,error.code);self.log(job,'degraded',error.code)
+   captures=getattr(adapter,'capture_metrics',[])
+   engine.fault(self.connect,uid,wid,mode,error.code,lease=lease,retry_after_s=getattr(error,'retry_after_s',None));self.health(job,None,error.code);self.log(job,'degraded',error.code,{'websocket':captures if isinstance(captures,list) else [],'provider_ms':round((time.perf_counter()-poll_started)*1000,3)})
   except Exception as error:
    code=processing_error_code(error)
    locks=None
@@ -957,7 +964,7 @@ class Runner:
   except (TypeError,ValueError):requested=1;lease_limit=1
   workers=max(1,min(10,engine.capacity(),requested,lease_limit))
   while len(self._workers)<workers-1:
-   child=Runner(self.connect);child.stop=self.stop;self._workers.append(child)
+   child=Runner(self.connect);child.stop=self.stop;child.brokers=self.brokers;child.broker_lock=self.broker_lock;self._workers.append(child)
   runners=[self]+self._workers[:workers-1];count=0;limit=engine.capacity()
   with ThreadPoolExecutor(max_workers=workers,thread_name_prefix='hotwatch') as pool:
    pending={pool.submit(r.once):r for r in runners if not self.stop.is_set()}

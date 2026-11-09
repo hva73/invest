@@ -150,6 +150,48 @@ def position_hotwatch(c,uid,portfolio_id,asset_id,report_position):
    warmup={'count':analysis['count'],'required':analysis['required'],'remaining':analysis['remaining'],'analysis_only':True,'complete':analysis['state']=='WARMUP COMPLETE','data_stale':analysis['freshness']=='DATA STALE' or bool(current.get('last_data_at') and current.get('data_stale')),'data_missing':not current.get('last_data_at'),'data_error':bool(current.get('last_error') and current['last_error']!='DATA_STALE'),'market_status_unknown':quality.get('market_status')=='UNKNOWN' and not regular_closed,'regular_closed':regular_closed}
  return {'auto_status':dict(auto) if auto else None,'candidate_id':candidate_id,'trade_cycle_id':cycle,'lifecycle':dict(lifecycle) if lifecycle else None,'session':({'watch_id':current['watch_id'],'is_test':False,'status':current['status'],'last_data_at':current['last_data_at'],'signal':current['signal'],'display_status':current['display_status'],'last_calculation_at':current.get('last_calculation_at'),'last_action_signal':current.get('last_action_signal'),'warmup':warmup} if current else None),'link_basis':'unique_asset_and_portfolio_scope' if asset_fallback else 'candidate_id+asset_id+portfolio' if report_position and report_position.get('candidate_id') else 'asset_id+portfolio+trade_cycle_id' if candidate_id and cycle else 'unique_asset_and_portfolio_scope' if session else None}
 
+def overview_positions(positions):
+ """Group leaf holdings for display only; broker scopes remain authoritative."""
+ groups={};output=[]
+ for row in positions:
+  # Parent collection summary values already include the leaves. Never add
+  # those summaries to direct holdings plus independently loaded collections.
+  if row.get('raw',{}).get('kind')=='collection':continue
+  aid=row.get('asset_id')
+  if not aid:output.append(row);continue
+  groups.setdefault(aid,[]).append(row)
+ def summed(members,*fields):
+  for field in fields:
+   values=[r.get(field) for r in members]
+   if all(isinstance(v,dict) and v.get('currency') and policy.decimal(v.get('amount')) is not None for v in values) and len({v['currency'] for v in values})==1:
+    return {'amount':str(sum((Decimal(v['amount']) for v in values),Decimal(0))),'currency':values[0]['currency']}
+  return None
+ for aid,members in groups.items():
+  if len(members)==1:output.append(members[0]);continue
+  quantities=[policy.decimal(r.get('quantity')) for r in members]
+  quantity=sum(quantities,Decimal(0)) if all(q is not None and q>=0 for q in quantities) else None
+  average=None;entries=[r.get('average_entry') or {} for r in members]
+  if quantity is not None and quantity>0 and all(e.get('currency') and policy.decimal(e.get('amount')) is not None for e in entries) and len({e['currency'] for e in entries})==1:
+   average={'amount':str(sum((q*Decimal(e['amount']) for q,e in zip(quantities,entries)),Decimal(0))/quantity),'currency':entries[0]['currency']}
+  value=summed(members,'value','original_value');pnl=summed(members,'unrealized','original_unrealized');cost=summed(members,'cost_basis')
+  original_pnl=summed(members,'original_unrealized');basis_pnl=pnl if pnl and cost and pnl['currency']==cost['currency'] else original_pnl
+  percent=str(Decimal(basis_pnl['amount'])/Decimal(cost['amount'])*100) if cost and basis_pnl and cost['currency']==basis_pnl['currency'] and Decimal(cost['amount'])>0 else None
+  latest=max(members,key=lambda r:r.get('snapshot_at') or '')
+  times=[r.get('snapshot_at') for r in members]
+  combined=dict(latest,key='asset:'+aid,portfolio_id=None,portfolio_name='Samlet · '+str(len(members))+' depoter',portfolio_kind='combined',external_id=None,
+   member_keys=[r['key'] for r in members],quantity=str(quantity) if quantity is not None else None,value=value,cost_basis=cost,average_entry=average,
+   unrealized=pnl,unrealized_percent=percent,unrealized_estimated=any(r.get('unrealized_estimated') or r.get('raw',{}).get('unrealized_basis')=='calculated_value_cost' and pnl and (r.get('original_unrealized') or {}).get('currency')==pnl['currency'] for r in members),
+   original_value=summed(members,'original_value'),original_unrealized=original_pnl,
+   snapshot_at=min(times) if all(times) else None,verification='broker_snapshot' if all(r.get('verification')=='broker_snapshot' for r in members) else 'last_known',
+   # A combined row never borrows one account's order/signal/history identity.
+   hot_watch={},assessment=None,assessment_report_id=None,reported_position=None,action=None,
+   critical=any(r.get('critical') for r in members),conflicts=list(dict.fromkeys(x for r in members for x in r.get('conflicts',[]))),raw={})
+  for field in ('daily','since_last'):
+   combined[field]=members[0].get(field) if all(r.get(field)==members[0].get(field) for r in members) else None
+  combined['missing']={**latest.get('missing',{}),'aggregate_value':value is None,'aggregate_result':pnl is None,'aggregate_average':average is None}
+  output.append(combined)
+ return output
+
 def build(connect,uid,owned,snapshots,now=None):
  now=now or datetime.now(timezone.utc);result=[];warnings=[];totals={};accounts=[];orders=[]
  with connect() as c:
@@ -220,7 +262,7 @@ def build(connect,uid,owned,snapshots,now=None):
     action=a.get('action') if a else None
     hotwatch=position_hotwatch(c,uid,p['id'],aid,report) if aid else {'candidate_id':None,'trade_cycle_id':None,'lifecycle':None,'session':None,'link_basis':None}
     reasons={'daily':'PROVIDER_DAILY_CHANGE_NOT_PROVIDED' if daily is None else None,'since_last':'NO_COMPARABLE_PLUTO_SNAPSHOT' if since is None else None,'fx':'DKK_CONVERSION_NOT_PROVIDED' if shown.get('currency')!='DKK' else None,'assessment':'NO_EXACT_ASSET_AND_PORTFOLIO_ASSESSMENT' if not a else None,'candidate_link':'NO_VERIFIED_CANDIDATE_AND_TRADE_CYCLE_LINK' if not hotwatch['candidate_id'] else None}
-    result.append({'key':identity,'portfolio_id':p['id'],'portfolio_name':p['name'],'portfolio_kind':p['kind'],'external_id':p['external_id'],'asset_id':aid,'ticker':row.get('ticker'),'name':row.get('name'),'quantity':row.get('quantity'),'price':row.get('price'),'price_time':row.get('price_time'),'value':shown,'original_value':raw_value,'cost_basis':cost,'average_entry':row.get('average_entry'),'unrealized':pnl,'unrealized_estimated':estimated and pnl is not None,'unrealized_percent':pnl_percent,'daily':daily,'since_last':since,'assessment':a,'assessment_report_id':matched[1] if matched else None,'reported_position':report,'hot_watch':hotwatch,'action':action,'critical':action in ['SÆLG','REDUCÉR'] or bool(conflicts),'price_freshness':price_age,'analysis_freshness':analysis_age,'snapshot_at':position_data.get('observed'),'verification':'last_known' if failed or not data.get('positions_complete') else 'broker_snapshot','conflicts':conflicts,'missing':reasons,'raw':row})
+    result.append({'key':identity,'portfolio_id':p['id'],'portfolio_name':p['name'],'portfolio_kind':p['kind'],'external_id':p['external_id'],'asset_id':aid,'ticker':row.get('ticker'),'name':row.get('name'),'quantity':row.get('quantity'),'price':row.get('price'),'price_time':row.get('price_time'),'value':shown,'original_value':raw_value,'original_unrealized':raw_pnl if not row.get('unrealized_basis') or row.get('unrealized_basis')=='calculated_value_cost' else None,'cost_basis':cost,'average_entry':row.get('average_entry'),'unrealized':pnl,'unrealized_estimated':estimated and pnl is not None,'unrealized_percent':pnl_percent,'daily':daily,'since_last':since,'assessment':a,'assessment_report_id':matched[1] if matched else None,'reported_position':report,'hot_watch':hotwatch,'action':action,'critical':action in ['SÆLG','REDUCÉR'] or bool(conflicts),'price_freshness':price_age,'analysis_freshness':analysis_age,'snapshot_at':position_data.get('observed'),'verification':'last_known' if failed or not data.get('positions_complete') else 'broker_snapshot','conflicts':conflicts,'missing':reasons,'raw':row})
   try:
    sessions=[]
    for row in c.execute("SELECT watch_id,status,last_error,last_data,request FROM hw_sessions WHERE user_id=? AND is_test=0 AND status IN ('DEGRADED','ERROR')",(uid,)):
@@ -229,7 +271,7 @@ def build(connect,uid,owned,snapshots,now=None):
   value_history=portfolio_value_history(c,uid,now)
  currencies={r['value'].get('currency') for r in result if r['value']}
  result.sort(key=lambda r:(not r['critical'],r['portfolio_name'].casefold(),r['value'].get('currency') or '',-(policy.decimal(r['value'].get('amount')) or Decimal(0)),r['ticker'] or ''))
- return {'policy':{'version':'1.0.0','limits':policy.LIMITS},'version':'design-1','positions':result,'count':len(result),'accounts':accounts,'totals':[{'currency':k,'amount':str(v)} for k,v in totals.items()],'portfolio_value_history':value_history,'daily_result':None,'daily_result_reason':'Pengestrømme og dokumenteret dagsreference er ikke tilgængelige','orders':orders,'warnings':warnings,'critical_sessions':sessions,'snapshot_at':max((a['snapshot_at'] for a in accounts if a['snapshot_at']),default=None),'mixed_value_currencies':len(currencies)>1}
+ return {'policy':{'version':'1.0.0','limits':policy.LIMITS},'version':'design-1','positions':result,'overview_positions':overview_positions(result),'count':len(result),'accounts':accounts,'totals':[{'currency':k,'amount':str(v)} for k,v in totals.items()],'portfolio_value_history':value_history,'daily_result':None,'daily_result_reason':'Pengestrømme og dokumenteret dagsreference er ikke tilgængelige','orders':orders,'warnings':warnings,'critical_sessions':sessions,'snapshot_at':max((a['snapshot_at'] for a in accounts if a['snapshot_at']),default=None),'mixed_value_currencies':len(currencies)>1}
 
 
 def engine_session_view(connect,uid,mode,group,limit=100,before=None):

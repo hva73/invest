@@ -37,10 +37,10 @@ for(const c of cases){
    const d=frame.contentDocument,w=frame.contentWindow,fail=[];
    const menu=d.querySelector('body > aside');
    if(!menu||!menu.querySelector('nav'))fail.push('Navigation mangler');
-   for(const n of d.querySelectorAll('.signal-notice')){
-    const b=n.getBoundingClientRect(),p=n.parentElement.getBoundingClientRect();
-    if(w.getComputedStyle(n).position!=='static')fail.push('Advarsel har menu-position');
-    if(b.left<p.left-1||b.right>p.right+1)fail.push('Advarsel uden for statusfelt');
+   if(d.querySelector('.signal-notice-details'))fail.push('Udvidet advarsel i oversigt');
+   for(const n of d.querySelectorAll('.signal-alert')){
+    const b=n.getBoundingClientRect();
+    if(b.width>44||b.height>44)fail.push('For stort advarselsikon');
    }
    if(d.documentElement.scrollWidth>w.innerWidth+1)fail.push('Vandret side-overflow');
    for(const button of menu.querySelectorAll('nav button')){

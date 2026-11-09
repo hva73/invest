@@ -56,7 +56,7 @@ class FollowupIntegration(unittest.TestCase):
    with app.connect() as c:
     raw=engine.view(c,c.execute('SELECT * FROM hw_sessions').fetchone())
     projected=dashboard_projection.position_hotwatch(c,1,123,self.fixture.req['asset_id'],None)['session']
-   self.assertEqual(raw['display_status'],'WARMUP')
+   self.assertEqual(raw['display_status'],'AFVENTER SIGNALDATA')
    self.assertEqual(projected['display_status'],raw['display_status'])
    self.assertEqual(projected['warmup']['count'],1) # actual calculation, not cache's zero
   with patch('hotwatch_engine.utc',return_value=self.now+timedelta(seconds=121)):

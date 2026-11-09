@@ -71,9 +71,11 @@ class ReviewFixes(unittest.TestCase):
   rows=[tick(self.at+timedelta(seconds=60*i),i) for i in range(34)]+[tick(self.at+timedelta(seconds=1995),34)]
   for s in rows:s.update(source='eodhd',price_time_kind='trade',feed_type='EODHD trades')
   rows[-1]['interval_s']=15
-  self.assertEqual(features(rows,BASELINE['parameters'])['sample_count'],34)
+  self.assertEqual(features(rows,BASELINE['parameters'])['sample_count'],35)
   rows[-1]['event_time']=(self.at+timedelta(seconds=2200)).isoformat()
-  self.assertEqual(features(rows,BASELINE['parameters'])['sample_count'],1)
+  self.assertEqual(features(rows,BASELINE['parameters'])['sample_count'],35)
+  self.assertIsNone(features(rows,BASELINE['parameters'])['return_1_pct'])
+  self.assertIsNone(features(rows,BASELINE['parameters'])['acceleration_pct_s2'])
  def test_prepared_features_run_outside_writer_and_recheck_concurrent_history(self):
   original=engine.features;entered=False
   def concurrent(samples,parameters):

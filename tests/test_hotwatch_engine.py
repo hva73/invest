@@ -261,7 +261,8 @@ class HotWatch(unittest.TestCase):
   with app.connect() as c:c.execute('UPDATE hw_sessions SET is_test=0')
   with patch('hotwatch_engine.utc',return_value=self.now):
    with app.connect() as c:view=dashboard_projection.position_hotwatch(c,1,123,self.req['asset_id'],None)
-  self.assertEqual(view['session']['warmup'],{'count':1,'required':34,'remaining':33})
+  self.assertEqual(view['session']['warmup'],{'count':1,'required':34,'remaining':33,'historical':True})
+  self.assertEqual(view['session']['display_status'],'AFVENTER SIGNALDATA')
   with patch('hotwatch_engine.utc',return_value=self.now+timedelta(seconds=121)):
    with app.connect() as c:view=dashboard_projection.position_hotwatch(c,1,123,self.req['asset_id'],None)
   self.assertEqual(view['session']['warmup'],{'count':1,'required':34,'remaining':33,'historical':True});self.assertNotEqual(view['session']['display_status'],'WARMUP')
@@ -571,8 +572,10 @@ class HotWatch(unittest.TestCase):
   with app.connect() as c:c.execute('UPDATE hw_sessions SET next_due=? WHERE watch_id=?',(self.now.timestamp(),req['watch_id']))
   with patch('hotwatch_engine.utc',return_value=self.now),patch('hotwatch_adapters.utc',return_value=self.now),patch.object(adapter,'feeds',return_value=Feeds()),patch.object(adapter.pluto,'safe_context',return_value=unknown_context()),patch('hotwatch_warmup.refresh'),patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}):
    self.assertTrue(runner.once(self.now,watch_id=req['watch_id']))
-  events=engine.history(app.connect,1,req['watch_id'],True)['items'];quotes=[e['data']['supporting_metrics'] for e in events if e['event_type']=='PARTIAL_MARKET_OBSERVATION']
-  self.assertEqual(quotes[-1]['quality'],'QUOTE_ONLY');self.assertEqual(quotes[-1]['bid'],'25.80');self.assertEqual(len(engine.history(app.connect,1,req['watch_id'],True,'samples')['items']),1)
+  samples=engine.history(app.connect,1,req['watch_id'],True,'samples')['items']
+  self.assertEqual(len(samples),1);self.assertEqual(samples[0]['data']['bid'],'25.80')
+  # This feed repeated the identical quote too: no duplicate journal write.
+  events=engine.history(app.connect,1,req['watch_id'],True)['items'];self.assertFalse(any(e['event_type']=='MARKET_EVIDENCE_UPDATED' for e in events))
  def test_processing_errors_expose_only_safe_category_and_do_not_create_signal(self):
   from hotwatch_service import Runner
   from unittest.mock import Mock
@@ -747,11 +750,11 @@ class HotWatch(unittest.TestCase):
   self.assertEqual(result['calculation']['supporting_metrics']['bar_history_count'],34)
   self.assertNotIn('WARMUP',result['calculation']['reason_codes'])
   self.assertFalse(result['calculation']['critical_override'])
- def test_market_phase_source_currency_interval_and_gaps_reset_features(self):
+ def test_identity_and_phase_reset_but_gaps_keep_actual_period_history(self):
   rows=[tick(self.now+timedelta(minutes=i),i) for i in range(40)]
   for key,value in [('source','eodhd'),('currency','DKK'),('market_status','PRE'),('session_key','NEXT'),('interval_s',15)]:
    changed=copy.deepcopy(rows);changed[-1][key]=value;self.assertEqual(features(changed,BASELINE['parameters'])['sample_count'],1)
-  changed=copy.deepcopy(rows);changed[-1]['event_time']=(self.now+timedelta(hours=10)).isoformat();self.assertEqual(features(changed,BASELINE['parameters'])['sample_count'],1)
+  changed=copy.deepcopy(rows);changed[-1]['event_time']=(self.now+timedelta(hours=10)).isoformat();m=features(changed,BASELINE['parameters']);self.assertEqual(m['sample_count'],40);self.assertIsNone(m['return_3_pct']);self.assertIsNone(m['acceleration_pct_s2'])
  def test_volume_cumulative_deltas_not_session_totals(self):
   rows=[tick(self.now+timedelta(minutes=i),i) for i in range(15)]
   for i,r in enumerate(rows):r.update(volume=str(1000+i*100),volume_type='cumulative')
@@ -1164,7 +1167,7 @@ class HotWatch(unittest.TestCase):
   with patch.dict(os.environ,env),patch('hotwatch_adapters.EODHDAdapter.feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=tick(now)['context']):
    self.assertTrue(Runner(app.connect).once(now,watch_id=r['watch_id']))
   view=engine.item(app.connect,1,r['watch_id'],True)['session']
-  self.assertEqual(view['data_status']['price'],'100');self.assertEqual(view['display_status'],'WARMUP');self.assertEqual(view['signal'],'NO_DATA');self.assertNotEqual(view['last_error'],'EODHD_RATE_LIMIT');self.assertIsNone(view['data_status']['bid'])
+  self.assertEqual(view['data_status']['price'],'100');self.assertEqual(view['display_status'],'AFVENTER SIGNALDATA');self.assertEqual(view['signal'],'NO_DATA');self.assertNotEqual(view['last_error'],'EODHD_RATE_LIMIT');self.assertIsNone(view['data_status']['bid'])
  def test_minute_bar_adapter_to_motor_preserves_volume_and_missing_session(self):
   from hotwatch_service import Runner
   at=engine.utc().replace(microsecond=0);r=copy.deepcopy(self.req);r.update(watch_id='mock-minute-bars',purpose='mock minute bars',provider='eodhd',provider_symbol='MERC.US')
@@ -1389,7 +1392,7 @@ class HotWatch(unittest.TestCase):
   signals=[]
   for i,price in enumerate(prices):
    at=self.now+timedelta(minutes=i);t=tick(at,i,price);t['volume']=str(100 if i<34 else 1000*2**(i-34));last=self.put(t,at);signals.append(last['calculation']['signal'])
-  self.assertIn('BUY',signals);self.assertTrue(all(s=='NO_DATA' for s in signals[:33]));self.assertEqual(last['calculation']['strategy_checksum'],checksum(BASELINE))
+  self.assertIn('BUY',signals);self.assertTrue(all(s in ('NO_DATA','WAIT') for s in signals[:33]));self.assertEqual(last['calculation']['strategy_checksum'],checksum(BASELINE))
   at+=timedelta(minutes=1);t=tick(at,99,'90',True);exit=self.put(t,at);self.assertEqual(exit['calculation']['signal'],'SELL');self.assertTrue(exit['calculation']['critical_override'])
   events=engine.history(app.connect,1,self.req['watch_id'],True,limit=100)['items'];self.assertTrue(any(e['event_type']=='BUY_SIGNAL' for e in events));self.assertTrue(any(e['event_type']=='CRITICAL_OVERRIDE' for e in events))
  def test_weakening_volume_creates_observation_and_event_not_an_order(self):

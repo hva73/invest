@@ -194,7 +194,13 @@ class FeedTests(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
   hotwatch_engine.sample_errors(sample,req,now);self.assertEqual(sample['market_status'],'REGULAR');self.assertEqual(sample['bid'],'45.1');self.assertNotEqual(sample['event_time'],sample['bid_at']);self.assertNotEqual(sample['bid_at'],sample['status_at'])
   stale=copy.deepcopy(sample);stale['ask_at']=(now-timedelta(seconds=121)).isoformat()
-  with self.assertRaisesRegex(ValueError,'quote_evidence_stale'):hotwatch_engine.sample_errors(stale,req,now)
+  # Old optional quotes are retained as observations; the buy gate still rejects them.
+  hotwatch_engine.sample_errors(stale,req,now)
+  from hotwatch_strategy import risk_gate
+  from test_hotwatch_engine import good_metrics,tick
+  stale['context']=tick(now)['context']
+  signal,codes,_=risk_gate(stale,good_metrics(),req['risk'],now,'BUY')
+  self.assertNotEqual(signal,'BUY');self.assertIn('SPREAD_UNKNOWN',codes)
  def test_stale_or_crossed_quotes_do_not_become_a_spread(self):
   from test_hotwatch_engine import request
   req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0);adapter=EODHDAdapter(None,1,Opener({}))
