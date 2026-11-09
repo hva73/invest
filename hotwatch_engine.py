@@ -82,28 +82,30 @@ def effective_poll_interval(c,request,profile=None):
  limit=provider_request_limit(source)
  available=max(1,limit-3 if limit>3 else limit)
  ws=os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1';fuse=os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1';bars=os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1'
- # A verified scan can use trade, quote, status, schedule and bar endpoints.
- # Reserve conservatively so the plan does not promise an unsustainable pace.
+ # Budget the normal configured route. REST is a fallback after a successful
+ # stream, not an additional request on every live scan. Every actual request,
+ # including fallback/recovery calls, still passes the unchanged hard limiter.
  verified_cost=1+(3 if ws and fuse else 0)+(2 if bars else 0)
- row=c.execute("SELECT COALESCE(SUM(CASE WHEN p.watch_row_id IS NOT NULL AND p.symbol=json_extract(s.request,'$.provider_symbol') THEN 1 ELSE ? END),0) AS units FROM hw_sessions s LEFT JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND json_extract(s.request,'$.provider')='eodhd'",(verified_cost,)).fetchone()
- units=max(1,row['units'] or 0)
- # BTC's .CC REST scan costs one request; reserve capacity for it and share
- # the remainder across other scans without exceeding the common budget.
  rows=c.execute("SELECT s.user_id,s.is_test,s.request,p.symbol AS provisional_symbol FROM hw_sessions s LEFT JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND json_extract(s.request,'$.provider')='eodhd'").fetchall()
- btc_count=0;other_units=0;groups={}
+ btc_count=0;other_units=0;groups={};calendars={}
  eu_exchanges={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}-{'CC'}
  for item in rows:
   req=json.loads(item['request']);symbol=req.get('provider_symbol') or ''
   if req.get('purpose')=='automatic holding watch' and req.get('asset_id')==BTC_PLUTO_ASSET_ID and symbol=='BTC-USD.CC':btc_count+=1;continue
-  other_units+=1 if symbol.endswith('.CC') or item['provisional_symbol']==symbol else verified_cost
   exchange=symbol.rsplit('.',1)[-1].upper() if '.' in symbol else ''
-  if ws and fuse and not item['is_test'] and item['provisional_symbol']!=symbol and (exchange=='US' or exchange in eu_exchanges):
+  supported=exchange=='US' or exchange in eu_exchanges
+  provisional=item['provisional_symbol']==symbol
+  cost=1 if symbol.endswith('.CC') or provisional or not item['is_test'] and not supported else verified_cost
+  other_units+=cost
+  if ws and fuse and not item['is_test'] and not provisional and supported:
    key=(item['user_id'],'US' if exchange=='US' else 'EU');groups[key]=groups.get(key,0)+1
- # Trade, quote and status streams can share at most five sessions per feed.
- # REST, calendars and bars stay charged per session. The real request limiter
- # remains authoritative if sessions are not due together or a batch misses.
- savings=sum(3*(count-(count+4)//5) for count in groups.values())
- units=max(1,units-savings);other_units=max(0,other_units-savings)
+   key=(item['user_id'],exchange);calendars[key]=calendars.get(key,0)+1
+ # Three streams per group of five; one minute-history request per session.
+ # Successful exchange schedules are shared for 20 seconds, across the same
+ # batch. Keep exchanges separate and retain headroom for fallback requests.
+ savings=sum(3*(count-(count+4)//5)+count for count in groups.values())
+ if bars:savings+=sum(count-(count+4)//5 for count in calendars.values())
+ other_units=max(0,other_units-savings);units=max(1,btc_count+other_units)
  if btc_count:
   if available==1 and other_units:return max(minimum,((btc_count+other_units)*60+available-1)//available)
   btc_share=min(btc_count,max(1,available//2) if other_units else available)
@@ -703,7 +705,9 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
        safe.update({k:worker_timing[k] for k in ('slowest_module','slowest_function') if isinstance(worker_timing.get(k),str) and re.fullmatch('[A-Za-z_][A-Za-z0-9_]{0,79}',worker_timing[k])})
        provider_diagnostics['worker_database_timing']=safe
      except (ValueError,TypeError):pass
-    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'last_calculation_at':r['last_calculation'],'last_computed_signal':detail['last_computed_signal'],'last_calculation_reason_codes':reasons,'display_reason_codes':detail['display_reason_codes'],'next_due_at':detail['next_due_at'],'effective_min_interval_s':detail['effective_min_interval_s'],'interval_basis':detail['interval_basis'],'provider_feed_diagnostics':provider_diagnostics,'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
+    context_diagnostic=(detail.get('latest_context') or {}).get('diagnostic')
+    if not isinstance(context_diagnostic,str) or not re.fullmatch(r'[A-Z0-9_]{1,100}',context_diagnostic):context_diagnostic=None
+    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'last_calculation_at':r['last_calculation'],'last_computed_signal':detail['last_computed_signal'],'signal':detail['signal'],'display_status':detail['display_status'],'context_diagnostic':context_diagnostic,'last_calculation_reason_codes':reasons,'display_reason_codes':detail['display_reason_codes'],'next_due_at':detail['next_due_at'],'effective_min_interval_s':detail['effective_min_interval_s'],'interval_basis':detail['interval_basis'],'provider_feed_diagnostics':provider_diagnostics,'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
    else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
   more=len(opened)>session_limit
   return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'supervisor':supervisor,'supervisor_events':supervisor_events,'application_error_fallback':application_errors,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}

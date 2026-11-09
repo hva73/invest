@@ -170,14 +170,15 @@ class PlutoAdapter:
    if overlap and not automatic:return unknown_context('PORTFOLIO_SCOPE_OVERLAP')
   for p in portfolios:
    with self.connect() as c:row=c.execute('SELECT * FROM portfolio_snapshots WHERE portfolio_id=? AND user_id=?',(p['id'],self.uid)).fetchone()
-   exit_only=request.get('watch_mode')=='exit'
    payload=json.loads(row['payload']) if row and not row['last_error'] and 0<=(utc()-stamp(row['observed'])).total_seconds()<=300 else None
    # A partial legacy snapshot does not prove the positions list was checked
    # independently. Re-read it with strict pagination/count checks instead.
-   if payload is None or (exit_only and not payload.get('complete') and not payload.get('positions_strict_verified')):
-    payload=portfolio_data.read(self.connect,self.uid,p['id'],client_factory=self.factory,strict_positions=exit_only)
+   if payload is None or (not payload.get('complete') and not payload.get('positions_strict_verified')):
+    payload=portfolio_data.read(self.connect,self.uid,p['id'],client_factory=self.factory,strict_positions=True)
     with self.connect() as c:portfolio_data.save(c,self.uid,p['id'],payload)
-   position_only=exit_only and payload.get('positions_strict_verified') is True
+   # Independently checked positions establish held/none for either watch.
+   # Missing capital, FX, fees and permissions remain unknown to the buy gate.
+   position_only=payload.get('positions_strict_verified') is True
    if not payload.get('positions_complete') or not (payload.get('complete') or position_only):return unknown_context('PORTFOLIO_SNAPSHOT_INCOMPLETE')
    rows.append(payload)
   if not rows:return unknown_context('NO_ACTIVE_PORTFOLIOS')
@@ -320,11 +321,13 @@ class EODHDAdapter:
    # can continue while this batch is being collected.
    waiting.wait()
   try:
+   # Include watches due within the 20-second cache lifetime. Their lease and
+   # calculation schedule remain unchanged; only raw provider data is shared.
    market='us' if feed.startswith('us_') else 'eu';symbols=[symbol]
    allowed_eu={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}
    from hotwatch_engine import verified_automatic_feed
    with self.connect() as c:
-    rows=c.execute("SELECT s.request FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND s.next_due<=? AND json_extract(s.request,'$.provider')='eodhd' ORDER BY CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,s.next_due,s.id LIMIT 40",(self.uid,utc().timestamp())).fetchall()
+    rows=c.execute("SELECT s.request FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND s.next_due<=? AND json_extract(s.request,'$.provider')='eodhd' ORDER BY CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,s.next_due,s.id LIMIT 40",(self.uid,utc().timestamp()+15)).fetchall()
     for row in rows:
      candidate=json.loads(row['request']);full=candidate.get('provider_symbol') or ''
      if not isinstance(full,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',full):continue

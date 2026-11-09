@@ -372,7 +372,7 @@ class HotWatch(unittest.TestCase):
    self.assertLessEqual(2*60/btc_interval+16*6*60/stock_interval,27)
    with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE':'1'}):
     with app.connect() as c:self.assertGreater(engine.effective_poll_interval(c,btc),120)
- def test_live_poll_budget_accounts_for_shared_stream_but_keeps_rest_per_session(self):
+ def test_live_poll_budget_accounts_for_shared_stream_schedule_and_conditional_rest(self):
   with app.connect() as c:
    base=dict(engine.row_for(c,1,self.req['watch_id'],True));base.pop('id')
    for i,symbol in enumerate(['MSFT.US','HIMS.US','FLY.US','LUNR.US','BRK-B.US']):
@@ -381,7 +381,7 @@ class HotWatch(unittest.TestCase):
     cols=list(item);c.execute('INSERT INTO hw_sessions('+','.join(cols)+') VALUES('+','.join('?' for _ in cols)+')',[item[k] for k in cols])
   settings={'ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE':'10','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_BARS_ENABLED':'1','ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'1','ESCAPE_HW_EODHD_MIN_POLL_S':'5'}
   with patch.dict(os.environ,settings,clear=True):
-   with app.connect() as c:self.assertEqual(engine.effective_poll_interval(c,req),(18*60+6)//7)
+   with app.connect() as c:self.assertEqual(engine.effective_poll_interval(c,req),(9*60+6)//7)
  def test_fast_eodhd_scheduling_uses_opt_in_floor_without_weakening_risk(self):
   from hotwatch_contract import GLOBAL_RISK
   req=copy.deepcopy(self.req);req.update(watch_id='fast-eodhd',purpose='fast eodhd fixture',provider='eodhd',provider_symbol='MERC.US',profile='ACTIVE')
@@ -1367,7 +1367,7 @@ class HotWatch(unittest.TestCase):
   at=engine.utc();stale=tick(at-timedelta(seconds=121),held=True);stale['context']=result
   signal,reasons,_=risk_gate(stale,good_metrics(),req['risk'],at,'SELL')
   self.assertEqual(signal,'NO_DATA');self.assertIn('DATA_STALE',reasons)
-  self.assertEqual(adapter.context(dict(req,watch_mode='entry'),'USD')['status'],'unknown')
+  self.assertEqual(adapter.context(dict(req,watch_mode='entry'),'USD')['status'],'verified')
   payload['positions_complete']=False
   with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),pid))
   self.assertEqual(adapter.context(req,'USD')['status'],'unknown')
