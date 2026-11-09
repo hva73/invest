@@ -5,6 +5,7 @@ native process supervisor as well. No credentials are written to disk or logs.
 """
 import argparse
 import fcntl
+import json
 import os
 from pathlib import Path
 import signal
@@ -103,14 +104,55 @@ def diagnostic(event, code=None):
         pass
 
 
+APPLICATION_AREAS = {'site_hotwatch', 'site_portfolio', 'site_portfolio_list', 'mcp_hotwatch'}
+APPLICATION_MODULES = {'app', 'intel_workflows', 'hotwatch_engine', 'hotwatch_adapters',
+                       'hotwatch_service', 'portfolio_data', 'mcp_client', 'mcp_reports',
+                       'oauth', 'report_ingest', 'dashboard_projection', 'sector_intelligence'}
+APPLICATION_EVENTS = APPLICATION_AREAS | {'site_sqlite_error', 'site_http_error'} | {
+    'site_frame_' + name for name in APPLICATION_MODULES}
+
+
+def application_error_fallback(entries=None):
+    """Bounded private fallback, independent of SQLite; never wait for its lock.
+
+    Reads expose only known event names, integer codes and timestamps. No
+    exception messages, account identifiers, URLs or credentials are stored.
+    """
+    import app
+    path = Path(app.DB).resolve().with_name('hotwatch-application-errors.json')
+    try:
+        flags = os.O_RDWR | os.O_CREAT if entries is not None else os.O_RDONLY
+        fd = os.open(path, flags | getattr(os, 'O_NOFOLLOW', 0), 0o600)
+        with os.fdopen(fd, 'r+b' if entries is not None else 'rb') as target:
+            fcntl.flock(target, (fcntl.LOCK_EX if entries is not None else fcntl.LOCK_SH) | fcntl.LOCK_NB)
+            raw = target.read(65537)
+            if len(raw) > 65536:raise ValueError('oversized diagnostic log')
+            rows = json.loads(raw) if raw else []
+            if not isinstance(rows, list) or len(rows) > 200:raise ValueError('invalid diagnostic log')
+            if entries is not None:rows = (rows + entries)[-200:]
+            clean = []
+            for row in rows:
+                if not isinstance(row, dict) or row.get('event') not in APPLICATION_EVENTS:raise ValueError('invalid event')
+                code = row.get('code')
+                if code is not None and (type(code) is not int or not 0 <= code < 100000):raise ValueError('invalid code')
+                created = row.get('created')
+                if not isinstance(created, str) or len(created) > 40 or datetime.fromisoformat(created).tzinfo is None:raise ValueError('invalid timestamp')
+                clean.append({'created':created, 'event':row['event'], 'code':code})
+            if entries is not None:
+                os.fchmod(target.fileno(), 0o600)
+                target.seek(0);target.write(json.dumps(clean, separators=(',', ':')).encode());target.truncate()
+            return {'status':'AVAILABLE', 'events':list(reversed(clean[-30:]))}
+    except FileNotFoundError:
+        return {'status':'MISSING' if entries is None else 'UNAVAILABLE', 'events':[]}
+    except (OSError, ValueError, TypeError):
+        return {'status':'UNAVAILABLE', 'events':[]}
+
+
 def application_error(connect, area, error):
     """Best-effort, bounded error location only; never persist exception text."""
-    areas={'site_hotwatch','site_portfolio','mcp_hotwatch'}
-    modules={'app','intel_workflows','hotwatch_engine','hotwatch_adapters',
-             'hotwatch_service','portfolio_data','mcp_client','mcp_reports',
-             'oauth','report_ingest','dashboard_projection','sector_intelligence'}
-    if area not in areas:return False
+    if area not in APPLICATION_AREAS:return False
     import sqlite3
+    from urllib.error import HTTPError
     if isinstance(error,sqlite3.Error):kind=1
     elif isinstance(error,(ValueError,TypeError,KeyError,IndexError)):kind=2
     elif isinstance(error,TimeoutError):kind=3
@@ -119,23 +161,26 @@ def application_error(connect, area, error):
     frames=[];tb=error.__traceback__
     while tb:
         name=Path(tb.tb_frame.f_code.co_filename).stem
-        if name in modules:frames.append((name,tb.tb_lineno))
+        if name in APPLICATION_MODULES:frames.append((name,tb.tb_lineno))
         tb=tb.tb_next
     entries=[(area,kind)]
     if isinstance(error,sqlite3.Error):
         code=getattr(error,'sqlite_errorcode',None)
         entries.append(('site_sqlite_error',code if type(code) is int and 0<=code<=65535 else None))
+    if isinstance(error, HTTPError):
+        entries.append(('site_http_error',error.code if type(error.code) is int and 100<=error.code<=599 else None))
     if frames:
         name,line=frames[-1];entries.append(('site_frame_'+name,line if 0<line<100000 else None))
+    created=datetime.now(timezone.utc).isoformat()
     try:
-        created=datetime.now(timezone.utc).isoformat()
         with connect() as c:
             c.execute('PRAGMA busy_timeout=100')
             c.executemany('INSERT INTO hw_supervisor_events(created,event,code) VALUES(?,?,?)',[(created,event,code) for event,code in entries])
             c.execute('DELETE FROM hw_supervisor_events WHERE id NOT IN (SELECT id FROM hw_supervisor_events ORDER BY id DESC LIMIT 200)')
         return True
     except Exception:
-        return False
+        rows=[{'created':created,'event':event,'code':code} for event,code in entries]
+        return application_error_fallback(rows)['status']=='AVAILABLE'
 
 
 def lock_category(pid):

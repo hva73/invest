@@ -21,6 +21,50 @@ def tick(at,index=0,price='100',held=False):
 def good_metrics():return {'sample_count':40,'price':'100','return_1_pct':'.1','return_3_pct':'.5','acceleration_pct_s2':'.01','relative_volume':'3','spread_pct':'.1','volatility_pct':'.3','breakout':True,'breakdown':False,'trend_up':True,'rsi':'60','macd_histogram':'.1','distance_high_pct':'0'}
 
 class HotWatch(unittest.TestCase):
+ def test_sync_reads_sanitized_fallback_errors_through_existing_endpoint(self):
+  import hotwatch_supervisor
+  row={'created':self.now.isoformat(),'event':'site_portfolio_list','code':1}
+  self.assertEqual(hotwatch_supervisor.application_error_fallback([row])['status'],'AVAILABLE')
+  result=engine.sync(app.connect,1,True,session_limit=1,summary_only=True)
+  self.assertEqual(result['application_error_fallback'],{'status':'AVAILABLE','events':[row]})
+  self.assertEqual(result['open_sessions'][0]['last_computed_signal'],'NO_DATA')
+
+ def test_status_uses_worker_interval_when_api_environment_differs(self):
+  req=copy.deepcopy(self.req);req.update(watch_id='worker-interval',purpose='worker interval',provider='eodhd',provider_symbol='MERC.US',profile='ACTIVE')
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'1','ESCAPE_HW_EODHD_MIN_POLL_S':'5'},clear=True):
+   engine.create(app.connect,1,req,self.now)
+   sample=tick(self.now);sample.update(source='eodhd',interval_s=15)
+   engine.ingest(app.connect,1,req['watch_id'],True,sample,self.now)
+  with patch.dict(os.environ,{},clear=True),patch.object(engine,'effective_poll_interval',side_effect=AssertionError('API must not recalculate worker budget')):
+   session=engine.item(app.connect,1,req['watch_id'],True)['session']
+  self.assertEqual(session['effective_min_interval_s'],15)
+  self.assertEqual(session['interval_basis'],'worker_schedule')
+  self.assertEqual((stamp(session['next_due_at'])-self.now).total_seconds(),15)
+  self.assertEqual(session['request']['risk']['max_quote_age_s'],120)
+
+ def test_fault_and_duplicate_release_update_the_reported_worker_schedule(self):
+  engine.fault(app.connect,1,self.req['watch_id'],True,'PROCESSING_DATABASE_BUSY_ENGINE_793',self.now)
+  item=engine.item(app.connect,1,self.req['watch_id'],True)['session']
+  self.assertEqual(item['effective_min_interval_s'],60)
+  later=self.now+timedelta(seconds=60);job=engine.claim(app.connect,later,self.req['watch_id'])
+  engine.release(app.connect,job,later)
+  with patch.object(engine,'effective_poll_interval',side_effect=AssertionError('not a worker')):
+   item=engine.item(app.connect,1,self.req['watch_id'],True)['session']
+  self.assertEqual(item['effective_min_interval_s'],(stamp(item['next_due_at'])-later).total_seconds())
+  self.assertEqual(item['interval_basis'],'worker_schedule')
+  self.assertEqual(item['signal'],'NO_DATA')
+
+ def test_provider_pipeline_times_are_bounded_and_do_not_expose_other_fields(self):
+  self.put(tick(self.now))
+  values={'provider_ms':70000,'pluto_context_ms':62000,'websocket_capture_ms':2000,'adapter_to_journal_ms':7,'event_to_adapter_receive_ms':None,'secret':'not-for-client','begin_wait_ms':.1}
+  with app.connect() as c:
+   c.execute('INSERT INTO hw_provider_health VALUES(?,?,?,?,?,?,?)',(1,1,'synthetic',self.now.isoformat(),self.now.isoformat(),None,json.dumps(values)))
+  item=engine.sync(app.connect,1,True,session_limit=1,summary_only=True)['open_sessions'][0]
+  diag=item['provider_feed_diagnostics']
+  self.assertEqual(diag['last_successful_pipeline_timing_ms'],{k:values[k] for k in ('provider_ms','pluto_context_ms','websocket_capture_ms','adapter_to_journal_ms')})
+  self.assertEqual(diag['scope'],'provider_wide_not_session')
+  self.assertNotIn('not-for-client',json.dumps(item))
+
  def test_reported_catalyst_priority_requires_evidence_and_expires(self):
   at=datetime(2026,11,9,8,0,tzinfo=timezone.utc)
   proposal={'strategy_id':'escape_early_catalyst','proposed_at':at.isoformat(),'news_check':{'status':'verified_news','checked_at':at.isoformat(),'source_ids':['news']},'catalyst':{'published_at':(at-timedelta(minutes=2)).isoformat(),'available_at':at.isoformat(),'source_ids':['news']}}

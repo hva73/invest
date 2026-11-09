@@ -472,7 +472,12 @@ def view(c,row,now=None):
    except (ValueError,TypeError,KeyError,ArithmeticError):
     effective='NO_DATA';display_reasons.append('EARLY_EVIDENCE_STALE')
  profile=state.get('adaptive_profile',request['profile'])
- budget_interval=effective_poll_interval(c,request,profile)
+ # The API and worker can have different environment settings. Show the
+ # interval actually selected by the worker, without recalculating its budget.
+ budget_interval=state.get('scheduled_interval_s')
+ interval_basis='worker_schedule'
+ if type(budget_interval) not in (int,float) or not 0<budget_interval<=86400:
+  budget_interval=effective_poll_interval(c,request,profile);interval_basis='reader_estimate'
  latest_payload=json.loads(sample['payload']) if sample else None
  if latest_payload and latest_payload.get('bar_history'):
   # Older bar arrays are not needed for quote-to-quote comparisons; omit them
@@ -571,7 +576,7 @@ def view(c,row,now=None):
   context=dict(context,fx_to_dkk=buy_plan['fx_to_dkk'] if buy_plan['fresh'] else None,fees_dkk=buy_plan['fees_dkk'] if buy_plan['fresh'] else None)
  if buy_plan and (not buy_plan['fresh'] or not row['last_calculation'] or stamp(row['last_calculation'])<=max(stamp(buy_plan['selected_at']),stamp(buy_plan['verified_at']))) and effective=='BUY':
   effective='WAIT';display_status='RISIKODATA MANGLER';display_reasons.append('BUY_PLAN_RECHECK_REQUIRED')
- return {'buy_plan':buy_plan,'last_action_signal':dict(last_action) if last_action else None,'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':budget_interval,'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
+ return {'buy_plan':buy_plan,'last_action_signal':dict(last_action) if last_action else None,'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':budget_interval,'interval_basis':interval_basis,'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
 def sessions(connect,uid,mode=False,after=0,limit=50):
  with connect() as c:
@@ -644,6 +649,8 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
  # consistent snapshot so one status request cannot hold a read lock across
  # every session; existing cursors continue to expose the complete list.
  session_limit=min(session_limit,10);now=utc()
+ from hotwatch_supervisor import application_error_fallback
+ application_errors=application_error_fallback()
  with connect() as c:
   c.execute('BEGIN')
   opened=c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=? AND id>? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') ORDER BY id LIMIT ?",(uid,int(mode),sessions_after,session_limit+1)).fetchall()
@@ -680,12 +687,13 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
       payload=json.loads(health['payload']);allowed=('websocket_trade_status','websocket_quote_status','websocket_status_status','exchange_status','minute_bars_status','bar_history_status','intraday_status')
       fields={k:payload[k] for k in allowed if isinstance(payload,dict) and isinstance(payload.get(k),str) and re.fullmatch(r'[A-Z0-9_]{1,80}',payload[k])}
       timing={k:payload[k] for k in ('begin_wait_ms','work_before_commit_ms','ingest_compute_ms') if isinstance(payload,dict) and type(payload.get(k)) in (int,float) and 0<=payload[k]<=3600000}
-      provider_diagnostics={'scope':'provider_wide_not_session','last_attempt_at':health['attempted'],'last_success_at':health['succeeded'],'last_error':health['code'],'last_successful_feed_statuses':fields,'last_successful_sqlite_timing_ms':timing}
+      pipeline={k:payload[k] for k in ('provider_ms','pluto_context_ms','websocket_capture_ms','adapter_to_journal_ms','event_to_adapter_receive_ms') if isinstance(payload,dict) and type(payload.get(k)) in (int,float) and 0<=payload[k]<=3600000}
+      provider_diagnostics={'scope':'provider_wide_not_session','last_attempt_at':health['attempted'],'last_success_at':health['succeeded'],'last_error':health['code'],'last_successful_feed_statuses':fields,'last_successful_sqlite_timing_ms':timing,'last_successful_pipeline_timing_ms':pipeline}
      except (ValueError,TypeError):pass
-    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'last_calculation_at':r['last_calculation'],'last_computed_signal':detail['last_computed_signal'],'last_calculation_reason_codes':reasons,'display_reason_codes':detail['display_reason_codes'],'next_due_at':detail['next_due_at'],'effective_min_interval_s':detail['effective_min_interval_s'],'provider_feed_diagnostics':provider_diagnostics,'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
+    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'last_calculation_at':r['last_calculation'],'last_computed_signal':detail['last_computed_signal'],'last_calculation_reason_codes':reasons,'display_reason_codes':detail['display_reason_codes'],'next_due_at':detail['next_due_at'],'effective_min_interval_s':detail['effective_min_interval_s'],'interval_basis':detail['interval_basis'],'provider_feed_diagnostics':provider_diagnostics,'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
    else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
   more=len(opened)>session_limit
-  return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'supervisor':supervisor,'supervisor_events':supervisor_events,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}
+  return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'supervisor':supervisor,'supervisor_events':supervisor_events,'application_error_fallback':application_errors,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}
 
 def control(connect,uid,wid,mode,action,now=None):
  now=now or utc()
@@ -895,6 +903,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   nextstate['provider_floor_s']=provider_floor(request['provider'])
   interval=effective_poll_interval(c,request,adaptive)
   if sample['market_status'] in ['CLOSED','HALTED']:interval=max(interval,300)
+  nextstate['scheduled_interval_s']=interval
   c.execute('UPDATE hw_sessions SET status=?,state=?,updated=?,last_data=?,last_calculation=?,next_due=?,failures=0,last_error=NULL,lease_owner=NULL,lease_until=0 WHERE id=?',(new_status,canonical(nextstate),now.isoformat(),sample['event_time'],now.isoformat(),now.timestamp()+interval,row['id']))
   response={'ok':True,'duplicate':False,'calculation':result,'sqlite_timing':{'begin_wait_ms':round((lock_acquired-lock_requested)*1000,3),'work_before_commit_ms':round((time.perf_counter()-lock_acquired)*1000,3)}}
   if include_session:response['session']=view(c,row_for(c,uid,wid,mode),now)
@@ -985,6 +994,7 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   # exponential provider backoff postpone a position or candidate for 30 min.
   if code.startswith('PROCESSING_DATABASE_BUSY_'):interval=60
   if retry_after_s is not None:interval=max(interval,max(0,retry_after_s))
+  state['scheduled_interval_s']=interval
   if row['last_error']!=code:
    previous=json.loads(row['strategy']);result={'signal':'NO_DATA','reason_codes':[code],'human_readable_explanation':code,'supporting_metrics':{'quote_age_s':(now-stamp(row['last_data'])).total_seconds() if row['last_data'] else None},'calculation_timestamp':now.isoformat(),'data_timestamp':row['last_data'],'strategy_id':previous['strategy_id'],'strategy_version':previous['version'],'strategy_checksum':checksum(previous),'confidence_score':0,'risk_level':'critical' if set(state.get('alert_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE'} else 'high','rules_score_note':'No valid current market input','critical_override':False}
    c.execute('INSERT INTO hw_calculations(watch_row_id,sample_row_id,calculated,payload,strategy_checksum) VALUES(?,NULL,?,?,?)',(row['id'],now.isoformat(),canonical(result),result['strategy_checksum']))
@@ -1018,7 +1028,7 @@ def release(connect,job,now=None):
  now=now or utc();request=job['request_data']
  with connect() as c:
   interval=effective_poll_interval(c,request)
-  c.execute('UPDATE hw_sessions SET next_due=?,lease_owner=NULL,lease_until=0 WHERE id=? AND lease_owner=?',(now.timestamp()+interval,job['id'],job['lease_owner']))
+  c.execute("UPDATE hw_sessions SET next_due=?,state=json_set(state,'$.scheduled_interval_s',?),lease_owner=NULL,lease_until=0 WHERE id=? AND lease_owner=?",(now.timestamp()+interval,interval,job['id'],job['lease_owner']))
 
 
 def system_kill(connect,enabled,reason,now=None):

@@ -607,7 +607,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as error:
             if self.path in ('/api/portfolios/data','/api/portfolios/sync'):
                 import hotwatch_supervisor
-                hotwatch_supervisor.application_error(connect,'site_portfolio',error)
+                hotwatch_supervisor.application_error(connect,'site_portfolio_list' if self.path=='/api/portfolios/sync' else 'site_portfolio',error)
             self.send(500,{'error':'Intern fejl. Kontrollér server og database.'})
 LOGIN_FAILURES={}
 if __name__=='__main__':

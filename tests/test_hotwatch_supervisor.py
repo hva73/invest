@@ -191,10 +191,48 @@ class WatchdogTests(unittest.TestCase):
                 self.assertNotIn('private_missing_table',str(rows))
                 holder=connect();holder.execute('BEGIN EXCLUSIVE')
                 try:
-                    start=time.monotonic();self.assertFalse(supervisor.application_error(connect,'site_hotwatch',RuntimeError('secret')))
+                    start=time.monotonic()
+                    with patch.object(app,'DB',db):
+                        self.assertTrue(supervisor.application_error(connect,'site_hotwatch',RuntimeError('secret')))
+                        fallback=supervisor.application_error_fallback()
+                    self.assertEqual(fallback['status'],'AVAILABLE')
+                    self.assertEqual(fallback['events'][0]['event'],'site_hotwatch')
+                    self.assertNotIn('secret',str(fallback))
                     self.assertLess(time.monotonic()-start,1)
                 finally:holder.rollback();holder.close()
             finally:pass
+
+    def test_application_fallback_is_bounded_private_and_readable_without_database(self):
+        from urllib.error import HTTPError
+        import json
+        with tempfile.TemporaryDirectory() as d, patch.object(app,'DB',str(Path(d)/'missing.db')):
+            def unavailable():raise sqlite3.OperationalError('locked secret')
+            self.assertEqual(supervisor.application_error_fallback()['status'],'MISSING')
+            for _ in range(105):
+                self.assertTrue(supervisor.application_error(unavailable,'site_portfolio_list',HTTPError('https://private/token',429,'private headers',{},None)))
+            path=Path(d)/'hotwatch-application-errors.json'
+            rows=json.loads(path.read_text())
+            self.assertEqual(len(rows),200)
+            self.assertEqual(path.stat().st_mode & 0o777,0o600)
+            self.assertNotIn('private',path.read_text())
+            result=supervisor.application_error_fallback()
+            self.assertEqual(len(result['events']),30)
+            self.assertEqual(result['events'][0]['event'],'site_http_error')
+            self.assertEqual(result['events'][0]['code'],429)
+            with path.open('r+b') as holder:
+                supervisor.fcntl.flock(holder,supervisor.fcntl.LOCK_EX | supervisor.fcntl.LOCK_NB)
+                self.assertEqual(supervisor.application_error_fallback()['status'],'UNAVAILABLE')
+                self.assertFalse(supervisor.application_error(unavailable,'site_hotwatch',RuntimeError('secret')))
+
+    def test_application_fallback_rejects_corruption_and_symlinks(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(app,'DB',str(Path(d)/'missing.db')):
+            path=Path(d)/'hotwatch-application-errors.json'
+            path.write_text('sensitive broken data')
+            self.assertEqual(supervisor.application_error_fallback(),{'status':'UNAVAILABLE','events':[]})
+            path.unlink();target=Path(d)/'private';target.write_text('secret')
+            path.symlink_to(target)
+            self.assertEqual(supervisor.application_error_fallback(),{'status':'UNAVAILABLE','events':[]})
+            self.assertEqual(target.read_text(),'secret')
 
     def test_lock_prevents_a_second_worker(self):
         with tempfile.TemporaryDirectory() as d, patch.object(app, 'DB', str(Path(d) / 'escape.db')):
