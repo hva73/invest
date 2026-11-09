@@ -1,5 +1,5 @@
-import base64,os,secrets,tempfile,time,unittest
-from datetime import datetime,timezone
+import base64,json,os,secrets,tempfile,time,unittest
+from datetime import datetime,timezone,timedelta
 from unittest.mock import patch
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -59,6 +59,56 @@ class Push(unittest.TestCase):
   self.subscribe();self.event('BUY_SIGNAL');sent=[]
   with patch('web_push._actionable',return_value=None):web_push.dispatch_one(app.connect,self.now,lambda *args:sent.append(args))
   self.assertEqual(sent,[])
+ def test_sell_message_names_ticker_and_reason(self):
+  self.subscribe();sent=[]
+  with app.connect() as c:
+   c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps({'ticker':'JDZG'}),self.watch['id']))
+   c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],self.now.isoformat(),json.dumps({'reason_codes':['TRAILING_EXIT']}),'x'))
+  self.event('SELL_SIGNAL')
+  with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+  self.assertEqual(sent[0]['title'],'JDZG · salgssignal')
+  self.assertIn('Trailing-exit',sent[0]['body'])
+  self.assertEqual(sent[0]['watch_id'],'synthetic-watch')
+ def test_sell_wait_nodata_sell_does_not_repeat(self):
+  self.subscribe();sent=[]
+  self.event('SELL_SIGNAL')
+  with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+  for kind in ('WAIT_SIGNAL','NO_DATA'):
+   self.event(kind)
+   with patch('web_push._actionable',return_value=None):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+  self.event('SELL_SIGNAL')
+  with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+  self.assertEqual(len(sent),1)
+ def test_new_verified_exit_after_recovery_notifies_again(self):
+  self.subscribe();sent=[];self.event('SELL_SIGNAL')
+  with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+  recovery={'signal':'WAIT','reason_codes':['NO_TRIGGER'],'new_market_observation':True,'position_context':{'position':'held'},'risk_level':'normal'}
+  with app.connect() as c:c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],(self.now+timedelta(seconds=1)).isoformat(),json.dumps(recovery),'x'))
+  self.event('SELL_SIGNAL')
+  with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now+timedelta(seconds=2),lambda s,p,t:sent.append(p))
+  self.assertEqual(len(sent),2)
+ def test_critical_stop_and_worsening_notify_even_during_sell(self):
+  self.subscribe();sent=[];self.event('SELL_SIGNAL')
+  with patch('web_push._actionable',return_value='SELL'):
+   web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+   with app.connect() as c:engine.event(c,self.watch,'RISK_REJECTION',self.now,'STOP_BREACHED',severity='critical')
+   web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+   with app.connect() as c:engine.event(c,self.watch,'TRAILING_EXIT_WORSENED',self.now,'worsened',severity='warning')
+   web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+  self.assertEqual(len(sent),3)
+ def test_critical_stop_is_reported_when_data_is_temporarily_unavailable(self):
+  self.subscribe();sent=[];self.event('SELL_SIGNAL')
+  with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+  with app.connect() as c:engine.event(c,self.watch,'RISK_REJECTION',self.now,'STOP_BREACHED',severity='critical')
+  with patch('web_push._actionable',return_value=None):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+  self.event('SELL_SIGNAL')
+  with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+  self.assertEqual(len(sent),2)
+  self.assertIn('kritisk exitadvarsel',sent[1]['title'])
+ def test_worsening_uses_configured_trailing_distance(self):
+  self.assertFalse(engine.trailing_notification_worsened('0.394','0.4','2'))
+  self.assertTrue(engine.trailing_notification_worsened('0.392','0.4','2'))
+  self.assertFalse(engine.trailing_notification_worsened('0.393','0.4','2'))
  def test_stale_signal_gets_replacement_without_new_event(self):
   self.subscribe();self.event('BUY_SIGNAL');sent=[]
   with patch('web_push._actionable',return_value='BUY'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))

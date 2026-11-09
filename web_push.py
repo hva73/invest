@@ -115,8 +115,9 @@ def device_preferences(connect,uid,endpoint):
     return {'subscribed':bool(row),'buy':bool(row['buy']) if row else False,'sell':bool(row['sell']) if row else False}
 
 
-def enqueue(c,row,kind,event_key,now):
-    if kind not in SIGNAL_EVENTS or row['is_test']:return
+def enqueue(c,row,kind,event_key,now,severity='info',reason=''):
+    urgent=kind=='RISK_REJECTION' and severity=='critical' and reason in ('STOP_BREACHED','EXIT_DEADLINE')
+    if (kind not in SIGNAL_EVENTS and kind!='TRAILING_EXIT_WORSENED' and not urgent) or row['is_test']:return
     c.execute('''INSERT OR IGNORE INTO push_jobs(event_key,watch_row_id,device_id,created)
                  SELECT ?,?,id,? FROM push_devices WHERE user_id=?''',(event_key,row['id'],now.timestamp(),row['user_id']))
 
@@ -128,10 +129,31 @@ def _actionable(c,row,now):
     return signal if view.get('display_status')=={'BUY':'KØBSSIGNAL','SELL':'SÆLGSSIGNAL','REDUCE':'EXIT WATCH'}.get(signal) else None
 
 
+def _message(c,watch,current):
+    # The user chose short instrument-specific notifications. The app still
+    # checks currentness when opened; a push is never an instruction to trade.
+    try:
+        ticker=str(json.loads(watch['request']).get('ticker') or '').strip()[:24]
+    except (TypeError,ValueError,AttributeError):ticker=''
+    ticker=''.join(ch for ch in ticker if ch.isalnum() or ch in '.-_')
+    label={'BUY':'købssignal','SELL':'salgssignal','REDUCE':'reduktionssignal'}.get(current)
+    title=(ticker+' · ' if ticker else 'ESCAPE · ')+(label or 'signal ændret')
+    row=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(watch['id'],)).fetchone()
+    try:codes=set(json.loads(row['payload']).get('reason_codes',[])) if row else set()
+    except (ValueError,TypeError,AttributeError):codes=set()
+    if current=='SELL' and 'STOP_BREACHED' in codes:body='Stopgrænsen er brudt. Tryk for at se status.'
+    elif current=='SELL' and 'EXIT_DEADLINE' in codes:body='Exitfristen er nået. Tryk for at se status.'
+    elif current=='SELL' and 'TRAILING_EXIT' in codes:body='Trailing-exit er udløst. Tryk for at se status.'
+    elif current=='BUY':body='Tryk for at gennemgå købssignalet.'
+    elif current in ('SELL','REDUCE'):body='Tryk for at gennemgå exitsignalet.'
+    else:body='Tryk for at se den aktuelle status.'
+    return title,body
+
+
 def _reconcile(c,now):
     # Rotate through previously delivered signals without holding a write lock
     # while calculating currentness. A later dispatch rechecks the result.
-    rows=c.execute("SELECT device_id,watch_row_id,event_key FROM push_last WHERE signal IN ('BUY','SELL','REDUCE') ORDER BY updated ASC LIMIT 100").fetchall()
+    rows=c.execute("SELECT device_id,watch_row_id,event_key,signal FROM push_last WHERE signal IN ('BUY','SELL','REDUCE') ORDER BY updated ASC LIMIT 100").fetchall()
     checked=[]
     for item in rows:
         watch=c.execute('SELECT * FROM hw_sessions WHERE id=?',(item['watch_row_id'],)).fetchone()
@@ -141,10 +163,23 @@ def _reconcile(c,now):
         checked.append((item,effective))
     for item,effective in checked:
         c.execute('UPDATE push_last SET updated=? WHERE device_id=? AND watch_row_id=? AND event_key=?',(now.timestamp(),item['device_id'],item['watch_row_id'],item['event_key']))
-        if effective not in ('BUY','SELL','REDUCE'):
+        if effective not in ('BUY','SELL','REDUCE') and item['signal']!='SELL':
             c.execute("""INSERT INTO push_jobs(event_key,watch_row_id,device_id,created) VALUES(?,?,?,?)
                 ON CONFLICT(event_key,device_id) DO UPDATE SET status='pending',created=excluded.created,attempts=0,next_attempt=0
                 WHERE push_jobs.status IN ('expired','failed') AND push_jobs.created<?""",('stale:'+item['event_key'],item['watch_row_id'],item['device_id'],now.timestamp(),now.timestamp()-300))
+
+
+def _exit_rearmed(c,watch_id,event_key):
+    """Only a fresh, verified calculation with no exit trigger ends an episode."""
+    event=c.execute('SELECT created FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch_id,event_key)).fetchone()
+    if not event:return False
+    rows=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? AND calculated>? ORDER BY id',(watch_id,event['created'])).fetchall()
+    for row in rows:
+        try:
+            result=json.loads(row['payload']);codes=set(result.get('reason_codes',[]))
+            if result.get('signal')=='WAIT' and codes=={'NO_TRIGGER'} and result.get('new_market_observation') is True and result.get('position_context',{}).get('position')=='held' and result.get('risk_level')=='normal':return True
+        except (ValueError,TypeError,AttributeError):continue
+    return False
 
 
 def _send(subscription,payload,topic):
@@ -178,20 +213,35 @@ def dispatch_one(connect,now=None,sender=None):
             c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
         try:current=_actionable(c,watch,now)
         except Exception:current=None
+        e=c.execute('SELECT event_type,severity,payload FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch['id'],job['event_key'])).fetchone()
+        try:reason=json.loads(e['payload']).get('reason') if e else None
+        except (ValueError,TypeError,AttributeError):reason=None
+        critical=bool(e and e['event_type']=='RISK_REJECTION' and e['severity']=='critical' and reason in ('STOP_BREACHED','EXIT_DEADLINE'))
+        urgent=bool(e and (e['event_type']=='TRAILING_EXIT_WORSENED' or critical))
+        critical_only=critical and bool(job['sell']) and current not in ('SELL','REDUCE')
         if (current=='BUY' and not job['buy'] or current in ('SELL','REDUCE') and not job['sell']):
             if previous and previous['signal']==current:
                 c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
             current=None
         is_action=current in ('BUY','SELL','REDUCE')
         previous_action=previous and previous['signal'] in ('BUY','SELL','REDUCE')
-        if not is_action and not previous_action:
+        # An unavailable calculation does not end a continuing exit episode.
+        if not is_action and not critical_only and previous and previous['signal']=='SELL':
             c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
-        if is_action and previous and previous['signal']==current:
+        if not is_action and not previous_action and not critical_only:
+            c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
+        if is_action and previous and previous['signal']==current and not (current=='SELL' and (urgent or _exit_rearmed(c,watch['id'],previous['event_key']))):
             c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
         signal=current if is_action else 'CHANGED'
-        # Generic lock-screen text avoids exposing holdings or account details.
-        payload={'title':('ESCAPE · købssignal' if current=='BUY' else 'ESCAPE · salgssignal') if is_action else 'ESCAPE · signal ændret','body':'Åbn ESCAPE for at se den aktuelle status.','watch_id':watch['watch_id'],'tag':'escape-'+hashlib.sha256((str(job['user_id'])+'|'+watch['watch_id']).encode()).hexdigest()[:24]}
+        title,body=_message(c,watch,current if is_action else None)
+        if critical_only:
+            title=title.replace('signal ændret','kritisk exitadvarsel')
+            body=('Stopgrænsen er registreret brudt. ' if reason=='STOP_BREACHED' else 'Exitfristen er nået. ')+'Tryk for at kontrollere aktuel status.'
+        elif urgent and e['event_type']=='TRAILING_EXIT_WORSENED':
+            body='Trailing-exit er forværret. Tryk for at se aktuel status.'
+        payload={'title':title,'body':body,'watch_id':watch['watch_id'],'tag':'escape-'+hashlib.sha256((str(job['user_id'])+'|'+watch['watch_id']).encode()).hexdigest()[:24]}
         data=bytes(job['payload']);job_id=job['id'];device_id=job['device_id'];watch_id=job['watch_row_id'];event_key=job['event_key'];uid=job['user_id'];attempts=job['attempts']+1
+        if critical_only and previous and previous['signal']=='SELL':signal='SELL';event_key=previous['event_key']
     try:
         sub=unseal(uid,data);validate_subscription(sub);(sender or _send)(sub,payload,payload['tag'])
     except Exception as error:

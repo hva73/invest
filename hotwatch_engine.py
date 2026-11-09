@@ -8,6 +8,11 @@ from hotwatch_features import features,observation_status,verified_bar_samples
 from hotwatch_strategy import BASELINE,EARLY_CATALYST,EARLY_CATALYST_V1,validate_strategy,calculate
 
 def utc():return datetime.now(timezone.utc)
+
+def trailing_notification_worsened(price,anchor,trailing_pct):
+ """Escalate each further decline of one configured trailing distance."""
+ return Decimal(str(price))<=Decimal(str(anchor))*(Decimal('1')-Decimal(str(trailing_pct))/Decimal('100'))
+
 def capacity():
  try:return max(1,int(os.environ.get('ESCAPE_HW_CAPACITY','40')))
  except (TypeError,ValueError):return 40
@@ -190,7 +195,7 @@ def event(c,row,kind,now,reason,metrics=None,severity='info',data_time=None):
  c.execute('INSERT INTO hw_events(event_id,watch_row_id,event_type,severity,created,data_timestamp,payload) VALUES(?,?,?,?,?,?,?)',(event_id,row['id'],kind,severity,now.isoformat(),data_time,canonical(payload)))
  try:
   import web_push
-  web_push.enqueue(c,row,kind,event_id,now)
+  web_push.enqueue(c,row,kind,event_id,now,severity,reason)
  except Exception:
   import logging
   logging.getLogger('escape.hotwatch').error('push_queue_unavailable')
@@ -1005,6 +1010,18 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   if oldcodes-codes:event(c,row,'DATA_RECOVERED',now,';'.join(sorted(oldcodes-codes)),metrics,data_time=sample['event_time'])
   if result['signal']!=state.get('signal','NO_DATA'):event(c,row,{'BUY':'BUY_SIGNAL','SELL':'SELL_SIGNAL','REDUCE':'REDUCE_SIGNAL','WAIT':'WAIT_SIGNAL','NO_DATA':'NO_DATA','PAUSE':'WATCH_PAUSED'}[result['signal']],now,result['human_readable_explanation'],metrics,'critical' if result['critical_override'] else 'info',sample['event_time'])
   if result['critical_override'] and state.get('signal')!='SELL':event(c,row,'CRITICAL_OVERRIDE',now,'Critical exit bypassed confirmation/cooldown; no order created',metrics,'critical',sample['event_time'])
+  # Notification episode state is separate from the calculated signal. WAIT or
+  # NO_DATA alone cannot end an exit; a new, valid no-trigger observation can.
+  reason_set=set(result['reason_codes'])
+  if new_market_event and result['signal']=='WAIT' and reason_set=={'NO_TRIGGER'} and result['risk_level']=='normal' and risk_sample['context'].get('position')=='held':
+   nextstate.pop('push_trailing_anchor',None)
+  if new_market_event and result['signal']=='SELL' and 'TRAILING_EXIT' in reason_set and not result['critical_override']:
+   price=Decimal(sample['price']);anchor=state.get('push_trailing_anchor')
+   threshold=Decimal(str(strategy_data['parameters']['trailing_pct']))
+   if anchor is None:nextstate['push_trailing_anchor']=str(price)
+   elif trailing_notification_worsened(price,anchor,threshold):
+    event(c,row,'TRAILING_EXIT_WORSENED',now,'Trailing-exit er væsentligt forværret',metrics,'warning',sample['event_time'])
+    nextstate['push_trailing_anchor']=str(price)
   for key,kind in [('breakout','BREAKOUT_DETECTED'),('rising_price_falling_volume','MOMENTUM_WEAKENING')]:
    if metrics.get(key) and not state.get('feature_'+key):event(c,row,kind,now,key,metrics,data_time=sample['event_time'])
    nextstate['feature_'+key]=bool(metrics.get(key))
