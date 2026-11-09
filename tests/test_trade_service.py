@@ -114,15 +114,22 @@ class Trading(unittest.TestCase):
   self.assertEqual(self.writes()[0]['arguments']['orders'][0]['side'],'SELL')
  def test_percentage_sell_reads_and_normalizes_real_provider_shape(self):
   original=self.factory
+  count=None
   class PositionClient(original):
    def tools(client):
     return super().tools()+[{'name':'get_positions','inputSchema':{'type':'object','properties':{'portfolioId':{'type':'string'}},'required':['portfolioId']},'annotations':{'readOnlyHint':True}}]
    def request(client,method,args):
-    if args['name']=='get_positions':return {'structuredContent':{'positions':[{'assetId':'asset-test','ticker':'TEST','quantity':'8','currency':'USD'}]}}
+    if args['name']=='get_positions':return {'structuredContent':{'positions':[{'assetId':'asset-test','ticker':'TEST','quantity':'8','currency':'USD'}],**({'totalCount':count} if count is not None else {})}}
     if args['name']=='get_portfolio_value':return {'structuredContent':{'value':'1000','currency':'DKK'}}
     return super().request(method,args)
   request=dict(self.request,size_mode='percent',size='25',order_type='MARKET')
   with patch('trade_service.candidate',return_value={'signal':'SÆLG'}),patch('pending_orders.enrich'):
+   # A positive fixture needs the completeness evidence required in production.
+   # Without it the unchanged trading gate must still refuse an estimate.
+   with self.assertRaisesRegex(trade.TradeError,'ufuldstændig'):
+    trade.estimate(app.connect,1,request,PositionClient)
+   self.assertFalse(self.writes())
+   count=1
    proposal=trade.estimate(app.connect,1,request,PositionClient)['proposal']
   self.assertEqual(proposal['payload']['orders'][0]['shares'],'2')
   self.assertFalse(self.writes())

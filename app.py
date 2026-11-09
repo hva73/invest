@@ -1,4 +1,4 @@
-import os, sqlite3, json, secrets, hashlib, hmac, time, math
+import os, sqlite3, json, secrets, hashlib, hmac, time, math, weakref
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from http.cookies import SimpleCookie
@@ -10,9 +10,50 @@ from report_validation import ReportValidationError,unique_object
 ROOT=Path(__file__).parent
 DB=os.environ.get('ESCAPE_DB',str(ROOT/'var/escape.db'))
 SESSIONS={}
+class DatabaseConnection(sqlite3.Connection):
+    """Finish the transaction and release the connection at scope exit."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._cursors = weakref.WeakSet()
+
+    def cursor(self, *args, **kwargs):
+        cursor = super().cursor(*args, **kwargs)
+        self._cursors.add(cursor)
+        return cursor
+
+    def execute(self, *args, **kwargs):
+        return self.cursor().execute(*args, **kwargs)
+
+    def executemany(self, *args, **kwargs):
+        return self.cursor().executemany(*args, **kwargs)
+
+    def executescript(self, *args, **kwargs):
+        return self.cursor().executescript(*args, **kwargs)
+
+    def close(self):
+        # SQLite may retain a read lock after Connection.close() when an
+        # unfinished cursor is still referenced. Finalize those statements.
+        for cursor in list(self._cursors):
+            cursor.close()
+        self._cursors.clear()
+        super().close()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
 def connect():
     Path(DB).parent.mkdir(parents=True,exist_ok=True)
-    c=sqlite3.connect(DB); c.row_factory=sqlite3.Row; c.execute('PRAGMA foreign_keys=ON'); return c
+    c=sqlite3.connect(DB, factory=DatabaseConnection)
+    try:
+        c.row_factory=sqlite3.Row
+        c.execute('PRAGMA foreign_keys=ON')
+        return c
+    except BaseException:
+        c.close()
+        raise
 def init():
     # Migrate under a write lock so Passenger workers cannot race the upgrade.
     with connect() as c:
@@ -204,7 +245,9 @@ class Handler(BaseHTTPRequestHandler):
                 result='connected'
             except Exception:pass
             self.send_response(303);self.send_header('Location','/?pluto='+result);self.send_header('Cache-Control','no-store');self.send_header('Referrer-Policy','no-referrer');self.send_header('Content-Length','0');self.end_headers();return
-        if self.path=='/api/health': return self.send(200,{'status':'ok','database':bool(connect().execute('SELECT 1').fetchone())})
+        if self.path=='/api/health':
+            with connect() as c: database=bool(c.execute('SELECT 1').fetchone())
+            return self.send(200,{'status':'ok','database':database})
         if self.path=='/api/session':
             s=self.session(); return self.send(200,{'authenticated':bool(s),'csrf':s['csrf'] if s else None,'user':{'username':s['username'],'role':s['role']} if s else None})
         if self.path.startswith('/api/'):
