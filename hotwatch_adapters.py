@@ -11,6 +11,7 @@ class DataUnavailable(EngineError):pass
 _quote_cache={}
 _ws_batch_cache={}
 _ws_batch_lock=threading.Lock()
+_ws_batch_inflight={}
 _quote_locks=[threading.Lock() for _ in range(32)]
 
 def shared_quote(key,symbol,fetch,enabled=True):
@@ -305,9 +306,20 @@ class EODHDAdapter:
    return client.capture(feed,symbol,duration=2)
   credential=hashlib.sha256(os.environ.get('ESCAPE_EODHD_API_KEY','').strip().encode()).digest()
   key=(self.uid,credential,feed,symbol)
-  with _ws_batch_lock:
-   cached=_ws_batch_cache.get(key);now=time.monotonic()
-   if cached and 0<=now-cached[0]<20:return copy.deepcopy(cached[1])
+  group=(self.uid,credential,feed)
+  while True:
+   with _ws_batch_lock:
+    cached=_ws_batch_cache.get(key);now=time.monotonic()
+    if cached and 0<=now-cached[0]<20:return copy.deepcopy(cached[1])
+    waiting=_ws_batch_inflight.get(group)
+    if waiting is None:
+     waiting=threading.Event();_ws_batch_inflight[group]=waiting;leader=True
+    else:leader=False
+   if leader:break
+   # Wait without holding the global cache lock. An unrelated feed or user
+   # can continue while this batch is being collected.
+   waiting.wait()
+  try:
    market='us' if feed.startswith('us_') else 'eu';symbols=[symbol]
    allowed_eu={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}
    from hotwatch_engine import verified_automatic_feed
@@ -321,16 +333,22 @@ class EODHDAdapter:
      stream=full[:-3] if market=='us' else full
      if stream not in symbols:symbols.append(stream)
      if len(symbols)>=5:break
+
    result=client.capture(feed,symbols if len(symbols)>1 else symbol,duration=2,max_messages=250 if len(symbols)>1 else 50)
    if result.get('status') not in ('OK','NO_MESSAGES'):return result
-   if len(_ws_batch_cache)>=512:_ws_batch_cache.clear()
-   saved=time.monotonic()
-   for item in symbols:
-    messages=[m for m in result.get('messages',[]) if m.get('symbol')==item]
-    partial=[m for m in result.get('partial_messages',[]) if m.get('symbol')==item]
-    value={**result,'status':'OK' if messages else 'NO_MESSAGES','messages':messages,'message_count':len(messages),'partial_messages':partial}
-    _ws_batch_cache[(self.uid,credential,feed,item)]=(saved,copy.deepcopy(value))
-   return copy.deepcopy(_ws_batch_cache[key][1])
+   with _ws_batch_lock:
+    if len(_ws_batch_cache)>=512:_ws_batch_cache.clear()
+    saved=time.monotonic()
+    for item in symbols:
+     messages=[m for m in result.get('messages',[]) if m.get('symbol')==item]
+     partial=[m for m in result.get('partial_messages',[]) if m.get('symbol')==item]
+     value={**result,'status':'OK' if messages else 'NO_MESSAGES','messages':messages,'message_count':len(messages),'partial_messages':partial}
+     _ws_batch_cache[(self.uid,credential,feed,item)]=(saved,copy.deepcopy(value))
+    return copy.deepcopy(_ws_batch_cache[key][1])
+  finally:
+   with _ws_batch_lock:
+    _ws_batch_inflight.pop(group,None);waiting.set()
+
  def poll(self,session):
   self.last_partial_observations=[]
   if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':raise DataUnavailable('EODHD_FEED_NOT_ENABLED')

@@ -328,6 +328,16 @@ class HotWatch(unittest.TestCase):
    self.assertLessEqual(2*60/btc_interval+16*6*60/stock_interval,27)
    with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE':'1'}):
     with app.connect() as c:self.assertGreater(engine.effective_poll_interval(c,btc),120)
+ def test_live_poll_budget_accounts_for_shared_stream_but_keeps_rest_per_session(self):
+  with app.connect() as c:
+   base=dict(engine.row_for(c,1,self.req['watch_id'],True));base.pop('id')
+   for i,symbol in enumerate(['MSFT.US','HIMS.US','FLY.US','LUNR.US','BRK-B.US']):
+    item=dict(base);item.update(watch_id='poll-batch-'+str(i),candidate_id='poll-candidate-'+str(i),is_test=0)
+    req=json.loads(item['request']);req.update(watch_id=item['watch_id'],candidate_id=item['candidate_id'],provider='eodhd',provider_symbol=symbol,is_test=False,profile='ACTIVE');item['request']=json.dumps(req)
+    cols=list(item);c.execute('INSERT INTO hw_sessions('+','.join(cols)+') VALUES('+','.join('?' for _ in cols)+')',[item[k] for k in cols])
+  settings={'ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE':'10','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_BARS_ENABLED':'1','ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'1','ESCAPE_HW_EODHD_MIN_POLL_S':'5'}
+  with patch.dict(os.environ,settings,clear=True):
+   with app.connect() as c:self.assertEqual(engine.effective_poll_interval(c,req),(18*60+6)//7)
  def test_fast_eodhd_scheduling_uses_opt_in_floor_without_weakening_risk(self):
   from hotwatch_contract import GLOBAL_RISK
   req=copy.deepcopy(self.req);req.update(watch_id='fast-eodhd',purpose='fast eodhd fixture',provider='eodhd',provider_symbol='MERC.US',profile='ACTIVE')
@@ -794,6 +804,50 @@ class HotWatch(unittest.TestCase):
      self.assertEqual([m['symbol'] for m in result['messages']],[symbol])
    self.assertEqual(len(client.calls),1);self.assertEqual(set(client.calls[0][1]),set(symbols))
   finally:adapters._ws_batch_cache.clear()
+ def test_different_websocket_feeds_do_not_block_each_other_during_network_wait(self):
+  import hotwatch_adapters as adapters,threading
+  from concurrent.futures import ThreadPoolExecutor
+  adapter=EODHDAdapter(app.connect,1);entered={'us_trades':threading.Event(),'us_quotes':threading.Event()};release=threading.Event()
+  req=copy.deepcopy(self.req);req.update(is_test=False,provider='eodhd',provider_symbol='MERC.US');job={'id':1,'request_data':req}
+  class Client:
+   def capture(self,feed,symbol,**kw):
+    entered[feed].set();release.wait(3);return {'status':'NO_MESSAGES','messages':[]}
+  adapters._ws_batch_cache.clear()
+  try:
+   with patch.dict(os.environ,{'ESCAPE_EODHD_API_KEY':'test-only'}),ThreadPoolExecutor(max_workers=2) as pool:
+    futures=[pool.submit(adapter.capture,Client(),feed,'MERC',job) for feed in ('us_trades','us_quotes')]
+    self.assertTrue(entered['us_trades'].wait(2));self.assertTrue(entered['us_quotes'].wait(2));release.set()
+    self.assertTrue(all(x.result(timeout=3)['status']=='NO_MESSAGES' for x in futures))
+  finally:release.set();adapters._ws_batch_cache.clear()
+ def test_concurrent_identical_websocket_batch_is_captured_once(self):
+  import hotwatch_adapters as adapters,threading
+  from concurrent.futures import ThreadPoolExecutor
+  adapter=EODHDAdapter(app.connect,1);entered=threading.Event();release=threading.Event();calls=[]
+  req=copy.deepcopy(self.req);req.update(is_test=False,provider='eodhd',provider_symbol='MERC.US');job={'id':1,'request_data':req}
+  class Client:
+   def capture(self,feed,symbol,**kw):
+    calls.append(feed);entered.set();release.wait(3);return {'status':'NO_MESSAGES','messages':[]}
+  adapters._ws_batch_cache.clear()
+  try:
+   with patch.dict(os.environ,{'ESCAPE_EODHD_API_KEY':'test-only'}),ThreadPoolExecutor(max_workers=2) as pool:
+    first=pool.submit(adapter.capture,Client(),'us_trades','MERC',job);self.assertTrue(entered.wait(2))
+    second=pool.submit(adapter.capture,Client(),'us_trades','MERC',job);release.set()
+    self.assertEqual(first.result(timeout=3)['status'],'NO_MESSAGES');self.assertEqual(second.result(timeout=3)['status'],'NO_MESSAGES');self.assertEqual(calls,['us_trades'])
+  finally:release.set();adapters._ws_batch_cache.clear()
+ def test_five_concurrent_scans_record_without_busy_in_local_database(self):
+  import threading
+  from concurrent.futures import ThreadPoolExecutor
+  watches=[]
+  for i in range(5):
+   req=copy.deepcopy(self.req);req.update(watch_id='concurrent-scan-'+str(i),purpose='concurrent scan '+str(i));engine.create(app.connect,1,req,self.now);watches.append(req['watch_id'])
+  barrier=threading.Barrier(5)
+  def scan(wid):
+   barrier.wait(timeout=5);return engine.ingest(app.connect,1,wid,True,tick(self.now),self.now,include_session=False)
+  with ThreadPoolExecutor(max_workers=5) as pool:results=list(pool.map(scan,watches))
+  self.assertEqual(len(results),5)
+  for result in results:
+   self.assertTrue(result['ok']);self.assertNotEqual(result['calculation']['signal'],'BUY')
+   self.assertGreaterEqual(result['sqlite_timing']['begin_wait_ms'],0);self.assertGreaterEqual(result['sqlite_timing']['work_before_commit_ms'],0)
  def test_latest_observations_have_indexes_after_repeat_initialization(self):
   app.init()
   with app.connect() as c:

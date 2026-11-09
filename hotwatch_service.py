@@ -788,6 +788,7 @@ class Runner:
    result=engine.ingest(self.connect,uid,wid,mode,sample,now=engine.utc(),lease=lease,include_session=False)
    journaled_at=engine.utc();ingest_done=time.perf_counter()
    timings={'provider_ms':round((provider_done-poll_started)*1000,3),'adapter_to_journal_ms':round((journaled_at-adapter_received).total_seconds()*1000,3),'ingest_compute_ms':round((ingest_done-provider_done)*1000,3),'event_to_adapter_receive_ms':round(adapter_latency_ms,3) if adapter_latency_ms is not None else None,'market_time_known':bool(sample.get('event_time')),'signal':result.get('calculation',{}).get('signal')}
+   timings.update({k:v for k,v in (result.get('sqlite_timing') or {}).items() if k in ('begin_wait_ms','work_before_commit_ms') and isinstance(v,(int,float))})
    telemetry=getattr(adapter,'last_telemetry',None)
    if isinstance(telemetry,dict):timings.update({k:telemetry[k] for k in ['eodhd_http_ms','pluto_context_ms','event_to_http_receive_ms','websocket_capture_ms','event_to_websocket_receive_ms'] if k in telemetry})
    diagnostics=getattr(adapter,'last_feed_diagnostics',None)
