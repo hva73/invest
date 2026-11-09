@@ -31,8 +31,9 @@ def valid_cxe_evidence(c,uid,request,now):
    if data.get('reference_source')!='https://accounteu.cboe.com/cxe/market_data/symbol_listing/csv/' or not -300<=(now-source).total_seconds()<=72*3600:return False
   if data.get('basis')=='pluto_asset_cxe_security_reference_eodhd_isin':return data.get('cxe_asset_class')=='EQTY' and pluto.get('type')=='CS'
   if data.get('basis') in ('pluto_asset_us_catalog_cxe_security_isin','pluto_asset_us_listing'):
+   from instrument_resolver import same_us_class_ticker
    received=stamp(data['catalog_received_at'])
-   return bool(-300<=(now-received).total_seconds()<=7*86400 and data.get('catalog_source')=='https://eodhd.com/api/exchange-symbol-list/US' and pluto.get('type') in ('CS','ADRC') and data.get('pluto_type')==pluto.get('type') and data.get('catalog_type')=='Common Stock' and data.get('catalog_exchange')==request.get('exchange') and data.get('catalog_ticker')==request.get('ticker') and data.get('symbol')==request.get('ticker')+'.US' and (data.get('basis')=='pluto_asset_us_listing' or data.get('cxe_symbols')))
+   return bool(-300<=(now-received).total_seconds()<=7*86400 and data.get('catalog_source')=='https://eodhd.com/api/exchange-symbol-list/US' and pluto.get('type') in ('CS','ADRC') and data.get('pluto_type')==pluto.get('type') and data.get('catalog_type')=='Common Stock' and data.get('catalog_exchange')==request.get('exchange') and same_us_class_ticker(data.get('catalog_ticker'),request.get('ticker')) and data.get('symbol')==data.get('catalog_ticker')+'.US' and (data.get('basis')=='pluto_asset_us_listing' or data.get('cxe_symbols')))
   return False
  except (KeyError,ValueError,TypeError,AttributeError):return False
 

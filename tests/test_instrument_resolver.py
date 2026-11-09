@@ -4,6 +4,16 @@ from instrument_resolver import resolve_instrument,resolve_cxe,resolve_us,crypto
 from cxe_reference import parse_reference,ReferenceUnavailable
 
 class InstrumentResolver(unittest.TestCase):
+ def test_us_share_class_alias_requires_same_class_and_matching_isin(self):
+  pluto={'asset_id':'synthetic-berkshire','ticker':'BRK.B','name':'Berkshire Hathaway Class B','exchange':'NYSE','currency':'USD','type':'CS'}
+  listing={'Code':'BRK-B','Name':'Berkshire Hathaway Inc','Country':'USA','Exchange':'NYSE','Currency':'USD','Type':'Common Stock','Isin':'US0846707026'}
+  choice={'symbol':'BRK-B.US','exchange':'US','currency':'USD','isin':'US0846707026'}
+  result=resolve_us(pluto,[choice],[listing]);self.assertEqual(result['status'],'VERIFIED');self.assertEqual(result['symbol'],'BRK-B.US')
+  self.assertNotEqual(resolve_us(pluto,[choice],[dict(listing,Code='BRK-A')])['status'],'VERIFIED')
+  self.assertNotEqual(resolve_us(pluto,[dict(choice,isin='US0846701086')],[listing])['status'],'VERIFIED')
+  self.assertNotEqual(resolve_us(pluto,[dict(choice,isin=None)],[listing])['status'],'VERIFIED')
+  self.assertEqual(resolve_us(pluto,[choice],[listing,listing])['status'],'AMBIGUOUS')
+  self.assertNotEqual(resolve_us(dict(pluto,name='Berkshire Hathaway Class A'),[choice],[dict(listing,Name='Berkshire Hathaway Class B')])['status'],'VERIFIED')
  def test_owner_authorized_crypto_reference_is_pinned_to_broker_asset_and_currency(self):
   btc={'asset_id':'54368e0b-2d53-401e-bf68-1033a5b84b08','ticker':'BTC','name':'Bitcoin','type':'CRYPTO','currency':'USD','exchange':'WINTERMUTE'}
   pepe={'asset_id':'4cde5f75-df03-4abc-9063-cfc588e31c11','ticker':'PEPE','name':'Pepe','type':'CRYPTO','currency':'USD','exchange':'UKENDT'}

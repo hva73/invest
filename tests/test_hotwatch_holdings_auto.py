@@ -18,6 +18,24 @@ class HoldingAutowatch(unittest.TestCase):
   self.verify=lambda *_:self.instrument
   self.lookup=lambda *_:{'choices':[{'symbol':'TEST.US','currency':'USD','isin':'US1234567890'}]}
  def tearDown(self):self.fixture.tearDown()
+ def test_reference_errors_are_specific_without_exception_content(self):
+  import sqlite3
+  for error,expected in [(KeyError('secret'),'REFERENCE_FIELD_MISSING'),(TypeError('secret'),'REFERENCE_TYPE_ERROR'),(ValueError('secret'),'REFERENCE_VALUE_ERROR'),(sqlite3.OperationalError('secret'),'REFERENCE_DATABASE_ERROR')]:
+   self.assertEqual(service.reference_error_code(error),expected)
+   self.assertNotIn('secret',service.reference_error_code(error))
+ def test_saved_share_class_alias_evidence_stays_verified_and_cannot_switch_class(self):
+  instrument={'asset_id':'synthetic-berkshire','ticker':'BRK.B','name':'Berkshire Hathaway Class B','exchange':'NYSE','currency':'USD','type':'CS','isin':None}
+  listing={'Code':'BRK-B','Name':'Berkshire Hathaway Inc','Country':'USA','Exchange':'NYSE','Currency':'USD','Type':'Common Stock','Isin':'US0846707026'}
+  choices=[{'symbol':'BRK-B.US','exchange':'US','currency':'USD','isin':'US0846707026'}]
+  catalog={'received_at':self.now.isoformat(),'rows':[listing]}
+  with patch('eodhd_us_reference.get_reference',return_value=catalog):evidence=service.cxe_verified_match(instrument,choices,self.now,app.connect,1)
+  self.assertEqual(evidence['symbol'],'BRK-B.US')
+  service.remember_verified_feed(app.connect,1,dict(instrument,isin=evidence['isin']),evidence['symbol'],self.now,cxe_evidence=evidence)
+  req={'asset_id':instrument['asset_id'],'ticker':'BRK.B','exchange':'NYSE','quote_currency':'USD','provider_symbol':'BRK-B.US'}
+  with app.connect() as c:
+   self.assertTrue(engine.valid_cxe_evidence(c,1,req,self.now))
+   self.assertFalse(engine.valid_cxe_evidence(c,1,dict(req,ticker='BRK.A'),self.now))
+   self.assertFalse(engine.valid_cxe_evidence(c,1,dict(req,provider_symbol='BRK-A.US'),self.now))
  def tick(self,**kwargs):
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_CAPACITY':'40','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}):return service.auto_holdings_tick(app.connect,now=self.now,**kwargs)
  def test_verified_holding_creates_exit_only_session_and_never_restarts_stopped(self):

@@ -24,6 +24,17 @@ class WS:
   return json.dumps(self.messages.pop(0))
 
 class FeedTests(unittest.TestCase):
+ def test_adapter_shared_quotes_deduplicate_only_same_symbol_and_credentials(self):
+  import hotwatch_adapters as adapter
+  adapter._quote_cache.clear();calls=[]
+  def fetch():calls.append(1);return ({'code':'BRK-B.US','timestamp':1730000000},'original-received',1)
+  first=adapter.shared_quote('token-a','BRK-B.US',fetch)
+  second=adapter.shared_quote('token-a','BRK-B.US',fetch)
+  adapter.shared_quote('token-b','BRK-B.US',fetch)
+  adapter.shared_quote('token-a','BRK-A.US',fetch)
+  self.assertEqual(len(calls),3);self.assertEqual(first,second);self.assertEqual(second[1],'original-received')
+  self.assertNotIn('token-a',str(adapter._quote_cache))
+  adapter._quote_cache.clear()
  def test_concurrent_same_symbol_snapshots_share_one_provider_call(self):
   import eodhd_feeds,time
   from concurrent.futures import ThreadPoolExecutor

@@ -27,6 +27,15 @@ def _value(row, *keys):
 def _norm(value):
  return re.sub(r'[^A-Z0-9]','',value.upper()) if isinstance(value,str) else None
 
+def same_us_class_ticker(left,right):
+ """Accept only an exact ticker or dot/hyphen spelling of the same class."""
+ if not isinstance(left,str) or not isinstance(right,str):return False
+ left=left.upper();right=right.upper()
+ if left==right:return True
+ a=re.fullmatch(r'([A-Z0-9]+)[.\-]([A-Z0-9]+)',left)
+ b=re.fullmatch(r'([A-Z0-9]+)[.\-]([A-Z0-9]+)',right)
+ return bool(a and b and a.groups()==b.groups())
+
 def _issuer(value):
  import unicodedata
  if not isinstance(value,str):return None
@@ -61,13 +70,18 @@ def resolve_us(pluto, eodhd_choices, us_rows, cxe_rows=None):
   # The two provider names below were observed for this exact Pluto asset
   # and EODHD listing. Do not generalize issuer prefixes to other securities.
   return bool(pluto.get('asset_id')=='bea4a183-d3aa-4893-8071-87b85385e281' and ticker=='FCX' and kind=='CS' and issuer==('FREEPORT','MCMORAN') and share_class is None and other==('FREEPORT','MCMORAN','COPPER','GOLD') and other_class is None and row.get('Isin')=='US35671D8570')
- matches=[row for row in us_rows if isinstance(row,dict) and row.get('Code')==ticker and _norm(row.get('Exchange'))==exchange and _norm(row.get('Currency'))=='USD' and _norm(row.get('Country'))=='USA' and _norm(row.get('Type'))=='COMMONSTOCK' and same_issuer(row) and isinstance(row.get('Isin'),str) and re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',row['Isin'])]
+ matches=[row for row in us_rows if isinstance(row,dict) and same_us_class_ticker(row.get('Code'),ticker) and _norm(row.get('Exchange'))==exchange and _norm(row.get('Currency'))=='USD' and _norm(row.get('Country'))=='USA' and _norm(row.get('Type'))=='COMMONSTOCK' and same_issuer(row) and isinstance(row.get('Isin'),str) and re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',row['Isin'])]
  if len(matches)!=1:return {'status':'AMBIGUOUS' if len(matches)>1 else 'UNVERIFIED','reason':'US_LISTING_NOT_UNIQUE'}
  listing=matches[0];isin=listing['Isin']
+ catalog_ticker=listing['Code'];alias=catalog_ticker!=ticker
+ if alias:
+  ticker_class=re.fullmatch(r'[A-Z0-9]+[.\-]([A-Z0-9]+)',ticker).group(1)
+  catalog_class=_us_issuer(listing.get('Name'))[1]
+  if (share_class and share_class!=ticker_class) or (catalog_class and catalog_class!=ticker_class):return {'status':'UNVERIFIED','reason':'SHARE_CLASS_CONFLICT'}
  if pluto.get('isin') and _norm(pluto['isin'])!=isin:return {'status':'UNVERIFIED','reason':'PLUTO_ISIN_CONFLICT'}
- choices=[row for row in eodhd_choices if isinstance(row,dict) and row.get('symbol')==ticker+'.US' and _norm(row.get('exchange'))=='US' and (not row.get('currency') or _norm(row['currency'])=='USD') and (not row.get('isin') or _norm(row['isin'])==isin)]
+ choices=[row for row in eodhd_choices if isinstance(row,dict) and row.get('symbol')==catalog_ticker+'.US' and _norm(row.get('exchange'))=='US' and (not row.get('currency') or _norm(row['currency'])=='USD') and ((bool(row.get('isin')) and _norm(row['isin'])==isin) if alias else (not row.get('isin') or _norm(row['isin'])==isin))]
  if len(choices)!=1:return {'status':'AMBIGUOUS' if len(choices)>1 else 'UNVERIFIED','reason':'EODHD_SYMBOL_NOT_UNIQUE'}
- result={'status':'VERIFIED','symbol':ticker+'.US','isin':isin,'currency':'USD','currency_basis':'us_catalog_and_pluto','basis':'pluto_asset_us_listing','catalog_exchange':exchange,'catalog_ticker':ticker,'catalog_type':listing['Type'],'pluto_type':pluto['type'],'type_note':'Pluto angiver ADR; EODHD bruger den brede betegnelse Common Stock.' if kind=='ADRC' else 'Begge kilder angiver en almindelig aktie.'}
+ result={'status':'VERIFIED','symbol':catalog_ticker+'.US','isin':isin,'currency':'USD','currency_basis':'us_catalog_and_pluto','basis':'pluto_asset_us_listing','catalog_exchange':exchange,'catalog_ticker':catalog_ticker,'catalog_type':listing['Type'],'pluto_type':pluto['type'],'type_note':'Pluto angiver ADR; EODHD bruger den brede betegnelse Common Stock.' if kind=='ADRC' else 'Begge kilder angiver en almindelig aktie.'}
  if _us_issuer(listing.get('Name'))[0]!=issuer:result['type_note']='FCX: Pluto og EODHD bruger forskellige observerede selskabsnavne; Pluto oplyser ikke ISIN.'
  if cxe_rows is not None:
   corroborating=[row for row in cxe_rows if isinstance(row,dict) and row.get('isin')==isin and _norm(row.get('instrument_type'))=='EQTY']

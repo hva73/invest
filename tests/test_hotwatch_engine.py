@@ -608,6 +608,22 @@ class HotWatch(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'  TEST-ONLY\n'}),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):
    sample=EODHDAdapter(app.connect,1,opener).poll({'request_data':req})
   self.assertEqual(opener.token,'TEST-ONLY');self.assertNotIn('TEST-ONLY',str(sample))
+ def test_real_adapter_shares_identical_quote_without_sharing_context(self):
+  import hotwatch_adapters as adapters
+  adapters._quote_cache.clear()
+  class Response:
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,limit):return json.dumps({'code':'MERC.US','timestamp':int(self_now.timestamp()),'close':'12.34','currency':'USD'}).encode()
+  class Opener:
+   def __init__(self):self.calls=0
+   def open(self,*args,**kwargs):self.calls+=1;return Response()
+  opener=Opener();self_now=self.now;req=copy.deepcopy(self.req);req.update(provider='eodhd',provider_symbol='MERC.US',quote_currency='USD')
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}),patch('hotwatch_adapters.urllib.request.build_opener',return_value=opener),patch('hotwatch_adapters.PlutoAdapter.context',side_effect=[unknown_context('FIRST'),unknown_context('SECOND')]),patch('hotwatch_adapters.reserve') as budget:
+   a=EODHDAdapter(app.connect,1).poll({'request_data':req});b=EODHDAdapter(app.connect,1).poll({'request_data':req})
+  self.assertEqual(opener.calls,1);self.assertEqual(budget.call_count,1)
+  self.assertEqual(a['event_time'],b['event_time']);self.assertEqual(a['context']['diagnostic'],'FIRST');self.assertEqual(b['context']['diagnostic'],'SECOND')
+  adapters._quote_cache.clear()
  def test_eodhd_quote_records_its_own_market_not_pluto_venue(self):
   class Response:
    def __enter__(self):return self

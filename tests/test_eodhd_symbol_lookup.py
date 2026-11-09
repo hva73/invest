@@ -9,6 +9,16 @@ class Response:
 class Opener:
  def open(self,*args,**kwargs):return Response()
 class SymbolLookup(unittest.TestCase):
+ def test_us_share_class_alias_is_discovered_without_other_share_class(self):
+  class Reply:
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,size):return json.dumps([{'Code':'BRK-B','Exchange':'US','Name':'Berkshire Hathaway','Currency':'USD','ISIN':'US0846707026'},{'Code':'BRK-A','Exchange':'US','Name':'Berkshire Hathaway','Currency':'USD','ISIN':'US0846701086'}]).encode()
+  class Client:
+   def open(self,*args,**kwargs):return Reply()
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY'}),patch.object(adapter,'reserve'):
+   result=adapter.search_eodhd_symbols(None,1,{'quote_currency':'USD'},Client(),candidate_override={'ticker':'BRK.B','company_name':'Berkshire Hathaway Class B'})
+  self.assertEqual([x['symbol'] for x in result['choices']],['BRK-B.US'])
  def test_crypto_pair_search_is_currency_specific_and_does_not_prove_identity(self):
   class Reply:
    def __enter__(self):return self

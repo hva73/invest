@@ -14,6 +14,12 @@ def reference_error_code(error):
  if isinstance(error,(CXEReferenceUnavailable,USReferenceUnavailable)):
   code=str(error)
  elif isinstance(error,EngineError):code=getattr(error,'code',None)
+ elif isinstance(error,sqlite3.OperationalError):
+  sqlcode=getattr(error,'sqlite_errorcode',None)
+  code='REFERENCE_DATABASE_BUSY' if isinstance(sqlcode,int) and (sqlcode&255) in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED) else 'REFERENCE_DATABASE_ERROR'
+ elif isinstance(error,KeyError):code='REFERENCE_FIELD_MISSING'
+ elif isinstance(error,TypeError):code='REFERENCE_TYPE_ERROR'
+ elif isinstance(error,ValueError):code='REFERENCE_VALUE_ERROR'
  else:code=None
  return code if isinstance(code,str) and re.fullmatch('[A-Za-z0-9_]{1,80}',code) else 'VERIFICATION_FAILED'
 

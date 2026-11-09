@@ -1,5 +1,5 @@
 """Read-only provider adapters. Missing entitlements/fields are explicit faults."""
-import hashlib,json,os,re,time,urllib.request,urllib.error
+import hashlib,json,os,re,time,urllib.request,urllib.error,threading,copy
 from datetime import datetime,timedelta,timezone
 from decimal import Decimal,InvalidOperation
 from urllib.parse import quote,urlencode
@@ -7,6 +7,21 @@ from hotwatch_contract import EngineError,checksum,stamp,provider_floor,PROFILES
 from hotwatch_engine import utc,effective_poll_interval,valid_cxe_evidence,provider_request_limit
 
 class DataUnavailable(EngineError):pass
+
+_quote_cache={}
+_quote_locks=[threading.Lock() for _ in range(32)]
+
+def shared_quote(key,symbol,fetch,enabled=True):
+ """Share a successful raw quote briefly; preserve its original receive time."""
+ if not enabled:return fetch()
+ cache_key=(hashlib.sha256(key.encode()).digest(),symbol)
+ with _quote_locks[hash(cache_key)%len(_quote_locks)]:
+  now=time.monotonic();cached=_quote_cache.get(cache_key)
+  if cached and 0<=now-cached[0]<5:return copy.deepcopy(cached[1])
+  result=fetch()
+  if len(_quote_cache)>=256:_quote_cache.clear()
+  _quote_cache[cache_key]=(time.monotonic(),copy.deepcopy(result))
+  return result
 
 def reserve(connect,uid,source,now=None,purpose=None):
  uid=0 if source=='eodhd' else uid
@@ -99,7 +114,9 @@ def search_eodhd_symbols(connect,uid,data,opener=None,candidate_override=None,pu
    ticker_equivalent=allow_ticker_alias and re.sub(r'[^a-z0-9]','',base.casefold())==re.sub(r'[^a-z0-9]','',ticker.casefold())
    # A quoted crypto pair is a search candidate, not an identity proof.
    crypto_pair=bool(crypto and expected_currency and exchange.upper()=='CC' and str(row.get('Type','')).casefold()=='currency' and base.upper()==ticker.upper()+'-'+expected_currency and currency in (None,'',expected_currency))
-   if base.casefold()!=ticker.casefold() and not ticker_equivalent and not crypto_pair and not (allow_alias and issuer_key and name_key(name)==issuer_key):continue
+   from instrument_resolver import same_us_class_ticker
+   exact_class_alias=exchange.upper()=='US' and same_us_class_ticker(base,ticker)
+   if base.casefold()!=ticker.casefold() and not exact_class_alias and not ticker_equivalent and not crypto_pair and not (allow_alias and issuer_key and name_key(name)==issuer_key):continue
    symbol=code if code.upper().endswith('.'+exchange.upper()) else code+'.'+exchange
    if symbol.casefold() in seen:continue
    seen.add(symbol.casefold());choices.append({'symbol':symbol,'name':name[:200] if isinstance(name,str) else None,'exchange':exchange,'currency':currency if isinstance(currency,str) and re.fullmatch('[A-Z]{3}',currency) else None,'isin':isin[:32] if isinstance(isin,str) else None})
@@ -291,7 +308,7 @@ def extended_session(trade,schedule,now,max_age_s):
  except (KeyError,ValueError,TypeError,ZoneInfoNotFoundError):return None
 
 class EODHDAdapter:
- def __init__(self,connect,uid,opener=None):self.connect=connect;self.uid=uid;self.opener=opener or urllib.request.build_opener(NoRedirect());self.pluto=PlutoAdapter(connect,uid);self.last_telemetry={}
+ def __init__(self,connect,uid,opener=None):self.connect=connect;self.uid=uid;self.opener=opener or urllib.request.build_opener(NoRedirect());self._shared_quotes=opener is None;self.pluto=PlutoAdapter(connect,uid);self.last_telemetry={}
  def interval(self,request,profile):
   if self.connect is None:return max(PROFILES.get(profile,PROFILES[request['profile']]),provider_floor('eodhd'))
   with self.connect() as c:return effective_poll_interval(c,request,profile)
@@ -439,29 +456,34 @@ class EODHDAdapter:
       context=self.pluto.safe_context(r,currency)
       return {'sample_id':sample_id,'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':None,'currency':currency,'event_time':bar['bar_open_at'],'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD '+kind+' closed 1m bar; time is bar open','documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':60,'price':bar['close'],'bid':None,'ask':None,'volume':bar.get('volume'),'volume_type':'interval','open':bar['open'],'high':bar['high'],'low':bar['low'],'close':bar['close'],'context':context,'price_time_kind':'bar_open'}
   # Exchange is an explicit EODHD code, not inferred from a display name.
-  reserve(self.connect,self.uid,'eodhd');url='https://eodhd.com/api/real-time/'+quote(symbol,safe='')+'?'+urlencode({'api_token':key,'fmt':'json'})
-  self.last_telemetry={};http_started=time.perf_counter()
-  try:
-   with self.opener.open(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=8) as response:
-    raw=response.read(131073)
-    if len(raw)>131072:raise ValueError()
-    received=utc();http_ms=(time.perf_counter()-http_started)*1000
-    d=json.loads(raw,parse_float=str)
-   permitted_codes=[symbol,symbol.rsplit('.',1)[0]]+([] if symbol.upper().endswith('.CC') else [r['ticker']])
-   if not isinstance(d,dict) or d.get('code') not in permitted_codes or not isinstance(d.get('timestamp'),(int,str)) or type(d.get('timestamp')) is bool:raise ValueError()
-   at=datetime.fromtimestamp(int(d['timestamp']),timezone.utc);price=Decimal(str(d['close']))
-   if not price.is_finite() or price<=0:raise ValueError()
-  except urllib.error.HTTPError as error:
-   if error.code==429:
-    failure=DataUnavailable('EODHD_RATE_LIMIT',429)
-    retry=error.headers.get('Retry-After','600') if error.headers else '600'
-    try:
-     seconds=int(retry);failure.retry_after_s=max(600,min(604800,seconds))
-     if seconds>604800:failure.code='EODHD_RATE_LIMIT_MANUAL_REVIEW'
-    except (ValueError,TypeError):failure.retry_after_s=3600
-    raise failure from None
-   raise DataUnavailable('EODHD_ENTITLEMENT_REJECTED' if error.code in [401,403] else 'EODHD_READ_ERROR') from None
-  except Exception:raise DataUnavailable('EODHD_READ_OR_CONTRACT_ERROR') from None
+  self.last_telemetry={}
+  def fetch_quote():
+   reserve(self.connect,self.uid,'eodhd');url='https://eodhd.com/api/real-time/'+quote(symbol,safe='')+'?'+urlencode({'api_token':key,'fmt':'json'});http_started=time.perf_counter()
+   try:
+    with self.opener.open(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=8) as response:
+     raw=response.read(131073)
+     if len(raw)>131072:raise ValueError()
+     received=utc();http_ms=(time.perf_counter()-http_started)*1000
+     d=json.loads(raw,parse_float=str)
+    permitted_codes=[symbol,symbol.rsplit('.',1)[0]]+([] if symbol.upper().endswith('.CC') else [r['ticker']])
+    if not isinstance(d,dict) or d.get('code') not in permitted_codes or not isinstance(d.get('timestamp'),(int,str)) or type(d.get('timestamp')) is bool:raise ValueError()
+    at=datetime.fromtimestamp(int(d['timestamp']),timezone.utc);price=Decimal(str(d['close']))
+    if not price.is_finite() or price<=0:raise ValueError()
+    return d,received,http_ms,at,price
+   except urllib.error.HTTPError as error:
+    if error.code==429:
+     failure=DataUnavailable('EODHD_RATE_LIMIT',429)
+     retry=error.headers.get('Retry-After','600') if error.headers else '600'
+     try:
+      seconds=int(retry);failure.retry_after_s=max(600,min(604800,seconds))
+      if seconds>604800:failure.code='EODHD_RATE_LIMIT_MANUAL_REVIEW'
+     except (ValueError,TypeError):failure.retry_after_s=3600
+     raise failure from None
+    raise DataUnavailable('EODHD_ENTITLEMENT_REJECTED' if error.code in [401,403] else 'EODHD_READ_ERROR') from None
+   except Exception:raise DataUnavailable('EODHD_READ_OR_CONTRACT_ERROR') from None
+  d,received,http_ms,at,price=shared_quote(key,symbol,fetch_quote,self._shared_quotes)
+  permitted_codes=[symbol,symbol.rsplit('.',1)[0]]+([] if symbol.upper().endswith('.CC') else [r['ticker']])
+  if d.get('code') not in permitted_codes:raise DataUnavailable('EODHD_READ_OR_CONTRACT_ERROR')
   # This documented price endpoint does not prove bid/ask, interval volume,
   # market status or account entitlement. Never invent these capabilities.
   currency=d.get('currency') or r.get('quote_currency')
