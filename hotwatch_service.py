@@ -453,6 +453,31 @@ def recover_automatic_feeds(connect,now=None):
   except (KeyError,TypeError,ValueError):continue
  return changed
 
+def queue_unverified_automatic_feeds(connect,now=None):
+ """Schedule proof for legacy EODHD sessions without deleting observations."""
+ now=now or engine.utc();queued=0
+ with connect() as c:
+  if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return 0
+  rows=c.execute("SELECT s.* FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id LEFT JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id WHERE s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.purpose IN ('automatic discovery','automatic holding watch') AND json_extract(s.request,'$.provider')='eodhd' AND COALESCE(k.killed,0)=0 AND p.watch_row_id IS NULL ORDER BY s.id LIMIT 40").fetchall()
+  pending=[]
+  for row in rows:
+   req=json.loads(row['request']);symbol=req.get('provider_symbol')
+   if not isinstance(symbol,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',symbol) or engine.verified_automatic_feed(c,row['user_id'],req,now):continue
+   pending.append((row,req,symbol))
+ if not pending:return 0
+ with connect() as c:
+  c.execute('BEGIN IMMEDIATE')
+  if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return 0
+  for row,req,symbol in pending:
+   current=c.execute("SELECT s.* FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.id=? AND s.request=? AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0",(row['id'],row['request'])).fetchone()
+   if not current or engine.verified_automatic_feed(c,row['user_id'],req,now):continue
+   evidence={'basis':'legacy_unverified_feed','asset_id':req.get('asset_id'),'symbol':symbol,'note':'Kilden afventer uafhængig instrumentkontrol; gamle observationer bevares uden handelssignal.'}
+   inserted=c.execute('INSERT OR IGNORE INTO hw_provisional_feed_links VALUES(?,?,?,?)',(row['id'],symbol,json.dumps(evidence),now.isoformat()))
+   if inserted.rowcount:
+    c.execute("INSERT INTO hw_feed_recovery VALUES(?,?,?,?) ON CONFLICT(watch_row_id) DO UPDATE SET next_attempt=excluded.next_attempt,status=excluded.status,updated=excluded.updated",(row['id'],now.timestamp(),'REFERENCE_RECHECK_REQUIRED',now.isoformat()))
+    engine.event(c,current,'REFERENCE_CANDIDATE_REGISTERED',now,evidence['note']);queued+=1
+ return queued
+
 def verify_provisional_feeds(connect,now=None):
  """Upgrade a provisional link only after a later independent ISIN match."""
  if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1' or not os.environ.get('ESCAPE_EODHD_API_KEY','').strip():return 0
@@ -809,6 +834,8 @@ class Runner:
     except Exception:logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'holdings_autowatch_error'}))
     try:recover_automatic_feeds(self.connect)
     except Exception:logging.getLogger('escape.hotwatch').exception('automatic_feed_recovery_error')
+    try:queue_unverified_automatic_feeds(self.connect)
+    except Exception:logging.getLogger('escape.hotwatch').exception('automatic_feed_recheck_queue_error')
     try:verify_provisional_feeds(self.connect)
     except Exception:logging.getLogger('escape.hotwatch').exception('provisional_feed_verification_error')
     try:verify_cxe_feeds(self.connect)

@@ -41,14 +41,29 @@ class Agreement(unittest.TestCase):
   with app.connect() as c:
    row=c.execute('SELECT * FROM hw_sessions WHERE watch_id=?',(created['watch_id'],)).fetchone();req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol='MANE.US')
    c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps(req),row['id']))
-   c.execute('INSERT INTO hw_provisional_feed_links VALUES(?,?,?,?)',(row['id'],'MANE.US','{}',self.now.isoformat()))
+   from test_hotwatch_engine import tick
+   sample=tick(self.now-timedelta(days=1));sample.update(source='eodhd',ticker='MANE',asset_id='synthetic-mane')
+   c.execute('INSERT INTO hw_samples(watch_row_id,source,sample_id,event_epoch,received,payload,digest) VALUES(?,?,?,?,?,?,?)',(row['id'],'eodhd',sample['sample_id'],(self.now-timedelta(days=1)).timestamp(),(self.now-timedelta(days=1)).isoformat(),json.dumps(sample),engine.checksum(sample)))
+   c.execute('UPDATE hw_sessions SET last_data=? WHERE id=?',((self.now-timedelta(days=1)).isoformat(),row['id']))
    c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?)',(row['id'],self.now.timestamp()-1,'VERIFICATION_FAILED',self.now.isoformat()))
+  with self.assertRaisesRegex(engine.EngineError,'EODHD_INSTRUMENT_REVALIDATION_REQUIRED'):engine.ingest(app.connect,1,created['watch_id'],False,sample,self.now)
+  readback=engine.sync(app.connect,1,False,summary_only=True)['open_sessions'][0]
+  self.assertEqual(readback['identity_verification'],'unverified');self.assertFalse(readback['instrument_match_verified'])
+  from hotwatch_adapters import EODHDAdapter,unknown_context,DataUnavailable
+  with patch.dict('os.environ',{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_adapters.PlutoAdapter.safe_context',return_value=unknown_context()):
+   with self.assertRaisesRegex(DataUnavailable,'EODHD_INSTRUMENT_REVALIDATION_REQUIRED'):EODHDAdapter(app.connect,1).poll({'id':row['id'],'request_data':req})
+  self.assertEqual(hotwatch_service.queue_unverified_automatic_feeds(app.connect,self.now),1)
+  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM hw_samples WHERE watch_row_id=?',(row['id'],)).fetchone()[0],1)
   listing={'received_at':self.now.isoformat(),'rows':[{'Code':'MANE','Name':'Veradermics, Incorporated','Country':'USA','Exchange':'NYSE','Currency':'USD','Type':'Common Stock','Isin':'US9229671048'}]}
   options={'choices':[{'symbol':'MANE.US','exchange':'US','currency':'USD','isin':'US9229671048'}]}
   with patch.dict('os.environ',{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.verified_discovery_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=options),patch('eodhd_us_reference.get_reference',return_value=listing):
    self.assertEqual(hotwatch_service.verify_provisional_feeds(app.connect,self.now),1)
   state=engine.item(app.connect,1,created['watch_id'],False)['session']['data_status']
   self.assertTrue(state['instrument_match_verified']);self.assertFalse(state['quote_feed_verified'])
+  with app.connect() as c:c.execute("UPDATE hw_verified_feed_links SET currency='EUR' WHERE asset_id='synthetic-mane'")
+  session=engine.item(app.connect,1,created['watch_id'],False)['session']
+  self.assertFalse(session['data_status']['instrument_match_verified']);self.assertNotEqual(session['signal'],'BUY')
+  with self.assertRaisesRegex(engine.EngineError,'EODHD_INSTRUMENT_REVALIDATION_REQUIRED'):engine.ingest(app.connect,1,created['watch_id'],False,sample,self.now)
  def assess(self,status='AFVENT',deadline=None,at=None):
   at=at or self.now
   data=dict(self.report['candidates'][0]['decision'],status=status,decided_at=at.isoformat(),deadline=deadline)

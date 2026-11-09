@@ -322,9 +322,13 @@ class EODHDAdapter:
   r=session['request_data'];symbol=r.get('provider_symbol')
   if not symbol:raise DataUnavailable('EODHD_SYMBOL_MAPPING_REQUIRED')
   if not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',symbol):raise DataUnavailable('EODHD_SYMBOL_MAPPING_REQUIRED')
-  cxe_valid=None
+  cxe_valid=None;automatic_missing=False
   if self.connect is not None:
-   with self.connect() as c:cxe_valid=valid_cxe_evidence(c,self.uid,r,utc())
+   with self.connect() as c:
+    cxe_valid=valid_cxe_evidence(c,self.uid,r,utc())
+    if not r.get('is_test') and r.get('purpose') in ('automatic discovery','automatic holding watch'):
+     from hotwatch_engine import verified_automatic_feed
+     automatic_missing=not verified_automatic_feed(c,self.uid,r,utc())
   from instrument_resolver import BTC_PLUTO_ASSET_ID,PEPE_PLUTO_ASSET_ID
   if r.get('asset_id')==PEPE_PLUTO_ASSET_ID:raise DataUnavailable('EODHD_INSTRUMENT_UNVERIFIED')
   if cxe_valid is False or r.get('asset_id')==BTC_PLUTO_ASSET_ID and cxe_valid is not True:
@@ -337,6 +341,10 @@ class EODHDAdapter:
    with self.connect() as c:provisional=c.execute('SELECT symbol FROM hw_provisional_feed_links WHERE watch_row_id=?',(session['id'],)).fetchone()
   if provisional:
    failure=DataUnavailable('EODHD_INSTRUMENT_UNVERIFIED')
+   failure.position_context=self.pluto.safe_context(r,r.get('quote_currency'))
+   raise failure
+  if automatic_missing:
+   failure=DataUnavailable('EODHD_INSTRUMENT_REVALIDATION_REQUIRED')
    failure.position_context=self.pluto.safe_context(r,r.get('quote_currency'))
    raise failure
   # Explicit opt-in: one bounded live trade capture. If unavailable, use the

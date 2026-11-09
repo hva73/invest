@@ -23,6 +23,18 @@ class HoldingAutowatch(unittest.TestCase):
   for error,expected in [(KeyError('secret'),'REFERENCE_FIELD_MISSING'),(TypeError('secret'),'REFERENCE_TYPE_ERROR'),(ValueError('secret'),'REFERENCE_VALUE_ERROR'),(sqlite3.OperationalError('secret'),'REFERENCE_DATABASE_ERROR')]:
    self.assertEqual(service.reference_error_code(error),expected)
    self.assertNotIn('secret',service.reference_error_code(error))
+ def test_legacy_recheck_leaves_verified_exit_and_kill_switch_unchanged(self):
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  self.assertEqual(service.queue_unverified_automatic_feeds(app.connect,self.now),0)
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();self.assertEqual(json.loads(row['request'])['watch_mode'],'exit')
+   c.execute("UPDATE hw_system_control SET killed=1 WHERE id=1")
+   c.execute('DELETE FROM hw_verified_feed_links')
+  self.assertEqual(service.queue_unverified_automatic_feeds(app.connect,self.now),0)
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0],1)
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_provisional_feed_links').fetchone()[0],0)
+   self.assertEqual(c.execute('SELECT status FROM hw_sessions WHERE id=?',(row['id'],)).fetchone()[0],'CREATED')
  def test_provisional_verification_defers_concurrent_claim_without_starving_queue(self):
   self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
   with app.connect() as c:
@@ -602,7 +614,8 @@ class HoldingAutowatch(unittest.TestCase):
    self.assertEqual(c.execute('SELECT count(*) FROM hw_samples').fetchone()[0],2)
    self.assertEqual(json.loads(c.execute('SELECT payload FROM hw_samples ORDER BY id DESC LIMIT 1').fetchone()['payload'])['verification'],'verified')
   self.assertEqual(refreshed['calculation']['supporting_metrics']['sample_count'],1)
-  self.assertEqual(engine.sync(app.connect,1,False,summary_only=True)['open_sessions'][0]['identity_verification'],'verified')
+  with patch('hotwatch_engine.utc',return_value=at):
+   self.assertEqual(engine.sync(app.connect,1,False,summary_only=True)['open_sessions'][0]['identity_verification'],'verified')
  def test_asml_cxe_recovery_revalidates_and_blocks_changed_identity(self):
   holding=dict(self.holding,ticker='ASML')
   with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[holding]}),))

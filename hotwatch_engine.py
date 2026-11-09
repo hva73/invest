@@ -1,5 +1,5 @@
 """Persistent HOT WATCH v1 session/signal engine. No trading capabilities."""
-import json,os,secrets,time,hashlib
+import json,os,secrets,time,hashlib,re
 from contextlib import nullcontext
 from datetime import datetime,timezone,timedelta
 from decimal import Decimal
@@ -49,6 +49,15 @@ def valid_cxe_evidence(c,uid,request,now):
    received=stamp(data['catalog_received_at'])
    return bool(-300<=(now-received).total_seconds()<=7*86400 and data.get('catalog_source')=='https://eodhd.com/api/exchange-symbol-list/US' and pluto.get('type') in ('CS','ADRC') and data.get('pluto_type')==pluto.get('type') and data.get('catalog_type')=='Common Stock' and data.get('catalog_exchange')==request.get('exchange') and same_us_class_ticker(data.get('catalog_ticker'),request.get('ticker')) and data.get('symbol')==data.get('catalog_ticker')+'.US' and (data.get('basis')=='pluto_asset_us_listing' or data.get('cxe_symbols')))
   return False
+ except (KeyError,ValueError,TypeError,AttributeError):return False
+
+def verified_automatic_feed(c,uid,request,now):
+ """Require a current asset-bound mapping before automatic EODHD signals."""
+ try:
+  row=c.execute('SELECT * FROM hw_verified_feed_links WHERE user_id=? AND asset_id=?',(uid,request.get('asset_id'))).fetchone()
+  if not row or row['symbol']!=request.get('provider_symbol') or str(row['ticker']).casefold()!=str(request.get('ticker','')).casefold() or row['currency']!=request.get('quote_currency') or str(row['exchange']).casefold()!=str(request.get('exchange','')).casefold() or not 0<=now.timestamp()-row['verified_epoch']<=7*86400:return False
+  evidence=valid_cxe_evidence(c,uid,request,now)
+  return bool(evidence is True or evidence is None and isinstance(row['isin'],str) and re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',row['isin']))
  except (KeyError,ValueError,TypeError,AttributeError):return False
 
 def provider_request_limit(source):
@@ -524,14 +533,15 @@ def view(c,row,now=None):
  instrument_match_verified=bool(link and request.get('provider')=='eodhd' and link['symbol']==request.get('provider_symbol') and 0<=now.timestamp()-link['verified_epoch']<=7*86400)
  cxe_link=c.execute('SELECT symbol,verified_epoch,status,payload FROM hw_cxe_feed_evidence WHERE user_id=? AND asset_id=?',(row['user_id'],request.get('asset_id'))).fetchone()
  if cxe_link:instrument_match_verified=bool(instrument_match_verified and valid_cxe_evidence(c,row['user_id'],request,now))
+ if not row['is_test'] and request.get('purpose') in ('automatic discovery','automatic holding watch') and request.get('provider')=='eodhd':instrument_match_verified=verified_automatic_feed(c,row['user_id'],request,now)
  evidence=None
  if cxe_link:
   try:
    stored_evidence=json.loads(cxe_link['payload']);evidence={key:stored_evidence.get(key) for key in ('basis','reference_source','reference_created_at','cxe_symbol','cxe_symbols','cxe_references','primary_ticker','primary_mic','cxe_asset_class','catalog_source','catalog_received_at','catalog_exchange','catalog_type','pluto_type','type_note','symbol','isin','currency','currency_basis','last_revalidation_error')};pluto_evidence=stored_evidence.get('pluto') or {};evidence['pluto']={key:pluto_evidence.get(key) for key in ('ticker','name','exchange','currency','type')}
   except (ValueError,TypeError,AttributeError):instrument_match_verified=False
  quote_feed_verified=bool(latest_payload and latest_payload.get('source')=='eodhd' and latest_payload.get('verification')=='verified' and instrument_match_verified and stamp(sample['received']).timestamp()>=link['verified_epoch'])
- if cxe_link and request.get('provider')=='eodhd' and not quote_feed_verified:
-  if row['status']!='PAUSED':effective='NO_DATA';display_status='MARKED LUKKET (ORDINÆR HANDEL)' if instrument_match_verified and regular['status']=='CLOSED' else 'DATA MANGLER';data_status['signal_status']='WAITING_FOR_DATA'
+ if request.get('provider')=='eodhd' and (cxe_link or not row['is_test'] and request.get('purpose') in ('automatic discovery','automatic holding watch')) and not quote_feed_verified:
+  if row['status']!='PAUSED':effective='NO_DATA';display_status='KURSKILDE IKKE BEKRÆFTET' if not instrument_match_verified and (provisional or not cxe_link) else 'MARKED LUKKET (ORDINÆR HANDEL)' if instrument_match_verified and regular['status']=='CLOSED' else 'DATA MANGLER';data_status['signal_status']='WAITING_FOR_DATA'
   data_status.update(identity_verification='verified' if instrument_match_verified else 'unverified',price=None,bid=None,ask=None,daily_change_pct=None,since_last_pct=None,momentum_pct={str(n):None for n in (1,5,15,30)},price_status='UNVERIFIED')
   display_reasons.append('EODHD_INSTRUMENT_REVALIDATION_REQUIRED' if not instrument_match_verified else 'WAITING_FOR_NEW_VERIFIED_QUOTE')
  quote_freshness='UNKNOWN'
@@ -630,6 +640,7 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
      from intel_workflows import candidate_currentness
      review=candidate_currentness(c,uid,mode,r['candidate_id'],now,report_fallback=purpose=='automatic discovery')
     data_status=view(c,r,now)['data_status']
+    if not mode and purpose in ('automatic discovery','automatic holding watch') and req.get('provider')=='eodhd' and not data_status['instrument_match_verified']:unverified=True
     sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
    else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
   more=len(opened)>session_limit
@@ -754,6 +765,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   if provisional and isinstance(sample,dict) and request.get('provider')=='eodhd':
    if not mode:raise EngineError('EODHD_INSTRUMENT_UNVERIFIED',409)
    sample=dict(sample);sample['verification']='unverified';sample.pop('bar_history',None);sample.pop('bar_evidence',None)
+  if request.get('provider')=='eodhd' and not mode and request.get('purpose') in ('automatic discovery','automatic holding watch') and not verified_automatic_feed(c,uid,request,now):raise EngineError('EODHD_INSTRUMENT_REVALIDATION_REQUIRED',409)
   if request['end_at'] and stamp(request['end_at'])<=now:
    c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']));event(c,row,'WATCH_EXPIRED',now,'Session deadline reached');return {'ok':True,'expired':True}
   sample_errors(sample,request,now)
