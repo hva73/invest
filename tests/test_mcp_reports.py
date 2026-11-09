@@ -45,6 +45,18 @@ class McpReports(unittest.TestCase):
   status,tokens,_=self.request('/oauth/token',params,form=True);self.assertEqual(status,200,(status,tokens))
   return client,tokens,params
  def call(self,token,name,args):return self.request('/mcp',{'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':name,'arguments':args}},{'Authorization':'Bearer '+token})
+ def test_transport_database_failure_is_logged_before_tool_dispatch(self):
+  import sqlite3
+  _,tokens,_=self.granted()
+  error=sqlite3.OperationalError('private database path')
+  error.sqlite_errorcode=sqlite3.SQLITE_BUSY
+  with patch.object(mcp_reports,'limit',side_effect=error):
+   status,body,_=self.call(tokens['access_token'],'sync_hot_watch',{'is_test':True})
+  self.assertEqual(status,500);self.assertEqual(body,{'error':'server_error'})
+  with app.connect() as c:rows=[dict(r) for r in c.execute('SELECT event,code FROM hw_supervisor_events')]
+  self.assertIn({'event':'mcp_hotwatch','code':1},rows)
+  self.assertIn({'event':'site_sqlite_error','code':sqlite3.SQLITE_BUSY},rows)
+  self.assertNotIn('private',str(rows))
  def test_validate_http_never_changes_database_and_reports_all_errors(self):
   _,tokens,_=self.granted()
   with app.connect() as c:before=list(c.iterdump())

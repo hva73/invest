@@ -237,7 +237,7 @@ class HoldingAutowatch(unittest.TestCase):
   def activate(connect):
    calls.append(connect);runner.stop.set()
   with patch.object(service,'exchange_status_tick',return_value=None),patch.object(service,'auto_holdings_tick',side_effect=activate),patch.object(runner,'drain',return_value=0):runner.run(interval=0.01)
-  self.assertEqual(calls,[app.connect])
+  self.assertEqual(calls,[runner.connect])
  def test_full_capacity_skips_external_lookups(self):
   with patch.object(engine,'capacity',return_value=0):
    status=self.tick(verify=lambda *_:self.fail('capacity must be checked first'),lookup=self.lookup)

@@ -228,6 +228,19 @@ class Handler(BaseHTTPRequestHandler):
         import mcp_reports
         if not mcp_reports.handle(self,connect,'DELETE'):self.send(405,{'error':'Metoden understøttes ikke'})
     def do_GET(self):
+        try:return self._get()
+        except Exception as error:
+            area={'/api/state':'site_state','/api/reports/hot-watch':'site_hotwatch'}.get(urlsplit(self.path).path)
+            if area is None:raise
+            import hotwatch_supervisor
+            recorded=hotwatch_supervisor.application_error(connect,area,error)
+            code=getattr(error,'sqlite_errorcode',None)
+            busy=isinstance(error,sqlite3.Error) and type(code) is int and (code&255) in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED)
+            message='Databasen er midlertidigt optaget. Tidligere data kan være forældede.' if busy else 'Siden kunne ikke indlæses.'
+            if not recorded:message+=' Fejlloggen kunne heller ikke gemmes.'
+            return self.send(503 if busy else 500,{'error':message,'error_logged':recorded})
+
+    def _get(self):
         import hotwatch_api
         if hotwatch_api.handle(self,connect,'GET'):return
         import mcp_reports
@@ -293,10 +306,7 @@ class Handler(BaseHTTPRequestHandler):
                 with connect() as c:rows=intel_workflows.candidates(c,user_id,mode[0]=='true',include_history_market=False)
                 return self.send(200,{'candidates':rows,'is_test':mode[0]=='true'})
             if self.path=='/api/sector-intelligence/holdings':
-                import sector_intelligence
-                try:result=sector_intelligence.request_benchmark_holdings(connect,user_id,data.get('symbol'),data.get('limit',20))
-                except ValueError as error:return self.send(400,{'error':str(error)})
-                return self.send(200,result)
+                return self.send(405,{'error':'Brug POST med CSRF-token til at anmode om sektorbeholdninger.'})
             if self.path=='/api/reports/hot-watch':
                 import intel_workflows
                 q=parse_qs(request.query);mode=q.get('is_test',['false'])

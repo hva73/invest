@@ -1,7 +1,8 @@
 """Standalone read-only HOT WATCH service. Never scheduled by legacy worker.py."""
-import json,signal,threading,logging,hashlib,time,os,re,secrets,sqlite3
+import json,signal,threading,logging,hashlib,time,os,re,secrets,sqlite3,sys
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 import app,hotwatch_engine as engine
 from hotwatch_adapters import PlutoAdapter,EODHDAdapter,InboxAdapter,DataUnavailable
 from hotwatch_contract import EngineError,stamp
@@ -9,6 +10,38 @@ from cxe_reference import ReferenceUnavailable as CXEReferenceUnavailable
 from eodhd_us_reference import ReferenceUnavailable as USReferenceUnavailable
 
 HEARTBEAT_INTERVAL_S=5
+
+def serialized_database(connect):
+ """Serialize this worker's short DB scopes, not its provider/network calls.
+
+ SQLite still arbitrates other processes. Sharing this wrapper with child
+ runners keeps their reads from blocking another worker thread's commit.
+ """
+ if getattr(connect,'_hotwatch_serialized',False) is True:return connect
+ gate=threading.RLock()
+ metrics={'scope':'worker_process','completed_scopes':0,'max_wait_ms':0,'max_scope_ms':0,'slowest_module':None,'slowest_function':None}
+ @contextmanager
+ def scoped():
+  requested=time.perf_counter()
+  caller=sys._getframe(2).f_code
+  module=os.path.basename(caller.co_filename).removesuffix('.py')
+  known={'hotwatch_service','hotwatch_engine','hotwatch_adapters','hotwatch_warmup','oauth','mcp_client','portfolio_data','sector_intelligence','web_push'}
+  location=(module,caller.co_name) if module in known and re.fullmatch('[A-Za-z_][A-Za-z0-9_]{0,79}',caller.co_name) else ('other','other')
+  with gate:
+   acquired=time.perf_counter()
+   metrics['max_wait_ms']=max(metrics['max_wait_ms'],round((acquired-requested)*1000,3))
+   try:
+    with connect() as connection:yield connection
+   finally:
+    elapsed=round((time.perf_counter()-acquired)*1000,3)
+    metrics['completed_scopes']+=1
+    if elapsed>=metrics['max_scope_ms']:
+     metrics.update(max_scope_ms=elapsed,slowest_module=location[0],slowest_function=location[1])
+ def database_metrics():
+  with gate:return dict(metrics)
+ scoped._hotwatch_serialized=True
+ scoped.database_metrics=database_metrics
+ return scoped
 
 def reference_error_code(error):
  if isinstance(error,(CXEReferenceUnavailable,USReferenceUnavailable)):
@@ -38,7 +71,9 @@ def processing_error_code(error):
  location='OTHER';line=0;tb=error.__traceback__
  while tb:
   name=os.path.basename(tb.tb_frame.f_code.co_filename)
-  if name in names:location=names[name];line=tb.tb_lineno
+  wrapper=name=='app.py' and tb.tb_frame.f_code.co_name in ('execute','executemany','executescript','cursor','__exit__','close')
+  wrapper=wrapper or name=='hotwatch_service.py' and tb.tb_frame.f_code.co_name=='scoped'
+  if name in names and not wrapper:location=names[name];line=tb.tb_lineno
   tb=tb.tb_next
  return f'PROCESSING_{kind}_{location}_{line}'
 
@@ -765,7 +800,7 @@ def exchange_status_tick(connect,client_factory=None,now=None):
  except Exception:return 'UNAVAILABLE'
 
 class Runner:
- def __init__(self,connect):self.connect=connect;self.adapters={};self.stop=threading.Event();self._workers=[]
+ def __init__(self,connect):self.connect=serialized_database(connect);self.adapters={};self.stop=threading.Event();self._workers=[]
  def once(self,now=None,watch_id=None):
   now=now or engine.utc();job=engine.claim(self.connect,now,watch_id)
   if not job:return False
@@ -849,6 +884,7 @@ class Runner:
  def health(self,job,sample,code,measurement=None):
   caps={'endpoint_access':True,'price_time':bool(sample.get('event_time')),'bid_ask':sample['bid'] is not None and sample['ask'] is not None,'interval_volume':sample['volume_type']=='interval','market_status':sample['market_status']!='UNKNOWN'} if sample else {}
   if measurement:caps.update(measurement)
+  caps['worker_database_timing']=self.connect.database_metrics()
   now=engine.utc().isoformat()
   with self.connect() as c:c.execute('INSERT INTO hw_provider_health VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,is_test,source) DO UPDATE SET attempted=excluded.attempted,succeeded=COALESCE(excluded.succeeded,hw_provider_health.succeeded),code=excluded.code,payload=CASE WHEN excluded.succeeded IS NOT NULL THEN excluded.payload ELSE hw_provider_health.payload END',(job['user_id'],job['is_test'],job['request_data']['provider'],now,now if sample else None,code,json.dumps(caps)))
  def log(self,job,status,code,metrics=None):

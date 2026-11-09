@@ -430,7 +430,10 @@ def handle(h,connect,method):
         if delivery:audit_write(sink,{**delivery,'phase':'processed','outcome':'transport_rejected','error_codes':[error.error]})
         send(error.status,{'error':error.error})
     except (ValueError,TypeError,KeyError,UnicodeError,RecursionError):send(400,{'error':'invalid_request'})
-    except Exception:
+    except Exception as error:
+        if path=='/mcp':
+            import hotwatch_supervisor
+            hotwatch_supervisor.application_error(connect,'mcp_hotwatch',error)
         if delivery:audit_write(sink,{**delivery,'phase':'processed','outcome':'server_error'})
         send(500,{'error':'server_error'})
     return True

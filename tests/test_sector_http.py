@@ -11,6 +11,8 @@ class SectorHoldingsHttp(unittest.TestCase):
   path='/api/sector-intelligence/holdings'
   self.assertEqual(self.http.request(path,{'symbol':'XLK.US'})[0],401)
   auth=self.http.login()
+  self.assertEqual(self.http.request(path+'?symbol=XLK.US',headers=auth,method='GET')[0],405)
+  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM sector_benchmark_holdings').fetchone()[0],0)
   self.assertEqual(self.http.request(path,{'symbol':'XLK.US'},{'Cookie':auth['Cookie']})[0],403)
   self.assertEqual(self.http.request(path,{'symbol':'NOT-ALLOWED.US'},auth)[0],400)
   self.assertEqual(self.http.request(path,{'symbol':'XLK.US'},auth)[1]['status'],'UNVERIFIED_BENCHMARK')

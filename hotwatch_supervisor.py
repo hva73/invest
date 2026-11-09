@@ -104,7 +104,7 @@ def diagnostic(event, code=None):
         pass
 
 
-APPLICATION_AREAS = {'site_hotwatch', 'site_portfolio', 'site_portfolio_list', 'mcp_hotwatch'}
+APPLICATION_AREAS = {'site_hotwatch', 'site_state', 'site_portfolio', 'site_portfolio_list', 'mcp_hotwatch'}
 APPLICATION_MODULES = {'app', 'intel_workflows', 'hotwatch_engine', 'hotwatch_adapters',
                        'hotwatch_service', 'portfolio_data', 'mcp_client', 'mcp_reports',
                        'oauth', 'report_ingest', 'dashboard_projection', 'sector_intelligence'}
@@ -161,7 +161,9 @@ def application_error(connect, area, error):
     frames=[];tb=error.__traceback__
     while tb:
         name=Path(tb.tb_frame.f_code.co_filename).stem
-        if name in APPLICATION_MODULES:frames.append((name,tb.tb_lineno))
+        wrapper=name=='app' and tb.tb_frame.f_code.co_name in ('execute','executemany','executescript','cursor','__exit__','close')
+        wrapper=wrapper or name=='hotwatch_service' and tb.tb_frame.f_code.co_name=='scoped'
+        if name in APPLICATION_MODULES and not wrapper:frames.append((name,tb.tb_lineno))
         tb=tb.tb_next
     entries=[(area,kind)]
     if isinstance(error,sqlite3.Error):

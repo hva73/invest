@@ -1,4 +1,5 @@
-import unittest,tempfile,threading,json,http.client,sys
+import unittest,tempfile,threading,json,http.client,sys,sqlite3
+from unittest.mock import patch
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import app
@@ -17,6 +18,38 @@ class Workflow(unittest.TestCase):
   status=r.status;c.close();return status,body
  def login(self):
   self.assertEqual(self.request('login',{'password':'test-password-long-enough'})[0],200);self.csrf=self.request('session')[1]['csrf']
+ def test_state_database_busy_returns_json_and_preserves_fallback_diagnosis(self):
+  import hotwatch_supervisor
+  self.login();original=app.connect
+  def quick():
+   c=original();c.execute('PRAGMA busy_timeout=25');return c
+  holder=sqlite3.connect(app.DB)
+  try:
+   holder.execute('BEGIN EXCLUSIVE')
+   with patch.object(app,'connect',side_effect=quick):
+    status,body=self.request('state')
+   self.assertEqual(status,503)
+   self.assertIn('midlertidigt optaget',body['error'])
+   log=hotwatch_supervisor.application_error_fallback()
+   self.assertEqual(log['status'],'AVAILABLE')
+   self.assertIn({'event':'site_state','code':1},[{k:r[k] for k in ('event','code')} for r in log['events']])
+   self.assertTrue(any(r['event']=='site_sqlite_error' and r['code']==sqlite3.SQLITE_BUSY for r in log['events']))
+  finally:holder.rollback();holder.close()
+  self.assertEqual(self.request('state')[0],200)
+ def test_state_projection_failure_is_logged_without_private_text(self):
+  self.login()
+  with patch('dashboard_projection.build',side_effect=ValueError('private account token')):
+   status,body=self.request('state')
+  self.assertEqual(status,500);self.assertNotIn('private',json.dumps(body))
+  self.assertTrue(body['error_logged'])
+  with app.connect() as c:
+   rows=[dict(r) for r in c.execute('SELECT event,code FROM hw_supervisor_events')]
+  self.assertIn({'event':'site_state','code':2},rows)
+  self.assertNotIn('private',str(rows))
+  with patch('dashboard_projection.build',side_effect=ValueError('private')),patch('hotwatch_supervisor.application_error',return_value=False):
+   status,body=self.request('state')
+  self.assertEqual(status,500);self.assertFalse(body['error_logged'])
+  self.assertIn('Fejlloggen kunne heller ikke gemmes',body['error'])
  def test_protected_workflow(self):
   self.assertEqual(self.request('state')[0],401);self.login()
   p={'portfolio_id':1,'ticker':'TEST','quantity':2,'price':100,'stop':90,'target':120,'costs':5,'fx':7}
