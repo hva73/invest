@@ -604,6 +604,12 @@ class HotWatch(unittest.TestCase):
   second=engine.sync(app.connect,1,True,sessions_after=first['next_sessions_cursor'],session_limit=100,summary_only=True)
   self.assertEqual(len(second['open_sessions']),2);self.assertFalse(second['sessions_have_more'])
   self.assertEqual(len({s['watch_id'] for s in first['open_sessions']+second['open_sessions']}),12)
+ def test_latest_observations_have_indexes_after_repeat_initialization(self):
+  app.init()
+  with app.connect() as c:
+   for table,index in [('hw_samples','hw_samples_latest'),('hw_calculations','hw_calculations_latest'),('hw_context_events','hw_context_latest')]:
+    plan=' '.join(str(tuple(row)) for row in c.execute('EXPLAIN QUERY PLAN SELECT payload FROM '+table+' WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(1,)))
+    self.assertIn(index,plan);self.assertNotIn('TEMP B-TREE',plan)
  def test_local_budget_retry_and_expired_display_explain_actual_cause(self):
   engine.fault(app.connect,1,self.req['watch_id'],True,'PROVIDER_RATE_BUDGET',self.now)
   with app.connect() as c:
