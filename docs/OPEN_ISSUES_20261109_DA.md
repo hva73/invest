@@ -361,3 +361,13 @@ Motoren genstartede kl. 21.38.25 dansk tid. Statusgenbrug blev bekræftet i prod
 En konkret resterende fejl i `Runner.drain()` er reproduceret: en worker, hvis `once()` returnerede False i et kort tomt køvindue, blev fjernet permanent fra den igangværende runde. Den anden worker kunne fortsætte alene op til rundens kapacitetsgrænse, også når flere job blev forfaldne. Tomme workers genoptager nu køen ved anden scans afslutning eller efter den eksisterende 2-sekunders rytme under et langsomt providerkald. Ingen flere workers, API-grænser, datakrav eller nye kontrolsystemer.
 
 Begge nye tests fejler på den tidligere `drain()` og består med rettelsen: genoptagelse efter en anden scans afslutning samt genoptagelse mens den anden provider fortsat venter. Samlet målrettet regression: 188 tests bestået, inklusive motor, kø, supervisor, sparse-feed-recovery og installation. Ingen ordrer. Skal installeres og måles over flere scanningsrunder; normaldriftens køtid og resterende depot-/datablokeringer er fortsat ikke godkendt.
+
+### Efterinstallation af 4aeb819: fjernet ekstra ventetærskel i køen
+
+Readback kl. 21.55–21.58 dansk tid bekræftede fortsat arbejde på begge workers efter genstart. I 44 scanposter med claim efter kl. 21.56.45 var køtidens median 16,1 s, 95-percentil 63,4 s og maksimum 69,3 s. Flere NORMAL-kandidater blev systematisk udskudt omtrent deres ekstra 60-sekunders interval af beholdningsprioriteringen. Der var ingen nye registrerede server-/SQLite-låsefejl i det læste udsnit. Dette er ikke bevis for fravær af alle driftsfejl.
+
+`claim()` bruger nu tidligste `next_due` først. Eksisterende pollingprofil fastlægger fortsat deadline; akutte exits, øvrige exits og katalysatorer afgør rækkefølgen ved samme deadline. Den ekstra intervalbaserede ventetærskel er fjernet frem for erstattet af endnu en prioriteringsregel. Leasegrænse, workers, providerkald, signalberegning og risikokrav er uændrede.
+
+190 målrettede tests består, inklusive installation, supervisor og motor. To regressioner fejler på gammel kode og består efter rettelsen: en blot ét sekund forsinket NORMAL-kandidat må ikke vente et ekstra minut, og 39 blandede sessioner behandles i deadlineorden med to leases uden at skabe handelsforslag. Tests dækker også exitforrang ved samme deadline og en ældre exits forrang over en ny kandidat.
+
+Afventer installation og måling over flere produktionsrunder. Før installation viste seneste status 19 WAIT, ét SELL og 18 NO_DATA; resterende kilde-/kontekst-/risikomangler er ikke erklæret løst. Præcis installeret commit er ikke eksponeret i det tilgængelige readback. Efter markedslukning skal legitimt gamle handler holdes adskilt fra køforsinkelse. Mobilpush, visuel accept og samlet livekæde står fortsat åbne.

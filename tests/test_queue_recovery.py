@@ -26,20 +26,37 @@ class QueueRecovery(unittest.TestCase):
  def test_candidate_missed_interval_precedes_new_critical_exit(self):
   self.add_exit(critical=True);self.candidate_due(16)
   self.assertEqual(engine.claim(app.connect,self.now)['watch_id'],self.f.req['watch_id'])
- def test_current_exit_has_priority_before_candidate_misses_interval(self):
-  r=self.add_exit(critical=True);self.candidate_due(10)
+ def test_current_exit_has_priority_at_equal_deadline(self):
+  r=self.add_exit(critical=True);self.candidate_due(0)
   self.assertEqual(engine.claim(app.connect,self.now)['watch_id'],r['watch_id'])
- def test_worker_schedule_not_two_minute_threshold_controls_fairness(self):
-  r=self.add_exit();self.candidate_due(16,60)
-  self.assertEqual(engine.claim(app.connect,self.now)['watch_id'],r['watch_id'])
-  with app.connect() as c:c.execute('UPDATE hw_sessions SET lease_until=0,lease_owner=NULL')
-  self.candidate_due(61,60)
+ def test_normal_candidate_does_not_wait_an_extra_scheduled_interval(self):
+  self.add_exit();self.candidate_due(1,60)
   self.assertEqual(engine.claim(app.connect,self.now)['watch_id'],self.f.req['watch_id'])
+ def test_overdue_exit_precedes_new_candidate(self):
+  r=self.add_exit(critical=True);self.candidate_due(0)
+  with app.connect() as c:c.execute('UPDATE hw_sessions SET next_due=? WHERE watch_id=?',((self.now-timedelta(seconds=1)).timestamp(),r['watch_id']))
+  self.assertEqual(engine.claim(app.connect,self.now)['watch_id'],r['watch_id'])
  def test_both_late_exit_and_candidate_are_oldest_due_first(self):
   r=self.add_exit(critical=True);self.candidate_due(30)
   with app.connect() as c:c.execute('UPDATE hw_sessions SET next_due=? WHERE watch_id=?',((self.now-timedelta(seconds=40)).timestamp(),r['watch_id']))
   first=engine.claim(app.connect,self.now);second=engine.claim(app.connect,self.now)
   self.assertEqual([first['watch_id'],second['watch_id']],[r['watch_id'],self.f.req['watch_id']])
+ def test_39_mixed_sessions_claim_oldest_deadline_with_two_leases(self):
+  jobs=[capacity_fixture.LiveCapacity.add(self,'TEST'+str(i)+'.US',i,due=self.now.timestamp()-39+i) for i in range(39)]
+  with app.connect() as c:
+   c.execute('UPDATE hw_sessions SET next_due=? WHERE watch_id=?',(self.now.timestamp()+60,self.f.req['watch_id']))
+   for job in jobs[1::2]:c.execute("UPDATE hw_sessions SET request=json_set(request,'$.watch_mode','exit'),state=json_set(state,'$.adaptive_profile','CRITICAL') WHERE id=?",(job['id'],))
+  claimed=[]
+  with patch.dict(os.environ,{'ESCAPE_HW_CONCURRENCY':'2'}):
+   while len(claimed)<len(jobs):
+    pair=[engine.claim(app.connect,self.now),engine.claim(app.connect,self.now)]
+    pair=[job for job in pair if job]
+    self.assertTrue(pair)
+    if len(pair)==2:self.assertIsNone(engine.claim(app.connect,self.now))
+    claimed.extend(job['id'] for job in pair)
+    for job in pair:engine.release(app.connect,job,self.now)
+  self.assertEqual(claimed,[job['id'] for job in jobs])
+  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
  def test_status_batch_reused_without_renewing_source_or_receive_time(self):
   req=dict(self.f.req,is_test=False);jobs=[{'id':123,'request_data':req,'state':'{}'} for _ in range(5)]
   calls=[];old=(self.now-timedelta(hours=6)).isoformat();received=self.now.isoformat()
