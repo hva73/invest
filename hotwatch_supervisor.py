@@ -63,8 +63,9 @@ def report(status, reason, attempts):
         import app
         with app.connect() as c:
             c.execute('INSERT INTO hw_supervisor_status VALUES(1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET updated=excluded.updated,status=excluded.status,reason=excluded.reason,attempts=excluded.attempts', (datetime.now(timezone.utc).isoformat(), status, reason, attempts))
+        return True
     except Exception:
-        pass
+        return False
 
 
 def heartbeat():
@@ -118,6 +119,16 @@ def run(timeout=300):
     healthy_since = None
     unhealthy_since = None
     next_start = 0
+    child_started_at = None
+    child_had_heartbeat = False
+    last_report = None
+    last_report_at = None
+    def report_periodic(status, reason, count, now):
+        nonlocal last_report, last_report_at
+        value = (status, reason, count)
+        if value != last_report or last_report_at is None or now - last_report_at >= 10:
+            if report(status, reason, count) is not False:
+                last_report, last_report_at = value, now
     diagnostic('supervisor_started')
     try:
         while not stop and enabled():
@@ -125,15 +136,22 @@ def run(timeout=300):
             fresh = heartbeat()
             if child and child.poll() is not None:
                 diagnostic('worker_exited', child.returncode)
+                # A worker that ran for at least a minute with a heartbeat is
+                # not a failed startup. Give its later crash a fresh bounded
+                # restart window; rapid startup failures remain bounded.
+                if child_had_heartbeat and child_started_at is not None and now - child_started_at >= 60:
+                    failures_since = None
+                    attempts = 0
                 child = None
                 fresh = False
             if fresh:
+                if child is not None:child_had_heartbeat = True
                 unhealthy_since = None
                 healthy_since = healthy_since or now
                 if now - healthy_since >= 60:
                     failures_since = None
                     attempts = 0
-                report('running', '', attempts)
+                report_periodic('running', '', attempts, now)
             else:
                 healthy_since = None
                 if unhealthy_since is None:
@@ -147,6 +165,9 @@ def run(timeout=300):
                         diagnostic('worker_killed')
                         child.kill()
                         child.wait()
+                    if child_had_heartbeat and child_started_at is not None and now - child_started_at >= 60:
+                        failures_since = None
+                        attempts = 0
                     child = None
                     unhealthy_since = None
                 if child is None and now >= next_start:
@@ -160,11 +181,13 @@ def run(timeout=300):
                         child = subprocess.Popen([sys.executable, str(ROOT / 'hotwatch_service.py'), '--interval', '2'], cwd=str(ROOT), env=environment(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
                         diagnostic('worker_started')
                         unhealthy_since = now
+                        child_started_at = now
+                        child_had_heartbeat = False
                     except OSError as error:
                         diagnostic('worker_start_failed', error.errno if isinstance(error.errno, int) else None)
                         child = None
                     next_start = now + min(30, 2 ** min(attempts, 5))
-                report('restarting', 'waiting_for_heartbeat', attempts)
+                report_periodic('restarting', 'waiting_for_heartbeat', attempts, now)
             time.sleep(2)
     finally:
         if stop_signal is not None:

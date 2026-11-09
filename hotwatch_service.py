@@ -528,6 +528,9 @@ def verify_provisional_feeds(connect,now=None):
 def verify_cxe_feeds(connect,now=None):
  """Recheck one cached cross-venue match without touching session history."""
  now=now or engine.utc()
+ # Do not reserve a SQLite write lock on every idle verification tick.
+ with connect() as preflight:
+  if not preflight.execute('SELECT 1 FROM hw_cxe_feed_evidence WHERE next_attempt<=? LIMIT 1',(now.timestamp(),)).fetchone():return 0
  with connect() as c:
   c.execute('BEGIN IMMEDIATE')
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return 0
@@ -672,25 +675,34 @@ def reconcile_closed_holdings(connect,now=None):
  """Close only automatic position watches on fresh complete Pluto evidence."""
  from decimal import Decimal,InvalidOperation
  now=now or engine.utc();closed=0
+ def absent(c,row):
+  req=json.loads(row['request']);pids=req.get('portfolio_ids',[]);aid=req.get('asset_id')
+  if len(pids)!=1 or not aid:return None
+  snap=c.execute("SELECT s.payload,s.last_error FROM portfolios p JOIN portfolio_snapshots s ON s.portfolio_id=p.id AND s.user_id=p.user_id WHERE p.id=? AND p.user_id=? AND p.active=1 AND p.source='pluto'",(pids[0],row['user_id'])).fetchone()
+  if not snap or snap['last_error']:return None
+  try:
+   payload=json.loads(snap['payload']);observed=stamp(payload['observed']);positions=payload['positions']
+   if not payload.get('positions_complete') or not isinstance(positions,list) or not 0<=(now-observed).total_seconds()<=300 or observed<stamp(row['created']):return None
+   if any(not isinstance(p,dict) or not p.get('kind') for p in positions):return None
+   holdings=[p for p in positions if p.get('kind')=='holding']
+   if any(not p.get('asset_id') or p.get('quantity') is None for p in holdings):return None
+   if any(p['asset_id']==aid and Decimal(str(p['quantity']))!=0 for p in holdings):return None
+   return pids[0],aid,observed
+  except (AttributeError,KeyError,TypeError,ValueError,InvalidOperation):return None
+ with connect() as preflight:
+  rows=preflight.execute("SELECT * FROM hw_sessions WHERE is_test=0 AND purpose='automatic holding watch' AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchall()
+  pending=[row['id'] for row in rows if absent(preflight,row)]
+ if not pending:return 0
  with connect() as c:
   c.execute('BEGIN IMMEDIATE')
-  rows=c.execute("SELECT * FROM hw_sessions WHERE is_test=0 AND purpose='automatic holding watch' AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchall()
-  for row in rows:
-   req=json.loads(row['request']);pids=req.get('portfolio_ids',[]);aid=req.get('asset_id')
-   if len(pids)!=1 or not aid:continue
-   snap=c.execute("SELECT s.payload,s.last_error FROM portfolios p JOIN portfolio_snapshots s ON s.portfolio_id=p.id AND s.user_id=p.user_id WHERE p.id=? AND p.user_id=? AND p.active=1 AND p.source='pluto'",(pids[0],row['user_id'])).fetchone()
-   if not snap or snap['last_error']:continue
-   try:
-    payload=json.loads(snap['payload']);observed=stamp(payload['observed']);positions=payload['positions']
-    if not payload.get('positions_complete') or not isinstance(positions,list) or not 0<=(now-observed).total_seconds()<=300 or observed<stamp(row['created']):continue
-    if any(not isinstance(p,dict) or not p.get('kind') for p in positions):continue
-    holdings=[p for p in positions if p.get('kind')=='holding']
-    if any(not p.get('asset_id') or p.get('quantity') is None for p in holdings):continue
-    if any(p['asset_id']==aid and Decimal(str(p['quantity']))!=0 for p in holdings):continue
-   except (AttributeError,KeyError,TypeError,ValueError,InvalidOperation):continue
+  for watch_row_id in pending:
+   row=c.execute("SELECT * FROM hw_sessions WHERE id=? AND is_test=0 AND purpose='automatic holding watch' AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(watch_row_id,)).fetchone()
+   proof=absent(c,row) if row else None
+   if not proof:continue
+   pid,aid,observed=proof
    c.execute("UPDATE hw_sessions SET status='COMPLETED',updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']))
    engine.event(c,row,'HOLDING_NOT_PRESENT',now,'Frisk komplet depotobservation viser ingen beholdning',data_time=observed.isoformat())
-   c.execute("UPDATE hw_holding_autowatch SET status='POSITION_CLOSED',next_attempt=0,updated=? WHERE user_id=? AND portfolio_id=? AND asset_id=? AND watch_id=?",(now.isoformat(),row['user_id'],pids[0],aid,row['watch_id']))
+   c.execute("UPDATE hw_holding_autowatch SET status='POSITION_CLOSED',next_attempt=0,updated=? WHERE user_id=? AND portfolio_id=? AND asset_id=? AND watch_id=?",(now.isoformat(),row['user_id'],pid,aid,row['watch_id']))
    closed+=1
  return closed
 

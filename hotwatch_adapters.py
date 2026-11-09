@@ -492,6 +492,9 @@ class EODHDAdapter:
   d,received,http_ms,at,price=shared_quote(key,symbol,fetch_quote,self._shared_quotes)
   permitted_codes=[symbol,symbol.rsplit('.',1)[0]]+([] if symbol.upper().endswith('.CC') else [r['ticker']])
   if d.get('code') not in permitted_codes:raise DataUnavailable('EODHD_READ_OR_CONTRACT_ERROR')
+  # A fallback snapshot can be older than a trade or bar already journalled.
+  # Treat it as stale rather than attempting to rewrite market history.
+  if session.get('last_data') and at<stamp(session['last_data']):raise DataUnavailable('DATA_STALE')
   # This documented price endpoint does not prove bid/ask, interval volume,
   # market status or account entitlement. Never invent these capabilities.
   currency=d.get('currency') or r.get('quote_currency')

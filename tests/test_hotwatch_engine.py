@@ -404,10 +404,25 @@ class HotWatch(unittest.TestCase):
   self.assertTrue(engine.observe_context(app.connect,1,self.req['watch_id'],True,ctx,self.now)['duplicate'])
   engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
   with self.assertRaisesRegex(EngineError,'watch_not_running'):engine.observe_context(app.connect,1,self.req['watch_id'],True,ctx,self.now)
+ def test_verified_context_after_unknown_timestamp_does_not_crash_or_accept_older_evidence(self):
+  ctx=tick(self.now,held=True)['context']
+  with app.connect() as c:
+   row=c.execute('SELECT id FROM hw_sessions WHERE watch_id=?',(self.req['watch_id'],)).fetchone()
+   c.execute('INSERT INTO hw_context_events(watch_row_id,sample_row_id,observed,payload) VALUES(?,NULL,?,?)',(row['id'],self.now.isoformat(),json.dumps(unknown_context())))
+  engine.observe_context(app.connect,1,self.req['watch_id'],True,ctx,self.now)
+  older=dict(ctx,as_of=(self.now-timedelta(seconds=1)).isoformat())
+  with self.assertRaisesRegex(EngineError,'out_of_order_position_context'):engine.observe_context(app.connect,1,self.req['watch_id'],True,older,self.now)
+  with app.connect() as c:
+   c.execute('INSERT INTO hw_context_events(watch_row_id,sample_row_id,observed,payload) VALUES(?,NULL,?,?)',(row['id'],self.now.isoformat(),json.dumps({'as_of':'not-a-date'})))
+  with self.assertRaisesRegex(EngineError,'invalid_previous_position_context'):engine.observe_context(app.connect,1,self.req['watch_id'],True,ctx,self.now)
+  self.assertEqual(self.counts()['hw_samples'],0)
  def test_runner_journals_broker_context_when_quote_time_is_unavailable(self):
   from hotwatch_service import Runner
   engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
   r=copy.deepcopy(self.req);r.update(watch_id='broker-no-quote',purpose='broker-context-test',provider='pluto');engine.create(app.connect,1,r,self.now)
+  with app.connect() as c:
+   row=c.execute('SELECT id FROM hw_sessions WHERE watch_id=?',(r['watch_id'],)).fetchone()
+   c.execute('INSERT INTO hw_context_events(watch_row_id,sample_row_id,observed,payload) VALUES(?,NULL,?,?)',(row['id'],self.now.isoformat(),json.dumps(unknown_context())))
   error=DataUnavailable('PLUTO_QUOTE_TIME_UNKNOWN');error.position_context=tick(self.now,held=True)['context']
   from unittest.mock import Mock
   adapter=Mock();adapter.poll.side_effect=error;runner=Runner(app.connect);runner.adapters[(1,'pluto')]=adapter
@@ -628,6 +643,16 @@ class HotWatch(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'  TEST-ONLY\n'}),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):
    sample=EODHDAdapter(app.connect,1,opener).poll({'request_data':req})
   self.assertEqual(opener.token,'TEST-ONLY');self.assertNotIn('TEST-ONLY',str(sample))
+ def test_older_eodhd_fallback_is_explicitly_stale_and_not_rejournalled(self):
+  class Response:
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,limit):return json.dumps({'code':'MERC.US','timestamp':int(old.timestamp()),'close':'12.34','currency':'USD'}).encode()
+  class Opener:
+   def open(self,*args,**kwargs):return Response()
+  old=self.now-timedelta(minutes=2);req=copy.deepcopy(self.req);req.update(provider='eodhd',provider_symbol='MERC.US',quote_currency='USD')
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}):
+   with self.assertRaisesRegex(DataUnavailable,'DATA_STALE'):EODHDAdapter(app.connect,1,Opener()).poll({'request_data':req,'last_data':self.now.isoformat()})
  def test_real_adapter_shares_identical_quote_without_sharing_context(self):
   import hotwatch_adapters as adapters
   adapters._quote_cache.clear()

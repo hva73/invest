@@ -10,6 +10,35 @@ import hotwatch_supervisor as supervisor
 
 
 class WatchdogTests(unittest.TestCase):
+    def test_long_lived_worker_failure_gets_new_bounded_restart_window(self):
+        from unittest.mock import Mock
+        first=Mock();first.poll.side_effect=[None,1];first.returncode=1
+        second=Mock();second.poll.return_value=None
+        clock=iter([1,2,310])
+        with patch.object(supervisor,'lock',return_value=os.open(os.devnull,os.O_RDONLY)), \
+             patch.object(supervisor,'enabled',side_effect=[True,True,True,False,False]), \
+             patch.object(supervisor,'heartbeat',side_effect=[False,True,False]), \
+             patch.object(supervisor,'report',return_value=True),patch.object(supervisor,'diagnostic') as diagnostic, \
+             patch.object(supervisor.time,'monotonic',side_effect=lambda:next(clock)), \
+             patch.object(supervisor.time,'sleep'),patch.object(supervisor.subprocess,'Popen',side_effect=[first,second]) as popen, \
+             patch.object(supervisor.signal,'signal'):
+            supervisor.run(timeout=300)
+        self.assertEqual(popen.call_count,2)
+        self.assertNotIn('restart_timeout',[call.args[0] for call in diagnostic.call_args_list])
+
+    def test_supervisor_throttles_repeated_status_writes_but_refreshes(self):
+        clock=iter([1,2,4,6,8,10,12,14])
+        with patch.object(supervisor,'lock',return_value=os.open(os.devnull,os.O_RDONLY)), \
+             patch.object(supervisor,'enabled',side_effect=[True]*8+[False,False]), \
+             patch.object(supervisor,'heartbeat',return_value=True), \
+             patch.object(supervisor,'report',return_value=True) as report, \
+             patch.object(supervisor,'diagnostic'),patch.object(supervisor.time,'monotonic',side_effect=lambda:next(clock)), \
+             patch.object(supervisor.time,'sleep'),patch.object(supervisor.signal,'signal'):
+            supervisor.run()
+        running=[call for call in report.call_args_list if call.args[0]=='running']
+        self.assertEqual(len(running),2)
+        self.assertEqual(report.call_args.args[:2],('stopped','disabled'))
+
     def test_late_transient_heartbeat_loss_does_not_kill_healthy_worker(self):
         from unittest.mock import Mock
         child = Mock()

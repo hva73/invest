@@ -13,6 +13,13 @@ class Agreement(unittest.TestCase):
   self.assertTrue(report_ingest.save(app.connect,1,self.report)[1]['ok'])
   self.cid=self.report['candidates'][0]['candidate_id']
  def tearDown(self):app.DB=self.old;self.temp.cleanup()
+ def test_idle_reconciliation_does_not_compete_for_sqlite_writer(self):
+  holder=app.connect()
+  try:
+   holder.execute('BEGIN IMMEDIATE')
+   self.assertEqual(engine.reconcile_candidates(app.connect,self.now),0)
+  finally:
+   holder.rollback();holder.close()
  def test_candidate_activation_does_not_call_market_lookup_and_reuses_only_matching_cache(self):
   for i,cache in enumerate((False,True)):
    report=merc_report(False);report.update(report_id=f'activation-source-{i}',generated_at=self.now.isoformat(),positions=[],orders=[])

@@ -18,6 +18,33 @@ class HoldingAutowatch(unittest.TestCase):
   self.verify=lambda *_:self.instrument
   self.lookup=lambda *_:{'choices':[{'symbol':'TEST.US','currency':'USD','isin':'US1234567890'}]}
  def tearDown(self):self.fixture.tearDown()
+ def test_idle_identity_recheck_does_not_reserve_database_writer(self):
+  holder=app.connect()
+  try:
+   holder.execute('BEGIN IMMEDIATE')
+   self.assertEqual(service.verify_cxe_feeds(app.connect,self.now),0)
+  finally:
+   holder.rollback();holder.close()
+ def test_present_holding_reconciliation_does_not_reserve_database_writer(self):
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  holder=app.connect()
+  try:
+   holder.execute('BEGIN IMMEDIATE')
+   self.assertEqual(service.reconcile_closed_holdings(app.connect,self.now),0)
+  finally:
+   holder.rollback();holder.close()
+ def test_holding_returning_after_preflight_is_not_closed(self):
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  with app.connect() as c:
+   c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[]}),))
+  calls=[]
+  def racing_connect():
+   calls.append(1)
+   if len(calls)==2:
+    with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[self.holding]}),))
+   return app.connect()
+  self.assertEqual(service.reconcile_closed_holdings(racing_connect,self.now),0)
+  with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM hw_sessions').fetchone()[0],'CREATED')
  def test_reference_errors_are_specific_without_exception_content(self):
   import sqlite3
   for error,expected in [(KeyError('secret'),'REFERENCE_FIELD_MISSING'),(TypeError('secret'),'REFERENCE_TYPE_ERROR'),(ValueError('secret'),'REFERENCE_VALUE_ERROR'),(sqlite3.OperationalError('secret'),'REFERENCE_DATABASE_ERROR')]:

@@ -570,6 +570,19 @@ def reconcile_candidates(connect,now=None,connection=None):
  """Expire report-only entry watches without relying on a market-data read."""
  from intel_workflows import candidate_currentness
  now=now or utc();changed=0
+ if connection is None:
+  # The worker runs this repeatedly. Avoid reserving the single SQLite writer
+  # when all sessions are already current; re-evaluate after acquiring it.
+  with connect() as preflight:
+   rows=preflight.execute("SELECT * FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchall()
+   needed=False
+   for row in rows:
+    req=json.loads(row['request']);mode=req.get('watch_mode','both')
+    if req.get('end_at') and stamp(req['end_at'])<=now:needed=True;break
+    if mode=='exit' or req.get('purpose')=='automatic holding watch' or req.get('report_id')=='manual-pluto':continue
+    current=candidate_currentness(preflight,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=req.get('purpose')=='automatic discovery')
+    if current['status']=='COLD' or json.loads(row['state']).get('candidate_cold'):needed=True;break
+   if not needed:return 0
  with (nullcontext(connection) if connection is not None else connect()) as c:
   if connection is None:c.execute('BEGIN IMMEDIATE')
   rows=c.execute("SELECT * FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchall()
@@ -872,8 +885,12 @@ def observe_context(connect,uid,wid,mode,context,now=None,lease=None,broker_sour
   if request['end_at'] and stamp(request['end_at'])<=now:raise EngineError('watch_not_running',409)
   previous=c.execute('SELECT payload FROM hw_context_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
   if previous:
-   old=json.loads(previous['payload'])
-   if stamp(context['as_of'])<stamp(old['as_of']):raise EngineError('out_of_order_position_context',409)
+   try:
+    old=json.loads(previous['payload'])
+    if not isinstance(old,dict):raise ValueError('invalid previous context')
+    old_time=stamp(old['as_of']) if old.get('as_of') is not None else None
+   except (ValueError,TypeError,KeyError):raise EngineError('invalid_previous_position_context',409) from None
+   if old_time is not None and stamp(context['as_of'])<old_time:raise EngineError('out_of_order_position_context',409)
    if old==context:return {'ok':True,'duplicate':True}
   c.execute('INSERT INTO hw_context_events(watch_row_id,sample_row_id,observed,payload) VALUES(?,NULL,?,?)',(row['id'],now.isoformat(),canonical(context)))
   import candidate_lifecycle
