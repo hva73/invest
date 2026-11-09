@@ -353,7 +353,10 @@ class EODHDAdapter:
   while True:
    with _ws_batch_lock:
     cached=_ws_batch_cache.get(key);now=time.monotonic()
-    usable=cached and (cached[1].get('status')=='NO_MESSAGES' or any(m.get('event_time') and 0<=(utc()-stamp(m['event_time'])).total_seconds()<=req['risk']['max_quote_age_s'] for m in cached[1].get('messages',[])))
+    # A status event may predate this capture by hours. Share the response
+    # briefly, including its unchanged timestamp; poll() still rejects stale
+    # status evidence. Reconnecting cannot make the same event more recent.
+    usable=cached and (cached[1].get('status')=='NO_MESSAGES' or feed.endswith('_status') and cached[1].get('status')=='OK' or any(m.get('event_time') and 0<=(utc()-stamp(m['event_time'])).total_seconds()<=req['risk']['max_quote_age_s'] for m in cached[1].get('messages',[])))
     if usable and 0<=now-cached[0]<cache_ttl:return record(copy.deepcopy(cached[1]),0,True)
     waiting=_ws_batch_inflight.get(group)
     if waiting is None:
@@ -370,7 +373,7 @@ class EODHDAdapter:
    allowed_eu={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}
    from hotwatch_engine import verified_automatic_feed,capacity
    with self.connect() as c:
-    rows=c.execute("SELECT s.request FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND s.next_due<=? AND json_extract(s.request,'$.provider')='eodhd' ORDER BY CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,s.next_due,s.id LIMIT ?",(self.uid,utc().timestamp()+15,capacity())).fetchall()
+    rows=c.execute("SELECT s.request FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND s.next_due<=? AND json_extract(s.request,'$.provider')='eodhd' ORDER BY s.next_due,CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,s.id LIMIT ?",(self.uid,utc().timestamp()+15,capacity())).fetchall()
     for row in rows:
      candidate=json.loads(row['request']);full=candidate.get('provider_symbol') or ''
      if not isinstance(full,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',full):continue
