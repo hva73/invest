@@ -1144,6 +1144,34 @@ class HotWatch(unittest.TestCase):
    with app.connect() as c:
     payload['positions']=[];payload['positions_complete']=False;c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),ids[0]))
    incomplete=adapter.context(self.req,'USD');self.assertEqual(incomplete['status'],'unknown');self.assertEqual(incomplete['diagnostic'],'PORTFOLIO_SNAPSHOT_INCOMPLETE')
+ def test_exit_position_can_be_verified_independently_of_unrelated_snapshot_sections(self):
+  import portfolios,portfolio_data
+  with app.connect() as c:
+   portfolios.replace_pluto(c,1,[{'id':'portfolios:partial','name':'Partial','kind':'portfolio'}]);pid=portfolios.list_owned(c,1)[0]['id']
+   payload={'observed':engine.utc().isoformat(),'positions':[{'kind':'holding','asset_id':self.req['asset_id'],'ticker':'MERC','quantity':'2'}],'positions_complete':True,'positions_strict_verified':True,'complete':False,'value':None,'pending_orders':[],'errors':['accounts unavailable']}
+   portfolio_data.save(c,1,pid,payload)
+  adapter=PlutoAdapter(app.connect,1);req=dict(self.req,portfolio_ids=[pid],watch_mode='exit')
+  with patch.object(adapter,'inactive_orders',return_value=[]),patch.object(adapter,'tradability',side_effect=AssertionError('no entry permission check')),patch('portfolio_data.read',side_effect=AssertionError('fresh verified snapshot must be reused')):
+   result=adapter.context(req,'USD')
+  self.assertEqual((result['status'],result['position'],result['quantity']),('verified','held','2'));self.assertIsNone(result['portfolio_equity_dkk'])
+  from hotwatch_strategy import risk_gate
+  at=engine.utc();stale=tick(at-timedelta(seconds=121),held=True);stale['context']=result
+  signal,reasons,_=risk_gate(stale,good_metrics(),req['risk'],at,'SELL')
+  self.assertEqual(signal,'NO_DATA');self.assertIn('DATA_STALE',reasons)
+  self.assertEqual(adapter.context(dict(req,watch_mode='entry'),'USD')['status'],'unknown')
+  payload['positions_complete']=False
+  with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),pid))
+  self.assertEqual(adapter.context(req,'USD')['status'],'unknown')
+ def test_exit_partial_legacy_snapshot_requires_fresh_strict_read(self):
+  import portfolios,portfolio_data
+  with app.connect() as c:
+   portfolios.replace_pluto(c,1,[{'id':'portfolios:partial','name':'Partial','kind':'portfolio'}]);pid=portfolios.list_owned(c,1)[0]['id']
+   payload={'observed':engine.utc().isoformat(),'positions':[{'kind':'holding','asset_id':self.req['asset_id'],'ticker':'MERC','quantity':'2'}],'positions_complete':True,'complete':False,'value':None,'pending_orders':[]}
+   portfolio_data.save(c,1,pid,payload)
+  adapter=PlutoAdapter(app.connect,1);req=dict(self.req,portfolio_ids=[pid],watch_mode='exit')
+  with patch('portfolio_data.read',side_effect=RuntimeError('unavailable')) as read:
+   result=adapter.safe_context(req,'USD')
+  self.assertEqual(result['status'],'unknown');self.assertTrue(read.call_args.kwargs['strict_positions'])
  def test_realistic_synthetic_merc_buy_noise_exit_and_history_pinning(self):
   last=None
   prices=['100' if i%2==0 else '100.5' for i in range(34)]+['100.55','100.70','100.90','101.15','101.45','101.80']

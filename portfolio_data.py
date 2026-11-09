@@ -226,7 +226,9 @@ def read(connect,user_id,portfolio_id,client_factory=None,strict_positions=False
             payload['positions']=normalize_positions(rows,local)
             from pending_orders import from_positions
             payload['pending_orders']=from_positions(rows,'get_collection')
-            payload['positions_complete']=True;successful+=1
+            payload['positions_complete']=True
+            if strict_positions:payload['positions_strict_verified']=True
+            successful+=1
         except PortfolioFormatError as error:payload['errors'].append('Collection-beholdninger: '+str(error))
         try:
             accounts=field(data,['cashAccounts','accounts'])
@@ -267,11 +269,13 @@ def read(connect,user_id,portfolio_id,client_factory=None,strict_positions=False
                 if not isinstance(cursor,str) or cursor in seen:raise PortfolioFormatError('Gentaget/ugyldig beholdningspagination')
                 seen.add(cursor)
             else:raise PortfolioFormatError('Beholdningslisten overstiger sidegrænsen')
+            if strict_positions and total is None:raise PortfolioFormatError('Beholdningslistens samlede antal mangler')
             if total is not None and (isinstance(total,bool) or not isinstance(total,int) or total<0 or len(rows)>total or strict_positions and len(rows)+collection_count!=total):raise PortfolioFormatError('Beholdningslistens antal er ugyldigt eller ufuldstændigt')
             payload['positions']=normalize_positions(rows,payload.get('currency'))
             from pending_orders import from_positions
             payload['pending_orders']=from_positions(rows,'get_positions')
             payload['positions_complete']=True
+            if strict_positions:payload['positions_strict_verified']=True
             successful+=1
         except PortfolioFormatError as error:payload['errors'].append('positions: '+str(error))
         except Exception:payload['errors'].append('positions: Pluto-opslaget fejlede eller kunne ikke fuldføres')

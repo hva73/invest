@@ -73,6 +73,20 @@ class Data(unittest.TestCase):
     if params['name']=='get_portfolio_value':return {'structuredContent':{'value':'100','currency':'EUR'}}
     return {'isError':True}
   payload=portfolio_data.read(app.connect,1,self.root,Client);self.assertFalse(payload['complete']);self.assertEqual(len(payload['errors']),2);self.assertEqual(payload['value']['value']['amount'],'100')
+ def test_strict_positions_proof_survives_unrelated_section_failure_but_not_missing_rows(self):
+  class Client:
+   total=1
+   def __init__(self,token):pass
+   def tools(self):return TOOLS
+   def request(self,method,params):
+    if params['name']=='get_positions':return {'structuredContent':{'positions':[{'assetId':'asset-one','ticker':'ONE','name':'One','quantity':'2','currency':'USD'}],'collections':[],'totalCount':self.total}}
+    return {'isError':True}
+  result=portfolio_data.read(app.connect,1,self.root,Client,strict_positions=True)
+  self.assertFalse(result['complete']);self.assertTrue(result['positions_complete']);self.assertTrue(result['positions_strict_verified'])
+  Client.total=2
+  with self.assertRaises(portfolio_data.PortfolioFormatError):portfolio_data.read(app.connect,1,self.root,Client,strict_positions=True)
+  Client.total=None
+  with self.assertRaises(portfolio_data.PortfolioFormatError):portfolio_data.read(app.connect,1,self.root,Client,strict_positions=True)
  def test_all_sections_fail_without_overwriting(self):
   class Client:
    def __init__(self,token):pass

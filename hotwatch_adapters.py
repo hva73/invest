@@ -193,11 +193,15 @@ class PlutoAdapter:
    if overlap and not automatic:return unknown_context('PORTFOLIO_SCOPE_OVERLAP')
   for p in portfolios:
    with self.connect() as c:row=c.execute('SELECT * FROM portfolio_snapshots WHERE portfolio_id=? AND user_id=?',(p['id'],self.uid)).fetchone()
-   if not row or row['last_error'] or (utc()-stamp(row['observed'])).total_seconds()>300:
-    payload=portfolio_data.read(self.connect,self.uid,p['id'],client_factory=self.factory)
+   exit_only=request.get('watch_mode')=='exit'
+   payload=json.loads(row['payload']) if row and not row['last_error'] and 0<=(utc()-stamp(row['observed'])).total_seconds()<=300 else None
+   # A partial legacy snapshot does not prove the positions list was checked
+   # independently. Re-read it with strict pagination/count checks instead.
+   if payload is None or (exit_only and not payload.get('complete') and not payload.get('positions_strict_verified')):
+    payload=portfolio_data.read(self.connect,self.uid,p['id'],client_factory=self.factory,strict_positions=exit_only)
     with self.connect() as c:portfolio_data.save(c,self.uid,p['id'],payload)
-   else:payload=json.loads(row['payload'])
-   if not payload.get('positions_complete') or not payload.get('complete'):return unknown_context('PORTFOLIO_SNAPSHOT_INCOMPLETE')
+   position_only=exit_only and payload.get('positions_strict_verified') is True
+   if not payload.get('positions_complete') or not (payload.get('complete') or position_only):return unknown_context('PORTFOLIO_SNAPSHOT_INCOMPLETE')
    rows.append(payload)
   if not rows:return unknown_context('NO_ACTIVE_PORTFOLIOS')
   # An unidentified holding could be this asset; absence is not proven.
@@ -225,7 +229,7 @@ class PlutoAdapter:
   # A Pluto main portfolio already includes its collections. Only exclude a
   # collection when its parent is present; standalone scopes remain included.
   parent_ids={p['external_id'] for p in portfolios if p.get('kind')=='portfolio'}
-  values=[snapshot.get('value',{}).get('value') for p,snapshot in zip(portfolios,rows) if not (p.get('kind')=='collection' and p.get('parent_external_id') in parent_ids)]
+  values=[(snapshot.get('value') or {}).get('value') for p,snapshot in zip(portfolios,rows) if not (p.get('kind')=='collection' and p.get('parent_external_id') in parent_ids)]
   if values and all(v and v['amount'] is not None and v['currency']=='DKK' for v in values):result['portfolio_equity_dkk']=format(sum(Decimal(v['amount']) for v in values),'f')
   exposures=[p.get('value_in_portfolio_currency') for p in found]
   if not found:result['exposure_dkk']='0'
