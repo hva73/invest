@@ -1,8 +1,17 @@
 import io,json,os,unittest
+import socket,ssl,urllib.error,http.client
 from unittest.mock import patch
 from eodhd_us_reference import get_reference,parse_reference,ReferenceUnavailable
 
 class USReference(unittest.TestCase):
+ def test_network_errors_are_classified_without_leaking_provider_details(self):
+  from eodhd_us_reference import network_error_code
+  cases=[(TimeoutError('secret-token'),'EODHD_US_REFERENCE_TIMEOUT'),(urllib.error.URLError(socket.gaierror('secret-token')),'EODHD_US_REFERENCE_DNS_ERROR'),(ssl.SSLError('secret-token'),'EODHD_US_REFERENCE_TLS_ERROR'),(http.client.IncompleteRead(b'secret-token'),'EODHD_US_REFERENCE_INCOMPLETE'),(urllib.error.URLError('secret-token'),'EODHD_US_REFERENCE_NETWORK_ERROR')]
+  for error,expected in cases:
+   with self.subTest(expected=expected):
+    self.assertEqual(network_error_code(error),expected)
+    self.assertNotIn('secret',network_error_code(error))
+
  def rows(self):
   return [{'Code':'TSM','Name':'Taiwan Semiconductor Manufacturing','Country':'USA','Exchange':'NYSE','Currency':'USD','Type':'Common Stock','Isin':'US8740391003'}, {'Code':'TSLA','Name':'Tesla Inc','Country':'USA','Exchange':'NASDAQ','Currency':'USD','Type':'Common Stock','Isin':'US88160R1014'}]
  def test_observed_us_catalog_rows_and_invalid_schema(self):

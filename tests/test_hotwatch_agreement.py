@@ -13,6 +13,23 @@ class Agreement(unittest.TestCase):
   self.assertTrue(report_ingest.save(app.connect,1,self.report)[1]['ok'])
   self.cid=self.report['candidates'][0]['candidate_id']
  def tearDown(self):app.DB=self.old;self.temp.cleanup()
+ def test_candidate_activation_does_not_call_market_lookup_and_reuses_only_matching_cache(self):
+  for i,cache in enumerate((False,True)):
+   report=merc_report(False);report.update(report_id=f'activation-source-{i}',generated_at=self.now.isoformat(),positions=[],orders=[])
+   candidate=report['candidates'][0];candidate.update(candidate_id=f'activation-{i}',ticker='TEST',company_name='Test Company',asset_id=f'asset-{i}',exchange='NASDAQ')
+   candidate['decision'].update(decided_at=self.now.isoformat(),data_as_of=self.now.isoformat(),deadline=(self.now+timedelta(hours=24)).isoformat())
+   self.assertTrue(report_ingest.save(app.connect,1,report)[1]['ok'])
+   instrument={'asset_id':f'asset-{i}','ticker':'TEST','name':'Test Company','exchange':'NASDAQ','currency':'USD','type':'CS','isin':'US1234567890'}
+   if cache:hotwatch_service.remember_verified_feed(app.connect,1,instrument,'TEST.US',self.now)
+   with patch('hotwatch_adapters.search_eodhd_symbols',side_effect=AssertionError('market lookup blocked activation')):
+    created=hotwatch_service.auto_activate_candidate(app.connect,1,False,report,candidate,verify=lambda *_:instrument)
+   self.assertEqual(created['status'],'CREATED')
+   session=engine.item(app.connect,1,created['watch_id'],False)['session']
+   self.assertEqual(session['request']['provider'],'eodhd' if cache else 'pluto')
+   self.assertIsNone(session['last_data_at'])
+   self.assertNotEqual(session['signal'],'BUY')
+  self.assertIsNone(hotwatch_service.verified_existing_feed(app.connect,1,{**instrument,'isin':'US0000000001'},self.now))
+  self.assertIsNone(hotwatch_service.verified_existing_feed(app.connect,1,{**instrument,'exchange':'NYSE'},self.now))
  def assess(self,status='AFVENT',deadline=None,at=None):
   at=at or self.now
   data=dict(self.report['candidates'][0]['decision'],status=status,decided_at=at.isoformat(),deadline=deadline)

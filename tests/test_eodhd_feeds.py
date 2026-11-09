@@ -24,6 +24,33 @@ class WS:
   return json.dumps(self.messages.pop(0))
 
 class FeedTests(unittest.TestCase):
+ def test_concurrent_same_symbol_snapshots_share_one_provider_call(self):
+  import eodhd_feeds,time
+  from concurrent.futures import ThreadPoolExecutor
+  eodhd_feeds._snapshot_cache.clear();calls=[]
+  def fetch(_self,_symbol):
+   calls.append(1);time.sleep(.03)
+   return {'status':'OK','price':'12','event_time':'2026-11-06T20:00:00+00:00','received_at':'2026-11-06T20:00:01+00:00'}
+  with patch.object(EODHDFeeds,'_snapshot_uncached',fetch),ThreadPoolExecutor(max_workers=2) as pool:
+   result=list(pool.map(lambda _:EODHDFeeds('SYNTHETIC').snapshot('AMD.US'),range(2)))
+  self.assertEqual(len(calls),1);self.assertEqual(result[0],result[1])
+  eodhd_feeds._snapshot_cache.clear()
+ def test_snapshot_is_shared_briefly_without_refreshing_source_time_or_crossing_keys(self):
+  import eodhd_feeds
+  eodhd_feeds._snapshot_cache.clear()
+  fake=Opener({'code':'AMD.US','timestamp':1730000000,'close':12.5,'volume':100})
+  calls=[]
+  with patch('eodhd_feeds.urllib.request.build_opener',return_value=fake),patch('eodhd_feeds.time.monotonic',side_effect=[10,10,11,12,12,20,20]):
+   first=EODHDFeeds(SECRET,reserve=lambda:calls.append('one')).snapshot('AMD.US')
+   second=EODHDFeeds(SECRET,reserve=lambda:calls.append('two')).snapshot('AMD.US')
+   separate=EODHDFeeds('different-key',reserve=lambda:calls.append('other')).snapshot('AMD.US')
+   expired=EODHDFeeds(SECRET,reserve=lambda:calls.append('expired')).snapshot('AMD.US')
+  self.assertEqual(calls,['one','other','expired'])
+  self.assertEqual(first['event_time'],second['event_time'])
+  self.assertEqual(first['received_at'],second['received_at'])
+  self.assertEqual(first['event_time'],separate['event_time'])
+  self.assertEqual(first['event_time'],expired['event_time'])
+  eodhd_feeds._snapshot_cache.clear()
  def test_realtime_minute_bars_preserve_open_millisecond_and_interval_volume(self):
   opener=Opener([{'s':'AMD.US','i':'1m','t':1730000000000,'o':10,'h':12,'l':9,'c':11,'v':45}]);result=EODHDFeeds(SECRET,opener=opener).minute_bars('us','AMD')
   self.assertEqual(result['status'],'OK');self.assertEqual(result['bars'][0]['bar_open_at'],'2024-10-27T03:33:20+00:00');self.assertEqual(result['bars'][0]['volume_type'],'interval');self.assertIn('ws.eodhistoricaldata.com/history?',opener.url);self.assertNotIn(SECRET,str(result))

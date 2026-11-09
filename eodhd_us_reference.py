@@ -1,5 +1,5 @@
 """Bounded read-only EODHD US symbol catalogue, with the existing rate budget."""
-import codecs,io,json,os,re,threading,time,urllib.error,urllib.request
+import codecs,io,json,os,re,threading,time,urllib.error,urllib.request,socket,ssl,http.client
 from datetime import datetime,timezone
 from urllib.parse import urlencode
 from hotwatch_contract import EngineError
@@ -10,6 +10,17 @@ _lock=threading.Lock()
 _cache=None
 
 class ReferenceUnavailable(ValueError):pass
+
+def network_error_code(error):
+ """Classify transport failures without exposing URLs, tokens or exception text."""
+ reason=error.reason if isinstance(error,urllib.error.URLError) else error
+ if isinstance(reason,(socket.timeout,TimeoutError)):return 'EODHD_US_REFERENCE_TIMEOUT'
+ if isinstance(reason,ssl.SSLError):return 'EODHD_US_REFERENCE_TLS_ERROR'
+ if isinstance(reason,socket.gaierror):return 'EODHD_US_REFERENCE_DNS_ERROR'
+ if isinstance(reason,http.client.IncompleteRead):return 'EODHD_US_REFERENCE_INCOMPLETE'
+ if isinstance(reason,ConnectionError):return 'EODHD_US_REFERENCE_CONNECTION_ERROR'
+ if isinstance(error,urllib.error.URLError):return 'EODHD_US_REFERENCE_NETWORK_ERROR'
+ return 'EODHD_US_REFERENCE_UNAVAILABLE'
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
  def redirect_request(self,*args,**kwargs):return None
@@ -76,6 +87,6 @@ def get_reference(connect,uid,opener=None):
   except EngineError:raise
   except ReferenceUnavailable:raise
   except urllib.error.HTTPError as error:raise ReferenceUnavailable('EODHD_US_REFERENCE_HTTP_'+str(error.code)) from None
-  except Exception:raise ReferenceUnavailable('EODHD_US_REFERENCE_UNAVAILABLE') from None
+  except Exception as error:raise ReferenceUnavailable(network_error_code(error)) from None
   if opener is None:_cache=(time.monotonic(),result)
   return result

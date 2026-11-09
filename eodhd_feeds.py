@@ -1,5 +1,5 @@
 """Bounded, read-only EODHD feed clients. No strategy or broker actions."""
-import json, logging, re, time, urllib.error, urllib.request
+import json, logging, re, time, urllib.error, urllib.request, threading, hashlib, copy
 from datetime import datetime, timedelta, timezone, time as day_time
 from decimal import Decimal, InvalidOperation
 from urllib.parse import quote, urlencode
@@ -7,6 +7,8 @@ from urllib.parse import quote, urlencode
 HTTP_BASE='https://eodhd.com/api'
 REALTIME_BASE='https://ws.eodhistoricaldata.com'
 WS_BASE='wss://ws.eodhistoricaldata.com/ws'
+_snapshot_cache={}
+_snapshot_locks=[threading.Lock() for _ in range(32)]
 WS_FEEDS={'us_trades':'us','us_quotes':'us-quote','us_status':'us-status','eu_trades':'eu','eu_quotes':'eu-quote','eu_status':'eu-status'}
 _WS_LOGGER=logging.Logger('escape.eodhd.transport');_WS_LOGGER.disabled=True
 
@@ -65,6 +67,7 @@ class EODHDFeeds:
   self._key=key.strip() if isinstance(key,str) else ''
   self._reserve=reserve or (lambda:None)
   self._opener=opener or urllib.request.build_opener(_NoRedirect())
+  self._shared_snapshots=opener is None
   self._ws_factory=ws_factory
  def _http(self,base,path,params):
   if not self._key:return _result('KEY_MISSING',path)
@@ -101,6 +104,18 @@ class EODHDFeeds:
   return {**res,'status':'OK' if out else 'NO_DATA','bars':out}
  def snapshot(self,symbol):
   if not _valid_symbol(symbol):return _result('INVALID_INPUT','/real-time')
+  if not self._key:return _result('KEY_MISSING','/real-time')
+  if not self._shared_snapshots:return self._snapshot_uncached(symbol)
+  key=(hashlib.sha256(self._key.encode()).digest(),symbol)
+  with _snapshot_locks[hash(key)%len(_snapshot_locks)]:
+   now=time.monotonic();cached=_snapshot_cache.get(key)
+   if cached and 0<=now-cached[0]<5:return copy.deepcopy(cached[1])
+   result=self._snapshot_uncached(symbol)
+   if result.get('status')=='OK':
+    if len(_snapshot_cache)>=256:_snapshot_cache.clear()
+    _snapshot_cache[key]=(time.monotonic(),copy.deepcopy(result))
+   return result
+ def _snapshot_uncached(self,symbol):
   res=self._http(HTTP_BASE,'/real-time/'+quote(symbol,safe=''),{'fmt':'json'})
   if res['status']!='OK':return res
   data=res.pop('payload')

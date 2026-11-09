@@ -193,15 +193,11 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
    if any(json.loads(r['request']).get('watch_mode','both')!='exit' for r in stopped):return {'status':'NOT_NEW'}
   instrument=verify(connect,uid,candidate) if verify else verified_discovery_instrument(connect,uid,candidate,adapter=adapter)
   if not instrument or instrument.get('asset_id')!=asset or str(instrument.get('ticker','')).casefold()!=candidate.get('ticker','').casefold():return {'status':'PLUTO_VERIFICATION_REQUIRED'}
-  from hotwatch_adapters import search_eodhd_symbols
-  matches=[]
-  if instrument.get('isin'):
-   try:
-    options=(lookup or search_eodhd_symbols)(connect,uid,{'report_id':report['report_id'],'candidate_id':cid,'is_test':mode,'quote_currency':instrument['currency']})
-    matches=[x for x in options.get('choices',[]) if x.get('isin')==instrument['isin'] and x.get('currency')==instrument['currency']]
-   except Exception:pass
-  provider='eodhd' if len(matches)==1 else 'pluto';symbol=matches[0]['symbol'] if len(matches)==1 else None
-  if symbol and mode is False:remember_verified_feed(connect,uid,instrument,symbol)
+  # Session creation must not wait for market-data search or its rate budget.
+  # Reuse only a still-valid verified identity; background feed recovery will
+  # perform independent matching after creation when no proof is cached.
+  cached=verified_existing_feed(connect,uid,instrument) if not mode else None
+  provider='eodhd' if cached else 'pluto';symbol=cached['provider_symbol'] if cached else None
   watch='hw-auto-'+hashlib.sha256((str(uid)+'|'+str(int(mode))+'|'+cid+('|'+reset['generation'] if reset else '')).encode()).hexdigest()[:28]
   risk={'max_notional_dkk':'1000','max_loss_dkk':'100','max_spread_pct':'1','max_quote_age_s':120,'max_position_fraction_pct':'20','proposed_quantity':None,'stop_price':None,'exit_deadline':None}
   with connect() as c:portfolios=[dict(p) for p in c.execute("SELECT id,external_id,parent_external_id FROM portfolios WHERE user_id=? AND active=1 AND source='pluto' ORDER BY id",(uid,))]
@@ -320,7 +316,7 @@ def verified_existing_feed(connect,uid,holding,now=None):
    with connect() as c:
     if not engine.valid_cxe_evidence(c,uid,request,now):return None
   except (KeyError,TypeError,ValueError):return None
- if row and (not holding.get('ticker') or str(holding['ticker']).casefold()==row['ticker'].casefold()) and (not holding.get('currency') or holding['currency']==row['currency']):
+ if row and (not holding.get('ticker') or str(holding['ticker']).casefold()==row['ticker'].casefold()) and (not holding.get('currency') or holding['currency']==row['currency']) and (not holding.get('exchange') or str(holding['exchange']).casefold()==str(row['exchange']).casefold()) and (not holding.get('isin') or holding['isin']==row['isin']):
   return {'asset_id':aid,'ticker':row['ticker'],'currency':row['currency'],'exchange':row['exchange'],'provider_symbol':row['symbol']}
  return None
 

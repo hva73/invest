@@ -570,6 +570,12 @@ class HotWatch(unittest.TestCase):
    c.execute('UPDATE hw_sessions SET next_due=?',(self.now.timestamp(),))
   job=engine.claim(app.connect,self.now+timedelta(seconds=1));self.assertEqual(job['watch_id'],second['watch_id'])
   view=engine.item(app.connect,1,second['watch_id'],True)['session'];self.assertEqual(view['last_computed_signal'],'NO_DATA')
+ def test_scheduler_prioritizes_due_exit_before_candidate_without_disabling_either(self):
+  exit_req=copy.deepcopy(self.req);exit_req.update(watch_id='exit-first',purpose='separate holding protection',watch_mode='exit')
+  engine.create(app.connect,1,exit_req,self.now)
+  with app.connect() as c:c.execute('UPDATE hw_sessions SET next_due=?',(self.now.timestamp(),))
+  first=engine.claim(app.connect,self.now+timedelta(seconds=1));self.assertEqual(first['watch_id'],'exit-first')
+  second=engine.claim(app.connect,self.now+timedelta(seconds=1));self.assertEqual(second['watch_id'],self.req['watch_id'])
  def test_eodhd_disabled_without_purchase_and_errors_do_not_leak_key(self):
   with patch.dict(os.environ,{},clear=True):
    with self.assertRaisesRegex(DataUnavailable,'EODHD_FEED_NOT_ENABLED'):EODHDAdapter(app.connect,1).poll({'request_data':self.req})
@@ -789,6 +795,11 @@ class HotWatch(unittest.TestCase):
   result=auto_activate_candidate(app.connect,1,True,report,candidate,verify,lookup);self.assertEqual(result['status'],'CREATED')
   again=auto_activate_candidate(app.connect,1,True,report,candidate,verify,lookup);self.assertIn(again['status'],('NOT_NEW','ALREADY_ACTIVE'))
   session=engine.item(app.connect,1,result['watch_id'],True)['session'];self.assertEqual(session['request']['candidate_id'],candidate['candidate_id']);self.assertEqual(session['request']['trade_cycle_id'],'cycle-preserved');self.assertIsNone(session['request']['risk']['proposed_quantity'])
+  # Simulate the separate, completed feed-recovery step in this synthetic test.
+  # Activation itself must not perform a provider lookup.
+  with app.connect() as c:
+   row=c.execute('SELECT request FROM hw_sessions WHERE watch_id=?',(result['watch_id'],)).fetchone();req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol='MERC.US')
+   c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),result['watch_id']))
   from hotwatch_service import Runner
   at=engine.utc().replace(microsecond=0)
   class Feeds:

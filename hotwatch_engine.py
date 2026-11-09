@@ -879,7 +879,7 @@ def claim(connect,now=None,watch_id=None):
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
   concurrency=max(1,min(10,int(os.environ.get('ESCAPE_HW_CONCURRENCY','2'))))
   if c.execute('SELECT count(*) FROM hw_sessions WHERE lease_until>?',(now.timestamp(),)).fetchone()[0]>=concurrency:return None
-  row=c.execute("SELECT s.* FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.next_due<=? AND s.lease_until<=? AND COALESCE(k.killed,0)=0 AND (? IS NULL OR s.watch_id=?) ORDER BY CASE json_extract(s.state,'$.adaptive_profile') WHEN 'CRITICAL' THEN 0 ELSE 1 END,CASE json_extract(s.request,'$.priority') WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 ELSE 2 END,s.next_due,s.created,s.id LIMIT 1",(now.timestamp(),now.timestamp(),watch_id,watch_id)).fetchone()
+  row=c.execute("SELECT s.* FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.next_due<=? AND s.lease_until<=? AND COALESCE(k.killed,0)=0 AND (? IS NULL OR s.watch_id=?) ORDER BY CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,CASE json_extract(s.state,'$.adaptive_profile') WHEN 'CRITICAL' THEN 0 ELSE 1 END,CASE json_extract(s.request,'$.priority') WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 ELSE 2 END,s.next_due,s.created,s.id LIMIT 1",(now.timestamp(),now.timestamp(),watch_id,watch_id)).fetchone()
   if not row:return None
   # Provider adapters charge the shared budget immediately before each actual
   # upstream request. Claiming a job is not itself a provider request.
