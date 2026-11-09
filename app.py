@@ -258,7 +258,12 @@ class Handler(BaseHTTPRequestHandler):
                 import intel_workflows
                 q=parse_qs(request.query);mode=q.get('is_test',['false'])
                 if len(mode)!=1 or mode[0] not in ['true','false']:return self.send(400,{'error':'Ugyldig rapporttype'})
-                return self.send(200,intel_workflows.watch(connect,user_id,mode[0]=='true',q.get('candidate_id',[None])[0]))
+                try:result=intel_workflows.watch(connect,user_id,mode[0]=='true',q.get('candidate_id',[None])[0])
+                except Exception as error:
+                    import hotwatch_supervisor
+                    hotwatch_supervisor.application_error(connect,'site_hotwatch',error)
+                    return self.send(500,{'error':'HOT WATCH kunne ikke indlæses. Prøv igen om lidt.'})
+                return self.send(200,result)
             if self.path=='/api/reports/desk':
                 import report_ingest
                 return self.send(200,report_ingest.desk(connect,user_id))
@@ -485,7 +490,9 @@ class Handler(BaseHTTPRequestHandler):
                 except oauth.SetupRequired:
                     with connect() as c:portfolio_data.mark_failed(c,user_id,pid,'Seneste læsning fejlede; gemte data kan være forældede')
                     raise
-                except Exception:
+                except Exception as error:
+                    import hotwatch_supervisor
+                    hotwatch_supervisor.application_error(connect,'site_portfolio',error)
                     with connect() as c:portfolio_data.mark_failed(c,user_id,pid,'Seneste Pluto-opslag fejlede; gemte data kan være forældede')
                     return self.send(502,{'error':'Pluto-opslaget fejlede. Tidligere data er bevaret og markeret.'})
                 with connect() as c:portfolio_data.save(c,user_id,pid,payload)
@@ -554,7 +561,11 @@ class Handler(BaseHTTPRequestHandler):
         except ReportValidationError as error:self.send(400,{'error':'Rapportvalidering fejlede',**error.result})
         except oauth.SetupRequired as error:self.send(409,{'error':str(error)})
         except (ValueError,KeyError,TypeError,RecursionError,OverflowError,sqlite3.IntegrityError):self.send(400,{'error':'Ugyldige oplysninger eller handling'})
-        except Exception:self.send(500,{'error':'Intern fejl. Kontrollér server og database.'})
+        except Exception as error:
+            if self.path in ('/api/portfolios/data','/api/portfolios/sync'):
+                import hotwatch_supervisor
+                hotwatch_supervisor.application_error(connect,'site_portfolio',error)
+            self.send(500,{'error':'Intern fejl. Kontrollér server og database.'})
 LOGIN_FAILURES={}
 if __name__=='__main__':
     import argparse,getpass

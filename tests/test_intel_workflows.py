@@ -117,6 +117,14 @@ class HotWatchHTTP(unittest.TestCase):
   self.assertEqual(self.http.request('/api/reports/hot-watch',None)[0],401)
   status,result,_=self.http.request('/api/reports/hot-watch?is_test=false',None,auth);self.assertEqual(status,200);self.assertEqual(len(result['groups']),1)
   self.assertEqual(self.http.request('/api/reports/hot-watch?is_test=true',None,auth)[1]['groups'],[]);self.assertEqual(self.http.request('/api/reports/hot-watch?is_test=bad',None,auth)[0],400)
+ def test_hotwatch_error_is_safe_and_visible_in_existing_engine_status(self):
+  import hotwatch_engine
+  auth=self.http.login()
+  with patch('intel_workflows.watch',side_effect=RuntimeError('private-token-never-log')):
+   status,body,_=self.http.request('/api/reports/hot-watch?is_test=false',None,auth)
+  self.assertEqual(status,500);self.assertNotIn('private-token',str(body))
+  data=hotwatch_engine.sync(app.connect,1,False,summary_only=True)
+  events=data['supervisor_events'];self.assertTrue(any(x['event']=='site_hotwatch' for x in events));self.assertNotIn('private-token',str(events))
  def test_radar_reset_requires_session_csrf_and_explicit_action(self):
   path='/api/reports/reset-radar';self.assertEqual(self.http.request(path,{'confirm':True})[0],401)
   auth=self.http.login();self.assertEqual(self.http.request(path,{'confirm':True},{'Cookie':auth['Cookie']})[0],403)

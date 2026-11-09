@@ -311,7 +311,16 @@ def rpc(connect,identity,data):
             result={'content':[{'type':'text','text':json.dumps(error.result,ensure_ascii=False)}],'structuredContent':error.result,'isError':True}
         except HotWatchError as error:
             body=error.result();result={'content':[{'type':'text','text':json.dumps(body,ensure_ascii=False)}],'structuredContent':body,'isError':True}
-        except (ValueError,KeyError,TypeError,OverflowError,RecursionError):result={'content':[{'type':'text','text':'Rapportformatet er ugyldigt, for stort eller report_id har modstridende indhold. Ingen rapport gemt.'}],'isError':True}
+        except (ValueError,KeyError,TypeError,OverflowError,RecursionError) as error:
+            if name in ('get_hot_watch','sync_hot_watch','get_hot_watch_engine'):
+                import hotwatch_supervisor
+                hotwatch_supervisor.application_error(connect,'mcp_hotwatch',error)
+            result={'content':[{'type':'text','text':'Rapportformatet er ugyldigt, for stort eller report_id har modstridende indhold. Ingen rapport gemt.'}],'isError':True}
+        except Exception as error:
+            if name in ('get_hot_watch','sync_hot_watch','get_hot_watch_engine'):
+                import hotwatch_supervisor
+                hotwatch_supervisor.application_error(connect,'mcp_hotwatch',error)
+            raise
     else:return error(-32601,'Method not found')
     return 200,{'jsonrpc':'2.0','id':rid,'result':result}
 

@@ -176,6 +176,26 @@ class WatchdogTests(unittest.TestCase):
             self.assertEqual(len(rows), 200)
             self.assertEqual(set(rows), {('worker_exited', -15)})
 
+    def test_application_error_records_sqlite_code_without_private_data_and_does_not_wait_on_lock(self):
+        import time
+        with tempfile.TemporaryDirectory() as d:
+            db=str(Path(d)/'diagnostics.db')
+            with sqlite3.connect(db) as c:c.execute('CREATE TABLE hw_supervisor_events(id INTEGER PRIMARY KEY,created TEXT,event TEXT,code INTEGER)')
+            def connect():return sqlite3.connect(db)
+            try:
+                try:connect().execute('SELECT * FROM private_missing_table')
+                except sqlite3.Error as error:
+                    self.assertTrue(supervisor.application_error(connect,'site_portfolio',error))
+                with connect() as c:rows=c.execute('SELECT event,code FROM hw_supervisor_events').fetchall()
+                self.assertIn(('site_portfolio',1),rows);self.assertIn(('site_sqlite_error',sqlite3.SQLITE_ERROR),rows)
+                self.assertNotIn('private_missing_table',str(rows))
+                holder=connect();holder.execute('BEGIN EXCLUSIVE')
+                try:
+                    start=time.monotonic();self.assertFalse(supervisor.application_error(connect,'site_hotwatch',RuntimeError('secret')))
+                    self.assertLess(time.monotonic()-start,1)
+                finally:holder.rollback();holder.close()
+            finally:pass
+
     def test_lock_prevents_a_second_worker(self):
         with tempfile.TemporaryDirectory() as d, patch.object(app, 'DB', str(Path(d) / 'escape.db')):
             first = supervisor.lock('worker')

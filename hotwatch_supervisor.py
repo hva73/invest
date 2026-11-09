@@ -103,6 +103,41 @@ def diagnostic(event, code=None):
         pass
 
 
+def application_error(connect, area, error):
+    """Best-effort, bounded error location only; never persist exception text."""
+    areas={'site_hotwatch','site_portfolio','mcp_hotwatch'}
+    modules={'app','intel_workflows','hotwatch_engine','hotwatch_adapters',
+             'hotwatch_service','portfolio_data','mcp_client','mcp_reports',
+             'oauth','report_ingest','dashboard_projection','sector_intelligence'}
+    if area not in areas:return False
+    import sqlite3
+    if isinstance(error,sqlite3.Error):kind=1
+    elif isinstance(error,(ValueError,TypeError,KeyError,IndexError)):kind=2
+    elif isinstance(error,TimeoutError):kind=3
+    elif isinstance(error,OSError):kind=4
+    else:kind=0
+    frames=[];tb=error.__traceback__
+    while tb:
+        name=Path(tb.tb_frame.f_code.co_filename).stem
+        if name in modules:frames.append((name,tb.tb_lineno))
+        tb=tb.tb_next
+    entries=[(area,kind)]
+    if isinstance(error,sqlite3.Error):
+        code=getattr(error,'sqlite_errorcode',None)
+        entries.append(('site_sqlite_error',code if type(code) is int and 0<=code<=65535 else None))
+    if frames:
+        name,line=frames[-1];entries.append(('site_frame_'+name,line if 0<line<100000 else None))
+    try:
+        created=datetime.now(timezone.utc).isoformat()
+        with connect() as c:
+            c.execute('PRAGMA busy_timeout=100')
+            c.executemany('INSERT INTO hw_supervisor_events(created,event,code) VALUES(?,?,?)',[(created,event,code) for event,code in entries])
+            c.execute('DELETE FROM hw_supervisor_events WHERE id NOT IN (SELECT id FROM hw_supervisor_events ORDER BY id DESC LIMIT 200)')
+        return True
+    except Exception:
+        return False
+
+
 def lock_category(pid):
     try:
         with open('/proc/%d/cmdline' % pid, 'rb') as source:
