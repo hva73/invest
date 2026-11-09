@@ -582,6 +582,28 @@ class HotWatch(unittest.TestCase):
  def test_fault_backoff_dedup_and_recovery(self):
   engine.fault(app.connect,1,self.req['watch_id'],True,'DATA_STALE',self.now);before=self.counts();engine.fault(app.connect,1,self.req['watch_id'],True,'DATA_STALE',self.now+timedelta(seconds=5));self.assertEqual(before,self.counts());self.assertEqual(engine.item(app.connect,1,self.req['watch_id'],True)['session']['status'],'DEGRADED')
   self.put(tick(self.now+timedelta(seconds=60),1),self.now+timedelta(seconds=60));events=engine.history(app.connect,1,self.req['watch_id'],True)['items'];self.assertTrue(any(e['event_type']=='DATA_RECOVERED' for e in events))
+ def test_stale_data_rechecks_at_budgeted_cadence_without_enabling_signal(self):
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True);req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol='MERC.US')
+   c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps(req),row['id']))
+  for i in range(6):
+   at=self.now+timedelta(minutes=i*10);engine.fault(app.connect,1,self.req['watch_id'],True,'DATA_STALE',at)
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True)
+   self.assertEqual(row['next_due'],at.timestamp()+engine.effective_poll_interval(c,req))
+   self.assertEqual(json.loads(row['state'])['signal'],'NO_DATA')
+ def test_sync_bounds_each_page_but_returns_all_sessions_via_cursor(self):
+  with app.connect() as c:
+   base=dict(engine.row_for(c,1,self.req['watch_id'],True));base.pop('id')
+   for i in range(11):
+    item=dict(base);item['watch_id']='extra-'+str(i);item['candidate_id']='candidate-extra-'+str(i)
+    req=json.loads(item['request']);req.update(watch_id=item['watch_id'],candidate_id=item['candidate_id'],watch_mode='exit');item['request']=json.dumps(req)
+    cols=list(item);c.execute('INSERT INTO hw_sessions('+','.join(cols)+') VALUES('+','.join('?' for _ in cols)+')',[item[k] for k in cols])
+  first=engine.sync(app.connect,1,True,session_limit=100,summary_only=True)
+  self.assertEqual(len(first['open_sessions']),10);self.assertTrue(first['sessions_have_more'])
+  second=engine.sync(app.connect,1,True,sessions_after=first['next_sessions_cursor'],session_limit=100,summary_only=True)
+  self.assertEqual(len(second['open_sessions']),2);self.assertFalse(second['sessions_have_more'])
+  self.assertEqual(len({s['watch_id'] for s in first['open_sessions']+second['open_sessions']}),12)
  def test_local_budget_retry_and_expired_display_explain_actual_cause(self):
   engine.fault(app.connect,1,self.req['watch_id'],True,'PROVIDER_RATE_BUDGET',self.now)
   with app.connect() as c:

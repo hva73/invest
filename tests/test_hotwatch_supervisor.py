@@ -127,7 +127,11 @@ class WatchdogTests(unittest.TestCase):
 
     def test_database_lock_read_failure_is_explicit(self):
         with patch.object(app,'DB','/does/not/exist'):
-            self.assertEqual(supervisor.database_locks(),[('db_lock_unavailable',None)])
+            self.assertEqual(supervisor.database_locks(),[('db_lock_unavailable',-1)])
+        with tempfile.TemporaryDirectory() as folder:
+            db=str(Path(folder)/'escape.db');Path(db).touch()
+            with patch.object(app,'DB',db),patch('builtins.open',side_effect=PermissionError(13,'denied')):
+                self.assertEqual(supervisor.database_locks(),[('db_lock_unavailable',13)])
 
     def test_lock_diagnostic_does_not_wait_for_blocked_database(self):
         import time

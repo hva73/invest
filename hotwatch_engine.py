@@ -628,7 +628,10 @@ def item(connect,uid,wid,mode=False):
 
 def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=100,summary_only=False):
  """Read owned open sessions and events with separate pagination cursors."""
- now=utc()
+ # Rendering a full session includes several dependent reads. Bound the
+ # consistent snapshot so one status request cannot hold a read lock across
+ # every session; existing cursors continue to expose the complete list.
+ session_limit=min(session_limit,10);now=utc()
  with connect() as c:
   c.execute('BEGIN')
   opened=c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=? AND id>? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') ORDER BY id LIMIT ?",(uid,int(mode),sessions_after,session_limit+1)).fetchall()
@@ -912,6 +915,10 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   if row['last_error']!=code:event(c,row,'DATA_STALE' if code=='DATA_STALE' else 'DATA_ERROR',now,code,severity='warning',data_time=row['last_data'])
   failures=min(row['failures']+1,10);floor=provider_floor(request['provider']);interval=min(1800,max(floor,PROFILES[request['profile']])*2**min(failures-1,5));state.update(signal='NO_DATA',pending=None,confirmations=0)
   if code=='PROVIDER_RATE_BUDGET':interval=max(60,effective_poll_interval(c,request)) if request['provider']=='eodhd' else 60
+  # A stale observation is not a failed provider or rate-limit response.
+  # Recheck at the sustainable cadence so repeated closed-market samples do
+  # not push the next check half an hour past a new market event.
+  if code=='DATA_STALE':interval=effective_poll_interval(c,request)
   if retry_after_s is not None:interval=max(interval,max(0,retry_after_s))
   if row['last_error']!=code:
    previous=json.loads(row['strategy']);result={'signal':'NO_DATA','reason_codes':[code],'human_readable_explanation':code,'supporting_metrics':{'quote_age_s':(now-stamp(row['last_data'])).total_seconds() if row['last_data'] else None},'calculation_timestamp':now.isoformat(),'data_timestamp':row['last_data'],'strategy_id':previous['strategy_id'],'strategy_version':previous['version'],'strategy_checksum':checksum(previous),'confidence_score':0,'risk_level':'critical' if set(state.get('alert_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE'} else 'high','rules_score_note':'No valid current market input','critical_override':False}

@@ -113,12 +113,19 @@ def database_locks():
         import app
         db = os.stat(app.DB)
         identity = (os.major(db.st_dev), os.minor(db.st_dev), db.st_ino)
-        with open('/proc/locks', encoding='ascii') as source:
-            lines = source.read(2_000_001)
-        if len(lines) > 2_000_000:
-            return [('db_lock_unavailable', None)]
     except (OSError, ValueError):
-        return [('db_lock_unavailable', None)]
+        return [('db_lock_unavailable', -1)]
+    try:
+        with open('/proc/locks', encoding='ascii') as source:
+            # Shared hosts can have large lock tables. Retain a bounded read;
+            # an incomplete snapshot is explicitly unavailable, never empty.
+            lines = source.read(8_000_001)
+        if len(lines) > 8_000_000:
+            return [('db_lock_unavailable', -2)]
+    except OSError as error:
+        return [('db_lock_unavailable', error.errno if isinstance(error.errno,int) and 0 < error.errno < 256 else -3)]
+    except ValueError:
+        return [('db_lock_unavailable', -3)]
     counts = {}
     for line in lines.splitlines():
         fields = line.split()
