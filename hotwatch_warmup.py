@@ -9,7 +9,7 @@ def init(c):
  c.execute('CREATE TABLE IF NOT EXISTS hw_warmup_history(watch_row_id INTEGER PRIMARY KEY REFERENCES hw_sessions(id),symbol TEXT NOT NULL,received TEXT NOT NULL,bars TEXT NOT NULL,next_attempt REAL NOT NULL,status TEXT NOT NULL)')
 
 def valid_bars(rows,now):
- """Keep only the most recent contiguous run of distinct, closed 1m bars."""
+ """Keep actual distinct closed bars, including observations across gaps."""
  from hotwatch_features import number
  if not isinstance(rows,list):return []
  by_time={}
@@ -23,12 +23,7 @@ def valid_bars(rows,now):
    cleaned={k:bar.get(k) for k in ('bar_open_at','open','high','low','close','volume')}
    if at in by_time and by_time[at]!=cleaned:return []
    by_time[at]=cleaned
-  ordered=sorted(by_time);tail=[];later=None
-  for at in reversed(ordered):
-   if later and (later-at).total_seconds()!=60:break
-   tail.append(by_time[at]);later=at
-   if len(tail)==34:break
-  return list(reversed(tail))
+  return [by_time[at] for at in sorted(by_time)[-120:]]
  except (KeyError,ValueError,TypeError,ArithmeticError,InvalidOperation):return []
 
 def refresh(connect,job,now,client=None):
@@ -100,11 +95,7 @@ def status(c,row,request,now):
    if historical_end and (at-historical_end).total_seconds()<30:continue
    slot=int(at.timestamp()//60)-(1 if at.second==0 and at.microsecond==0 else 0)
    minutes.setdefault(slot,{**common,'sample_id':sample.get('sample_id'),'event_time':at.isoformat(),'price':sample['price'],'open':sample.get('open'),'high':sample.get('high'),'low':sample.get('low'),'close':sample.get('close'),'volume':sample.get('volume') if sample.get('volume_type')=='interval' else None,'volume_type':sample.get('volume_type') if sample.get('volume_type')=='interval' else 'unknown','bid':sample.get('bid'),'ask':sample.get('ask')})
-  slots=sorted(minutes,reverse=True);selected=[];previous=None
-  for slot in slots:
-   if previous is not None and previous-slot!=1:break
-   selected.append(minutes[slot]);previous=slot
-   if len(selected)>=max(34,required):break
+  selected=[minutes[slot] for slot in sorted(minutes,reverse=True)[:max(34,required)]]
   metrics=features(list(reversed(selected)),parameters);count=metrics.get('sample_count',0)
   age=(now-latest).total_seconds() if latest else None
   return {'state':'WARMUP COMPLETE' if count>=required else 'WARMUP','count':count,'required':required,'remaining':max(0,required-count),'freshness':'FRESH' if age is not None and 0<=age<=request['risk']['max_quote_age_s'] else 'DATA STALE','first_observed':selected[-1]['event_time'] if selected else None,'last_observed':latest.isoformat() if latest else None,'latest_live_sample_id':selected[0].get('sample_id') if selected else None,'historical_count':len(bars),'source_status':saved['status'],'analysis_only':True,'metrics':metrics}

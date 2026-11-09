@@ -110,7 +110,7 @@ class SparseFeedRecovery(unittest.TestCase):
    result['calculation']['analysis_uses_bars']=False
    self.assertTrue(runner.once(self.now));self.assertEqual(refresh.call_count,1)
  def test_quiet_or_older_ws_batch_keeps_fresh_observation_without_renewing_time(self):
-  adapter=adapters.EODHDAdapter(app.connect,1);req=dict(self.req,is_test=False);job={'id':999,'request_data':req}
+  adapter=adapters.EODHDAdapter(app.connect,1);req=dict(self.req,is_test=False,profile='ACTIVE');job={'id':999,'request_data':req}
   message={'symbol':'MERC','event_time':self.now.isoformat(),'received_at':self.now.isoformat(),'price':'100'}
   client=Mock();client.capture.return_value={'status':'OK','messages':[message]}
   with patch.dict(os.environ,{'ESCAPE_EODHD_API_KEY':'test-only'}),patch.object(adapters,'utc',return_value=self.now),patch.object(adapters.time,'monotonic',return_value=100):

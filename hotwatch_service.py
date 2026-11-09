@@ -852,9 +852,15 @@ def worker_settings():
  return {k:(v if v is None or re.fullmatch(r'[A-Za-z0-9_,.-]{0,100}',v) else 'INVALID') for k in keys for v in [os.environ.get(k)]}
 
 class Runner:
- def __init__(self,connect):self.connect=serialized_database(connect);self.adapters={};self.brokers={};self.broker_lock=threading.Lock();self.stop=threading.Event();self._workers=[]
+ def __init__(self,connect):self.connect=serialized_database(connect);self.adapters={};self.brokers={};self.broker_lock=threading.Lock();self.stop=threading.Event();self._workers=[];self.pending_feeds={};self.pending_lock=threading.Lock()
  def once(self,now=None,watch_id=None):
-  now=now or engine.utc();claim_started=time.perf_counter();job=engine.claim(self.connect,now,watch_id);claimed=engine.utc()
+  now=now or engine.utc();claim_started=time.perf_counter()
+  with self.pending_lock:
+   for ident,event in list(self.pending_feeds.items()):
+    if event.is_set():self.pending_feeds.pop(ident,None)
+   excluded=tuple(self.pending_feeds)
+   job=engine.claim(self.connect,now,watch_id,exclude_ids=excluded)
+  claimed=engine.utc()
   if not job:return False
   job['scan_timing']={'next_due_at':engine.datetime.fromtimestamp(job['next_due'],engine.timezone.utc).isoformat(),'claimed_at':claimed.isoformat(),'claim_ms':round((time.perf_counter()-claim_started)*1000,3),'queue_ms':max(0,round((claimed.timestamp()-job['next_due'])*1000,3))}
   uid=job['user_id'];r=job['request_data'];wid=job['watch_id'];mode=bool(job['is_test']);lease=job['lease_owner'];adapter=None;uses_realtime_history=False;pending_feed=False
@@ -897,11 +903,13 @@ class Runner:
     if (journaled_at-stamp(sample['event_time'])).total_seconds()>r['risk']['max_quote_age_s']:engine.fault(self.connect,uid,wid,mode,'DATA_STALE',lease=lease)
     else:engine.release(self.connect,job,journaled_at,sample=sample)
   except EngineError as error:
-   if error.code=='FEED_COLLECTING':
+   if error.code=='FEED_COLLECTING' and getattr(error,'feed_ready',None) is not None:
     pending_feed=True
-    engine.release(self.connect,job,engine.utc(),pending_feed=True)
+    with self.pending_lock:
+     self.pending_feeds[job['id']]=error.feed_ready
+     engine.release(self.connect,job,engine.utc(),pending_feed=True)
     self.log(job,'deferred',error.code,{'websocket':getattr(adapter,'capture_metrics',[]),'provider_ms':round((time.perf_counter()-poll_started)*1000,3)})
-    return True
+    return 'deferred'
    if error.code in ['lease_lost','watch_not_running','kill_switch_active','operator_kill_switch']:
     self.log(job,'cancelled',error.code);return True
    self.partials(job,adapter,getattr(error,'partial_observation',None))
@@ -962,14 +970,14 @@ class Runner:
   logging.getLogger('escape.hotwatch').info(json.dumps({'service':'hotwatch','user_id':job['user_id'],'is_test':bool(job['is_test']),'utc':engine.utc().isoformat(),'watch_ref':hashlib.sha256(job['watch_id'].encode()).hexdigest()[:16],'source':job['request_data']['provider'],'status':status,'code':code,'metrics':{**job.get('scan_timing',{}),**(metrics or {})}}))
  def drain(self,watch_id=None):
   """Keep each available worker busy without waiting for slower provider calls."""
-  if watch_id:return int(self.once(watch_id=watch_id))
+  if watch_id:return int(self.once(watch_id=watch_id) is True)
   try:
    requested=int(os.environ.get('ESCAPE_HW_PARALLEL_SCANS','2'))
    lease_limit=int(os.environ.get('ESCAPE_HW_CONCURRENCY','2'))
   except (TypeError,ValueError):requested=1;lease_limit=1
   workers=max(1,min(10,engine.capacity(),requested,lease_limit))
   while len(self._workers)<workers-1:
-   child=Runner(self.connect);child.stop=self.stop;child.brokers=self.brokers;child.broker_lock=self.broker_lock;self._workers.append(child)
+   child=Runner(self.connect);child.stop=self.stop;child.brokers=self.brokers;child.broker_lock=self.broker_lock;child.pending_feeds=self.pending_feeds;child.pending_lock=self.pending_lock;self._workers.append(child)
   runners=[self]+self._workers[:workers-1];count=0;limit=engine.capacity()
   with ThreadPoolExecutor(max_workers=workers,thread_name_prefix='hotwatch') as pool:
    pending={pool.submit(r.once):r for r in runners if not self.stop.is_set()};idle=[]
@@ -981,8 +989,12 @@ class Runner:
     finished,_=wait(pending,timeout=2,return_when=FIRST_COMPLETED)
     ready=[]
     for future in finished:
-     runner=pending.pop(future);processed=bool(future.result());count+=processed
-     (ready if processed else idle).append(runner)
+     runner=pending.pop(future);outcome=future.result()
+     # A yielded feed claim has done no scan and consumes no round budget.
+     # Its completion event excludes it from claims until data is available;
+     # this worker can immediately try the next eligible deadline instead.
+     count+=outcome is True
+     (ready if outcome else idle).append(runner)
     if ready or not finished:
      ready.extend(idle);idle=[]
     for runner in ready:

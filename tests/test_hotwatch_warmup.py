@@ -10,9 +10,9 @@ class WarmupHistory(unittest.TestCase):
   rows=valid_bars(list(reversed(self.bars))+[self.bars[0]],self.now)
   self.assertEqual(len(rows),34);self.assertEqual(rows[0],self.bars[0]);self.assertEqual(rows[-1],self.bars[-1])
  def test_gaps_invalid_ohlcv_future_and_conflicting_duplicates_never_fabricate_history(self):
-  rows=copy.deepcopy(self.bars);del rows[-3];self.assertEqual(len(valid_bars(rows,self.now)),2)
-  rows=copy.deepcopy(self.bars);rows[-3]['high']='1';self.assertEqual(len(valid_bars(rows,self.now)),2)
-  rows=copy.deepcopy(self.bars);rows[-3]['volume']=None;self.assertEqual(len(valid_bars(rows,self.now)),2)
+  rows=copy.deepcopy(self.bars);del rows[-3];self.assertEqual(valid_bars(rows,self.now),rows)
+  rows=copy.deepcopy(self.bars);rows[-3]['high']='1';self.assertEqual(len(valid_bars(rows,self.now)),33)
+  rows=copy.deepcopy(self.bars);rows[-3]['volume']=None;self.assertEqual(len(valid_bars(rows,self.now)),33)
   rows=copy.deepcopy(self.bars);rows.append(dict(rows[-1],close='100'));self.assertEqual(valid_bars(rows,self.now),[])
   rows=copy.deepcopy(self.bars);rows.append(dict(rows[-1],bar_open_at=self.now.isoformat()));self.assertEqual(len(valid_bars(rows,self.now)),34)
  def test_real_rest_response_shape_is_parsed_for_btc_minute_history(self):
@@ -27,6 +27,29 @@ class WarmupHistory(unittest.TestCase):
     self.url=request.full_url;return Response()
   client=Opener();result=EODHDFeeds('synthetic',opener=client).intraday('BTC-USD.CC',interval='1m',start=int(self.now.timestamp())-7200,end=int(self.now.timestamp()))
   self.assertEqual(result['status'],'OK');self.assertEqual(len(valid_bars(result['bars'],self.now)),34);self.assertIn('/intraday/BTC-USD.CC?',client.url);self.assertIn('interval=1m',client.url)
+ def test_sparse_history_status_keeps_actual_bars_without_fabricating_minute_returns(self):
+  import app,hotwatch_engine as engine,hotwatch_warmup as warmup
+  import test_hotwatch_engine as fixture
+  from unittest.mock import patch
+  f=fixture.HotWatch();f.setUp()
+  try:
+   now=f.now.replace(second=0,microsecond=0)
+   req=dict(f.req,provider='eodhd',provider_symbol='MERC.US')
+   # Forty actual closed bars, two minutes apart. No one-minute baseline.
+   bars=[dict(self.bars[0],bar_open_at=(now-timedelta(minutes=79-2*i)).isoformat(),close=str(100+i/100)) for i in range(40)]
+   with app.connect() as c:
+    c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
+    row=engine.row_for(c,1,req['watch_id'],True)
+    c.execute('INSERT INTO hw_verified_feed_links VALUES(?,?,?,?,?,?,?,?)',(1,req['asset_id'],req['ticker'],req['quote_currency'],req['exchange'],req['provider_symbol'],'US1234567890',now.timestamp()))
+    c.execute('INSERT INTO hw_warmup_history VALUES(?,?,?,?,?,?)',(row['id'],req['provider_symbol'],now.isoformat(),json.dumps(bars),now.timestamp()+300,'OK'))
+    with patch('hotwatch_engine.valid_cxe_evidence',return_value=None):result=warmup.status(c,row,req,now)
+    self.assertEqual(result['count'],34);self.assertEqual(result['historical_count'],40)
+    self.assertEqual(result['state'],'WARMUP COMPLETE');self.assertIsNotNone(result['metrics']['ema_long'])
+    self.assertIsNone(result['metrics']['return_1_pct']);self.assertIsNone(result['metrics']['return_3_pct'])
+    self.assertEqual(result['last_observed'],now.isoformat())
+    self.assertEqual(c.execute('SELECT count(*) FROM hw_calculations').fetchone()[0],0)
+    self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
+  finally:f.tearDown()
  def test_history_can_inform_signals_only_with_fresh_same_session_schedule(self):
   now=datetime(2026,11,6,15,15,tzinfo=timezone.utc);c=sqlite3.connect(':memory:');c.row_factory=sqlite3.Row
   c.execute('CREATE TABLE hw_exchange_calendar(exchange TEXT,received TEXT,timezone TEXT,calendar TEXT)')

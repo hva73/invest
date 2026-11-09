@@ -353,15 +353,20 @@ class EODHDAdapter:
    if not cached:return False
    value=cached[1];age=time.monotonic()-cached[0]
    fresh=any(m.get('event_time') and 0<=(utc()-stamp(m['event_time'])).total_seconds()<=min(request['risk']['max_quote_age_s'],GLOBAL_RISK['max_quote_age_s']) for m in value.get('messages',[]))
-   recent=0<=age<min(20,PROFILES.get(profile,60))
-   return (recent and (fresh or value.get('status')=='NO_MESSAGES' or feed.endswith('_status') and value.get('status')=='OK')) or (allow_older and age>=0 and fresh)
+   interval=PROFILES.get(profile,60)
+   # Share fresh observations for the requesting profile's existing cadence.
+   # Empty/status responses keep their short response cache; neither cache
+   # duration nor reuse changes a market event's original timestamp.
+   return (fresh and 0<=age<interval) or (0<=age<min(20,interval) and (value.get('status')=='NO_MESSAGES' or feed.endswith('_status') and value.get('status')=='OK')) or (allow_older and age>=0 and fresh)
   with _ws_batch_lock:
    cached=_ws_batch_cache.get(key);collecting=group in _ws_batch_inflight
    # A running capture must not tie up both workers. A still-fresh observation
    # can be analysed immediately, with its original source/receive timestamps.
    if reusable(cached,req,profile,allow_older=collecting):return record(copy.deepcopy(cached[1]),0,True)
-   if collecting:return record({'status':'COLLECTING','messages':[]},0,True)
-   _ws_batch_inflight[group]=True
+   if collecting:
+    self.pending_feed=_ws_batch_inflight[group]
+    return record({'status':'COLLECTING','messages':[]},0,True)
+   completed=threading.Event();_ws_batch_inflight[group]=completed
   try:
    # Fill the existing batch with due watches that lack a reusable response.
    # Do not spend its ten slots repeatedly subscribing to already cached data.
@@ -405,9 +410,10 @@ class EODHDAdapter:
   finally:
    with _ws_batch_lock:
     _ws_batch_inflight.pop(group,None)
+    completed.set()
 
  def poll(self,session):
-  self.last_partial_observations=[];self.capture_metrics=[]
+  self.last_partial_observations=[];self.capture_metrics=[];self.pending_feed=None
   if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':raise DataUnavailable('EODHD_FEED_NOT_ENABLED')
   key=os.environ.get('ESCAPE_EODHD_API_KEY','').strip()
   if not key:raise DataUnavailable('EODHD_KEY_NOT_CONFIGURED')
@@ -456,7 +462,8 @@ class EODHDAdapter:
    if partial:
     item=partial[-1];self.last_partial_observations.append({'source':'eodhd','price':item.get('price'),'currency':r.get('quote_currency'),'source_time':None,'received_at':item.get('received_at'),'quality':'TIME_UNKNOWN','trade_size':item.get('trade_size')})
    self.last_feed_diagnostics={'websocket_trade_status':feed['status']}
-   if feed['status']=='COLLECTING':raise DataUnavailable('FEED_COLLECTING')
+   if feed['status']=='COLLECTING':
+    failure=DataUnavailable('FEED_COLLECTING');failure.feed_ready=self.pending_feed;raise failure
    if feed['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
    if feed['status']=='RATE_LIMIT':
     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=feed.get('retry_after_s') or retry_seconds(None);raise failure
@@ -464,7 +471,8 @@ class EODHDAdapter:
    if feed['status'] in ('OK','NO_MESSAGES') and not valid and os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
     standalone=self.capture(client,market+'_quotes',stream_symbol,session)
     self.last_feed_diagnostics['websocket_quote_status']=standalone.get('status')
-    if standalone.get('status')=='COLLECTING':raise DataUnavailable('FEED_COLLECTING')
+    if standalone.get('status')=='COLLECTING':
+     failure=DataUnavailable('FEED_COLLECTING');failure.feed_ready=self.pending_feed;raise failure
     if standalone.get('status')=='RATE_LIMIT':
      failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=standalone.get('retry_after_s') or retry_seconds(None);raise failure
     quotes=standalone.get('messages',[]);partial_quotes=standalone.get('partial_messages',[])

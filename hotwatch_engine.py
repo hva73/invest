@@ -1117,13 +1117,13 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   if status=='ERROR' and row['status']!='ERROR':event(c,row,'WATCH_ERROR',now,'Manual review required: '+code,severity='critical')
   c.execute("UPDATE hw_sessions SET status=?,state=?,last_error=?,failures=?,updated=?,next_due=?,lease_owner=NULL,lease_until=0 WHERE id=?",(status,canonical(state),code,failures,now.isoformat(),now.timestamp()+interval,row['id']))
 
-def claim(connect,now=None,watch_id=None):
- now=now or utc();owner=secrets.token_hex(16)
+def claim(connect,now=None,watch_id=None,exclude_ids=()):
+ now=now or utc();owner=secrets.token_hex(16);excluded=json.dumps(list(exclude_ids))
  # Avoid competing for the SQLite writer lock when the queue is empty.
  # The complete query and all kill switches are checked again under the
  # transaction below; this read-only preflight cannot claim a session.
  with connect() as c:
-  pending=c.execute("SELECT 1 FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.next_due<=? AND s.lease_until<=? AND COALESCE(k.killed,0)=0 AND (? IS NULL OR s.watch_id=?) LIMIT 1",(now.timestamp(),now.timestamp(),watch_id,watch_id)).fetchone()
+  pending=c.execute("SELECT 1 FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.next_due<=? AND s.lease_until<=? AND s.id NOT IN (SELECT value FROM json_each(?)) AND COALESCE(k.killed,0)=0 AND (? IS NULL OR s.watch_id=?) LIMIT 1",(now.timestamp(),now.timestamp(),excluded,watch_id,watch_id)).fetchone()
  if not pending:return None
  with connect() as c:
   c.execute('BEGIN IMMEDIATE')
@@ -1134,7 +1134,7 @@ def claim(connect,now=None,watch_id=None):
   # Serve the earliest deadline first; exits/catalysts break equal deadlines.
   # Giving newly due holdings absolute priority until candidates missed a
   # whole extra interval systematically delayed NORMAL candidates by 60s.
-  row=c.execute("SELECT s.* FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.next_due<=? AND s.lease_until<=? AND COALESCE(k.killed,0)=0 AND (? IS NULL OR s.watch_id=?) ORDER BY s.next_due,CASE WHEN json_extract(s.request,'$.watch_mode')='exit' AND json_extract(s.state,'$.adaptive_profile')='CRITICAL' THEN 0 ELSE 1 END,CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,CASE WHEN COALESCE(json_extract(s.state,'$.catalyst_priority_until'),0)>? THEN 0 ELSE 1 END,CASE json_extract(s.state,'$.adaptive_profile') WHEN 'CRITICAL' THEN 0 ELSE 1 END,CASE json_extract(s.request,'$.priority') WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 ELSE 2 END,s.created,s.id LIMIT 1",(now.timestamp(),now.timestamp(),watch_id,watch_id,now.timestamp())).fetchone()
+  row=c.execute("SELECT s.* FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.next_due<=? AND s.lease_until<=? AND s.id NOT IN (SELECT value FROM json_each(?)) AND COALESCE(k.killed,0)=0 AND (? IS NULL OR s.watch_id=?) ORDER BY s.next_due,CASE WHEN json_extract(s.request,'$.watch_mode')='exit' AND json_extract(s.state,'$.adaptive_profile')='CRITICAL' THEN 0 ELSE 1 END,CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,CASE WHEN COALESCE(json_extract(s.state,'$.catalyst_priority_until'),0)>? THEN 0 ELSE 1 END,CASE json_extract(s.state,'$.adaptive_profile') WHEN 'CRITICAL' THEN 0 ELSE 1 END,CASE json_extract(s.request,'$.priority') WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 ELSE 2 END,s.created,s.id LIMIT 1",(now.timestamp(),now.timestamp(),excluded,watch_id,watch_id,now.timestamp())).fetchone()
   if not row:return None
   # Provider adapters charge the shared budget immediately before each actual
   # upstream request. Claiming a job is not itself a provider request.
@@ -1146,9 +1146,9 @@ def release(connect,job,now=None,sample=None,pending_feed=False):
  now=now or utc();request=job['request_data']
  with connect() as c:
   if pending_feed:
-   # Yield the worker for the existing 2s queue rhythm. Preserve next_due so
-   # retry latency and deadline ordering still include the original wait.
-   c.execute('UPDATE hw_sessions SET lease_owner=NULL,lease_until=? WHERE id=? AND lease_owner=?',(now.timestamp()+2,job['id'],job['lease_owner']))
+   # The runner excludes this job until the shared capture completes. Keep
+   # the original deadline and no sleeping lease or extra database wake-up.
+   c.execute('UPDATE hw_sessions SET lease_owner=NULL,lease_until=0 WHERE id=? AND lease_owner=?',(job['id'],job['lease_owner']))
    return
   profile=json.loads(job.get('state') or '{}').get('adaptive_profile') or request['profile']
   interval=observation_poll_interval(c,request,profile,now,sample)
