@@ -61,58 +61,39 @@ def verified_automatic_feed(c,uid,request,now):
  except (KeyError,ValueError,TypeError,AttributeError):return False
 
 def provider_request_limit(source):
- """Respect explicit settings; EODHD has a separate, higher default."""
- default='30' if source=='eodhd' else '12'
- value=os.environ.get('ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE') if source=='eodhd' else None
- if value is None:value=os.environ.get('ESCAPE_HW_REQUESTS_PER_MINUTE',default)
- try:return max(1,min(120,int(value)))
- except (TypeError,ValueError):return int(default)
+ if source=='eodhd':
+  from eodhd_capacity import configured_limit
+  return configured_limit()
+ try:return max(1,min(120,int(os.environ.get('ESCAPE_HW_REQUESTS_PER_MINUTE','12'))))
+ except (TypeError,ValueError):return 12
 
 def effective_poll_interval(c,request,profile=None):
- """Budget-aware cadence; never raise the provider request limit."""
- source=request['provider'];profile=profile or request['profile'];floor=provider_floor(source)
- # The explicitly approved BTC monitoring feed is continuous. Poll it often
- # enough for the unchanged 120-second freshness gate; retain budget limits.
- # An operator-configured fast-poll floor remains authoritative.
+ """Use existing profiles and actual HTTP capacity, not WebSocket call counts."""
+ source=request['provider'];profile=profile or request['profile']
+ floor=provider_floor(source)
  from instrument_resolver import BTC_PLUTO_ASSET_ID
- btc_monitor=source=='eodhd' and request.get('purpose')=='automatic holding watch' and request.get('asset_id')==BTC_PLUTO_ASSET_ID and request.get('provider_symbol')=='BTC-USD.CC'
- if btc_monitor and os.environ.get('ESCAPE_HW_EODHD_FAST_POLL_ENABLED')!='1':floor=60
+ if source=='eodhd' and request.get('purpose')=='automatic holding watch' and request.get('asset_id')==BTC_PLUTO_ASSET_ID and request.get('provider_symbol')=='BTC-USD.CC' and os.environ.get('ESCAPE_HW_EODHD_FAST_POLL_ENABLED')!='1':floor=60
  minimum=max(PROFILES.get(profile,PROFILES[request['profile']]),floor)
  if source!='eodhd':return minimum
- limit=provider_request_limit(source)
- available=max(1,limit-3 if limit>3 else limit)
- ws=os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1';fuse=os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1';bars=os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1'
- # Budget the normal configured route. REST is a fallback after a successful
- # stream, not an additional request on every live scan. Every actual request,
- # including fallback/recovery calls, still passes the unchanged hard limiter.
- verified_cost=1+(3 if ws and fuse else 0)+(2 if bars else 0)
- rows=c.execute("SELECT s.user_id,s.is_test,s.request,p.symbol AS provisional_symbol FROM hw_sessions s LEFT JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND json_extract(s.request,'$.provider')='eodhd'").fetchall()
- btc_count=0;other_units=0;groups={};calendars={}
- eu_exchanges={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}-{'CC'}
+ from eodhd_capacity import http_limit
+ limit=http_limit(c)
+ ws=os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1'
+ bars=os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1'
+ eu={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}-{'CC'}
+ rows=c.execute("SELECT s.is_test,s.request,p.symbol AS provisional_symbol FROM hw_sessions s LEFT JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND json_extract(s.request,'$.provider')='eodhd'").fetchall()
+ histories=set();rest=set();calendars=set()
  for item in rows:
-  req=json.loads(item['request']);symbol=req.get('provider_symbol') or ''
-  if req.get('purpose')=='automatic holding watch' and req.get('asset_id')==BTC_PLUTO_ASSET_ID and symbol=='BTC-USD.CC':btc_count+=1;continue
-  exchange=symbol.rsplit('.',1)[-1].upper() if '.' in symbol else ''
-  supported=exchange=='US' or exchange in eu_exchanges
-  provisional=item['provisional_symbol']==symbol
-  cost=1 if symbol.endswith('.CC') or provisional or not item['is_test'] and not supported else verified_cost
-  other_units+=cost
-  if ws and fuse and not item['is_test'] and not provisional and supported:
-   key=(item['user_id'],'US' if exchange=='US' else 'EU');groups[key]=groups.get(key,0)+1
-   key=(item['user_id'],exchange);calendars[key]=calendars.get(key,0)+1
- # Three streams per group of five; one minute-history request per session.
- # Successful exchange schedules are shared for 20 seconds, across the same
- # batch. Keep exchanges separate and retain headroom for fallback requests.
- savings=sum(3*(count-(count+4)//5)+count for count in groups.values())
- if bars:savings+=sum(count-(count+4)//5 for count in calendars.values())
- other_units=max(0,other_units-savings);units=max(1,btc_count+other_units)
- if btc_count:
-  if available==1 and other_units:return max(minimum,((btc_count+other_units)*60+available-1)//available)
-  btc_share=min(btc_count,max(1,available//2) if other_units else available)
-  if btc_monitor:return max(minimum,(btc_count*60+btc_share-1)//btc_share)
-  remaining=max(1,available-btc_share)
-  return max(minimum,(other_units*60+remaining-1)//remaining)
+  req=json.loads(item['request']);symbol=req.get('provider_symbol') or '';exchange=symbol.rsplit('.',1)[-1]
+  live=ws and not item['is_test'] and item['provisional_symbol']!=symbol and (exchange=='US' or exchange in eu)
+  if live:
+   if bars:histories.add(symbol);calendars.add(exchange)
+  else:rest.add(symbol)
+ # Successful history and REST observations are shared by credential/symbol.
+ # Calendar is one HTTP request per exchange/minute. WebSockets cost zero
+ # HTTP requests. Fallbacks still consume the shared limiter when performed.
+ units=max(1,len(histories)+len(rest));available=max(1,limit-len(calendars))
  return max(minimum,(units*60+available-1)//available)
+
 def init(c):
  import hotwatch_warmup,web_push,hotwatch_buy_plan
  hotwatch_buy_plan.init(c)
@@ -710,7 +691,8 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
     sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'last_calculation_at':r['last_calculation'],'last_computed_signal':detail['last_computed_signal'],'signal':detail['signal'],'display_status':detail['display_status'],'context_diagnostic':context_diagnostic,'last_calculation_reason_codes':reasons,'display_reason_codes':detail['display_reason_codes'],'next_due_at':detail['next_due_at'],'effective_min_interval_s':detail['effective_min_interval_s'],'interval_basis':detail['interval_basis'],'provider_feed_diagnostics':provider_diagnostics,'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
    else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
   more=len(opened)>session_limit
-  return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'supervisor':supervisor,'supervisor_events':supervisor_events,'application_error_fallback':application_errors,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}
+  from eodhd_capacity import snapshot as capacity_snapshot
+  return {'provider_capacity':capacity_snapshot(c,now.timestamp()),'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'supervisor':supervisor,'supervisor_events':supervisor_events,'application_error_fallback':application_errors,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}
 
 def control(connect,uid,wid,mode,action,now=None):
  now=now or utc()
@@ -1014,7 +996,8 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   # A transient SQLite contention is not a failed market feed. Do not let
   # exponential provider backoff postpone a position or candidate for 30 min.
   if code.startswith('PROCESSING_DATABASE_BUSY_'):interval=60
-  if retry_after_s is not None:interval=max(interval,max(0,retry_after_s))
+  if request['provider']=='eodhd' and code in ('EODHD_RATE_LIMIT','PROVIDER_RATE_BUDGET') and retry_after_s is not None:interval=max(1,retry_after_s)
+  elif retry_after_s is not None:interval=max(interval,max(0,retry_after_s))
   state['scheduled_interval_s']=interval
   if row['last_error']!=code:
    previous=json.loads(row['strategy']);result={'signal':'NO_DATA','reason_codes':[code],'human_readable_explanation':code,'supporting_metrics':{'quote_age_s':(now-stamp(row['last_data'])).total_seconds() if row['last_data'] else None},'calculation_timestamp':now.isoformat(),'data_timestamp':row['last_data'],'strategy_id':previous['strategy_id'],'strategy_version':previous['version'],'strategy_checksum':checksum(previous),'confidence_score':0,'risk_level':'critical' if set(state.get('alert_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE'} else 'high','rules_score_note':'No valid current market input','critical_override':False}

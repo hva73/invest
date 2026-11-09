@@ -4,6 +4,18 @@ from instrument_resolver import resolve_instrument,resolve_cxe,resolve_us,crypto
 from cxe_reference import parse_reference,ReferenceUnavailable
 
 class InstrumentResolver(unittest.TestCase):
+ def test_ferguson_old_name_requires_exact_independently_checked_us_security(self):
+  pluto={'asset_id':'13ba8af0-fa33-442a-9610-47fe67b70f1d','ticker':'FERG','name':'Ferguson Enterprises Inc.','exchange':'NYSE','currency':'USD','type':'CS'}
+  listing={'Code':'FERG','Name':'Ferguson Plc','Country':'USA','Exchange':'NYSE','Currency':'USD','Type':'Common Stock','Isin':'US31488V1070'}
+  choice={'symbol':'FERG.US','exchange':'US','currency':'USD','isin':'US31488V1070'}
+  result=resolve_us(pluto,[choice],[listing]);self.assertEqual(result['status'],'VERIFIED');self.assertIn('Endavu',result['type_note'])
+  for fields in ({'asset_id':'other'},{'name':'Ferguson Enterprises Class A Common Stock'},{'exchange':'NASDAQ'},{'type':'ADRC'},{'currency':'GBP'},{'isin':'JE00BJVNSS43'}):
+   with self.subTest(fields=fields):self.assertNotEqual(resolve_us(dict(pluto,**fields),[choice],[listing])['status'],'VERIFIED')
+  for fields in ({'Name':'Ferguson Holdings Plc'},{'Isin':'JE00BJVNSS43'},{'Exchange':'NASDAQ'},{'Type':'Preferred Stock'}):
+   with self.subTest(fields=fields):self.assertNotEqual(resolve_us(pluto,[choice],[dict(listing,**fields)])['status'],'VERIFIED')
+  self.assertNotEqual(resolve_us(pluto,[dict(choice,isin=None)],[listing])['status'],'VERIFIED')
+  self.assertNotEqual(resolve_us(pluto,[dict(choice,isin='JE00BJVNSS43')],[listing])['status'],'VERIFIED')
+  self.assertEqual(resolve_us(pluto,[choice],[listing,listing])['status'],'AMBIGUOUS')
  def test_short_issuer_is_not_rejected_but_all_listing_checks_remain(self):
   pluto={'asset_id':'synthetic-kkr','ticker':'KKR','name':'KKR & Co. Inc.','exchange':'NYSE','currency':'USD','type':'CS'}
   listing={'Code':'KKR','Name':'KKR & Co. Inc.','Country':'USA','Exchange':'NYSE','Currency':'USD','Type':'Common Stock','Isin':'US48251W1045'}

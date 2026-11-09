@@ -1,4 +1,5 @@
 """Read-only sector data; background collection never places or changes orders."""
+from eodhd_capacity import Capacity
 import json, math, os, re, sqlite3, time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
@@ -88,7 +89,7 @@ def capture(c,uid,pid,payload):
  c.execute('INSERT OR REPLACE INTO sector_history VALUES(?,?,?,?,?)',(uid,pid,bucket,payload['observed'],json.dumps(rows,separators=(',',':'))))
 
 def _client(connect,uid):
- return EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),reserve=lambda:reserve(connect,uid,'eodhd',purpose='sector'))
+ return EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),capacity=Capacity(connect))
 
 def _num(v):
  if isinstance(v,bool):return None

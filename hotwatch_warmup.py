@@ -1,4 +1,5 @@
 """Actual EODHD minute history for analysis only; never creates signals/orders."""
+from eodhd_capacity import Capacity
 import json, os
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
@@ -49,7 +50,7 @@ def refresh(connect,job,now,client=None):
   if not link or link['symbol']!=symbol or link['currency']!=req['quote_currency'] or str(link['ticker']).casefold()!=str(req.get('ticker','')).casefold() or str(link['exchange']).casefold()!=str(req.get('exchange','')).casefold() or not 0<=now.timestamp()-link['verified_epoch']<=7*86400 or proof is False or req.get('asset_id')==BTC_PLUTO_ASSET_ID and proof is not True:return None
   cached=c.execute('SELECT next_attempt,symbol FROM hw_warmup_history WHERE watch_row_id=?',(job['id'],)).fetchone()
   if cached and cached['symbol']==symbol and cached['next_attempt']>now.timestamp():return None
- feed=client or EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),reserve=lambda:reserve(connect,job['user_id'],'eodhd',purpose='holding_identity'))
+ feed=client or EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),capacity=Capacity(connect))
  lookback=7200 if symbol.upper().endswith('.CC') else 7*86400
  try:response=feed.intraday(symbol,interval='1m',start=int(now.timestamp())-lookback,end=int(now.timestamp()))
  except Exception:response={'status':'UNAVAILABLE'}

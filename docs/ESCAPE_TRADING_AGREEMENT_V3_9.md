@@ -227,3 +227,10 @@ Historik bevares i tidligere rapporter. En ny timesrapport skal ikke kopiere hel
 Beholdninger, handlingsoversigt, motorliste og sessionsdetaljer skal følge samme aktuelle motorstatus. Spørgsmålstegnet ved beholdningens status findes både øverst og nederst og genlæser sessionen. En separat analyse-warmup må ikke overskrive et aktuelt signal, en risikoblokering eller en datamangel. En tidligere beregning adskilles fra aktuelt signal.
 
 Strategiens eksisterende TRAILING_EXIT er fald fra toppen i det analyserede kursvindue, ikke afkast siden køb eller en stopordre hos Pluto. Særskilte exitregler kan være opfyldt, før alle indikatorer er varmet op. Derfor kan WARMUP og TRAILING_EXIT forekomme blandt beregningens begrundelser samtidig med SELL; hovedstatus skal stadig vise den faktiske aktuelle beslutning. Ny købte og ældre verificerede positioner følger de samme versionslåste exitregler. En accepteret ordre uden faktisk beholdning starter ikke exit-overvågning. Ingen risikogrænser, signalparametre eller handelsmandater ændres.
+
+
+## 15. Kapacitet — ejerbeslutning 9. november 2026
+
+ESCAPE må bruge 80 % af den dokumenterede eller aflæste EODHD-kapacitet uden yderligere skjulte buffere. Ved 1000 HTTP-requests/minut er det lokale loft 800; det er et loft, ikke et mål for konstant trafik. Lavere providergrænser, faktisk 429 og Retry-After respekteres. HTTP-requests, dagsforbrug i API-call-enheder og samtidige WebSocket-abonnementer er forskellige størrelser. Ukendt forbrug må ikke fremstilles som målt. Eventuelle eksplicitte driftsindstillinger skal være synlige i diagnostikken.
+
+Data indsamles og analyseres uafhængigt af handelsgodkendelsen. Instrumentidentitet, oprindelige kildetider, likviditet, spread, Pluto-verifikation og globale risikoregler bevares før KØB. Denne kapacitetsændring giver ingen tilladelse til automatiske forslag eller handler. Verifikation af faktisk throughput og kildefriskhed efter installation er fortsat påkrævet, før kæden kan betegnes live-verificeret.

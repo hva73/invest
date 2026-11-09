@@ -3,14 +3,18 @@ import json, logging, re, time, urllib.error, urllib.request, threading, hashlib
 from datetime import datetime, timedelta, timezone, time as day_time
 from decimal import Decimal, InvalidOperation
 from urllib.parse import quote, urlencode
+from contextlib import nullcontext
 
 HTTP_BASE='https://eodhd.com/api'
 REALTIME_BASE='https://ws.eodhistoricaldata.com'
 WS_BASE='wss://ws.eodhistoricaldata.com/ws'
+_history_cache={}
+_history_locks=[threading.Lock() for _ in range(32)]
 _snapshot_cache={}
 _snapshot_locks=[threading.Lock() for _ in range(32)]
 _status_cache={}
 _status_locks=[threading.Lock() for _ in range(32)]
+STATUS_CACHE_TTL_S=60
 WS_FEEDS={'us_trades':'us','us_quotes':'us-quote','us_status':'us-status','eu_trades':'eu','eu_quotes':'eu-quote','eu_status':'eu-status'}
 _WS_LOGGER=logging.Logger('escape.eodhd.transport');_WS_LOGGER.disabled=True
 
@@ -65,19 +69,21 @@ def _calendar(data):
  except (KeyError,ValueError,TypeError,AttributeError):return None
 
 class EODHDFeeds:
- def __init__(self,key,reserve=None,opener=None,ws_factory=None,share_status=None):
+ def __init__(self,key,reserve=None,opener=None,ws_factory=None,share_status=None,capacity=None):
   self._key=key.strip() if isinstance(key,str) else ''
   self._reserve=reserve or (lambda:None)
   self._opener=opener or urllib.request.build_opener(_NoRedirect())
   self._shared_snapshots=opener is None
   self._shared_status=opener is None if share_status is None else share_status
   self._ws_factory=ws_factory
+  self._capacity=capacity
  def _http(self,base,path,params):
   if not self._key:return _result('KEY_MISSING',path)
   try:
-   self._reserve()
+   if self._capacity is None:self._reserve()
    url=base+path+'?'+urlencode({**params,'api_token':self._key})
-   with self._opener.open(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=8) as response:
+   request=urllib.request.Request(url,headers={'Accept':'application/json'})
+   with (self._capacity.open(self._opener,request) if self._capacity else self._opener.open(request,timeout=8)) as response:
     raw=response.read(1048577);received=datetime.now(timezone.utc).isoformat()
    if len(raw)>1048576: return _result('RESPONSE_TOO_LARGE',path)
    payload=json.loads(raw,parse_float=str,parse_constant=lambda _:None)
@@ -87,11 +93,24 @@ class EODHDFeeds:
    return _result('OK',path,received_at=received,payload=payload)
   except urllib.error.HTTPError as error:
    status='ENTITLEMENT_UNVERIFIED' if error.code in (401,402,403) else 'RATE_LIMIT' if error.code==429 else 'HTTP_ERROR'
-   return _result(status,path,http_status=error.code)
+   from eodhd_capacity import retry_seconds
+   return _result(status,path,http_status=error.code,**({'retry_after_s':retry_seconds(error.headers)} if error.code==429 else {}))
   except Exception as error:
-   if getattr(error,'code',None)=='PROVIDER_RATE_BUDGET':return _result('LOCAL_BUDGET_EXHAUSTED',path)
+   if getattr(error,'code',None) in ('PROVIDER_RATE_BUDGET','EODHD_DAILY_BUDGET'):return _result('LOCAL_BUDGET_EXHAUSTED',path,budget_reason=error.code,retry_after_s=getattr(error,'retry_after_s',None))
    return _result('NETWORK_OR_RESPONSE_ERROR',path)
  def minute_bars(self,market,symbol):
+  if market not in ('us','eu') or not _valid_symbol(symbol):return _result('INVALID_INPUT','/history')
+  if not self._shared_status or not self._key:return self._minute_bars_uncached(market,symbol)
+  key=(hashlib.sha256(self._key.encode()).digest(),market,symbol)
+  with _history_locks[hash(key)%len(_history_locks)]:
+   cached=_history_cache.get(key);now=time.monotonic()
+   if cached and 0<=now-cached[0]<20:return copy.deepcopy(cached[1])
+   result=self._minute_bars_uncached(market,symbol)
+   if result.get('status')=='OK':
+    if len(_history_cache)>=256:_history_cache.clear()
+    _history_cache[key]=(time.monotonic(),copy.deepcopy(result))
+   return result
+ def _minute_bars_uncached(self,market,symbol):
   if market not in ('us','eu') or not _valid_symbol(symbol):return _result('INVALID_INPUT','/history')
   res=self._http(REALTIME_BASE,'/history',{'market':market,'symbol':symbol})
   if res['status']!='OK':return res
@@ -157,7 +176,7 @@ class EODHDFeeds:
   key=(hashlib.sha256(self._key.encode()).digest(),exchange)
   with _status_locks[hash(key)%len(_status_locks)]:
    cached=_status_cache.get(key);now=time.monotonic()
-   if cached and 0<=now-cached[0]<20:return copy.deepcopy(cached[1])
+   if cached and 0<=now-cached[0]<STATUS_CACHE_TTL_S:return copy.deepcopy(cached[1])
    result=self._market_status_uncached(exchange)
    if result.get('status')=='OK':
     if len(_status_cache)>=128:_status_cache.clear()
@@ -179,13 +198,12 @@ class EODHDFeeds:
   path='/ws/'+endpoint
   if not self._key:return _result('KEY_MISSING',path)
   try:
-   self._reserve()
    factory=self._ws_factory
    if factory is None:
     try:from websockets.sync.client import connect as factory
     except ImportError:return _result('WEBSOCKET_DEPENDENCY_MISSING',path)
    url=WS_BASE+'/'+endpoint+'?'+urlencode({'api_token':self._key});messages=[];partial_messages=[]
-   with factory(url,open_timeout=8,close_timeout=2,max_size=131072,max_queue=16,logger=_WS_LOGGER) as ws:
+   with (self._capacity.websocket(len(symbols)) if self._capacity else nullcontext()),factory(url,open_timeout=8,close_timeout=2,max_size=131072,max_queue=16,logger=_WS_LOGGER) as ws:
     deadline=time.monotonic()+duration
     ws.send(json.dumps({'action':'subscribe','symbols':','.join(symbols)}))
     while time.monotonic()<deadline and len(messages)<max_messages:
@@ -196,8 +214,11 @@ class EODHDFeeds:
      try:row=json.loads(raw,parse_float=str,parse_constant=lambda _:None)
      except (ValueError,TypeError):continue
      if not isinstance(row,dict):continue
-     if str(row.get('status_code')) in ('401','402','403'):return _result('ENTITLEMENT_UNVERIFIED',path)
-     if str(row.get('status_code'))=='429':return _result('RATE_LIMIT',path)
+     if str(row.get('status_code',row.get('status'))) in ('401','402','403'):return _result('ENTITLEMENT_UNVERIFIED',path)
+     if str(row.get('status_code'))=='429':
+      from eodhd_capacity import retry_seconds
+      seconds=self._capacity.ws_limited() if self._capacity else retry_seconds(None)
+      return _result('RATE_LIMIT',path,retry_after_s=seconds)
      actual=row.get('s')
      if actual not in symbols:continue
      at=_timestamp(row.get('t'),1000)
@@ -223,6 +244,10 @@ class EODHDFeeds:
   except Exception as error:
    code=getattr(getattr(error,'response',None),'status_code',None)
    if code in (401,402,403):return _result('ENTITLEMENT_UNVERIFIED',path,http_status=code)
-   if getattr(error,'code',None)=='PROVIDER_RATE_BUDGET':return _result('LOCAL_BUDGET_EXHAUSTED',path)
-   if code==429:return _result('RATE_LIMIT',path)
+   if getattr(error,'code',None) in ('PROVIDER_RATE_BUDGET','EODHD_WS_CAPACITY'):return _result('LOCAL_BUDGET_EXHAUSTED',path,budget_reason=error.code,retry_after_s=getattr(error,'retry_after_s',None))
+   if code==429:
+    from eodhd_capacity import retry_seconds
+    headers=getattr(error.response,'headers',None)
+    seconds=self._capacity.ws_limited(headers) if self._capacity else retry_seconds(headers)
+    return _result('RATE_LIMIT',path,retry_after_s=seconds)
    return _result('NETWORK_OR_RESPONSE_ERROR',path)

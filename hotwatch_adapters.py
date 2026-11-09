@@ -5,6 +5,7 @@ from decimal import Decimal,InvalidOperation
 from urllib.parse import quote,urlencode
 from hotwatch_contract import EngineError,checksum,stamp,provider_floor,PROFILES
 from hotwatch_engine import utc,effective_poll_interval,valid_cxe_evidence,provider_request_limit
+from eodhd_capacity import Capacity,retry_seconds
 
 class DataUnavailable(EngineError):pass
 
@@ -27,6 +28,9 @@ def shared_quote(key,symbol,fetch,enabled=True):
   return result
 
 def reserve(connect,uid,source,now=None,purpose=None):
+ if source=='eodhd':
+  try:return Capacity(connect).reserve(now=now.timestamp() if now is not None else None)
+  except EngineError as error:raise DataUnavailable(error.code,error.status) from None
  uid=0 if source=='eodhd' else uid
  now=now or utc();window=int(now.timestamp()//60);limit=provider_request_limit(source)
  with connect() as c:
@@ -68,10 +72,9 @@ def search_eodhd_symbols(connect,uid,data,opener=None,candidate_override=None,pu
  crypto=str(candidate.get('asset_type') or '').upper()=='CRYPTO'
  choices=[];seen=set();client=opener or urllib.request.build_opener(NoRedirect());not_found=[];successful=[]
  def search(query,allow_alias=False,allow_ticker_alias=False):
-  reserve(connect,uid,'eodhd',purpose=purpose or ('holding_identity' if 'holding_portfolio_id' in data else None))
   url='https://eodhd.com/api/search/'+quote(query,safe='')+'?'+urlencode({'api_token':key,'fmt':'json','limit':50})
   try:
-   with client.open(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=8) as response:raw=response.read(131073)
+   with Capacity(connect).open(client,urllib.request.Request(url,headers={'Accept':'application/json'})) as response:raw=response.read(131073)
    if len(raw)>131072:raise ValueError()
    rows=json.loads(raw)
    if not isinstance(rows,list):raise ValueError()
@@ -79,8 +82,10 @@ def search_eodhd_symbols(connect,uid,data,opener=None,candidate_override=None,pu
   except urllib.error.HTTPError as error:
    if error.code==404:not_found.append(True);return
    if error.code in [401,403]:raise DataUnavailable('EODHD_SEARCH_HTTP_'+str(error.code),502) from None
-   if error.code==429:raise DataUnavailable('EODHD_RATE_LIMIT',429) from None
+   if error.code==429:
+    failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=retry_seconds(error.headers);raise failure from None
    raise DataUnavailable('EODHD_SEARCH_HTTP_'+str(error.code),502) from None
+  except EngineError:raise
   except Exception:raise DataUnavailable('EODHD_SEARCH_NETWORK_OR_RESPONSE_ERROR',502) from None
   for row in rows[:50]:
    if not isinstance(row,dict):continue
@@ -292,6 +297,13 @@ def extended_session(trade,schedule,now,max_age_s):
   return 'PRE' if local.time()<opening else 'AFTER' if local.time()>=closing else None
  except (KeyError,ValueError,TypeError,ZoneInfoNotFoundError):return None
 
+def realtime_symbol(symbol):
+ """Translate only observed feed spellings; keep REST/security IDs unchanged."""
+ # Direct trades, quotes and minute history verified 2026-11-09. The US
+ # catalog identifies BRK-B.US, while all three real-time feeds emit BRK.B.
+ if symbol=='BRK-B.US':return 'BRK.B'
+ return symbol[:-3] if symbol.endswith('.US') else symbol
+
 class EODHDAdapter:
  def __init__(self,connect,uid,opener=None):self.connect=connect;self.uid=uid;self.opener=opener or urllib.request.build_opener(NoRedirect());self._shared_quotes=opener is None;self.pluto=PlutoAdapter(connect,uid);self.last_telemetry={};self.last_partial_observations=[]
  def interval(self,request,profile):
@@ -299,19 +311,21 @@ class EODHDAdapter:
   with self.connect() as c:return effective_poll_interval(c,request,profile)
  def feeds(self):
   from eodhd_feeds import EODHDFeeds
-  return EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),reserve=lambda:reserve(self.connect,self.uid,'eodhd'),opener=self.opener,share_status=self._shared_quotes)
+  return EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),capacity=Capacity(self.connect) if self.connect else None,opener=self.opener,share_status=self._shared_quotes)
  def capture(self,client,feed,symbol,session):
   """Share one bounded stream across due, independently verified watches."""
   req=session['request_data']
   if not self._shared_quotes or self.connect is None or session.get('id') is None or req.get('is_test'):
    return client.capture(feed,symbol,duration=2)
   credential=hashlib.sha256(os.environ.get('ESCAPE_EODHD_API_KEY','').strip().encode()).digest()
+  profile=json.loads(session.get('state') or '{}').get('adaptive_profile') or req['profile']
+  cache_ttl=min(20,PROFILES.get(profile,60))
   key=(self.uid,credential,feed,symbol)
   group=(self.uid,credential,feed)
   while True:
    with _ws_batch_lock:
     cached=_ws_batch_cache.get(key);now=time.monotonic()
-    if cached and 0<=now-cached[0]<20:return copy.deepcopy(cached[1])
+    if cached and 0<=now-cached[0]<cache_ttl:return copy.deepcopy(cached[1])
     waiting=_ws_batch_inflight.get(group)
     if waiting is None:
      waiting=threading.Event();_ws_batch_inflight[group]=waiting;leader=True
@@ -333,9 +347,9 @@ class EODHDAdapter:
      if not isinstance(full,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',full):continue
      if (market=='us')!=full.endswith('.US') or (market=='eu' and ('.' not in full or full.rsplit('.',1)[1].upper() not in allowed_eu)):continue
      if not verified_automatic_feed(c,self.uid,candidate,utc()):continue
-     stream=full[:-3] if market=='us' else full
+     stream=realtime_symbol(full)
      if stream not in symbols:symbols.append(stream)
-     if len(symbols)>=5:break
+     if len(symbols)>=10:break
 
    result=client.capture(feed,symbols if len(symbols)>1 else symbol,duration=2,max_messages=250 if len(symbols)>1 else 50)
    if result.get('status') not in ('OK','NO_MESSAGES'):return result
@@ -393,7 +407,7 @@ class EODHDAdapter:
   eu_exchanges.discard('CC')
   if os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and exchange and exchange!='US' and exchange not in eu_exchanges:self.last_feed_diagnostics={'websocket_trade_status':'MARKET_MAPPING_UNVERIFIED'}
   if os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and (exchange=='US' or exchange in eu_exchanges):
-   market='us' if exchange=='US' else 'eu';stream_symbol=symbol[:-3] if market=='us' else symbol
+   market='us' if exchange=='US' else 'eu';stream_symbol=realtime_symbol(symbol)
    client=self.feeds();stream_started=time.perf_counter();feed=self.capture(client,market+'_trades',stream_symbol,session);stream_ms=(time.perf_counter()-stream_started)*1000
    partial=feed.get('partial_messages',[])
    if partial:
@@ -401,13 +415,13 @@ class EODHDAdapter:
    self.last_feed_diagnostics={'websocket_trade_status':feed['status']}
    if feed['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
    if feed['status']=='RATE_LIMIT':
-    failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+    failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=feed.get('retry_after_s') or retry_seconds(None);raise failure
    valid=[x for x in feed.get('messages',[]) if stamp(x['event_time'])<=utc() and (utc()-stamp(x['event_time'])).total_seconds()<=r['risk']['max_quote_age_s']] if feed['status']=='OK' else []
    if feed['status'] in ('OK','NO_MESSAGES') and not valid and os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
     standalone=self.capture(client,market+'_quotes',stream_symbol,session)
     self.last_feed_diagnostics['websocket_quote_status']=standalone.get('status')
     if standalone.get('status')=='RATE_LIMIT':
-     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=standalone.get('retry_after_s') or retry_seconds(None);raise failure
     quotes=standalone.get('messages',[]);partial_quotes=standalone.get('partial_messages',[])
     if quotes:
      item=max(quotes,key=lambda x:stamp(x['event_time']))
@@ -501,16 +515,16 @@ class EODHDAdapter:
   # Bar open times and close prices are recorded as such; never pretend that
   # the bar timestamp is the timestamp of its final trade.
   if os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1' and (exchange=='US' or exchange in eu_exchanges):
-   market='us' if exchange=='US' else 'eu';stream_symbol=symbol[:-3] if market=='us' else symbol;client=self.feeds();bars=client.minute_bars(market,stream_symbol);kind='realtime'
+   market='us' if exchange=='US' else 'eu';stream_symbol=realtime_symbol(symbol);client=self.feeds();bars=client.minute_bars(market,stream_symbol);kind='realtime'
    self.last_feed_diagnostics['minute_bars_status']=bars['status']
    if bars['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
    if bars['status']=='RATE_LIMIT':
-    failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+    failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=bars.get('retry_after_s') or retry_seconds(None);raise failure
    if bars['status']!='OK':
     end=int(utc().timestamp());bars=client.intraday(symbol,start=end-86400,end=end);kind='intraday';self.last_feed_diagnostics['intraday_status']=bars['status']
     if bars['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
     if bars['status']=='RATE_LIMIT':
-     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=bars.get('retry_after_s') or retry_seconds(None);raise failure
    if bars['status']=='OK':
     closed=[b for b in bars.get('bars',[]) if b.get('bar_open_at') and stamp(b['bar_open_at'])+timedelta(seconds=60)<=utc() and b.get('close') and Decimal(b['close'])>0 and (not session.get('last_data') or stamp(b['bar_open_at'])>=stamp(session['last_data']))]
     if closed:
@@ -527,9 +541,9 @@ class EODHDAdapter:
   # Exchange is an explicit EODHD code, not inferred from a display name.
   self.last_telemetry={}
   def fetch_quote():
-   reserve(self.connect,self.uid,'eodhd');url='https://eodhd.com/api/real-time/'+quote(symbol,safe='')+'?'+urlencode({'api_token':key,'fmt':'json'});http_started=time.perf_counter()
+   url='https://eodhd.com/api/real-time/'+quote(symbol,safe='')+'?'+urlencode({'api_token':key,'fmt':'json'});http_started=time.perf_counter()
    try:
-    with self.opener.open(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=8) as response:
+    with Capacity(self.connect).open(self.opener,urllib.request.Request(url,headers={'Accept':'application/json'})) as response:
      raw=response.read(131073)
      if len(raw)>131072:raise ValueError()
      received=utc();http_ms=(time.perf_counter()-http_started)*1000
@@ -542,13 +556,10 @@ class EODHDAdapter:
    except urllib.error.HTTPError as error:
     if error.code==429:
      failure=DataUnavailable('EODHD_RATE_LIMIT',429)
-     retry=error.headers.get('Retry-After','600') if error.headers else '600'
-     try:
-      seconds=int(retry);failure.retry_after_s=max(600,min(604800,seconds))
-      if seconds>604800:failure.code='EODHD_RATE_LIMIT_MANUAL_REVIEW'
-     except (ValueError,TypeError):failure.retry_after_s=3600
+     failure.retry_after_s=retry_seconds(error.headers)
      raise failure from None
     raise DataUnavailable('EODHD_ENTITLEMENT_REJECTED' if error.code in [401,403] else 'EODHD_READ_ERROR') from None
+   except EngineError:raise
    except Exception:raise DataUnavailable('EODHD_READ_OR_CONTRACT_ERROR') from None
   d,received,http_ms,at,price=shared_quote(key,symbol,fetch_quote,self._shared_quotes)
   permitted_codes=[symbol,symbol.rsplit('.',1)[0]]+([] if symbol.upper().endswith('.CC') else [r['ticker']])

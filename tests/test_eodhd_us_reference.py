@@ -26,7 +26,7 @@ class USReference(unittest.TestCase):
    def read(self,size):return self.buf.read(min(size,7))
   class Opener:
    def open(self,*args,**kwargs):return Response()
-  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'SYNTHETIC-SECRET'}),patch('hotwatch_adapters.reserve') as budget:
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'SYNTHETIC-SECRET'}),patch('eodhd_capacity.Capacity.observe'),patch('eodhd_capacity.Capacity.reserve') as budget:
    result=get_reference(None,1,opener=Opener())
   self.assertEqual(budget.call_count,1);self.assertNotIn('SYNTHETIC-SECRET',str(result));self.assertEqual(len(result['rows']),2)
  def test_incomplete_and_malformed_catalogues_fail_closed(self):

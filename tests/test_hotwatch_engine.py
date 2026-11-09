@@ -336,16 +336,16 @@ class HotWatch(unittest.TestCase):
      row=c.execute('SELECT id FROM hw_sessions WHERE watch_id=?',(item['watch_id'],)).fetchone()
      c.execute('INSERT INTO hw_provisional_feed_links VALUES(?,?,?,?)',(row['id'],'MERC.US','{}',self.now.isoformat()))
    with app.connect() as c:
-    self.assertEqual(engine.effective_poll_interval(c,item),160)
-   sample=tick(self.now);sample.update(source='eodhd',market_status='UNKNOWN',session_key='test:UNKNOWN',feed_type='synthetic EODHD snapshot',bid=None,ask=None,interval_s=160)
+    self.assertEqual(engine.effective_poll_interval(c,item),60)
+   sample=tick(self.now);sample.update(source='eodhd',market_status='UNKNOWN',session_key='test:UNKNOWN',feed_type='synthetic EODHD snapshot',bid=None,ask=None,interval_s=60)
    result=engine.ingest(app.connect,1,item['watch_id'],True,sample,self.now)
-   self.assertEqual(result['session']['effective_min_interval_s'],160)
+   self.assertEqual(result['session']['effective_min_interval_s'],60)
    with app.connect() as c:
     due=c.execute('SELECT next_due FROM hw_sessions WHERE watch_id=?',(item['watch_id'],)).fetchone()['next_due']
-   self.assertEqual(due-self.now.timestamp(),160)
+   self.assertEqual(due-self.now.timestamp(),60)
    verified=copy.deepcopy(self.req);verified.update(watch_id='budget-verified',purpose='verified budget',provider='eodhd',provider_symbol='MERC.US')
    engine.create(app.connect,1,verified,self.now)
-   with app.connect() as c:self.assertEqual(engine.effective_poll_interval(c,verified),200)
+   with app.connect() as c:self.assertEqual(engine.effective_poll_interval(c,verified),60)
  def test_fast_eodhd_polling_is_explicit_bounded_and_budgeted(self):
   from hotwatch_contract import provider_floor
   from hotwatch_adapters import providers
@@ -353,7 +353,7 @@ class HotWatch(unittest.TestCase):
    self.assertEqual(provider_floor('eodhd'),300);self.assertEqual(providers()['eodhd']['minimum_poll_s'],300)
   for setting in ['4','301','broken','-1']:
    with self.subTest(setting=setting),patch.dict(os.environ,{'ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'1','ESCAPE_HW_EODHD_MIN_POLL_S':setting}):self.assertEqual(provider_floor('eodhd'),300)
-  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'1','ESCAPE_HW_EODHD_MIN_POLL_S':'5','ESCAPE_HW_REQUESTS_PER_MINUTE':'1'}):
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'1','ESCAPE_HW_EODHD_MIN_POLL_S':'5','ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE':'1'}):
    self.assertEqual(provider_floor('eodhd'),5);self.assertEqual(providers()['eodhd']['minimum_poll_s'],5);self.assertEqual(provider_floor('pluto'),300)
    reserve(app.connect,1,'eodhd',self.now)
    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now)
@@ -368,10 +368,10 @@ class HotWatch(unittest.TestCase):
     with app.connect() as c:c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(btc),btc['watch_id']))
    with app.connect() as c:
     btc_interval=engine.effective_poll_interval(c,btc);stock_interval=engine.effective_poll_interval(c,stock)
-   self.assertEqual(btc_interval,60);self.assertEqual(stock_interval,231)
-   self.assertLessEqual(2*60/btc_interval+16*6*60/stock_interval,27)
+   self.assertEqual(btc_interval,60);self.assertEqual(stock_interval,60)
+   self.assertLessEqual(60/btc_interval+60/stock_interval,30) # identical symbols share raw observations
    with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE':'1'}):
-    with app.connect() as c:self.assertGreater(engine.effective_poll_interval(c,btc),120)
+    with app.connect() as c:self.assertEqual(engine.effective_poll_interval(c,btc),120)
  def test_live_poll_budget_accounts_for_shared_stream_schedule_and_conditional_rest(self):
   with app.connect() as c:
    base=dict(engine.row_for(c,1,self.req['watch_id'],True));base.pop('id')
@@ -381,7 +381,7 @@ class HotWatch(unittest.TestCase):
     cols=list(item);c.execute('INSERT INTO hw_sessions('+','.join(cols)+') VALUES('+','.join('?' for _ in cols)+')',[item[k] for k in cols])
   settings={'ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE':'10','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_BARS_ENABLED':'1','ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'1','ESCAPE_HW_EODHD_MIN_POLL_S':'5'}
   with patch.dict(os.environ,settings,clear=True):
-   with app.connect() as c:self.assertEqual(engine.effective_poll_interval(c,req),(9*60+6)//7)
+   with app.connect() as c:self.assertEqual(engine.effective_poll_interval(c,req),(5*60+8)//9)
  def test_fast_eodhd_scheduling_uses_opt_in_floor_without_weakening_risk(self):
   from hotwatch_contract import GLOBAL_RISK
   req=copy.deepcopy(self.req);req.update(watch_id='fast-eodhd',purpose='fast eodhd fixture',provider='eodhd',provider_symbol='MERC.US',profile='ACTIVE')
@@ -394,7 +394,7 @@ class HotWatch(unittest.TestCase):
   from hotwatch_contract import provider_floor
   env={'ESCAPE_HW_EODHD_FAST_POLL_ENABLED':'0','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}
   with patch.dict(os.environ,env):
-   self.assertEqual(provider_floor('eodhd'),60)
+   self.assertEqual(provider_floor('eodhd'),5)
    req=copy.deepcopy(self.req);req.update(watch_id='minute-live',purpose='minute live',provider='eodhd',provider_symbol='MERC.US',profile='NORMAL')
    engine.create(app.connect,1,req,self.now);sample=tick(self.now);sample.update(source='eodhd',interval_s=60)
    engine.ingest(app.connect,1,req['watch_id'],True,sample,self.now)
@@ -1009,7 +1009,7 @@ class HotWatch(unittest.TestCase):
    def __init__(self):self.calls=0
    def open(self,*args,**kwargs):self.calls+=1;return Response()
   opener=Opener();self_now=self.now;req=copy.deepcopy(self.req);req.update(provider='eodhd',provider_symbol='MERC.US',quote_currency='USD')
-  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}),patch('hotwatch_adapters.urllib.request.build_opener',return_value=opener),patch('hotwatch_adapters.PlutoAdapter.context',side_effect=[unknown_context('FIRST'),unknown_context('SECOND')]),patch('hotwatch_adapters.reserve') as budget:
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}),patch('hotwatch_adapters.urllib.request.build_opener',return_value=opener),patch('hotwatch_adapters.PlutoAdapter.context',side_effect=[unknown_context('FIRST'),unknown_context('SECOND')]),patch('eodhd_capacity.Capacity.reserve') as budget:
    a=EODHDAdapter(app.connect,1).poll({'request_data':req});b=EODHDAdapter(app.connect,1).poll({'request_data':req})
   self.assertEqual(opener.calls,1);self.assertEqual(budget.call_count,1)
   self.assertEqual(a['event_time'],b['event_time']);self.assertEqual(a['context']['diagnostic'],'FIRST');self.assertEqual(b['context']['diagnostic'],'SECOND')

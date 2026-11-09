@@ -107,7 +107,7 @@ class FeedTests(unittest.TestCase):
   def exhausted():raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
   client=EODHDFeeds(SECRET,reserve=exhausted,opener=Opener([]),ws_factory=lambda *a,**kw:WS([]))
   self.assertEqual(client.minute_bars('us','AMD')['status'],'LOCAL_BUDGET_EXHAUSTED')
-  self.assertEqual(client.capture('us_trades','AMD',1)['status'],'LOCAL_BUDGET_EXHAUSTED')
+  self.assertEqual(client.capture('us_trades','AMD',1)['status'],'NO_MESSAGES') # HTTP exhaustion must not block a WebSocket.
  def test_live_trade_survives_exhausted_local_quote_budget(self):
   from test_hotwatch_engine import request
   req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0);adapter=EODHDAdapter(None,1,Opener({}))
@@ -165,14 +165,14 @@ class FeedTests(unittest.TestCase):
   opener=Opener({'code':'MERC.US','timestamp':int(now.timestamp()),'close':'12.34','currency':'USD'});adapter=EODHDAdapter(None,1,opener)
   class Missing:
    def capture(self,*a,**k):return {'status':'ENTITLEMENT_UNVERIFIED'}
-  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Missing()),patch('hotwatch_adapters.reserve'),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Missing()),patch('eodhd_capacity.Capacity.observe'),patch('eodhd_capacity.Capacity.reserve'),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
   self.assertEqual(sample['price'],'12.34');self.assertIn('/api/real-time/',opener.url);self.assertEqual(adapter.last_feed_diagnostics['websocket_trade_status'],'ENTITLEMENT_UNVERIFIED')
  def test_rest_uses_previous_close_from_same_provider_snapshot(self):
   from test_hotwatch_engine import request
   from hotwatch_features import observation_status
   req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0)
   opener=Opener({'code':'MERC.US','timestamp':int(now.timestamp()),'close':'12.00','previousClose':'10.00','currency':'USD'});adapter=EODHDAdapter(None,1,opener)
-  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}),patch('hotwatch_adapters.reserve'),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}),patch('eodhd_capacity.Capacity.observe'),patch('eodhd_capacity.Capacity.reserve'),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
   self.assertEqual(sample['previous_close'],'10.00');self.assertEqual(observation_status([sample],now,120,'NO_DATA','DEGRADED')['daily_change_pct'],'20.0')
  def test_opt_in_live_trade_is_real_observation_but_unknown_risk_fields_remain_unknown(self):
   from test_hotwatch_engine import request

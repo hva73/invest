@@ -73,16 +73,15 @@ def parse_reference(raw,received_at):
 
 def get_reference(connect,uid,opener=None):
  global _cache
- from hotwatch_adapters import reserve
+ from eodhd_capacity import Capacity
  key=os.environ.get('ESCAPE_EODHD_API_KEY','').strip()
  if not key or os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':raise ReferenceUnavailable('EODHD_US_REFERENCE_DISABLED')
  with _lock:
   if opener is None and _cache and 0<=time.monotonic()-_cache[0]<3600:return _cache[1]
   try:
-   reserve(connect,uid,'eodhd',purpose='holding_identity')
    client=opener or urllib.request.build_opener(_NoRedirect())
    url=URL+'?'+urlencode({'fmt':'json','api_token':key})
-   with client.open(urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=20) as response:rows=_parse_stream(response)
+   with Capacity(connect).open(client,urllib.request.Request(url,headers={'Accept':'application/json'}),timeout=20) as response:rows=_parse_stream(response)
    result={'received_at':datetime.now(timezone.utc).isoformat(),'rows':rows}
   except EngineError:raise
   except ReferenceUnavailable:raise

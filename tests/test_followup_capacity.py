@@ -32,7 +32,9 @@ class SharedStatus(unittest.TestCase):
   with patch.object(EODHDFeeds,'_market_status_uncached',fetch),patch('eodhd_feeds.time.monotonic',return_value=10):
    first=EODHDFeeds('one').market_status('US');self.assertEqual(EODHDFeeds('one').market_status('US'),first)
    EODHDFeeds('two').market_status('US');EODHDFeeds('one').market_status('CO')
-  with patch.object(EODHDFeeds,'_market_status_uncached',return_value={'status':'RATE_LIMIT'}) as failed,patch('eodhd_feeds.time.monotonic',return_value=31):
+  with patch.object(EODHDFeeds,'_market_status_uncached',side_effect=AssertionError('same minute')),patch('eodhd_feeds.time.monotonic',return_value=69):
+   self.assertEqual(EODHDFeeds('one').market_status('US'),first)
+  with patch.object(EODHDFeeds,'_market_status_uncached',return_value={'status':'RATE_LIMIT'}) as failed,patch('eodhd_feeds.time.monotonic',return_value=71):
    self.assertEqual(EODHDFeeds('one').market_status('US')['status'],'RATE_LIMIT')
    self.assertEqual(EODHDFeeds('one').market_status('US')['status'],'RATE_LIMIT');self.assertEqual(failed.call_count,2)
   self.assertEqual(len(calls),3);self.assertEqual(first['received_at'],'original')
@@ -91,7 +93,7 @@ class FollowupIntegration(unittest.TestCase):
    self.assertEqual(c.execute('SELECT count(*) FROM hw_request_budget').fetchone()[0],0)
   self.assertIsNone(engine.claim(app.connect,at+timedelta(seconds=5)))
   self.assertIsNotNone(engine.claim(app.connect,at+timedelta(seconds=14)))
-  self.assertEqual(engine.provider_request_limit('eodhd'),30)
+  self.assertEqual(engine.provider_request_limit('eodhd'),800)
  def test_recent_holding_can_exit_on_market_weakness_without_inventing_profit(self):
   metrics=good_metrics();metrics.update(return_3_pct='-3',breakdown=True,distance_high_pct='-10')
   risk=copy.deepcopy(self.fixture.req['risk']);risk['stop_price']=None

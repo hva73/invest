@@ -1,4 +1,5 @@
 """Standalone read-only HOT WATCH service. Never scheduled by legacy worker.py."""
+from eodhd_capacity import Capacity
 import json,signal,threading,logging,hashlib,time,os,re,secrets,sqlite3,sys
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
@@ -411,7 +412,7 @@ def cxe_verified_match(instrument,choices,now=None,connect=None,uid=None):
   if connect is None or uid is None:return None
   from eodhd_feeds import EODHDFeeds
   from hotwatch_adapters import reserve
-  feed=EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),reserve=lambda:reserve(connect,uid,'eodhd',purpose='holding_identity'))
+  feed=EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),capacity=Capacity(connect))
   quote=feed.snapshot(crypto['symbol'])
   if quote['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
   if quote['status']=='RATE_LIMIT':raise DataUnavailable('EODHD_RATE_LIMIT',429)
@@ -802,7 +803,7 @@ def exchange_status_tick(connect,client_factory=None,now=None):
  try:
   from eodhd_feeds import EODHDFeeds
   from hotwatch_adapters import reserve
-  client=(client_factory or (lambda:EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),reserve=lambda:reserve(connect,0,'eodhd',purpose='exchange_status'))))()
+  client=(client_factory or (lambda:EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),capacity=Capacity(connect))))()
   result=client.market_status(exchange)
   received=stamp(result['received_at']) if result.get('received_at') else None
   if result.get('status')!='OK' or result.get('exchange')!=exchange or type(result.get('exchange_open')) is not bool or not received or not 0<=(engine.utc()-received).total_seconds()<=30:return result.get('status','INVALID_RESPONSE')
@@ -854,8 +855,8 @@ class Runner:
    # Market-feed availability is independent of current broker ownership.
    # Only the read-only, budgeted Pluto adapter can provide this evidence;
    # unknown context is never promoted to verified or used as a market signal.
-   feed_errors={'DATA_STALE','PROVIDER_RATE_BUDGET','EODHD_RATE_LIMIT','EODHD_READ_ERROR','EODHD_READ_OR_CONTRACT_ERROR','EODHD_ENTITLEMENT_REJECTED','EODHD_FEED_NOT_ENABLED','EODHD_KEY_NOT_CONFIGURED'}
-   if isinstance(error,DataUnavailable) and error.code in feed_errors and getattr(error,'position_context',None) is None and r['provider']=='eodhd' and r.get('watch_mode')=='exit' and adapter is not None:
+   feed_errors={'EODHD_DAILY_BUDGET','DATA_STALE','PROVIDER_RATE_BUDGET','EODHD_RATE_LIMIT','EODHD_READ_ERROR','EODHD_READ_OR_CONTRACT_ERROR','EODHD_ENTITLEMENT_REJECTED','EODHD_FEED_NOT_ENABLED','EODHD_KEY_NOT_CONFIGURED'}
+   if error.code in feed_errors and getattr(error,'position_context',None) is None and r['provider']=='eodhd' and r.get('watch_mode')=='exit' and adapter is not None:
     try:context=adapter.pluto.safe_context(r,r.get('quote_currency'))
     except Exception:context=None
     if isinstance(context,dict) and context.get('status')=='verified' and context.get('as_of'):error.position_context=context
@@ -952,6 +953,10 @@ class Runner:
   candidate_thread=threading.Thread(target=candidate_loop,name='hotwatch-candidates',daemon=True);candidate_thread.start()
   def holdings_loop():
    while not self.stop.is_set():
+    try:
+     from eodhd_capacity import refresh_account
+     refresh_account(self.connect)
+    except Exception:logging.getLogger('escape.hotwatch').warning('eodhd_account_usage_unavailable')
     try:exchange_status_tick(self.connect)
     except Exception:logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'exchange_status_error'}))
     if self.stop.is_set():break
@@ -1030,9 +1035,10 @@ def probe_eodhd(connect,symbol,market,duration=2):
  """Explicit operator probe: bounded read-only requests and sanitized output."""
  from eodhd_feeds import EODHDFeeds
  from hotwatch_adapters import reserve
- client=EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),reserve=lambda:reserve(connect,0,'eodhd'))
+ client=EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),capacity=Capacity(connect))
  if market not in ('us','eu') or '.' not in symbol or (market=='us' and not symbol.endswith('.US')):return {'status':'INVALID_INPUT'}
- exchange=symbol.rsplit('.',1)[1];stream_symbol=symbol[:-3] if market=='us' else symbol
+ from hotwatch_adapters import realtime_symbol
+ exchange=symbol.rsplit('.',1)[1];stream_symbol=realtime_symbol(symbol)
  end=int(time.time());actions=[('rest_snapshot',lambda:client.snapshot(symbol)),('minute_bars',lambda:client.minute_bars(market,stream_symbol)),('intraday',lambda:client.intraday(symbol,start=end-86400,end=end)),('market_status',lambda:client.market_status(exchange))]
  if market=='us':actions.append(('delayed_quotes',lambda:client.us_quotes(symbol)))
  for suffix in ('trades','quotes','status'):actions.append(('ws_'+suffix,lambda suffix=suffix:client.capture(market+'_'+suffix,stream_symbol,duration=duration)))
