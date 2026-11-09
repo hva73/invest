@@ -967,12 +967,21 @@ class Runner:
    child=Runner(self.connect);child.stop=self.stop;child.brokers=self.brokers;child.broker_lock=self.broker_lock;self._workers.append(child)
   runners=[self]+self._workers[:workers-1];count=0;limit=engine.capacity()
   with ThreadPoolExecutor(max_workers=workers,thread_name_prefix='hotwatch') as pool:
-   pending={pool.submit(r.once):r for r in runners if not self.stop.is_set()}
+   pending={pool.submit(r.once):r for r in runners if not self.stop.is_set()};idle=[]
    while pending:
-    finished,_=wait(pending,return_when=FIRST_COMPLETED)
+    # An empty claim is transient while another scan is running. Keep that
+    # worker available for the next due job instead of retiring it until the
+    # whole capacity-sized drain has finished. Use the existing 2s loop pace
+    # when all remaining provider calls are slow; never busy-poll SQLite.
+    finished,_=wait(pending,timeout=2,return_when=FIRST_COMPLETED)
+    ready=[]
     for future in finished:
      runner=pending.pop(future);processed=bool(future.result());count+=processed
-     if processed and count+len(pending)<limit and not self.stop.is_set():
+     (ready if processed else idle).append(runner)
+    if ready or not finished:
+     ready.extend(idle);idle=[]
+    for runner in ready:
+     if count+len(pending)<limit and not self.stop.is_set():
       pending[pool.submit(runner.once)]=runner
   return count
  def heartbeat(self,status):

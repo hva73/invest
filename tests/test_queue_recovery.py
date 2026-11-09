@@ -79,6 +79,42 @@ class QueueRecovery(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_EODHD_API_KEY':'queue-test-39'}),patch('hotwatch_adapters.utc',return_value=self.now),patch('hotwatch_engine.verified_automatic_feed',return_value=True),ThreadPoolExecutor(max_workers=2) as pool:list(pool.map(worker,range(2)))
   self.assertLessEqual(len(calls),6);self.assertLessEqual(sum(calls),60)
   with connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
+ def test_empty_worker_rejoins_when_other_scan_completes(self):
+  import hotwatch_service as service
+  runner=service.Runner(app.connect);empty=threading.Event();resumed=threading.Event();release=threading.Event();calls={};errors=[]
+  def once(worker):
+   calls[worker]=calls.get(worker,0)+1
+   if worker is runner:
+    if calls[worker]==1:empty.wait(2);return True
+    release.wait(3);return False
+   if calls[worker]==1:empty.set();return False
+   resumed.set();return False
+  def run():
+   try:runner.drain()
+   except Exception as error:errors.append(error)
+  with patch.dict(os.environ,{'ESCAPE_HW_PARALLEL_SCANS':'2','ESCAPE_HW_CONCURRENCY':'2'}),patch.object(service.Runner,'once',once):
+   thread=threading.Thread(target=run);thread.start()
+   try:self.assertTrue(resumed.wait(1),'worker retired after a transient empty queue')
+   finally:release.set();thread.join(4)
+  self.assertFalse(thread.is_alive());self.assertFalse(errors)
+ def test_idle_worker_rechecks_due_queue_while_other_provider_stays_blocked(self):
+  import hotwatch_service as service
+  runner=service.Runner(app.connect);empty=threading.Event();resumed=threading.Event();release=threading.Event();calls={};errors=[]
+  def once(worker):
+   calls[worker]=calls.get(worker,0)+1
+   if worker is runner:release.wait(5);return False
+   if calls[worker]==1:empty.set();return False
+   resumed.set();return False
+  def run():
+   try:runner.drain()
+   except Exception as error:errors.append(error)
+  with patch.dict(os.environ,{'ESCAPE_HW_PARALLEL_SCANS':'2','ESCAPE_HW_CONCURRENCY':'2'}),patch.object(service.Runner,'once',once):
+   thread=threading.Thread(target=run);thread.start()
+   try:
+    self.assertTrue(empty.wait(1));self.assertTrue(resumed.wait(3),'idle worker did not resume while the provider was blocked')
+    self.assertEqual(sum(calls.values()),3,'empty claims must not busy-poll')
+   finally:release.set();thread.join(4)
+  self.assertFalse(thread.is_alive());self.assertFalse(errors)
  def test_old_status_cannot_override_unknown_trade_session(self):
   from test_post_install_capacity import ENV
   now=self.now;adapter=adapters.EODHDAdapter(None,1,opener=object())

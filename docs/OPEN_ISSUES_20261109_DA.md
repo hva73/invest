@@ -353,3 +353,11 @@ Rettet direkte i `claim()` og `EODHDAdapter.capture()`: den faste 120-sekunders 
 Syntetisk før/efter med 39 sessioner og to workers: status-captures 39 → 4, subscriptions 345 → 39. Med skaleret netværksventetid tog testforløbet 1170,5 → 148,8 ms; dette er ikke en prognose for produktion. Otte målrettede regressioner dækker køaldring, exitprioritet, batching, samtidig brug og at gammel status ikke bliver frisk. Den samlede suite bestod 845 tests; den efterfølgende ekstra 39-sessionsregression og ni installationstests bestod også (17 målrettede tests).
 
 Afventer installation og nyt produktionsreadback: faktisk køtid, forbrug og gyldige signaler. Udløbet Pluto-kontekst og nødvendige manglende data er fortsat selvstændige problemer; denne rettelse erklærer ikke samlet LIVE PASS. Visuel kontrol af BTC-sammenlægning og alarmikoner er heller ikke bekræftet gennem statusværktøjet.
+
+### Efterinstallation af 8e8049b: tom kø pensionerede en worker midlertidigt
+
+Motoren genstartede kl. 21.38.25 dansk tid. Statusgenbrug blev bekræftet i produktion (37 cachehits af 42 statusopslag); første stikprøve havde 25 WAIT og 14 NO_DATA. En efterfølgende måling viste dog igen op til 64,7 sekunders køtid og 26 NO_DATA. Den første forbedring var derfor ikke tilstrækkelig dokumentation for stabil normaldrift.
+
+En konkret resterende fejl i `Runner.drain()` er reproduceret: en worker, hvis `once()` returnerede False i et kort tomt køvindue, blev fjernet permanent fra den igangværende runde. Den anden worker kunne fortsætte alene op til rundens kapacitetsgrænse, også når flere job blev forfaldne. Tomme workers genoptager nu køen ved anden scans afslutning eller efter den eksisterende 2-sekunders rytme under et langsomt providerkald. Ingen flere workers, API-grænser, datakrav eller nye kontrolsystemer.
+
+Begge nye tests fejler på den tidligere `drain()` og består med rettelsen: genoptagelse efter en anden scans afslutning samt genoptagelse mens den anden provider fortsat venter. Samlet målrettet regression: 188 tests bestået, inklusive motor, kø, supervisor, sparse-feed-recovery og installation. Ingen ordrer. Skal installeres og måles over flere scanningsrunder; normaldriftens køtid og resterende depot-/datablokeringer er fortsat ikke godkendt.
