@@ -658,9 +658,21 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
     if source=='candidate':
      from intel_workflows import candidate_currentness
      review=candidate_currentness(c,uid,mode,r['candidate_id'],now,report_fallback=purpose=='automatic discovery')
-    data_status=view(c,r,now)['data_status']
+    detail=view(c,r,now);data_status=detail['data_status']
     if not mode and purpose in ('automatic discovery','automatic holding watch') and req.get('provider')=='eodhd' and not data_status['instrument_match_verified']:unverified=True
-    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
+    calculation=detail.get('latest_calculation') or {}
+    reasons=calculation.get('reason_codes') if isinstance(calculation,dict) else None
+    if not isinstance(reasons,list):reasons=[]
+    reasons=[x for x in reasons if isinstance(x,str) and re.fullmatch(r'[A-Z0-9_]{1,80}',x)][:30]
+    health=c.execute('SELECT attempted,succeeded,code,payload FROM hw_provider_health WHERE user_id=? AND is_test=? AND source=?',(uid,int(mode),req.get('provider'))).fetchone()
+    provider_diagnostics=None
+    if health:
+     try:
+      payload=json.loads(health['payload']);allowed=('websocket_trade_status','websocket_quote_status','websocket_status_status','exchange_status','minute_bars_status','bar_history_status','intraday_status')
+      fields={k:payload[k] for k in allowed if isinstance(payload,dict) and isinstance(payload.get(k),str) and re.fullmatch(r'[A-Z0-9_]{1,80}',payload[k])}
+      provider_diagnostics={'scope':'provider_wide_not_session','last_attempt_at':health['attempted'],'last_success_at':health['succeeded'],'last_error':health['code'],'last_successful_feed_statuses':fields}
+     except (ValueError,TypeError):pass
+    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'last_calculation_at':r['last_calculation'],'last_computed_signal':detail['last_computed_signal'],'last_calculation_reason_codes':reasons,'display_reason_codes':detail['display_reason_codes'],'next_due_at':detail['next_due_at'],'effective_min_interval_s':detail['effective_min_interval_s'],'provider_feed_diagnostics':provider_diagnostics,'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
    else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
   more=len(opened)>session_limit
   return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'supervisor':supervisor,'supervisor_events':supervisor_events,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}

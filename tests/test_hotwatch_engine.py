@@ -71,6 +71,16 @@ class HotWatch(unittest.TestCase):
  def put(self,data,now=None):return engine.ingest(app.connect,1,self.req['watch_id'],True,data,now or self.now)
  def counts(self):
   with app.connect() as c:return {name:c.execute('SELECT count(*) FROM '+name).fetchone()[0] for name in ['hw_sessions','hw_samples','hw_calculations','hw_events']}
+ def test_read_only_summary_exposes_calculation_schedule_and_labels_provider_wide_feed(self):
+  self.put(tick(self.now))
+  with app.connect() as c:
+   c.execute('INSERT INTO hw_provider_health VALUES(?,?,?,?,?,?,?)',(1,1,'synthetic',self.now.isoformat(),self.now.isoformat(),'EXAMPLE_ERROR',json.dumps({'websocket_trade_status':'OK','secret':'must-not-escape'})))
+  result=engine.sync(app.connect,1,True,session_limit=1,summary_only=True);item=result['open_sessions'][0]
+  self.assertEqual(item['last_calculation_at'],self.now.isoformat());self.assertTrue(item['next_due_at']);self.assertGreaterEqual(item['effective_min_interval_s'],1)
+  self.assertIsInstance(item['last_calculation_reason_codes'],list);self.assertIsInstance(item['display_reason_codes'],list)
+  diag=item['provider_feed_diagnostics'];self.assertEqual(diag['scope'],'provider_wide_not_session');self.assertEqual(diag['last_successful_feed_statuses']['websocket_trade_status'],'OK')
+  self.assertEqual(diag['last_error'],'EXAMPLE_ERROR');self.assertNotIn('must-not-escape',json.dumps(item));self.assertNotIn('request',item)
+  self.assertEqual(engine.sync(app.connect,2,True,summary_only=True)['open_sessions'],[])
  def test_observation_status_separates_stale_price_from_signal_without_guessing_delay(self):
   sample=tick(self.now-timedelta(minutes=15));sample.update(source='eodhd',market_status='UNKNOWN',bid=None,ask=None,documented_delay_s=None)
   quality=observation_status([sample],self.now,120,'NO_DATA','DEGRADED')
