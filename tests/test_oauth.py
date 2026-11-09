@@ -47,6 +47,21 @@ class OAuth(unittest.TestCase):
   def post(url,data):calls.append(data);return {'client_id':'dynamic-test','token_endpoint_auth_method':'none'}
   oauth.start(app.connect,self.session,self.metadata,post);oauth.start(app.connect,self.session,self.metadata,post)
   self.assertEqual(len(calls),1);self.assertEqual(calls[0]['redirect_uris'],['https://escape.example.org/api/pluto/callback'])
+ def test_dynamic_registration_does_not_lock_database_and_is_serialized(self):
+  import concurrent.futures,threading
+  os.environ['PLUTO_CLIENT_ID']='';self.metadata['oauth']['registration_endpoint']='https://mcp.prod.pluto.markets/register'
+  started=threading.Event();release=threading.Event();calls=[]
+  def post(*args):
+   calls.append(1);started.set();self.assertTrue(release.wait(3));return {'client_id':'dynamic-test','token_endpoint_auth_method':'none'}
+  with concurrent.futures.ThreadPoolExecutor(2) as pool:
+   first=pool.submit(oauth.start,app.connect,self.session,self.metadata,post);self.assertTrue(started.wait(2))
+   second=pool.submit(oauth.start,app.connect,self.session,self.metadata,post)
+   try:
+    with app.connect() as c:
+     c.execute('PRAGMA busy_timeout=100');c.execute('UPDATE users SET active=active WHERE id=1')
+   finally:release.set()
+   first.result();second.result()
+  self.assertEqual(len(calls),1)
  def test_config_guards_and_tamper(self):
   os.environ['PLUTO_READ_SCOPES']='trading:write'
   with self.assertRaises(oauth.SetupRequired):oauth.start(app.connect,self.session,self.metadata)

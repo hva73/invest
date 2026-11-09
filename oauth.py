@@ -80,9 +80,11 @@ def start(connect,session,metadata=None,post=None,trade=False):
         raise SetupRequired('Denne version kræver en offentlig PKCE-klient uden client-secret; Pluto tilbyder ikke dette i metadata')
     client_id=os.environ.get('PLUTO_CLIENT_ID','')
     if not client_id:
-        with connect() as c:
-            c.execute('BEGIN IMMEDIATE')
-            client=c.execute('SELECT * FROM oauth_clients WHERE issuer=?',(server['issuer'],)).fetchone()
+        # Registration can involve a slow provider request. Serialize it across
+        # app processes without holding SQLite's global writer lock over HTTP.
+        with token_lock(0):
+            with connect() as c:
+                client=c.execute('SELECT * FROM oauth_clients WHERE issuer=?',(server['issuer'],)).fetchone()
             if client:
                 if client['redirect_uri']!=callback:raise SetupRequired('Appadressen er ændret; klientregistreringen skal gennemgås')
                 client_id=client['client_id']
@@ -93,7 +95,8 @@ def start(connect,session,metadata=None,post=None,trade=False):
                 client_id=registration.get('client_id')
                 if not isinstance(client_id,str) or not client_id or registration.get('client_secret') or registration.get('token_endpoint_auth_method','none')!='none':
                     raise SetupRequired('Registreringen kræver en anden klienttype; ingen login er startet')
-                c.execute('INSERT INTO oauth_clients VALUES(?,?,?)',(server['issuer'],client_id,callback))
+                with connect() as c:
+                    c.execute('INSERT INTO oauth_clients VALUES(?,?,?)',(server['issuer'],client_id,callback))
     state=secrets.token_urlsafe(32);verifier=secrets.token_urlsafe(48)
     challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b'=').decode()
     payload={'verifier':verifier,'client_id':client_id,'callback':callback,'scopes':scopes,'server':server}
