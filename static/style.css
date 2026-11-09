@@ -367,3 +367,6 @@ body.pull-refresh-visible #refresh-status{display:none}
 .engine-strategy-link{display:flex;justify-content:flex-end;margin:0 0 12px}.engine-strategy-link button{min-height:44px}@media(max-width:600px){.engine-strategy-link{justify-content:stretch}.engine-strategy-link button{width:100%}}
 
 .strategy-lab{border-top:1px solid var(--line,#304653);margin-top:28px;padding-top:24px}.strategy-lab form{display:grid;gap:12px}.strategy-lab-comparison{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px}.strategy-lab-comparison article{border:1px solid var(--line,#304653);border-radius:12px;padding:16px;overflow-wrap:anywhere}.strategy-lab-comparison small{color:var(--muted)}
+
+/* Keep the current status and its explanation together in both tables. */
+.signal-control{display:inline-flex;align-items:center;max-width:100%}.signal-control .signal-help{flex-shrink:0}.signal-control .dash-action-badge{min-width:0}

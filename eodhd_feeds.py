@@ -9,6 +9,8 @@ REALTIME_BASE='https://ws.eodhistoricaldata.com'
 WS_BASE='wss://ws.eodhistoricaldata.com/ws'
 _snapshot_cache={}
 _snapshot_locks=[threading.Lock() for _ in range(32)]
+_status_cache={}
+_status_locks=[threading.Lock() for _ in range(32)]
 WS_FEEDS={'us_trades':'us','us_quotes':'us-quote','us_status':'us-status','eu_trades':'eu','eu_quotes':'eu-quote','eu_status':'eu-status'}
 _WS_LOGGER=logging.Logger('escape.eodhd.transport');_WS_LOGGER.disabled=True
 
@@ -63,11 +65,12 @@ def _calendar(data):
  except (KeyError,ValueError,TypeError,AttributeError):return None
 
 class EODHDFeeds:
- def __init__(self,key,reserve=None,opener=None,ws_factory=None):
+ def __init__(self,key,reserve=None,opener=None,ws_factory=None,share_status=None):
   self._key=key.strip() if isinstance(key,str) else ''
   self._reserve=reserve or (lambda:None)
   self._opener=opener or urllib.request.build_opener(_NoRedirect())
   self._shared_snapshots=opener is None
+  self._shared_status=opener is None if share_status is None else share_status
   self._ws_factory=ws_factory
  def _http(self,base,path,params):
   if not self._key:return _result('KEY_MISSING',path)
@@ -150,6 +153,17 @@ class EODHDFeeds:
   return {**res,'quote':{'symbol':symbol,'bid':_number(row.get('bidPrice',row.get('bid'))),'bid_at':_timestamp(row.get('bidTime'),1000),'bid_size':_number(row.get('bidSize')),'ask':_number(row.get('askPrice',row.get('ask'))),'ask_at':_timestamp(row.get('askTime'),1000),'ask_size':_number(row.get('askSize')),'documented_delay':'15-minute delayed endpoint'}}
  def market_status(self,exchange):
   if not isinstance(exchange,str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,16}',exchange):return _result('INVALID_INPUT','/exchange-details')
+  if not self._shared_status or not self._key:return self._market_status_uncached(exchange)
+  key=(hashlib.sha256(self._key.encode()).digest(),exchange)
+  with _status_locks[hash(key)%len(_status_locks)]:
+   cached=_status_cache.get(key);now=time.monotonic()
+   if cached and 0<=now-cached[0]<20:return copy.deepcopy(cached[1])
+   result=self._market_status_uncached(exchange)
+   if result.get('status')=='OK':
+    if len(_status_cache)>=128:_status_cache.clear()
+    _status_cache[key]=(time.monotonic(),copy.deepcopy(result))
+   return result
+ def _market_status_uncached(self,exchange):
   res=self._http(HTTP_BASE,'/exchange-details/'+quote(exchange,safe=''),{'fmt':'json'})
   if res['status']!='OK':return res
   data=res.pop('payload')

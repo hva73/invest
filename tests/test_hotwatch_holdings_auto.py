@@ -349,7 +349,7 @@ class HoldingAutowatch(unittest.TestCase):
    for row in after:
     pid=json.loads(row['request'])['portfolio_ids'][0]
     displayed=dashboard_projection.position_hotwatch(c,1,pid,aid,None)['session']
-    self.assertEqual(displayed['display_status'],'WARMUP');self.assertEqual(displayed['warmup']['count'],1);self.assertTrue(displayed['warmup']['market_status_unknown']);self.assertNotIn('historical',displayed['warmup'])
+    self.assertEqual(displayed['display_status'],'KURS MODTAGET · MARKEDSSTATUS UKENDT');self.assertEqual(displayed['warmup']['count'],1);self.assertTrue(displayed['warmup']['historical'])
   from hotwatch_warmup import refresh
   end=self.now.replace(second=0,microsecond=0)
   bars=[{'bar_open_at':(end-timedelta(minutes=34-i)).isoformat(),'open':'100','high':'102','low':'99','close':'101','volume':'20'} for i in range(34)]
@@ -376,7 +376,7 @@ class HoldingAutowatch(unittest.TestCase):
    self.assertEqual(warm['state'],'WARMUP COMPLETE');self.assertEqual(warm['count'],34);self.assertEqual(warm['freshness'],'FRESH');self.assertIsNotNone(warm['metrics']['ema_long']);self.assertEqual(view['signal'],'NO_DATA')
    self.assertEqual(c.execute('SELECT count(*) FROM hw_samples').fetchone()[0],4)
    self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
-   displayed=dashboard_projection.position_hotwatch(c,1,json.loads(job['request'])['portfolio_ids'][0],aid,None)['session'];self.assertTrue(displayed['warmup']['complete']);self.assertTrue(displayed['warmup']['market_status_unknown'])
+   displayed=dashboard_projection.position_hotwatch(c,1,json.loads(job['request'])['portfolio_ids'][0],aid,None)['session'];self.assertEqual(displayed['display_status'],view['display_status']);self.assertEqual(displayed['warmup']['count'],1);self.assertTrue(displayed['warmup']['historical'])
   class WrongSymbol:
    def intraday(self,symbol,interval,start,end):return {'status':'OK','bars':[dict(bars[-1],symbol='OTHER-USD.CC')]}
   self.assertEqual(refresh(app.connect,job,self.now+timedelta(seconds=301),WrongSymbol()),'NO_VALID_BARS')

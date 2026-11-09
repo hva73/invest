@@ -136,9 +136,6 @@ def position_hotwatch(c,uid,portfolio_id,asset_id,report_position):
  if session:
   try:current=hotwatch_engine.view(c,session[0])
   except (KeyError,TypeError,ValueError):current={'watch_id':session[0]['watch_id'],'status':session[0]['status'],'last_data_at':session[0]['last_data'],'signal':'NO_DATA','display_status':'DATA MANGLER'}
-  if current.get('signal')=='NO_DATA' and current.get('display_status')=='AFVENTER SIGNALDATA' and not current.get('data_stale') and not current.get('last_error') and (current.get('data_status') or {}).get('price') is not None and 'WARMUP' in ((current.get('latest_calculation') or {}).get('reason_codes') or []):current['display_status']='WARMUP'
-  quality=current.get('data_status') or {};calculation=current.get('latest_calculation') or {}
-  if current.get('display_status')=='KURS MODTAGET · MARKEDSSTATUS UKENDT' and current.get('signal')=='NO_DATA' and not current.get('data_stale') and not current.get('last_error') and quality.get('quote_feed_verified') and quality.get('quote_freshness')=='FRESH' and policy.stamp(calculation.get('data_timestamp')) and policy.stamp(calculation.get('data_timestamp'))==policy.stamp(current.get('last_data_at')) and 'WARMUP' in (calculation.get('reason_codes') or []):current['display_status']='WARMUP'
  warmup=None
  if current and 'WARMUP' in ((current.get('latest_calculation') or {}).get('reason_codes') or []) and 'DATA_UNVERIFIED' not in ((current.get('latest_calculation') or {}).get('reason_codes') or []):
   count=((current.get('latest_calculation') or {}).get('supporting_metrics') or {}).get('sample_count');required=current.get('minimum_required_samples')
@@ -148,7 +145,7 @@ def position_hotwatch(c,uid,portfolio_id,asset_id,report_position):
    elif ((current.get('data_status') or {}).get('instrument_match_evidence') or {}).get('basis')=='user_authorized_btc_monitoring' and (current.get('data_status') or {}).get('market_status')=='UNKNOWN':warmup['market_status_unknown']=True
  if current:
   quality=current.get('data_status') or {};analysis=quality.get('analysis_warmup')
-  if analysis:
+  if analysis and warmup is None:
    regular_closed=(quality.get('regular_session') or {}).get('status')=='CLOSED'
    warmup={'count':analysis['count'],'required':analysis['required'],'remaining':analysis['remaining'],'analysis_only':True,'complete':analysis['state']=='WARMUP COMPLETE','data_stale':analysis['freshness']=='DATA STALE' or bool(current.get('last_data_at') and current.get('data_stale')),'data_missing':not current.get('last_data_at'),'data_error':bool(current.get('last_error') and current['last_error']!='DATA_STALE'),'market_status_unknown':quality.get('market_status')=='UNKNOWN' and not regular_closed,'regular_closed':regular_closed}
  return {'auto_status':dict(auto) if auto else None,'candidate_id':candidate_id,'trade_cycle_id':cycle,'lifecycle':dict(lifecycle) if lifecycle else None,'session':({'watch_id':current['watch_id'],'status':current['status'],'last_data_at':current['last_data_at'],'signal':current['signal'],'display_status':current['display_status'],'last_calculation_at':current.get('last_calculation_at'),'last_action_signal':current.get('last_action_signal'),'warmup':warmup} if current else None),'link_basis':'unique_asset_and_portfolio_scope' if asset_fallback else 'candidate_id+asset_id+portfolio' if report_position and report_position.get('candidate_id') else 'asset_id+portfolio+trade_cycle_id' if candidate_id and cycle else 'unique_asset_and_portfolio_scope' if session else None}

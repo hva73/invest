@@ -576,6 +576,13 @@ def view(c,row,now=None):
   context=dict(context,fx_to_dkk=buy_plan['fx_to_dkk'] if buy_plan['fresh'] else None,fees_dkk=buy_plan['fees_dkk'] if buy_plan['fresh'] else None)
  if buy_plan and (not buy_plan['fresh'] or not row['last_calculation'] or stamp(row['last_calculation'])<=max(stamp(buy_plan['selected_at']),stamp(buy_plan['verified_at']))) and effective=='BUY':
   effective='WAIT';display_status='RISIKODATA MANGLER';display_reasons.append('BUY_PLAN_RECHECK_REQUIRED')
+ # One current status for API, dashboard and engine views. Only a calculation
+ # for the latest observation can establish signal warmup; an independent
+ # historical-analysis cache cannot override a decision or data/risk gate.
+ calculation=json.loads(last['payload']) if last else {}
+ if effective=='NO_DATA' and display_status=='AFVENTER SIGNALDATA' and not stale and not row['last_error'] and data_status.get('price') is not None and set(calculation.get('reason_codes',[]))=={'WARMUP'} and calculation.get('data_timestamp')==row['last_data']:
+  display_status='WARMUP'
+ display_status={'PAUSED':'PAUSERET','COMPLETED':'AFSLUTTET','EXPIRED':'UDLØBET','ERROR':'FEJL'}.get(row['status'],display_status)
  return {'buy_plan':buy_plan,'last_action_signal':dict(last_action) if last_action else None,'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':budget_interval,'interval_basis':interval_basis,'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
 def sessions(connect,uid,mode=False,after=0,limit=50):
@@ -991,7 +998,11 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
    c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']));event(c,row,'WATCH_EXPIRED',now,'Session deadline reached');return
   if row['last_error']!=code:event(c,row,'DATA_STALE' if code=='DATA_STALE' else 'DATA_ERROR',now,code,severity='warning',data_time=row['last_data'])
   failures=min(row['failures']+1,10);floor=provider_floor(request['provider']);interval=min(1800,max(floor,PROFILES[request['profile']])*2**min(failures-1,5));state.update(signal='NO_DATA',pending=None,confirmations=0)
-  if code=='PROVIDER_RATE_BUDGET':interval=max(60,effective_poll_interval(c,request)) if request['provider']=='eodhd' else 60
+  # A locally denied request collected no observation. Retry once the shared
+  # minute budget renews instead of treating it as a completed scan and
+  # postponing this session for an entire multi-minute polling cycle.
+  # The same limiter still charges every actual upstream request.
+  if code=='PROVIDER_RATE_BUDGET':interval=61-now.timestamp()%60 if request['provider']=='eodhd' else 60
   # A stale observation is not a failed provider or rate-limit response.
   # Recheck at the sustainable cadence so repeated closed-market samples do
   # not push the next check half an hour past a new market event.

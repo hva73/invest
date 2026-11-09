@@ -1162,7 +1162,7 @@ class HotWatch(unittest.TestCase):
   with patch.dict(os.environ,env),patch('hotwatch_adapters.EODHDAdapter.feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=tick(now)['context']):
    self.assertTrue(Runner(app.connect).once(now,watch_id=r['watch_id']))
   view=engine.item(app.connect,1,r['watch_id'],True)['session']
-  self.assertEqual(view['data_status']['price'],'100');self.assertEqual(view['display_status'],'AFVENTER SIGNALDATA');self.assertNotEqual(view['last_error'],'EODHD_RATE_LIMIT');self.assertIsNone(view['data_status']['bid'])
+  self.assertEqual(view['data_status']['price'],'100');self.assertEqual(view['display_status'],'WARMUP');self.assertEqual(view['signal'],'NO_DATA');self.assertNotEqual(view['last_error'],'EODHD_RATE_LIMIT');self.assertIsNone(view['data_status']['bid'])
  def test_minute_bar_adapter_to_motor_preserves_volume_and_missing_session(self):
   from hotwatch_service import Runner
   at=engine.utc().replace(microsecond=0);r=copy.deepcopy(self.req);r.update(watch_id='mock-minute-bars',purpose='mock minute bars',provider='eodhd',provider_symbol='MERC.US')

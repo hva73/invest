@@ -20,8 +20,20 @@ assert.match(html,/dash-action-badge signal-wait/);
 state.dashboard.orders=[{ticker:'ORDER_ONLY',status:'ACCEPTED'}];state.dashboard.critical_sessions=[{ticker:'ERROR_ONLY',status:'ERROR'}];
 row.critical=true;row.conflicts=['conflict'];row.action='REDUCÉR';html=ui.render(state);let attention=html.match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];
 assert.doesNotMatch(attention,/ORDER_ONLY|ERROR_ONLY|REDUCÉR|TEST/);assert.match(attention,/Ingen køb eller salg/);
-row.action='SÆLG';html=ui.render(state);attention=html.match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];assert.match(attention,/Vurdering: SÆLG/);assert.match(attention,/TEST/);
-row.action=null;row.hot_watch.session.signal='BUY';row.hot_watch.session.display_status='KØBSSIGNAL';html=ui.render(state);attention=html.match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];assert.match(attention,/KØBSSIGNAL/);assert.match(attention,/dash-action-badge signal-buy/);assert.match(html,/dash-action-badge signal-buy/);assert.match(attention,/data-dashboard-watch="synthetic-watch"/);
-row.hot_watch.session.signal='SELL';row.hot_watch.session.display_status='SÆLGSIGNAL';html=ui.render(state);assert.match(html,/dash-action-badge signal-sell/);assert.match(html,/dash-action-badge signal-sell/);
+row.action='SÆLG';html=ui.render(state);attention=html.match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];assert.doesNotMatch(attention,/Vurdering: SÆLG/);
+const activeSession=row.hot_watch.session;row.hot_watch={};html=ui.render(state);attention=html.match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];assert.match(attention,/Vurdering: SÆLG/);assert.match(attention,/TEST/);row.hot_watch={session:activeSession};
+row.action=null;row.hot_watch.session.status='ACTIVE';row.hot_watch.session.signal='BUY';row.hot_watch.session.display_status='KØBSSIGNAL';html=ui.render(state);attention=html.match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];assert.match(attention,/KØBSSIGNAL/);assert.match(attention,/dash-action-badge signal-buy/);assert.match(html,/dash-action-badge signal-buy/);assert.match(attention,/data-trade-watch="synthetic-watch"/);
+row.hot_watch.session.signal='SELL';row.hot_watch.session.display_status='SÆLGSSIGNAL';html=ui.render(state);assert.match(html,/dash-action-badge signal-sell/);assert.match(html,/dash-action-badge signal-sell/);
 row.hot_watch.session.signal='NO_DATA';row.hot_watch.session.display_status='DATA FOR GAMLE';html=ui.render(state);assert.doesNotMatch(html,/dash-action-badge signal-(buy|sell|wait)/);
 console.log('PASS: estimated result is labeled, signed values are colored, empty columns are omitted');
+
+// The same current signal and explanation must appear in both tables even if
+// the separate historical-analysis cache is still warming up.
+row.hot_watch.session={watch_id:'synthetic-watch',status:'ACTIVE',signal:'SELL',display_status:'SÆLGSSIGNAL',warmup:{analysis_only:true,count:1,required:34,complete:false},last_calculation_at:'2026-11-09T15:23:00Z'};
+html=ui.render(state);assert.equal((html.match(/SÆLGSSIGNAL →/g)||[]).length,2);assert.equal((html.match(/data-explain-watch="synthetic-watch"/g)||[]).length,2);assert.equal((html.match(/data-trade-watch="synthetic-watch"/g)||[]).length,2);assert.doesNotMatch(html,/WARMUP 1 af 34/);
+row.hot_watch.session.signal='WAIT';row.hot_watch.session.display_status='AFVENT';html=ui.render(state);assert.match(html,/AFVENT →/);assert.doesNotMatch(html,/WARMUP 1 af 34|data-trade-watch/);assert.equal((html.match(/data-explain-watch="synthetic-watch"/g)||[]).length,1);
+row.hot_watch.session.signal='SELL';row.hot_watch.session.status='DEGRADED';row.hot_watch.session.display_status='DATA FOR GAMLE';html=ui.render(state);attention=html.match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];assert.doesNotMatch(attention,/SÆLGSSIGNAL|data-trade-watch/);assert.match(html,/DATA FOR GAMLE →/);assert.doesNotMatch(html,/WARMUP 1 af 34/);
+row.hot_watch.session.status='PAUSED';html=ui.render(state);assert.match(html,/PAUSERET/);assert.doesNotMatch(html,/data-trade-watch/);
+console.log('PASS: consistent current status and help in both tables; stale/paused signals cannot become trade controls');
+
+for(const label of ['RISIKODATA MANGLER','EARLY WATCH','HANDEL STANDSET']){row.hot_watch.session.status='DEGRADED';row.hot_watch.session.display_status=label;html=ui.render(state);assert.ok(html.includes(label+' →'));assert.doesNotMatch(html,/data-trade-watch|WARMUP 1 af 34/)}

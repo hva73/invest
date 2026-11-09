@@ -298,7 +298,7 @@ class EODHDAdapter:
   with self.connect() as c:return effective_poll_interval(c,request,profile)
  def feeds(self):
   from eodhd_feeds import EODHDFeeds
-  return EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),reserve=lambda:reserve(self.connect,self.uid,'eodhd'),opener=self.opener)
+  return EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),reserve=lambda:reserve(self.connect,self.uid,'eodhd'),opener=self.opener,share_status=self._shared_quotes)
  def capture(self,client,feed,symbol,session):
   """Share one bounded stream across due, independently verified watches."""
   req=session['request_data']

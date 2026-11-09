@@ -218,3 +218,12 @@ En kodefejl er rettet på udviklingsgrenen: Når EODHD-adapteren ved en identite
 ## 14. Fejl og opfølgning — 9. november 2026
 
 Når der findes en fejl, undersøges og rettes den inden for den aftalte opgave, når det er muligt. Hvis den ikke kan løses eller verificeres straks, registreres den med evidens, betydning, status og næste skridt i [listen over åbne fejl](OPEN_ISSUES_20261109_DA.md). Ejeren orienteres løbende om væsentlige uløste forhold og når en samlet fejlrettelsesrunde eller ejerens medvirken er nødvendig. En rettelse er først afsluttet, når relevante tests er gennemført, og installation og produktionsresultat er verificeret hvor det kræves. Tidligere observationer mærkes med tidspunkt; ukendte forhold gættes ikke. Dette opretter ikke i sig selv en selvstændig tidsplan eller baggrundsovervågning og ændrer ikke risikoregler eller handelsmandat.
+
+
+### Rapporter og aktuel positionsstatus — 9. november 2026
+
+Historik bevares i tidligere rapporter. En ny timesrapport skal ikke kopiere hele kandidat-, journal- og kildearkivet. Den indeholder aktuelle kandidater og relevante opdateringer samt deres refererede kilder; alle lokale source_ids skal kunne opløses. Grænsen på 150 kilder gælder den enkelte rapport. Aktive kandidatforløb og beholdningernes exit-overvågning bevares. Historisk arkivering er ikke en frisk revurdering. Motorjournalens cursor gemmes og genbruges; ufuldstændig pagination mærkes som ufuldstændig.
+
+Beholdninger, handlingsoversigt, motorliste og sessionsdetaljer skal følge samme aktuelle motorstatus. Spørgsmålstegnet ved beholdningens status findes både øverst og nederst og genlæser sessionen. En separat analyse-warmup må ikke overskrive et aktuelt signal, en risikoblokering eller en datamangel. En tidligere beregning adskilles fra aktuelt signal.
+
+Strategiens eksisterende TRAILING_EXIT er fald fra toppen i det analyserede kursvindue, ikke afkast siden køb eller en stopordre hos Pluto. Særskilte exitregler kan være opfyldt, før alle indikatorer er varmet op. Derfor kan WARMUP og TRAILING_EXIT forekomme blandt beregningens begrundelser samtidig med SELL; hovedstatus skal stadig vise den faktiske aktuelle beslutning. Ny købte og ældre verificerede positioner følger de samme versionslåste exitregler. En accepteret ordre uden faktisk beholdning starter ikke exit-overvågning. Ingen risikogrænser, signalparametre eller handelsmandater ændres.
