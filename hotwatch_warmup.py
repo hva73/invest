@@ -35,11 +35,12 @@ def refresh(connect,job,now,client=None):
  """Read at most one intraday response; never mutate a session or its journal."""
  from instrument_resolver import PEPE_PLUTO_ASSET_ID,BTC_PLUTO_ASSET_ID
  from hotwatch_engine import valid_cxe_evidence
- from hotwatch_adapters import reserve
  from eodhd_feeds import EODHDFeeds
  req=job['request_data'];symbol=req.get('provider_symbol')
  if job['is_test'] or req.get('provider')!='eodhd' or not symbol or req.get('asset_id')==PEPE_PLUTO_ASSET_ID:return None
  with connect() as c:
+  cached=c.execute('SELECT next_attempt,symbol FROM hw_warmup_history WHERE watch_row_id=?',(job['id'],)).fetchone()
+  if cached and cached['symbol']==symbol and cached['next_attempt']>now.timestamp():return None
   row=c.execute("SELECT * FROM hw_sessions WHERE id=? AND user_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED')",(job['id'],job['user_id'])).fetchone()
   if not row or json.loads(row['request'])!=req:return None
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
@@ -48,8 +49,6 @@ def refresh(connect,job,now,client=None):
   link=c.execute('SELECT * FROM hw_verified_feed_links WHERE user_id=? AND asset_id=?',(job['user_id'],req['asset_id'])).fetchone()
   proof=valid_cxe_evidence(c,job['user_id'],req,now)
   if not link or link['symbol']!=symbol or link['currency']!=req['quote_currency'] or str(link['ticker']).casefold()!=str(req.get('ticker','')).casefold() or str(link['exchange']).casefold()!=str(req.get('exchange','')).casefold() or not 0<=now.timestamp()-link['verified_epoch']<=7*86400 or proof is False or req.get('asset_id')==BTC_PLUTO_ASSET_ID and proof is not True:return None
-  cached=c.execute('SELECT next_attempt,symbol FROM hw_warmup_history WHERE watch_row_id=?',(job['id'],)).fetchone()
-  if cached and cached['symbol']==symbol and cached['next_attempt']>now.timestamp():return None
  feed=client or EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),capacity=Capacity(connect))
  lookback=7200 if symbol.upper().endswith('.CC') else 7*86400
  try:response=feed.intraday(symbol,interval='1m',start=int(now.timestamp())-lookback,end=int(now.timestamp()))

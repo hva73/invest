@@ -2,7 +2,7 @@
 from eodhd_capacity import Capacity
 import json,signal,threading,logging,hashlib,time,os,re,secrets,sqlite3,sys
 from datetime import timedelta
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor,wait,FIRST_COMPLETED
 from contextlib import contextmanager
 import app,hotwatch_engine as engine
 from hotwatch_adapters import PlutoAdapter,EODHDAdapter,InboxAdapter,DataUnavailable
@@ -857,7 +857,7 @@ class Runner:
   now=now or engine.utc();claim_started=time.perf_counter();job=engine.claim(self.connect,now,watch_id);claimed=engine.utc()
   if not job:return False
   job['scan_timing']={'next_due_at':engine.datetime.fromtimestamp(job['next_due'],engine.timezone.utc).isoformat(),'claimed_at':claimed.isoformat(),'claim_ms':round((time.perf_counter()-claim_started)*1000,3),'queue_ms':max(0,round((claimed.timestamp()-job['next_due'])*1000,3))}
-  uid=job['user_id'];r=job['request_data'];wid=job['watch_id'];mode=bool(job['is_test']);lease=job['lease_owner'];adapter=None
+  uid=job['user_id'];r=job['request_data'];wid=job['watch_id'];mode=bool(job['is_test']);lease=job['lease_owner'];adapter=None;uses_realtime_history=False
   try:
    poll_started=time.perf_counter();job['scan_timing']['poll_started_at']=engine.utc().isoformat()
    if r['end_at'] and stamp(r['end_at'])<=now:
@@ -876,6 +876,7 @@ class Runner:
    # view here would hold the SQLite writer lock during additional reads.
    job['scan_timing']['ingest_started_at']=engine.utc().isoformat()
    result=engine.ingest(self.connect,uid,wid,mode,sample,now=engine.utc(),lease=lease,include_session=False)
+   uses_realtime_history=bool((result.get('calculation') or {}).get('analysis_uses_bars'))
    journaled_at=engine.utc();ingest_done=time.perf_counter()
    job['scan_timing']['ingest_finished_at']=journaled_at.isoformat()
    timings={**job['scan_timing'],'websocket':getattr(adapter,'capture_metrics',[]),'provider_ms':round((provider_done-poll_started)*1000,3),'adapter_to_journal_ms':round((journaled_at-adapter_received).total_seconds()*1000,3),'ingest_compute_ms':round((ingest_done-provider_done)*1000,3),'event_to_adapter_receive_ms':round(adapter_latency_ms,3) if adapter_latency_ms is not None else None,'market_time_known':bool(sample.get('event_time')),'signal':result.get('calculation',{}).get('signal')}
@@ -887,8 +888,8 @@ class Runner:
    self.health(job,sample,None,timings)
    self.log(job,'processed',result.get('calculation',{}).get('signal'),{**timings,'duplicate':bool(result.get('duplicate'))})
    if result.get('duplicate'):
-    if (now-stamp(sample['event_time'])).total_seconds()>r['risk']['max_quote_age_s']:engine.fault(self.connect,uid,wid,mode,'DATA_STALE',lease=lease)
-    else:engine.release(self.connect,job,now)
+    if (journaled_at-stamp(sample['event_time'])).total_seconds()>r['risk']['max_quote_age_s']:engine.fault(self.connect,uid,wid,mode,'DATA_STALE',lease=lease)
+    else:engine.release(self.connect,job,journaled_at,sample=sample)
   except EngineError as error:
    if error.code in ['lease_lost','watch_not_running','kill_switch_active','operator_kill_switch']:
     self.log(job,'cancelled',error.code);return True
@@ -922,7 +923,7 @@ class Runner:
   finally:
    # The live scan and its risk decision finish first. Historical analysis
    # cannot create signals, and its failure cannot fault the live scan.
-   if r['provider']=='eodhd' and not mode:
+   if r['provider']=='eodhd' and not mode and not uses_realtime_history:
     try:
      import hotwatch_warmup
      hotwatch_warmup.refresh(self.connect,job,engine.utc())
@@ -948,7 +949,7 @@ class Runner:
  def log(self,job,status,code,metrics=None):
   logging.getLogger('escape.hotwatch').info(json.dumps({'service':'hotwatch','user_id':job['user_id'],'is_test':bool(job['is_test']),'utc':engine.utc().isoformat(),'watch_ref':hashlib.sha256(job['watch_id'].encode()).hexdigest()[:16],'source':job['request_data']['provider'],'status':status,'code':code,'metrics':{**job.get('scan_timing',{}),**(metrics or {})}}))
  def drain(self,watch_id=None):
-  """Drain due work in bounded batches, opt-in for concurrent provider calls."""
+  """Keep each available worker busy without waiting for slower provider calls."""
   if watch_id:return int(self.once(watch_id=watch_id))
   try:
    requested=int(os.environ.get('ESCAPE_HW_PARALLEL_SCANS','2'))
@@ -957,13 +958,15 @@ class Runner:
   workers=max(1,min(10,engine.capacity(),requested,lease_limit))
   while len(self._workers)<workers-1:
    child=Runner(self.connect);child.stop=self.stop;self._workers.append(child)
-  runners=[self]+self._workers[:workers-1];count=0
+  runners=[self]+self._workers[:workers-1];count=0;limit=engine.capacity()
   with ThreadPoolExecutor(max_workers=workers,thread_name_prefix='hotwatch') as pool:
-   while count<engine.capacity() and not self.stop.is_set():
-    slots=min(workers,engine.capacity()-count)
-    results=[f.result() for f in [pool.submit(runners[i].once) for i in range(slots)]]
-    completed=sum(bool(x) for x in results);count+=completed
-    if not completed:break
+   pending={pool.submit(r.once):r for r in runners if not self.stop.is_set()}
+   while pending:
+    finished,_=wait(pending,return_when=FIRST_COMPLETED)
+    for future in finished:
+     runner=pending.pop(future);processed=bool(future.result());count+=processed
+     if processed and count+len(pending)<limit and not self.stop.is_set():
+      pending[pool.submit(runner.once)]=runner
   return count
  def heartbeat(self,status):
   with self.connect() as c:c.execute("INSERT INTO hw_heartbeat VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET updated=excluded.updated,status=excluded.status",(engine.utc().isoformat(),status))

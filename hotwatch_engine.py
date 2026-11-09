@@ -94,6 +94,15 @@ def effective_poll_interval(c,request,profile=None):
  units=max(1,len(histories)+len(rest));available=max(1,limit-len(calendars))
  return max(minimum,(units*60+available-1)//available)
 
+def observation_poll_interval(c,request,profile,now,sample):
+ """Recheck aging live trades at the existing ACTIVE cadence, within budget."""
+ interval=effective_poll_interval(c,request,profile)
+ if sample and request['provider']=='eodhd' and sample.get('price_time_kind')=='trade' and sample.get('market_status') in ('REGULAR','PRE','AFTER'):
+  remaining=min(request['risk']['max_quote_age_s'],GLOBAL_RISK['max_quote_age_s'])-(now-stamp(sample['event_time'])).total_seconds()
+  if remaining<=interval:
+   interval=min(interval,effective_poll_interval(c,request,'ACTIVE'))
+ return interval
+
 def init(c):
  import hotwatch_warmup,web_push,hotwatch_buy_plan
  hotwatch_buy_plan.init(c)
@@ -882,7 +891,8 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
    prior_context=json.loads(extra['payload']) if extra else previous_sample['context'];current_context=sample['context']
    material=lambda context:{k:v for k,v in context.items() if k!='as_of'}
    fresh=lambda context:bool(context['as_of'] and 0<=now.timestamp()-stamp(context['as_of']).timestamp()<=300)
-   if material(prior_context)==material(current_context) and fresh(prior_context)==fresh(current_context):
+   renewed=current_context.get('as_of') and (not prior_context.get('as_of') or stamp(current_context['as_of'])>stamp(prior_context['as_of']))
+   if material(prior_context)==material(current_context) and fresh(prior_context)==fresh(current_context) and not renewed:
     result={'ok':True,'duplicate':True}
     if include_session:result['session']=view(c,row,now)
     return result
@@ -932,7 +942,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
    result['early_catalyst']=pilot
   result['analysis_uses_bars']=bar_samples is not None
   result['position_context']=risk_sample['context'];result['new_market_observation']=new_market_event
-  result.update(engine_version='1.0-phase1-2',feature_version='1.1.0',risk_version='1.1.0',global_risk_limits=GLOBAL_RISK,algorithm_constraints={'max_volatility_pct':'5','max_price_gap_pct':'5','max_action_signals_hour':20,'max_context_age_s':300},risk_parameters=risk,prior_signal_state=state,input_sample_ids=[s['sample_id'] for s in samples])
+  result.update(engine_version='1.0-phase1-2',feature_version='1.2.0',risk_version='1.1.0',global_risk_limits=GLOBAL_RISK,algorithm_constraints={'max_volatility_pct':'5','max_price_gap_pct':'5','max_action_signals_hour':20,'max_context_age_s':300},risk_parameters=risk,prior_signal_state=state,input_sample_ids=[s['sample_id'] for s in samples])
   metrics['quote_age_s']=format(Decimal(str(now.timestamp()-stamp(sample['event_time']).timestamp())),'f');result['supporting_metrics']=metrics
   c.execute('INSERT INTO hw_calculations(watch_row_id,sample_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?,?)',(row['id'],sample_row_id,now.isoformat(),canonical(result),result['strategy_checksum']))
   cycle=request.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':wid})[:24]
@@ -961,7 +971,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   adaptive='CRITICAL' if result['risk_level']=='critical' else 'ACTIVE' if metrics.get('breakout') or nextstate.get('volume_spike') else 'IDLE' if sample['market_status'] in ['CLOSED','HALTED'] else request['profile']
   nextstate['adaptive_profile']=adaptive
   nextstate['provider_floor_s']=provider_floor(request['provider'])
-  interval=effective_poll_interval(c,request,adaptive)
+  interval=observation_poll_interval(c,request,adaptive,now,sample)
   if sample['market_status'] in ['CLOSED','HALTED']:interval=max(interval,300)
   nextstate['scheduled_interval_s']=interval
   c.execute('UPDATE hw_sessions SET status=?,state=?,updated=?,last_data=?,last_calculation=?,next_due=?,failures=0,last_error=NULL,lease_owner=NULL,lease_until=0 WHERE id=?',(new_status,canonical(nextstate),now.isoformat(),sample['event_time'],now.isoformat(),now.timestamp()+interval,row['id']))
@@ -1089,10 +1099,11 @@ def claim(connect,now=None,watch_id=None):
   c.execute("UPDATE hw_sessions SET status=CASE WHEN status='CREATED' THEN 'VALIDATING' ELSE status END,lease_owner=?,lease_until=? WHERE id=?",(owner,now.timestamp()+120,row['id']))
   return dict(row,lease_owner=owner,request_data=request)
 
-def release(connect,job,now=None):
+def release(connect,job,now=None,sample=None):
  now=now or utc();request=job['request_data']
  with connect() as c:
-  interval=effective_poll_interval(c,request)
+  profile=json.loads(job.get('state') or '{}').get('adaptive_profile') or request['profile']
+  interval=observation_poll_interval(c,request,profile,now,sample)
   c.execute("UPDATE hw_sessions SET next_due=?,state=json_set(state,'$.scheduled_interval_s',?),lease_owner=NULL,lease_until=0 WHERE id=? AND lease_owner=?",(now.timestamp()+interval,interval,job['id'],job['lease_owner']))
 
 

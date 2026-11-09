@@ -88,3 +88,7 @@ Efter ovenstående gennemgang skal Codex **færdiggøre og installere** hele kæ
 ## Rettelsesrunde — 9. november 2026
 
 Ejeren har godkendt implementering og GitHub-installationsleverance af kapacitetsrevisionens konkrete fejl samt stabile historiske salgsadvarsler. Se [installationsnotat](INSTALL_SIGNAL_FIXES_20261109.md) og [fælles aftale, afsnit 16](ESCAPE_TRADING_AGREEMENT_V3_9.md#16-signaler-og-historiske-advarsler--9-november-2026). Forkerte fælles betingelser erstattes; ingen parallel signalmotor eller ny databasearkitektur. Ingen automatiske handler. Produktionens endelige accept står fortsat åben, indtil den installerede version og faktiske resultater er læst tilbage.
+
+
+## Opfølgning på performancepakken — 9. november 2026
+Eksisterende kode rettes samlet: selvstændig fremdrift pr. worker, genbrug af uændret gyldige observationer og beregning på EODHDs faktisk leverede sparsomme minutbars. Barbaserede perioder tæller observerede bars; minutbaseret momentum og acceleration beholder deres tidskrav. Tomme minutter udfyldes ikke. Pluto-kontekst, kildefriskhed, exitbeskyttelse, historiske advarsler og risikoregler bevares. Pakken inkluderer menurettelsen fra 287d4dc og kræver ingen nye moduler, miljøindstillinger eller databasearkitektur. Den installerede effekt kontrolleres efter ejerens installation; lokale testresultater er ikke LIVE PASS.

@@ -99,6 +99,10 @@ def features(samples,parameters):
  # one minute apart; extra fast polls do not reset the analysis window.
  interval=60 if live else last['interval_s']
  identity=lambda s:tuple(s[k] for k in ['source','asset_id','currency','venue','session_key','market_status','feed_type'])+(() if live else (s['interval_s'],))+(s.get('price_time_kind'),s.get('verification','unknown'))
+ # The real-time history endpoint emits only minutes with trades. Period
+ # indicators use actual closed bars, not invented empty candles. Live polling
+ # samples still require cadence continuity; they are not a complete bar feed.
+ sparse_bars=last.get('verification')=='verified' and last.get('price_time_kind')=='bar_open' and last.get('feed_type')=='EODHD verified real-time closed 1m bars'
  rows=[]
  for s in reversed(samples):
   if identity(s)!=identity(last):break
@@ -106,7 +110,7 @@ def features(samples,parameters):
    from report_validation import stamp
    gap=(stamp(rows[-1]['event_time'])-stamp(s['event_time'])).total_seconds()
    if live and gap<interval*0.5:continue
-   if gap>interval*1.5 or gap<interval*0.5:break
+   if gap<interval*0.5 or (not sparse_bars and gap>interval*1.5):break
   rows.append(s)
  rows.reverse();prices=[number(r['price']) for r in rows]
  if any(p is None or p<=0 for p in prices):return {'sample_count':len(rows)}
@@ -114,15 +118,26 @@ def features(samples,parameters):
   ctx.prec=40
   p=prices[-1];f={'sample_count':len(rows),'price':p,'quote_age_s':None}
   returns=[(b/a-1)*100 for a,b in zip(prices,prices[1:])]
-  for n in [1,3,5,10]:f['return_'+str(n)+'_pct']=(p/prices[-n-1]-1)*100 if len(prices)>n else None
   from report_validation import stamp
   times=[stamp(r['event_time']).timestamp() for r in rows]
+  for n in [1,3,5,10]:
+   # A return over N minutes needs the observed price at that time. N sparse
+   # bars can span much longer; never relabel that return as N minutes.
+   if sparse_bars:index=next((i for i in range(len(times)-2,-1,-1) if times[-1]-times[i]==n*interval),None)
+   else:index=len(prices)-n-1 if len(prices)>n else None
+   f['return_'+str(n)+'_pct']=(p/prices[index]-1)*100 if index is not None else None
   window_seconds=int(parameters.get('momentum_window_minutes',3))*60
   previous_window=[i for i in range(len(times)-1) if abs((times[-1]-times[i])-window_seconds)<=5]
   best_window=min(previous_window,key=lambda i:abs((times[-1]-times[i])-window_seconds)) if previous_window else None
   f['return_window_pct']=(p/prices[best_window]-1)*100 if best_window is not None else None
   speeds=[r/Decimal(str(b-a)) for r,a,b in zip(returns,times,times[1:]) if b>a]
   f['velocity_pct_s']=speeds[-1] if speeds else None;f['acceleration_pct_s2']=(speeds[-1]-speeds[-2])/Decimal(str(times[-1]-times[-2])) if len(speeds)>=2 else None
+  recent_minutes=not sparse_bars or len(times)>=3 and times[-1]-times[-2]==interval and times[-2]-times[-3]==interval
+  if sparse_bars:
+   # Missing adjacent minutes cannot establish the one-minute velocity or
+   # acceleration used by the existing entry and price-gap safeguards.
+   if len(times)<2 or times[-1]-times[-2]!=interval:f['velocity_pct_s']=None
+   if not recent_minutes:f['acceleration_pct_s2']=None
   short=int(parameters['short_period']);long=int(parameters['long_period'])
   f['sma_short']=average(prices[-short:]) if len(prices)>=short else None;f['sma_long']=average(prices[-long:]) if len(prices)>=long else None
   f['ema_short']=ema(prices,short);f['ema_long']=ema(prices,long)
@@ -160,6 +175,6 @@ def features(samples,parameters):
   f['interval_volume']=volumes[-1]
   baseline=[v for v in volumes[-window-1:-1] if v is not None]
   f['relative_volume']=volumes[-1]/average(baseline) if volumes[-1] is not None and len(baseline)==window and average(baseline)>0 else None
-  f['volume_acceleration']=volumes[-1]-2*volumes[-2]+volumes[-3] if len(volumes)>=3 and all(v is not None for v in volumes[-3:]) else None
+  f['volume_acceleration']=volumes[-1]-2*volumes[-2]+volumes[-3] if recent_minutes and len(volumes)>=3 and all(v is not None for v in volumes[-3:]) else None
   f['rising_price_falling_volume']=bool(returns and returns[-1]>0 and len(volumes)>1 and volumes[-1] is not None and volumes[-2] is not None and volumes[-1]<volumes[-2])
   return {k:format(v,'f') if isinstance(v,Decimal) else v for k,v in f.items()}

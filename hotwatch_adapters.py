@@ -3,7 +3,7 @@ import hashlib,json,os,re,time,urllib.request,urllib.error,threading,copy
 from datetime import datetime,timedelta,timezone
 from decimal import Decimal,InvalidOperation
 from urllib.parse import quote,urlencode
-from hotwatch_contract import EngineError,checksum,stamp,provider_floor,PROFILES
+from hotwatch_contract import EngineError,checksum,stamp,provider_floor,PROFILES,GLOBAL_RISK
 from hotwatch_engine import utc,effective_poll_interval,valid_cxe_evidence,provider_request_limit
 from eodhd_capacity import Capacity,retry_seconds
 
@@ -362,6 +362,15 @@ class EODHDAdapter:
     saved=time.monotonic()
     for item in symbols:
      messages=[m for m in result.get('messages',[]) if m.get('symbol')==item]
+     # A quiet capture must not erase a more recent, still-valid observation
+     # from another batch. Keep original event/receive times and feed identity;
+     # the requesting session applies its own freshness limit in poll().
+     prior=_ws_batch_cache.get((self.uid,credential,feed,item))
+     if prior:
+      retained=[m for m in prior[1].get('messages',[]) if m.get('event_time') and 0<=(utc()-stamp(m['event_time'])).total_seconds()<=GLOBAL_RISK['max_quote_age_s']]
+      if retained:
+       latest=max(retained,key=lambda m:stamp(m['event_time']))
+       if not messages or stamp(latest['event_time'])>max(stamp(m['event_time']) for m in messages):messages=[latest]
      partial=[m for m in result.get('partial_messages',[]) if m.get('symbol')==item]
      value={**result,'status':'OK' if messages else 'NO_MESSAGES','messages':messages,'message_count':len(messages),'partial_messages':partial}
      _ws_batch_cache[(self.uid,credential,feed,item)]=(saved,copy.deepcopy(value))

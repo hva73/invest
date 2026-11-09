@@ -34,9 +34,13 @@ class BarEvidenceTests(unittest.TestCase):
     else:self.assertEqual(sample_errors(sample,self.req,self.now),sample)
     self.assertIsNone(verified_bar_samples(sample,self.req,self.now))
  def test_gaps_do_not_generate_fabricated_bars(self):
-  sample=copy.deepcopy(self.sample);del sample['bar_history'][-3]
+  sample=copy.deepcopy(self.sample);del sample['bar_history'][-4]
   sample_errors(sample,self.req,self.now)
-  self.assertEqual(features(verified_bar_samples(sample,self.req,self.now),BASELINE['parameters'])['sample_count'],2)
+  actual=verified_bar_samples(sample,self.req,self.now);metrics=features(actual,BASELINE['parameters'])
+  self.assertEqual(len(actual),34);self.assertEqual(metrics['sample_count'],34)
+  self.assertIsNotNone(metrics['macd_histogram'])
+  # The absent minute stays absent; period indicators retain observed bars.
+  self.assertIsNone(metrics['return_3_pct']);self.assertIsNotNone(metrics['return_1_pct'])
  def test_invalid_ohlc_is_not_eligible_for_features(self):
   sample=copy.deepcopy(self.sample);sample['bar_history'][-1]['high']='1'
   sample_errors(sample,self.req,self.now)
