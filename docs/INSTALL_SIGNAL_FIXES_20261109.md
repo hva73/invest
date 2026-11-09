@@ -42,3 +42,11 @@ Følg scriptets efterfølgende besked om requirements og `setup_runtime.py`, og 
 3. Mål køforsinkelse, feedgenbrug og SQLite-ventetid på serveren. Bekræft installerede og kørende versioner samt mobilpush. Tidligere målinger identificerer ikke en nuværende SQLite-låseholder. Denne pakke påstår ikke, at alle sådanne produktionsforhold er bevist løst.
 
 Manglende markedsdata, lukkede markeder eller utilstrækkelig faktisk indikatorhistorik kan fortsat give NO_DATA. Det er ikke gjort købsklart med gættede data. Ingen automatisk ordre eller Pluto-handelsforslag introduceres.
+
+## Efterfølgende layoutrettelse – sidemenu
+
+Brugerens skærmbillede efter installation af `050cd0f` dokumenterede, at signaladvarslen lå oven på navigationen. Årsagen var de generelle `aside`-selektorer i `static/style.css`: de ramte både den faste sidemenu og de nye semantiske advarselselementer. Alle ti relevante selektorer er nu afgrænset til `body > aside`. De eksisterende regler er rettet direkte; der er ingen modvirkende position-overrides og ingen ændring i signalberegningen.
+
+`node tests/test_sidebar_scope.js` fejler på CSS fra `050cd0f` og består på rettelsen. Alle 12 `tests/test_*.js`-filer og de 9 installationstests består. Browsertesten kontrollerer nu også advarslernes placering i statusfeltet og fravær af side-overflow. En selvstændig offline-visuel test kan genereres med `node tests/render_signal_layout.cjs`; den bruger de faktiske renderere og CSS med syntetiske data for Overblik og HOT WATCH i 390 og 1280 pixels.
+
+Visuel udførelse af den lokale test er fortsat ikke bekræftet i dette miljø: Chromium-processen får `socket(): Operation not permitted`, og den fælles browser tillader ikke `file:`-URL'er. Loginvisningen på produktion er åbnet; den indloggede fejl er verificeret fra brugerens skærmbillede. Efter installation og genindlæsning skal menuen igen stå frit, og advarslerne skal blive ved de relevante statusfelter.

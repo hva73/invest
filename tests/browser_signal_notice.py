@@ -29,6 +29,7 @@ try:
    }''',[session,now])
   for width in (1300,390):
    page.set_viewport_size({'width':width,'height':900});render()
+   page.evaluate("() => {\n    const menu=document.querySelector('body > aside');\n    for(const notice of document.querySelectorAll('.signal-notice')){\n     const box=notice.getBoundingClientRect(),parent=notice.parentElement.getBoundingClientRect();\n     if(getComputedStyle(notice).position!=='static'||box.left<parent.left-1||box.right>parent.right+1)throw Error('Signal notice escaped its status container');\n    }\n    if(menu.querySelector('.signal-notice'))throw Error('Signal notice inserted in navigation');\n    if(document.documentElement.scrollWidth>innerWidth+1)throw Error('Page overflows viewport');\n   }")
    buttons=page.locator('[data-trade-watch="synthetic-status"]')
    expect(buttons).to_have_count(2)
    for i in range(2):expect(buttons.nth(i)).to_have_text('SÆLGSSIGNAL →')

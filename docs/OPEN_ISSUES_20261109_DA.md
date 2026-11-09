@@ -316,3 +316,7 @@ Ejeren meldte HTTP 500 efter installation. Direkte browserkontrol af /api/health
 **Rettet og lokalt testet, afventer installation/readback:** fælles WARMUP foran beregnelige exitregler; uvedkommende bar-friskhed foran stop-SELL; trailing beregnet på gammel bar-close; reset af EODHD-observationshistorik ved hurtig polling; kalender-refresh 300 s mod 120 s gate; uvirksom kapacitetskonfiguration over 40; account-refresh idle-skrivelås; kasseret workerlog; ukendt exchange-details-pris; kortvarige signaler uden vedvarende kvitterbar advarsel. Ren featureberegning er flyttet før skrivetransaktionen med genkontrol af historikversion.
 
 **Fortsat åbent:** serverens faktiske samtidige workerantal og gennemløb, fuld driftsfase-sporing efter logaktivering, konkret eventuel SQLite-låseholder, kørende versionsmatch, fysisk mobilpush og visuel accept. Sparse markedsbars kan fortsat være utilstrækkelige for køb; strategiens tidsbaserede krav er ikke lempet. Standardkapacitet er fortsat 40, og den er ikke hævet blindt. Se [installationsnotat og næste kontroller](INSTALL_SIGNAL_FIXES_20261109.md).
+
+### Layout efter `050cd0f`
+- **Påvist og rettet i pakken:** generelle `aside`-regler lagde signaladvarsler oven på sidemenuen. Reglerne er afgrænset til sidens direkte sidebar. Regression fejler før og består efter; 12 JavaScript-testfiler og 9 installationstests består.
+- **Afventer installation:** brugerens indloggede visning skal genindlæses og kontrolleres visuelt. Ingen ændring i motor, signaler eller handelsregler i denne layoutrettelse.
