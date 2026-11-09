@@ -527,6 +527,12 @@ class HotWatch(unittest.TestCase):
   session=engine.item(app.connect,1,req['watch_id'],True)['session']
   self.assertTrue(session['last_error'].startswith('PROCESSING_TYPE_ERROR_'));self.assertNotIn('private-token',session['last_error'])
   self.assertEqual(session['signal'],'NO_DATA');self.assertIsNone(session['last_data_at'])
+ def test_repeated_database_contention_retries_without_thirty_minute_backoff(self):
+  with app.connect() as c:c.execute('UPDATE hw_sessions SET failures=9 WHERE watch_id=?',(self.req['watch_id'],))
+  engine.fault(app.connect,1,self.req['watch_id'],True,'PROCESSING_DATABASE_BUSY_ADAPTER_315',self.now)
+  with app.connect() as c:row=engine.row_for(c,1,self.req['watch_id'],True)
+  self.assertEqual(row['next_due']-self.now.timestamp(),60);self.assertEqual(row['status'],'DEGRADED')
+  self.assertEqual(engine.item(app.connect,1,self.req['watch_id'],True)['session']['signal'],'NO_DATA')
  def test_processing_diagnostic_identifies_real_sqlite_busy_without_error_text(self):
   import sqlite3
   from hotwatch_service import processing_error_code

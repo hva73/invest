@@ -971,6 +971,9 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   # Recheck at the sustainable cadence so repeated closed-market samples do
   # not push the next check half an hour past a new market event.
   if code=='DATA_STALE':interval=effective_poll_interval(c,request)
+  # A transient SQLite contention is not a failed market feed. Do not let
+  # exponential provider backoff postpone a position or candidate for 30 min.
+  if code.startswith('PROCESSING_DATABASE_BUSY_'):interval=60
   if retry_after_s is not None:interval=max(interval,max(0,retry_after_s))
   if row['last_error']!=code:
    previous=json.loads(row['strategy']);result={'signal':'NO_DATA','reason_codes':[code],'human_readable_explanation':code,'supporting_metrics':{'quote_age_s':(now-stamp(row['last_data'])).total_seconds() if row['last_data'] else None},'calculation_timestamp':now.isoformat(),'data_timestamp':row['last_data'],'strategy_id':previous['strategy_id'],'strategy_version':previous['version'],'strategy_checksum':checksum(previous),'confidence_score':0,'risk_level':'critical' if set(state.get('alert_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE'} else 'high','rules_score_note':'No valid current market input','critical_override':False}
