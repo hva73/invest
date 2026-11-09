@@ -98,13 +98,50 @@ class WatchdogTests(unittest.TestCase):
                         c.execute('BEGIN IMMEDIATE')
                 with patch.object(runner, 'drain', side_effect=claim_locked), patch.object(supervisor, 'diagnostic') as diagnostic:
                     self.assertEqual(runner.drain_safely(), 0)
-                    self.assertEqual(diagnostic.call_args.args, ('worker_database_busy', sqlite3.SQLITE_BUSY))
+                    diagnostic.assert_any_call('worker_database_busy', sqlite3.SQLITE_BUSY)
                 with patch.object(runner, 'drain', side_effect=sqlite3.OperationalError('other')):
                     with self.assertRaises(sqlite3.OperationalError):
                         runner.drain_safely()
             finally:
                 holder.rollback()
                 holder.close()
+
+    def test_database_lock_observations_are_filtered_and_sanitized(self):
+        import io
+        with tempfile.TemporaryDirectory() as folder:
+            db = str(Path(folder) / 'escape.db')
+            Path(db).touch();st = os.stat(db)
+            device = '%x:%x:%d' % (os.major(st.st_dev),os.minor(st.st_dev),st.st_ino)
+            lines = ('1: POSIX ADVISORY WRITE 123 %s 1 1\n' % device +
+                     '2: POSIX ADVISORY READ 456 %s 2 2\n' % device +
+                     '3: POSIX ADVISORY WRITE 789 00:00:1 1 1\n')
+            def fake_open(path, *args, **kwargs):
+                if path == '/proc/locks':return io.StringIO(lines)
+                if path == '/proc/123/cmdline':return io.BytesIO(b'python\0/secret/hotwatch_service.py\0token=private\0')
+                raise PermissionError()
+            with patch.object(app,'DB',db),patch('builtins.open',side_effect=fake_open):
+                result=supervisor.database_locks()
+            self.assertEqual(result,[('db_lock_unknown',-1),('db_lock_worker',1)])
+            self.assertNotIn('private',str(result))
+            self.assertNotIn('123',str(result))
+
+    def test_database_lock_read_failure_is_explicit(self):
+        with patch.object(app,'DB','/does/not/exist'):
+            self.assertEqual(supervisor.database_locks(),[('db_lock_unavailable',None)])
+
+    def test_lock_diagnostic_does_not_wait_for_blocked_database(self):
+        import time
+        with tempfile.TemporaryDirectory() as folder:
+            db = str(Path(folder) / 'escape.db')
+            with sqlite3.connect(db) as c:
+                c.execute('CREATE TABLE hw_supervisor_events(id INTEGER PRIMARY KEY,created TEXT,event TEXT,code INTEGER)')
+            holder=sqlite3.connect(db)
+            try:
+                holder.execute('BEGIN EXCLUSIVE')
+                with patch.object(app,'DB',db):
+                    start=time.monotonic();supervisor.record_database_locks([('db_lock_other',1)])
+                    self.assertLess(time.monotonic()-start,1)
+            finally:holder.rollback();holder.close()
 
     def test_diagnostics_are_bounded_structured_and_no_secrets(self):
         with tempfile.TemporaryDirectory() as d:

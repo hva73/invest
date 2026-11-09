@@ -795,7 +795,16 @@ class Runner:
    engine.fault(self.connect,uid,wid,mode,error.code,lease=lease,retry_after_s=getattr(error,'retry_after_s',None));self.health(job,None,error.code);self.log(job,'degraded',error.code)
   except Exception as error:
    code=processing_error_code(error)
-   engine.fault(self.connect,uid,wid,mode,code,lease=lease);self.health(job,None,code);self.log(job,'degraded',code)
+   locks=None
+   if code.startswith('PROCESSING_DATABASE_BUSY_'):
+    from hotwatch_supervisor import database_locks
+    locks=database_locks()
+   try:
+    engine.fault(self.connect,uid,wid,mode,code,lease=lease);self.health(job,None,code);self.log(job,'degraded',code)
+   finally:
+    if locks is not None:
+     from hotwatch_supervisor import record_database_locks
+     record_database_locks(locks)
   finally:
    # The live scan and its risk decision finish first. Historical analysis
    # cannot create signals, and its failure cannot fault the live scan.
@@ -837,8 +846,10 @@ class Runner:
   except sqlite3.OperationalError as error:
    code=getattr(error,'sqlite_errorcode',None)
    if not isinstance(code,int) or (code & 255) not in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED):raise
-   from hotwatch_supervisor import diagnostic
+   from hotwatch_supervisor import diagnostic,database_locks,record_database_locks
+   locks=database_locks()
    diagnostic('worker_database_busy',code)
+   record_database_locks(locks)
    return 0
  def run(self,interval=2):
   if os.environ.get('ESCAPE_HW_AUTOSTART_ENABLED','1')=='1':

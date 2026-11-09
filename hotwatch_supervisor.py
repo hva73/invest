@@ -88,7 +88,9 @@ def diagnostic(event, code=None):
                'heartbeat_timeout', 'restart_timeout', 'worker_killed',
                'worker_exception', 'worker_frame_service', 'worker_frame_engine',
                'worker_frame_app', 'worker_frame_adapters', 'worker_frame_other',
-               'worker_sqlite_error', 'worker_database_busy'}
+               'worker_sqlite_error', 'worker_database_busy',
+               'db_lock_worker', 'db_lock_supervisor', 'db_lock_passenger',
+               'db_lock_other', 'db_lock_unknown', 'db_lock_unavailable', 'db_lock_none'}
     if event not in allowed or (code is not None and not isinstance(code, int)):
         raise ValueError('invalid diagnostic event')
     try:
@@ -98,6 +100,72 @@ def diagnostic(event, code=None):
                       (datetime.now(timezone.utc).isoformat(), event, code))
             c.execute('DELETE FROM hw_supervisor_events WHERE id NOT IN (SELECT id FROM hw_supervisor_events ORDER BY id DESC LIMIT 200)')
     except Exception:
+        pass
+
+
+def database_locks():
+    """Sample kernel locks for this DB after BUSY; never expose paths or command lines.
+
+    Counts are only a point-in-time observation, not proof of the blocker.
+    Hosts can restrict /proc or use lock types not visible here.
+    """
+    try:
+        import app
+        db = os.stat(app.DB)
+        identity = (os.major(db.st_dev), os.minor(db.st_dev), db.st_ino)
+        with open('/proc/locks', encoding='ascii') as source:
+            lines = source.read(2_000_001)
+        if len(lines) > 2_000_000:
+            return [('db_lock_unavailable', None)]
+    except (OSError, ValueError):
+        return [('db_lock_unavailable', None)]
+    counts = {}
+    for line in lines.splitlines():
+        fields = line.split()
+        if len(fields) < 8 or fields[1] != 'POSIX' or fields[3] not in ('READ', 'WRITE'):
+            continue
+        try:
+            device = fields[5].split(':')
+            if len(device) != 3 or (int(device[0], 16), int(device[1], 16), int(device[2])) != identity:
+                continue
+            pid = int(fields[4])
+            if pid <= 0:continue
+        except (ValueError, IndexError):
+            continue
+        category = 'unknown'
+        try:
+            with open('/proc/%d/cmdline' % pid, 'rb') as source:
+                args = source.read(8192).split(b'\0')
+            names = {os.path.basename(arg).decode('ascii', 'ignore') for arg in args if arg}
+            if 'hotwatch_service.py' in names:category = 'worker'
+            elif 'hotwatch_supervisor.py' in names:category = 'supervisor'
+            elif any('passenger' in name.lower() for name in names):category = 'passenger'
+            else:category = 'other'
+        except OSError:
+            pass
+        # Positive = observed write locks, negative = observed read locks.
+        key = ('db_lock_' + category, 1 if fields[3] == 'WRITE' else -1)
+        counts[key] = counts.get(key, 0) + 1
+    if not counts:return [('db_lock_none', None)]
+    # At most one aggregated entry per category and lock type, bounded output.
+    return [(event, sign * count) for (event, sign), count in sorted(counts.items())]
+
+
+def record_database_locks(observations):
+    allowed = {'db_lock_worker', 'db_lock_supervisor', 'db_lock_passenger',
+               'db_lock_other', 'db_lock_unknown', 'db_lock_unavailable', 'db_lock_none'}
+    rows = [(datetime.now(timezone.utc).isoformat(), event, code)
+            for event, code in observations[:10]
+            if event in allowed and (code is None or type(code) is int and -10000 <= code <= 10000)]
+    if not rows:return
+    try:
+        import app
+        with app.connect() as c:
+            c.execute('PRAGMA busy_timeout=100')
+            c.executemany('INSERT INTO hw_supervisor_events(created,event,code) VALUES(?,?,?)', rows)
+            c.execute('DELETE FROM hw_supervisor_events WHERE id NOT IN (SELECT id FROM hw_supervisor_events ORDER BY id DESC LIMIT 200)')
+    except Exception:
+        # Diagnosis must not interrupt the trading safety path or wait for a lock.
         pass
 
 
