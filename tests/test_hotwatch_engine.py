@@ -496,6 +496,33 @@ class HotWatch(unittest.TestCase):
   with patch('hotwatch_adapters.reserve'),patch('hotwatch_adapters.PlutoAdapter.safe_context',return_value=unknown_context()),patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}):
    with self.assertRaises(DataUnavailable) as error:EODHDAdapter(app.connect,1,Opener()).poll({'request_data':req,'last_data':self.now.isoformat()})
   self.assertEqual(error.exception.code,'DATA_STALE');self.assertIsNone(getattr(error.exception,'position_context',None))
+ def test_feed_error_does_not_block_independent_verified_exit_context(self):
+  from hotwatch_service import Runner
+  from unittest.mock import Mock
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  req=copy.deepcopy(self.req);req.update(watch_id='feed-failed-holding',purpose='feed failed holding test',provider='eodhd',provider_symbol='MERC.US',watch_mode='exit');engine.create(app.connect,1,req,self.now)
+  runner=Runner(app.connect);adapter=Mock();adapter.poll.side_effect=DataUnavailable('PROVIDER_RATE_BUDGET',429);adapter.pluto.safe_context.return_value=tick(self.now,held=True)['context'];runner.adapters[(1,'eodhd')]=adapter
+  with patch('hotwatch_engine.utc',return_value=self.now):self.assertTrue(runner.once(self.now,watch_id=req['watch_id']))
+  view=engine.item(app.connect,1,req['watch_id'],True)['session']
+  self.assertEqual(view['latest_context']['quantity'],'10');self.assertEqual(view['signal'],'NO_DATA');self.assertEqual(view['last_error'],'PROVIDER_RATE_BUDGET');self.assertEqual(self.counts()['hw_samples'],0)
+ def test_feed_error_does_not_invent_or_require_missing_exit_context(self):
+  from hotwatch_service import Runner
+  from unittest.mock import Mock
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  req=copy.deepcopy(self.req);req.update(watch_id='feed-failed-unknown',purpose='feed failed unknown test',provider='eodhd',provider_symbol='MERC.US',watch_mode='exit');engine.create(app.connect,1,req,self.now)
+  runner=Runner(app.connect);adapter=Mock();adapter.poll.side_effect=DataUnavailable('EODHD_READ_ERROR');adapter.pluto.safe_context.return_value=unknown_context();runner.adapters[(1,'eodhd')]=adapter
+  with patch('hotwatch_engine.utc',return_value=self.now):self.assertTrue(runner.once(self.now,watch_id=req['watch_id']))
+  view=engine.item(app.connect,1,req['watch_id'],True)['session']
+  self.assertEqual(view['signal'],'NO_DATA');self.assertIsNone(view['latest_context']);self.assertEqual(view['last_error'],'EODHD_READ_ERROR')
+ def test_feed_error_rejects_expired_broker_context(self):
+  from hotwatch_service import Runner
+  from unittest.mock import Mock
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  req=copy.deepcopy(self.req);req.update(watch_id='feed-failed-old-context',purpose='expired broker context test',provider='eodhd',provider_symbol='MERC.US',watch_mode='exit');engine.create(app.connect,1,req,self.now)
+  old=tick(self.now-timedelta(minutes=10),held=True)['context'];runner=Runner(app.connect);adapter=Mock();adapter.poll.side_effect=DataUnavailable('EODHD_READ_ERROR');adapter.pluto.safe_context.return_value=old;runner.adapters[(1,'eodhd')]=adapter
+  with patch('hotwatch_engine.utc',return_value=self.now):self.assertTrue(runner.once(self.now,watch_id=req['watch_id']))
+  view=engine.item(app.connect,1,req['watch_id'],True)['session']
+  self.assertEqual(view['signal'],'NO_DATA');self.assertIsNone(view['latest_context']);self.assertEqual(view['last_error'],'EODHD_READ_ERROR')
  def test_checkpoint_context_migration_preserves_old_journal(self):
   ctx=tick(self.now)['context'];engine.observe_context(app.connect,1,self.req['watch_id'],True,ctx,self.now)
   with app.connect() as c:

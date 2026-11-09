@@ -759,7 +759,7 @@ class Runner:
  def once(self,now=None,watch_id=None):
   now=now or engine.utc();job=engine.claim(self.connect,now,watch_id)
   if not job:return False
-  uid=job['user_id'];r=job['request_data'];wid=job['watch_id'];mode=bool(job['is_test']);lease=job['lease_owner']
+  uid=job['user_id'];r=job['request_data'];wid=job['watch_id'];mode=bool(job['is_test']);lease=job['lease_owner'];adapter=None
   try:
    poll_started=time.perf_counter()
    if r['end_at'] and stamp(r['end_at'])<=now:
@@ -789,6 +789,14 @@ class Runner:
   except EngineError as error:
    if error.code in ['lease_lost','watch_not_running','kill_switch_active','operator_kill_switch']:
     self.log(job,'cancelled',error.code);return True
+   # Market-feed availability is independent of current broker ownership.
+   # Only the read-only, budgeted Pluto adapter can provide this evidence;
+   # unknown context is never promoted to verified or used as a market signal.
+   feed_errors={'DATA_STALE','PROVIDER_RATE_BUDGET','EODHD_RATE_LIMIT','EODHD_READ_ERROR','EODHD_READ_OR_CONTRACT_ERROR','EODHD_ENTITLEMENT_REJECTED','EODHD_FEED_NOT_ENABLED','EODHD_KEY_NOT_CONFIGURED'}
+   if isinstance(error,DataUnavailable) and error.code in feed_errors and getattr(error,'position_context',None) is None and r['provider']=='eodhd' and r.get('watch_mode')=='exit' and adapter is not None:
+    try:context=adapter.pluto.safe_context(r,r.get('quote_currency'))
+    except Exception:context=None
+    if isinstance(context,dict) and context.get('status')=='verified' and context.get('as_of'):error.position_context=context
    if getattr(error,'position_context',None) is not None:
     try:engine.observe_context(self.connect,uid,wid,mode,error.position_context,lease=lease,broker_source='pluto' if r['provider']=='eodhd' else None)
     except EngineError as context_error:
