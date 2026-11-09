@@ -69,6 +69,7 @@ class QueueRecovery(unittest.TestCase):
    with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(lambda j:runner.capture(client,'us_status','MERC',j),jobs))
    self.assertEqual(len(calls),1)
    for result in results:
+    if result['status']=='COLLECTING':result=runner.capture(client,'us_status','MERC',jobs[0])
     self.assertEqual(result['messages'][0]['event_time'],old)
     self.assertEqual(result['messages'][0]['received_at'],received)
    # The response cache expires normally; stale status is never upgraded.
@@ -77,7 +78,7 @@ class QueueRecovery(unittest.TestCase):
  def test_39_sessions_two_workers_share_bounded_status_captures(self):
   jobs=[capacity_fixture.LiveCapacity.add(self,'TEST'+str(i)+'.US',i,due=self.now.timestamp()-40+i) for i in range(39)]
   from hotwatch_service import serialized_database
-  connect=serialized_database(app.connect);workers=[adapters.EODHDAdapter(connect,1) for _ in range(2)];calls=[];lock=threading.Lock()
+  connect=serialized_database(app.connect);workers=[adapters.EODHDAdapter(connect,1) for _ in range(2)];calls=[];deferred=[];lock=threading.Lock()
   with connect() as c:
    for job in jobs[:22]:c.execute("UPDATE hw_sessions SET request=json_set(request,'$.watch_mode','exit') WHERE id=?",(job['id'],))
   old=(self.now-timedelta(hours=6)).isoformat()
@@ -91,9 +92,17 @@ class QueueRecovery(unittest.TestCase):
    for job in jobs[i::2]:
     symbol=job['request_data']['provider_symbol'].removesuffix('.US')
     value=workers[i].capture(Client(),'us_status',symbol,job)
+    if value['status']=='COLLECTING':
+     with lock:deferred.append((i,job,symbol))
+     continue
     self.assertEqual(value['messages'][0]['event_time'],old)
     with connect() as c:c.execute('UPDATE hw_sessions SET next_due=? WHERE id=?',(self.now.timestamp()+60,job['id']))
-  with patch.dict(os.environ,{'ESCAPE_EODHD_API_KEY':'queue-test-39'}),patch('hotwatch_adapters.utc',return_value=self.now),patch('hotwatch_engine.verified_automatic_feed',return_value=True),ThreadPoolExecutor(max_workers=2) as pool:list(pool.map(worker,range(2)))
+  with patch.dict(os.environ,{'ESCAPE_EODHD_API_KEY':'queue-test-39'}),patch('hotwatch_adapters.utc',return_value=self.now),patch('hotwatch_engine.verified_automatic_feed',return_value=True):
+   with ThreadPoolExecutor(max_workers=2) as pool:list(pool.map(worker,range(2)))
+   for i,job,symbol in deferred:
+    value=workers[i].capture(Client(),'us_status',symbol,job)
+    self.assertEqual(value['messages'][0]['event_time'],old)
+    with connect() as c:c.execute('UPDATE hw_sessions SET next_due=? WHERE id=?',(self.now.timestamp()+60,job['id']))
   self.assertLessEqual(len(calls),6);self.assertLessEqual(sum(calls),60)
   with connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
  def test_empty_worker_rejoins_when_other_scan_completes(self):

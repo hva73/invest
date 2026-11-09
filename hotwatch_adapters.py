@@ -341,45 +341,44 @@ class EODHDAdapter:
    messages=value.get('messages',[]);latest=max(messages,key=lambda m:stamp(m['event_time'])) if messages else {}
    age=(utc()-stamp(latest['event_time'])).total_seconds() if latest.get('event_time') else None
    received_age=(utc()-stamp(latest['received_at'])).total_seconds() if latest.get('received_at') else None
-   self.capture_metrics.append({'source_age_s':round(age,3) if age is not None else None,'received_age_s':round(received_age,3) if received_age is not None else None,'feed':feed,'subscriptions_sent':0 if reused else value.get('subscriptions_sent'),'connections_opened':0 if reused else value.get('connections_opened'),'batch_symbols':symbols,'capture_attempts':0 if reused else 1,'cache_hit':reused,'status':value.get('status'),'wait_ms':round((time.monotonic()-capture_started)*1000,3),'messages':len(value.get('messages',[]))})
+   self.capture_metrics.append({'source_age_s':round(age,3) if age is not None else None,'received_age_s':round(received_age,3) if received_age is not None else None,'feed':feed,'subscriptions_sent':0 if reused else value.get('subscriptions_sent'),'connections_opened':0 if reused else value.get('connections_opened'),'batch_symbols':symbols,'capture_attempts':0 if reused else 1,'cache_hit':reused and value.get('status')!='COLLECTING','status':value.get('status'),'wait_ms':round((time.monotonic()-capture_started)*1000,3),'messages':len(value.get('messages',[]))})
    return value
   if not self._shared_quotes or self.connect is None or session.get('id') is None or req.get('is_test'):
    return record(client.capture(feed,symbol,duration=2),1,False)
   credential=hashlib.sha256(os.environ.get('ESCAPE_EODHD_API_KEY','').strip().encode()).digest()
   profile=json.loads(session.get('state') or '{}').get('adaptive_profile') or req['profile']
-  cache_ttl=min(20,PROFILES.get(profile,60))
   key=(self.uid,credential,feed,symbol)
   group=(self.uid,credential,feed)
-  while True:
-   with _ws_batch_lock:
-    cached=_ws_batch_cache.get(key);now=time.monotonic()
-    # A status event may predate this capture by hours. Share the response
-    # briefly, including its unchanged timestamp; poll() still rejects stale
-    # status evidence. Reconnecting cannot make the same event more recent.
-    usable=cached and (cached[1].get('status')=='NO_MESSAGES' or feed.endswith('_status') and cached[1].get('status')=='OK' or any(m.get('event_time') and 0<=(utc()-stamp(m['event_time'])).total_seconds()<=req['risk']['max_quote_age_s'] for m in cached[1].get('messages',[])))
-    if usable and 0<=now-cached[0]<cache_ttl:return record(copy.deepcopy(cached[1]),0,True)
-    waiting=_ws_batch_inflight.get(group)
-    if waiting is None:
-     waiting=threading.Event();_ws_batch_inflight[group]=waiting;leader=True
-    else:leader=False
-   if leader:break
-   # Wait without holding the global cache lock. An unrelated feed or user
-   # can continue while this batch is being collected.
-   waiting.wait()
+  def reusable(cached,request,profile,allow_older=False):
+   if not cached:return False
+   value=cached[1];age=time.monotonic()-cached[0]
+   fresh=any(m.get('event_time') and 0<=(utc()-stamp(m['event_time'])).total_seconds()<=min(request['risk']['max_quote_age_s'],GLOBAL_RISK['max_quote_age_s']) for m in value.get('messages',[]))
+   recent=0<=age<min(20,PROFILES.get(profile,60))
+   return (recent and (fresh or value.get('status')=='NO_MESSAGES' or feed.endswith('_status') and value.get('status')=='OK')) or (allow_older and age>=0 and fresh)
+  with _ws_batch_lock:
+   cached=_ws_batch_cache.get(key);collecting=group in _ws_batch_inflight
+   # A running capture must not tie up both workers. A still-fresh observation
+   # can be analysed immediately, with its original source/receive timestamps.
+   if reusable(cached,req,profile,allow_older=collecting):return record(copy.deepcopy(cached[1]),0,True)
+   if collecting:return record({'status':'COLLECTING','messages':[]},0,True)
+   _ws_batch_inflight[group]=True
   try:
-   # Include watches due within the 20-second cache lifetime. Their lease and
-   # calculation schedule remain unchanged; only raw provider data is shared.
+   # Fill the existing batch with due watches that lack a reusable response.
+   # Do not spend its ten slots repeatedly subscribing to already cached data.
    market='us' if feed.startswith('us_') else 'eu';symbols=[symbol]
    allowed_eu={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}
    from hotwatch_engine import verified_automatic_feed,capacity
    with self.connect() as c:
-    rows=c.execute("SELECT s.request FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND s.next_due<=? AND json_extract(s.request,'$.provider')='eodhd' ORDER BY s.next_due,CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,s.id LIMIT ?",(self.uid,utc().timestamp()+15,capacity())).fetchall()
+    rows=c.execute("SELECT s.request,s.state FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND s.next_due<=? AND json_extract(s.request,'$.provider')='eodhd' ORDER BY s.next_due,CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,s.id LIMIT ?",(self.uid,utc().timestamp()+15,capacity())).fetchall()
     for row in rows:
      candidate=json.loads(row['request']);full=candidate.get('provider_symbol') or ''
      if not isinstance(full,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',full):continue
      if (market=='us')!=full.endswith('.US') or (market=='eu' and ('.' not in full or full.rsplit('.',1)[1].upper() not in allowed_eu)):continue
-     if not verified_automatic_feed(c,self.uid,candidate,utc()):continue
      stream=realtime_symbol(full)
+     candidate_profile=json.loads(row['state'] or '{}').get('adaptive_profile') or candidate['profile']
+     with _ws_batch_lock:
+      if reusable(_ws_batch_cache.get((self.uid,credential,feed,stream)),candidate,candidate_profile):continue
+     if not verified_automatic_feed(c,self.uid,candidate,utc()):continue
      if stream not in symbols:symbols.append(stream)
      if len(symbols)>=10:break
 
@@ -405,7 +404,7 @@ class EODHDAdapter:
     return copy.deepcopy(_ws_batch_cache[key][1])
   finally:
    with _ws_batch_lock:
-    _ws_batch_inflight.pop(group,None);waiting.set()
+    _ws_batch_inflight.pop(group,None)
 
  def poll(self,session):
   self.last_partial_observations=[];self.capture_metrics=[]
@@ -457,6 +456,7 @@ class EODHDAdapter:
    if partial:
     item=partial[-1];self.last_partial_observations.append({'source':'eodhd','price':item.get('price'),'currency':r.get('quote_currency'),'source_time':None,'received_at':item.get('received_at'),'quality':'TIME_UNKNOWN','trade_size':item.get('trade_size')})
    self.last_feed_diagnostics={'websocket_trade_status':feed['status']}
+   if feed['status']=='COLLECTING':raise DataUnavailable('FEED_COLLECTING')
    if feed['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
    if feed['status']=='RATE_LIMIT':
     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=feed.get('retry_after_s') or retry_seconds(None);raise failure
@@ -464,6 +464,7 @@ class EODHDAdapter:
    if feed['status'] in ('OK','NO_MESSAGES') and not valid and os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
     standalone=self.capture(client,market+'_quotes',stream_symbol,session)
     self.last_feed_diagnostics['websocket_quote_status']=standalone.get('status')
+    if standalone.get('status')=='COLLECTING':raise DataUnavailable('FEED_COLLECTING')
     if standalone.get('status')=='RATE_LIMIT':
      failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=standalone.get('retry_after_s') or retry_seconds(None);raise failure
     quotes=standalone.get('messages',[]);partial_quotes=standalone.get('partial_messages',[])
@@ -490,7 +491,7 @@ class EODHDAdapter:
        item=partial_quotes[-1];self.last_partial_observations.append({'source':'eodhd','price':None,'currency':r.get('quote_currency'),'source_time':None,'received_at':item.get('received_at'),'quality':'TIME_UNKNOWN','bid':item.get('bid'),'ask':item.get('ask')})
       if quote_feed['status']=='LOCAL_BUDGET_EXHAUSTED':
        self.last_feed_diagnostics['websocket_quote_status']='LOCAL_BUDGET_EXHAUSTED';return sample
-      status_feed=self.capture(client,market+'_status',stream_symbol,session) if quote_feed['status']!='RATE_LIMIT' else {'status':'RATE_LIMIT'}
+      status_feed=self.capture(client,market+'_status',stream_symbol,session) if quote_feed['status'] not in ('RATE_LIMIT','COLLECTING') else {'status':quote_feed['status']}
       self.last_feed_diagnostics.update(websocket_quote_status=quote_feed['status'],websocket_status_status=status_feed['status'])
       now=utc();max_age=r['risk']['max_quote_age_s']
       fresh=lambda item:bool(item.get('event_time') and 0<=(now-stamp(item['event_time'])).total_seconds()<=max_age)

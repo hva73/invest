@@ -1129,7 +1129,7 @@ def claim(connect,now=None,watch_id=None):
   c.execute('BEGIN IMMEDIATE')
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
   concurrency=max(1,min(10,int(os.environ.get('ESCAPE_HW_CONCURRENCY','2'))))
-  if c.execute('SELECT count(*) FROM hw_sessions WHERE lease_until>?',(now.timestamp(),)).fetchone()[0]>=concurrency:return None
+  if c.execute('SELECT count(*) FROM hw_sessions WHERE lease_owner IS NOT NULL AND lease_until>?',(now.timestamp(),)).fetchone()[0]>=concurrency:return None
   # next_due already encodes each watch's urgency and polling profile.
   # Serve the earliest deadline first; exits/catalysts break equal deadlines.
   # Giving newly due holdings absolute priority until candidates missed a
@@ -1142,9 +1142,14 @@ def claim(connect,now=None,watch_id=None):
   c.execute("UPDATE hw_sessions SET status=CASE WHEN status='CREATED' THEN 'VALIDATING' ELSE status END,lease_owner=?,lease_until=? WHERE id=?",(owner,now.timestamp()+120,row['id']))
   return dict(row,lease_owner=owner,request_data=request)
 
-def release(connect,job,now=None,sample=None):
+def release(connect,job,now=None,sample=None,pending_feed=False):
  now=now or utc();request=job['request_data']
  with connect() as c:
+  if pending_feed:
+   # Yield the worker for the existing 2s queue rhythm. Preserve next_due so
+   # retry latency and deadline ordering still include the original wait.
+   c.execute('UPDATE hw_sessions SET lease_owner=NULL,lease_until=? WHERE id=? AND lease_owner=?',(now.timestamp()+2,job['id'],job['lease_owner']))
+   return
   profile=json.loads(job.get('state') or '{}').get('adaptive_profile') or request['profile']
   interval=observation_poll_interval(c,request,profile,now,sample)
   c.execute("UPDATE hw_sessions SET next_due=?,state=json_set(state,'$.scheduled_interval_s',?),lease_owner=NULL,lease_until=0 WHERE id=? AND lease_owner=?",(now.timestamp()+interval,interval,job['id'],job['lease_owner']))

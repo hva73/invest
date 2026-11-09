@@ -880,8 +880,10 @@ class HotWatch(unittest.TestCase):
   try:
    with patch.dict(os.environ,{'ESCAPE_EODHD_API_KEY':'test-only'}),ThreadPoolExecutor(max_workers=2) as pool:
     first=pool.submit(adapter.capture,Client(),'us_trades','MERC',job);self.assertTrue(entered.wait(2))
-    second=pool.submit(adapter.capture,Client(),'us_trades','MERC',job);release.set()
-    self.assertEqual(first.result(timeout=3)['status'],'NO_MESSAGES');self.assertEqual(second.result(timeout=3)['status'],'NO_MESSAGES');self.assertEqual(calls,['us_trades'])
+    second=pool.submit(adapter.capture,Client(),'us_trades','MERC',job)
+    self.assertEqual(second.result(timeout=1)['status'],'COLLECTING');release.set()
+    self.assertEqual(first.result(timeout=3)['status'],'NO_MESSAGES')
+    self.assertEqual(adapter.capture(Client(),'us_trades','MERC',job)['status'],'NO_MESSAGES');self.assertEqual(calls,['us_trades'])
   finally:release.set();adapters._ws_batch_cache.clear()
  def test_five_concurrent_scans_record_without_busy_in_local_database(self):
   import threading

@@ -857,7 +857,7 @@ class Runner:
   now=now or engine.utc();claim_started=time.perf_counter();job=engine.claim(self.connect,now,watch_id);claimed=engine.utc()
   if not job:return False
   job['scan_timing']={'next_due_at':engine.datetime.fromtimestamp(job['next_due'],engine.timezone.utc).isoformat(),'claimed_at':claimed.isoformat(),'claim_ms':round((time.perf_counter()-claim_started)*1000,3),'queue_ms':max(0,round((claimed.timestamp()-job['next_due'])*1000,3))}
-  uid=job['user_id'];r=job['request_data'];wid=job['watch_id'];mode=bool(job['is_test']);lease=job['lease_owner'];adapter=None;uses_realtime_history=False
+  uid=job['user_id'];r=job['request_data'];wid=job['watch_id'];mode=bool(job['is_test']);lease=job['lease_owner'];adapter=None;uses_realtime_history=False;pending_feed=False
   try:
    poll_started=time.perf_counter();job['scan_timing']['poll_started_at']=engine.utc().isoformat()
    if r['end_at'] and stamp(r['end_at'])<=now:
@@ -897,6 +897,11 @@ class Runner:
     if (journaled_at-stamp(sample['event_time'])).total_seconds()>r['risk']['max_quote_age_s']:engine.fault(self.connect,uid,wid,mode,'DATA_STALE',lease=lease)
     else:engine.release(self.connect,job,journaled_at,sample=sample)
   except EngineError as error:
+   if error.code=='FEED_COLLECTING':
+    pending_feed=True
+    engine.release(self.connect,job,engine.utc(),pending_feed=True)
+    self.log(job,'deferred',error.code,{'websocket':getattr(adapter,'capture_metrics',[]),'provider_ms':round((time.perf_counter()-poll_started)*1000,3)})
+    return True
    if error.code in ['lease_lost','watch_not_running','kill_switch_active','operator_kill_switch']:
     self.log(job,'cancelled',error.code);return True
    self.partials(job,adapter,getattr(error,'partial_observation',None))
@@ -930,7 +935,7 @@ class Runner:
   finally:
    # The live scan and its risk decision finish first. Historical analysis
    # cannot create signals, and its failure cannot fault the live scan.
-   if r['provider']=='eodhd' and not mode and not uses_realtime_history:
+   if r['provider']=='eodhd' and not mode and not uses_realtime_history and not pending_feed:
     try:
      import hotwatch_warmup
      hotwatch_warmup.refresh(self.connect,job,engine.utc())
