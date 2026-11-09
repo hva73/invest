@@ -117,6 +117,21 @@ class FeedTests(unittest.TestCase):
     return {'status':'LOCAL_BUDGET_EXHAUSTED'}
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
   self.assertEqual(sample['price'],'45.2');self.assertEqual(sample['trade_size'],'7');self.assertIsNone(sample['volume']);self.assertEqual(sample['market_status'],'REGULAR');self.assertIsNone(sample['bid']);self.assertEqual(adapter.last_feed_diagnostics['websocket_quote_status'],'LOCAL_BUDGET_EXHAUSTED')
+ def test_live_trade_survives_downstream_rate_limit_with_available_quote(self):
+  from test_hotwatch_engine import request
+  req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0)
+  for limited_feed in ('us_quotes','us_status'):
+   with self.subTest(limited_feed=limited_feed):
+    adapter=EODHDAdapter(None,1,Opener({}))
+    class Feeds:
+     def capture(self,feed,*args,**kwargs):
+      if feed==limited_feed:return {'status':'RATE_LIMIT','messages':[]}
+      if feed=='us_trades':return {'status':'OK','messages':[{'event_time':now.isoformat(),'price':'45.2','trade_size':'7','market_session':'extended-hours'}]}
+      if feed=='us_quotes':return {'status':'OK','messages':[{'event_time':now.isoformat(),'bid':'45.1','ask':'45.3'}]}
+      return {'status':'OK','messages':[]}
+    with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
+    self.assertEqual(sample['price'],'45.2');self.assertEqual(sample['trade_size'],'7');self.assertEqual(sample['market_status'],'UNKNOWN');self.assertIsNone(sample['volume'])
+    self.assertEqual(sample['bid'],'45.1' if limited_feed=='us_status' else None)
  def test_ws_trade_quote_status_and_no_messages(self):
   for feed,msg,field in [('us_trades',{'s':'AMD','t':1730000000000,'p':10,'v':5,'ms':'open'},'price'),('us_quotes',{'s':'AMD','t':1730000000000,'bp':10,'ap':11},'bid'),('us_status',{'s':'AMD','t':1730000000000,'h':'T'},'trading_status')]:
    ws=WS([msg]);client=EODHDFeeds(SECRET,ws_factory=lambda *a,**k:ws);result=client.capture(feed,'AMD',1)

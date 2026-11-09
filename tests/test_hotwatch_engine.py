@@ -486,6 +486,27 @@ class HotWatch(unittest.TestCase):
   events=engine.history(app.connect,1,req['watch_id'],True)['items'];observed=[x for x in events if x['event_type']=='PARTIAL_MARKET_OBSERVATION']
   self.assertEqual(len(observed),1);self.assertEqual(observed[0]['data_timestamp'],self.now.isoformat());self.assertEqual(observed[0]['data']['supporting_metrics']['bid'],'99')
   self.assertEqual(engine.item(app.connect,1,req['watch_id'],True)['session']['signal'],'NO_DATA');self.assertEqual(self.counts()['hw_samples'],0)
+ def test_us_trade_reaches_database_and_calculation_when_status_is_rate_limited(self):
+  from hotwatch_service import Runner
+  class Feeds:
+   def capture(self,feed,*args,**kwargs):
+    if feed=='us_trades':return {'status':'OK','messages':[{'event_time':self_now.isoformat(),'received_at':self_now.isoformat(),'price':'25.93','trade_size':'20','market_session':'extended-hours'}]}
+    if feed=='us_quotes':return {'status':'OK','messages':[{'event_time':self_now.isoformat(),'received_at':self_now.isoformat(),'bid':'25.80','ask':'25.99'}]}
+    return {'status':'RATE_LIMIT','messages':[]}
+  self_now=self.now;engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  req=copy.deepcopy(self.req);req.update(watch_id='us-hims-trace',purpose='synthetic HIMS trace',provider='eodhd',provider_symbol='HIMS.US',watch_mode='entry');engine.create(app.connect,1,req,self.now)
+  adapter=EODHDAdapter(app.connect,1,object());runner=Runner(app.connect);runner.adapters[(1,'eodhd')]=adapter
+  with patch('hotwatch_engine.utc',return_value=self.now),patch('hotwatch_adapters.utc',return_value=self.now),patch.object(adapter,'feeds',return_value=Feeds()),patch.object(adapter.pluto,'safe_context',return_value=unknown_context()),patch('hotwatch_warmup.refresh'),patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}):
+   self.assertTrue(runner.once(self.now,watch_id=req['watch_id']))
+  samples=engine.history(app.connect,1,req['watch_id'],True,'samples')['items'];self.assertEqual(len(samples),1)
+  data=samples[0]['data'];self.assertEqual((data['price'],data['trade_size'],data['bid'],data['ask']),('25.93','20','25.80','25.99'));self.assertEqual(data['event_time'],self.now.isoformat());self.assertIsNone(data['volume'])
+  view=engine.item(app.connect,1,req['watch_id'],True)['session'];self.assertNotEqual(view['last_computed_signal'],'BUY');self.assertIsNotNone(view['last_calculation_at'])
+  # A repeated trade must not suppress a new independently timestamped quote.
+  with app.connect() as c:c.execute('UPDATE hw_sessions SET next_due=? WHERE watch_id=?',(self.now.timestamp(),req['watch_id']))
+  with patch('hotwatch_engine.utc',return_value=self.now),patch('hotwatch_adapters.utc',return_value=self.now),patch.object(adapter,'feeds',return_value=Feeds()),patch.object(adapter.pluto,'safe_context',return_value=unknown_context()),patch('hotwatch_warmup.refresh'),patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}):
+   self.assertTrue(runner.once(self.now,watch_id=req['watch_id']))
+  events=engine.history(app.connect,1,req['watch_id'],True)['items'];quotes=[e['data']['supporting_metrics'] for e in events if e['event_type']=='PARTIAL_MARKET_OBSERVATION']
+  self.assertEqual(quotes[-1]['quality'],'QUOTE_ONLY');self.assertEqual(quotes[-1]['bid'],'25.80');self.assertEqual(len(engine.history(app.connect,1,req['watch_id'],True,'samples')['items']),1)
  def test_processing_errors_expose_only_safe_category_and_do_not_create_signal(self):
   from hotwatch_service import Runner
   from unittest.mock import Mock

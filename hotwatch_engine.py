@@ -882,9 +882,9 @@ def record_partial_observation(connect,uid,wid,mode,observation,now=None,lease=N
  """Journal an incomplete price or quote without a signal sample."""
  now=now or utc()
  base={'source','price','currency','source_time','received_at','quality'}
- if not isinstance(observation,dict) or not base<=set(observation) or set(observation)-base-{'bid','ask','trade_size'} or observation['source'] not in ('pluto','eodhd') or observation['quality'] not in ('TIME_UNKNOWN','TRADE_MISSING'):raise EngineError('invalid_partial_observation')
+ if not isinstance(observation,dict) or not base<=set(observation) or set(observation)-base-{'bid','ask','trade_size'} or observation['source'] not in ('pluto','eodhd') or observation['quality'] not in ('TIME_UNKNOWN','TRADE_MISSING','QUOTE_ONLY'):raise EngineError('invalid_partial_observation')
  if observation['quality']=='TIME_UNKNOWN' and observation['source_time'] is not None:raise EngineError('invalid_partial_observation')
- if observation['quality']=='TRADE_MISSING':
+ if observation['quality'] in ('TRADE_MISSING','QUOTE_ONLY'):
   try:
    if observation['source']!='eodhd' or not observation['source_time'] or stamp(observation['source_time'])>now:raise ValueError()
   except (ValueError,TypeError,AttributeError):raise EngineError('invalid_partial_observation') from None

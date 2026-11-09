@@ -408,6 +408,15 @@ class EODHDAdapter:
      if session.get('id') is not None:
       with self.connect() as c:old=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(session['id'],'eodhd',sample['sample_id'])).fetchone()
       if old:
+       # The latest trade can be unchanged while the order book moves. Keep
+       # the new quote separately rather than mutating an immutable trade.
+       if os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
+        quote_feed=self.capture(client,market+'_quotes',stream_symbol,session)
+        self.last_feed_diagnostics['websocket_quote_status']=quote_feed.get('status')
+        quotes=quote_feed.get('messages',[])
+        if quotes:
+         q=max(quotes,key=lambda x:stamp(x['event_time']))
+         if q.get('bid') is not None or q.get('ask') is not None:self.last_partial_observations.append({'source':'eodhd','price':None,'currency':currency,'source_time':q['event_time'],'received_at':q.get('received_at'),'quality':'QUOTE_ONLY','bid':q.get('bid'),'ask':q.get('ask')})
        previous=json.loads(old['payload']);previous['context']=context;return previous
      if os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
       quote_feed=self.capture(client,market+'_quotes',stream_symbol,session)
@@ -418,14 +427,14 @@ class EODHDAdapter:
        self.last_feed_diagnostics['websocket_quote_status']='LOCAL_BUDGET_EXHAUSTED';return sample
       status_feed=self.capture(client,market+'_status',stream_symbol,session) if quote_feed['status']!='RATE_LIMIT' else {'status':'RATE_LIMIT'}
       self.last_feed_diagnostics.update(websocket_quote_status=quote_feed['status'],websocket_status_status=status_feed['status'])
-      if 'RATE_LIMIT' in (quote_feed['status'],status_feed['status']):
-       failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
       now=utc();max_age=r['risk']['max_quote_age_s']
       fresh=lambda item:bool(item.get('event_time') and 0<=(now-stamp(item['event_time'])).total_seconds()<=max_age)
       quotes=[x for x in quote_feed.get('messages',[]) if fresh(x) and x.get('bid') and x.get('ask') and Decimal(x['bid'])>0 and Decimal(x['ask'])>=Decimal(x['bid'])]
       if quotes:
        q=max(quotes,key=lambda x:stamp(x['event_time']));sample.update(bid=q['bid'],ask=q['ask'],bid_at=q['event_time'],ask_at=q['event_time'],quote_feed=market+'_quotes')
-      if status_feed['status']=='LOCAL_BUDGET_EXHAUSTED':return sample
+      # A subsequent quote/status failure must not discard an already
+      # received trade. Missing evidence remains unknown and cannot permit BUY.
+      if quote_feed['status']=='RATE_LIMIT' or status_feed['status'] in ('RATE_LIMIT','LOCAL_BUDGET_EXHAUSTED'):return sample
       statuses=[x for x in status_feed.get('messages',[]) if fresh(x) and x.get('trading_status')]
       if statuses and trade.get('market_session')=='open':
        status=max(statuses,key=lambda x:stamp(x['event_time']))
@@ -433,8 +442,7 @@ class EODHDAdapter:
        else:sample.update(market_status='UNKNOWN',session_key=at.date().isoformat()+':UNKNOWN');sample.pop('status_at',None);sample.pop('status_feed',None)
       if sample['market_status']=='UNKNOWN' and trade.get('market_session') in ('extended-hours','extended hours') and (not statuses or max(statuses,key=lambda x:stamp(x['event_time']))['trading_status']=='T'):
        schedule=client.market_status(exchange);self.last_feed_diagnostics['exchange_status']=schedule['status']
-       if schedule['status']=='RATE_LIMIT':
-        failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+       if schedule['status']=='RATE_LIMIT':return sample
        phase=extended_session(trade,schedule,utc(),max_age)
        if phase:
         # After-hours trading can cross midnight UTC while remaining on the
@@ -445,13 +453,11 @@ class EODHDAdapter:
       if sample['market_status']=='REGULAR' and os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1':
        schedule=client.market_status(exchange);self.last_feed_diagnostics['exchange_status']=schedule['status']
        if schedule['status']=='LOCAL_BUDGET_EXHAUSTED':return sample
-       if schedule['status']=='RATE_LIMIT':
-        failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+       if schedule['status']=='RATE_LIMIT':return sample
        if schedule.get('status')=='OK' and schedule.get('exchange_open') is True and schedule.get('calendar') and schedule.get('timezone'):
         bars=client.minute_bars(market,stream_symbol);self.last_feed_diagnostics['minute_bars_status']=bars['status']
         if bars['status']=='LOCAL_BUDGET_EXHAUSTED':return sample
-        if bars['status']=='RATE_LIMIT':
-         failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+        if bars['status']=='RATE_LIMIT':return sample
         if bars['status']=='OK':
          try:
           from zoneinfo import ZoneInfo
