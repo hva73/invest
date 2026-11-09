@@ -284,7 +284,24 @@ JOIN report_candidate_links l ON l.rowid=(
  WHERE newer.user_id=? AND newer.is_test=0 AND newer.candidate_id=ids.candidate_id AND nr.report_type!='deep_analysis' AND newer.generated<=?
  ORDER BY newer.generated DESC,newer.report_row_id DESC LIMIT 1)
 JOIN ingested_reports r ON r.id=l.report_row_id
-ORDER BY l.generated DESC,r.id DESC,(SELECT CAST(j.key AS INTEGER) FROM json_each(r.payload,'$.candidates') j WHERE json_extract(j.value,'$.candidate_id')=l.candidate_id LIMIT 1)"""
+ORDER BY l.generated DESC,r.id DESC"""
+
+def discovery_candidate_order(rows):
+ """Sort candidates within each report after releasing the database read scope."""
+ cache={}
+ def position(row):
+  if row['id'] not in cache:
+   candidates=json.loads(row['payload']).get('candidates',[])
+   positions={}
+   for i,item in enumerate(candidates):
+    if isinstance(item,dict):positions.setdefault(item.get('candidate_id'),i)
+   cache[row['id']]=positions
+  index=cache[row['id']].get(row['candidate_id'])
+  return (index is not None,index if index is not None else 0)
+ # SQL already ordered the report groups; sorting within each group preserves
+ # its NULL-first candidate order without repeatedly parsing JSON in SQLite.
+ from itertools import groupby
+ return [row for _,group in groupby(rows,key=lambda r:(r['generated'],r['id'])) for row in sorted(group,key=position)]
 
 def auto_discover(connect,cursor=0):
  """Optional worker path, bounded by existing capacity and provider budgets."""
@@ -304,6 +321,7 @@ def auto_discover(connect,cursor=0):
    cleared={r[0] for r in c.execute('SELECT DISTINCT candidate_id FROM report_candidate_links WHERE user_id=? AND is_test=0 AND report_row_id<=?',(uid,radar_reset['report_cutoff']))} if radar_reset else set()
    rows=c.execute(DISCOVERY_CANDIDATES_SQL,(uid,uid,now.timestamp())).fetchall()
   if rows:
+   rows=discovery_candidate_order(rows)
    candidate=None;report=None;report_cache={}
    with connect() as c:
     for offset in range(len(rows)):
