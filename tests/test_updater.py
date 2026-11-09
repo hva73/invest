@@ -1,8 +1,41 @@
-import sqlite3,tempfile,unittest,os,fcntl
+import sqlite3,tempfile,unittest,os,fcntl,ast,shutil,subprocess,sys,json
 from pathlib import Path
 from unittest.mock import patch
 import apply_update
 class Updater(unittest.TestCase):
+ def test_installed_release_starts_without_source_checkout_on_import_path(self):
+  root=Path(apply_update.__file__).resolve().parent
+  with tempfile.TemporaryDirectory() as d:
+   source,target=self.fixture(Path(d))
+   for name in apply_update.FILES:shutil.copyfile(root/name,source/name)
+   apply_update.apply(source,target)
+   env={k:v for k,v in os.environ.items() if not k.startswith(('ESCAPE_','PLUTO_','PYTHONPATH'))}
+   env.update(ESCAPE_DB=str(target/'var/escape.db'),ESCAPE_HW_AUTOSUPERVISE='0')
+   probe='''import sys,io,json
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import passenger_wsgi,hotwatch_service,eodhd_capacity
+status=[]
+body=b''.join(passenger_wsgi.application({'PATH_INFO':'/api/health','REQUEST_METHOD':'GET','REMOTE_ADDR':'test','wsgi.input':io.BytesIO(b'')},lambda s,h:status.append(s)))
+assert status==['200 OK'],status
+assert json.loads(body)['database'] is True
+assert Path(eodhd_capacity.__file__).parent==Path(sys.argv[1])
+print('INSTALLED_RELEASE_HEALTH_PASS')
+'''
+   result=subprocess.run([sys.executable,'-I','-c',probe,str(target)],cwd=target,env=env,capture_output=True,text=True,timeout=30)
+   self.assertEqual(result.returncode,0,result.stderr)
+   self.assertIn('INSTALLED_RELEASE_HEALTH_PASS',result.stdout)
+   with sqlite3.connect(target/'var/escape.db') as c:self.assertEqual(c.execute('SELECT value FROM preserved').fetchone()[0],'private-data')
+ def test_manifest_contains_local_runtime_imports(self):
+  root=Path(apply_update.__file__).resolve().parent;missing=set()
+  for name in apply_update.FILES:
+   if not name.endswith('.py'):continue
+   for node in ast.walk(ast.parse((root/name).read_text())):
+    modules=[a.name for a in node.names] if isinstance(node,ast.Import) else [node.module] if isinstance(node,ast.ImportFrom) and node.module else []
+    for module in modules:
+     dependency=module.split('.')[0]+'.py'
+     if (root/dependency).is_file() and dependency not in apply_update.FILES:missing.add((name,dependency))
+  self.assertEqual(missing,set(),'Installer omits local runtime imports: '+repr(sorted(missing)))
  def fixture(self,root):
   target=root/'escape_app';source=target/'opdatering/release';source.mkdir(parents=True);(target/'var').mkdir()
   with sqlite3.connect(target/'var/escape.db') as c:c.execute('CREATE TABLE preserved(value)');c.execute("INSERT INTO preserved VALUES('private-data')")
@@ -37,6 +70,12 @@ class Updater(unittest.TestCase):
    source,target=self.fixture(Path(d));(source/'oauth.py').unlink()
    with self.assertRaises(ValueError):apply_update.apply(source,target)
    self.assertEqual((target/'app.py').read_text(),'old code')
+ def test_missing_capacity_module_is_rejected_before_existing_code_changes(self):
+  with tempfile.TemporaryDirectory() as d:
+   source,target=self.fixture(Path(d));(source/'eodhd_capacity.py').unlink()
+   with self.assertRaises(ValueError):apply_update.apply(source,target)
+   self.assertEqual((target/'app.py').read_text(),'old code')
+   self.assertFalse((target/'hotwatch_warmup.py').exists())
  def test_partial_copy_rolls_back(self):
   with tempfile.TemporaryDirectory() as d:
    source,target=self.fixture(Path(d));original=apply_update.os.replace;calls=[]

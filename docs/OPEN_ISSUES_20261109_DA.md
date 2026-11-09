@@ -296,3 +296,16 @@ Planlæggeren tæller faktiske HTTP-ruter og fælles rådata, ikke tre HTTP-kald
 
 
 **Test af 80 %-pakken:** 795 Python-tests PASS (81,602 sekunder) på den endelige kode. Herunder ti samtidige tråde mod en midlertidig SQLite-database: præcis 800 af 810 reservationsforsøg accepteres i ét minut, og det næste minut åbner igen. Tests dækker lavere provider-headere, delt remaining/429-backoff, HTTP kontra dagsenheder, separat WS-kapacitet og frigivelse, filtreret kontolæsning, døgnskift, deling af historie mellem fem samtidige læsere, fem aktiers delte feed, hurtig profils cacheudløb, BRK.B/Ferg-identitet, manglende handelsdata og uændrede risikoregler. Netværksadgangen testes uden en åben SQLite-skrivetransaktion. Dette er syntetiske regressioner og lokal samtidighed, ikke 800 rigtige EODHD-requests eller en produktionsmåling. Ingen handelsforslag eller ordrer. Endelig syntax-kontrol og diff-kontrol PASS. Ingen frontendændringer i denne pakke.
+
+
+### Kritisk installationsfejl efter 535550e — 9. november 2026
+
+Ejeren meldte HTTP 500 efter installation. Direkte browserkontrol af /api/health viste 500, og både sync_hot_watch og get_latest_report fejlede. Den modtagne SSL-adgangslog sluttede kl. 18.23.43 dansk tid og indeholdt ikke den aktuelle Python-fejl. Skærmbilledet kl. 19.01 viser eodhd_capacity.py i den udpakkede release, hvilket ikke bekræfter installation i driftsmappen.
+
+**Påvist og reproduceret fejl:** Codex havde tilføjet eodhd_capacity.py til koden, men glemt filen i apply_update.FILES. Den almindelige installer kopierede derfor afhængige moduler uden kapacitetsmodulet. En installation i en isoleret midlertidig appmappe fejlede ved Passenger-opstart: app.init → hotwatch_engine.init → hotwatch_warmup → ModuleNotFoundError: eodhd_capacity. Dette er en installationsregression i pakken; serverens præcise traceback er fortsat ikke hentet.
+
+**Rettet:** eodhd_capacity.py er nu med i den eksisterende installationsliste. Ingen ændringer af motor, strategi, kapacitetsgrænser eller handelsmandat i denne rettelse. Den nye regression installerer de rigtige releasefiler, starter Passenger i en separat Python-proces med isoleret importsti og kontrollerer /api/health = 200 og bevaret databaseindhold. En supplerende test kontrollerer alle lokale imports i installerens Python-filer mod installationslisten. En ufuldstændig pakke uden kapacitetsmodulet afvises før udskiftning af eksisterende kode.
+
+**Test:** De to nye installationskontroller fejlede på den publicerede 535550e-installer. Efter rettelsen består alle 11 installer-/WSGI-tests, inklusive reel isoleret opstart, health, login, backup og rollback. De tidligere 795 kildekodetests beviste ikke, at installerens filliste var komplet; den mangel er nu dækket. Diff-kontrol PASS.
+
+**Næste skridt:** Brug apply_update.py fra den nye udpakkede pakke og genstart Python-appen efter det normale installationsflow. Bekræft /api/health, login og MCP-læsning, derefter motorens 80 %-kapacitet, faktisk kildefriskhed og øvrige åbne punkter. Produktionens gendannelse er AFVENTER INSTALLATION/READBACK.
