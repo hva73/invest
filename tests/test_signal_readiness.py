@@ -75,7 +75,24 @@ class SignalReadiness(unittest.TestCase):
    self.assertEqual(c.execute('SELECT count(*) FROM hw_samples WHERE watch_row_id=(SELECT id FROM hw_sessions WHERE watch_id=?)',(self.req['watch_id'],)).fetchone()[0],1)
    self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
   conflict=copy.deepcopy(new);conflict.update(price='101',close='101',high='101.1')
-  with self.assertRaisesRegex(EngineError,'sample_id_conflict'):engine.ingest(app.connect,1,self.req['watch_id'],True,conflict,later)
+  with self.assertRaisesRegex(EngineError,'sample_id_conflict') as rejected:engine.ingest(app.connect,1,self.req['watch_id'],True,conflict,later)
+  detail=rejected.exception.market_conflict
+  self.assertIn('price',detail['fields']);self.assertEqual(detail['previous']['price'],'100');self.assertEqual(detail['incoming']['price'],'101')
+  self.assertNotIn('context',detail['fields']);self.assertNotIn('asset_id',detail['previous'])
+ def test_conflict_diagnostics_reach_existing_scan_log_without_broker_context(self):
+  previous=self.sample(held=True);incoming=copy.deepcopy(previous);incoming['price']='101';incoming['context']['diagnostic']='private-broker-detail'
+  error=engine.sample_conflict(previous,incoming,{'price','context','asset_id','feed_type'})
+  runner=service.Runner(app.connect);runner.health=Mock();runner.log=Mock()
+  with app.connect() as c:job=dict(engine.row_for(c,1,self.req['watch_id'],True))
+  job.update(request_data=self.req,lease_owner='synthetic-lease')
+  adapter=Mock();adapter.poll.return_value=incoming;adapter.capture_metrics=[];adapter.last_partial_observations=[]
+  runner.adapters[(1,'eodhd')]=adapter
+  with patch.object(engine,'claim',return_value=job),patch.object(engine,'ingest',side_effect=error),patch.object(engine,'fault') as fault:
+   self.assertTrue(runner.once(self.now))
+  detail=runner.log.call_args.args[3]['market_conflict']
+  self.assertEqual(detail['previous'],{'price':'100'});self.assertEqual(detail['incoming'],{'price':'101'})
+  self.assertNotIn('private-broker-detail',json.dumps(detail))
+  self.assertEqual(runner.log.call_args.args[2],'sample_id_conflict');self.assertEqual(fault.call_args.args[4],'sample_id_conflict')
  def test_earliest_required_evidence_schedules_refresh_without_extending_freshness(self):
   s=self.sample();env={'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}
   with patch.dict(os.environ,env,clear=True),app.connect() as c:

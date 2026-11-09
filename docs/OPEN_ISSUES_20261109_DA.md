@@ -389,3 +389,13 @@ Påvist og rettet direkte: udskudte feedforsøg brugte drænrundens budget som f
 864 Python-tests består, inklusive installation, risikoregler og uafhængige exits. Tre regressioner fejler på gammel kode og består efter. En integrationstest med 39 blandede sessioner og to faktiske Runner-workers behandler alle 39 i én drænrunde trods feedudsættelser og opretter ingen handelsforslag. Afventer installation og ny måling af normal køtid; ingen samlet LIVE PASS.
 
 Særskilt åben fejl: MANE havde `sample_id_conflict` kl. 22.46.25 og endnu en session samme fejlkode kl. 22.50.40 i produktionsloggen. Statusadgangen viser ikke de to modstridende råobservationer; årsagen er ikke fastslået og integritetskontrollen er ikke lempet. Næste undersøgelse kræver sammenligning af gemt og indgående sample ved samme ID/tid. Mobilpush, visuel accept og samlet livekæde står fortsat åbne. LONG-TERM WATCH forbliver parkeret.
+
+### Stille instrumenter: genbrug af allerede gammel feedrespons
+
+Efter genstart kl. 23.12 dansk tid steg køtiden igen over flere runder: seneste udsnit havde 51 afsluttede scanninger med deadline efter kl. 23.14, median 43,8 s og maksimum 58,5 s. Begge services havde frisk heartbeat; adapter-til-journal tog højst 46,7 ms. MANE fik igen sample_id_conflict kl. 23.17.18. Fejlen er fortsat åben.
+
+Påvist og rettet i EODHDAdapter.capture(): En batchrespons med allerede gamle handler blev genhentet for hvert stille instrument, fordi OK-responsen hverken var frisk eller NO_MESSAGES. Den deles nu i den eksisterende korte respons-cache, med separat capture-tid og uændrede markeds-/modtagelsestider. En handel, der først bliver gammel efter indsamling, genhentes fortsat straks. Scanloggens kildealder beregnes nu for det efterspurgte instrument frem for den nyeste handel i hele batchen.
+
+Syntetisk regression med 39 stille instrumenter: 39 captures før rettelsen, fire efter. Gammel pris med frisk quote forbliver DATA_STALE/NO_DATA. 869 Python-tests består, inklusive installation. Dette er ikke en målt produktionsgevinst endnu.
+
+Eksisterende scanlog får ved sample_id_conflict markedsfelternes navne og tilladte før/efter-værdier; ingen depotkontekst, credentials eller lempet integritetskontrol. MANE kræver ny readback efter installation og næste konflikt. Normal køtid, mobilpush, visuel accept og samlet livekæde er fortsat åbne; LONG-TERM WATCH forbliver parkeret.

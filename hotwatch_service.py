@@ -927,7 +927,9 @@ class Runner:
      if context_error.code in ['lease_lost','watch_not_running','kill_switch_active','operator_kill_switch']:return True
      self.log(job,'context_rejected',context_error.code)
    captures=getattr(adapter,'capture_metrics',[])
-   engine.fault(self.connect,uid,wid,mode,error.code,lease=lease,retry_after_s=getattr(error,'retry_after_s',None));self.health(job,None,error.code);self.log(job,'degraded',error.code,{'websocket':captures if isinstance(captures,list) else [],'provider_ms':round((time.perf_counter()-poll_started)*1000,3)})
+   diagnostics={'websocket':captures if isinstance(captures,list) else [],'provider_ms':round((time.perf_counter()-poll_started)*1000,3)}
+   if error.code=='sample_id_conflict' and getattr(error,'market_conflict',None):diagnostics['market_conflict']=error.market_conflict
+   engine.fault(self.connect,uid,wid,mode,error.code,lease=lease,retry_after_s=getattr(error,'retry_after_s',None));self.health(job,None,error.code);self.log(job,'degraded',error.code,diagnostics)
   except Exception as error:
    code=processing_error_code(error)
    locks=None

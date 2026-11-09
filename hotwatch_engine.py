@@ -849,6 +849,14 @@ def analysis_snapshot(c,row,sample,request,now):
   samples=[json.loads(r['payload']) for r in reversed(prior)]+[sample]
  return version,bars,samples
 
+def sample_conflict(previous,current,keys):
+ """Describe rejected market differences without exposing broker context."""
+ error=EngineError('sample_id_conflict',409)
+ fields=sorted(k for k in keys if k!='context' and k in SAMPLE['properties'] and previous.get(k)!=current.get(k))
+ public={'event_time','price','bid','ask','volume','volume_type','open','high','low','close','trade_size','interval_s','price_time_kind','market_status','bid_at','ask_at','status_at'}
+ error.market_conflict={'fields':fields,'previous':{k:previous.get(k) for k in fields if k in public},'incoming':{k:current.get(k) for k in fields if k in public}}
+ return error
+
 def refreshed_trade_evidence(previous,current,request,now):
  """Renew separately timestamped evidence, never the trade or confirmations."""
  groups=[('bid_at',('bid','ask','bid_at','ask_at','quote_feed')),
@@ -856,7 +864,7 @@ def refreshed_trade_evidence(previous,current,request,now):
          ('bar_evidence',('bar_history','bar_evidence'))]
  auxiliary={'context','sample_id','interval_s'}|{k for _,keys in groups for k in keys}
  if previous.get('source')!='eodhd' or previous.get('price_time_kind')!='trade':return current
- if {k:v for k,v in previous.items() if k not in auxiliary}!={k:v for k,v in current.items() if k not in auxiliary}:raise EngineError('sample_id_conflict',409)
+ if {k:v for k,v in previous.items() if k not in auxiliary}!={k:v for k,v in current.items() if k not in auxiliary}:raise sample_conflict(previous,current,(set(previous)|set(current))-auxiliary)
  merged=dict(previous,context=current['context'])
  for time_key,keys in groups:
   if time_key=='bar_evidence':
@@ -867,7 +875,7 @@ def refreshed_trade_evidence(previous,current,request,now):
    old_time=previous.get(time_key);new_time=current.get(time_key)
    if time_key=='bid_at' and previous.get('ask_at') and current.get('ask_at') and stamp(current['ask_at'])<stamp(previous['ask_at']):continue
   if not new_time or old_time and stamp(new_time)<stamp(old_time):continue
-  if old_time==new_time and time_key!='bar_evidence' and any(previous.get(k)!=current.get(k) for k in keys):raise EngineError('sample_id_conflict',409)
+  if old_time==new_time and time_key!='bar_evidence' and any(previous.get(k)!=current.get(k) for k in keys):raise sample_conflict(previous,current,keys)
   for key in keys:
    if key in current:merged[key]=current[key]
    else:merged.pop(key,None)
@@ -919,7 +927,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
     same_history=False;sample_errors(sample,request,now)
    previous_market={k:v for k,v in previous_sample.items() if k not in ['context','sample_id']};current_market={k:v for k,v in sample.items() if k not in ['context','sample_id']}
    evidence_changed=previous_market!=current_market
-   if evidence_changed and not (sample['source']=='eodhd' and sample.get('price_time_kind')=='trade'):raise EngineError('sample_id_conflict',409)
+   if evidence_changed and not (sample['source']=='eodhd' and sample.get('price_time_kind')=='trade'):raise sample_conflict(previous_market,current_market,set(previous_market)|set(current_market))
    extra=c.execute('SELECT payload FROM hw_context_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
    prior_context=json.loads(extra['payload']) if extra else previous_sample['context'];current_context=sample['context']
    if prior_context.get('as_of') and current_context.get('as_of') and stamp(current_context['as_of'])<stamp(prior_context['as_of']):

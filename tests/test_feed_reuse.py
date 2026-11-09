@@ -100,6 +100,62 @@ class FeedReuse(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_PARALLEL_SCANS':'1'}),patch.object(engine,'capacity',return_value=2),patch.object(service.Runner,'once',side_effect=['deferred',True,True]) as once:
    self.assertEqual(runner.drain(),2)
   self.assertEqual(once.call_count,3)
+ def test_quiet_symbols_share_stale_capture_response_without_refreshing_prices(self):
+  jobs=[capacity_fixture.LiveCapacity.add(self,'QUIET'+str(i)+'.US',i,due=self.now.timestamp()-40+i) for i in range(39)]
+  calls=[];old=(self.now-timedelta(minutes=5)).isoformat()
+  class Client:
+   def capture(_,feed,symbols,**kwargs):
+    if isinstance(symbols,str):symbols=[symbols]
+    calls.append(tuple(symbols))
+    return {'status':'OK','messages':[{'symbol':s,'event_time':old,'received_at':self.now.isoformat(),'price':'100'} for s in symbols]}
+  with patch('hotwatch_engine.verified_automatic_feed',return_value=True):
+   for job in jobs:
+    result=self.adapter.capture(Client(),'us_trades',job['request_data']['provider_symbol'].removesuffix('.US'),job)
+    self.assertEqual(len(result['messages']),1)
+    self.assertEqual(result['messages'][0]['event_time'],old)
+    self.assertEqual(result['messages'][0]['received_at'],self.now.isoformat())
+   self.assertEqual(len(calls),4)
+   self.assertEqual(sum(map(len,calls)),39)
+   # Quiet responses expire on the existing ACTIVE cadence, not on the
+   # event's timestamp. No permanent suppression of a newly arriving trade.
+   with patch('hotwatch_adapters.time.monotonic',return_value=time.monotonic()+16),patch('hotwatch_adapters.utc',return_value=self.now+timedelta(seconds=16)):
+    self.adapter.capture(Client(),'us_trades','QUIET0',jobs[0])
+  self.assertEqual(len(calls),5)
+ def test_trade_that_expires_after_capture_is_refetched(self):
+  client=Mock();old=(self.now-timedelta(seconds=119)).isoformat()
+  client.capture.return_value={'status':'OK','messages':[{'symbol':'MERC','event_time':old,'received_at':self.now.isoformat(),'price':'100'}]}
+  self.adapter.capture(client,'us_trades','MERC',self.job)
+  later=self.now+timedelta(seconds=2)
+  client.capture.return_value={'status':'OK','messages':[{'symbol':'MERC','event_time':later.isoformat(),'received_at':later.isoformat(),'price':'101'}]}
+  with patch('hotwatch_adapters.utc',return_value=later):result=self.adapter.capture(client,'us_trades','MERC',self.job)
+  self.assertEqual(client.capture.call_count,2);self.assertEqual(result['messages'][0]['price'],'101')
+ def test_scan_diagnostics_use_requested_symbol_not_newest_other_batch_member(self):
+  job=capacity_fixture.LiveCapacity.add(self,'OTHER.US',1,due=self.now.timestamp())
+  client=Mock();client.capture.return_value={'status':'OK','messages':[{'symbol':'MERC','event_time':(self.now-timedelta(minutes=5)).isoformat(),'received_at':self.now.isoformat(),'price':'100'},{'symbol':'OTHER','event_time':self.now.isoformat(),'received_at':self.now.isoformat(),'price':'200'}],'connections_opened':1,'subscriptions_sent':2}
+  with patch('hotwatch_engine.verified_automatic_feed',return_value=True):self.adapter.capture(client,'us_trades','MERC',self.job)
+  metrics=self.adapter.capture_metrics[-1]
+  self.assertEqual(metrics['source_age_s'],300);self.assertEqual(metrics['messages'],1)
+  self.assertEqual(metrics['connections_opened'],1);self.assertEqual(metrics['subscriptions_sent'],2)
+ def test_cached_stale_trade_and_fresh_quotes_cannot_become_actionable(self):
+  from decimal import Decimal
+  from hotwatch_strategy import BASELINE,calculate
+  old=self.now-timedelta(minutes=5);client=Mock();calls=[]
+  def capture(feed,symbols,**kwargs):
+   calls.append(feed)
+   if isinstance(symbols,str):symbols=[symbols]
+   at=old if feed.endswith('trades') else self.now
+   return {'status':'OK','messages':[dict(symbol=s,event_time=at.isoformat(),received_at=self.now.isoformat(),price='100',bid='99.99',ask='100.01',market_session='open') for s in symbols]}
+  client.capture.side_effect=capture
+  env={'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}
+  rest=({'code':'MERC.US','close':'100','currency':'USD'},self.now,1,old,Decimal('100'))
+  with patch.dict(os.environ,env),patch.object(self.adapter,'feeds',return_value=client),patch.object(self.adapter.pluto,'safe_context',return_value=fixture.tick(self.now,held=True)['context']),patch.object(adapters,'shared_quote',return_value=rest):
+   first=self.adapter.poll(self.job);second=self.adapter.poll(self.job)
+  self.assertEqual(calls,['us_trades','us_quotes'])
+  self.assertEqual(first['event_time'],old.isoformat());self.assertEqual(second['event_time'],old.isoformat())
+  self.assertNotEqual(second.get('price_time_kind'),'trade')
+  # Even a breached analytical stop cannot use the stale price as current.
+  result,_=calculate(second,fixture.good_metrics(),BASELINE,dict(self.req['risk'],stop_price='101'),{},self.now)
+  self.assertEqual(result['signal'],'NO_DATA');self.assertIn('DATA_STALE',result['reason_codes'])
  def test_pending_feed_yields_lease_without_hiding_deadline_or_faulting(self):
   with app.connect() as c:
    c.execute("UPDATE hw_sessions SET request=json_set(request,'$.provider','eodhd'),status='ACTIVE' WHERE watch_id=?",(self.f.req['watch_id'],))
