@@ -23,6 +23,25 @@ def reference_error_code(error):
  else:code=None
  return code if isinstance(code,str) and re.fullmatch('[A-Za-z0-9_]{1,80}',code) else 'VERIFICATION_FAILED'
 
+def processing_error_code(error):
+ """Safe per-session diagnosis; never persist exception messages or values."""
+ if isinstance(error,sqlite3.OperationalError):
+  code=getattr(error,'sqlite_errorcode',None)
+  kind='DATABASE_BUSY' if isinstance(code,int) and (code&255) in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED) else 'DATABASE_ERROR'
+ elif isinstance(error,sqlite3.IntegrityError):kind='DATABASE_INTEGRITY'
+ elif isinstance(error,KeyError):kind='FIELD_MISSING'
+ elif isinstance(error,TypeError):kind='TYPE_ERROR'
+ elif isinstance(error,ValueError):kind='VALUE_ERROR'
+ elif isinstance(error,OSError):kind='IO_ERROR'
+ else:kind='ERROR'
+ names={'hotwatch_service.py':'SERVICE','hotwatch_engine.py':'ENGINE','hotwatch_adapters.py':'ADAPTER','eodhd_feeds.py':'EODHD','app.py':'APP'}
+ location='OTHER';line=0;tb=error.__traceback__
+ while tb:
+  name=os.path.basename(tb.tb_frame.f_code.co_filename)
+  if name in names:location=names[name];line=tb.tb_lineno
+  tb=tb.tb_next
+ return f'PROCESSING_{kind}_{location}_{line}'
+
 def pluto_isin(*nodes):
  """Read only explicitly named ISIN fields; reject malformed or conflicting values."""
  values=[]
@@ -774,8 +793,9 @@ class Runner:
      if context_error.code in ['lease_lost','watch_not_running','kill_switch_active','operator_kill_switch']:return True
      self.log(job,'context_rejected',context_error.code)
    engine.fault(self.connect,uid,wid,mode,error.code,lease=lease,retry_after_s=getattr(error,'retry_after_s',None));self.health(job,None,error.code);self.log(job,'degraded',error.code)
-  except Exception:
-   engine.fault(self.connect,uid,wid,mode,'PROVIDER_OR_PROCESSING_ERROR',lease=lease);self.health(job,None,'PROVIDER_OR_PROCESSING_ERROR');self.log(job,'degraded','PROVIDER_OR_PROCESSING_ERROR')
+  except Exception as error:
+   code=processing_error_code(error)
+   engine.fault(self.connect,uid,wid,mode,code,lease=lease);self.health(job,None,code);self.log(job,'degraded',code)
   finally:
    # The live scan and its risk decision finish first. Historical analysis
    # cannot create signals, and its failure cannot fault the live scan.

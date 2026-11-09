@@ -429,6 +429,29 @@ class HotWatch(unittest.TestCase):
   with patch('hotwatch_engine.utc',return_value=self.now):self.assertTrue(runner.once(self.now))
   view=engine.item(app.connect,1,r['watch_id'],True)['session'];self.assertEqual(view['status'],'DEGRADED');self.assertEqual(view['signal'],'NO_DATA');self.assertIsNone(view['last_data_at']);self.assertEqual(view['latest_context']['quantity'],'10')
   self.assertEqual(self.counts()['hw_samples'],0)
+ def test_processing_errors_expose_only_safe_category_and_do_not_create_signal(self):
+  from hotwatch_service import Runner
+  from unittest.mock import Mock
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  req=copy.deepcopy(self.req);req.update(watch_id='safe-processing-error',purpose='safe processing error',provider='pluto');engine.create(app.connect,1,req,self.now)
+  adapter=Mock();adapter.poll.side_effect=TypeError('private-token-never-print');runner=Runner(app.connect);runner.adapters[(1,'pluto')]=adapter
+  with patch('hotwatch_engine.utc',return_value=self.now):self.assertTrue(runner.once(self.now,watch_id=req['watch_id']))
+  session=engine.item(app.connect,1,req['watch_id'],True)['session']
+  self.assertTrue(session['last_error'].startswith('PROCESSING_TYPE_ERROR_'));self.assertNotIn('private-token',session['last_error'])
+  self.assertEqual(session['signal'],'NO_DATA');self.assertIsNone(session['last_data_at'])
+ def test_processing_diagnostic_identifies_real_sqlite_busy_without_error_text(self):
+  import sqlite3
+  from hotwatch_service import processing_error_code
+  holder=app.connect();other=sqlite3.connect(app.DB,timeout=0)
+  try:
+   holder.execute('BEGIN IMMEDIATE')
+   try:other.execute('BEGIN IMMEDIATE')
+   except sqlite3.OperationalError as error:
+    self.assertTrue(processing_error_code(error).startswith('PROCESSING_DATABASE_BUSY_'))
+    self.assertNotIn(app.DB,processing_error_code(error))
+   else:self.fail('expected SQLite writer contention')
+  finally:
+   other.close();holder.rollback();holder.close()
  def test_eodhd_failure_keeps_verified_pluto_context_without_market_signal(self):
   from hotwatch_service import Runner
   from unittest.mock import Mock
