@@ -19,7 +19,31 @@ class WatchdogTests(unittest.TestCase):
                 hotwatch_service.record_worker_exception(error)
         self.assertEqual(diagnostic.call_args_list[0].args, ('worker_exception', 1))
         self.assertNotIn('secret', str(diagnostic.call_args_list))
-        self.assertEqual(diagnostic.call_args_list[1].args, ('worker_frame_other',))
+        self.assertEqual(diagnostic.call_args_list[1].args, ('worker_sqlite_error', None))
+        self.assertEqual(diagnostic.call_args_list[2].args, ('worker_frame_other',))
+
+    def test_worker_retries_real_database_lock_but_raises_other_sqlite_errors(self):
+        import hotwatch_service
+        with tempfile.TemporaryDirectory() as d:
+            path = str(Path(d) / 'locked.db')
+            with sqlite3.connect(path) as setup:
+                setup.execute('CREATE TABLE item(id INTEGER)')
+            holder = sqlite3.connect(path)
+            try:
+                holder.execute('BEGIN IMMEDIATE')
+                runner = hotwatch_service.Runner(lambda: sqlite3.connect(path, timeout=0))
+                def claim_locked():
+                    with runner.connect() as c:
+                        c.execute('BEGIN IMMEDIATE')
+                with patch.object(runner, 'drain', side_effect=claim_locked), patch.object(supervisor, 'diagnostic') as diagnostic:
+                    self.assertEqual(runner.drain_safely(), 0)
+                    self.assertEqual(diagnostic.call_args.args, ('worker_database_busy', sqlite3.SQLITE_BUSY))
+                with patch.object(runner, 'drain', side_effect=sqlite3.OperationalError('other')):
+                    with self.assertRaises(sqlite3.OperationalError):
+                        runner.drain_safely()
+            finally:
+                holder.rollback()
+                holder.close()
 
     def test_diagnostics_are_bounded_structured_and_no_secrets(self):
         with tempfile.TemporaryDirectory() as d:

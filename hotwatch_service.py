@@ -1,5 +1,5 @@
 """Standalone read-only HOT WATCH service. Never scheduled by legacy worker.py."""
-import json,signal,threading,logging,hashlib,time,os,re,secrets
+import json,signal,threading,logging,hashlib,time,os,re,secrets,sqlite3
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
 import app,hotwatch_engine as engine
@@ -768,6 +768,14 @@ class Runner:
   return count
  def heartbeat(self,status):
   with self.connect() as c:c.execute("INSERT INTO hw_heartbeat VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET updated=excluded.updated,status=excluded.status",(engine.utc().isoformat(),status))
+ def drain_safely(self):
+  try:return self.drain()
+  except sqlite3.OperationalError as error:
+   code=getattr(error,'sqlite_errorcode',None)
+   if not isinstance(code,int) or (code & 255) not in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED):raise
+   from hotwatch_supervisor import diagnostic
+   diagnostic('worker_database_busy',code)
+   return 0
  def run(self,interval=2):
   if os.environ.get('ESCAPE_HW_AUTOSTART_ENABLED','1')=='1':
    with self.connect() as c:c.execute('INSERT OR IGNORE INTO hw_discovery_control VALUES(1,?)',(engine.utc().isoformat(),))
@@ -829,7 +837,7 @@ class Runner:
   push_thread=threading.Thread(target=push_loop,name='signal-notifications',daemon=True);push_thread.start()
   try:
    while not self.stop.is_set():
-    self.drain()
+    self.drain_safely()
     self.stop.wait(interval)
   finally:
    self.stop.set();thread.join(timeout=6);holding_thread.join(timeout=2);candidate_thread.join(timeout=2);discovery_thread.join(timeout=2);sector_thread.join(timeout=2);push_thread.join(timeout=10)
@@ -920,10 +928,12 @@ def main():
   finally:os.close(fd)
 def record_worker_exception(error):
  """Record class and local source location only, never exception text or values."""
- import sqlite3
  from hotwatch_supervisor import diagnostic
  classes=(sqlite3.OperationalError,sqlite3.IntegrityError,KeyError,ValueError,TypeError,AttributeError,RuntimeError,OSError)
  diagnostic('worker_exception',next((i for i,cls in enumerate(classes,1) if isinstance(error,cls)),0))
+ if isinstance(error,sqlite3.Error):
+  code=getattr(error,'sqlite_errorcode',None)
+  diagnostic('worker_sqlite_error',code if isinstance(code,int) else None)
  frames=[];tb=error.__traceback__
  while tb:
   filename=os.path.basename(tb.tb_frame.f_code.co_filename)

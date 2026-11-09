@@ -86,7 +86,8 @@ def diagnostic(event, code=None):
                'worker_started', 'worker_exited', 'worker_start_failed',
                'heartbeat_timeout', 'restart_timeout', 'worker_killed',
                'worker_exception', 'worker_frame_service', 'worker_frame_engine',
-               'worker_frame_app', 'worker_frame_adapters', 'worker_frame_other'}
+               'worker_frame_app', 'worker_frame_adapters', 'worker_frame_other',
+               'worker_sqlite_error', 'worker_database_busy'}
     if event not in allowed or (code is not None and not isinstance(code, int)):
         raise ValueError('invalid diagnostic event')
     try:
