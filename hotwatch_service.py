@@ -482,7 +482,12 @@ def verify_provisional_feeds(connect,now=None):
  with connect() as c:
   c.execute('BEGIN IMMEDIATE')
   current=c.execute("SELECT s.* FROM hw_sessions s WHERE s.id=? AND s.request=? AND s.lease_until<=? AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND NOT EXISTS (SELECT 1 FROM hw_system_control g WHERE g.id=1 AND g.killed=1) AND NOT EXISTS (SELECT 1 FROM hw_control k WHERE k.user_id=s.user_id AND k.killed=1)",(row['id'],row['request'],now.timestamp())).fetchone()
-  if not current:return 0
+  if not current:
+   # A scan may have claimed the session while the read-only identity calls
+   # were running. Avoid repeatedly selecting this same due row and starving
+   # other provisional instruments; never change a stopped or changed watch.
+   c.execute("UPDATE hw_feed_recovery SET next_attempt=?,status='CONCURRENT_SESSION_BUSY',updated=? WHERE watch_row_id=? AND EXISTS (SELECT 1 FROM hw_sessions s WHERE s.id=? AND s.request=? AND s.lease_until>? AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED'))",(now.timestamp()+60,now.isoformat(),row['id'],row['id'],row['request'],now.timestamp()))
+   return 0
   if status=='MATCHED':
    removed=c.execute('DELETE FROM hw_provisional_feed_links WHERE watch_row_id=? AND symbol=?',(row['id'],row['provisional_symbol']))
    if removed.rowcount:

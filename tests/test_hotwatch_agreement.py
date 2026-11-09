@@ -30,6 +30,25 @@ class Agreement(unittest.TestCase):
    self.assertNotEqual(session['signal'],'BUY')
   self.assertIsNone(hotwatch_service.verified_existing_feed(app.connect,1,{**instrument,'isin':'US0000000001'},self.now))
   self.assertIsNone(hotwatch_service.verified_existing_feed(app.connect,1,{**instrument,'exchange':'NYSE'},self.now))
+ def test_mane_provisional_candidate_verifies_only_with_matching_us_listing_and_isin(self):
+  report=merc_report(False);report.update(report_id='mane-reference-test',generated_at=self.now.isoformat(),positions=[],orders=[])
+  candidate=report['candidates'][0];candidate.update(candidate_id='mane-reference',ticker='MANE',company_name='Veradermics, Incorporated',asset_id='synthetic-mane',exchange='NYSE')
+  candidate['decision'].update(decided_at=self.now.isoformat(),data_as_of=self.now.isoformat(),deadline=(self.now+timedelta(hours=24)).isoformat())
+  self.assertTrue(report_ingest.save(app.connect,1,report)[1]['ok'])
+  instrument={'asset_id':'synthetic-mane','ticker':'MANE','name':'Veradermics, Incorporated','exchange':'NYSE','currency':'USD','type':'CS','isin':None}
+  created=hotwatch_service.auto_activate_candidate(app.connect,1,False,report,candidate,verify=lambda *_:instrument)
+  self.assertEqual(created['status'],'CREATED')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions WHERE watch_id=?',(created['watch_id'],)).fetchone();req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol='MANE.US')
+   c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps(req),row['id']))
+   c.execute('INSERT INTO hw_provisional_feed_links VALUES(?,?,?,?)',(row['id'],'MANE.US','{}',self.now.isoformat()))
+   c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?)',(row['id'],self.now.timestamp()-1,'VERIFICATION_FAILED',self.now.isoformat()))
+  listing={'received_at':self.now.isoformat(),'rows':[{'Code':'MANE','Name':'Veradermics, Incorporated','Country':'USA','Exchange':'NYSE','Currency':'USD','Type':'Common Stock','Isin':'US9229671048'}]}
+  options={'choices':[{'symbol':'MANE.US','exchange':'US','currency':'USD','isin':'US9229671048'}]}
+  with patch.dict('os.environ',{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.verified_discovery_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=options),patch('eodhd_us_reference.get_reference',return_value=listing):
+   self.assertEqual(hotwatch_service.verify_provisional_feeds(app.connect,self.now),1)
+  state=engine.item(app.connect,1,created['watch_id'],False)['session']['data_status']
+  self.assertTrue(state['instrument_match_verified']);self.assertFalse(state['quote_feed_verified'])
  def assess(self,status='AFVENT',deadline=None,at=None):
   at=at or self.now
   data=dict(self.report['candidates'][0]['decision'],status=status,decided_at=at.isoformat(),deadline=deadline)

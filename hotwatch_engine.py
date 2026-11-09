@@ -12,6 +12,20 @@ def capacity():
  try:return max(1,min(40,int(os.environ.get('ESCAPE_HW_CAPACITY','40'))))
  except (TypeError,ValueError):return 40
 
+def reported_catalyst_priority_until(candidate,now,max_age_minutes=None):
+ """Short queue priority from attributed report evidence; never a trade gate."""
+ try:
+  proposal=candidate.get('strategy_proposal') or {};news=proposal.get('news_check') or {};catalyst=proposal.get('catalyst') or {}
+  if proposal.get('strategy_id')!='escape_early_catalyst' or news.get('status')!='verified_news':return None
+  if not set(news.get('source_ids') or []).intersection(catalyst.get('source_ids') or []):return None
+  published=stamp(catalyst['published_at']);available=stamp(catalyst['available_at']);checked=stamp(news['checked_at']);proposed=stamp(proposal['proposed_at'])
+  if not published<=available<=proposed<=now or not available<=checked<=proposed:return None
+  minutes=EARLY_CATALYST_V1['parameters']['news_max_age_minutes'] if max_age_minutes is None else max_age_minutes
+  if type(minutes) is not int or not 1<=minutes<=1440:return None
+  expiry=published+timedelta(minutes=minutes)
+  return expiry.timestamp() if published<=now<expiry else None
+ except (KeyError,TypeError,ValueError,OverflowError):return None
+
 def valid_cxe_evidence(c,uid,request,now):
  """None means no CXE proof; False means proof exists but cannot be used."""
  row=c.execute('SELECT * FROM hw_cxe_feed_evidence WHERE user_id=? AND asset_id=?',(uid,request.get('asset_id'))).fetchone()
@@ -254,7 +268,12 @@ def _create_in_transaction(c,uid,data,now,holding=False,manual=False):
  version=strategy(c,uid,data['strategy_id'],data['strategy_version'])
  from strategy_center import deployment
  if deployment(version) not in ('QUALIFIED','PILOT'):raise EngineError('strategy_qualification_required',409)
- cur=c.execute('INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(uid,data['watch_id'],int(data['is_test']),data['candidate_id'],data['purpose'].strip().casefold(),'CREATED',canonical(data),checksum(data),version['payload'],canonical({'signal':'NO_DATA','alert_codes':[]}),now.isoformat(),now.isoformat(),now.timestamp()))
+ initial_state={'signal':'NO_DATA','alert_codes':[]}
+ if not holding and not manual and data.get('purpose')=='automatic discovery':
+  configured=json.loads(version['payload']).get('parameters',{}).get('news_max_age_minutes')
+  priority_until=reported_catalyst_priority_until(candidate,now,configured)
+  if priority_until is not None:initial_state.update(catalyst_priority_until=priority_until,catalyst_priority_basis='sender_reported_news')
+ cur=c.execute('INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(uid,data['watch_id'],int(data['is_test']),data['candidate_id'],data['purpose'].strip().casefold(),'CREATED',canonical(data),checksum(data),version['payload'],canonical(initial_state),now.isoformat(),now.isoformat(),now.timestamp()))
  row=c.execute('SELECT * FROM hw_sessions WHERE id=?',(cur.lastrowid,)).fetchone();event(c,row,'WATCH_STARTED',now,data['activation_reason']);cycle=data.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':data['watch_id']})[:24];candidate_lifecycle.record(c,uid,data['is_test'],data['candidate_id'],'HOT_WATCH',now.isoformat(),data.get('reactivation_reason') or data['activation_reason'],data['watch_id'],cycle);return {'ok':True,'duplicate':False,'session':view(c,row,now)}
 
 def create(connect,uid,data,now=None):
@@ -880,7 +899,7 @@ def claim(connect,now=None,watch_id=None):
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
   concurrency=max(1,min(10,int(os.environ.get('ESCAPE_HW_CONCURRENCY','2'))))
   if c.execute('SELECT count(*) FROM hw_sessions WHERE lease_until>?',(now.timestamp(),)).fetchone()[0]>=concurrency:return None
-  row=c.execute("SELECT s.* FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.next_due<=? AND s.lease_until<=? AND COALESCE(k.killed,0)=0 AND (? IS NULL OR s.watch_id=?) ORDER BY CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,CASE json_extract(s.state,'$.adaptive_profile') WHEN 'CRITICAL' THEN 0 ELSE 1 END,CASE json_extract(s.request,'$.priority') WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 ELSE 2 END,s.next_due,s.created,s.id LIMIT 1",(now.timestamp(),now.timestamp(),watch_id,watch_id)).fetchone()
+  row=c.execute("SELECT s.* FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.next_due<=? AND s.lease_until<=? AND COALESCE(k.killed,0)=0 AND (? IS NULL OR s.watch_id=?) ORDER BY CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,CASE WHEN COALESCE(json_extract(s.state,'$.catalyst_priority_until'),0)>? THEN 0 ELSE 1 END,CASE json_extract(s.state,'$.adaptive_profile') WHEN 'CRITICAL' THEN 0 ELSE 1 END,CASE json_extract(s.request,'$.priority') WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 ELSE 2 END,s.next_due,s.created,s.id LIMIT 1",(now.timestamp(),now.timestamp(),watch_id,watch_id,now.timestamp())).fetchone()
   if not row:return None
   # Provider adapters charge the shared budget immediately before each actual
   # upstream request. Claiming a job is not itself a provider request.

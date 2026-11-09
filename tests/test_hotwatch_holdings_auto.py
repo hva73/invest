@@ -23,6 +23,23 @@ class HoldingAutowatch(unittest.TestCase):
   for error,expected in [(KeyError('secret'),'REFERENCE_FIELD_MISSING'),(TypeError('secret'),'REFERENCE_TYPE_ERROR'),(ValueError('secret'),'REFERENCE_VALUE_ERROR'),(sqlite3.OperationalError('secret'),'REFERENCE_DATABASE_ERROR')]:
    self.assertEqual(service.reference_error_code(error),expected)
    self.assertNotIn('secret',service.reference_error_code(error))
+ def test_provisional_verification_defers_concurrent_claim_without_starving_queue(self):
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol='TEST.US')
+   c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps(req),row['id']))
+   c.execute('INSERT INTO hw_provisional_feed_links VALUES(?,?,?,?)',(row['id'],'TEST.US','{}',self.now.isoformat()))
+   c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?)',(row['id'],self.now.timestamp()-1,'VERIFICATION_FAILED',self.now.isoformat()))
+  def claim_during_verification(*_):
+   with app.connect() as c:c.execute('UPDATE hw_sessions SET lease_until=? WHERE id=?',(self.now.timestamp()+2,row['id']))
+   return self.instrument
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',side_effect=claim_during_verification),patch('hotwatch_adapters.search_eodhd_symbols',return_value=self.lookup()):
+   self.assertEqual(service.verify_provisional_feeds(app.connect,self.now),0)
+  with app.connect() as c:
+   recovery=c.execute('SELECT status,next_attempt FROM hw_feed_recovery WHERE watch_row_id=?',(row['id'],)).fetchone()
+   self.assertEqual(recovery['status'],'CONCURRENT_SESSION_BUSY');self.assertEqual(recovery['next_attempt'],self.now.timestamp()+60)
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',side_effect=AssertionError('must not retry deferred watch')):
+   self.assertEqual(service.verify_provisional_feeds(app.connect,self.now+timedelta(seconds=3)),0)
  def test_saved_share_class_alias_evidence_stays_verified_and_cannot_switch_class(self):
   instrument={'asset_id':'synthetic-berkshire','ticker':'BRK.B','name':'Berkshire Hathaway Class B','exchange':'NYSE','currency':'USD','type':'CS','isin':None}
   listing={'Code':'BRK-B','Name':'Berkshire Hathaway Inc','Country':'USA','Exchange':'NYSE','Currency':'USD','Type':'Common Stock','Isin':'US0846707026'}

@@ -21,6 +21,17 @@ def tick(at,index=0,price='100',held=False):
 def good_metrics():return {'sample_count':40,'price':'100','return_1_pct':'.1','return_3_pct':'.5','acceleration_pct_s2':'.01','relative_volume':'3','spread_pct':'.1','volatility_pct':'.3','breakout':True,'breakdown':False,'trend_up':True,'rsi':'60','macd_histogram':'.1','distance_high_pct':'0'}
 
 class HotWatch(unittest.TestCase):
+ def test_reported_catalyst_priority_requires_evidence_and_expires(self):
+  at=datetime(2026,11,9,8,0,tzinfo=timezone.utc)
+  proposal={'strategy_id':'escape_early_catalyst','proposed_at':at.isoformat(),'news_check':{'status':'verified_news','checked_at':at.isoformat(),'source_ids':['news']},'catalyst':{'published_at':(at-timedelta(minutes=2)).isoformat(),'available_at':at.isoformat(),'source_ids':['news']}}
+  self.assertIsNotNone(engine.reported_catalyst_priority_until({'strategy_proposal':proposal},at))
+  self.assertIsNone(engine.reported_catalyst_priority_until({'strategy_proposal':proposal},at+timedelta(minutes=120)))
+  bad=copy.deepcopy(proposal);bad['news_check']['source_ids']=['other']
+  self.assertIsNone(engine.reported_catalyst_priority_until({'strategy_proposal':bad},at))
+  bad=copy.deepcopy(proposal);bad['news_check']['status']='unknown'
+  self.assertIsNone(engine.reported_catalyst_priority_until({'strategy_proposal':bad},at))
+  bad=copy.deepcopy(proposal);bad['catalyst']['available_at']=(at+timedelta(seconds=1)).isoformat()
+  self.assertIsNone(engine.reported_catalyst_priority_until({'strategy_proposal':bad},at))
  def setUp(self):
   self.old=app.DB;self.temp=tempfile.TemporaryDirectory();app.DB=self.temp.name+'/db';app.init();app.create_user('test-password-long-enough');self.now=datetime.now(timezone.utc).replace(microsecond=0);self.r=merc_report(True);report_ingest.save(app.connect,1,self.r);self.req=request();engine.create(app.connect,1,self.req,self.now)
  def tearDown(self):app.DB=self.old;self.temp.cleanup()
@@ -576,6 +587,15 @@ class HotWatch(unittest.TestCase):
   with app.connect() as c:c.execute('UPDATE hw_sessions SET next_due=?',(self.now.timestamp(),))
   first=engine.claim(app.connect,self.now+timedelta(seconds=1));self.assertEqual(first['watch_id'],'exit-first')
   second=engine.claim(app.connect,self.now+timedelta(seconds=1));self.assertEqual(second['watch_id'],self.req['watch_id'])
+ def test_scheduler_prioritizes_time_limited_catalyst_then_returns_to_fifo(self):
+  candidate=copy.deepcopy(self.req);candidate.update(watch_id='news-priority',purpose='news-priority')
+  engine.create(app.connect,1,candidate,self.now)
+  with app.connect() as c:
+   c.execute('UPDATE hw_sessions SET next_due=?',(self.now.timestamp(),))
+   c.execute('UPDATE hw_sessions SET state=? WHERE watch_id=?',(json.dumps({'signal':'NO_DATA','catalyst_priority_until':self.now.timestamp()+30}),candidate['watch_id']))
+  selected=engine.claim(app.connect,self.now+timedelta(seconds=1));self.assertEqual(selected['watch_id'],'news-priority')
+  with app.connect() as c:c.execute("UPDATE hw_sessions SET lease_until=0,lease_owner=NULL")
+  selected=engine.claim(app.connect,self.now+timedelta(seconds=31));self.assertEqual(selected['watch_id'],self.req['watch_id'])
  def test_eodhd_disabled_without_purchase_and_errors_do_not_leak_key(self):
   with patch.dict(os.environ,{},clear=True):
    with self.assertRaisesRegex(DataUnavailable,'EODHD_FEED_NOT_ENABLED'):EODHDAdapter(app.connect,1).poll({'request_data':self.req})

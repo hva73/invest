@@ -14,6 +14,14 @@ class Pilot(unittest.TestCase):
   self.candidate['strategy_proposal']={'strategy_id':'escape_early_catalyst','version':'1.0.0','reason':'Synthetic pilot','proposed_at':self.now.isoformat(),'source_ids':['synthetic-source'],'catalyst':{'kind':'earnings','published_at':self.now.isoformat(),'available_at':self.now.isoformat(),'source_ids':['synthetic-source']},'news_check':{'status':'verified_news','checked_at':self.now.isoformat(),'source_ids':['synthetic-source']}}
   self.report['sources'][0].update(verification='verified',published_at=self.now.isoformat(),verified_at=self.now.isoformat())
   report_ingest.save(app.connect,1,self.report);self.req=request();self.req.update(report_id='pilot-report',strategy_id='escape_early_catalyst',strategy_version='1.0.0');engine.create(app.connect,1,self.req,self.now)
+ def test_automatic_reported_catalyst_priority_is_scheduling_only(self):
+  req=copy.deepcopy(self.req);req.update(watch_id='pilot-priority',purpose='automatic discovery',watch_mode='entry')
+  engine.create(app.connect,1,req,self.now)
+  with app.connect() as c:
+   state=json.loads(c.execute('SELECT state FROM hw_sessions WHERE watch_id=?',(req['watch_id'],)).fetchone()['state'])
+  self.assertEqual(state['catalyst_priority_basis'],'sender_reported_news')
+  self.assertEqual(state['catalyst_priority_until'],(self.now+timedelta(minutes=120)).timestamp())
+  self.assertEqual(state['signal'],'NO_DATA')
  def tearDown(self):app.DB=self.old;self.tmp.cleanup()
  def test_pilot_observation_shows_claim_and_blocks_missing_evidence(self):
   sample=tick(self.now);sample['context'].update(instrument_type='CS',instrument_type_at=self.now.isoformat())
