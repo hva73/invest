@@ -878,6 +878,38 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   if include_session:response['session']=view(c,row_for(c,uid,wid,mode),now)
   return response
 
+def record_partial_observation(connect,uid,wid,mode,observation,now=None,lease=None):
+ """Journal an incomplete price or quote without a signal sample."""
+ now=now or utc()
+ base={'source','price','currency','source_time','received_at','quality'}
+ if not isinstance(observation,dict) or not base<=set(observation) or set(observation)-base-{'bid','ask','trade_size'} or observation['source'] not in ('pluto','eodhd') or observation['quality'] not in ('TIME_UNKNOWN','TRADE_MISSING'):raise EngineError('invalid_partial_observation')
+ if observation['quality']=='TIME_UNKNOWN' and observation['source_time'] is not None:raise EngineError('invalid_partial_observation')
+ if observation['quality']=='TRADE_MISSING':
+  try:
+   if observation['source']!='eodhd' or not observation['source_time'] or stamp(observation['source_time'])>now:raise ValueError()
+  except (ValueError,TypeError,AttributeError):raise EngineError('invalid_partial_observation') from None
+ if all(observation.get(key) is None for key in ('price','bid','ask')):raise EngineError('invalid_partial_observation')
+ for key in ('price','bid','ask','trade_size'):
+  value=observation.get(key)
+  if value is not None and (not isinstance(value,str) or not re.fullmatch(r'\d{1,31}(?:\.\d{1,12})?',value) or Decimal(value)<0 or key=='price' and Decimal(value)<=0):raise EngineError('invalid_partial_observation')
+ received=observation['received_at']
+ if received is not None:
+  try:
+   if stamp(received)>now:raise ValueError()
+  except (ValueError,TypeError,AttributeError):raise EngineError('invalid_partial_observation') from None
+ with connect() as c:
+  c.execute('BEGIN IMMEDIATE');row=row_for(c,uid,wid,mode);request=json.loads(row['request'])
+  if lease and (row['lease_owner']!=lease or row['lease_until']<now.timestamp()):raise EngineError('lease_lost',409)
+  if row['status'] not in ('CREATED','VALIDATING','ACTIVE','DEGRADED'):raise EngineError('watch_not_running',409)
+  if request['provider']!=observation['source'] or request['quote_currency']!=observation['currency']:raise EngineError('invalid_partial_observation')
+  if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:raise EngineError('operator_kill_switch',409)
+  killed=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
+  if killed and killed['killed']:raise EngineError('kill_switch_active',409)
+  previous=c.execute("SELECT payload FROM hw_events WHERE watch_row_id=? AND event_type='PARTIAL_MARKET_OBSERVATION' ORDER BY id DESC LIMIT 1",(row['id'],)).fetchone()
+  if previous and json.loads(previous['payload']).get('supporting_metrics')==observation:return False
+  event(c,row,'PARTIAL_MARKET_OBSERVATION',now,'Ufuldstændige markedsdata; kun observation, ikke handelssignal',observation,data_time=observation['source_time'])
+ return True
+
 def observe_context(connect,uid,wid,mode,context,now=None,lease=None,broker_source=None):
  """Trusted adapter evidence only. Never invent a quote or advance signal confirmation."""
  now=now or utc();require(context,CONTEXT)
@@ -949,7 +981,7 @@ def claim(connect,now=None,watch_id=None):
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
   concurrency=max(1,min(10,int(os.environ.get('ESCAPE_HW_CONCURRENCY','2'))))
   if c.execute('SELECT count(*) FROM hw_sessions WHERE lease_until>?',(now.timestamp(),)).fetchone()[0]>=concurrency:return None
-  row=c.execute("SELECT s.* FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.next_due<=? AND s.lease_until<=? AND COALESCE(k.killed,0)=0 AND (? IS NULL OR s.watch_id=?) ORDER BY CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,CASE WHEN COALESCE(json_extract(s.state,'$.catalyst_priority_until'),0)>? THEN 0 ELSE 1 END,CASE json_extract(s.state,'$.adaptive_profile') WHEN 'CRITICAL' THEN 0 ELSE 1 END,CASE json_extract(s.request,'$.priority') WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 ELSE 2 END,s.next_due,s.created,s.id LIMIT 1",(now.timestamp(),now.timestamp(),watch_id,watch_id,now.timestamp())).fetchone()
+  row=c.execute("SELECT s.* FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.next_due<=? AND s.lease_until<=? AND COALESCE(k.killed,0)=0 AND (? IS NULL OR s.watch_id=?) ORDER BY CASE WHEN json_extract(s.request,'$.watch_mode')='exit' AND json_extract(s.state,'$.adaptive_profile')='CRITICAL' THEN 0 ELSE 1 END,CASE WHEN s.next_due<=? THEN 0 ELSE 1 END,CASE WHEN s.next_due<=? THEN s.next_due ELSE 0 END,CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,CASE WHEN COALESCE(json_extract(s.state,'$.catalyst_priority_until'),0)>? THEN 0 ELSE 1 END,CASE json_extract(s.state,'$.adaptive_profile') WHEN 'CRITICAL' THEN 0 ELSE 1 END,CASE json_extract(s.request,'$.priority') WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1 ELSE 2 END,s.next_due,s.created,s.id LIMIT 1",(now.timestamp(),now.timestamp(),watch_id,watch_id,now.timestamp()-120,now.timestamp()-120,now.timestamp())).fetchone()
   if not row:return None
   # Provider adapters charge the shared budget immediately before each actual
   # upstream request. Claiming a job is not itself a provider request.

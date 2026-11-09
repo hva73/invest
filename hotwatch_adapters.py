@@ -9,6 +9,8 @@ from hotwatch_engine import utc,effective_poll_interval,valid_cxe_evidence,provi
 class DataUnavailable(EngineError):pass
 
 _quote_cache={}
+_ws_batch_cache={}
+_ws_batch_lock=threading.Lock()
 _quote_locks=[threading.Lock() for _ in range(32)]
 
 def shared_quote(key,symbol,fetch,enabled=True):
@@ -29,37 +31,11 @@ def reserve(connect,uid,source,now=None,purpose=None):
  with connect() as c:
   c.execute('BEGIN IMMEDIATE');c.execute('DELETE FROM hw_request_budget WHERE window<?',(window-2,))
   row=c.execute('SELECT used FROM hw_request_budget WHERE user_id=? AND source=? AND window=?',(uid,source,window)).fetchone()
-  lane_name='identity' if purpose in ('identity','candidate_identity','holding_identity') else purpose
-  if source=='pluto' and lane_name in ('identity','scan') and limit>=10:
-   candidate_report="SELECT r.report_id FROM report_candidate_links l JOIN ingested_reports r ON r.id=l.report_row_id WHERE l.user_id=d.user_id AND l.is_test=0 AND l.candidate_id=d.candidate_id AND r.report_type!='deep_analysis' ORDER BY l.generated DESC,r.id DESC LIMIT 1"
-   c.execute('DELETE FROM hw_pluto_budget_lane WHERE window<?',(window-2,))
-   if purpose=='candidate_identity' and window%2:
-    waiting=c.execute("SELECT 1 FROM hw_holding_autowatch WHERE user_id=? AND status NOT IN ('LINKED','STOPPED','POSITION_CLOSED','AMBIGUOUS','CAPACITY_LIMIT') AND (status='VERIFYING' OR next_attempt<=?) UNION ALL SELECT 1 FROM hw_feed_recovery f JOIN hw_sessions s ON s.id=f.watch_row_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND f.status!='MATCHED' AND f.next_attempt<=? LIMIT 1",(uid,now.timestamp()+60,uid,now.timestamp()+60)).fetchone()
-    if waiting:raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
-   if purpose=='holding_identity' and not window%2:
-    waiting=c.execute("SELECT 1 FROM hw_discovery_attempts d WHERE d.user_id=? AND d.is_test=0 AND d.report_id=("+candidate_report+") AND d.status NOT IN ('CREATED','ACTIVE','ALREADY_ACTIVE','NOT_NEW','REJECTED','global_capacity_limit','capacity_limit') AND d.next_attempt BETWEEN ? AND ? LIMIT 1",(uid,now.timestamp()-60,now.timestamp()+60)).fetchone()
-    if waiting:raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
-   if lane_name=='identity':
-    competing=c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=0 AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND json_extract(request,'$.provider')='pluto' AND next_due<=? LIMIT 1",(uid,now.timestamp()+60)).fetchone()
-    cap=limit-max(4,limit*5//12)
-   else:
-    competing=c.execute("SELECT 1 FROM hw_holding_autowatch WHERE user_id=? AND status NOT IN ('LINKED','STOPPED','POSITION_CLOSED','AMBIGUOUS','CAPACITY_LIMIT') AND (status='VERIFYING' OR next_attempt<=?) UNION ALL SELECT 1 FROM hw_discovery_attempts d WHERE d.user_id=? AND d.is_test=0 AND d.report_id=("+candidate_report+") AND d.status NOT IN ('CREATED','ACTIVE','ALREADY_ACTIVE','NOT_NEW','REJECTED','global_capacity_limit','capacity_limit') AND d.next_attempt BETWEEN ? AND ? UNION ALL SELECT 1 FROM hw_feed_recovery f JOIN hw_sessions s ON s.id=f.watch_row_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND f.status!='MATCHED' AND f.next_attempt<=? LIMIT 1",(uid,now.timestamp()+60,uid,now.timestamp()-60,now.timestamp()+60,uid,now.timestamp()+60)).fetchone()
-    cap=max(4,limit*5//12)
-   lane=c.execute('SELECT used FROM hw_pluto_budget_lane WHERE user_id=? AND window=? AND lane=?',(uid,window,lane_name)).fetchone()
-   if competing and lane and lane['used']>=cap:raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
-  # Leave room within the existing shared limit for identity and exchange
-  # checks; neither kind of request may exceed the provider-wide budget.
-  if source=='eodhd' and limit>3:
-   reserved=0
-   if purpose!='holding_identity':
-    pending=c.execute("SELECT 1 FROM hw_holding_autowatch WHERE (status='VERIFYING' AND next_attempt>=?) OR (status='PROVIDER_RATE_BUDGET' AND next_attempt BETWEEN ? AND ?) UNION ALL SELECT 1 FROM hw_feed_recovery f JOIN hw_sessions s ON s.id=f.watch_row_id WHERE s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND f.status!='MATCHED' AND f.next_attempt BETWEEN ? AND ? LIMIT 1",(now.timestamp()-60,now.timestamp()-60,now.timestamp()+60,now.timestamp()-60,now.timestamp()+60)).fetchone()
-    if pending:reserved+=2
-   if purpose!='exchange_status' and c.execute('SELECT 1 FROM hw_exchange_status WHERE next_attempt BETWEEN ? AND ? LIMIT 1',(now.timestamp()-60,now.timestamp()+60)).fetchone():reserved+=1
-   limit=max(1,limit-reserved)
+  # Charge only actual requests against the configured provider-wide limit.
+  # Priority and fair scheduling are handled before a session is claimed;
+  # idle reservations must not consume capacity or delay new identities.
   if row and row['used']>=limit:raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
   c.execute('INSERT INTO hw_request_budget VALUES(?,?,?,1) ON CONFLICT(user_id,source,window) DO UPDATE SET used=used+1',(uid,source,window))
-  if source=='pluto' and lane_name in ('identity','scan'):
-   c.execute('INSERT INTO hw_pluto_budget_lane VALUES(?,?,?,1) ON CONFLICT(user_id,window,lane) DO UPDATE SET used=used+1',(uid,window,lane_name))
 
 def unknown_context(diagnostic=None):
  result={'tradability':'unknown','status':'unknown','as_of':None,'position':'unknown','quantity':None,'cost_price':None,'portfolio_equity_dkk':None,'exposure_dkk':None,'fx_to_dkk':None,'fees_dkk':None,'orders':[]}
@@ -290,7 +266,10 @@ class PlutoAdapter:
   if q.get('last_error'):raise DataUnavailable('PLUTO_PROVIDER_ERROR')
   context=self.safe_context(r,q['currency'])
   if not q.get('price_time'):
-   error=DataUnavailable('PLUTO_QUOTE_TIME_UNKNOWN');error.position_context=context;raise error
+   error=DataUnavailable('PLUTO_QUOTE_TIME_UNKNOWN');error.position_context=context
+   if q.get('price') is not None and q.get('currency')==r.get('quote_currency'):
+    error.partial_observation={'source':'pluto','price':q['price'],'currency':q['currency'],'source_time':None,'received_at':q.get('fetched_at'),'quality':'TIME_UNKNOWN'}
+   raise error
   at=stamp(q['price_time'])
   return {'sample_id':'pluto-'+hashlib.sha256((r['asset_id']+q['price_time']).encode()).hexdigest()[:32],'source':'pluto','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':q.get('exchange'),'currency':q['currency'],'event_time':q['price_time'],'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'Pluto get_asset price; cadence/session unconfirmed','documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':300,'price':q['price'],'bid':None,'ask':None,'volume':None,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context}
 
@@ -312,14 +291,48 @@ def extended_session(trade,schedule,now,max_age_s):
  except (KeyError,ValueError,TypeError,ZoneInfoNotFoundError):return None
 
 class EODHDAdapter:
- def __init__(self,connect,uid,opener=None):self.connect=connect;self.uid=uid;self.opener=opener or urllib.request.build_opener(NoRedirect());self._shared_quotes=opener is None;self.pluto=PlutoAdapter(connect,uid);self.last_telemetry={}
+ def __init__(self,connect,uid,opener=None):self.connect=connect;self.uid=uid;self.opener=opener or urllib.request.build_opener(NoRedirect());self._shared_quotes=opener is None;self.pluto=PlutoAdapter(connect,uid);self.last_telemetry={};self.last_partial_observations=[]
  def interval(self,request,profile):
   if self.connect is None:return max(PROFILES.get(profile,PROFILES[request['profile']]),provider_floor('eodhd'))
   with self.connect() as c:return effective_poll_interval(c,request,profile)
  def feeds(self):
   from eodhd_feeds import EODHDFeeds
   return EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),reserve=lambda:reserve(self.connect,self.uid,'eodhd'),opener=self.opener)
+ def capture(self,client,feed,symbol,session):
+  """Share one bounded stream across due, independently verified watches."""
+  req=session['request_data']
+  if not self._shared_quotes or self.connect is None or session.get('id') is None or req.get('is_test'):
+   return client.capture(feed,symbol,duration=2)
+  credential=hashlib.sha256(os.environ.get('ESCAPE_EODHD_API_KEY','').strip().encode()).digest()
+  key=(self.uid,credential,feed,symbol)
+  with _ws_batch_lock:
+   cached=_ws_batch_cache.get(key);now=time.monotonic()
+   if cached and 0<=now-cached[0]<20:return copy.deepcopy(cached[1])
+   market='us' if feed.startswith('us_') else 'eu';symbols=[symbol]
+   allowed_eu={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}
+   from hotwatch_engine import verified_automatic_feed
+   with self.connect() as c:
+    rows=c.execute("SELECT s.request FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND s.next_due<=? AND json_extract(s.request,'$.provider')='eodhd' ORDER BY CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,s.next_due,s.id LIMIT 40",(self.uid,utc().timestamp())).fetchall()
+    for row in rows:
+     candidate=json.loads(row['request']);full=candidate.get('provider_symbol') or ''
+     if not isinstance(full,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',full):continue
+     if (market=='us')!=full.endswith('.US') or (market=='eu' and ('.' not in full or full.rsplit('.',1)[1].upper() not in allowed_eu)):continue
+     if not verified_automatic_feed(c,self.uid,candidate,utc()):continue
+     stream=full[:-3] if market=='us' else full
+     if stream not in symbols:symbols.append(stream)
+     if len(symbols)>=5:break
+   result=client.capture(feed,symbols if len(symbols)>1 else symbol,duration=2,max_messages=250 if len(symbols)>1 else 50)
+   if result.get('status') not in ('OK','NO_MESSAGES'):return result
+   if len(_ws_batch_cache)>=512:_ws_batch_cache.clear()
+   saved=time.monotonic()
+   for item in symbols:
+    messages=[m for m in result.get('messages',[]) if m.get('symbol')==item]
+    partial=[m for m in result.get('partial_messages',[]) if m.get('symbol')==item]
+    value={**result,'status':'OK' if messages else 'NO_MESSAGES','messages':messages,'message_count':len(messages),'partial_messages':partial}
+    _ws_batch_cache[(self.uid,credential,feed,item)]=(saved,copy.deepcopy(value))
+   return copy.deepcopy(_ws_batch_cache[key][1])
  def poll(self,session):
+  self.last_partial_observations=[]
   if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':raise DataUnavailable('EODHD_FEED_NOT_ENABLED')
   key=os.environ.get('ESCAPE_EODHD_API_KEY','').strip()
   if not key:raise DataUnavailable('EODHD_KEY_NOT_CONFIGURED')
@@ -360,14 +373,28 @@ class EODHDAdapter:
   if os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and exchange and exchange!='US' and exchange not in eu_exchanges:self.last_feed_diagnostics={'websocket_trade_status':'MARKET_MAPPING_UNVERIFIED'}
   if os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and (exchange=='US' or exchange in eu_exchanges):
    market='us' if exchange=='US' else 'eu';stream_symbol=symbol[:-3] if market=='us' else symbol
-   client=self.feeds();stream_started=time.perf_counter();feed=client.capture(market+'_trades',stream_symbol,duration=2);stream_ms=(time.perf_counter()-stream_started)*1000
+   client=self.feeds();stream_started=time.perf_counter();feed=self.capture(client,market+'_trades',stream_symbol,session);stream_ms=(time.perf_counter()-stream_started)*1000
+   partial=feed.get('partial_messages',[])
+   if partial:
+    item=partial[-1];self.last_partial_observations.append({'source':'eodhd','price':item.get('price'),'currency':r.get('quote_currency'),'source_time':None,'received_at':item.get('received_at'),'quality':'TIME_UNKNOWN','trade_size':item.get('trade_size')})
    self.last_feed_diagnostics={'websocket_trade_status':feed['status']}
    if feed['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
    if feed['status']=='RATE_LIMIT':
     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+   valid=[x for x in feed.get('messages',[]) if stamp(x['event_time'])<=utc() and (utc()-stamp(x['event_time'])).total_seconds()<=r['risk']['max_quote_age_s']] if feed['status']=='OK' else []
+   if feed['status'] in ('OK','NO_MESSAGES') and not valid and os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
+    standalone=self.capture(client,market+'_quotes',stream_symbol,session)
+    self.last_feed_diagnostics['websocket_quote_status']=standalone.get('status')
+    if standalone.get('status')=='RATE_LIMIT':
+     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure
+    quotes=standalone.get('messages',[]);partial_quotes=standalone.get('partial_messages',[])
+    if quotes:
+     item=max(quotes,key=lambda x:stamp(x['event_time']))
+     if item.get('bid') is not None or item.get('ask') is not None:self.last_partial_observations.append({'source':'eodhd','price':None,'currency':r.get('quote_currency'),'source_time':item['event_time'],'received_at':item.get('received_at'),'quality':'TRADE_MISSING','bid':item.get('bid'),'ask':item.get('ask')})
+    elif partial_quotes:
+     item=partial_quotes[-1];self.last_partial_observations.append({'source':'eodhd','price':None,'currency':r.get('quote_currency'),'source_time':None,'received_at':item.get('received_at'),'quality':'TIME_UNKNOWN','bid':item.get('bid'),'ask':item.get('ask')})
    if feed['status']=='OK':
-    valid=[x for x in feed['messages'] if stamp(x['event_time'])<=utc() and (utc()-stamp(x['event_time'])).total_seconds()<=r['risk']['max_quote_age_s']]
-    if not valid:self.last_feed_diagnostics={'websocket_trade_status':'STALE_OR_FUTURE'}
+    if not valid:self.last_feed_diagnostics['websocket_trade_status']='STALE_OR_FUTURE'
     if valid:
      trade=max(valid,key=lambda x:stamp(x['event_time']));at=stamp(trade['event_time']);currency=r.get('quote_currency')
      if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):raise DataUnavailable('EODHD_CURRENCY_UNCONFIRMED')
@@ -375,7 +402,7 @@ class EODHDAdapter:
      self.last_telemetry={'websocket_capture_ms':round(stream_ms,3),'pluto_context_ms':round(context_ms,3),'event_to_websocket_receive_ms':round((stamp(trade['received_at'])-at).total_seconds()*1000,3) if trade.get('received_at') else None}
      state=json.loads(session.get('state') or '{}');profile=state.get('adaptive_profile') or r['profile']
      interval=self.interval(r,profile)
-     sample={'sample_id':'eodhd-ws-'+hashlib.sha256((symbol+trade['event_time']).encode()).hexdigest()[:28],'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':None,'currency':currency,'event_time':trade['event_time'],'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD WebSocket '+market+' trade; venue not supplied; not necessarily consolidated','documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':interval,'price':trade['price'],'bid':None,'ask':None,'volume':None,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context,'price_time_kind':'trade'}
+     sample={'sample_id':'eodhd-ws-'+hashlib.sha256((symbol+trade['event_time']).encode()).hexdigest()[:28],'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':None,'currency':currency,'event_time':trade['event_time'],'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD WebSocket '+market+' trade; venue not supplied; not necessarily consolidated','documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':interval,'price':trade['price'],'trade_size':trade.get('trade_size'),'bid':None,'ask':None,'volume':None,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context,'price_time_kind':'trade'}
      if trade.get('market_session')=='closed':sample.update(market_status='CLOSED',session_key=at.date().isoformat()+':CLOSED',status_at=trade['event_time'],status_feed=market+'_trades')
      if trade.get('market_session')=='open':sample.update(market_status='REGULAR',session_key=at.date().isoformat()+':REGULAR',status_at=trade['event_time'],status_feed=market+'_trades')
      if session.get('id') is not None:
@@ -383,10 +410,13 @@ class EODHDAdapter:
       if old:
        previous=json.loads(old['payload']);previous['context']=context;return previous
      if os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
-      quote_feed=client.capture(market+'_quotes',stream_symbol,duration=2)
+      quote_feed=self.capture(client,market+'_quotes',stream_symbol,session)
+      partial_quotes=quote_feed.get('partial_messages',[])
+      if partial_quotes:
+       item=partial_quotes[-1];self.last_partial_observations.append({'source':'eodhd','price':None,'currency':r.get('quote_currency'),'source_time':None,'received_at':item.get('received_at'),'quality':'TIME_UNKNOWN','bid':item.get('bid'),'ask':item.get('ask')})
       if quote_feed['status']=='LOCAL_BUDGET_EXHAUSTED':
        self.last_feed_diagnostics['websocket_quote_status']='LOCAL_BUDGET_EXHAUSTED';return sample
-      status_feed=client.capture(market+'_status',stream_symbol,duration=2) if quote_feed['status']!='RATE_LIMIT' else {'status':'RATE_LIMIT'}
+      status_feed=self.capture(client,market+'_status',stream_symbol,session) if quote_feed['status']!='RATE_LIMIT' else {'status':'RATE_LIMIT'}
       self.last_feed_diagnostics.update(websocket_quote_status=quote_feed['status'],websocket_status_status=status_feed['status'])
       if 'RATE_LIMIT' in (quote_feed['status'],status_feed['status']):
        failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=600;raise failure

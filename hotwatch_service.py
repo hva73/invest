@@ -781,6 +781,7 @@ class Runner:
    if not adapter:
     adapter={'pluto':PlutoAdapter,'eodhd':EODHDAdapter,'report_inbox':InboxAdapter}[r['provider']](self.connect,uid);self.adapters[key]=adapter
    sample=adapter.poll(job);adapter_received=engine.utc();provider_done=time.perf_counter()
+   self.partials(job,adapter)
    adapter_latency_ms=(adapter_received-stamp(sample['event_time'])).total_seconds()*1000 if sample.get('event_time') else None
    # The worker consumes the calculation only. Building a complete dashboard
    # view here would hold the SQLite writer lock during additional reads.
@@ -799,6 +800,7 @@ class Runner:
   except EngineError as error:
    if error.code in ['lease_lost','watch_not_running','kill_switch_active','operator_kill_switch']:
     self.log(job,'cancelled',error.code);return True
+   self.partials(job,adapter,getattr(error,'partial_observation',None))
    # Market-feed availability is independent of current broker ownership.
    # Only the read-only, budgeted Pluto adapter can provide this evidence;
    # unknown context is never promoted to verified or used as a market signal.
@@ -834,6 +836,15 @@ class Runner:
      hotwatch_warmup.refresh(self.connect,job,engine.utc())
     except Exception:logging.getLogger('escape.hotwatch').warning('historical warmup unavailable')
   return True
+ def partial(self,job,observation):
+  if not isinstance(observation,dict):return
+  try:engine.record_partial_observation(self.connect,job['user_id'],job['watch_id'],bool(job['is_test']),observation,lease=job['lease_owner'])
+  except Exception:logging.getLogger('escape.hotwatch').warning('partial_observation_unavailable')
+ def partials(self,job,adapter,observation=None):
+  self.partial(job,observation)
+  items=getattr(adapter,'last_partial_observations',None) if adapter is not None else None
+  if isinstance(items,list):
+   for item in items[:5]:self.partial(job,item)
  def health(self,job,sample,code,measurement=None):
   caps={'endpoint_access':True,'price_time':bool(sample.get('event_time')),'bid_ask':sample['bid'] is not None and sample['ask'] is not None,'interval_volume':sample['volume_type']=='interval','market_status':sample['market_status']!='UNKNOWN'} if sample else {}
   if measurement:caps.update(measurement)

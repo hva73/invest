@@ -439,6 +439,53 @@ class HotWatch(unittest.TestCase):
   with patch('hotwatch_engine.utc',return_value=self.now):self.assertTrue(runner.once(self.now))
   view=engine.item(app.connect,1,r['watch_id'],True)['session'];self.assertEqual(view['status'],'DEGRADED');self.assertEqual(view['signal'],'NO_DATA');self.assertIsNone(view['last_data_at']);self.assertEqual(view['latest_context']['quantity'],'10')
   self.assertEqual(self.counts()['hw_samples'],0)
+ def test_untimed_price_is_journalled_but_cannot_create_a_signal(self):
+  from hotwatch_service import Runner
+  from unittest.mock import Mock
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  req=copy.deepcopy(self.req);req.update(watch_id='untimed-price',purpose='untimed observation',provider='pluto');engine.create(app.connect,1,req,self.now)
+  error=DataUnavailable('PLUTO_QUOTE_TIME_UNKNOWN');error.partial_observation={'source':'pluto','price':'12.34','currency':'USD','source_time':None,'received_at':self.now.isoformat(),'quality':'TIME_UNKNOWN'}
+  adapter=Mock();adapter.poll.side_effect=error;runner=Runner(app.connect);runner.adapters[(1,'pluto')]=adapter
+  with patch('hotwatch_engine.utc',return_value=self.now):self.assertTrue(runner.once(self.now,watch_id=req['watch_id']))
+  view=engine.item(app.connect,1,req['watch_id'],True)['session'];self.assertEqual(view['signal'],'NO_DATA');self.assertIsNone(view['last_data_at']);self.assertEqual(self.counts()['hw_samples'],0)
+  events=engine.history(app.connect,1,req['watch_id'],True)['items'];observed=[x for x in events if x['event_type']=='PARTIAL_MARKET_OBSERVATION']
+  self.assertEqual(len(observed),1);self.assertIsNone(observed[0]['data_timestamp']);self.assertEqual(observed[0]['data']['supporting_metrics']['price'],'12.34')
+  self.assertFalse(engine.record_partial_observation(app.connect,1,req['watch_id'],True,error.partial_observation,self.now))
+  with self.assertRaises(EngineError):engine.record_partial_observation(app.connect,1,req['watch_id'],True,dict(error.partial_observation,currency='EUR'),self.now)
+ def test_pluto_adapter_preserves_untimed_price_as_unverified_observation(self):
+  req=copy.deepcopy(self.req);req.update(provider='pluto')
+  quote={'asset_id':req['asset_id'],'ticker':req['ticker'],'currency':'USD','price':'12.34','price_time':None,'fetched_at':self.now.isoformat()}
+  adapter=PlutoAdapter(app.connect,1)
+  with patch('market_data.quote',return_value=quote),patch.object(adapter,'safe_context',return_value=unknown_context()):
+   with self.assertRaises(DataUnavailable) as error:adapter.poll({'request_data':req})
+  self.assertEqual(error.exception.code,'PLUTO_QUOTE_TIME_UNKNOWN');self.assertEqual(error.exception.partial_observation['price'],'12.34');self.assertIsNone(error.exception.partial_observation['source_time'])
+ def test_untimed_eodhd_trade_survives_followup_feed_failure(self):
+  from hotwatch_service import Runner
+  from unittest.mock import Mock
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  req=copy.deepcopy(self.req);req.update(watch_id='untimed-eodhd',purpose='untimed eodhd',provider='eodhd',provider_symbol='MERC.US',watch_mode='entry');engine.create(app.connect,1,req,self.now)
+  adapter=Mock();adapter.poll.side_effect=DataUnavailable('EODHD_READ_ERROR');adapter.last_partial_observations=[{'source':'eodhd','price':'12.34','currency':'USD','source_time':None,'received_at':self.now.isoformat(),'quality':'TIME_UNKNOWN','trade_size':'7'}]
+  runner=Runner(app.connect);runner.adapters[(1,'eodhd')]=adapter
+  with patch('hotwatch_engine.utc',return_value=self.now):self.assertTrue(runner.once(self.now,watch_id=req['watch_id']))
+  events=engine.history(app.connect,1,req['watch_id'],True)['items'];observed=[x for x in events if x['event_type']=='PARTIAL_MARKET_OBSERVATION']
+  self.assertEqual(len(observed),1);self.assertEqual(observed[0]['data']['supporting_metrics']['trade_size'],'7');self.assertIsNone(observed[0]['data_timestamp'])
+  view=engine.item(app.connect,1,req['watch_id'],True)['session'];self.assertEqual(view['signal'],'NO_DATA');self.assertEqual(self.counts()['hw_samples'],0)
+ def test_european_quote_is_kept_even_when_no_trade_or_fallback_is_available(self):
+  from hotwatch_service import Runner
+  class BadOpener:
+   def open(self,*args,**kwargs):raise OSError('synthetic outage')
+  class Feeds:
+   def capture(self,feed,*args,**kwargs):
+    if feed.endswith('trades'):return {'status':'NO_MESSAGES','messages':[]}
+    return {'status':'OK','messages':[{'event_time':self_now.isoformat(),'received_at':self_now.isoformat(),'bid':'99','ask':'101'}]}
+  self_now=self.now;engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  req=copy.deepcopy(self.req);req.update(watch_id='quote-no-trade',purpose='quote without trade',provider='eodhd',provider_symbol='MERC.CO',watch_mode='entry');engine.create(app.connect,1,req,self.now)
+  runner=Runner(app.connect);adapter=EODHDAdapter(app.connect,1,BadOpener());runner.adapters[(1,'eodhd')]=adapter
+  with patch('hotwatch_engine.utc',return_value=self.now),patch('hotwatch_adapters.utc',return_value=self.now),patch('hotwatch_adapters.reserve'),patch.object(adapter,'feeds',return_value=Feeds()),patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_WS_EU_EXCHANGES':'CO','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}):
+   self.assertTrue(runner.once(self.now,watch_id=req['watch_id']))
+  events=engine.history(app.connect,1,req['watch_id'],True)['items'];observed=[x for x in events if x['event_type']=='PARTIAL_MARKET_OBSERVATION']
+  self.assertEqual(len(observed),1);self.assertEqual(observed[0]['data_timestamp'],self.now.isoformat());self.assertEqual(observed[0]['data']['supporting_metrics']['bid'],'99')
+  self.assertEqual(engine.item(app.connect,1,req['watch_id'],True)['session']['signal'],'NO_DATA');self.assertEqual(self.counts()['hw_samples'],0)
  def test_processing_errors_expose_only_safe_category_and_do_not_create_signal(self):
   from hotwatch_service import Runner
   from unittest.mock import Mock
@@ -689,6 +736,27 @@ class HotWatch(unittest.TestCase):
   second=engine.sync(app.connect,1,True,sessions_after=first['next_sessions_cursor'],session_limit=100,summary_only=True)
   self.assertEqual(len(second['open_sessions']),2);self.assertFalse(second['sessions_have_more'])
   self.assertEqual(len({s['watch_id'] for s in first['open_sessions']+second['open_sessions']}),12)
+ def test_due_verified_sessions_share_european_stream_by_symbol(self):
+  import hotwatch_adapters as adapters
+  symbols=['NOVO-B.CO','GMAB.CO','DSV.CO','VWS.CO','CARL-B.CO'];jobs=[]
+  with app.connect() as c:
+   base=dict(engine.row_for(c,1,self.req['watch_id'],True));base.pop('id')
+   for i,symbol in enumerate(symbols):
+    item=dict(base);item.update(watch_id='batch-'+str(i),candidate_id='batch-candidate-'+str(i),is_test=0,next_due=self.now.timestamp())
+    req=json.loads(item['request']);req.update(watch_id=item['watch_id'],candidate_id=item['candidate_id'],provider='eodhd',provider_symbol=symbol,is_test=False,asset_id='asset-'+str(i));item['request']=json.dumps(req)
+    cols=list(item);cur=c.execute('INSERT INTO hw_sessions('+','.join(cols)+') VALUES('+','.join('?' for _ in cols)+')',[item[k] for k in cols]);jobs.append({'id':cur.lastrowid,'request_data':req})
+  class Client:
+   def __init__(self):self.calls=[]
+   def capture(self,feed,requested,duration,max_messages):
+    self.calls.append((feed,requested));return {'status':'OK','messages':[{'symbol':s,'event_time':self_now.isoformat(),'price':str(i+1)} for i,s in enumerate(requested)]}
+  self_now=self.now;client=Client();adapter=EODHDAdapter(app.connect,1);adapters._ws_batch_cache.clear()
+  try:
+   with patch('hotwatch_engine.verified_automatic_feed',return_value=True),patch.dict(os.environ,{'ESCAPE_EODHD_API_KEY':'test-only','ESCAPE_HW_EODHD_WS_EU_EXCHANGES':'CO'}):
+    for symbol,job in zip(symbols,jobs):
+     result=adapter.capture(client,'eu_trades',symbol,job)
+     self.assertEqual([m['symbol'] for m in result['messages']],[symbol])
+   self.assertEqual(len(client.calls),1);self.assertEqual(set(client.calls[0][1]),set(symbols))
+  finally:adapters._ws_batch_cache.clear()
  def test_latest_observations_have_indexes_after_repeat_initialization(self):
   app.init()
   with app.connect() as c:
@@ -747,6 +815,12 @@ class HotWatch(unittest.TestCase):
   selected=engine.claim(app.connect,self.now+timedelta(seconds=1));self.assertEqual(selected['watch_id'],'news-priority')
   with app.connect() as c:c.execute("UPDATE hw_sessions SET lease_until=0,lease_owner=NULL")
   selected=engine.claim(app.connect,self.now+timedelta(seconds=31));self.assertEqual(selected['watch_id'],self.req['watch_id'])
+ def test_overdue_candidate_is_not_starved_by_newly_due_holdings(self):
+  exit_req=copy.deepcopy(self.req);exit_req.update(watch_id='exit-fairness',purpose='holding fairness',watch_mode='exit');engine.create(app.connect,1,exit_req,self.now)
+  with app.connect() as c:
+   c.execute('UPDATE hw_sessions SET next_due=? WHERE watch_id=?',((self.now-timedelta(seconds=121)).timestamp(),self.req['watch_id']))
+   c.execute('UPDATE hw_sessions SET next_due=? WHERE watch_id=?',(self.now.timestamp(),exit_req['watch_id']))
+  selected=engine.claim(app.connect,self.now);self.assertEqual(selected['watch_id'],self.req['watch_id'])
  def test_eodhd_disabled_without_purchase_and_errors_do_not_leak_key(self):
   with patch.dict(os.environ,{},clear=True):
    with self.assertRaisesRegex(DataUnavailable,'EODHD_FEED_NOT_ENABLED'):EODHDAdapter(app.connect,1).poll({'request_data':self.req})

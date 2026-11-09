@@ -167,11 +167,10 @@ class HoldingAutowatch(unittest.TestCase):
   self.assertIsNone(self.tick(verify=lambda *_:self.fail('must not look up'),lookup=self.lookup))
   with app.connect() as c:c.execute("UPDATE portfolio_snapshots SET last_error=NULL,payload=?",(json.dumps({'positions_complete':False,'positions':[self.holding]}),))
   self.assertIsNone(self.tick(verify=lambda *_:self.fail('must not look up'),lookup=self.lookup))
- def test_identity_reserves_two_calls_without_increasing_shared_limit(self):
+ def test_waiting_identity_does_not_reserve_unused_shared_capacity(self):
   with app.connect() as c:c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(1,self.pid,'synthetic-asset','VERIFYING',None,self.now.timestamp()+300,self.now.isoformat()))
   with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12'}):
    for _ in range(10):reserve(app.connect,1,'eodhd',self.now)
-   with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now)
    for _ in range(2):reserve(app.connect,1,'eodhd',self.now,purpose='holding_identity')
    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now,purpose='holding_identity')
  def test_eodhd_budget_has_separate_default_and_respects_explicit_settings(self):
@@ -181,7 +180,7 @@ class HoldingAutowatch(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12','ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE':'40'},clear=True):
    self.assertEqual(engine.provider_request_limit('eodhd'),40)
    self.assertEqual(engine.provider_request_limit('pluto'),12)
- def test_pluto_budget_preserves_room_for_scan_and_identity_in_either_order(self):
+ def test_pluto_budget_is_shared_by_scan_and_identity_in_either_order(self):
   self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
   with app.connect() as c:
    c.execute("UPDATE hw_sessions SET request=json_set(request,'$.provider','pluto'),next_due=?",(self.now.timestamp(),))
@@ -190,7 +189,6 @@ class HoldingAutowatch(unittest.TestCase):
    for at,first,second in [(self.now,'scan','identity'),(self.now+timedelta(minutes=1),'identity','scan')]:
     amounts={'scan':5,'identity':7}
     for _ in range(amounts[first]):reserve(app.connect,1,'pluto',at,purpose=first)
-    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'pluto',at,purpose=first)
     for _ in range(amounts[second]):reserve(app.connect,1,'pluto',at,purpose=second)
     with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'pluto',at,purpose=second)
  def test_old_discovery_attempt_does_not_permanently_reserve_pluto_budget(self):
@@ -199,7 +197,7 @@ class HoldingAutowatch(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12'}):
    for _ in range(12):reserve(app.connect,1,'pluto',self.now,purpose='scan')
    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'pluto',self.now,purpose='scan')
- def test_candidate_and_holding_checks_take_turns_when_both_wait(self):
+ def test_candidate_and_holding_checks_do_not_wait_for_alternating_minutes(self):
   with app.connect() as c:
    c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(1,self.pid,'synthetic-asset','VERIFYING',None,self.now.timestamp()+300,self.now.isoformat()))
    c.execute('INSERT INTO hw_discovery_attempts VALUES(?,?,?,?,?,?,?,?)',(1,0,self.fixture.report['candidates'][0]['candidate_id'],'trade-source','PROVIDER_RATE_BUDGET',self.now.isoformat(),self.now.timestamp(),None))
@@ -207,10 +205,10 @@ class HoldingAutowatch(unittest.TestCase):
   if int(at.timestamp()//60)%2:at+=timedelta(minutes=1)
   with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12'}):
    reserve(app.connect,1,'pluto',at,purpose='candidate_identity')
-   with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'pluto',at,purpose='holding_identity')
+   reserve(app.connect,1,'pluto',at,purpose='holding_identity')
    at+=timedelta(minutes=1)
    reserve(app.connect,1,'pluto',at,purpose='holding_identity')
-   with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'pluto',at,purpose='candidate_identity')
+   reserve(app.connect,1,'pluto',at,purpose='candidate_identity')
  def test_candidates_waiting_for_capacity_do_not_block_existing_identity_recovery(self):
   with app.connect() as c:
    c.execute('INSERT INTO hw_discovery_attempts VALUES(?,?,?,?,?,?,?,?)',(1,0,self.fixture.report['candidates'][0]['candidate_id'],'trade-source','global_capacity_limit',self.now.isoformat(),self.now.timestamp(),None))
@@ -219,21 +217,19 @@ class HoldingAutowatch(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12'}):
    for _ in range(12):reserve(app.connect,1,'pluto',at,purpose='holding_identity')
    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'pluto',at,purpose='holding_identity')
- def test_exchange_check_gets_one_reserved_call_without_increasing_budget(self):
+ def test_pending_exchange_does_not_reserve_unused_capacity(self):
   with app.connect() as c:c.execute('INSERT INTO hw_exchange_status(exchange,next_attempt) VALUES(?,?)',('CO',self.now.timestamp()+60))
   with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12'}):
    for _ in range(11):reserve(app.connect,1,'eodhd',self.now)
-   with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now)
    reserve(app.connect,1,'eodhd',self.now,purpose='exchange_status')
    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now,purpose='exchange_status')
- def test_feed_recovery_has_reserved_eodhd_capacity(self):
+ def test_feed_recovery_does_not_reserve_unused_capacity(self):
   self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
   with app.connect() as c:
    row=c.execute('SELECT id FROM hw_sessions').fetchone()
    c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?)',(row['id'],self.now.timestamp(),'PLUTO_ISIN_MISSING',self.now.isoformat()))
   with patch.dict(os.environ,{'ESCAPE_HW_REQUESTS_PER_MINUTE':'12'}):
    for _ in range(10):reserve(app.connect,1,'eodhd',self.now)
-   with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now)
    for _ in range(2):reserve(app.connect,1,'eodhd',self.now,purpose='holding_identity')
    with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):reserve(app.connect,1,'eodhd',self.now,purpose='holding_identity')
  def test_runner_starts_the_automatic_holding_loop(self):

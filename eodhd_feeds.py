@@ -160,7 +160,8 @@ class EODHDFeeds:
  def websocket_status(self,market,symbol,duration=2):return self.capture(str(market)+'_status',symbol,duration)
  def capture(self,feed,symbol,duration=2,max_messages=50):
   endpoint=WS_FEEDS.get(feed)
-  if not endpoint or not _valid_symbol(symbol) or type(duration) is not int or not 1<=duration<=5 or type(max_messages) is not int or not 1<=max_messages<=50:return _result('INVALID_INPUT','/ws')
+  symbols=[symbol] if isinstance(symbol,str) else symbol
+  if not endpoint or not isinstance(symbols,list) or not 1<=len(symbols)<=10 or any(not _valid_symbol(s) for s in symbols) or len(set(symbols))!=len(symbols) or type(duration) is not int or not 1<=duration<=5 or type(max_messages) is not int or not 1<=max_messages<=250:return _result('INVALID_INPUT','/ws')
   path='/ws/'+endpoint
   if not self._key:return _result('KEY_MISSING',path)
   try:
@@ -169,10 +170,10 @@ class EODHDFeeds:
    if factory is None:
     try:from websockets.sync.client import connect as factory
     except ImportError:return _result('WEBSOCKET_DEPENDENCY_MISSING',path)
-   url=WS_BASE+'/'+endpoint+'?'+urlencode({'api_token':self._key});messages=[]
+   url=WS_BASE+'/'+endpoint+'?'+urlencode({'api_token':self._key});messages=[];partial_messages=[]
    with factory(url,open_timeout=8,close_timeout=2,max_size=131072,max_queue=16,logger=_WS_LOGGER) as ws:
     deadline=time.monotonic()+duration
-    ws.send(json.dumps({'action':'subscribe','symbols':symbol}))
+    ws.send(json.dumps({'action':'subscribe','symbols':','.join(symbols)}))
     while time.monotonic()<deadline and len(messages)<max_messages:
      try:raw=ws.recv(timeout=max(.01,deadline-time.monotonic()))
      except TimeoutError:break
@@ -183,19 +184,28 @@ class EODHDFeeds:
      if not isinstance(row,dict):continue
      if str(row.get('status_code')) in ('401','402','403'):return _result('ENTITLEMENT_UNVERIFIED',path)
      if str(row.get('status_code'))=='429':return _result('RATE_LIMIT',path)
-     if row.get('s')!=symbol:continue
+     actual=row.get('s')
+     if actual not in symbols:continue
      at=_timestamp(row.get('t'),1000)
-     if not at:continue
+     if not at:
+      if feed.endswith('trades'):
+       price=_number(row.get('p'))
+       if price is not None and Decimal(price)>0:partial_messages.append({'symbol':actual,'received_at':received_at,'price':price,'trade_size':_number(row.get('v'))})
+      elif feed.endswith('quotes'):
+       bid=_number(row.get('bp'));ask=_number(row.get('ap'))
+       if bid is not None or ask is not None:partial_messages.append({'symbol':actual,'received_at':received_at,'bid':bid,'ask':ask})
+      if len(partial_messages)>=max_messages:break
+      continue
      if feed.endswith('trades'):
       price=_number(row.get('p'))
       if price is None or Decimal(price)<=0:continue
-      messages.append({'symbol':symbol,'event_time':at,'received_at':received_at,'price':price,'trade_size':_number(row.get('v')),'market_session':row.get('ms') if row.get('ms') in ('open','closed','extended-hours','extended hours') else None})
+      messages.append({'symbol':actual,'event_time':at,'received_at':received_at,'price':price,'trade_size':_number(row.get('v')),'market_session':row.get('ms') if row.get('ms') in ('open','closed','extended-hours','extended hours') else None})
      elif feed.endswith('quotes'):
-      messages.append({'symbol':symbol,'event_time':at,'received_at':received_at,'bid':_number(row.get('bp')),'ask':_number(row.get('ap')),'bid_size':_number(row.get('bs')),'ask_size':_number(row.get('as'))})
+      messages.append({'symbol':actual,'event_time':at,'received_at':received_at,'bid':_number(row.get('bp')),'ask':_number(row.get('ap')),'bid_size':_number(row.get('bs')),'ask_size':_number(row.get('as'))})
      else:
       status=row.get('h');reason=row.get('r')
-      messages.append({'symbol':symbol,'event_time':at,'received_at':received_at,'trading_status':status if isinstance(status,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',status) else None,'reason':reason if isinstance(reason,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',reason) else None})
-   return _result('OK' if messages else 'NO_MESSAGES',path,messages=messages,message_count=len(messages))
+      messages.append({'symbol':actual,'event_time':at,'received_at':received_at,'trading_status':status if isinstance(status,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',status) else None,'reason':reason if isinstance(reason,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',reason) else None})
+   return _result('OK' if messages else 'NO_MESSAGES',path,messages=messages,message_count=len(messages),partial_messages=partial_messages)
   except Exception as error:
    code=getattr(getattr(error,'response',None),'status_code',None)
    if code in (401,402,403):return _result('ENTITLEMENT_UNVERIFIED',path,http_status=code)

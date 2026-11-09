@@ -113,15 +113,28 @@ class FeedTests(unittest.TestCase):
   req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0);adapter=EODHDAdapter(None,1,Opener({}))
   class Feeds:
    def capture(self,feed,*args,**kwargs):
-    if feed.endswith('trades'):return {'status':'OK','messages':[{'event_time':now.isoformat(),'price':'45.2','market_session':'open'}]}
+    if feed.endswith('trades'):return {'status':'OK','messages':[{'event_time':now.isoformat(),'price':'45.2','trade_size':'7','market_session':'open'}]}
     return {'status':'LOCAL_BUDGET_EXHAUSTED'}
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
-  self.assertEqual(sample['price'],'45.2');self.assertEqual(sample['market_status'],'REGULAR');self.assertIsNone(sample['bid']);self.assertEqual(adapter.last_feed_diagnostics['websocket_quote_status'],'LOCAL_BUDGET_EXHAUSTED')
+  self.assertEqual(sample['price'],'45.2');self.assertEqual(sample['trade_size'],'7');self.assertIsNone(sample['volume']);self.assertEqual(sample['market_status'],'REGULAR');self.assertIsNone(sample['bid']);self.assertEqual(adapter.last_feed_diagnostics['websocket_quote_status'],'LOCAL_BUDGET_EXHAUSTED')
  def test_ws_trade_quote_status_and_no_messages(self):
   for feed,msg,field in [('us_trades',{'s':'AMD','t':1730000000000,'p':10,'v':5,'ms':'open'},'price'),('us_quotes',{'s':'AMD','t':1730000000000,'bp':10,'ap':11},'bid'),('us_status',{'s':'AMD','t':1730000000000,'h':'T'},'trading_status')]:
    ws=WS([msg]);client=EODHDFeeds(SECRET,ws_factory=lambda *a,**k:ws);result=client.capture(feed,'AMD',1)
    self.assertEqual(result['status'],'OK');self.assertIsNotNone(result['messages'][0][field]);self.assertEqual(ws.sent,{'action':'subscribe','symbols':'AMD'});self.assertNotIn(SECRET,str(result))
   self.assertEqual(EODHDFeeds(SECRET,ws_factory=lambda *a,**k:WS([])).capture('eu_trades','NOVO-B.CO',1)['status'],'NO_MESSAGES')
+ def test_european_websocket_batches_symbols_without_cross_contamination(self):
+  symbols=['NOVO-B.CO','GMAB.CO','DSV.CO','VWS.CO','CARL-B.CO']
+  rows=[{'s':symbol,'t':1730000000000+i,'p':100+i,'v':i+1,'ms':'open'} for i,symbol in enumerate(symbols)]
+  rows.append({'s':'OTHER.CO','t':1730000001000,'p':900,'v':1})
+  ws=WS(rows);result=EODHDFeeds(SECRET,ws_factory=lambda *a,**k:ws).capture('eu_trades',symbols,1,250)
+  self.assertEqual(ws.sent['symbols'],','.join(symbols));self.assertEqual({m['symbol'] for m in result['messages']},set(symbols))
+  self.assertEqual([m['trade_size'] for m in result['messages']],['1','2','3','4','5'])
+  self.assertEqual(len({m['event_time'] for m in result['messages']}),5)
+ def test_untimed_european_trade_is_retained_without_inventing_source_time(self):
+  ws=WS([{'s':'NOVO-B.CO','p':'100','v':7}]);client=EODHDFeeds(SECRET,ws_factory=lambda *a,**k:ws)
+  result=client.capture('eu_trades','NOVO-B.CO',1)
+  self.assertEqual(result['status'],'NO_MESSAGES');self.assertEqual(result['messages'],[])
+  self.assertEqual(result['partial_messages'][0]['price'],'100');self.assertNotIn('event_time',result['partial_messages'][0])
  def test_websocket_entitlement_error_and_untrusted_fields_do_not_leak(self):
   ws=WS([{'status_code':403,'message':SECRET}]);self.assertEqual(EODHDFeeds(SECRET,ws_factory=lambda *a,**k:ws).capture('us_trades','AMD',1)['status'],'ENTITLEMENT_UNVERIFIED')
   ws=WS([{'s':'AMD','t':1730000000000,'p':10,'extra':SECRET}]);res=EODHDFeeds(SECRET,ws_factory=lambda *a,**k:ws).capture('us_trades','AMD',1);self.assertNotIn(SECRET,str(res))
