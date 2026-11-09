@@ -44,7 +44,9 @@ def _issuer(value):
  # EODHD puts that type in a separate field. Preserve class identifiers.
  if len(words)>=2 and words[-2:]==['COMMON','STOCK']:words=words[:-2]
  while words and words[-1] in ('INC','INCORPORATED','LTD','LIMITED','CO','COMPANY','CORP','CORPORATION','PLC'):words.pop()
- return tuple(words) if words and sum(map(len,words))>=4 else None
+ # A short legal issuer (e.g. KKR) is still a name. Identity also requires
+ # the unique ticker, venue, currency, instrument type and catalog ISIN.
+ return tuple(words) if words else None
 
 def _us_issuer(value):
  """Separate generic share descriptions and retain any explicit class."""
@@ -67,8 +69,14 @@ def resolve_us(pluto, eodhd_choices, us_rows, cxe_rows=None):
  def same_issuer(row):
   other,other_class=_us_issuer(row.get('Name'))
   if other==issuer and not (share_class and other_class and share_class!=other_class):return True
-  # The two provider names below were observed for this exact Pluto asset
-  # and EODHD listing. Do not generalize issuer prefixes to other securities.
+  # EODHD truncates HRTX to "Heron Therapeuti". Independently checked
+  # 2026-11-09: Endavu HRTX / XNAS / USD / stock / US4277461020,
+  # asset f8452852-f7eb-44d6-940b-1ed7ce68636f, full Heron Therapeutics.
+  # Pin the observed alias to this broker asset and security; never permit
+  # arbitrary prefixes or infer a match for another share class.
+  if (pluto.get('asset_id')=='da14edd7-64b5-4932-9dd5-62b4136a2387' and ticker=='HRTX' and exchange=='NASDAQ' and kind=='CS' and issuer==('HERON','THERAPEUTICS') and share_class is None and other==('HERON','THERAPEUTI') and other_class is None and row.get('Isin')=='US4277461020'):
+   return any(x.get('symbol')=='HRTX.US' and x.get('isin')=='US4277461020' for x in eodhd_choices if isinstance(x,dict))
+  # These provider names were observed for this exact Pluto asset and listing.
   return bool(pluto.get('asset_id')=='bea4a183-d3aa-4893-8071-87b85385e281' and ticker=='FCX' and kind=='CS' and issuer==('FREEPORT','MCMORAN') and share_class is None and other==('FREEPORT','MCMORAN','COPPER','GOLD') and other_class is None and row.get('Isin')=='US35671D8570')
  matches=[row for row in us_rows if isinstance(row,dict) and same_us_class_ticker(row.get('Code'),ticker) and _norm(row.get('Exchange'))==exchange and _norm(row.get('Currency'))=='USD' and _norm(row.get('Country'))=='USA' and _norm(row.get('Type'))=='COMMONSTOCK' and same_issuer(row) and isinstance(row.get('Isin'),str) and re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',row['Isin'])]
  if len(matches)!=1:return {'status':'AMBIGUOUS' if len(matches)>1 else 'UNVERIFIED','reason':'US_LISTING_NOT_UNIQUE'}
@@ -82,7 +90,9 @@ def resolve_us(pluto, eodhd_choices, us_rows, cxe_rows=None):
  choices=[row for row in eodhd_choices if isinstance(row,dict) and row.get('symbol')==catalog_ticker+'.US' and _norm(row.get('exchange'))=='US' and (not row.get('currency') or _norm(row['currency'])=='USD') and ((bool(row.get('isin')) and _norm(row['isin'])==isin) if alias else (not row.get('isin') or _norm(row['isin'])==isin))]
  if len(choices)!=1:return {'status':'AMBIGUOUS' if len(choices)>1 else 'UNVERIFIED','reason':'EODHD_SYMBOL_NOT_UNIQUE'}
  result={'status':'VERIFIED','symbol':catalog_ticker+'.US','isin':isin,'currency':'USD','currency_basis':'us_catalog_and_pluto','basis':'pluto_asset_us_listing','catalog_exchange':exchange,'catalog_ticker':catalog_ticker,'catalog_type':listing['Type'],'pluto_type':pluto['type'],'type_note':'Pluto angiver ADR; EODHD bruger den brede betegnelse Common Stock.' if kind=='ADRC' else 'Begge kilder angiver en almindelig aktie.'}
- if _us_issuer(listing.get('Name'))[0]!=issuer:result['type_note']='FCX: Pluto og EODHD bruger forskellige observerede selskabsnavne; Pluto oplyser ikke ISIN.'
+ if _us_issuer(listing.get('Name'))[0]!=issuer:
+  result['type_note']=ticker+': Pluto og EODHD bruger forskellige observerede selskabsnavne; Pluto oplyser ikke ISIN.'
+  if ticker=='HRTX':result['type_note']+=' EODHD-navnet er forkortet; HRTX/XNAS/USD og ISIN US4277461020 er også kontrolleret hos Endavu 2026-11-09.'
  if cxe_rows is not None:
   corroborating=[row for row in cxe_rows if isinstance(row,dict) and row.get('isin')==isin and _norm(row.get('instrument_type'))=='EQTY']
   if not corroborating or any(_issuer(row.get('name'))!=issuer for row in corroborating):return {'status':'UNVERIFIED','reason':'CXE_ISIN_NOT_CORROBORATED'}

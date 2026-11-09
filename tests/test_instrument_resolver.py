@@ -4,6 +4,30 @@ from instrument_resolver import resolve_instrument,resolve_cxe,resolve_us,crypto
 from cxe_reference import parse_reference,ReferenceUnavailable
 
 class InstrumentResolver(unittest.TestCase):
+ def test_short_issuer_is_not_rejected_but_all_listing_checks_remain(self):
+  pluto={'asset_id':'synthetic-kkr','ticker':'KKR','name':'KKR & Co. Inc.','exchange':'NYSE','currency':'USD','type':'CS'}
+  listing={'Code':'KKR','Name':'KKR & Co. Inc.','Country':'USA','Exchange':'NYSE','Currency':'USD','Type':'Common Stock','Isin':'US48251W1045'}
+  choice={'symbol':'KKR.US','exchange':'US','currency':'USD','isin':'US48251W1045'}
+  self.assertEqual(resolve_us(pluto,[choice],[listing])['status'],'VERIFIED')
+  for fields in ({'name':'ABC & Co. Inc.'},{'name':'Co. Inc.'},{'name':''},{'exchange':'NASDAQ'},{'currency':'CAD'},{'isin':'US0000000001'}):
+   with self.subTest(fields=fields):self.assertNotEqual(resolve_us(dict(pluto,**fields),[choice],[listing])['status'],'VERIFIED')
+  for fields in ({'Isin':None},{'Type':'Preferred Stock'},{'Currency':'CAD'},{'Country':'Canada'},{'Code':'KKR-PD'}):
+   with self.subTest(fields=fields):self.assertNotEqual(resolve_us(pluto,[choice],[dict(listing,**fields)])['status'],'VERIFIED')
+  self.assertEqual(resolve_us(pluto,[choice],[listing,listing])['status'],'AMBIGUOUS')
+ def test_observed_hrtx_truncation_is_pinned_to_independently_checked_security(self):
+  pluto={'asset_id':'da14edd7-64b5-4932-9dd5-62b4136a2387','ticker':'HRTX','name':'Heron Therapeutics, Inc. Common Stock','exchange':'NASDAQ','currency':'USD','type':'CS'}
+  listing={'Code':'HRTX','Name':'Heron Therapeuti','Country':'USA','Exchange':'NASDAQ','Currency':'USD','Type':'Common Stock','Isin':'US4277461020'}
+  choice={'symbol':'HRTX.US','exchange':'US','currency':'USD','isin':'US4277461020'}
+  result=resolve_us(pluto,[choice],[listing]);self.assertEqual(result['status'],'VERIFIED');self.assertIn('Endavu',result['type_note'])
+  self.assertNotEqual(resolve_us(dict(pluto,exchange='NYSE'),[choice],[dict(listing,Exchange='NYSE')])['status'],'VERIFIED')
+  for fields in ({'asset_id':'other'},{'ticker':'OTHER'},{'name':'Heron Therapeutics Class A Common Stock'},{'exchange':'NYSE'},{'currency':'EUR'},{'type':'ADRC'},{'isin':'US0000000001'}):
+   with self.subTest(fields=fields):self.assertNotEqual(resolve_us(dict(pluto,**fields),[choice],[listing])['status'],'VERIFIED')
+  for fields in ({'Isin':'US0000000001'},{'Name':'Heron Therapeu'},{'Name':'Heron Therapeuti Class B'},{'Exchange':'NYSE'},{'Type':'Preferred Stock'}):
+   with self.subTest(fields=fields):self.assertNotEqual(resolve_us(pluto,[choice],[dict(listing,**fields)])['status'],'VERIFIED')
+  for fields in ({'isin':None},{'isin':'US0000000001'},{'currency':'EUR'},{'symbol':'HRTX.F'}):
+   with self.subTest(fields=fields):self.assertNotEqual(resolve_us(pluto,[dict(choice,**fields)],[listing])['status'],'VERIFIED')
+  self.assertEqual(resolve_us(pluto,[choice],[listing,listing])['status'],'AMBIGUOUS')
+  self.assertEqual(resolve_us(pluto,[choice,choice],[listing])['status'],'AMBIGUOUS')
  def test_us_share_class_alias_requires_same_class_and_matching_isin(self):
   pluto={'asset_id':'synthetic-berkshire','ticker':'BRK.B','name':'Berkshire Hathaway Class B','exchange':'NYSE','currency':'USD','type':'CS'}
   listing={'Code':'BRK-B','Name':'Berkshire Hathaway Inc','Country':'USA','Exchange':'NYSE','Currency':'USD','Type':'Common Stock','Isin':'US0846707026'}
