@@ -494,7 +494,14 @@ class EODHDAdapter:
   if d.get('code') not in permitted_codes:raise DataUnavailable('EODHD_READ_OR_CONTRACT_ERROR')
   # A fallback snapshot can be older than a trade or bar already journalled.
   # Treat it as stale rather than attempting to rewrite market history.
-  if session.get('last_data') and at<stamp(session['last_data']):raise DataUnavailable('DATA_STALE')
+  if session.get('last_data') and at<stamp(session['last_data']):
+   failure=DataUnavailable('DATA_STALE')
+   # A stale market observation must not prevent an independent, verified
+   # Pluto holding check. The runner journals it separately without a signal.
+   if r.get('watch_mode')=='exit':
+    context=self.pluto.safe_context(r,r.get('quote_currency'))
+    if context.get('status')=='verified' and context.get('as_of'):failure.position_context=context
+   raise failure
   # This documented price endpoint does not prove bid/ask, interval volume,
   # market status or account entitlement. Never invent these capabilities.
   currency=d.get('currency') or r.get('quote_currency')

@@ -467,6 +467,35 @@ class HotWatch(unittest.TestCase):
   view=engine.item(app.connect,1,r['watch_id'],True)['session']
   self.assertEqual(view['latest_context']['quantity'],'10');self.assertEqual(view['signal'],'NO_DATA');self.assertEqual(view['status'],'DEGRADED')
   self.assertIsNone(view['last_data_at']);self.assertEqual(self.counts()['hw_samples'],0)
+ def test_stale_eodhd_fallback_journals_verified_holding_without_signal(self):
+  from hotwatch_service import Runner
+  class Response:
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,limit):return json.dumps({'code':'MERC.US','timestamp':int((self_now-timedelta(minutes=1)).timestamp()),'close':'12.34','currency':'USD'}).encode()
+  class Opener:
+   def open(self,*args,**kwargs):return Response()
+  self_now=self.now;engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  req=copy.deepcopy(self.req);req.update(watch_id='stale-fallback-holding',purpose='holding test',provider='eodhd',provider_symbol='MERC.US',watch_mode='exit');engine.create(app.connect,1,req,self.now)
+  with app.connect() as c:c.execute('UPDATE hw_sessions SET last_data=? WHERE watch_id=?',(self.now.isoformat(),req['watch_id']))
+  runner=Runner(app.connect);adapter=EODHDAdapter(app.connect,1,Opener());runner.adapters[(1,'eodhd')]=adapter
+  context=tick(self.now,held=True)['context']
+  with patch('hotwatch_engine.utc',return_value=self.now),patch('hotwatch_adapters.reserve'),patch.object(adapter.pluto,'safe_context',return_value=context),patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}):
+   self.assertTrue(runner.once(self.now,watch_id=req['watch_id']))
+  view=engine.item(app.connect,1,req['watch_id'],True)['session']
+  self.assertEqual(view['latest_context']['quantity'],'10');self.assertEqual(view['signal'],'NO_DATA');self.assertEqual(view['last_error'],'DATA_STALE')
+  self.assertEqual(self.counts()['hw_samples'],0)
+ def test_stale_fallback_does_not_invent_missing_holding_context(self):
+  class Response:
+   def __enter__(self):return self
+   def __exit__(self,*args):return False
+   def read(self,limit):return json.dumps({'code':'MERC.US','timestamp':int((self_now-timedelta(minutes=1)).timestamp()),'close':'12.34'}).encode()
+  class Opener:
+   def open(self,*args,**kwargs):return Response()
+  self_now=self.now;req=copy.deepcopy(self.req);req.update(provider='eodhd',provider_symbol='MERC.US',watch_mode='exit')
+  with patch('hotwatch_adapters.reserve'),patch('hotwatch_adapters.PlutoAdapter.safe_context',return_value=unknown_context()),patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}):
+   with self.assertRaises(DataUnavailable) as error:EODHDAdapter(app.connect,1,Opener()).poll({'request_data':req,'last_data':self.now.isoformat()})
+  self.assertEqual(error.exception.code,'DATA_STALE');self.assertIsNone(getattr(error.exception,'position_context',None))
  def test_checkpoint_context_migration_preserves_old_journal(self):
   ctx=tick(self.now)['context'];engine.observe_context(app.connect,1,self.req['watch_id'],True,ctx,self.now)
   with app.connect() as c:
