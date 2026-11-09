@@ -16,6 +16,13 @@ class EngineContract(unittest.TestCase):
   self.assertTrue(self.call('validate_report',self.report)['valid']);self.assertTrue(self.call('send_report',self.report)['ok'])
   with patch('hotwatch_engine.utc',return_value=self.base):self.call('start_hot_watch',self.req)
  def tearDown(self):self.http.tearDown()
+ def test_supervisor_diagnostics_are_available_via_sync(self):
+  import hotwatch_supervisor
+  hotwatch_supervisor.diagnostic('worker_exited',-15)
+  synced=self.call('sync_hot_watch',{'is_test':True})
+  self.assertEqual(synced['supervisor_events'][0]['event'],'worker_exited')
+  self.assertEqual(synced['supervisor_events'][0]['code'],-15)
+  self.assertIn('supervisor',synced)
  def call(self,name,args):
   status,response,_=self.http.call(self.token,name,args)
   if 'result' not in response:self.fail(f'{name} returned JSON-RPC error: {response}')

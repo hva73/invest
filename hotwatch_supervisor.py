@@ -80,13 +80,32 @@ def heartbeat():
     return False
 
 
+def diagnostic(event, code=None):
+    """Persist bounded, non-sensitive lifecycle codes; never log exception text."""
+    allowed = {'supervisor_started', 'supervisor_signal', 'supervisor_stopped',
+               'worker_started', 'worker_exited', 'worker_start_failed',
+               'heartbeat_timeout', 'restart_timeout', 'worker_killed'}
+    if event not in allowed or (code is not None and not isinstance(code, int)):
+        raise ValueError('invalid diagnostic event')
+    try:
+        import app
+        with app.connect() as c:
+            c.execute('INSERT INTO hw_supervisor_events(created,event,code) VALUES(?,?,?)',
+                      (datetime.now(timezone.utc).isoformat(), event, code))
+            c.execute('DELETE FROM hw_supervisor_events WHERE id NOT IN (SELECT id FROM hw_supervisor_events ORDER BY id DESC LIMIT 200)')
+    except Exception:
+        pass
+
+
 def run(timeout=300):
     fd = lock('supervisor')
     if fd is None:
         return
     stop = False
-    def shutdown(*_):
-        nonlocal stop
+    stop_signal = None
+    def shutdown(signum, _frame):
+        nonlocal stop, stop_signal
+        stop_signal = signum
         stop = True
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
@@ -96,11 +115,13 @@ def run(timeout=300):
     healthy_since = None
     last_start = 0
     next_start = 0
+    diagnostic('supervisor_started')
     try:
         while not stop and enabled():
             now = time.monotonic()
             fresh = heartbeat()
             if child and child.poll() is not None:
+                diagnostic('worker_exited', child.returncode)
                 child = None
                 fresh = False
             if fresh:
@@ -112,28 +133,35 @@ def run(timeout=300):
             else:
                 healthy_since = None
                 if child and now - last_start > 45:
+                    diagnostic('heartbeat_timeout')
                     child.terminate()
                     try:
                         child.wait(timeout=10)
                     except subprocess.TimeoutExpired:
+                        diagnostic('worker_killed')
                         child.kill()
                         child.wait()
                     child = None
                 if child is None and now >= next_start:
                     failures_since = failures_since or now
                     if now - failures_since >= timeout:
+                        diagnostic('restart_timeout')
                         report('timeout', 'restart_timeout', attempts)
                         return
                     attempts += 1
                     try:
                         child = subprocess.Popen([sys.executable, str(ROOT / 'hotwatch_service.py'), '--interval', '2'], cwd=str(ROOT), env=environment(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, start_new_session=True)
+                        diagnostic('worker_started')
                         last_start = now
-                    except OSError:
+                    except OSError as error:
+                        diagnostic('worker_start_failed', error.errno if isinstance(error.errno, int) else None)
                         child = None
                     next_start = now + min(30, 2 ** min(attempts, 5))
                 report('restarting', 'waiting_for_heartbeat', attempts)
             time.sleep(2)
     finally:
+        if stop_signal is not None:
+            diagnostic('supervisor_signal', stop_signal)
         if child and child.poll() is None:
             child.terminate()
             try:
@@ -142,7 +170,8 @@ def run(timeout=300):
                 child.kill()
                 child.wait()
         if stop or not enabled():
-            report('stopped', 'disabled', attempts)
+            report('stopped', 'signal' if stop else 'disabled', attempts)
+        diagnostic('supervisor_stopped')
         os.close(fd)
 
 

@@ -121,6 +121,7 @@ def init(c):
  c.execute('CREATE TABLE IF NOT EXISTS hw_provider_health(user_id INTEGER NOT NULL,is_test INTEGER NOT NULL,source TEXT NOT NULL,attempted TEXT NOT NULL,succeeded TEXT,code TEXT,payload TEXT NOT NULL,PRIMARY KEY(user_id,is_test,source))')
  c.execute('CREATE TABLE IF NOT EXISTS hw_heartbeat(id INTEGER PRIMARY KEY CHECK(id=1),updated TEXT NOT NULL,status TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_supervisor_status(id INTEGER PRIMARY KEY CHECK(id=1),updated TEXT NOT NULL,status TEXT NOT NULL,reason TEXT,attempts INTEGER NOT NULL DEFAULT 0)')
+ c.execute('CREATE TABLE IF NOT EXISTS hw_supervisor_events(id INTEGER PRIMARY KEY,created TEXT NOT NULL,event TEXT NOT NULL,code INTEGER)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_exchange_status(exchange TEXT PRIMARY KEY,received TEXT,is_open INTEGER,next_attempt REAL NOT NULL DEFAULT 0)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_exchange_calendar(exchange TEXT PRIMARY KEY,received TEXT NOT NULL,timezone TEXT NOT NULL,calendar TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_holding_autowatch(user_id INTEGER NOT NULL,portfolio_id INTEGER NOT NULL,asset_id TEXT NOT NULL,status TEXT NOT NULL,watch_id TEXT,next_attempt REAL NOT NULL DEFAULT 0,updated TEXT NOT NULL,PRIMARY KEY(user_id,portfolio_id,asset_id))')
@@ -589,6 +590,9 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
   c.execute('BEGIN')
   opened=c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=? AND id>? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED') ORDER BY id LIMIT ?",(uid,int(mode),sessions_after,session_limit+1)).fetchall()
   beat=c.execute('SELECT updated,status FROM hw_heartbeat WHERE id=1').fetchone();worker=dict(beat) if beat else None
+  supervisor_row=c.execute('SELECT updated,status,reason,attempts FROM hw_supervisor_status WHERE id=1').fetchone()
+  supervisor=dict(supervisor_row) if supervisor_row else None
+  supervisor_events=[dict(row) for row in c.execute('SELECT created,event,code FROM hw_supervisor_events ORDER BY id DESC LIMIT 30').fetchall()]
   try:worker_fresh=bool(worker and worker['status']=='running' and 0<=(now-stamp(worker['updated'])).total_seconds()<15)
   except (ValueError,TypeError):worker_fresh=False
   events=c.execute('SELECT e.id,e.event_id,e.event_type,e.severity,e.created,e.data_timestamp,e.payload,s.watch_id,s.candidate_id FROM hw_events e JOIN hw_sessions s ON s.id=e.watch_row_id WHERE s.user_id=? AND s.is_test=? AND e.id>? ORDER BY e.id LIMIT ?',(uid,int(mode),after,limit+1)).fetchall()
@@ -609,7 +613,7 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
     sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
    else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
   more=len(opened)>session_limit
-  return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}
+  return {'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'supervisor':supervisor,'supervisor_events':supervisor_events,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}
 
 def control(connect,uid,wid,mode,action,now=None):
  now=now or utc()

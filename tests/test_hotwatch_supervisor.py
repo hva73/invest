@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,6 +10,21 @@ import hotwatch_supervisor as supervisor
 
 
 class WatchdogTests(unittest.TestCase):
+    def test_diagnostics_are_bounded_structured_and_no_secrets(self):
+        with tempfile.TemporaryDirectory() as d:
+            db = str(Path(d) / 'diagnostics.db')
+            with sqlite3.connect(db) as c:
+                c.execute('CREATE TABLE hw_supervisor_events(id INTEGER PRIMARY KEY,created TEXT NOT NULL,event TEXT NOT NULL,code INTEGER)')
+            with patch.object(app, 'connect', side_effect=lambda: sqlite3.connect(db)):
+                for _ in range(205):
+                    supervisor.diagnostic('worker_exited', -15)
+                with self.assertRaises(ValueError):
+                    supervisor.diagnostic('private-token')
+            with sqlite3.connect(db) as c:
+                rows = c.execute('SELECT event,code FROM hw_supervisor_events').fetchall()
+            self.assertEqual(len(rows), 200)
+            self.assertEqual(set(rows), {('worker_exited', -15)})
+
     def test_lock_prevents_a_second_worker(self):
         with tempfile.TemporaryDirectory() as d, patch.object(app, 'DB', str(Path(d) / 'escape.db')):
             first = supervisor.lock('worker')
