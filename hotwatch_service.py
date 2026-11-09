@@ -772,7 +772,9 @@ class Runner:
     adapter={'pluto':PlutoAdapter,'eodhd':EODHDAdapter,'report_inbox':InboxAdapter}[r['provider']](self.connect,uid);self.adapters[key]=adapter
    sample=adapter.poll(job);adapter_received=engine.utc();provider_done=time.perf_counter()
    adapter_latency_ms=(adapter_received-stamp(sample['event_time'])).total_seconds()*1000 if sample.get('event_time') else None
-   result=engine.ingest(self.connect,uid,wid,mode,sample,now=engine.utc(),lease=lease)
+   # The worker consumes the calculation only. Building a complete dashboard
+   # view here would hold the SQLite writer lock during additional reads.
+   result=engine.ingest(self.connect,uid,wid,mode,sample,now=engine.utc(),lease=lease,include_session=False)
    journaled_at=engine.utc();ingest_done=time.perf_counter()
    timings={'provider_ms':round((provider_done-poll_started)*1000,3),'adapter_to_journal_ms':round((journaled_at-adapter_received).total_seconds()*1000,3),'ingest_compute_ms':round((ingest_done-provider_done)*1000,3),'event_to_adapter_receive_ms':round(adapter_latency_ms,3) if adapter_latency_ms is not None else None,'market_time_known':bool(sample.get('event_time')),'signal':result.get('calculation',{}).get('signal')}
    telemetry=getattr(adapter,'last_telemetry',None)

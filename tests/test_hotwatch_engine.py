@@ -582,6 +582,25 @@ class HotWatch(unittest.TestCase):
  def test_fault_backoff_dedup_and_recovery(self):
   engine.fault(app.connect,1,self.req['watch_id'],True,'DATA_STALE',self.now);before=self.counts();engine.fault(app.connect,1,self.req['watch_id'],True,'DATA_STALE',self.now+timedelta(seconds=5));self.assertEqual(before,self.counts());self.assertEqual(engine.item(app.connect,1,self.req['watch_id'],True)['session']['status'],'DEGRADED')
   self.put(tick(self.now+timedelta(seconds=60),1),self.now+timedelta(seconds=60));events=engine.history(app.connect,1,self.req['watch_id'],True)['items'];self.assertTrue(any(e['event_type']=='DATA_RECOVERED' for e in events))
+ def test_worker_ingest_skips_view_for_new_and_duplicate_sample(self):
+  from unittest.mock import patch
+  sample=tick(self.now)
+  with patch.object(engine,'view',side_effect=AssertionError('worker must not build view')):
+   first=engine.ingest(app.connect,1,self.req['watch_id'],True,sample,self.now,include_session=False)
+   second=engine.ingest(app.connect,1,self.req['watch_id'],True,sample,self.now,include_session=False)
+  self.assertTrue(first['ok']);self.assertFalse(first['duplicate']);self.assertIn('calculation',first)
+  self.assertTrue(second['duplicate']);self.assertNotIn('session',first);self.assertNotIn('session',second)
+  self.assertEqual(self.counts()['hw_samples'],1)
+ def test_empty_queue_does_not_request_database_writer_lock(self):
+  import sqlite3
+  with app.connect() as c:c.execute('UPDATE hw_sessions SET next_due=?',(self.now.timestamp()+3600,))
+  holder=app.connect()
+  def quick_connect():
+   c=sqlite3.connect(app.DB,timeout=0);c.row_factory=sqlite3.Row;return c
+  try:
+   holder.execute('BEGIN IMMEDIATE')
+   self.assertIsNone(engine.claim(quick_connect,self.now))
+  finally:holder.rollback();holder.close()
  def test_stale_data_rechecks_at_budgeted_cadence_without_enabling_signal(self):
   with app.connect() as c:
    row=engine.row_for(c,1,self.req['watch_id'],True);req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol='MERC.US')

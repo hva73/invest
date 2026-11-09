@@ -766,7 +766,7 @@ def sample_errors(sample,request,now):
  if context['position']=='none' and context['quantity'] is not None and Decimal(context['quantity'])!=0:raise EngineError('invalid_position_quantity')
  return sample
 
-def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
+def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True):
  now=now or utc()
  with connect() as c:
   c.execute('BEGIN IMMEDIATE');row=row_for(c,uid,wid,mode);request=json.loads(row['request'])
@@ -800,7 +800,10 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
    prior_context=json.loads(extra['payload']) if extra else previous_sample['context'];current_context=sample['context']
    material=lambda context:{k:v for k,v in context.items() if k!='as_of'}
    fresh=lambda context:bool(context['as_of'] and 0<=now.timestamp()-stamp(context['as_of']).timestamp()<=300)
-   if material(prior_context)==material(current_context) and fresh(prior_context)==fresh(current_context):return {'ok':True,'duplicate':True,'session':view(c,row,now)}
+   if material(prior_context)==material(current_context) and fresh(prior_context)==fresh(current_context):
+    result={'ok':True,'duplicate':True}
+    if include_session:result['session']=view(c,row,now)
+    return result
    c.execute('INSERT INTO hw_context_events(watch_row_id,sample_row_id,observed,payload) VALUES(?,?,?,?)',(row['id'],old['id'],now.isoformat(),canonical(current_context)))
    event(c,row,'BROKER_CONTEXT_UPDATED',now,'Position/order context changed; no new market observation',data_time=current_context['as_of'])
    sample_row_id=old['id'];new_market_event=False
@@ -871,7 +874,9 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None):
   interval=effective_poll_interval(c,request,adaptive)
   if sample['market_status'] in ['CLOSED','HALTED']:interval=max(interval,300)
   c.execute('UPDATE hw_sessions SET status=?,state=?,updated=?,last_data=?,last_calculation=?,next_due=?,failures=0,last_error=NULL,lease_owner=NULL,lease_until=0 WHERE id=?',(new_status,canonical(nextstate),now.isoformat(),sample['event_time'],now.isoformat(),now.timestamp()+interval,row['id']))
-  return {'ok':True,'duplicate':False,'calculation':result,'session':view(c,row_for(c,uid,wid,mode),now)}
+  response={'ok':True,'duplicate':False,'calculation':result}
+  if include_session:response['session']=view(c,row_for(c,uid,wid,mode),now)
+  return response
 
 def observe_context(connect,uid,wid,mode,context,now=None,lease=None,broker_source=None):
  """Trusted adapter evidence only. Never invent a quote or advance signal confirmation."""
@@ -933,6 +938,12 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
 
 def claim(connect,now=None,watch_id=None):
  now=now or utc();owner=secrets.token_hex(16)
+ # Avoid competing for the SQLite writer lock when the queue is empty.
+ # The complete query and all kill switches are checked again under the
+ # transaction below; this read-only preflight cannot claim a session.
+ with connect() as c:
+  pending=c.execute("SELECT 1 FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.next_due<=? AND s.lease_until<=? AND COALESCE(k.killed,0)=0 AND (? IS NULL OR s.watch_id=?) LIMIT 1",(now.timestamp(),now.timestamp(),watch_id,watch_id)).fetchone()
+ if not pending:return None
  with connect() as c:
   c.execute('BEGIN IMMEDIATE')
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
