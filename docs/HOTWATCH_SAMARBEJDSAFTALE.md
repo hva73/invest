@@ -7,6 +7,10 @@
 
 Dette afsnit præciserer og har forrang for tidligere formuleringer om straksinstallation og live-start. Udgangspunktet for gennemgangen er `69d1279` på `codex/escape-development`. Købskæden er **ikke færdig**, og der er ikke dokumenteret samlet LIVE PASS. Implementering og lokale tests fortsætter; resultatet gennemgås med Heine, før den samlede live-test startes. Ingen rigtige ordrer eller Pluto-handelsforslag under denne testfase.
 
+### Praktisk prioritering — 9. november 2026
+
+Fungerende overvågning og enkel betjening prioriteres over omfattende dokumentation. Hold kildehenvisninger, journal og status korte; ekstra administrativ dokumentation må ikke i sig selv forsinke overvågning af et verificeret instrument. Ubekræftede katalysatorer er uafklarede, ikke verificerede. Denne prioritering ændrer ikke datakvaliteten, signal- og risikokontrollerne eller brugerens handelsmandat; manglende fakta må ikke gættes. Gennemgå eksisterende skemaer og kode før ændring, og dokumentér den faktiske effekt med relevante tests.
+
 ### Handelsforløb og risikogrundlag
 
 ChatGPT-kandidat → verificeret Pluto-instrument → automatisk HOT WATCH → Early Catalyst / dynamisk signal → bruger vælger beløb og sender forslaget → godkendelse i Pluto → verificeret beholdning → separat exit-watch.

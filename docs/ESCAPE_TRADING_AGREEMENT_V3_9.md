@@ -79,6 +79,12 @@ Dette tillæg erstatter alene den tidligere bestemmelse om obligatoriske brugerr
 
 Tillægget er aftalegrundlag. Indsættelsen dokumenterer ikke i sig selv, at den kørende radarautomatisering er opdateret eller verificeret.
 
+## Praktisk prioritering — 9. november 2026
+
+Ejeren prioriterer fungerende overvågning og enkel betjening over omfattende dokumentation. Kildehenvisninger og journal skal være korte og relevante; ekstra formuleringer eller administrative dokumentationsrunder må ikke i sig selv forsinke en verificeret kandidats overvågning. En nyhed eller katalysator uden tilstrækkeligt grundlag vises som uafklaret og må ikke kaldes verificeret. Almindelig overvågning, EARLY WATCH, faktisk signalstatus og handelsgodkendelse skal fortsat skelnes.
+
+Dette ændrer ikke kravet om entydig instrumentidentitet, korrekte data til de respektive signaler, globale risikogrænser, brugerens handelsmandat eller Pluto-godkendelse. Manglende oplysninger forbliver ukendte; begrænsninger skal vises kort. Aftaletekst er et krav, ikke bevis for implementering eller live-test.
+
 ## 3. Datadisciplin — ikke til forhandling
 
 1. **Pluto er autoritativ for portefølje, beholdning, kontanter, ordrer, fills og operativ Pluto-pris.** Manglende tidsstempel på Pluto-kursen diskvalificerer ikke i sig selv kursen.
