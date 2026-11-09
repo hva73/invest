@@ -130,8 +130,22 @@ class WatchdogTests(unittest.TestCase):
             self.assertEqual(supervisor.database_locks(),[('db_lock_unavailable',-1)])
         with tempfile.TemporaryDirectory() as folder:
             db=str(Path(folder)/'escape.db');Path(db).touch()
-            with patch.object(app,'DB',db),patch('builtins.open',side_effect=PermissionError(13,'denied')):
+            with patch.object(app,'DB',db),patch('builtins.open',side_effect=PermissionError(13,'denied')),patch.object(supervisor,'fallback_database_locks',return_value=[('db_lock_unavailable',13)]):
                 self.assertEqual(supervisor.database_locks(),[('db_lock_unavailable',13)])
+
+    def test_isolated_fallback_detects_real_lock_without_releasing_it(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db=str(Path(folder)/'escape.db')
+            with sqlite3.connect(db) as c:c.execute('CREATE TABLE item(id INTEGER)')
+            holder=sqlite3.connect(db);other=sqlite3.connect(db,timeout=0)
+            try:
+                holder.execute('BEGIN IMMEDIATE')
+                with patch.object(supervisor,'lock_category',return_value='worker'):
+                    found=supervisor.fallback_database_locks(db,1)
+                self.assertIn(('db_lock_probe',None),found)
+                self.assertIn(('db_lock_worker',1),found)
+                with self.assertRaises(sqlite3.OperationalError):other.execute('BEGIN IMMEDIATE')
+            finally:holder.rollback();holder.close();other.close()
 
     def test_lock_diagnostic_does_not_wait_for_blocked_database(self):
         import time

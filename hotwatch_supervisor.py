@@ -90,7 +90,7 @@ def diagnostic(event, code=None):
                'worker_frame_app', 'worker_frame_adapters', 'worker_frame_other',
                'worker_sqlite_error', 'worker_database_busy',
                'db_lock_worker', 'db_lock_supervisor', 'db_lock_passenger',
-               'db_lock_other', 'db_lock_unknown', 'db_lock_unavailable', 'db_lock_none'}
+               'db_lock_other', 'db_lock_unknown', 'db_lock_unavailable', 'db_lock_none', 'db_lock_probe'}
     if event not in allowed or (code is not None and not isinstance(code, int)):
         raise ValueError('invalid diagnostic event')
     try:
@@ -101,6 +101,54 @@ def diagnostic(event, code=None):
             c.execute('DELETE FROM hw_supervisor_events WHERE id NOT IN (SELECT id FROM hw_supervisor_events ORDER BY id DESC LIMIT 200)')
     except Exception:
         pass
+
+
+def lock_category(pid):
+    try:
+        with open('/proc/%d/cmdline' % pid, 'rb') as source:
+            args = source.read(8192).split(b'\0')
+        names = {os.path.basename(arg).decode('ascii', 'ignore') for arg in args if arg}
+        if 'hotwatch_service.py' in names:return 'worker'
+        if 'hotwatch_supervisor.py' in names:return 'supervisor'
+        if any('passenger' in name.lower() for name in names):return 'passenger'
+        return 'other'
+    except OSError:
+        return 'unknown'
+
+
+def fallback_database_locks(path, unavailable_code):
+    """Ask the kernel for conflicting SQLite byte locks in an isolated process.
+
+    A separate process is essential: closing any DB fd in the worker could
+    release that process's SQLite POSIX locks. The query acquires no lock.
+    """
+    code = '''import fcntl,json,os,struct,sys
+path=sys.stdin.read(8192)
+fd=os.open(path,os.O_RDONLY)
+try:
+ found=[]
+ for offset,length in ((1073741824,1),(1073741825,1),(1073741826,510)):
+  query=struct.pack('hhqqi4x',fcntl.F_WRLCK,os.SEEK_SET,offset,length,0)
+  mode,_,_,_,pid=struct.unpack('hhqqi4x',fcntl.fcntl(fd,fcntl.F_GETLK,query))
+  if mode in (fcntl.F_RDLCK,fcntl.F_WRLCK) and pid>0:found.append([pid,mode==fcntl.F_WRLCK])
+ print(json.dumps(found))
+finally:os.close(fd)
+'''
+    try:
+        import json
+        result = subprocess.run([sys.executable, '-c', code], input=str(path),
+                                text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                timeout=2, check=True)
+        rows=json.loads(result.stdout)
+        if not isinstance(rows,list) or len(rows)>3:raise ValueError('invalid probe')
+        counts={}
+        for item in rows:
+            if not isinstance(item,list) or len(item)!=2 or type(item[0]) is not int or item[0]<=0 or type(item[1]) is not bool:raise ValueError('invalid probe')
+            key=('db_lock_'+lock_category(item[0]),1 if item[1] else -1)
+            counts[key]=counts.get(key,0)+1
+        return [('db_lock_probe',None)]+([(event,sign*count) for (event,sign),count in sorted(counts.items())] if counts else [('db_lock_none',None)])
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return [('db_lock_unavailable',unavailable_code)]
 
 
 def database_locks():
@@ -121,11 +169,11 @@ def database_locks():
             # an incomplete snapshot is explicitly unavailable, never empty.
             lines = source.read(8_000_001)
         if len(lines) > 8_000_000:
-            return [('db_lock_unavailable', -2)]
+            return fallback_database_locks(app.DB, -2)
     except OSError as error:
-        return [('db_lock_unavailable', error.errno if isinstance(error.errno,int) and 0 < error.errno < 256 else -3)]
+        return fallback_database_locks(app.DB, error.errno if isinstance(error.errno,int) and 0 < error.errno < 256 else -3)
     except ValueError:
-        return [('db_lock_unavailable', -3)]
+        return fallback_database_locks(app.DB, -3)
     counts = {}
     for line in lines.splitlines():
         fields = line.split()
@@ -139,17 +187,7 @@ def database_locks():
             if pid <= 0:continue
         except (ValueError, IndexError):
             continue
-        category = 'unknown'
-        try:
-            with open('/proc/%d/cmdline' % pid, 'rb') as source:
-                args = source.read(8192).split(b'\0')
-            names = {os.path.basename(arg).decode('ascii', 'ignore') for arg in args if arg}
-            if 'hotwatch_service.py' in names:category = 'worker'
-            elif 'hotwatch_supervisor.py' in names:category = 'supervisor'
-            elif any('passenger' in name.lower() for name in names):category = 'passenger'
-            else:category = 'other'
-        except OSError:
-            pass
+        category = lock_category(pid)
         # Positive = observed write locks, negative = observed read locks.
         key = ('db_lock_' + category, 1 if fields[3] == 'WRITE' else -1)
         counts[key] = counts.get(key, 0) + 1
@@ -160,7 +198,7 @@ def database_locks():
 
 def record_database_locks(observations):
     allowed = {'db_lock_worker', 'db_lock_supervisor', 'db_lock_passenger',
-               'db_lock_other', 'db_lock_unknown', 'db_lock_unavailable', 'db_lock_none'}
+               'db_lock_other', 'db_lock_unknown', 'db_lock_unavailable', 'db_lock_none', 'db_lock_probe'}
     rows = [(datetime.now(timezone.utc).isoformat(), event, code)
             for event, code in observations[:10]
             if event in allowed and (code is None or type(code) is int and -10000 <= code <= 10000)]
