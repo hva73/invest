@@ -29,6 +29,7 @@ jobs:
       - name: Run simulated multi-issue and existing checks
         run: >-
           python3 -m unittest
+          tests.test_projects_status_single_test
           tests.test_projects_general_bridge
           tests.test_projects_dryrun
           tests.test_projects_replay_claim
