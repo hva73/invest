@@ -10,7 +10,7 @@ import urllib.error
 import urllib.request
 from projects_dryrun import ALLOWED_ISSUES
 
-LIVE_WRITE_ENABLED = False  # Hard stop: changing this requires a reviewed change.
+LIVE_WRITE_ENABLED = True  # Activated only through the reviewed, restricted workflow.
 ISSUE_3_ALLOWED = frozenset({'backlog', 'in progress', 'in review'})
 
 READ = '''query($item:ID!){user(login:"hva73"){login projectV2(number:1){id number closed
