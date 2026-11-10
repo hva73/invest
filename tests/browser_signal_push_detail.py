@@ -27,11 +27,11 @@ def main():
     periods.append(route.request.post_data_json.get('period'));route.fulfill(json=quote)
    page.route('**/api/market/quote',market)
    page.evaluate("window.EngineUI.openNotification('synthetic-push')")
-   d=page.locator('#engine-dialog');expect(d).to_contain_text('SÆLGSSIGNAL');expect(d).to_contain_text('Syntetisk selskab');expect(d).to_contain_text('Siden køb');expect(d).to_contain_text('Ingen ordre er sendt')
+   d=page.locator('#engine-dialog');expect(d).to_contain_text('SÆLGSSIGNAL');expect(d).to_contain_text('Syntetisk selskab');expect(d).to_contain_text('Siden køb');expect(d).to_contain_text('ikke sendt en ordre')
    slot=d.locator('.market-slot');expect(slot.locator('.market-price')).to_be_visible();expect(slot.locator('[data-market-period=day]')).to_have_attribute('aria-pressed','true')
    expect(slot.locator('.signal-chart-peak')).to_contain_text('højeste viste punkt')
    for name in ['week','month','year','day']:
-    slot.locator('[data-market-period='+name+']').click();expect(slot.locator('[data-market-period='+name+']')).to_have_attribute('aria-pressed','true')
+    slot.locator('[data-market-period='+name+']').click();expect(slot.locator('[data-market-period='+name+']')).to_have_attribute('aria-pressed','true');page.wait_for_timeout(300)
    assert 'ONE_MONTH' in periods and 'ONE_YEAR' in periods,periods
    for offset in (0,300,700,1200):
     d.evaluate('(e,y)=>e.scrollTop=y',offset);box=d.locator('.signal-action-bar').bounding_box();viewport=page.viewport_size;assert box and box['y']>=0 and box['y']+box['height']<=viewport['height']+1,(offset,box)
