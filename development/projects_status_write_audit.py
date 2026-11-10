@@ -57,3 +57,41 @@ def post(token, request_id, outcome, run_id, simulated=False):
         raise
     except Exception:
         raise AuditFailed('audit outcome uncertain') from None
+
+
+def report_job_failure(token, run_id, attempt):
+    """Fail-safe workflow-level report when the writer job did not succeed."""
+    if (not isinstance(token, str) or not token or not isinstance(run_id, str)
+            or not re.fullmatch(r'[1-9][0-9]{0,19}', run_id) or not isinstance(attempt, str)
+            or not re.fullmatch(r'[1-9][0-9]{0,5}', attempt)):
+        raise AuditFailed('invalid workflow audit context')
+    marker = f'<!-- escape-project-status-job:{run_id}:{attempt} -->'
+    headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json',
+               'Content-Type': 'application/json', 'User-Agent': 'escape-projects-audit'}
+    opener = urllib.request.build_opener(NoRedirect())
+    try:
+        for page in range(1, 101):
+            req = urllib.request.Request(f'{URL}?per_page=100&page={page}', headers=headers)
+            with opener.open(req, timeout=15) as response:
+                comments = json.load(response)
+            if not isinstance(comments, list):
+                raise AuditFailed('incomplete issue comments')
+            if any(marker in c['body'] for c in comments if isinstance(c, dict)
+                   and isinstance(c.get('body'), str) and (c.get('user') or {}).get('id') == 41898282):
+                return 'RECORDED'
+            if len(comments) < 100:
+                break
+        else:
+            raise AuditFailed('incomplete issue comments')
+        body = (f'{marker}\n**Projects-workflow stoppet.** Udfaldet kan være usikkert. '
+                'Afstem tavle og journal før et nyt forsøg.\n\n'
+                f'[Se Actions-kørsel](https://github.com/hva73/invest/actions/runs/{run_id}/attempts/{attempt}).')
+        req = urllib.request.Request(URL, method='POST', data=json.dumps({'body': body}).encode(), headers=headers)
+        with opener.open(req, timeout=15) as response:
+            if response.status != 201:
+                raise AuditFailed('workflow audit outcome uncertain')
+        return 'RECORDED'
+    except AuditFailed:
+        raise
+    except Exception:
+        raise AuditFailed('workflow audit outcome uncertain') from None
