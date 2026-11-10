@@ -83,3 +83,39 @@ Tredje gennemløb: Udfør en fuld pagineret læsning **efter ny produktionsinsta
 Prioritér **det første dokumenterede brud pr. session** og gruppering af de 56 sessioner efter fælles årsager. Der er allerede mange `MATCHED` instrumenter. Begynd med scope-overlap på CABA, verificér samtidige direkte- versus motorobservationer på WIX/AMZN, og mål præcis hvorfor ASML/ORCL får bar-evidens-blokering. Del quote- og handelsstatus, men bevar alle køb-/exit-/risikogates. Budgetfejl skal mærkes med den faktiske provider og type. Ret kun påviste fællesfejl og læs den installerede version tilbage. Følg samarbejdsaftalens mandat og versionslåste strategier. Ingen nye subsystemer, ingen ordrer eller skjult regelændring.
 
 **Resultatstatus:** Uafhængigt kode-review med dokumenterede kodeveje og målrettede hypoteser. **Ikke** et live-verificeret fix, komplet testkørsel eller ejerautoriseret deployment.
+
+
+---
+
+## Opfølgning – Codex commit `6243faf` og overførsel til GitHub Projects (10. november 2026)
+
+**Projektstyring:** Ejeren har oprettet GitHub Projects-tavlen **ESCAPE Development**. Fremover er GitHub Issues i `hva73/invest` opgavernes autoritative backlog, tilknyttet Projects-tavlen; `development/` rummer model, Codex-undersøgelser og dette uafhængige review. GitHub-connectoren tillader i øjeblikket **ikke** at sætte Project-værdier eller tilknytte Issues direkte til Projects. Nye Issues er oprettet i repository; de må ikke hævdes synlige på tavlen, før GitHubs auto-add workflow eller manuel tilføjelse er verificeret.
+
+**Vores model:** [ESCAPE – samlet driftsmodel](ESCAPE_arkitektur_og_arbejdsmodel_2026-11-10.md). Ændrer ikke samarbejdsaftalen eller handelsmandatet.
+
+### Review af den nye ændring
+Codex har tilføjet [`6243faf`](https://github.com/hva73/invest/commit/6243faf95485627e5aad780a4fd68c58eaa9151f) (**Reconcile explicitly scoped Pluto holdings**) og [sin opfølgning](CODEX_opfoelgning_hotwatch_2026-11-10.md).
+
+**Vigtig korrigering/præcisering til den første CABA-hypotese:** Pluto-parentens `get_positions` og en Collections `get_collection` kan repræsentere **forskellige direkte og Collection-beholdninger i samme aktiv**, ikke nødvendigvis dubletter. Det var derfor for hårdt at afvise alle tilfælde, hvor samme asset-ID forekommer i begge. Codex dokumenterer konkrete Pluto-responsefund for CABA/BTC. Rettelsen mærker direkte portefølje-data `positions_scope=DIRECT`, Collection-data `positions_scope=COLLECTION`, kontrollerer komplette strengt læste positioner, sammenholder de aktuelle Collection-ID'er og tillader kun summation, når begge scopes er særskilt dokumenterede. Manglende metadata medfører fortsat UNKNOWN. Ingen ny database.
+
+**Kode-review:** Dette er en målrettet, bagudkompatibel retning, som bevarer afvisning ved ufuldstændig scope. De væsentlige linjer ligger i `hotwatch_adapters.py:PlutoAdapter._context()` og `portfolio_data.py:read()`. Der er imidlertid stadig en vigtig **produktionsaccept**: kontrollér at `positions_scope` er opnået fra de faktiske raw Pluto-responsefelter på alle relevante depoter, inklusive korrekt pagination og reference til alle child Collections. Test separate vs. aggregerede beholdninger og ingen krydsdepottilskrivning. Denne observation er *ikke* bevis for, at rettelsen er installeret.
+
+Codex' read-only samtidige check omkring **11:56 UTC** viste, at WIX og AMZNs seneste handler stemte med motorens. Dermed er der **ikke** påvist tabte EODHD-handler for disse to i måleintervallet. Tidligere kilde-/motortidsforskel er et undersøgelsesspor, ikke en dokumenteret bug. ASML/ORCLs tidligere `BAR_EVIDENCE_STALE` var ikke længere til stede i det senere snapshot; undersøg uden at lempes entry/exitkrav.
+
+**Tests:** Codex oplyser **342 relevante lokale PASS** for den nye rettelse. Dette er ikke min egen reproduktion, ingen fuld testpakke og intet LIVE PASS. Codex oplyser, at serveren fortsat kørte `d889aff` ved kontroltidspunktet; installationsgodkendelse kræves særskilt fra ejeren.
+
+### Nye Issues – opgaver og efterfølgende accept
+- [#3 – P0: Pluto DIRECT/COLLECTION CABA/BTC](https://github.com/hva73/invest/issues/3)
+- [#4 – P0: EODHD → HOT WATCH datakæde, 56 sessioner](https://github.com/hva73/invest/issues/4)
+- [#5 – P1: ASML/ORCL bar-evidens](https://github.com/hva73/invest/issues/5)
+- [#6 – P1: MSFT/MANE sample-ID-konflikter](https://github.com/hva73/invest/issues/6)
+- [#7 – P1: TTD/CELC/SHOT/EXK/PEPE identitets- og budgetdiagnose](https://github.com/hva73/invest/issues/7)
+- [#8 – P1: Tidlige observationer og købsfilter](https://github.com/hva73/invest/issues/8)
+- [#9 – P1: EODHD-forbrug, market sleep/wake](https://github.com/hva73/invest/issues/9)
+- [#10 – P1: Installeret commit, readback og release-gate](https://github.com/hva73/invest/issues/10)
+
+Tidligere [#1 – kontraktafstemning](https://github.com/hva73/invest/issues/1) bevares, men skal opdateres mod den *nuværende* v3.9-tekst og nyere tillæg, ikke styres af forældede tal.
+
+**Anbefalet proces:** Backlog → I gang → Review → Klar til installation → Driftstest → Færdig. Maksimalt 2–3 aktive kodeopgaver. Codex knytter commits/tests til Issues. ChatGPT reviewer ændringer uafhængigt. Ejeren godkender produktion særskilt. Først efter dokumenteret live-readback markeres issue Færdig. Ingen automatisk broker-write, ingen falsk PASS, ingen implicit ejerbeslutning.
+
+**Kanban-tilknytning:** Repo-Issues er oprettet, men deres visning i selve Projects-tavlen er endnu **ikke verificeret** fra denne forbindelse; aktivér auto-add for `hva73/invest` eller tilføj de eksisterende Issues én gang i GitHub Projects.
