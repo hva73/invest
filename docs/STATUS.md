@@ -1,5 +1,7 @@
 # Aktuelt tillæg — HOT WATCH fase 1–2
 
+> **Aktuel læsevejledning (10. november 2026):** Dette er historisk status for flere tidligere versioner; brug [masterkontrakten](ESCAPE_MASTER_CONTRACT.md) og aktuelle Issues for nyere kode og tidsbundne driftsobservationer. Det følgende er ikke en nutidig inventarliste.
+
 3. november 2026: motorfundament, deterministiske signaler, risiko, permanent kandidatstatus og dashboard er tilføjet til den stabile v2.2. Se [leverancematricen](HOTWATCH_ENGINE.md) og [statusmodellen](CANDIDATE_STATUS_MODEL.md). Backtest/shadow og aktivering/rollback af uploads er ikke implementeret. Live datakilder og kontinuerlig hosting er ikke verificeret. Ingen automatisk installation eller handel er udført.
 
 Test: 252 samlede Python-tests bestået; efterfølgende udvidet målrettet motorsuite 37 bestået, senest udvidet livscyklus-suite 10 bestået, tre JS-suiter bestået og HOT WATCH-browserkontrol 320–1920px bestået. Alle engine-forløb er syntetiske/simulerede. Eksisterende worker.py, jobs.py og trade_service.py er uændrede i forhold til v2.2. Nedenstående v0.4-afsnit er historiske og beskriver ikke den samlede aktuelle integrationsstatus.

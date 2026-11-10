@@ -1,5 +1,7 @@
 # ESCAPE – samlet driftsmodel, dataverifikation og arbejdsbeskrivelse
 
+> **Aktuel læsevejledning:** Dette er et arbejdsudkast, ikke et nyt handelsmandat. Se [samlet kontrakt og kodeafstemning](../docs/ESCAPE_MASTER_CONTRACT.md), aktive Issues og faktiske readbacks for nyere beslutninger.
+
 **Arbejdsudkast til fælles gennemgang med Codex og ChatGPT · 10. november 2026**  
 **Grundlag:** `docs/ESCAPE_TRADING_AGREEMENT_V3_9.md` (inkl. Night Intelligence og afsnit 9–16), `docs/HOTWATCH_SAMARBEJDSAFTALE.md`, `docs/HOTWATCH_ENGINE_DATA_CONTRACT.md`, `docs/END_TO_END_DATA_CONTRACT.md` og dokumenterede installationsnotater.  
 **Afgrænsning:** Dokumentet er en *foreslået implementerings- og fejlfindingsmodel*, ikke en ændring af gældende aftale, strategi, risikoparametre, rettigheder eller driftsmandat. Den nye fejlrapport i udviklingsroden er **ikke læst** ved udarbejdelsen. Faktiske kode-/produktionsfakta skal verificeres mod den version, der er installeret.

@@ -1,5 +1,7 @@
 # ESCAPE Trading Command Center
 
+**Ny agent eller samarbejdspartner:** Start med [AGENTS.md](AGENTS.md), [den fælles kontrakt](docs/ESCAPE_MASTER_CONTRACT.md) og det aktuelle Issue. En PR eller separat servercheckout er ikke produktionsinstallation.
+
 En første fungerende lokal version med Python 3.12+ standardbibliotek, SQLite og en responsiv JavaScript-frontend. OAuth-tokenkryptering kræver den fastlåste pakke i `requirements.txt`. Dette er ikke den komplette produktionsapp; se [funktionsoversigten](docs/STATUS.md) for præcis dækning og udeståender.
 
 ## Start

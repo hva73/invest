@@ -1,5 +1,7 @@
 # Individuelle positionsvurderinger
 
+> **Aktuel læsevejledning (10. november 2026):** Se [masterkontrakten](ESCAPE_MASTER_CONTRACT.md) for vurdering kontra motor-/brokerstatus og kilde-/tidskrav.
+
 Positionsvurderinger er et valgfrit, additivt lag i `schema_version: 2`. Gamle v1/v2-payloads, digest og rapport-ID'er ændres ikke. MCP-kontrakten og backend bruger det samme deklarative schema.
 
 Rapportgeneratoren skal sende **alle faktiske positionsposter** i hovedrapportens `positions`. Positioner er ikke kandidater: `candidate_id` kan være null. Identiteten er `(portfolio_id, position_id)`; samme BTC i to depoter kan have egne vurderinger og ordrer. Et instrument må ikke skifte `asset_id` under samme positionsidentitet. Journalposter med et position_id, der gentages i flere depoter, skal også oplyse `portfolio_id`.

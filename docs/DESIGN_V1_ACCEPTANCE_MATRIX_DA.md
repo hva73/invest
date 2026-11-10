@@ -1,5 +1,7 @@
 # Accepttestmatrix — design v1.0
 
+> **Aktuel læsevejledning (10. november 2026):** Denne historiske matrix er ikke live-accept for den udvidede mobil-/pushopgave i [Issue #13](https://github.com/hva73/invest/issues/13). Se [masterkontrakten](ESCAPE_MASTER_CONTRACT.md).
+
 Alle T01–T28 er specificeret i `tests/fixtures/design-v1-acceptance.json`. Filen er et testgrundlag, ikke en schema_version 2-rapport og må ikke sendes til produktionsindbakken.
 
 **Baseline:** eksisterende arbejdsudgave 162d41f. Det kommende redesign er ikke implementeret eller samlet godkendt. Tabellen beskriver dækning og konkrete huller; eksisterende dækning er ikke automatisk en bestået sluttest.

@@ -1,5 +1,7 @@
 # Rapportindbakke: minimal integrationstest
 
+> **Aktuel læsevejledning (10. november 2026):** Se [masterkontrakten](ESCAPE_MASTER_CONTRACT.md) for rapport-ID, idempotens, kategori og præcis readback.
+
 ## Adresser
 
 - Levering: `POST https://escape.nordic-response.dk/api/reports/ingest`

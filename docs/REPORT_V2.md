@@ -1,5 +1,7 @@
 # ESCAPE Intelligence – rapportformat og visning v2
 
+> **Aktuel læsevejledning (10. november 2026):** Se [masterkontrakten](ESCAPE_MASTER_CONTRACT.md) for eksakt rapportreadback kontra `get_latest_report`, ejer-/testadskillelse og aktuelle skemagrænser.
+
 ## Status
 
 V1 og eksisterende rapporters payload, rapport-ID, digest og test-/driftskategori ændres ikke. V2 tilføjer et nyt eksplicit format og genbruger `report_ingest.save/latest`, samme database og samme OAuth-/ingest-autentifikation. Ingen planlagte ChatGPT-opgaver oprettes eller ændres, ingen brokerhandlinger tilføjes, og ingen betalt AI-tjeneste tilkobles.

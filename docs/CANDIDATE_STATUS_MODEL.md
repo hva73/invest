@@ -1,5 +1,7 @@
 # Permanent HOT WATCH-kandidatstatus v1.0
 
+> **Aktuel læsevejledning (10. november 2026):** Se [masterkontrakten](ESCAPE_MASTER_CONTRACT.md) for samlet mapping, motorsessionernes selvstændige status og nyere kode-/driftsforbehold.
+
 Kandidatens identitet og rapporthistorik bevares, også når senere rapporter ikke nævner kandidaten. Indlæsning af gamle rapporter opbygger en separat, append-only statusjournal uden at omskrive oprindelige rapportpayloads eller checksums.
 
 Tre dimensioner vises særskilt:

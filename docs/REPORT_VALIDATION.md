@@ -1,5 +1,7 @@
 # Komplet rapportlevering og fælles validering
 
+> **Aktuel læsevejledning (10. november 2026):** Se [masterkontrakten](ESCAPE_MASTER_CONTRACT.md) for de gældende kodegrænser og forskellen mellem skemavaliditet og verificeret marked/broker.
+
 ## Fund og afgrænsning
 
 Gennemgangen omfatter `mcp_reports.py`, `report_ingest.py`, `report_v2.py`, rapporttabellerne, import-API og automatiserede tests. Den faktiske afviste driftsrapport og OpenAI's interne sikkerhedsafgørelse er ikke tilgængelige i udviklingsmiljøet. Der er ikke sendt nogen rapport eller foretaget Pluto-opslag i produktion under arbejdet.

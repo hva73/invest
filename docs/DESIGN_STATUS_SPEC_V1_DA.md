@@ -1,5 +1,7 @@
 # ESCAPE Invest – Endelig design- og statusspecifikation
 
+> **Aktuel læsevejledning (10. november 2026):** Dette er en designspecifikation, ikke bevis på installeret funktion. [Issue #13](https://github.com/hva73/invest/issues/13) tilføjer den konkrete mobilvisning og permanent synlige handlinger; se [masterkontrakten](ESCAPE_MASTER_CONTRACT.md) for 60/120/300-sekunders forskellen.
+
 **Version:** 1.0 – godkendt designgrundlag  
 **Repository:** `hva73/invest`  
 **Arbejdsbranch:** `codex/design-review-wip`  

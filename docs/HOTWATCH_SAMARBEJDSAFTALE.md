@@ -1,5 +1,7 @@
 # ESCAPE × Trading Radar × HOT WATCH — samarbejds- og driftsaftale
 
+> **Aktuel læsevejledning (10. november 2026):** Senere kontraktmatch og påviste versionsforskelle samles i [masterkontrakten](ESCAPE_MASTER_CONTRACT.md). Tekst om installation giver ikke selv tilladelse til at deploye en konkret version.
+
 **Mål:** Færdiggør hele kæden: RADAR opdager → ESCAPE registrerer → HOT WATCH følger → RADAR revurderer → bruger beslutter eventuel handel. Dette er implementeringsordre til Codex, ikke en påstand om at funktionerne allerede er installeret.
 
 

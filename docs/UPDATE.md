@@ -1,5 +1,7 @@
 # Opdatering v0.4 på Nordicway
 
+> **Aktuel læsevejledning (10. november 2026):** Dette er historiske installationsnoter. Automatisk GitHub Actions → SSH-installation er et mål i [Issue #16](https://github.com/hva73/invest/issues/16), ikke dokumenteret aktiv. En separat checkout er ikke produktion; vælg ikke en gammel ZIP-vejledning som en aktuel release uden at kontrollere version og særskilt ejergodkendelse.
+
 Opdateringen ligger på GitHub-grenen codex/escape-development og er ikke automatisk installeret. Bevar den eksisterende database og konto. Ingen betalt tjeneste er nødvendig for jobkø eller ECB-kilder.
 
 ## Filer og automatisk backup
