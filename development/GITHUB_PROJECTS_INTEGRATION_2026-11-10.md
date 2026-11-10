@@ -5,9 +5,9 @@ Status 10. november 2026. Undersøgelsen omfatter Issues #3–#11 og påvirker h
 ## Konstateret adgang og begrænsning
 
 - GitHub-connectoren kan læse og redigere repository-Issues og filer. De tilgængelige værktøjer omfatter ikke Projects V2 eller et generelt GraphQL-kald. ChatGPTs appindstilling tillader handlinger, men den indstilling er ikke dokumentation for GitHub OAuth-scopes, GitHub App-projektrettigheder eller et Projects-værktøj.
-- `gh` 2.46.0 findes, men `gh auth status` melder ingen login. Både `gh project list --owner hva73 --format json` og `gh api graphql` afvises før kaldet: autentifikation mangler. Derfor kender vi ikke tokenets scopes, projektnummer, felter, eksisterende medlemskab eller faktisk adgang til tavlen. Intet scope eller samtykke er blevet ændret.
-- Den anonyme repository-projektside viste ingen projekter tilknyttet repoet. Det udelukker ikke et personligt eller privat projekt. Listen kan ikke bruges til at fastslå, om #3–#11 er på ESCAPE Development.
-- CLI-kontrollen `projects_audit.py` stopper korrekt uden credentials. Ingen live tilføjelse eller statusskift er udført. Et one-issue liveforsøg er **BLOKERET**, ikke bestået.
+- `gh` 2.46.0 findes, men `gh auth status` melder ingen login. Både `gh project list --owner hva73 --format json` og `gh api graphql` afvises før kaldet: autentifikation mangler. Derfor kender vi ikke denne sessions token-scopes eller har selvstændig adgang til tavlen. Projektets ejer og nummer er efterfølgende bekræftet af Heine (se opdateringen nedenfor). Intet scope eller samtykke er blevet ændret.
+- Den anonyme repository-projektside viste ingen projekter tilknyttet repoet. Det udelukker ikke et personligt eller privat projekt. Listen kan ikke bruges til at fastslå medlemskab; senere ejerkontrol er beskrevet nedenfor.
+- CLI-kontrollen `projects_audit.py` stopper korrekt uden credentials. Ingen live tilføjelse eller statusskift er udført fra Codex-miljøet. Ejerens særskilte live-test er beskrevet nedenfor.
 
 ## Rettigheder og fælles adgang
 
@@ -50,3 +50,13 @@ Som ikke-forstyrrende live-test: vælg ét Issue, der allerede er på tavlen, og
 - https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/adding-items-automatically
 - https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/using-the-built-in-automations
 - https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/automating-projects-using-actions
+
+## Opdatering 10. november – ejerens Projects-test og Codex-adgang
+
+Heine oplyser, at det verificerede projekt er ejer `hva73`, projektnummer `1`, at Issues #3–#11 allerede findes på tavlen, og at #4 er flyttet fra Backlog til In progress med `gh project item-edit` fra hans Mac. Dette er ejerens rapporterede vellykkede live-test; Codex har ikke selv læst tavlen og ændrer ikke dens status. Eksisterende Issues skal ikke tilføjes igen. Auto-add, #1 og øvrige workflowfelter er fortsat ikke uafhængigt verificeret.
+
+Fra Codex-miljøet gav `gh auth status` igen ingen login, og ingen `GH_TOKEN`/`GITHUB_TOKEN`-variabel var tilgængelig. En anonym HEAD til `https://api.github.com` gav HTTP 200; netværksforbindelse er således observeret, men dette beviser ikke autoriseret GraphQL-adgang. Tilgængelige GitHub-connectorværktøjer har fortsat ikke en Projects- eller GraphQL-operation. Den eksisterende Mac-sessions godkendelse deles ikke automatisk.
+
+Mulige veje: (1) et separat `gh` device-login i dette miljø med Projects-scope, som ejeren godkender på GitHub; først kontrollér hvilke øvrige OAuth-rettigheder GitHub CLI beder om, og hvordan credentials gemmes i miljøet; eller (2) en særskilt, mindst privilegeret GitHub App/token som indstilles gennem en sikker credential-mekanisme, hvis miljøet understøtter det. Del aldrig eksisterende Mac-token eller hemmeligheder i chat eller repo. GitHub CLI oplyser, at det kan falde tilbage til ukrypteret fillagring, hvis ingen credential-store er tilgængelig; derfor skal egnet sikker opbevaring afklares, før login iværksættes. Ingen scope er udvidet af Codex.
+
+Når adgang findes: læs project #1 og alle items, verificér #4s aktuelle status, og kør derefter en read-only eller idempotent test på ét eksisterende item. Statusændringer kræver frisk readback og må aldrig sætte aktive opgaver tilbage som følge af en genkørsel.
