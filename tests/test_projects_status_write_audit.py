@@ -16,6 +16,15 @@ class Response(io.BytesIO):
 
 
 class AuditTest(unittest.TestCase):
+    def test_simulation_is_explicit_and_has_separate_marker(self):
+        with patch('urllib.request.build_opener') as factory:
+            factory.return_value.open.side_effect = [Response([]), Response({}, 201)]
+            self.assertEqual(audit.post('fake', 'a' * 32, 'verified', '123', simulated=True), 'RECORDED')
+            body = json.loads(factory.return_value.open.call_args.args[0].data)['body']
+            self.assertIn('audit-test: simuleret verificeret', body)
+            self.assertIn('Ingen Projects-status er ændret', body)
+            self.assertIn('escape-project-status:test:', body)
+
     def test_fixed_result_is_recorded_without_secret(self):
         with patch('urllib.request.build_opener') as factory:
             factory.return_value.open.side_effect = [Response([]), Response({}, 201)]
