@@ -20,3 +20,27 @@ jobs:
           python-version: '3.11'
       - name: Test requests, host verification, redaction and bounded transport
         run: python -m unittest tests.test_nordicway_request tests.test_nordicway_hostkey tests.test_nordicway_readonly_diagnostics tests.test_nordicway_readonly_client tests.test_nordicway_release_preflight tests.test_nordicway_server_guard tests.test_nordicway_provision_readonly tests.test_updater.Updater.test_backup_restore_after_simulated_migration
+      - name: Test encrypted synthetic key with ephemeral SSH agent
+        run: |
+          set -eu
+          umask 077
+          test_dir=$(mktemp -d)
+          eval "$(ssh-agent -s)" >/dev/null
+          trap 'ssh-agent -k >/dev/null 2>&1 || true; rm -rf "$test_dir"' EXIT
+          # This passphrase and key are generated solely for this isolated test.
+          export NORDICWAY_KEY_PASSPHRASE=synthetic-test-passphrase
+          ssh-keygen -q -t ed25519 -N "$NORDICWAY_KEY_PASSPHRASE" -f "$test_dir/key"
+          cat > "$test_dir/askpass" <<'ASKPASS'
+          #!/bin/sh
+          printf '%s\n' "$NORDICWAY_KEY_PASSPHRASE"
+          ASKPASS
+          chmod 700 "$test_dir/askpass"
+          export SSH_ASKPASS="$test_dir/askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0
+          NORDICWAY_PRIVATE_KEY=$(cat "$test_dir/key")
+          if ! printf '%s\n' "$NORDICWAY_PRIVATE_KEY" | ssh-add - >/dev/null 2>&1; then
+            echo 'Synthetic encrypted key could not be loaded.'
+            exit 1
+          fi
+          unset NORDICWAY_PRIVATE_KEY NORDICWAY_KEY_PASSPHRASE
+          ssh-add -l >/dev/null 2>&1
+          echo 'Synthetic encrypted key loaded successfully.'
