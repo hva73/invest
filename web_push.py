@@ -183,6 +183,18 @@ def _exit_rearmed(c,watch_id,event_key):
     return False
 
 
+def _exit_evidence(result,strategy_checksum):
+    risk=result['risk_parameters'];context=result['position_context'];price=result['supporting_metrics']['price']
+    if context.get('position')!='held' or context.get('status')!='verified' or context.get('quantity') is None or price is None or not strategy_checksum:return None
+    # Account valuation and FX fluctuate with every tick and are entry inputs;
+    # they must not turn an unchanged exit into a new alert. Preserve changes
+    # to position, execution context, stop/deadline and strategy.
+    material={k:context.get(k) for k in ('status','position','quantity','cost_price','tradability','orders','instrument_type')}
+    if isinstance(material['orders'],list):material['orders']=[{k:v for k,v in order.items() if k!='status_time'} if isinstance(order,dict) else order for order in material['orders']]
+    limits={k:risk.get(k) for k in ('stop_price','exit_deadline','exit_allowed')}
+    return (strategy_checksum,limits,material,str(price))
+
+
 def _repeated_critical(c,watch_id,device_id,event_key,reason):
     """Suppress only when both calculations prove the same risk situation."""
     current=c.execute('SELECT created FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch_id,event_key)).fetchone()
@@ -196,14 +208,31 @@ def _repeated_critical(c,watch_id,device_id,event_key,reason):
     def evidence(created):
         row=c.execute('SELECT payload,strategy_checksum FROM hw_calculations WHERE watch_row_id=? AND calculated=? ORDER BY id DESC LIMIT 1',(watch_id,created)).fetchone()
         try:
-            result=json.loads(row['payload']); risk=result['risk_parameters']; context=result['position_context']; price=result['supporting_metrics']['price']
-            if risk.get(key) is None or context.get('position')!='held' or context.get('status')!='verified' or context.get('quantity') is None or price is None or not row['strategy_checksum']:return None
-            # Timestamps and quote age do not themselves change risk; all other
-            # broker context and risk parameters do. Unknown evidence fails open.
-            return (row['strategy_checksum'],risk,{k:v for k,v in context.items() if k not in ('as_of','instrument_type_at')},str(price))
+            result=json.loads(row['payload'])
+            if result['risk_parameters'].get(key) is None:return None
+            return _exit_evidence(result,row['strategy_checksum'])
         except (TypeError,ValueError,KeyError,AttributeError):return None
     old,new=evidence(prior['created']),evidence(current['created'])
-    return old is not None and new is not None and old==new
+    return _same_exit_episode(c,watch_id,old,new)
+
+
+def _same_exit_episode(c,watch_id,old,new):
+    """Use the pinned strategy's trailing distance, never a generic cooldown."""
+    if old is None or new is None or old[:3]!=new[:3]:return False
+    from decimal import Decimal,InvalidOperation
+    try:
+        before,after=Decimal(old[3]),Decimal(new[3])
+        if not before.is_finite() or not after.is_finite() or before<=0 or after<=0:return False
+        if before==after:return True
+        row=c.execute('SELECT strategy FROM hw_sessions WHERE id=?',(watch_id,)).fetchone()
+        strategy=json.loads(row['strategy'])
+        from hotwatch_contract import checksum
+        if checksum(strategy)!=old[0]:return False
+        threshold=Decimal(str(strategy['parameters']['trailing_pct']))
+        if not threshold.is_finite() or not Decimal('0')<threshold<=Decimal('100'):return False
+        from hotwatch_engine import trailing_notification_worsened
+        return not trailing_notification_worsened(after,before,threshold)
+    except (TypeError,ValueError,KeyError,AttributeError,InvalidOperation):return False
 
 
 def _repeated_trailing(c,watch_id,device_id,event_key):
@@ -217,12 +246,10 @@ def _repeated_trailing(c,watch_id,device_id,event_key):
     def evidence(created):
         row=c.execute('SELECT payload,strategy_checksum FROM hw_calculations WHERE watch_row_id=? AND calculated=? ORDER BY id DESC LIMIT 1',(watch_id,created)).fetchone()
         try:
-            result=json.loads(row['payload']);context=result['position_context'];price=result['supporting_metrics']['price'];risk=result['risk_parameters']
-            if context.get('status')!='verified' or context.get('position')!='held' or context.get('quantity') is None or price is None or not row['strategy_checksum']:return None
-            return (row['strategy_checksum'],risk,{k:v for k,v in context.items() if k not in ('as_of','instrument_type_at')},str(price))
+            return _exit_evidence(json.loads(row['payload']),row['strategy_checksum'])
         except (TypeError,ValueError,KeyError,AttributeError):return None
     old,new=evidence(prior['created']),evidence(current['created'])
-    return old is not None and new is not None and old==new
+    return _same_exit_episode(c,watch_id,old,new)
 
 
 def _send(subscription,payload,topic):

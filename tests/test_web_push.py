@@ -171,6 +171,21 @@ class Push(unittest.TestCase):
    for _ in range(4):self.assertTrue(web_push.dispatch_one(app.connect,self.now+timedelta(seconds=2),lambda sub,p,t:sent.append(sub['endpoint'])))
   self.assertEqual(sorted(sent),sorted([self.sub['endpoint'],self.sub['endpoint']+'-second']))
   with app.connect() as c:self.assertEqual(c.execute("SELECT count(*) FROM push_jobs WHERE status='skipped'").fetchone()[0],2)
+ def test_small_ticks_do_not_repeat_critical_or_trailing_push(self):
+  self.subscribe();sent=[];strategy={'version':'1.0.0','parameters':{'trailing_pct':'2'}};digest=engine.checksum(strategy)
+  with app.connect() as c:c.execute('UPDATE hw_sessions SET strategy=? WHERE id=?',(json.dumps(strategy),self.watch['id']))
+  def event(offset,kind,price):
+   at=self.now+timedelta(seconds=offset)
+   payload={'risk_parameters':{'stop_price':'10'},'position_context':{'position':'held','status':'verified','quantity':'10','portfolio_equity_dkk':str(10000+offset),'exposure_dkk':str(1000+offset)},'supporting_metrics':{'price':price}}
+   with app.connect() as c:
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps(payload),digest))
+    row=c.execute('SELECT * FROM hw_sessions WHERE id=?',(self.watch['id'],)).fetchone()
+    engine.event(c,row,kind,at,'STOP_BREACHED' if kind=='RISK_REJECTION' else 'worsened',severity='critical' if kind=='RISK_REJECTION' else 'warning')
+   with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,at,lambda s,p,t:sent.append(p))
+  for i,price in enumerate(('9.000','8.999','8.998','8.990','8.820')):event(i,'RISK_REJECTION',price)
+  self.assertEqual(len(sent),2,'Only the first stop and a 2% worsening notify')
+  for i,price in enumerate(('9.000','8.999','8.990','8.820'),10):event(i,'TRAILING_EXIT_WORSENED',price)
+  self.assertEqual(len(sent),4,'Trailing notifications also require a configured-distance worsening')
  def test_deadline_change_in_position_is_not_suppressed(self):
   self.subscribe();sent=[]
   for offset,quantity in enumerate(('10','10','20')):
