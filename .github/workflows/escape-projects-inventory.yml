@@ -2,11 +2,22 @@ name: ESCAPE Projects backlog inventory
 
 on:
   workflow_dispatch:
+  issue_comment:
+    types: [created]
 
 permissions: {}
 
 jobs:
   inventory:
+    if: >-
+      github.repository == 'hva73/invest' &&
+      github.actor_id == '351122234' &&
+      github.ref == 'refs/heads/codex/escape-development' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'issue_comment' &&
+        github.event.issue.number == 11 &&
+        github.event.issue.pull_request == null &&
+        github.event.comment.body == 'ESCAPE_PROJECTS_INVENTORY_V1'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
