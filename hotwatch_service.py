@@ -955,7 +955,11 @@ def entry_funnel(rows,now):
      pending=None
     else:pending=None
    except (TypeError,ValueError,ArithmeticError,InvalidOperation):pending=None
- def movement(values):return {'count':len(values),'average_pct':round(sum(values)/len(values),4) if values else None,'median_pct':round(sorted(values)[(len(values)-1)//2],4) if values else None}
+ def movement(values):
+  ordered=sorted(values);n=len(ordered)
+  median=(ordered[(n-1)//2]+ordered[n//2])/2 if n else None
+  return {'count':n,'average_pct':round(sum(ordered)/n,4) if n else None,'median_pct':round(median,4) if n else None}
+
  for group in groups.values():group['signals']=dict(group['signals'])
  return {'window_hours':24,'candidate_count':len(latest),'missing_or_unverified':missing,'strategies':groups,'confirmation_movement':{'confirmed_sequences':confirmations,'before_confirmation':movement(before),'five_to_ten_minutes_after':movement(after)},'history_truncated':truncated,'note':'Seneste beregning pr. kandidat blandt de nyeste højst 100000 beregninger og 5000 match. Historiske observationer er ikke en profitabilitetsmåling; manglende målinger er ikke nul.'}
 
