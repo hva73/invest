@@ -1,4 +1,4 @@
-"""Disabled Issue #4 writer prototype. Never wire into Actions without review.
+"""Restricted writer for approved ESCAPE Projects status requests.
 
 The caller must serialize all cooperating requests and supply a one-time
 journal claim and the existing authenticated, unedited-comment validator.
@@ -81,7 +81,7 @@ def _status(data, context):
 
 
 def execute(context, validate_comment, claim_once, graphql):
-    """Reviewable prototype. Production gate prevents all network/claims by default."""
+    """Validate, claim, write once and read back an allowed project status."""
     if LIVE_WRITE_ENABLED is not True:
         raise Blocked('live status writing is disabled')
     try:
