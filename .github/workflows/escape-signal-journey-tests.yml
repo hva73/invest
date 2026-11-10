@@ -30,4 +30,6 @@ jobs:
         env:
           ESCAPE_PLAYWRIGHT_MANAGED: '1'
           PYTHONPATH: .:tests
-        run: python3 tests/browser_signal_push_detail.py
+        run: |
+          python3 tests/browser_signal_push_detail.py
+          python3 tests/browser_market_charts.py

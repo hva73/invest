@@ -136,7 +136,7 @@ window.EngineUI=(()=>{
   const positions=(account?.dashboard?.positions||[]).filter(p=>p.hot_watch?.session?.watch_id===wid&&p.asset_id===req.asset_id),holding=positions.length===1?positions[0]:null;
   const active=s.status==='ACTIVE'&&['KØBSSIGNAL','SÆLGSSIGNAL','EXIT WATCH'].includes(s.display_status)&&['BUY','SELL','REDUCE'].includes(s.signal);
   const contextAge=(Date.now()-Date.parse(context.as_of))/1000,canSell=active&&!s.data_stale&&s.display_freshness?.state!=='stale'&&d.price_status==='FRESH'&&d.identity_verification==='verified'&&['SELL','REDUCE'].includes(s.signal)&&holding?.verification==='broker_snapshot'&&context.status==='verified'&&context.position==='held'&&context.tradability==='available'&&contextAge>=0&&contextAge<=300&&d.market_status==='OPEN';
-  const chartMeta=holding?{report_id:'',holding_portfolio_id:holding.portfolio_id,holding_asset_id:holding.asset_id,is_test:false}:null;
+  const chartMeta=holding?{report_id:'',holding_portfolio_id:holding.portfolio_id,holding_asset_id:holding.asset_id,is_test:false,markers:[{kind:'entry',value:holding.average_entry?.amount,currency:holding.average_entry?.currency},{kind:'stop',value:req.risk?.stop_price,currency:req.quote_currency},{kind:'signal',at:a?.data_timestamp}]}:null;
   const chart=chartMeta?window.MarketUI.slot(chartMeta):'<p class="signal-chart-empty">Kursgraf kan ikke vises: depot og aktiv er ikke entydigt koblet.</p>';
   const stale=s.data_stale||s.display_freshness?.state==='stale'||d.price_status!=='FRESH';
   const price=d.price!=null&&s.latest_currency&&s.last_data_at&&d.identity_verification!=='unverified'?money({amount:d.price,currency:s.latest_currency}):'—';
