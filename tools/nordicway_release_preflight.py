@@ -40,7 +40,7 @@ def inspect(checkout,target,sha):
   if checkout.is_symlink() or target.is_symlink() or not checkout.is_dir() or not target.is_dir():raise ValueError('unsafe_paths')
   if _git(checkout,'rev-parse','--verify','HEAD^{commit}')!=sha:raise ValueError('checkout_sha_mismatch')
   if _git(checkout,'status','--porcelain=v1','--untracked-files=all'):raise ValueError('checkout_not_clean')
-  names=manifest(checkout);root=checkout.resolve();digest=hashlib.sha256();total=0
+  names=manifest(checkout);root=checkout.resolve();target_root=target.resolve();digest=hashlib.sha256();total=0;installed_matches=0
   for name in names:
    relative=Path(name);node=checkout
    for part in relative.parts:
@@ -51,10 +51,18 @@ def inspect(checkout,target,sha):
    data=node.read_bytes()
    if data!=_git_blob(checkout,sha,name):raise ValueError('manifest_file_mismatch')
    total+=len(data);digest.update(name.encode()+b'\0'+hashlib.sha256(data).digest())
+   installed=target
+   unsafe=False
+   for part in relative.parts:
+    installed=installed/part
+    if installed.is_symlink():unsafe=True;break
+   if not unsafe and installed.is_file() and installed.resolve().is_relative_to(target_root) and installed.stat().st_size<=50_000_000:
+    expected=(sha+'\n').encode('ascii') if name=='BUILD_COMMIT' else data
+    if installed.read_bytes()==expected:installed_matches+=1
   var=target/'var';db=var/'escape.db'
   if var.is_symlink() or db.is_symlink() or not db.is_file() or not db.resolve().is_relative_to(target.resolve()):raise ValueError('database_unavailable')
   fs=os.statvfs(target);free=fs.f_bavail*fs.f_frsize
-  return {'status':'blocked','requested_sha':sha,'manifest_files':len(names),'manifest_sha256':digest.hexdigest(),'source_bytes':total,'database_bytes':db.stat().st_size,'filesystem_free_bytes':free,'account_quota':'unknown','blockers':['owner_approval_not_confirmed','account_quota_unknown','passenger_quiesce_unverified','restore_and_restart_unverified']}
+  return {'status':'blocked','requested_sha':sha,'manifest_files':len(names),'manifest_sha256':digest.hexdigest(),'installed_files_matching':installed_matches,'installed_files_checked':len(names),'runtime_version':'unknown','source_bytes':total,'database_bytes':db.stat().st_size,'filesystem_free_bytes':free,'account_quota':'unknown','blockers':['owner_approval_not_confirmed','account_quota_unknown','passenger_quiesce_unverified','restore_and_restart_unverified']}
  except (OSError,ValueError,TypeError,SyntaxError,subprocess.SubprocessError) as error:
   reason=str(error) if isinstance(error,ValueError) and re.fullmatch(r'[a-z_]+',str(error)) else 'preflight_failed'
   return {'status':'blocked','reason':reason}

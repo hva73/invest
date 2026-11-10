@@ -34,4 +34,13 @@ class Preflight(unittest.TestCase):
  def test_database_directory_symlink_is_rejected(self):
   outside=self.root/'outside';outside.mkdir();(self.target/'var/escape.db').rename(outside/'escape.db');(self.target/'var').rmdir();(self.target/'var').symlink_to(outside,target_is_directory=True)
   self.assertEqual(preflight.inspect(self.checkout,self.target,self.sha)['reason'],'database_unavailable')
+ def test_installed_file_comparison_is_read_only_and_does_not_claim_running_version(self):
+  (self.target/'app.py').write_text('safe code\n');(self.target/'BUILD_COMMIT').write_text(self.sha+'\n')
+  result=preflight.inspect(self.checkout,self.target,self.sha)
+  self.assertEqual(result['installed_files_checked'],2);self.assertEqual(result['installed_files_matching'],2)
+  self.assertEqual(result['runtime_version'],'unknown');self.assertEqual(result['status'],'blocked')
+  (self.target/'app.py').write_text('other code\n')
+  self.assertEqual(preflight.inspect(self.checkout,self.target,self.sha)['installed_files_matching'],1)
+  (self.target/'app.py').unlink();(self.target/'app.py').symlink_to(self.checkout/'app.py')
+  self.assertEqual(preflight.inspect(self.checkout,self.target,self.sha)['installed_files_matching'],1)
 if __name__=='__main__':unittest.main()

@@ -31,7 +31,7 @@ class Client(unittest.TestCase):
    result=client.run(self.env,runner);self.assertEqual(result,{'status':'failed','reason':'ssh_or_report_failed'});self.assertNotIn('secret',json.dumps(result))
  def test_release_preflight_is_fixed_read_only_and_always_blocked(self):
   env={**self.env,'NORDICWAY_OPERATION':'release_preflight','NORDICWAY_RELEASE_SHA':'b'*40}
-  payload={'status':'blocked','requested_sha':'b'*40,'manifest_sha256':'c'*64,'manifest_files':71,'source_bytes':100,'database_bytes':200,'filesystem_free_bytes':300,'blockers':sorted(client.PREFLIGHT_BLOCKERS),'private':'secret'}
+  payload={'status':'blocked','requested_sha':'b'*40,'manifest_sha256':'c'*64,'manifest_files':71,'installed_files_checked':71,'installed_files_matching':70,'source_bytes':100,'database_bytes':200,'filesystem_free_bytes':300,'blockers':sorted(client.PREFLIGHT_BLOCKERS),'private':'secret'}
   def runner(command,**kwargs):
    self.assertEqual(command[-2:],[client.HOST,'escape-readonly-v1 preflight '+'b'*40])
    self.assertEqual(kwargs['input'],b'')

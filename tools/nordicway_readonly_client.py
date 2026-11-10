@@ -51,10 +51,10 @@ def sanitize_preflight(raw,sha):
  if raw.get('requested_sha')!=sha or not isinstance(raw.get('manifest_sha256'),str) or not re.fullmatch(r'[0-9a-f]{64}',raw['manifest_sha256']):raise ValueError('invalid_report')
  blockers=raw.get('blockers')
  if not isinstance(blockers,list) or set(blockers)!=PREFLIGHT_BLOCKERS:raise ValueError('invalid_report')
- fields=('manifest_files','source_bytes','database_bytes','filesystem_free_bytes')
+ fields=('manifest_files','installed_files_matching','installed_files_checked','source_bytes','database_bytes','filesystem_free_bytes')
  counts={field:number(raw.get(field)) for field in fields}
- if any(value is None for value in counts.values()):raise ValueError('invalid_report')
- return {'status':'blocked','requested_sha':sha,'manifest_sha256':raw['manifest_sha256'],**counts,'account_quota':'unknown','blockers':sorted(PREFLIGHT_BLOCKERS)}
+ if any(value is None for value in counts.values()) or counts['installed_files_checked']!=counts['manifest_files'] or counts['installed_files_matching']>counts['installed_files_checked']:raise ValueError('invalid_report')
+ return {'status':'blocked','requested_sha':sha,'manifest_sha256':raw['manifest_sha256'],**counts,'runtime_version':'unknown','account_quota':'unknown','blockers':sorted(PREFLIGHT_BLOCKERS)}
 
 def _run_limited(command,*,input,capture_output,timeout,env):
  """Bound remote stdout and runtime; never surface SSH stderr or arguments."""
