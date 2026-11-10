@@ -16,6 +16,14 @@ class Response(io.BytesIO):
 
 
 class AuditTest(unittest.TestCase):
+    def test_synthetic_workflow_failure_is_unambiguously_labelled(self):
+        with patch('urllib.request.build_opener') as factory:
+            factory.return_value.open.side_effect = [Response([]), Response({}, 201)]
+            self.assertEqual(audit.report_job_failure('fake', '123', '1', simulated=True), 'RECORDED')
+            body = json.loads(factory.return_value.open.call_args.args[0].data)['body']
+            self.assertIn('simuleret workflowfejl', body)
+            self.assertIn('Ingen Projects-status er ændret', body)
+
     def test_workflow_failure_report_warns_about_uncertainty(self):
         with patch('urllib.request.build_opener') as factory:
             factory.return_value.open.side_effect = [Response([]), Response({}, 201)]
