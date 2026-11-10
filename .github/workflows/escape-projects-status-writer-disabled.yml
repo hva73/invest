@@ -1,0 +1,40 @@
+name: ESCAPE status writer prototype - disabled
+
+on:
+  workflow_dispatch:
+    inputs:
+      comment_id:
+        description: Existing Issue 4 request comment ID
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: escape-projects-isolated-item-4-test
+  cancel-in-progress: false
+
+jobs:
+  disabled-write:
+    # Deliberate hard stop. Changing this requires a reviewed change and
+    # separate owner approval for the first actual Projects mutation.
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      - name: Check out reviewed immutable revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 400166e16ed95dfde6a4a330280de74a6b70eb79
+          persist-credentials: false
+      - name: Disabled status writer
+        env:
+          ESCAPE_PROJECTS_TOKEN: ${{ secrets.ESCAPE_PROJECTS_TOKEN }}
+          JOURNAL_TOKEN: ${{ github.token }}
+          ISSUE_TOKEN: ${{ github.token }}
+          REQUEST_COMMENT_ID: ${{ inputs.comment_id }}
+          GITHUB_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: python3 development/projects_status_write_entry.py
