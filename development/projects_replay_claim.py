@@ -9,6 +9,7 @@ import hashlib
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -64,6 +65,16 @@ def claim(token, request_id, comment_id, project_id, item_id, expected, target):
         'Content-Type': 'application/json', 'User-Agent': 'escape-project-claim'})
     opener = urllib.request.build_opener(NoRedirect())
     try:
+        query = urllib.parse.urlencode({'sha': JOURNAL_BRANCH, 'path': path, 'per_page': 1})
+        history = urllib.request.Request('https://api.github.com/repos/hva73/invest/commits?' + query,
+            headers={'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json',
+                     'User-Agent': 'escape-project-claim'})
+        with opener.open(history, timeout=15) as response:
+            if response.status != 200:
+                raise ClaimBlocked('journal history uncertain')
+            commits = json.load(response)
+            if not isinstance(commits, list) or commits:
+                raise ClaimBlocked('request has journal history or history is uncertain')
         with opener.open(req, timeout=15) as response:
             if response.status != 201:
                 raise ClaimBlocked('claim outcome uncertain')
