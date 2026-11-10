@@ -9,7 +9,7 @@ OWNER = 'hva73'
 REPO = 'hva73/invest'
 TITLE = 'ESCAPE Development'
 ITEMS = '''query($id:ID!,$cursor:String){node(id:$id){... on ProjectV2{
- items(first:100,after:$cursor){pageInfo{hasNextPage endCursor} nodes{id isArchived
+ items(first:100,after:$cursor,archivedStates:[ARCHIVED,NOT_ARCHIVED]){pageInfo{hasNextPage endCursor} nodes{id isArchived
  content{... on Issue{number url repository{nameWithOwner}}}
  fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}
  }}}}}'''
