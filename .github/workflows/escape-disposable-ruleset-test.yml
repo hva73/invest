@@ -1,0 +1,33 @@
+name: ESCAPE disposable ruleset test
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  test-rules:
+    if: >-
+      github.repository == 'hva73/invest' &&
+      github.actor_id == '351122234' &&
+      github.event.issue.number == 11 &&
+      github.event.issue.pull_request == null &&
+      github.event.comment.body == 'ESCAPE_DISPOSABLE_RULESET_TEST_V1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Check out reviewed test code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 7f0a3013dbe4129759545e0a384d0d449219d08e
+          persist-credentials: false
+      - name: Test only disposable branch protection
+        env:
+          RULE_TEST_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set +x
+          python3 development/projects_ruleset_disposable_test.py
