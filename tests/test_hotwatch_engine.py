@@ -633,6 +633,10 @@ class HotWatch(unittest.TestCase):
   self.assertEqual(view['data_status']['partial_quote']['source_time'],self.now.isoformat())
   self.assertEqual(view['data_status']['quote_status'],'FRESH');self.assertEqual(view['data_status']['price_status'],'STALE');self.assertTrue(view['data_stale'])
   self.assertEqual(view['display_status'],'EFTERMARKED AKTIVT · SIGNAL AFVENTER')
+  with patch('hotwatch_engine.utc',return_value=self.now):
+   summary=next(x for x in engine.sync(app.connect,1,True,summary_only=True)['open_sessions'] if x['watch_id']==req['watch_id'])
+  self.assertEqual(summary['price_status'],'STALE');self.assertEqual(summary['bid_ask_status'],'FRESH')
+  self.assertEqual(summary['signal'],'NO_DATA')
   invalid=dict(observed,ask_at=(self.now+timedelta(seconds=1)).isoformat())
   with app.connect() as c:c.execute('UPDATE hw_samples SET payload=? WHERE watch_row_id=?',(json.dumps(invalid),row['id']))
   with patch('hotwatch_engine.utc',return_value=self.now):invalid_view=engine.item(app.connect,1,req['watch_id'],True)['session']
