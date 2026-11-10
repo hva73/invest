@@ -1,0 +1,36 @@
+name: ESCAPE disabled status writer tests
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    if: >-
+      github.repository == 'hva73/invest' &&
+      github.actor_id == '351122234' &&
+      github.event.issue.number == 4 &&
+      github.event.issue.pull_request == null &&
+      startsWith(github.event.comment.body, 'ESCAPE_DISABLED_WRITER_TEST_V1')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out isolated reviewed revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: de9c4ba38cd7b650cbf9589ca3d042e0ef118dba
+          persist-credentials: false
+      - name: Run mock tests without Projects credentials
+        run: >-
+          python3 -m unittest
+          tests.test_projects_status_write_audit
+          tests.test_projects_status_write_runner
+          tests.test_projects_status_write_prototype
+          tests.test_projects_dryrun_feedback
+          tests.test_projects_ruleset_disposable_test
+          tests.test_projects_replay_claim
+          tests.test_projects_dryrun
+          tests.test_projects_replay_actions_test
