@@ -89,6 +89,33 @@ class ReviewFixes(unittest.TestCase):
    row=engine.row_for(c,1,self.req['watch_id'],True)
    events=c.execute("SELECT payload FROM hw_events WHERE watch_row_id=? AND event_type='RISK_REJECTION' AND severity='critical' ORDER BY id",(row['id'],)).fetchall()
   self.assertEqual([json.loads(e['payload'])['reason'] for e in events],['STOP_BREACHED','STOP_BREACHED'])
+ def test_breached_stop_escalates_only_after_configured_worsening(self):
+  for offset,price in ((0,'94'),(10,'93.999'),(20,'93.998'),(30,'92.12')):
+   result=self.ingest(self.sample(price,offset),self.at+timedelta(seconds=offset))['calculation']
+   self.assertEqual(result['signal'],'SELL')
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True)
+   events=c.execute("SELECT payload FROM hw_events WHERE watch_row_id=? AND event_type='RISK_REJECTION' AND severity='critical' ORDER BY id",(row['id'],)).fetchall()
+  self.assertEqual([json.loads(e['payload'])['reason'] for e in events],['STOP_BREACHED','STOP_BREACHED'])
+ def test_breached_stop_emits_on_changed_verified_position(self):
+  self.ingest(self.sample('94',0),self.at)
+  changed=self.sample('93.999',10);changed['context']['quantity']=str(int(changed['context']['quantity'])+1)
+  self.ingest(changed,self.at+timedelta(seconds=10))
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True)
+   events=c.execute("SELECT payload FROM hw_events WHERE watch_row_id=? AND event_type='RISK_REJECTION' AND severity='critical'",(row['id'],)).fetchall()
+  self.assertEqual(len(events),2)
+ def test_breached_stop_emits_on_changed_limit_and_after_recovery(self):
+  self.ingest(self.sample('94',0),self.at)
+  with app.connect() as c:
+   req=copy.deepcopy(self.req);req['risk']['stop_price']='96';c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
+  self.ingest(self.sample('94',10),self.at+timedelta(seconds=10))
+  recovered=self.ingest(self.sample('100',20),self.at+timedelta(seconds=20))['calculation'];self.assertEqual(recovered['signal'],'WAIT')
+  self.ingest(self.sample('94',30),self.at+timedelta(seconds=30))
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True)
+   events=c.execute("SELECT payload FROM hw_events WHERE watch_row_id=? AND event_type='RISK_REJECTION' AND severity='critical'",(row['id'],)).fetchall()
+  self.assertEqual(len(events),3)
  def test_warning_ack_is_idempotent_owned_and_not_a_trade_or_state_change(self):
   self.ingest(self.sample());before=self.view();a=before['last_action_signal'];eid=a['event_id']
   engine.acknowledge_signal(app.connect,1,self.req['watch_id'],True,eid,self.at)
