@@ -11,9 +11,9 @@ jobs:
     if: >-
       github.repository == 'hva73/invest' &&
       github.actor_id == '351122234' &&
-      github.event.issue.number == 11 &&
+      github.event.issue.number == 4 &&
       github.event.issue.pull_request == null &&
-      github.event.comment.body == 'ESCAPE_DISPOSABLE_RULESET_TEST_V1'
+      startsWith(github.event.comment.body, 'ESCAPE_DISPOSABLE_RULESET_TEST_V1')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
