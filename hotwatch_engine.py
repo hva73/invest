@@ -1191,8 +1191,33 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   # Notification episode state is separate from the calculated signal. WAIT or
   # NO_DATA alone cannot end an exit; a new, valid no-trigger observation can.
   reason_set=set(result['reason_codes'])
-  if new_market_event and result['signal']=='WAIT' and reason_set=={'NO_TRIGGER'} and result['risk_level']=='normal' and risk_sample['context'].get('position')=='held':
+  rearmed=new_market_event and result['signal']=='WAIT' and reason_set=={'NO_TRIGGER'} and result['risk_level']=='normal' and risk_sample['context'].get('position')=='held'
+  if rearmed:
    nextstate.pop('push_trailing_anchor',None)
+   nextstate.pop('push_critical_anchors',None)
+  # Critical stops normally emit only on a code transition. While the stop
+  # stays breached, emit a new notification event when the existing strategy's
+  # trailing distance is exceeded or verified exit exposure/limits change.
+  # These anchors affect notifications only, never the calculated signal.
+  stored_anchors=state.get('push_critical_anchors')
+  anchors={} if rearmed or not isinstance(stored_anchors,dict) else dict(stored_anchors)
+  context=risk_sample['context']
+  if context.get('status')=='verified' and context.get('position')=='held' and context.get('quantity') is not None and sample.get('price'):
+   for code in sorted(codes&{'STOP_BREACHED','EXIT_DEADLINE'}):
+    current={'price':str(sample['price']),'quantity':format(Decimal(str(context['quantity'])).normalize(),'f'),'stop_price':format(Decimal(str(risk['stop_price'])).normalize(),'f') if risk.get('stop_price') is not None else None,'exit_deadline':risk.get('exit_deadline'),'strategy_checksum':result['strategy_checksum']}
+    old=anchors.get(code)
+    if not isinstance(old,dict) or not old.get('price'):old=None
+    changed=bool(old and any(old.get(k)!=current[k] for k in ('quantity','stop_price','exit_deadline','strategy_checksum')))
+    try:
+     threshold=Decimal(str(strategy_data['parameters']['trailing_pct']))
+     if not threshold.is_finite() or not Decimal('0')<threshold<=Decimal('100'):
+      worsened=bool(old and new_market_event and Decimal(current['price'])!=Decimal(str(old['price'])))
+     else:worsened=bool(old and new_market_event and trailing_notification_worsened(current['price'],old['price'],threshold))
+    except (ArithmeticError,TypeError,ValueError,KeyError):old=None;worsened=False
+    if code in oldcodes and (old is None or changed or worsened):
+     event(c,row,'RISK_REJECTION',now,code,metrics,'critical',sample['event_time'])
+    if old is None or changed or worsened:anchors[code]=current
+   if anchors:nextstate['push_critical_anchors']=anchors
   if new_market_event and result['signal']=='SELL' and 'TRAILING_EXIT' in reason_set and not result['critical_override']:
    price=Decimal(sample['price']);anchor=state.get('push_trailing_anchor')
    threshold=Decimal(str(strategy_data['parameters']['trailing_pct']))
