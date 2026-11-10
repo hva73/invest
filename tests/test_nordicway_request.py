@@ -24,4 +24,10 @@ class Request(unittest.TestCase):
   e={'sender':{'id':request.OWNER_ID}}
   self.assertTrue(request.validate(e,'workflow_dispatch',request.BRANCH,str(request.OWNER_ID)))
   self.assertFalse(request.validate(e,'workflow_dispatch','refs/heads/untrusted',str(request.OWNER_ID)))
+ def test_release_preflight_is_a_fixed_read_only_operation_with_exact_sha(self):
+  event=copy.deepcopy(self.event);event['comment']['body']=request.PREFIX+'{"request_id":"'+'a'*32+'","operation":"release_preflight","sha":"'+'b'*40+'"}'
+  result=request.parse(event,'issue_comment',request.BRANCH,str(request.OWNER_ID));self.assertEqual(result,{'operation':'release_preflight','sha':'b'*40})
+  for payload in ['$(id)','b'*39,'B'*40,'b'*40+';id']:
+   event['comment']['body']=request.PREFIX+__import__('json').dumps({'request_id':'a'*32,'operation':'release_preflight','sha':payload})
+   self.assertIsNone(request.parse(event,'issue_comment',request.BRANCH,str(request.OWNER_ID)))
 if __name__=='__main__':unittest.main()

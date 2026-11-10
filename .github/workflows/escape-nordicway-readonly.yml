@@ -1,6 +1,17 @@
 name: ESCAPE Nordicway read-only diagnostics
 on:
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Fixed read-only operation
+        type: choice
+        options: [diagnostics, release_preflight]
+        default: diagnostics
+        required: true
+      sha:
+        description: Exact commit SHA for read-only release preflight
+        type: string
+        required: false
   issue_comment:
     types: [created]
 permissions:
@@ -30,6 +41,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Validate request and verify host
+        id: request
         env:
           NORDICWAY_READONLY_AUTHORIZED: ${{ vars.ESCAPE_NORDICWAY_READONLY_AUTHORIZED }}
           NORDICWAY_KNOWN_HOST: ${{ secrets.ESCAPE_NORDICWAY_KNOWN_HOST }}
@@ -49,6 +61,8 @@ jobs:
           NORDICWAY_VERIFIED_FINGERPRINT: ${{ secrets.ESCAPE_NORDICWAY_VERIFIED_FINGERPRINT }}
           NORDICWAY_PRIVATE_KEY: ${{ secrets.ESCAPE_NORDICWAY_SSH_PRIVATE_KEY }}
           NORDICWAY_KEY_PASSPHRASE: ${{ secrets.ESCAPE_NORDICWAY_SSH_PASSPHRASE }}
+          NORDICWAY_OPERATION: ${{ steps.request.outputs.operation }}
+          NORDICWAY_RELEASE_SHA: ${{ steps.request.outputs.sha }}
         run: |
           set -eu
           umask 077

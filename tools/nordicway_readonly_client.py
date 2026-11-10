@@ -7,9 +7,12 @@ from nordicway_hostkey import verify
 
 HOST='nordicr4@cp14.nordicway.dk'
 SCRIPT=Path(__file__).with_name('nordicway_readonly_diagnostics.py')
+PREFLIGHT_SCRIPT=Path(__file__).with_name('nordicway_release_preflight.py')
 STATES={'running','stopped','starting','restarting','timeout','run_once','unknown','unavailable'}
 SESSION_STATES={'CREATED','VALIDATING','ACTIVE','DEGRADED','PAUSED','ERROR','COMPLETED','EXPIRED','OTHER'}
 REASONS={'database_missing_or_unsafe','database_journal_present','database_header_invalid','database_journal_mode_unsupported','database_read_failed'}
+PREFLIGHT_REASONS={'invalid_sha','unsafe_paths','checkout_unavailable','checkout_sha_mismatch','checkout_not_clean','manifest_unavailable','manifest_invalid','manifest_symlink','manifest_missing_file','manifest_untracked_file','manifest_file_mismatch','database_unavailable','preflight_failed'}
+PREFLIGHT_BLOCKERS={'owner_approval_not_confirmed','account_quota_unknown','passenger_quiesce_unverified','restore_and_restart_unverified'}
 
 def number(value,maximum=10**18):
  return value if type(value) is int and 0<=value<=maximum else None
@@ -40,6 +43,19 @@ def sanitize(raw):
  storage=raw.get('storage');storage=storage if isinstance(storage,dict) else {}
  result['storage']={'filesystem_free_bytes':number(storage.get('filesystem_free_bytes')),'account_quota':'unknown'}
  return result
+
+def sanitize_preflight(raw,sha):
+ if not isinstance(raw,dict) or raw.get('status')!='blocked':raise ValueError('invalid_report')
+ if 'reason' in raw:
+  reason=raw['reason']
+  return {'status':'blocked','reason':reason if reason in PREFLIGHT_REASONS else 'preflight_failed'}
+ if raw.get('requested_sha')!=sha or not isinstance(raw.get('manifest_sha256'),str) or not re.fullmatch(r'[0-9a-f]{64}',raw['manifest_sha256']):raise ValueError('invalid_report')
+ blockers=raw.get('blockers')
+ if not isinstance(blockers,list) or set(blockers)!=PREFLIGHT_BLOCKERS:raise ValueError('invalid_report')
+ fields=('manifest_files','source_bytes','database_bytes','filesystem_free_bytes')
+ counts={field:number(raw.get(field)) for field in fields}
+ if any(value is None for value in counts.values()):raise ValueError('invalid_report')
+ return {'status':'blocked','requested_sha':sha,'manifest_sha256':raw['manifest_sha256'],**counts,'account_quota':'unknown','blockers':sorted(PREFLIGHT_BLOCKERS)}
 
 def _run_limited(command,*,input,capture_output,timeout,env):
  """Bound remote stdout and runtime; never surface SSH stderr or arguments."""
@@ -78,15 +94,19 @@ def run(env=None,runner=None):
  try:known=verify(env.get('NORDICWAY_KNOWN_HOST',''),env.get('NORDICWAY_VERIFIED_FINGERPRINT',''))
  except ValueError:return {'status':'blocked','reason':'host_key_unverified'}
  if not env.get('SSH_AUTH_SOCK'):return {'status':'blocked','reason':'ssh_agent_unavailable'}
+ operation=env.get('NORDICWAY_OPERATION','diagnostics');sha=env.get('NORDICWAY_RELEASE_SHA','')
+ if operation not in ('diagnostics','release_preflight') or not isinstance(sha,str) or (operation=='release_preflight' and not re.fullmatch(r'[0-9a-f]{40}',sha)) or (operation=='diagnostics' and sha):return {'status':'blocked','reason':'invalid_operation'}
  try:
-  script=SCRIPT.read_bytes()
+  script=(SCRIPT if operation=='diagnostics' else PREFLIGHT_SCRIPT).read_bytes()
   if not script or len(script)>100000:return {'status':'blocked','reason':'diagnostics_script_invalid'}
+  if operation=='release_preflight':script=("import os;os.environ['ESCAPE_RELEASE_SHA']='"+sha+"'\n").encode('ascii')+script
   with tempfile.TemporaryDirectory(prefix='escape-hostkey-') as tmp:
    hosts=Path(tmp)/'known_hosts';hosts.write_text(known,encoding='ascii');hosts.chmod(0o600)
    command=['ssh','-F','/dev/null','-T','-p','33','-o','BatchMode=yes','-o','PasswordAuthentication=no','-o','KbdInteractiveAuthentication=no','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(hosts),'-o','GlobalKnownHostsFile=/dev/null','-o','ForwardAgent=no','-o','ClearAllForwardings=yes','-o','ConnectTimeout=10',HOST,'python3 -']
    result=runner(command,input=script,capture_output=True,timeout=30,env=env)
   if result.returncode!=0 or len(result.stdout)>100000:return {'status':'failed','reason':'ssh_or_report_failed'}
-  return {'status':'ok','report':sanitize(json.loads(result.stdout))}
+  parsed=json.loads(result.stdout)
+  return {'status':'ok','report':sanitize(parsed) if operation=='diagnostics' else sanitize_preflight(parsed,sha)}
  except (OSError,subprocess.SubprocessError,ValueError,TypeError,UnicodeError):return {'status':'failed','reason':'ssh_or_report_failed'}
 
 if __name__=='__main__':

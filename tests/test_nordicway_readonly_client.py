@@ -26,6 +26,15 @@ class Client(unittest.TestCase):
   for code,raw in [(1,b'secret remote error'),(0,b'secret malformed response'),(0,b'x'*100001)]:
    runner=Mock(return_value=type('Result',(),{'returncode':code,'stdout':raw})())
    result=client.run(self.env,runner);self.assertEqual(result,{'status':'failed','reason':'ssh_or_report_failed'});self.assertNotIn('secret',json.dumps(result))
+ def test_release_preflight_is_fixed_read_only_and_always_blocked(self):
+  env={**self.env,'NORDICWAY_OPERATION':'release_preflight','NORDICWAY_RELEASE_SHA':'b'*40}
+  payload={'status':'blocked','requested_sha':'b'*40,'manifest_sha256':'c'*64,'manifest_files':71,'source_bytes':100,'database_bytes':200,'filesystem_free_bytes':300,'blockers':sorted(client.PREFLIGHT_BLOCKERS),'private':'secret'}
+  def runner(command,**kwargs):
+   self.assertEqual(command[-2:],[client.HOST,'python3 -'])
+   self.assertIn(b"ESCAPE_RELEASE_SHA']='"+b'b'*40+b"'",kwargs['input'])
+   return type('Result',(),{'returncode':0,'stdout':json.dumps(payload).encode()})()
+  result=client.run(env,runner);self.assertEqual(result['status'],'ok');self.assertEqual(result['report']['status'],'blocked');self.assertNotIn('secret',json.dumps(result))
+  env['NORDICWAY_RELEASE_SHA']='$(id)';runner=Mock();self.assertEqual(client.run(env,runner)['reason'],'invalid_operation');runner.assert_not_called()
  def test_transport_bounds_stdout_and_timeout(self):
   small=client._run_limited([sys.executable,'-c','import sys;sys.stdout.buffer.write(sys.stdin.buffer.read())'],input=b'hello',capture_output=True,timeout=3,env=os.environ)
   self.assertEqual(small.stdout,b'hello');self.assertEqual(small.returncode,0)
