@@ -74,6 +74,25 @@ class Push(unittest.TestCase):
    self.assertTrue(web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p)))
   self.assertEqual(len(sent),1)
   with app.connect() as c:self.assertEqual([r['status'] for r in c.execute('SELECT status FROM push_jobs ORDER BY id')],['sent','skipped'])
+ def test_failed_send_retries_and_later_duplicate_is_suppressed(self):
+  self.subscribe();self.event('SELL_SIGNAL');sent=[];attempts=[]
+  def fail_once(*args):attempts.append(1);raise RuntimeError('temporary network error')
+  with patch('web_push._actionable',return_value='SELL'):
+   self.assertTrue(web_push.dispatch_one(app.connect,self.now,fail_once))
+   self.assertTrue(web_push.dispatch_one(app.connect,self.now+timedelta(seconds=4),lambda s,p,t:sent.append(p)))
+   self.event('SELL_SIGNAL')
+   self.assertTrue(web_push.dispatch_one(app.connect,self.now+timedelta(seconds=5),lambda s,p,t:sent.append(p)))
+  self.assertEqual(len(attempts),1);self.assertEqual(len(sent),1)
+  with app.connect() as c:self.assertEqual([r['status'] for r in c.execute('SELECT status FROM push_jobs ORDER BY id')],['sent','skipped'])
+ def test_separate_watches_are_not_suppressed_on_same_device(self):
+  self.subscribe();self.event('SELL_SIGNAL');sent=[]
+  with app.connect() as c:
+   c.execute("INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due) VALUES(1,'second-watch',0,'other','other-depot','ACTIVE','{}','hash','{\"version\":\"1.0.0\"}','{}',?,?,0)",(self.now.isoformat(),self.now.isoformat()))
+   other=c.execute("SELECT * FROM hw_sessions WHERE watch_id='second-watch'").fetchone();engine.event(c,other,'SELL_SIGNAL',self.now,'synthetic')
+  with patch('web_push._actionable',return_value='SELL'):
+   web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+   web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+  self.assertEqual({p['watch_id'] for p in sent},{'synthetic-watch','second-watch'})
  def test_old_signal_is_never_announced(self):
   self.subscribe();self.event('BUY_SIGNAL');sent=[]
   with patch('web_push._actionable',return_value=None):web_push.dispatch_one(app.connect,self.now,lambda *args:sent.append(args))
