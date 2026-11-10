@@ -1,0 +1,32 @@
+name: ESCAPE Projects status dry-run
+
+on:
+  workflow_dispatch:
+    inputs:
+      comment_id:
+        description: Issue 4 request comment ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    if: github.actor_id == '351122234' && github.ref == 'refs/heads/codex/escape-development'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out trusted default branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Validate issue request without changing status
+        env:
+          ESCAPE_PROJECTS_TOKEN: ${{ secrets.ESCAPE_PROJECTS_TOKEN }}
+          REQUEST_COMMENT_ID: ${{ inputs.comment_id }}
+          GITHUB_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        shell: bash
+        run: |
+          set +x
+          python3 development/projects_dryrun.py
