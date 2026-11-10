@@ -55,6 +55,25 @@ class Push(unittest.TestCase):
   self.event('WAIT_SIGNAL')
   with patch('web_push._actionable',return_value=None):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
   self.assertEqual(len(sent),2);self.assertEqual(sent[1]['title'],'ESCAPE · signal ændret');self.assertEqual(sent[0]['tag'],sent[1]['tag'])
+ def test_parallel_workers_serialize_same_device_and_watch(self):
+  import threading
+  self.subscribe();self.event('SELL_SIGNAL');self.event('SELL_SIGNAL')
+  entered=threading.Event();release=threading.Event();sent=[];failures=[]
+  def blocking_sender(sub,payload,tag):
+   sent.append(payload);entered.set()
+   if not release.wait(5):raise RuntimeError('test sender timed out')
+  def worker():
+   try:web_push.dispatch_one(app.connect,self.now,blocking_sender)
+   except Exception as exc:failures.append(exc)
+  with patch('web_push._actionable',return_value='SELL'):
+   thread=threading.Thread(target=worker);thread.start()
+   try:
+    self.assertTrue(entered.wait(5));self.assertFalse(web_push.dispatch_one(app.connect,self.now,lambda *args:self.fail('parallel duplicate sent')))
+   finally:release.set();thread.join(5)
+   self.assertFalse(thread.is_alive());self.assertEqual(failures,[])
+   self.assertTrue(web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p)))
+  self.assertEqual(len(sent),1)
+  with app.connect() as c:self.assertEqual([r['status'] for r in c.execute('SELECT status FROM push_jobs ORDER BY id')],['sent','skipped'])
  def test_old_signal_is_never_announced(self):
   self.subscribe();self.event('BUY_SIGNAL');sent=[]
   with patch('web_push._actionable',return_value=None):web_push.dispatch_one(app.connect,self.now,lambda *args:sent.append(args))

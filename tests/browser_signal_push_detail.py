@@ -1,0 +1,50 @@
+"""Synthetic push-to-detail journey; no broker orders or real market data."""
+import os,sys,threading
+from datetime import datetime,timezone,timedelta
+from pathlib import Path
+sys.path[:0]=[str(Path(__file__).resolve().parents[1]),str(Path(__file__).resolve().parent)]
+import app
+from test_portfolio_value_chart import PortfolioValueChart
+from playwright.sync_api import sync_playwright,expect
+
+def main():
+ case=PortfolioValueChart();case.setUp();server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
+ now=datetime.now(timezone.utc);stamp=now.isoformat()
+ session={'watch_id':'synthetic-push','status':'ACTIVE','signal':'SELL','display_status':'SÆLGSSIGNAL','is_test':False,'request':{'ticker':'JDZG','asset_id':'synthetic-asset','quote_currency':'USD','provider':'eodhd','risk':{'stop_price':'2.5'}},'last_data_at':stamp,'last_calculation_at':stamp,'data_stale':False,'data_status':{'price':'3.1','price_status':'FRESH','market_status':'OPEN','identity_verification':'verified'},'latest_currency':'USD','latest_context':{'status':'verified','position':'held','tradability':'available','as_of':stamp},'latest_calculation':{'reason_codes':['EXIT_RULES','TRAILING_EXIT']},'last_action_signal':{'event_id':'hw-'+'a'*24,'event_type':'SELL_SIGNAL','created':stamp,'reason':'Syntetisk exit','state':'ACTIVE','acknowledged_at':None}}
+ holding={'key':'synthetic-row','portfolio_id':case.root,'portfolio_name':'Test depot','portfolio_kind':'portfolio','asset_id':'synthetic-asset','ticker':'JDZG','name':'Syntetisk selskab','quantity':'2','price':{'amount':'3.1','currency':'USD'},'value':{'amount':'6.2','currency':'USD'},'unrealized':{'amount':'-12','currency':'DKK'},'unrealized_percent':'-5','daily':{'amount':'-0.1','percent':'-3','currency':'USD'},'snapshot_at':stamp,'verification':'broker_snapshot','conflicts':[],'analysis_freshness':{},'hot_watch':{'session':{'watch_id':'synthetic-push'}}}
+ series=[{'price':str(v),'epoch':(now-timedelta(hours=2-i)).timestamp(),'timestamp':(now-timedelta(hours=2-i)).isoformat(),'date':now.date().isoformat()} for i,v in enumerate([3.4,3.2,3.1])]
+ quote={'price':'3.1','currency':'USD','ticker':'JDZG','exchange':'NASDAQ','name':'Syntetisk selskab','asset_id':'synthetic-asset','asset_type':'CS','price_time':stamp,'fetched_at':stamp,'daily_change_percent':'-3','daily_change':'-0.1','daily_note':None,'series':series,'week_change_percent':'-4'}
+ try:
+  with sync_playwright() as pw:
+   browser=pw.chromium.launch(**({} if os.environ.get('ESCAPE_PLAYWRIGHT_MANAGED') else {'executable_path':'/usr/bin/chromium'}),headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':390,'height':700},is_mobile=True,has_touch=True);errors=[];orders=[];periods=[]
+   page.on('pageerror',lambda e:errors.append(str(e)));page.on('request',lambda r:orders.append(r.url) if '/api/trade/' in r.url else None)
+   page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();page.locator('.dashboard-v1').wait_for()
+   page.evaluate('state.connection.connected=true')
+   page.route('**/api/v1/hotwatch/sessions/synthetic-push?is_test=false',lambda route:route.fulfill(json={'session':session}))
+   account=page.evaluate('structuredClone(state)');account['dashboard']['positions']=[holding]
+   page.route('**/api/state',lambda route:route.fulfill(json=account))
+   def market(route):
+    periods.append(route.request.post_data_json.get('period'));route.fulfill(json=quote)
+   page.route('**/api/market/quote',market)
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')")
+   d=page.locator('#engine-dialog');expect(d).to_contain_text('SÆLGSSIGNAL');expect(d).to_contain_text('Syntetisk selskab');expect(d).to_contain_text('Siden køb');expect(d).to_contain_text('Ingen ordre er sendt')
+   slot=d.locator('.market-slot');expect(slot.locator('.market-price')).to_be_visible();expect(slot.locator('[data-market-period=day]')).to_have_attribute('aria-pressed','true')
+   expect(slot.locator('.signal-chart-peak')).to_contain_text('højeste viste punkt')
+   for name in ['week','month','year','day']:
+    slot.locator('[data-market-period='+name+']').click();expect(slot.locator('[data-market-period='+name+']')).to_have_attribute('aria-pressed','true')
+   assert 'ONE_MONTH' in periods and 'ONE_YEAR' in periods,periods
+   for offset in (0,300,700,1200):
+    d.evaluate('(e,y)=>e.scrollTop=y',offset);box=d.locator('.signal-action-bar').bounding_box();viewport=page.viewport_size;assert box and box['y']>=0 and box['y']+box['height']<=viewport['height']+1,(offset,box)
+   assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+   page.screenshot(path='/tmp/escape-signal-push-detail.png')
+   d.locator('[data-engine-close]').first.click();expect(d).not_to_be_visible()
+   session.update(status='DEGRADED',signal='NO_DATA',display_status='DATA FOR GAMLE',data_stale=True,latest_context={})
+   session['data_status']={'price':None,'price_status':'STALE','market_status':'UNKNOWN'}
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')")
+   expect(d).to_contain_text('forældet eller er ikke bekræftet');expect(d.locator('[data-trade-watch]')).to_have_count(0)
+   d.locator('[data-engine-close]').first.click();expect(d).not_to_be_visible()
+   assert not errors,errors;assert not orders,orders
+   browser.close()
+  print('PASS: synthetic push → mobile detail, four periods, Pluto identity, real-point high, sticky actions and no order')
+ finally:server.shutdown();server.server_close();case.tearDown()
+if __name__=='__main__':main()

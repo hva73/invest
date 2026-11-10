@@ -13,6 +13,7 @@ def init(c):
     c.execute('''CREATE TABLE IF NOT EXISTS push_devices(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),endpoint_hash TEXT NOT NULL UNIQUE,payload BLOB NOT NULL,buy INTEGER NOT NULL DEFAULT 1,sell INTEGER NOT NULL DEFAULT 1,created REAL NOT NULL,updated REAL NOT NULL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS push_jobs(id INTEGER PRIMARY KEY,event_key TEXT NOT NULL,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),device_id INTEGER NOT NULL REFERENCES push_devices(id) ON DELETE CASCADE,created REAL NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_attempt REAL NOT NULL DEFAULT 0,lease_until REAL NOT NULL DEFAULT 0,lease_owner TEXT,status TEXT NOT NULL DEFAULT 'pending',UNIQUE(event_key,device_id))''')
     c.execute('CREATE INDEX IF NOT EXISTS push_due ON push_jobs(status,next_attempt,lease_until,id)')
+    c.execute('CREATE INDEX IF NOT EXISTS push_active_watch_device ON push_jobs(device_id,watch_row_id,status,lease_until)')
     c.execute('''CREATE TABLE IF NOT EXISTS push_last(device_id INTEGER NOT NULL REFERENCES push_devices(id) ON DELETE CASCADE,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),signal TEXT NOT NULL,event_key TEXT NOT NULL,updated REAL NOT NULL,PRIMARY KEY(device_id,watch_row_id))''')
 
 
@@ -203,7 +204,7 @@ def dispatch_one(connect,now=None,sender=None):
     with connect() as c:
         c.execute('BEGIN IMMEDIATE')
         c.execute("UPDATE push_jobs SET status='expired' WHERE status='pending' AND created<?",(t-300,))
-        job=c.execute("SELECT j.*,d.user_id,d.payload,d.buy,d.sell FROM push_jobs j JOIN push_devices d ON d.id=j.device_id JOIN users u ON u.id=d.user_id AND u.active=1 WHERE j.status='pending' AND j.next_attempt<=? AND j.lease_until<? ORDER BY j.id LIMIT 1",(t,t)).fetchone()
+        job=c.execute("SELECT j.*,d.user_id,d.payload,d.buy,d.sell FROM push_jobs j JOIN push_devices d ON d.id=j.device_id JOIN users u ON u.id=d.user_id AND u.active=1 WHERE j.status='pending' AND j.next_attempt<=? AND j.lease_until<? AND NOT EXISTS (SELECT 1 FROM push_jobs active WHERE active.watch_row_id=j.watch_row_id AND active.device_id=j.device_id AND active.id<>j.id AND active.status='pending' AND active.lease_until>=?) ORDER BY j.id LIMIT 1",(t,t,t)).fetchone()
         if not job:return False
         c.execute('UPDATE push_jobs SET lease_owner=?,lease_until=?,attempts=attempts+1 WHERE id=?',(owner,t+30,job['id']))
     with connect() as c:
