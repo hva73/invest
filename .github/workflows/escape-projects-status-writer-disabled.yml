@@ -37,7 +37,7 @@ jobs:
       - name: Check out reviewed immutable revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: d92a1243a479880ba5c47d575e85a0e1b9ac0f92
+          ref: 143c8fed580fba41ec6fba637566c506aaf0233b
           persist-credentials: false
       - name: Disabled status writer
         env:
@@ -63,7 +63,7 @@ jobs:
       - name: Check out reviewed failure reporter
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: d92a1243a479880ba5c47d575e85a0e1b9ac0f92
+          ref: 143c8fed580fba41ec6fba637566c506aaf0233b
           persist-credentials: false
       - name: Report uncertain workflow result
         env:
