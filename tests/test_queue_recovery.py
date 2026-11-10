@@ -123,6 +123,32 @@ class QueueRecovery(unittest.TestCase):
    try:self.assertTrue(resumed.wait(1),'worker retired after a transient empty queue')
    finally:release.set();thread.join(4)
   self.assertFalse(thread.is_alive());self.assertFalse(errors)
+ def test_scan_log_measures_worker_occupancy_through_historical_refresh(self):
+  from unittest.mock import Mock
+  from hotwatch_service import Runner
+  job=capacity_fixture.LiveCapacity.add(self,'BUSY.US',501,due=self.now.timestamp());job['lease_owner']='synthetic'
+  runner=Runner(app.connect);adapter=Mock();adapter.poll.return_value=fixture.tick(self.now);adapter.capture_metrics=[];adapter.last_partial_observations=[];adapter.last_telemetry={};adapter.last_feed_diagnostics={}
+  runner.adapters[(1,'eodhd')]=adapter;runner.health=Mock();runner.log=Mock()
+  def refresh(*args):time.sleep(.04)
+  with patch.object(engine,'claim',return_value=job),patch.object(engine,'ingest',return_value={'calculation':{'signal':'NO_DATA'}}),patch('hotwatch_warmup.refresh',side_effect=refresh):self.assertTrue(runner.once(self.now))
+  args=runner.log.call_args.args;self.assertEqual(args[1],'processed');self.assertGreaterEqual(args[3]['warmup_ms'],35);self.assertGreaterEqual(args[3]['worker_busy_ms'],args[3]['warmup_ms'])
+ def test_stale_watch_defers_auxiliary_history_only_while_queue_is_overdue(self):
+  from unittest.mock import Mock
+  from hotwatch_service import Runner
+  job=capacity_fixture.LiveCapacity.add(self,'QUIET.US',502,due=self.now.timestamp());job['lease_owner']='synthetic'
+  runner=Runner(app.connect);adapter=Mock();adapter.poll.side_effect=adapters.DataUnavailable('DATA_STALE');adapter.capture_metrics=[];adapter.last_partial_observations=[];runner.adapters[(1,'eodhd')]=adapter;runner.health=Mock();runner.log=Mock()
+  with app.connect() as c:c.execute('UPDATE hw_sessions SET next_due=? WHERE watch_id=?',((self.now-timedelta(seconds=20)).timestamp(),self.f.req['watch_id']))
+  with patch('hotwatch_engine.utc',return_value=self.now),patch.object(engine,'claim',return_value=job),patch.object(engine,'fault'),patch('hotwatch_warmup.refresh') as refresh:
+   self.assertTrue(runner.once(self.now));refresh.assert_not_called();self.assertTrue(runner.log.call_args.args[3]['warmup_deferred'])
+   with app.connect() as c:c.execute('UPDATE hw_sessions SET next_due=? WHERE watch_id=?',((self.now+timedelta(minutes=2)).timestamp(),self.f.req['watch_id']))
+   self.assertTrue(runner.once(self.now));refresh.assert_called_once();self.assertFalse(runner.log.call_args.args[3]['warmup_deferred'])
+   with app.connect() as c:c.execute('UPDATE hw_sessions SET next_due=? WHERE watch_id=?',((self.now-timedelta(seconds=20)).timestamp(),self.f.req['watch_id']))
+   adapter.poll.side_effect=None;adapter.poll.return_value=fixture.tick(self.now);adapter.last_telemetry={};adapter.last_feed_diagnostics={};refresh.reset_mock()
+   with patch.object(engine,'ingest',return_value={'calculation':{'signal':'NO_DATA'}}):self.assertTrue(runner.once(self.now))
+   refresh.assert_called_once();self.assertFalse(runner.log.call_args.args[3]['warmup_deferred'])
+   adapter.poll.return_value=fixture.tick(self.now-timedelta(minutes=3));refresh.reset_mock()
+   with patch.object(engine,'ingest',return_value={'duplicate':True,'calculation':{'signal':'NO_DATA'}}):self.assertTrue(runner.once(self.now))
+   refresh.assert_not_called();self.assertTrue(runner.log.call_args.args[3]['warmup_deferred'])
  def test_idle_worker_rechecks_due_queue_while_other_provider_stays_blocked(self):
   import hotwatch_service as service
   runner=service.Runner(app.connect);empty=threading.Event();resumed=threading.Event();release=threading.Event();calls={};errors=[]

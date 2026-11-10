@@ -40,13 +40,14 @@ window.EngineUI=(()=>{
   dialog((s.ticker?s.ticker+' · ':'')+'Signaladvarsel',`<section class="signal-notice-details"><strong>${a.state==='ACTIVE'?'Seneste signal':'Tidligere advarsel'}: ${esc(noticeSide(a))} · ${noticeState(a)}</strong><small>${date(a.created)}</small><p>${esc(a.reason||'Begrundelse ikke registreret')}</p><small>${a.state==='ACTIVE'?'Status ved seneste opdatering.':'Historisk advarsel · ikke et aktuelt handelssignal.'}</small>${acknowledged?'<p role="status">Kvitteret</p>':`<button type="button" data-engine-ack="${esc(s.watch_id)}" data-event-id="${esc(a.event_id)}" data-is-test="${s.is_test===true}">Kvittér advarsel</button>`}</section>`);
  }
  async function acknowledgeNotice(b){
-  const user=owner(),eventId=b.dataset.eventId,wid=b.dataset.engineAck,test=b.dataset.isTest==='true';b.disabled=true;
+  const user=owner(),eventId=b.dataset.eventId,wid=b.dataset.engineAck,test=b.dataset.isTest==='true',noticeDialog=b.closest('dialog');b.disabled=true;
   try{
    await api(base+'/sessions/'+encodeURIComponent(wid)+'/ack-signal',{is_test:test,event_id:eventId});if(owner()!==user)return;
    const mark=s=>{if(s?.watch_id===wid&&(s.is_test===true)===test&&s.last_action_signal?.event_id===eventId)s.last_action_signal.acknowledged=true};
    (data?.sessions||[]).forEach(mark);window.DashboardUI?.acknowledgeSignal?.(wid,eventId,test);
    document.querySelectorAll('[data-engine-notice]').forEach(icon=>{const s=JSON.parse(icon.dataset.engineNotice);mark(s);if(s.last_action_signal.acknowledged){icon.dataset.engineNotice=JSON.stringify(s);icon.className='signal-alert signal-alert--read';const label='Vis kvitteret advarsel · '+noticeSide(s.last_action_signal)+' · '+noticeState(s.last_action_signal);icon.setAttribute('aria-label',label);icon.title=label}});
    b.textContent='Kvitteret';b.setAttribute('aria-label','Advarslen er kvitteret');
+   if(noticeDialog?.open&&b.isConnected&&noticeDialog.contains(b))noticeDialog.close();
   }catch(error){b.disabled=false;throw error}
  }
  function signalTiming(s){const live=s.status==='ACTIVE'&&['KØBSSIGNAL','SÆLGSSIGNAL','EXIT WATCH'].includes(s.display_status),last=s.last_action_signal||{},labels={BUY_SIGNAL:'Køb',SELL_SIGNAL:'Salg',REDUCE_SIGNAL:'Reducér'};if(live)return `<small class="signal-timing">Aktuelt · beregnet ${date(s.last_calculation_at)}</small>`;if(labels[last.event_type]&&last.created)return `<small class="signal-timing">Tidligere ${esc(labels[last.event_type])} · ${date(last.created)} · ikke aktuelt</small>`;return ''}

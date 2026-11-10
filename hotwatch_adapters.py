@@ -572,7 +572,15 @@ class EODHDAdapter:
    if bars['status']=='RATE_LIMIT':
     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=bars.get('retry_after_s') or retry_seconds(None);raise failure
    if bars['status']!='OK':
-    end=int(utc().timestamp());bars=client.intraday(symbol,start=end-86400,end=end);kind='intraday';self.last_feed_diagnostics['intraday_status']=bars['status']
+    end=int(utc().timestamp());start=end-86400
+    # Only bars at or after the already journalled observation can be used
+    # below. Request a one-minute overlap for boundary/rounding safety.
+    try:
+     if session.get('last_data'):
+      last=stamp(session['last_data']).timestamp()
+      if last<=end:start=max(start,int(last)-60)
+    except (ValueError,TypeError,AttributeError,OverflowError):pass
+    bars=client.intraday(symbol,start=start,end=end);kind='intraday';self.last_feed_diagnostics['intraday_status']=bars['status']
     if bars['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
     if bars['status']=='RATE_LIMIT':
      failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=bars.get('retry_after_s') or retry_seconds(None);raise failure

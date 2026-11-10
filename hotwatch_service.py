@@ -893,6 +893,105 @@ def recent_scan_log(uid,mode,watch_ids):
   return {'status':'AVAILABLE','records':rows,'retention':'rotating 3 x 1 MiB; records may be incomplete'}
  except OSError:return {'status':'UNAVAILABLE','records':[]}
 
+def admin_diagnostics(connect,uid,now=None):
+ """Read bounded existing operational evidence; do not initiate work or trade."""
+ from pathlib import Path
+ import math,shutil
+ from collections import Counter
+ from datetime import datetime,timezone
+ from eodhd_capacity import snapshot
+ now=now or engine.utc();epoch=now.timestamp();base=Path(app.DB).resolve();path=base.parent/'hotwatch-scans.jsonl'
+ with connect() as c:
+  sessions=c.execute("SELECT watch_id,status,request,last_error,last_data,next_due,lease_until FROM hw_sessions WHERE user_id=? AND is_test=0 AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED','PAUSED')",(uid,)).fetchall()
+  history_sessions=c.execute('SELECT watch_id,request FROM hw_sessions WHERE user_id=? AND is_test=0 ORDER BY id DESC LIMIT 10001',(uid,)).fetchall()
+  beat=c.execute('SELECT updated,status FROM hw_heartbeat WHERE id=1').fetchone()
+  supervisor=c.execute('SELECT updated,status,attempts FROM hw_supervisor_status WHERE id=1').fetchone()
+  events=[dict(x) for x in c.execute('SELECT created,event,code FROM hw_supervisor_events ORDER BY id DESC LIMIT 50')]
+  health=c.execute('SELECT source,attempted,succeeded,code,payload FROM hw_provider_health WHERE user_id=? AND is_test=0',(uid,)).fetchall()
+  push={x['status']:x['n'] for x in c.execute('SELECT j.status,count(*) AS n FROM push_jobs j JOIN push_devices d ON d.id=j.device_id WHERE d.user_id=? AND j.created>=? GROUP BY j.status',(uid,epoch-86400))}
+  push_pending=c.execute("SELECT min(j.created) FROM push_jobs j JOIN push_devices d ON d.id=j.device_id WHERE d.user_id=? AND j.status='pending'",(uid,)).fetchone()[0]
+  jobs={x['status']:x['n'] for x in c.execute('SELECT status,count(*) AS n FROM jobs WHERE user_id=? AND created>=? GROUP BY status',(uid,epoch-86400))}
+  cron=c.execute('SELECT heartbeat FROM worker_state WHERE id=1').fetchone()
+  provider=snapshot(c,epoch);journal=c.execute('PRAGMA journal_mode').fetchone()[0];pages=c.execute('PRAGMA page_count').fetchone()[0];page_size=c.execute('PRAGMA page_size').fetchone()[0]
+ watches={};states=Counter();errors=Counter();overdue=[]
+ for row in history_sessions[:10000]:
+  try:req=json.loads(row['request']);ticker=req.get('ticker','?')
+  except (ValueError,TypeError):ticker='?'
+  ref=hashlib.sha256(row['watch_id'].encode()).hexdigest()[:16];watches[ref]=ticker if isinstance(ticker,str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,40}',ticker) else '?'
+ for row in sessions:
+  try:req=json.loads(row['request']);ticker=req.get('ticker','?')
+  except (ValueError,TypeError):ticker='?'
+  ref=hashlib.sha256(row['watch_id'].encode()).hexdigest()[:16];watches[ref]=ticker if isinstance(ticker,str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,40}',ticker) else '?'
+  states[row['status']]+=1
+  if row['last_error'] and re.fullmatch(r'[A-Za-z0-9_]{1,100}',row['last_error']):errors[row['last_error']]+=1
+  if row['status']!='PAUSED' and row['next_due']<=epoch and row['lease_until']<=epoch:overdue.append({'ticker':watches[ref],'late_s':round(epoch-row['next_due'],1)})
+ records=[];files_read=0
+ numeric=('queue_ms','claim_ms','provider_ms','ingest_compute_ms','adapter_to_journal_ms','warmup_ms','worker_busy_ms','pluto_context_ms','eodhd_http_ms','websocket_capture_ms')
+ for item in (path,Path(str(path)+'.1'),Path(str(path)+'.2'),Path(str(path)+'.3')):
+  try:
+   with item.open('rb') as f:f.seek(0,2);f.seek(max(0,f.tell()-1048576));lines=f.read().decode('utf-8',errors='replace').splitlines()
+   files_read+=1
+  except OSError:continue
+  for line in lines:
+   try:
+    rec=json.loads(line);ref=rec.get('watch_ref');at=stamp(rec['utc']);age=epoch-at.timestamp()
+    if rec.get('service')!='hotwatch' or rec.get('user_id')!=uid or rec.get('is_test') is not False or ref not in watches or not 0<=age<=86400:continue
+    metrics=rec.get('metrics') or {};clean={k:round(metrics[k],3) for k in numeric if isinstance(metrics.get(k),(int,float)) and not isinstance(metrics.get(k),bool) and math.isfinite(metrics[k]) and 0<=metrics[k]<=86400000}
+    clean['warmup_deferred']=metrics.get('warmup_deferred') is True
+    for key in ('websocket_trade_status','websocket_quote_status','websocket_status_status','minute_bars_status','bar_history_status','intraday_status'):
+     value=metrics.get(key)
+     if isinstance(value,str) and re.fullmatch(r'[A-Z0-9_]{1,80}',value):clean[key]=value
+    ws=metrics.get('websocket') or []
+    if not isinstance(ws,list):ws=[]
+    clean['websocket_ms']=round(sum(x.get('wait_ms',0) for x in ws if isinstance(x,dict) and isinstance(x.get('wait_ms'),(int,float)) and not isinstance(x.get('wait_ms'),bool) and math.isfinite(x['wait_ms']) and 0<=x['wait_ms']<=60000),3)
+    clean['websocket']=[{k:x[k] for k in ('feed','status','wait_ms','source_age_s','received_age_s','connections_opened','subscriptions_sent','cache_hit') if k in x and (isinstance(x[k],bool) or isinstance(x[k],(int,float)) and math.isfinite(x[k]) and abs(x[k])<=86400000 or isinstance(x[k],str) and re.fullmatch(r'[A-Za-z0-9_]{1,40}',x[k]))} for x in ws[:10] if isinstance(x,dict)]
+    conflict=metrics.get('market_conflict')
+    if isinstance(conflict,dict):
+     fields=[x for x in (conflict.get('fields') or []) if isinstance(x,str) and x in ('price','bid','ask','volume','open','high','low','close')]
+     if fields:
+      clean['market_conflict']={'fields':fields,'previous':{},'incoming':{}}
+      for side in ('previous','incoming'):
+       values=conflict.get(side) if isinstance(conflict.get(side),dict) else {}
+       for field in fields:
+        value=values.get(field)
+        if isinstance(value,str) and re.fullmatch(r'\d{1,31}(?:\.\d{1,12})?',value):clean['market_conflict'][side][field]=value
+    status=rec.get('status');code=rec.get('code');source=rec.get('source')
+    records.append({'at':at.isoformat(),'ticker':watches[ref],'status':status if status in ('processed','degraded','deferred','cancelled','context_rejected') else 'unknown','code':code if isinstance(code,str) and re.fullmatch(r'[A-Za-z0-9_]{1,100}',code) else None,'source':source if source in ('eodhd','pluto','report_inbox','synthetic') else 'unknown','metrics':clean,'_epoch':at.timestamp()})
+   except (ValueError,TypeError,KeyError,AttributeError,OverflowError):continue
+ records.sort(key=lambda x:x['_epoch'],reverse=True)
+ def summary(seconds):
+  subset=[x for x in records if x['_epoch']>=epoch-seconds];done=[x for x in subset if x['status'] in ('processed','degraded')];deferred=sum(x['status']=='deferred' for x in subset)
+  def stat(name):
+   vals=sorted(x['metrics'][name] for x in done if name in x['metrics'])
+   if not vals:return None
+   return {'count':len(vals),'p50_ms':vals[(len(vals)-1)//2],'p90_ms':vals[math.ceil(.9*len(vals))-1],'max_ms':vals[-1]}
+  return {'completed':len(done),'deferred':deferred,'queue':stat('queue_ms'),'worker':stat('worker_busy_ms'),'provider':stat('provider_ms'),'database':stat('ingest_compute_ms'),'warmup':stat('warmup_ms'),'websocket':stat('websocket_ms')}
+ windows={name:summary(seconds) for name,seconds in (('5m',300),('1h',3600),('24h',86400))}
+ timeline=[]
+ for i in range(11,-1,-1):
+  end=epoch-i*300;start=end-300;group=sorted(x['metrics']['queue_ms'] for x in records if x['status'] in ('processed','degraded') and start<=x['_epoch']<end and 'queue_ms' in x['metrics'])
+  timeline.append({'from':datetime.fromtimestamp(start,timezone.utc).isoformat(),'to':datetime.fromtimestamp(end,timezone.utc).isoformat(),'count':len(group),'p50_ms':group[(len(group)-1)//2] if group else None,'p90_ms':group[math.ceil(.9*len(group))-1] if group else None,'max_ms':group[-1] if group else None})
+ recent=[{k:v for k,v in x.items() if k!='_epoch'} for x in records[:500]]
+ providers=[]
+ for row in health:
+  try:
+   payload=json.loads(row['payload']);timing=payload.get('worker_database_timing') or {}
+   safe={k:timing.get(k) for k in ('scope','completed_scopes','max_wait_ms','max_scope_ms','slowest_module','slowest_function') if isinstance(timing.get(k),(str,int,float))}
+   settings=payload.get('worker_settings') or {};configured={k:settings.get(k) for k in ('ESCAPE_HW_PARALLEL_SCANS','ESCAPE_HW_CONCURRENCY') if settings.get(k) is None or isinstance(settings.get(k),str) and re.fullmatch(r'[0-9]{1,4}',settings[k])}
+   feeds={k:payload[k] for k in ('websocket_trade_status','websocket_quote_status','websocket_status_status','minute_bars_status','intraday_status','bar_history_status') if isinstance(payload.get(k),str) and re.fullmatch(r'[A-Z0-9_]{1,80}',payload[k])}
+   defaults={k:payload[k] for k in ('parallel_scans_default','concurrency_default','session_capacity') if type(payload.get(k)) is int and 0<payload[k]<=10000}
+  except (ValueError,TypeError,AttributeError):safe={};configured={};feeds={};defaults={}
+  providers.append({'source':row['source'],'attempted':row['attempted'],'succeeded':row['succeeded'],'code':row['code'],'worker_database_timing':safe,'worker_settings':configured,'worker_defaults':defaults,'last_successful_feeds':feeds})
+ def size(p):
+  try:return p.stat().st_size
+  except OSError:return None
+ try:disk=shutil.disk_usage(base.parent);storage={'free_bytes':disk.free,'total_bytes':disk.total}
+ except OSError:storage={'free_bytes':None,'total_bytes':None}
+ storage.update(database_bytes=size(base),wal_bytes=size(Path(str(base)+'-wal')),journal_mode=journal,page_count=pages,page_size=page_size)
+ import hotwatch_supervisor
+ app_errors=hotwatch_supervisor.application_error_fallback()
+ return {'application_errors':app_errors,'as_of':now.isoformat(),'scope':'own_sessions_and_shared_process','worker':dict(beat) if beat else None,'supervisor':dict(supervisor) if supervisor else None,'supervisor_events':events,'session_count':len(sessions),'states':dict(states),'errors':dict(errors),'due_count':len(overdue),'overdue':sorted(overdue,key=lambda x:x['late_s'],reverse=True)[:20],'provider_capacity':provider,'providers':providers,'storage':storage,'push':{'last_24h':push,'oldest_pending_age_s':round(max(0,epoch-push_pending),1) if push_pending is not None else None},'scheduled_jobs':{'last_24h':jobs,'worker_last_seen':datetime.fromtimestamp(cron['heartbeat'],timezone.utc).isoformat() if cron else None},'windows':windows,'timeline':timeline,'recent':recent,'log_files_read':files_read,'log_earliest':records[-1]['at'] if records else None,'history_scope_truncated':len(history_sessions)>10000,'log_retention':'Roterende filer; perioderne kan være ufuldstændige. Udskudte indsamlinger tælles separat.','unavailable':'Eksterne processers CPU, hukommelse og fuld versionsidentitet er ikke registreret.'}
+
 def worker_settings():
  keys=('ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE','ESCAPE_HW_REQUESTS_PER_MINUTE','ESCAPE_HW_EODHD_FAST_POLL_ENABLED','ESCAPE_HW_EODHD_MIN_POLL_S','ESCAPE_HW_EODHD_WS_TRADES_ENABLED','ESCAPE_HW_EODHD_FUSE_ENABLED','ESCAPE_HW_EODHD_BARS_ENABLED','ESCAPE_HW_EODHD_WS_EU_EXCHANGES','ESCAPE_HW_PARALLEL_SCANS','ESCAPE_HW_CONCURRENCY','ESCAPE_HW_CAPACITY')
  return {k:(v if v is None or re.fullmatch(r'[A-Za-z0-9_,.-]{0,100}',v) else 'INVALID') for k in keys for v in [os.environ.get(k)]}
@@ -909,7 +1008,7 @@ class Runner:
   claimed=engine.utc()
   if not job:return False
   job['scan_timing']={'next_due_at':engine.datetime.fromtimestamp(job['next_due'],engine.timezone.utc).isoformat(),'claimed_at':claimed.isoformat(),'claim_ms':round((time.perf_counter()-claim_started)*1000,3),'queue_ms':max(0,round((claimed.timestamp()-job['next_due'])*1000,3))}
-  uid=job['user_id'];r=job['request_data'];wid=job['watch_id'];mode=bool(job['is_test']);lease=job['lease_owner'];adapter=None;sample=None;uses_realtime_history=False;pending_feed=False
+  uid=job['user_id'];r=job['request_data'];wid=job['watch_id'];mode=bool(job['is_test']);lease=job['lease_owner'];adapter=None;sample=None;uses_realtime_history=False;pending_feed=False;scan_log=None;warmup_ms=0;warmup_deferred=False;stale_duplicate=False
   try:
    poll_started=time.perf_counter();job['scan_timing']['poll_started_at']=engine.utc().isoformat()
    if r['end_at'] and stamp(r['end_at'])<=now:
@@ -944,9 +1043,10 @@ class Runner:
    diagnostics=getattr(adapter,'last_feed_diagnostics',None)
    if isinstance(diagnostics,dict):timings.update({k:diagnostics[k] for k in ('websocket_trade_status','websocket_quote_status','websocket_status_status','exchange_status','minute_bars_status','bar_history_status','intraday_status') if k in diagnostics})
    self.health(job,sample,None,timings)
-   self.log(job,'processed',result.get('calculation',{}).get('signal'),{**timings,'duplicate':bool(result.get('duplicate'))})
+   scan_log=('processed',result.get('calculation',{}).get('signal'),{**timings,'duplicate':bool(result.get('duplicate'))})
    if result.get('duplicate'):
-    if (journaled_at-stamp(sample['event_time'])).total_seconds()>r['risk']['max_quote_age_s']:engine.fault(self.connect,uid,wid,mode,'DATA_STALE',lease=lease)
+    if (journaled_at-stamp(sample['event_time'])).total_seconds()>r['risk']['max_quote_age_s']:
+     stale_duplicate=True;engine.fault(self.connect,uid,wid,mode,'DATA_STALE',lease=lease)
     else:engine.release(self.connect,job,journaled_at,sample=sample)
   except EngineError as error:
    if error.code=='FEED_COLLECTING' and getattr(error,'feed_ready',None) is not None:
@@ -954,10 +1054,10 @@ class Runner:
     with self.pending_lock:
      self.pending_feeds[job['id']]=error.feed_ready
      engine.release(self.connect,job,engine.utc(),pending_feed=True)
-    self.log(job,'deferred',error.code,{'websocket':getattr(adapter,'capture_metrics',[]),'provider_ms':round((time.perf_counter()-poll_started)*1000,3)})
+    scan_log=('deferred',error.code,{'websocket':getattr(adapter,'capture_metrics',[]),'provider_ms':round((time.perf_counter()-poll_started)*1000,3)})
     return 'deferred'
    if error.code in ['lease_lost','watch_not_running','kill_switch_active','operator_kill_switch']:
-    self.log(job,'cancelled',error.code);return True
+    scan_log=('cancelled',error.code,{});return True
    # A trade's phase can expire while its separately timestamped quote is
    # collected. Keep the verified quote as observation only; never ingest the
    # rejected trade or advance signal confirmation with it.
@@ -983,7 +1083,7 @@ class Runner:
    captures=getattr(adapter,'capture_metrics',[])
    diagnostics={'websocket':captures if isinstance(captures,list) else [],'provider_ms':round((time.perf_counter()-poll_started)*1000,3)}
    if error.code=='sample_id_conflict' and getattr(error,'market_conflict',None):diagnostics['market_conflict']=error.market_conflict
-   engine.fault(self.connect,uid,wid,mode,error.code,lease=lease,retry_after_s=getattr(error,'retry_after_s',None));self.health(job,None,error.code);self.log(job,'degraded',error.code,diagnostics)
+   engine.fault(self.connect,uid,wid,mode,error.code,lease=lease,retry_after_s=getattr(error,'retry_after_s',None));self.health(job,None,error.code);scan_log=('degraded',error.code,diagnostics)
   except Exception as error:
    code=processing_error_code(error)
    locks=None
@@ -991,7 +1091,7 @@ class Runner:
     from hotwatch_supervisor import database_locks
     locks=database_locks()
    try:
-    engine.fault(self.connect,uid,wid,mode,code,lease=lease);self.health(job,None,code);self.log(job,'degraded',code)
+    engine.fault(self.connect,uid,wid,mode,code,lease=lease);self.health(job,None,code);scan_log=('degraded',code,{})
    finally:
     if locks is not None:
      from hotwatch_supervisor import record_database_locks
@@ -1001,9 +1101,23 @@ class Runner:
    # cannot create signals, and its failure cannot fault the live scan.
    if r['provider']=='eodhd' and not mode and not uses_realtime_history and not pending_feed:
     try:
-     import hotwatch_warmup
-     hotwatch_warmup.refresh(self.connect,job,engine.utc())
+     # A stale quote cannot produce an actionable signal. When other live
+     # scans are already substantially overdue, defer this auxiliary history
+     # fetch to a later scan so it does not occupy a worker ahead of them.
+     if stale_duplicate or scan_log and scan_log[0]=='degraded' and scan_log[1]=='DATA_STALE':
+      now_due=engine.utc().timestamp()
+      with self.connect() as c:
+       warmup_deferred=bool(c.execute("SELECT 1 FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.id!=? AND s.next_due<=? AND s.lease_until<=? AND COALESCE(k.killed,0)=0 LIMIT 1",(job['id'],now_due-15,now_due)).fetchone())
+     if not warmup_deferred:
+      warmup_started=time.perf_counter()
+      try:
+       import hotwatch_warmup
+       hotwatch_warmup.refresh(self.connect,job,engine.utc())
+      finally:warmup_ms=round((time.perf_counter()-warmup_started)*1000,3)
     except Exception:logging.getLogger('escape.hotwatch').warning('historical warmup unavailable')
+   if scan_log:
+    status,code,metrics=scan_log
+    self.log(job,status,code,{**metrics,'warmup_ms':warmup_ms,'warmup_deferred':warmup_deferred,'worker_busy_ms':round((time.perf_counter()-claim_started)*1000,3)})
   return True
  def partial(self,job,observation):
   if not isinstance(observation,dict):return

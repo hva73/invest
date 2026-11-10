@@ -16,6 +16,11 @@ class Accounts(unittest.TestCase):
  def login(self,name='owner',password='owner-password-at-least-14'):
   self.assertEqual(self.request('login',{'username':name,'password':password})[0],200);self.csrf=self.request('session')[1]['csrf']
  def invite(self):return self.request('invitations',{})[1]['invitation']
+ def test_operational_dashboard_requires_authenticated_admin(self):
+  self.assertEqual(self.request('admin/diagnostics')[0],401)
+  self.login();self.assertEqual(self.request('admin/diagnostics')[0],200);token=self.invite()
+  self.request('register',{'username':'other','password':'other-password-at-least-14','invitation':token})
+  self.login('other','other-password-at-least-14');self.assertEqual(self.request('admin/diagnostics')[0],403)
  def test_isolation_and_connection_requests(self):
   self.login();token=self.invite();owner_cookie,owner_csrf=self.cookie,self.csrf
   self.assertEqual(self.request('register',{'username':'other','password':'other-password-at-least-14','invitation':token,'role':'admin'})[0],201)

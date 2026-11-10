@@ -283,6 +283,10 @@ class Handler(BaseHTTPRequestHandler):
                     rows=c.execute('SELECT id,username,role,active FROM users ORDER BY username COLLATE NOCASE').fetchall()
                     users=[{**dict(row),'profile':user_profile.read(c,row['id'])} for row in rows]
                 return self.send(200,{'users':users})
+            if self.path=='/api/admin/diagnostics':
+                if s['role']!='admin':return self.send(403,{'error':'Kun administratoren kan se driftsmålinger'})
+                import hotwatch_service
+                return self.send(200,hotwatch_service.admin_diagnostics(connect,user_id))
             if self.path=='/api/profile/postcode':
                 import re
                 q=parse_qs(request.query);code=q.get('code',[])
