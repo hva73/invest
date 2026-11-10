@@ -1,7 +1,8 @@
 name: ESCAPE disabled status writer tests
 
 on:
-  workflow_dispatch:
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read
@@ -11,14 +12,16 @@ jobs:
     if: >-
       github.repository == 'hva73/invest' &&
       github.actor_id == '351122234' &&
-      github.ref == 'refs/heads/codex/escape-development'
+      github.event.issue.number == 4 &&
+      github.event.issue.pull_request == null &&
+      startsWith(github.event.comment.body, 'ESCAPE_SEPARATE_REQUEST_TEST_V1')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Check out isolated reviewed revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 286f35ba0ccc71ff6e7db92ce43d0ce12a2f0887
+          ref: 3ca3ae98c5f52eef3625ce24cd3c8bac24659643
           persist-credentials: false
       - name: Run mock tests without Projects credentials
         run: >-
