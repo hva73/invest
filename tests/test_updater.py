@@ -75,6 +75,17 @@ print('INSTALLED_RELEASE_HEALTH_PASS')
     return real_connect(database,*args,**kwargs)
    with patch('apply_update.sqlite3.connect',side_effect=verify_lock_on_snapshot):apply_update.apply(source,target)
    self.assertEqual(observations,['supervisor','worker'])
+ def test_snapshot_failure_preserves_code_and_releases_worker_locks(self):
+  with tempfile.TemporaryDirectory() as d:
+   source,target=self.fixture(Path(d))
+   with patch('apply_update.sqlite3.connect',side_effect=sqlite3.OperationalError('synthetic backup failure')):
+    with self.assertRaises(sqlite3.OperationalError):apply_update.apply(source,target)
+   self.assertEqual((target/'app.py').read_text(),'old code')
+   self.assertFalse((target/'var/hotwatch-autostart.disabled').exists())
+   for name in ('supervisor','worker'):
+    fd=os.open(target/'var'/('hotwatch-'+name+'.lock'),os.O_RDWR)
+    try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);fcntl.flock(fd,fcntl.LOCK_UN)
+    finally:os.close(fd)
  def test_backup_restore_after_simulated_migration(self):
   # Only temporary files: demonstrate the existing updater's backup can be
   # independently read and restored after a synthetic schema/data change.
