@@ -1,5 +1,5 @@
 """Read-only provider adapters. Missing entitlements/fields are explicit faults."""
-import hashlib,json,os,re,time,urllib.request,urllib.error,threading,copy
+import hashlib,json,os,re,sqlite3,time,urllib.request,urllib.error,threading,copy
 from datetime import datetime,timedelta,timezone
 from decimal import Decimal,InvalidOperation
 from urllib.parse import quote,urlencode
@@ -143,7 +143,16 @@ class PlutoAdapter:
  def safe_context(self,request,currency):
   try:return self.context(request,currency)
   except DataUnavailable as error:return unknown_context(error.code if error.code=='PROVIDER_RATE_BUDGET' else 'BROKER_CONTEXT_UNAVAILABLE')
-  except Exception:return unknown_context('BROKER_CONTEXT_UNAVAILABLE')
+  except sqlite3.Error:return unknown_context('BROKER_CONTEXT_DATABASE_ERROR')
+  except (TimeoutError,ConnectionError,urllib.error.URLError):return unknown_context('BROKER_CONTEXT_NETWORK_ERROR')
+  except Exception as error:
+   # These fixed categories are safe to persist in the session. Never store an
+   # exception string: provider responses may contain credentials or user data.
+   from mcp_client import PortfolioFormatError
+   import oauth
+   if isinstance(error,PortfolioFormatError):return unknown_context('BROKER_CONTEXT_READ_UNAVAILABLE')
+   if isinstance(error,oauth.SetupRequired):return unknown_context('BROKER_CONTEXT_SETUP_REQUIRED')
+   return unknown_context('BROKER_CONTEXT_UNAVAILABLE')
  def factory(self,token):
   if self.gateway and self.gateway.token==token:return self.gateway
   from mcp_client import MCP

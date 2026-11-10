@@ -1052,12 +1052,17 @@ def refreshed_trade_evidence(previous,current,request,now):
    old_time=previous.get(time_key);new_time=current.get(time_key)
    if time_key=='bid_at' and previous.get('ask_at') and current.get('ask_at') and stamp(current['ask_at'])<stamp(previous['ask_at']):continue
   if not new_time or old_time and stamp(new_time)<stamp(old_time):continue
-  if old_time==new_time and time_key!='bar_evidence' and any(previous.get(k)!=current.get(k) for k in keys):
-   if time_key!='bid_at':raise sample_conflict(previous,current,keys)
-   # Distinct venue quotes may share the same millisecond. Without a source
-   # sequence their ordering is unknowable: keep the trade, invalidate the
-   # ambiguous spread, and do not accept that timestamp again as fresh proof.
-   merged.update(bid=None,ask=None,bid_at=old_time,ask_at=previous.get('ask_at') or old_time,quote_feed=None)
+  def changed(k):
+   old,new=previous.get(k),current.get(k)
+   if k in ('bid_at','ask_at','status_at') and old and new:return stamp(old)!=stamp(new)
+   return old!=new
+  if old_time and stamp(old_time)==stamp(new_time) and time_key!='bar_evidence':
+   if any(changed(k) for k in keys):
+    if time_key!='bid_at':raise sample_conflict(previous,current,keys)
+    # Distinct venue quotes may share the same millisecond. Without a source
+    # sequence their ordering is unknowable: keep the trade, invalidate the
+    # ambiguous spread, and do not accept that timestamp again as fresh proof.
+    merged.update(bid=None,ask=None,bid_at=old_time,ask_at=previous.get('ask_at') or old_time,quote_feed=None)
    continue
   for key in keys:
    if key in current:merged[key]=current[key]

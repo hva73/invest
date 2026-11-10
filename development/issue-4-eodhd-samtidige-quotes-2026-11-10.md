@@ -75,3 +75,9 @@ Før #4 kan afsluttes, kræves en samlet kilde-til-visning-gennemgang med readba
 | e75729ee | TURB | automatic discovery | DEGRADED / NO_DATA | DATA FOR GAMLE | WARMUP, DATA_STALE, MARKET_STATUS_UNKNOWN | — | 2026-11-10T20:20:00+00:00 |
 
 Eksempelvis havde AMZN, ZETA og SANM modtaget kursdata, mens en positionskontekst var ukendt; for SANM oplyste diagnosen `BROKER_CONTEXT_UNAVAILABLE`. Denne generiske diagnose kan repræsentere flere fejl i depotopslag og fastslår ikke alene en årsag. For ZETA var seneste beregning `TRAILING_EXIT`, mens den aktuelle visning rapporterede manglende positionskontekst: de to tidspunkter/lag må ikke sammenblandes til et aktuelt salgssignal.
+
+## Præcisering af diagnostik
+
+I arbejdssporet er den hidtidige generiske fejldiagnose suppleret med faste kategorier for database-, netværks-, depotlæse- og opsætningsfejl. Alle efterlader positionskonteksten ukendt og bevarer de eksisterende risikogates; de indeholder aldrig selve fejlteksten. Depotlæsefejl er en bred kategori og beviser ikke, at Plutos dataformat er årsagen. Denne ændring kan først hjælpe med at identificere en eventuel fremtidig fejl efter en særskilt godkendt installation; den kan ikke diagnosticere hændelsen bagudrettet.
+
+Sammenligning af quote-tider bruger desuden faktiske tidspunkter, også når det samme tidspunkt er skrevet med `Z` eller `+00:00`. Samme quote i to formater giver ingen ny observation; forskellige quotes med samme faktiske kildetid bliver fortsat markeret tvetydige.

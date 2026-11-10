@@ -14,6 +14,24 @@ class SignalReadiness(unittest.TestCase):
  setUp=setup.SparseFeedRecovery.setUp
  tearDown=setup.SparseFeedRecovery.tearDown
  sample=setup.SparseFeedRecovery.sample
+ def test_broker_failure_diagnostics_preserve_unknown_context_without_secrets(self):
+  import sqlite3,urllib.error,oauth
+  from mcp_client import PortfolioFormatError
+  adapter=adapters.PlutoAdapter(app.connect,1)
+  failures=[(sqlite3.OperationalError('secret-value'),'BROKER_CONTEXT_DATABASE_ERROR'),
+            (urllib.error.URLError('secret-value'),'BROKER_CONTEXT_NETWORK_ERROR'),
+            (PortfolioFormatError('secret-value'),'BROKER_CONTEXT_READ_UNAVAILABLE'),
+            (oauth.SetupRequired('secret-value'),'BROKER_CONTEXT_SETUP_REQUIRED'),
+            (RuntimeError('secret-value'),'BROKER_CONTEXT_UNAVAILABLE')]
+  for error,expected in failures:
+   with self.subTest(expected=expected),patch.object(adapter,'context',side_effect=error):
+    result=adapter.safe_context(self.req,'USD')
+   self.assertEqual(result['diagnostic'],expected);self.assertEqual(result['position'],'unknown');self.assertEqual(result['status'],'unknown')
+   self.assertNotIn('secret-value',json.dumps(result))
+  sample=self.sample(held=False);sample['context']=result
+  output=engine.ingest(app.connect,1,self.req['watch_id'],True,sample,self.now)
+  self.assertEqual(output['session']['latest_context']['diagnostic'],'BROKER_CONTEXT_UNAVAILABLE')
+  self.assertNotEqual(output['calculation']['signal'],'BUY')
  def test_gap_keeps_period_history_but_not_fictitious_minute_returns(self):
   rows=[fixture.tick(self.now-timedelta(minutes=40-i),i,price=str(100+i)) for i in range(40)]
   rows=[r for i,r in enumerate(rows) if i not in (8,36)]
@@ -102,6 +120,16 @@ class SignalReadiness(unittest.TestCase):
   with app.connect() as c:
    self.assertEqual(c.execute('SELECT count(*) FROM hw_samples WHERE watch_row_id=(SELECT id FROM hw_sessions WHERE watch_id=?)',(self.req['watch_id'],)).fetchone()[0],1)
    self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
+ def test_equal_quote_times_in_different_formats_do_not_bypass_collision_check(self):
+  original=self.sample(held=False);engine.ingest(app.connect,1,self.req['watch_id'],True,original,self.now)
+  equivalent=copy.deepcopy(original)
+  for key in ('bid_at','ask_at','status_at'):equivalent[key]=equivalent[key].replace('+00:00','Z')
+  duplicate=engine.ingest(app.connect,1,self.req['watch_id'],True,equivalent,self.now+timedelta(seconds=1))
+  self.assertTrue(duplicate['duplicate']);self.assertEqual(duplicate['session']['data_status']['bid'],original['bid'])
+  equivalent['bid']='99.93'
+  collision=engine.ingest(app.connect,1,self.req['watch_id'],True,equivalent,self.now+timedelta(seconds=2))
+  self.assertIsNone(collision['session']['data_status']['bid']);self.assertIsNone(collision['session']['data_status']['ask'])
+  self.assertNotEqual(collision['calculation']['signal'],'BUY')
  def test_ambiguous_quote_does_not_hide_separately_valid_exit(self):
   with app.connect() as c:
    req=json.loads(engine.row_for(c,1,self.req['watch_id'],True)['request']);req['risk']['stop_price']='101'
