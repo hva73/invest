@@ -4,6 +4,18 @@ from instrument_resolver import resolve_instrument,resolve_cxe,resolve_us,crypto
 from cxe_reference import parse_reference,ReferenceUnavailable
 
 class InstrumentResolver(unittest.TestCase):
+ def test_trade_desk_alias_requires_exact_class_and_verified_security(self):
+  pluto={'asset_id':'1f080b56-b5ac-4639-9649-904634000230','ticker':'TTD','name':'The Trade Desk, Inc. Class A Common Stock','exchange':'NASDAQ','currency':'USD','type':'CS'}
+  listing={'Code':'TTD','Name':'Trade Desk Inc','Country':'USA','Exchange':'NASDAQ','Currency':'USD','Type':'Common Stock','Isin':'US88339J1051'}
+  choice={'symbol':'TTD.US','exchange':'US','currency':'USD','isin':'US88339J1051'}
+  self.assertEqual(resolve_us(pluto,[choice],[listing])['status'],'VERIFIED')
+  for change in ({'asset_id':'other'},{'name':'The Trade Desk, Inc. Class B Common Stock'},{'exchange':'NYSE'},{'currency':'EUR'},{'type':'ADRC'},{'isin':'US0000000001'}):
+   with self.subTest(change=change):self.assertNotEqual(resolve_us(dict(pluto,**change),[choice],[listing])['status'],'VERIFIED')
+  for change in ({'Isin':'US0000000001'},{'Name':'Different Desk Inc'},{'Exchange':'NYSE'},{'Type':'Preferred Stock'}):
+   with self.subTest(change=change):self.assertNotEqual(resolve_us(pluto,[choice],[dict(listing,**change)])['status'],'VERIFIED')
+  for change in ({'isin':None},{'isin':'US0000000001'},{'currency':'EUR'},{'exchange':'MX'}):
+   with self.subTest(change=change):self.assertNotEqual(resolve_us(pluto,[dict(choice,**change)],[listing])['status'],'VERIFIED')
+  self.assertEqual(resolve_us(pluto,[choice],[listing,listing])['status'],'AMBIGUOUS')
  def test_rocket_lab_name_change_requires_exact_independent_security(self):
   pluto={'asset_id':'004180fa-1876-448e-889e-04b231119149','ticker':'RKLB','name':'Rocket Lab Corporation Common Stock','exchange':'NASDAQ','currency':'USD','type':'CS'}
   listing={'Code':'RKLB','Name':'Rocket Lab USA Inc.','Country':'USA','Exchange':'NASDAQ','Currency':'USD','Type':'Common Stock','Isin':'US7731211089'}
