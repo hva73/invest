@@ -19,7 +19,7 @@ class SignalReadiness(unittest.TestCase):
   from mcp_client import PortfolioFormatError
   adapter=adapters.PlutoAdapter(app.connect,1)
   failures=[(sqlite3.OperationalError('secret-value'),'BROKER_CONTEXT_DATABASE_ERROR'),
-            (urllib.error.HTTPError('https://example.invalid/?secret=secret-value',401,'secret-value',{},None),'BROKER_CONTEXT_PROVIDER_HTTP_ERROR'),
+            (urllib.error.HTTPError('https://example.invalid/?secret=secret-value',401,'synthetic HTTP error',{},None),'BROKER_CONTEXT_PROVIDER_HTTP_ERROR'),
             (urllib.error.URLError('secret-value'),'BROKER_CONTEXT_NETWORK_ERROR'),
             (PortfolioFormatError('secret-value'),'BROKER_CONTEXT_READ_UNAVAILABLE'),
             (oauth.SetupRequired('secret-value'),'BROKER_CONTEXT_SETUP_REQUIRED'),
@@ -29,6 +29,7 @@ class SignalReadiness(unittest.TestCase):
     result=adapter.safe_context(self.req,'USD')
    self.assertEqual(result['diagnostic'],expected);self.assertEqual(result['position'],'unknown');self.assertEqual(result['status'],'unknown')
    self.assertNotIn('secret-value',json.dumps(result))
+   if isinstance(error,urllib.error.HTTPError):error.close()
   sample=self.sample(held=False);sample['context']=result
   output=engine.ingest(app.connect,1,self.req['watch_id'],True,sample,self.now)
   self.assertEqual(output['session']['latest_context']['diagnostic'],'BROKER_CONTEXT_UNAVAILABLE')
