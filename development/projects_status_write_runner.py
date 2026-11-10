@@ -10,6 +10,8 @@ import projects_replay_claim as journal
 import projects_status_write_prototype as writer
 import projects_status_write_audit as audit
 
+WRITE_PREFIX = 'ESCAPE_PROJECTS_WRITE_V1 '
+
 
 def run(project_token, journal_token, issue_token, run_id):
     if writer.LIVE_WRITE_ENABLED is not True:
@@ -20,7 +22,7 @@ def run(project_token, journal_token, issue_token, run_id):
     def validate():
         os.environ['ESCAPE_PROJECTS_TOKEN'] = project_token
         try:
-            return dryrun.main()
+            return dryrun.main(prefix=WRITE_PREFIX)
         finally:
             os.environ.pop('ESCAPE_PROJECTS_TOKEN', None)
 
