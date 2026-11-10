@@ -1,9 +1,11 @@
-import base64,hashlib,json,os,struct,subprocess,sys,unittest
+import base64,hashlib,json,os,sqlite3,struct,subprocess,sys,tempfile,unittest
 from pathlib import Path
 from unittest.mock import Mock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 import nordicway_readonly_client as client
 import nordicway_hostkey as key
+import nordicway_server_guard as guard
+import nordicway_readonly_diagnostics as diagnostics
 
 class Client(unittest.TestCase):
  def setUp(self):
@@ -41,4 +43,19 @@ class Client(unittest.TestCase):
   self.assertEqual(small.stdout,b'hello');self.assertEqual(small.returncode,0)
   with self.assertRaises(ValueError):client._run_limited([sys.executable,'-c','print("x"*100001)'],input=b'',capture_output=True,timeout=3,env=os.environ)
   with self.assertRaises(subprocess.TimeoutExpired):client._run_limited([sys.executable,'-c','import time;time.sleep(2)'],input=b'',capture_output=True,timeout=.1,env=os.environ)
+ def test_end_to_end_fixed_guard_with_synthetic_database_is_read_only(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   root=Path(tmp);(root/'var').mkdir();db=root/'var/escape.db'
+   with sqlite3.connect(db) as connection:
+    connection.execute('CREATE TABLE preserved(value TEXT)')
+    connection.execute("INSERT INTO preserved VALUES('must-not-appear')")
+   (root/'BUILD_COMMIT').write_text('a'*40,encoding='ascii');before=db.read_bytes()
+   def runner(command,**kwargs):
+    self.assertEqual(kwargs['input'],b'')
+    report=guard.dispatch(command[-1],lambda:diagnostics.inspect(root),lambda sha:self.fail('preflight not requested'))
+    return type('Result',(),{'returncode':0,'stdout':json.dumps(report).encode()})()
+   result=client.run(self.env,runner)
+   self.assertEqual(result['status'],'ok');self.assertEqual(result['report']['installation']['declared_commit'],'a'*40)
+   self.assertEqual(result['report']['database']['status'],'ok')
+   self.assertEqual(db.read_bytes(),before);self.assertNotIn('must-not-appear',json.dumps(result))
 if __name__=='__main__':unittest.main()
