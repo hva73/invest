@@ -22,11 +22,11 @@ class Blocked(Exception):
     pass
 
 
-def parse_request(body):
-    if not isinstance(body, str) or not body.startswith(PREFIX):
+def parse_request(body, prefix=PREFIX):
+    if not isinstance(body, str) or not body.startswith(prefix):
         return None
     try:
-        value = json.loads(body[len(PREFIX):], object_pairs_hook=unique_keys)
+        value = json.loads(body[len(prefix):], object_pairs_hook=unique_keys)
     except (ValueError, TypeError):
         return None
     if not isinstance(value, dict) or set(value) != {'request_id', 'expected_status', 'desired_status'}:
@@ -47,7 +47,7 @@ def unique_keys(pairs):
     return result
 
 
-def validate_request(comments, comment_id, current_status, options):
+def validate_request(comments, comment_id, current_status, options, prefix=PREFIX):
     selected = [c for c in comments if c.get('id') == comment_id]
     if len(selected) != 1:
         raise Blocked('Anmodningen findes ikke entydigt på Issue #4.')
@@ -58,10 +58,10 @@ def validate_request(comments, comment_id, current_status, options):
         raise Blocked('Anmodningens GitHub App er ikke godkendt.')
     if not comment.get('created_at') or comment.get('updated_at') != comment.get('created_at'):
         raise Blocked('Redigerede anmodninger afvises.')
-    request = parse_request(comment.get('body'))
+    request = parse_request(comment.get('body'), prefix)
     if request is None:
         raise Blocked('Anmodningen har ugyldigt format.')
-    found = [parse_request(c.get('body')) for c in comments]
+    found = [parse_request(c.get('body'), prefix) for c in comments]
     if sum(bool(r and r['request_id'] == request['request_id']) for r in found) != 1:
         raise Blocked('Dubleret anmodnings-ID på Issue #4.')
     if request['expected_status'] != current_status:
@@ -78,7 +78,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def main():
+def main(prefix=PREFIX):
     if os.environ.get('GITHUB_ACTOR_ID') != str(OWNER_ID) or os.environ.get('GITHUB_TRIGGERING_ACTOR', '').lower() != 'hva73':
         raise Blocked('Workflowets afsender er ikke godkendt.')
     if os.environ.get('GITHUB_REPOSITORY') != 'hva73/invest' or os.environ.get('GITHUB_REF') != 'refs/heads/codex/escape-development':
@@ -156,14 +156,17 @@ def main():
     if len(matches) != 1 or matches[0].get('isArchived') is not False or not isinstance(matches[0].get('id'), str) or not matches[0]['id'].startswith('PVTI_'):
         raise Blocked('Projektkortet er ikke entydigt og aktivt.')
     current = (matches[0].get('fieldValueByName') or {}).get('name')
-    request = validate_request(first, int(raw_id), current, options)
+    request = validate_request(first, int(raw_id), current, options, prefix)
     second = comments()
-    if validate_request(second, int(raw_id), current, options) != request:
+    if validate_request(second, int(raw_id), current, options, prefix) != request:
         raise Blocked('Anmodningen blev ændret under kontrollen.')
     selected_second = next(c for c in second if c.get('id') == int(raw_id))
     verify_unedited(selected_second)
-    print('DRY RUN: afsender, kort, statusoption og synlige dubletter kontrolleret.')
-    print('Ingen status blev ændret. Replay mellem kørsler er IKKE beskyttet.')
+    if prefix == PREFIX:
+        print('DRY RUN: afsender, kort, statusoption og synlige dubletter kontrolleret.')
+        print('Ingen status blev ændret. Replay mellem kørsler er IKKE beskyttet.')
+    else:
+        print('Anmodning, afsender, kort og statusoption er foreløbigt kontrolleret.')
     return {'request': request, 'project_id': project.get('id'), 'item_id': matches[0]['id'], 'comment_id': int(raw_id), 'status': current}
 
 
