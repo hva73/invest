@@ -190,6 +190,23 @@ class HotWatch(unittest.TestCase):
    c.execute('UPDATE hw_exchange_status SET received=? WHERE exchange=?',((self.now+timedelta(seconds=1)).isoformat(),'US'))
    view=engine.view(c,engine.row_for(c,1,self.req['watch_id'],False),self.now+timedelta(seconds=2))
    self.assertEqual(view['data_status']['market_status'],'UNKNOWN');self.assertEqual(view['display_status'],'MARKED LUKKET (ORDINÆR HANDEL)')
+ def test_exchange_status_refresh_does_not_starve_later_exchange(self):
+  import hotwatch_service as service
+  second=copy.deepcopy(self.req);second.update(watch_id='other-exchange',purpose='other exchange')
+  engine.create(app.connect,1,second,self.now)
+  with app.connect() as c:
+   for wid,symbol in ((self.req['watch_id'],'MERC.CO'),(second['watch_id'],'LHA.XETRA')):
+    row=c.execute('SELECT id,request FROM hw_sessions WHERE watch_id=?',(wid,)).fetchone();req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol=symbol)
+    c.execute('UPDATE hw_sessions SET is_test=0,request=? WHERE id=?',(json.dumps(req),row['id']))
+  calls=[]
+  class Client:
+   def market_status(client,exchange):
+    calls.append(exchange);return {'status':'OK','exchange':exchange,'exchange_open':False,'received_at':engine.utc().isoformat(),'timezone':'Europe/Berlin','calendar':{'open':'09:00:00','close':'17:30:00','working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[]}}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}):
+   for at in (self.now,self.now+timedelta(seconds=75)):
+    with patch('hotwatch_engine.utc',return_value=at):self.assertEqual(service.exchange_status_tick(app.connect,lambda:Client(),at),'OK')
+  self.assertEqual(calls,['CO','XETRA'])
+  with app.connect() as c:self.assertIsNotNone(c.execute("SELECT received FROM hw_exchange_calendar WHERE exchange='XETRA'").fetchone())
  def test_exchange_status_refresh_is_cached_and_failed_read_does_not_refresh_old_evidence(self):
   import hotwatch_service as service
   with app.connect() as c:
@@ -541,7 +558,7 @@ class HotWatch(unittest.TestCase):
   error=DataUnavailable('PLUTO_QUOTE_TIME_UNKNOWN');error.partial_observation={'source':'pluto','price':'12.34','currency':'USD','source_time':None,'received_at':self.now.isoformat(),'quality':'TIME_UNKNOWN'}
   adapter=Mock();adapter.poll.side_effect=error;runner=Runner(app.connect);runner.adapters[(1,'pluto')]=adapter
   with patch('hotwatch_engine.utc',return_value=self.now):self.assertTrue(runner.once(self.now,watch_id=req['watch_id']))
-  view=engine.item(app.connect,1,req['watch_id'],True)['session'];self.assertEqual(view['signal'],'NO_DATA');self.assertIsNone(view['last_data_at']);self.assertEqual(self.counts()['hw_samples'],0)
+  view=engine.item(app.connect,1,req['watch_id'],True)['session'];self.assertEqual(view['signal'],'NO_DATA');self.assertEqual(view['display_status'],'KURSTID MANGLER');self.assertIsNone(view['last_data_at']);self.assertEqual(self.counts()['hw_samples'],0)
   events=engine.history(app.connect,1,req['watch_id'],True)['items'];observed=[x for x in events if x['event_type']=='PARTIAL_MARKET_OBSERVATION']
   self.assertEqual(len(observed),1);self.assertIsNone(observed[0]['data_timestamp']);self.assertEqual(observed[0]['data']['supporting_metrics']['price'],'12.34')
   self.assertFalse(engine.record_partial_observation(app.connect,1,req['watch_id'],True,error.partial_observation,self.now))

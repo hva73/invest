@@ -671,6 +671,15 @@ def view(c,row,now=None):
   context=dict(context,fx_to_dkk=buy_plan['fx_to_dkk'] if buy_plan['fresh'] else None,fees_dkk=buy_plan['fees_dkk'] if buy_plan['fresh'] else None)
  if buy_plan and (not buy_plan['fresh'] or not row['last_calculation'] or stamp(row['last_calculation'])<=max(stamp(buy_plan['selected_at']),stamp(buy_plan['verified_at']))) and effective=='BUY':
   effective='WAIT';display_status='RISIKODATA MANGLER';display_reasons.append('BUY_PLAN_RECHECK_REQUIRED')
+ # Missing broker event time is distinct from an absent broker price. Never
+ # treat the fetch time or a provisional crypto match as signal evidence.
+ if effective=='NO_DATA' and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED') and request.get('provider')=='pluto' and row['last_error']=='PLUTO_QUOTE_TIME_UNKNOWN':
+  display_status='KURSTID MANGLER'
+ # A verified instrument without a usable schedule must not be presented as
+ # a confirmed closed market. Explain the missing market status instead.
+ if effective=='NO_DATA' and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED') and display_status=='DATA MANGLER' and request.get('provider')=='eodhd' and instrument_match_verified and regular['status']=='UNKNOWN' and data_status['market_status']=='UNKNOWN':
+  display_status='MARKEDSSTATUS UKENDT'
+  display_reasons.append('EXCHANGE_STATUS_UNKNOWN')
  # One current status for API, dashboard and engine views. Only a calculation
  # for the latest observation can establish signal warmup; an independent
  # historical-analysis cache cannot override a decision or data/risk gate.

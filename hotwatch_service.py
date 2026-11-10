@@ -840,11 +840,15 @@ def exchange_status_tick(connect,client_factory=None,now=None):
   c.execute('BEGIN IMMEDIATE')
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
   exchanges=candidates(c)
-  exchange=None
+  # A slow maintenance loop can leave every exchange due on every pass.
+  # Choose the most overdue (including never checked), not alphabetically.
+  pending=[]
   for item in exchanges:
    prior=c.execute('SELECT next_attempt FROM hw_exchange_status WHERE exchange=?',(item,)).fetchone()
-   if not prior or prior['next_attempt']<=epoch:
-    exchange=item;c.execute('INSERT INTO hw_exchange_status(exchange,next_attempt) VALUES(?,?) ON CONFLICT(exchange) DO UPDATE SET next_attempt=excluded.next_attempt',(exchange,epoch+60));break
+   due=prior['next_attempt'] if prior else 0
+   if due<=epoch:pending.append((due,item))
+  exchange=min(pending)[1] if pending else None
+  if exchange:c.execute('INSERT INTO hw_exchange_status(exchange,next_attempt) VALUES(?,?) ON CONFLICT(exchange) DO UPDATE SET next_attempt=excluded.next_attempt',(exchange,epoch+60))
  if not exchange:return None
  try:
   from eodhd_feeds import EODHDFeeds
