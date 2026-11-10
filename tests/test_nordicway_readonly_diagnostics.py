@@ -34,6 +34,13 @@ class Diagnostics(unittest.TestCase):
     self.assertEqual(diag._database(db,datetime.now(timezone.utc))['status'],'unavailable');connect.assert_not_called()
     db.write_bytes(b'test');Path(str(db)+'-wal').write_bytes(b'test')
     self.assertEqual(diag._database(db,datetime.now(timezone.utc))['reason'],'database_journal_present');connect.assert_not_called()
+ def test_unrecognized_database_and_wal_header_are_not_opened(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   db=Path(tmp)/'db';now=datetime.now(timezone.utc)
+   with patch.object(diag.sqlite3,'connect') as connect:
+    db.write_bytes(b'bad');self.assertEqual(diag._database(db,now)['reason'],'database_header_invalid')
+    db.write_bytes(b'SQLite format 3\x00'+b'\x10\x00\x02\x02');self.assertEqual(diag._database(db,now)['reason'],'database_journal_mode_unsupported')
+    connect.assert_not_called()
  def test_process_arguments_are_not_returned(self):
   result=type('Result',(),{'stdout':'python /app/hotwatch_service.py --private secret-value\npython /app/hotwatch_supervisor.py --run\n'})()
   with patch.object(diag.subprocess,'run',return_value=result):out=diag._processes()
