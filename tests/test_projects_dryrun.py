@@ -13,7 +13,7 @@ spec.loader.exec_module(dry)
 
 def comment(identifier=1, author=351122234, edited=False, request_id='a' * 32, expected='In progress', desired='Backlog'):
     import json
-    return {'id': identifier, 'user': {'id': author}, 'author_association': 'OWNER', 'performed_via_github_app': {'id': 1144995},
+    return {'id': identifier, 'node_id': 'comment-node', 'user': {'id': author}, 'author_association': 'OWNER', 'performed_via_github_app': {'id': 1144995},
             'created_at': 'time', 'updated_at': 'changed' if edited else 'time',
             'body': dry.PREFIX + json.dumps({'request_id': request_id, 'expected_status': expected, 'desired_status': desired})}
 
@@ -48,16 +48,25 @@ class DryRun(unittest.TestCase):
         project = {'number': 1, 'closed': False, 'fields': {'pageInfo': {'hasNextPage': False}, 'nodes': [{'name': 'Status', 'options': [{'name': 'In progress'}, {'name': 'Backlog'}]}]}, 'items': {'pageInfo': {'hasNextPage': False}, 'nodes': [issue]}}
         response = {'data': {'user': {'login': 'hva73', 'projectV2': project}}}
         opener = Mock()
-        opener.open.side_effect = [io.BytesIO(json.dumps(x).encode()) for x in ([comment()], response, [comment()])]
+        unchanged = {'data': {'node': {'id': 'comment-node', 'body': comment()['body'], 'lastEditedAt': None}}}
+        opener.open.side_effect = [io.BytesIO(json.dumps(x).encode()) for x in ([comment()], unchanged, response, [comment()], unchanged)]
         env = {'GITHUB_ACTOR_ID': str(dry.OWNER_ID), 'GITHUB_TRIGGERING_ACTOR': 'hva73', 'GITHUB_REPOSITORY': 'hva73/invest', 'GITHUB_REF': 'refs/heads/codex/escape-development', 'REQUEST_COMMENT_ID': '1', 'ESCAPE_PROJECTS_TOKEN': 'mock-secret-value'}
         output = io.StringIO()
         with patch.dict('os.environ', env, clear=True), patch('urllib.request.build_opener', return_value=opener), contextlib.redirect_stdout(output):
             dry.main()
-        self.assertEqual([c.args[0].get_method() for c in opener.open.call_args_list], ['GET', 'POST', 'GET'])
+        self.assertEqual([c.args[0].get_method() for c in opener.open.call_args_list], ['GET', 'POST', 'POST', 'GET', 'POST'])
         graph = opener.open.call_args_list[1].args[0].data.decode()
         self.assertNotIn('mutation', graph.lower())
         self.assertIn('Replay mellem kørsler er IKKE beskyttet', output.getvalue())
         self.assertNotIn('mock-secret-value', output.getvalue())
+
+    def test_same_second_edit_rejected_by_graphql(self):
+        edited = {'data': {'node': {'id': 'comment-node', 'body': comment()['body'], 'lastEditedAt': '2026-11-10T15:00:00Z'}}}
+        opener = Mock()
+        opener.open.side_effect = [io.BytesIO(json.dumps(x).encode()) for x in ([comment()], edited)]
+        env = {'GITHUB_ACTOR_ID': str(dry.OWNER_ID), 'GITHUB_TRIGGERING_ACTOR': 'hva73', 'GITHUB_REPOSITORY': 'hva73/invest', 'GITHUB_REF': 'refs/heads/codex/escape-development', 'REQUEST_COMMENT_ID': '1', 'ESCAPE_PROJECTS_TOKEN': 'mock-secret-value'}
+        with patch.dict('os.environ', env, clear=True), patch('urllib.request.build_opener', return_value=opener), self.assertRaises(dry.Blocked):
+            dry.main()
 
     def test_dispatch_actor_rejected_before_network(self):
         with patch.dict('os.environ', {'GITHUB_ACTOR_ID': '1'}, clear=True), patch('urllib.request.build_opener') as opener:
