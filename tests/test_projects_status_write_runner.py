@@ -12,7 +12,7 @@ from tests.test_projects_status_write_prototype import CONTEXT
 
 class RunnerTest(unittest.TestCase):
     def test_disabled_runner_does_not_read_or_claim(self):
-        with patch.object(runner.dryrun, 'main') as validate, patch.object(runner.journal, 'claim') as claim:
+        with patch.object(runner.writer, 'LIVE_WRITE_ENABLED', False), patch.object(runner.dryrun, 'main') as validate, patch.object(runner.journal, 'claim') as claim:
             with self.assertRaises(runner.writer.Blocked): runner.run('fake-project', 'fake-journal', 'fake-issue', '123')
             validate.assert_not_called()
             claim.assert_not_called()

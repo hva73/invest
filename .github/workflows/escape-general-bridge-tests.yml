@@ -17,7 +17,8 @@ jobs:
   tests:
     if: >-
       github.repository == 'hva73/invest' &&
-      github.event.pull_request.head.ref == 'codex/projects-general-status-bridge'
+      (github.event.pull_request.head.ref == 'codex/projects-general-status-bridge' ||
+       github.event.pull_request.head.ref == 'codex/activate-general-projects-bridge')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

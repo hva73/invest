@@ -23,7 +23,7 @@ def board(status='In progress'):
 class WriterTest(unittest.TestCase):
     def test_hard_gate_blocks_all_dependencies(self):
         validate = Mock(); claim = Mock(); graphql = Mock()
-        with self.assertRaises(writer.Blocked): writer.execute(CONTEXT, validate, claim, graphql)
+        with patch.object(writer, 'LIVE_WRITE_ENABLED', False), self.assertRaises(writer.Blocked): writer.execute(CONTEXT, validate, claim, graphql)
         validate.assert_not_called(); claim.assert_not_called(); graphql.assert_not_called()
 
     def test_verified_write_and_readback(self):
@@ -60,3 +60,4 @@ class WriterTest(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+

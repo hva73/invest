@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Disabled manual-entry prototype; do not activate without security review."""
+"""Restricted Actions entrypoint for ESCAPE Projects status requests."""
 import os
 import sys
 import re

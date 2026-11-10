@@ -2,6 +2,7 @@ import copy
 import io
 import json
 import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -18,6 +19,12 @@ from tests.test_projects_dryrun import comment
 
 
 class GeneralBridgeTest(unittest.TestCase):
+    def test_writer_default_is_enabled_in_fresh_process(self):
+        root = Path(__file__).resolve().parents[1]
+        check = 'import sys; sys.path.insert(0, "development"); import projects_status_write_prototype as writer; assert writer.LIVE_WRITE_ENABLED is True'
+        result = subprocess.run([sys.executable, '-c', check], cwd=root, capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_validator_reads_comments_and_project_item_for_target_issue(self):
         row = comment()
         issue = {'id': 'PVTI_test', 'isArchived': False,
