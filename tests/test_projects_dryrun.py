@@ -19,6 +19,15 @@ def comment(identifier=1, author=351122234, edited=False, request_id='a' * 32, e
 
 
 class DryRun(unittest.TestCase):
+    def test_write_request_is_not_a_dryrun_request(self):
+        write_prefix = 'ESCAPE_PROJECTS_WRITE_V1 '
+        row = comment()
+        row['body'] = row['body'].replace(dry.PREFIX, write_prefix, 1)
+        with self.assertRaises(dry.Blocked):
+            dry.validate_request([row], 1, 'In progress', ['In progress', 'Backlog'])
+        request = dry.validate_request([row], 1, 'In progress', ['In progress', 'Backlog'], write_prefix)
+        self.assertEqual(request['request_id'], 'a' * 32)
+
     def test_valid_request(self):
         self.assertEqual(dry.validate_request([comment()], 1, 'In progress', ['In progress', 'Backlog'])['desired_status'], 'Backlog')
 
