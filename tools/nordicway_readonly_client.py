@@ -11,7 +11,7 @@ STATES={'running','stopped','starting','restarting','timeout','run_once','unknow
 SESSION_STATES={'CREATED','VALIDATING','ACTIVE','DEGRADED','PAUSED','ERROR','COMPLETED','EXPIRED','OTHER'}
 REASONS={'database_missing_or_unsafe','database_journal_present','database_header_invalid','database_journal_mode_unsupported','database_read_failed'}
 PREFLIGHT_REASONS={'invalid_sha','unsafe_paths','checkout_unavailable','checkout_sha_mismatch','checkout_not_clean','manifest_unavailable','manifest_invalid','manifest_symlink','manifest_missing_file','manifest_untracked_file','manifest_file_mismatch','manifest_too_large','database_unavailable','preflight_failed'}
-PREFLIGHT_BLOCKERS={'owner_approval_not_confirmed','account_quota_unknown','passenger_quiesce_unverified','restore_and_restart_unverified'}
+PREFLIGHT_BLOCKERS={'release_gate_not_implemented','account_quota_unknown','passenger_quiesce_unverified','restore_and_restart_unverified'}
 
 def number(value,maximum=10**18):
  return value if type(value) is int and 0<=value<=maximum else None

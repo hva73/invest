@@ -16,7 +16,7 @@ class Preflight(unittest.TestCase):
  def test_preflight_is_read_only_and_cannot_approve_release(self):
   db=self.target/'var/escape.db';before=db.read_bytes();result=preflight.inspect(self.checkout,self.target,self.sha)
   self.assertEqual(result['status'],'blocked');self.assertEqual(result['requested_sha'],self.sha);self.assertEqual(result['manifest_files'],2)
-  self.assertIn('passenger_quiesce_unverified',result['blockers']);self.assertIn('owner_approval_not_confirmed',result['blockers']);self.assertEqual(result['account_quota'],'unknown')
+  self.assertIn('passenger_quiesce_unverified',result['blockers']);self.assertIn('release_gate_not_implemented',result['blockers']);self.assertEqual(result['account_quota'],'unknown')
   self.assertEqual(db.read_bytes(),before);self.assertNotIn('private-data',str(result));self.assertEqual(self.git('status','--porcelain'),'')
  def test_invalid_sha_dirty_checkout_and_hidden_modification_fail_closed(self):
   self.assertEqual(preflight.inspect(self.checkout,self.target,'$(touch BAD)')['reason'],'invalid_sha')

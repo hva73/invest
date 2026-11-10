@@ -62,7 +62,7 @@ def inspect(checkout,target,sha):
   var=target/'var';db=var/'escape.db'
   if var.is_symlink() or db.is_symlink() or not db.is_file() or not db.resolve().is_relative_to(target.resolve()):raise ValueError('database_unavailable')
   fs=os.statvfs(target);free=fs.f_bavail*fs.f_frsize
-  return {'status':'blocked','requested_sha':sha,'manifest_files':len(names),'manifest_sha256':digest.hexdigest(),'installed_files_matching':installed_matches,'installed_files_checked':len(names),'runtime_version':'unknown','source_bytes':total,'database_bytes':db.stat().st_size,'filesystem_free_bytes':free,'account_quota':'unknown','blockers':['owner_approval_not_confirmed','account_quota_unknown','passenger_quiesce_unverified','restore_and_restart_unverified']}
+  return {'status':'blocked','requested_sha':sha,'manifest_files':len(names),'manifest_sha256':digest.hexdigest(),'installed_files_matching':installed_matches,'installed_files_checked':len(names),'runtime_version':'unknown','source_bytes':total,'database_bytes':db.stat().st_size,'filesystem_free_bytes':free,'account_quota':'unknown','blockers':['release_gate_not_implemented','account_quota_unknown','passenger_quiesce_unverified','restore_and_restart_unverified']}
  except (OSError,ValueError,TypeError,SyntaxError,subprocess.SubprocessError) as error:
   reason=str(error) if isinstance(error,ValueError) and re.fullmatch(r'[a-z_]+',str(error)) else 'preflight_failed'
   return {'status':'blocked','reason':reason}
