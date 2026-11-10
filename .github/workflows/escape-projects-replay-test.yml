@@ -26,7 +26,7 @@ jobs:
       - name: Check out reviewed test code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 0c679bedbd5a1ccbf07f0da997107a43eb585d99
+          ref: ce7d37b88afa536c9728f38801bb4d8cf21ee315
           persist-credentials: false
       - name: Test validation and replay without Projects writes
         env:
