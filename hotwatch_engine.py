@@ -1256,6 +1256,9 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   # postponing this session for an entire multi-minute polling cycle.
   # The same limiter still charges every actual upstream request.
   if code=='PROVIDER_RATE_BUDGET':interval=61-now.timestamp()%60 if request['provider']=='eodhd' else 60
+  # Daily HTTP budget does not prevent a fresh WebSocket trade. Continue
+  # checking on the normal sustainable cadence rather than backing off 30 min.
+  if code=='EODHD_DAILY_BUDGET':interval=effective_poll_interval(c,request)
   # A stale observation is not a failed provider or rate-limit response.
   # Recheck at the sustainable cadence so repeated closed-market samples do
   # not push the next check half an hour past a new market event. A rejected

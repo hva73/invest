@@ -9,6 +9,13 @@ from eodhd_capacity import Capacity,retry_seconds
 
 class DataUnavailable(EngineError):pass
 
+def local_budget_error(result):
+ code=result.get('budget_reason')
+ if code not in ('EODHD_DAILY_BUDGET','PROVIDER_RATE_BUDGET'):code='PROVIDER_RATE_BUDGET'
+ failure=DataUnavailable(code,429)
+ if result.get('retry_after_s') is not None:failure.retry_after_s=result['retry_after_s']
+ return failure
+
 _quote_cache={}
 _quiet_intraday_empty={}
 _ws_batch_cache={}
@@ -493,7 +500,7 @@ class EODHDAdapter:
    self.last_feed_diagnostics={'websocket_trade_status':feed['status']}
    if feed['status']=='COLLECTING':
     failure=DataUnavailable('FEED_COLLECTING');failure.feed_ready=self.pending_feed;raise failure
-   if feed['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+   if feed['status']=='LOCAL_BUDGET_EXHAUSTED':raise local_budget_error(feed)
    if feed['status']=='RATE_LIMIT':
     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=feed.get('retry_after_s') or retry_seconds(None);raise failure
    valid=[x for x in feed.get('messages',[]) if stamp(x['event_time'])<=utc() and (utc()-stamp(x['event_time'])).total_seconds()<=r['risk']['max_quote_age_s']] if feed['status']=='OK' else []
@@ -586,7 +593,7 @@ class EODHDAdapter:
   if os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1' and (exchange=='US' or exchange in eu_exchanges):
    market='us' if exchange=='US' else 'eu';stream_symbol=realtime_symbol(symbol);client=self.feeds(priority_request);bars=client.minute_bars(market,stream_symbol);kind='realtime'
    self.last_feed_diagnostics['minute_bars_status']=bars['status']
-   if bars['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+   if bars['status']=='LOCAL_BUDGET_EXHAUSTED':raise local_budget_error(bars)
    if bars['status']=='RATE_LIMIT':
     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=bars.get('retry_after_s') or retry_seconds(None);raise failure
    if bars['status']!='OK':
@@ -611,7 +618,7 @@ class EODHDAdapter:
     bars,reused=quiet_intraday_lookup(key,symbol,session.get('last_data'),quiet,lambda:client.intraday(symbol,start=start,end=end))
     if reused:self.last_feed_diagnostics['intraday_cache_hit']=True
     kind='intraday';self.last_feed_diagnostics['intraday_status']=bars['status']
-    if bars['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+    if bars['status']=='LOCAL_BUDGET_EXHAUSTED':raise local_budget_error(bars)
     if bars['status']=='RATE_LIMIT':
      failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=bars.get('retry_after_s') or retry_seconds(None);raise failure
    if bars['status']=='OK':

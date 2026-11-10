@@ -206,6 +206,13 @@ class HotWatch(unittest.TestCase):
    next_day=at+timedelta(days=1);self.assertEqual(engine.quiet_market_interval(c,req,'NORMAL',next_day,60),60)
    schedule['excluded_dates']=['2026-11-10'];c.execute('UPDATE hw_exchange_calendar SET calendar=? WHERE exchange=?',(json.dumps(schedule),'US'))
    self.assertEqual(engine.quiet_market_interval(c,req,'NORMAL',at,60),60)
+ def test_daily_budget_still_retries_on_normal_cadence_for_websocket_events(self):
+  req=copy.deepcopy(self.req);req.update(watch_id='daily-budget-watch',purpose='daily budget watch',provider='eodhd',provider_symbol='MERC.US')
+  engine.create(app.connect,1,req,self.now)
+  for i in range(7):engine.fault(app.connect,1,req['watch_id'],True,'EODHD_DAILY_BUDGET',self.now+timedelta(seconds=i))
+  with app.connect() as c:
+   row=engine.row_for(c,1,req['watch_id'],True);interval=engine.effective_poll_interval(c,req)
+   self.assertEqual(row['last_error'],'EODHD_DAILY_BUDGET');self.assertAlmostEqual(row['next_due'],(self.now+timedelta(seconds=6+interval)).timestamp())
  def test_exchange_status_refresh_does_not_starve_later_exchange(self):
   import hotwatch_service as service
   second=copy.deepcopy(self.req);second.update(watch_id='other-exchange',purpose='other exchange')

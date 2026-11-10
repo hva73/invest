@@ -225,6 +225,11 @@ class FeedTests(unittest.TestCase):
   self.assertIsNone(extended_session(trade,dict(schedule,exchange_open=True),now,120))
   weekend=datetime(2026,11,7,13,15,tzinfo=timezone.utc)
   self.assertIsNone(extended_session({'event_time':weekend.isoformat(),'market_session':'extended-hours'},dict(schedule,received_at=weekend.isoformat()),weekend,120))
+ def test_local_budget_preserves_daily_or_minute_reason(self):
+  from hotwatch_adapters import local_budget_error
+  self.assertEqual(local_budget_error({'budget_reason':'EODHD_DAILY_BUDGET'}).code,'EODHD_DAILY_BUDGET')
+  self.assertEqual(local_budget_error({'budget_reason':'PROVIDER_RATE_BUDGET'}).code,'PROVIDER_RATE_BUDGET')
+  self.assertEqual(local_budget_error({}).code,'PROVIDER_RATE_BUDGET')
  def test_adapter_marks_verified_premarket_trade_without_buy_permission(self):
   from test_hotwatch_engine import request,good_metrics,tick
   from hotwatch_engine import sample_errors
