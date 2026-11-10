@@ -15,6 +15,8 @@ import urllib.request
 class ClaimBlocked(Exception):
     pass
 
+JOURNAL_BRANCH = 'escape-projects-journal'
+
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -55,7 +57,7 @@ def claim(token, request_id, comment_id, project_id, item_id, expected, target):
         raise ClaimBlocked('unsafe request payload')
     body = json.dumps({'message': 'Record Projects request claim',
                        'content': base64.b64encode(payload).decode(),
-                       'branch': 'escape-projects-journal'}).encode()
+                       'branch': JOURNAL_BRANCH}).encode()
     url = 'https://api.github.com/repos/hva73/invest/contents/' + path
     req = urllib.request.Request(url, data=body, method='PUT', headers={
         'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json',
