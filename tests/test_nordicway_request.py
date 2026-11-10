@@ -1,4 +1,4 @@
-import copy,importlib.util,unittest
+import copy,importlib.util,json,os,subprocess,sys,tempfile,unittest
 from pathlib import Path
 spec=importlib.util.spec_from_file_location('nordicway_request',Path(__file__).resolve().parents[1]/'tools/nordicway_request.py')
 request=importlib.util.module_from_spec(spec);spec.loader.exec_module(request)
@@ -30,4 +30,21 @@ class Request(unittest.TestCase):
   for payload in ['$(id)','b'*39,'B'*40,'b'*40+';id']:
    event['comment']['body']=request.PREFIX+__import__('json').dumps({'request_id':'a'*32,'operation':'release_preflight','sha':payload})
    self.assertIsNone(request.parse(event,'issue_comment',request.BRANCH,str(request.OWNER_ID)))
+ def test_actions_event_file_owner_comment_and_wrong_actor(self):
+  # GitHub supplies its default branch as GITHUB_REF for issue_comment.
+  event=copy.deepcopy(self.event)
+  event['repository']={'full_name':'hva73/invest','default_branch':'codex/escape-development'}
+  with tempfile.TemporaryDirectory() as tmp:
+   event_path=Path(tmp)/'event.json';output_path=Path(tmp)/'output'
+   event_path.write_text(json.dumps(event),encoding='utf-8')
+   env={**os.environ,'GITHUB_EVENT_PATH':str(event_path),'GITHUB_OUTPUT':str(output_path),'GITHUB_EVENT_NAME':'issue_comment','GITHUB_REF':'refs/heads/'+event['repository']['default_branch'],'GITHUB_ACTOR_ID':str(request.OWNER_ID)}
+   result=subprocess.run([sys.executable,str(Path(request.__file__))],env=env,capture_output=True,text=True)
+   self.assertEqual(result.returncode,0,result.stderr)
+   self.assertEqual(output_path.read_text(),'operation=diagnostics\nsha=\n')
+   output_path.unlink();env['GITHUB_ACTOR_ID']='999'
+   result=subprocess.run([sys.executable,str(Path(request.__file__))],env=env,capture_output=True,text=True)
+   self.assertNotEqual(result.returncode,0);self.assertFalse(output_path.exists())
+   env['GITHUB_ACTOR_ID']=str(request.OWNER_ID);env['GITHUB_REF']='refs/heads/other'
+   result=subprocess.run([sys.executable,str(Path(request.__file__))],env=env,capture_output=True,text=True)
+   self.assertNotEqual(result.returncode,0);self.assertFalse(output_path.exists())
 if __name__=='__main__':unittest.main()
