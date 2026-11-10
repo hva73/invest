@@ -176,7 +176,7 @@ class Push(unittest.TestCase):
   with app.connect() as c:c.execute('UPDATE hw_sessions SET strategy=? WHERE id=?',(json.dumps(strategy),self.watch['id']))
   def event(offset,kind,price):
    at=self.now+timedelta(seconds=offset)
-   payload={'risk_parameters':{'stop_price':'10'},'position_context':{'position':'held','status':'verified','quantity':'10','portfolio_equity_dkk':str(10000+offset),'exposure_dkk':str(1000+offset)},'supporting_metrics':{'price':price}}
+   payload={'risk_parameters':{'stop_price':'10.0' if offset%2 else '10'},'position_context':{'position':'held','status':'verified','quantity':'10.00' if offset%2 else '10','portfolio_equity_dkk':str(10000+offset),'exposure_dkk':str(1000+offset)},'supporting_metrics':{'price':price}}
    with app.connect() as c:
     c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps(payload),digest))
     row=c.execute('SELECT * FROM hw_sessions WHERE id=?',(self.watch['id'],)).fetchone()

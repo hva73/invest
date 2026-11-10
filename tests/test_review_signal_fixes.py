@@ -91,7 +91,9 @@ class ReviewFixes(unittest.TestCase):
   self.assertEqual([json.loads(e['payload'])['reason'] for e in events],['STOP_BREACHED','STOP_BREACHED'])
  def test_breached_stop_escalates_only_after_configured_worsening(self):
   for offset,price in ((0,'94'),(10,'93.999'),(20,'93.998'),(30,'92.12')):
-   result=self.ingest(self.sample(price,offset),self.at+timedelta(seconds=offset))['calculation']
+   sample=self.sample(price,offset)
+   if offset==10:sample['context']['quantity']=sample['context']['quantity']+'.0'
+   result=self.ingest(sample,self.at+timedelta(seconds=offset))['calculation']
    self.assertEqual(result['signal'],'SELL')
   with app.connect() as c:
    row=engine.row_for(c,1,self.req['watch_id'],True)

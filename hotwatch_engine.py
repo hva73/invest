@@ -1204,7 +1204,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   context=risk_sample['context']
   if context.get('status')=='verified' and context.get('position')=='held' and context.get('quantity') is not None and sample.get('price'):
    for code in sorted(codes&{'STOP_BREACHED','EXIT_DEADLINE'}):
-    current={'price':str(sample['price']),'quantity':str(context['quantity']),'stop_price':risk.get('stop_price'),'exit_deadline':risk.get('exit_deadline'),'strategy_checksum':result['strategy_checksum']}
+    current={'price':str(sample['price']),'quantity':format(Decimal(str(context['quantity'])).normalize(),'f'),'stop_price':format(Decimal(str(risk['stop_price'])).normalize(),'f') if risk.get('stop_price') is not None else None,'exit_deadline':risk.get('exit_deadline'),'strategy_checksum':result['strategy_checksum']}
     old=anchors.get(code)
     if not isinstance(old,dict) or not old.get('price'):old=None
     changed=bool(old and any(old.get(k)!=current[k] for k in ('quantity','stop_price','exit_deadline','strategy_checksum')))
