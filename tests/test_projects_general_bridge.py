@@ -1,4 +1,7 @@
 import copy
+import io
+import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -11,9 +14,31 @@ import projects_status_write_prototype as writer
 import projects_status_write_audit as audit
 from tests.test_projects_status_write_prototype import CONTEXT, board
 from tests.test_projects_status_write_audit import Response
+from tests.test_projects_dryrun import comment
 
 
 class GeneralBridgeTest(unittest.TestCase):
+    def test_validator_reads_comments_and_project_item_for_target_issue(self):
+        row = comment()
+        issue = {'id': 'PVTI_test', 'isArchived': False,
+                 'content': {'number': 5, 'repository': {'nameWithOwner': 'hva73/invest'}},
+                 'fieldValueByName': {'name': 'In progress'}}
+        project = {'id': 'PVT_test', 'number': 1, 'closed': False,
+                   'fields': {'pageInfo': {'hasNextPage': False}, 'nodes': [{'name': 'Status', 'options': [{'name': 'In progress'}, {'name': 'Backlog'}]}]},
+                   'items': {'pageInfo': {'hasNextPage': False}, 'nodes': [issue]}}
+        unchanged = {'data': {'node': {'id': 'comment-node', 'body': row['body'], 'lastEditedAt': None}}}
+        result = {'data': {'user': {'login': 'hva73', 'projectV2': project}}}
+        env = {'GITHUB_ACTOR_ID': str(dryrun.OWNER_ID), 'GITHUB_TRIGGERING_ACTOR': 'hva73',
+               'GITHUB_REPOSITORY': 'hva73/invest', 'GITHUB_REF': 'refs/heads/codex/escape-development',
+               'REQUEST_COMMENT_ID': '1', 'ESCAPE_PROJECTS_TOKEN': 'fake'}
+        with patch.dict(os.environ, env, clear=True), patch('urllib.request.build_opener') as factory:
+            factory.return_value.open.side_effect = [io.BytesIO(json.dumps(x).encode()) for x in ([row], unchanged, result, [row], unchanged)]
+            validated = dryrun.main(issue_number=5)
+            calls = factory.return_value.open.call_args_list
+        self.assertEqual(validated['issue_number'], 5)
+        self.assertIn('/issues/5/comments?', calls[0].args[0].full_url)
+        self.assertIn('/issues/5/comments?', calls[3].args[0].full_url)
+
     def test_all_allowed_issues_match_actual_issue_before_mutation(self):
         for issue_number in [1, *range(3, 17)]:
             context = copy.deepcopy(CONTEXT)
