@@ -1,0 +1,22 @@
+name: ESCAPE Nordicway bridge offline tests
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [codex/escape-development]
+permissions:
+  contents: read
+jobs:
+  offline-tests:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue-16-nordicway-bridge'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Test requests, host verification, redaction and bounded transport
+        run: python -m unittest tests.test_nordicway_request tests.test_nordicway_hostkey tests.test_nordicway_readonly_diagnostics tests.test_nordicway_readonly_client
