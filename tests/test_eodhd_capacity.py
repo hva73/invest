@@ -29,6 +29,18 @@ class CapacityTests(unittest.TestCase):
   self.assertEqual(self.state()['known_units'],800)
   self.cap.reserve(1,self.now+60)
   self.assertLess(time.perf_counter()-started,30)
+ def test_http_breakdown_exposes_only_endpoint_and_market(self):
+  class Response:
+   status=200;headers={}
+   def __enter__(self):return self
+   def __exit__(self,*_):pass
+  class Opener:
+   def open(self,*args,**kwargs):return Response()
+  import urllib.request
+  with self.cap.open(Opener(),urllib.request.Request('https://eodhd.com/api/intraday/SECRET.US?api_token=private')):pass
+  with app.connect() as c:result=capacity.snapshot(c)
+  encoded=json.dumps(result['endpoint_hourly'])
+  self.assertIn('intraday:US',encoded);self.assertNotIn('SECRET',encoded);self.assertNotIn('private',encoded)
  def test_provider_headers_lower_budget_remaining_and_429_are_global(self):
   self.assertEqual(capacity.retry_seconds({'Retry-After':'Infinity'},self.now+50),10)
   self.cap.reserve(1,self.now)

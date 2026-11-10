@@ -3,7 +3,7 @@
 HTTP requests, daily call units and concurrent WebSocket subscriptions are
 different budgets. No market, strategy, or order decisions belong here.
 """
-import hashlib,json,math,os,secrets,time,urllib.error,urllib.request
+import hashlib,json,math,os,re,secrets,time,urllib.error,urllib.request
 from contextlib import contextmanager
 from datetime import datetime,timezone
 from email.utils import parsedate_to_datetime
@@ -57,7 +57,7 @@ def cost(url):
 
 class Capacity:
  def __init__(self,connect):self.connect=connect
- def reserve(self,units=None,now=None):
+ def reserve(self,units=None,now=None,endpoint=None,market=None):
   now=time.time() if now is None else now;window=int(now//60)
   with self.connect() as c:
    c.execute('BEGIN IMMEDIATE');state=read(c);limit=configured_limit(state.get('http_provider_limit',DOCUMENTED_HTTP_LIMIT))
@@ -78,6 +78,14 @@ class Capacity:
    state['known_units']=state.get('known_units',0)+(units or 0)
    state['unknown_cost_requests']=state.get('unknown_cost_requests',0)+(units is None)
    state['requests']=state.get('requests',0)+1
+   # Hourly aggregate only: never store paths, symbols, keys or credentials.
+   if endpoint:
+    hour=int(now//3600);buckets=state.get('endpoint_hours',{})
+    buckets={k:v for k,v in buckets.items() if k.isdigit() and hour-23<=int(k)<=hour}
+    key=endpoint+':'+(market or 'UNKNOWN');bucket=buckets.setdefault(str(hour),{})
+    counter=bucket.setdefault(key,{'requests':0,'known_units':0,'unknown_cost_requests':0})
+    counter['requests']+=1;counter['known_units']+=units or 0;counter['unknown_cost_requests']+=units is None
+    state['endpoint_hours']=buckets
    c.execute('DELETE FROM hw_request_budget WHERE window<?',(window-2,))
    c.execute("INSERT INTO hw_request_budget VALUES(0,'eodhd',?,1) ON CONFLICT(user_id,source,window) DO UPDATE SET used=used+1",(window,))
    write(c,state,now)
@@ -100,7 +108,12 @@ class Capacity:
    write(c,state,now)
  @contextmanager
  def open(self,opener,request,timeout=8):
-  self.reserve(cost(request.full_url));started=time.perf_counter();status=None;headers={}
+  parsed=urlsplit(request.full_url);parts=parsed.path.removeprefix('/api/').split('/')
+  allowed={'user','intraday','technical','news','screener','fundamentals','real-time','search','exchanges-list','exchange-details','exchange-symbol-list','calendar','eod','splits','div'}
+  endpoint=parts[0] if parsed.hostname=='eodhd.com' and parts[0] in allowed else 'other'
+  raw=parts[1] if len(parts)>1 else '';market=raw.rsplit('.',1)[-1].upper() if '.' in raw else raw.upper() if endpoint in ('exchange-details','exchange-symbol-list') else ''
+  market=market if re.fullmatch(r'[A-Z0-9_-]{1,16}',market) else 'UNKNOWN'
+  self.reserve(cost(request.full_url),endpoint=endpoint,market=market);started=time.perf_counter();status=None;headers={}
   try:
    with opener.open(request,timeout=timeout) as response:
     status=getattr(response,'status',200);headers=getattr(response,'headers',{})
@@ -135,7 +148,7 @@ def snapshot(c,now=None):
  row=c.execute("SELECT used FROM hw_request_budget WHERE user_id=0 AND source='eodhd' AND window=?",(int(now//60),)).fetchone()
  queue=c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND next_due<=? AND lease_until<=? AND json_extract(request,'$.provider')='eodhd'",(now,now)).fetchone()[0]
  leases=[x for x in state.get('ws_leases',{}).values() if x['until']>now]
- return {'utilization_pct':UTILIZATION,'http_provider_limit_per_minute':limit,'http_limit_basis':state.get('limit_source','documented_default'),'http_effective_limit_per_minute':configured_limit(limit),'http_configured_override':os.environ.get('ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE'),'http_used_this_minute':row['used'] if row else 0,'due_sessions':queue,'ws_connections':len(leases),'ws_subscriptions':sum(x['symbols'] for x in leases),'ws_subscription_limit':40,'ws_connection_limit':51,**{k:state.get(k) for k in ('local_day','requests','errors','http_429','last_http_status','last_http_at','last_latency_ms','latency_total_ms','known_units','unknown_cost_requests','http_retry_at','account','account_checked_at','account_status','ws_retry_at','ws_429')},'daily_usage_note':'Account snapshot plus known local costs; other clients and unknown endpoint costs require the next account snapshot.'}
+ return {'utilization_pct':UTILIZATION,'http_provider_limit_per_minute':limit,'http_limit_basis':state.get('limit_source','documented_default'),'http_effective_limit_per_minute':configured_limit(limit),'http_configured_override':os.environ.get('ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE'),'http_used_this_minute':row['used'] if row else 0,'due_sessions':queue,'ws_connections':len(leases),'ws_subscriptions':sum(x['symbols'] for x in leases),'ws_subscription_limit':40,'ws_connection_limit':51,**{k:state.get(k) for k in ('local_day','requests','errors','http_429','last_http_status','last_http_at','last_latency_ms','latency_total_ms','known_units','unknown_cost_requests','http_retry_at','account','account_checked_at','account_status','ws_retry_at','ws_429')},'endpoint_hourly':state.get('endpoint_hours',{}),'daily_usage_note':'Account snapshot plus known local costs; other clients and unknown endpoint costs require the next account snapshot.'}
 
 def refresh_account(connect,opener=None):
  key=os.environ.get('ESCAPE_EODHD_API_KEY','').strip()

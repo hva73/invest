@@ -99,6 +99,36 @@ def effective_poll_interval(c,request,profile=None):
  units=max(1,len(histories)+len(rest));available=max(1,limit-len(calendars))
  return max(minimum,(units*60+available-1)//available)
 
+def quiet_market_interval(c,request,profile,now,interval,sample=None):
+ """Conservative reduced polling, not proof of broker untradability."""
+ if request.get('provider')!='eodhd' or profile=='CRITICAL':return interval
+ if sample and sample.get('market_status') in ('PRE','AFTER','HALTED'):return interval
+ if sample and sample.get('event_time'):
+  try:
+   if 0<=(now-stamp(sample['event_time'])).total_seconds()<=request['risk']['max_quote_age_s']:return interval
+  except (ValueError,TypeError):return interval
+ symbol=request.get('provider_symbol') or '';exchange=symbol.rsplit('.',1)[-1].upper() if '.' in symbol else ''
+ if not exchange or not scheduled_regular_close(c,exchange,now):return interval
+ opening=expected_regular_open(c,request,now)
+ if not opening:return interval
+ seconds=(stamp(opening['expected_at'])-now).total_seconds()
+ if seconds<=300:return interval
+ # US extended trading can occur 04:00–20:00 local. Do not slow it down.
+ if exchange=='US':
+  from zoneinfo import ZoneInfo
+  local=now.astimezone(ZoneInfo('America/New_York'))
+  if local.weekday()<5 and 4<=local.hour<20:return interval
+  # Wake before 04:00 ET even if regular opening is later.
+  if local.weekday()<5 and local.hour<4:
+   pre=local.replace(hour=4,minute=0,second=0,microsecond=0)
+   seconds=min(seconds,(pre-local).total_seconds())
+ deadline=request.get('risk',{}).get('exit_deadline')
+ if deadline:
+  try:seconds=min(seconds,(stamp(deadline)-now).total_seconds())
+  except (ValueError,TypeError):return interval
+ if seconds<=300:return interval
+ return max(interval,min(120,int(seconds-300)))
+
 def observation_poll_interval(c,request,profile,now,sample):
  """Recheck aging live trades at the existing ACTIVE cadence, within budget."""
  interval=effective_poll_interval(c,request,profile)
@@ -114,7 +144,7 @@ def observation_poll_interval(c,request,profile,now,sample):
   remaining=min(deadlines)-now.timestamp()
   if remaining<=interval:
    interval=min(interval,effective_poll_interval(c,request,'ACTIVE'))
- return interval
+ return quiet_market_interval(c,request,profile,now,interval,sample)
 
 def init(c):
  import hotwatch_warmup,web_push,hotwatch_buy_plan
@@ -1137,6 +1167,9 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   interval=observation_poll_interval(c,request,adaptive,now,sample)
   if sample['market_status'] in ['CLOSED','HALTED']:interval=max(interval,300)
   nextstate['scheduled_interval_s']=interval
+  baseline=effective_poll_interval(c,request,adaptive)
+  nextstate['quiet_market_poll']=interval>baseline
+  nextstate['quiet_baseline_s']=baseline if interval>baseline else None
   c.execute('UPDATE hw_sessions SET status=?,state=?,updated=?,last_data=?,last_calculation=?,next_due=?,failures=0,last_error=NULL,lease_owner=NULL,lease_until=0 WHERE id=?',(new_status,canonical(nextstate),now.isoformat(),sample['event_time'],now.isoformat(),now.timestamp()+interval,row['id']))
   response={'ok':True,'duplicate':False,'calculation':result,'sqlite_timing':{'begin_wait_ms':round((lock_acquired-lock_requested)*1000,3),'work_before_commit_ms':round((time.perf_counter()-lock_acquired)*1000,3)}}
   if include_session:response['session']=view(c,row_for(c,uid,wid,mode),now)
@@ -1228,13 +1261,18 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   # not push the next check half an hour past a new market event. A rejected
   # same-timestamp conflict also needs a new observation, not a 30-minute
   # provider-error backoff; the conflicting observation remains rejected.
-  if code in ('DATA_STALE','sample_id_conflict'):interval=effective_poll_interval(c,request)
+  if code in ('DATA_STALE','sample_id_conflict'):
+   interval=effective_poll_interval(c,request)
+   if code=='DATA_STALE' and not set(state.get('alert_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE'}:interval=quiet_market_interval(c,request,state.get('adaptive_profile',request['profile']),now,interval)
   # A transient SQLite contention is not a failed market feed. Do not let
   # exponential provider backoff postpone a position or candidate for 30 min.
   if code.startswith('PROCESSING_DATABASE_BUSY_'):interval=60
   if request['provider']=='eodhd' and code in ('EODHD_RATE_LIMIT','PROVIDER_RATE_BUDGET') and retry_after_s is not None:interval=max(1,retry_after_s)
   elif retry_after_s is not None:interval=max(interval,max(0,retry_after_s))
   state['scheduled_interval_s']=interval
+  baseline=effective_poll_interval(c,request,state.get('adaptive_profile',request['profile']))
+  state['quiet_market_poll']=code=='DATA_STALE' and interval>baseline
+  state['quiet_baseline_s']=baseline if state['quiet_market_poll'] else None
   if row['last_error']!=code:
    previous=json.loads(row['strategy']);result={'signal':'NO_DATA','reason_codes':[code],'human_readable_explanation':code,'supporting_metrics':{'quote_age_s':(now-stamp(row['last_data'])).total_seconds() if row['last_data'] else None},'calculation_timestamp':now.isoformat(),'data_timestamp':row['last_data'],'strategy_id':previous['strategy_id'],'strategy_version':previous['version'],'strategy_checksum':checksum(previous),'confidence_score':0,'risk_level':'critical' if set(state.get('alert_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE'} else 'high','rules_score_note':'No valid current market input','critical_override':False}
    c.execute('INSERT INTO hw_calculations(watch_row_id,sample_row_id,calculated,payload,strategy_checksum) VALUES(?,NULL,?,?,?)',(row['id'],now.isoformat(),canonical(result),result['strategy_checksum']))
@@ -1255,7 +1293,8 @@ def claim(connect,now=None,watch_id=None,exclude_ids=()):
   c.execute('BEGIN IMMEDIATE')
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
   concurrency=max(1,min(10,int(os.environ.get('ESCAPE_HW_CONCURRENCY','2'))))
-  if c.execute('SELECT count(*) FROM hw_sessions WHERE lease_owner IS NOT NULL AND lease_until>?',(now.timestamp(),)).fetchone()[0]>=concurrency:return None
+  occupied=c.execute('SELECT count(*) FROM hw_sessions WHERE lease_owner IS NOT NULL AND lease_until>?',(now.timestamp(),)).fetchone()[0]
+  if occupied>=concurrency:return None
   # next_due already encodes each watch's urgency and polling profile.
   # Serve the earliest deadline first; exits/catalysts break equal deadlines.
   # Giving newly due holdings absolute priority until candidates missed a
@@ -1266,7 +1305,8 @@ def claim(connect,now=None,watch_id=None,exclude_ids=()):
   # upstream request. Claiming a job is not itself a provider request.
   request=json.loads(row['request'])
   c.execute("UPDATE hw_sessions SET status=CASE WHEN status='CREATED' THEN 'VALIDATING' ELSE status END,lease_owner=?,lease_until=? WHERE id=?",(owner,now.timestamp()+120,row['id']))
-  return dict(row,lease_owner=owner,request_data=request)
+  due_count=c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND next_due<=? AND lease_until<=?",(now.timestamp(),now.timestamp())).fetchone()[0]
+  return dict(row,lease_owner=owner,request_data=request,diagnostic_occupied_workers=occupied+1,diagnostic_due_sessions=due_count)
 
 def release(connect,job,now=None,sample=None,pending_feed=False):
  now=now or utc();request=job['request_data']
@@ -1278,7 +1318,8 @@ def release(connect,job,now=None,sample=None,pending_feed=False):
    return
   profile=json.loads(job.get('state') or '{}').get('adaptive_profile') or request['profile']
   interval=observation_poll_interval(c,request,profile,now,sample)
-  c.execute("UPDATE hw_sessions SET next_due=?,state=json_set(state,'$.scheduled_interval_s',?),lease_owner=NULL,lease_until=0 WHERE id=? AND lease_owner=?",(now.timestamp()+interval,interval,job['id'],job['lease_owner']))
+  baseline=effective_poll_interval(c,request,profile);reduced=interval>baseline
+  c.execute("UPDATE hw_sessions SET next_due=?,state=json_set(state,'$.scheduled_interval_s',?,'$.quiet_market_poll',json(?),'$.quiet_baseline_s',?),lease_owner=NULL,lease_until=0 WHERE id=? AND lease_owner=?",(now.timestamp()+interval,interval,'true' if reduced else 'false',baseline if reduced else None,job['id'],job['lease_owner']))
 
 
 def system_kill(connect,enabled,reason,now=None):

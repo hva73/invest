@@ -20,7 +20,7 @@ class AdminDiagnostics(unittest.TestCase):
   result=hotwatch_service.admin_diagnostics(app.connect,1,self.now)
   self.assertEqual(result['log_files_read'],2);self.assertEqual(result['windows']['5m']['completed'],1);self.assertEqual(result['windows']['5m']['deferred'],1)
   self.assertEqual(result['windows']['5m']['queue']['p50_ms'],1000);self.assertEqual(result['windows']['1h']['completed'],2)
-  self.assertEqual(result['recent'][0]['metrics']['websocket_ms'],500);self.assertEqual(result['recent'][0]['metrics']['market_conflict']['incoming']['price'],'143.95');self.assertNotIn('DO_NOT_EXPOSE',json.dumps(result));self.assertEqual(result['session_count'],1)
+  self.assertIn('worker_utilization',result);self.assertIn('readiness_by_market',result);self.assertIn('market_sleep',result);self.assertEqual(result['market_sleep']['estimated_avoided_scans'],0);self.assertEqual(result['recent'][0]['metrics']['websocket_ms'],500);self.assertEqual(result['recent'][0]['metrics']['market_conflict']['incoming']['price'],'143.95');self.assertNotIn('DO_NOT_EXPOSE',json.dumps(result));self.assertEqual(result['session_count'],1)
   with app.connect() as c:c.execute("UPDATE hw_sessions SET status='EXPIRED' WHERE watch_id=?",(self.f.req['watch_id'],))
   result=hotwatch_service.admin_diagnostics(app.connect,1,self.now);self.assertEqual(result['session_count'],0);self.assertEqual(result['windows']['1h']['completed'],2)
  def test_missing_log_is_explicit_and_read_only(self):

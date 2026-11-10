@@ -190,6 +190,22 @@ class HotWatch(unittest.TestCase):
    c.execute('UPDATE hw_exchange_status SET received=? WHERE exchange=?',((self.now+timedelta(seconds=1)).isoformat(),'US'))
    view=engine.view(c,engine.row_for(c,1,self.req['watch_id'],False),self.now+timedelta(seconds=2))
    self.assertEqual(view['data_status']['market_status'],'UNKNOWN');self.assertEqual(view['display_status'],'MARKED LUKKET (ORDINÆR HANDEL)')
+ def test_closed_market_unknown_access_is_reduced_without_suppressing_us_extended_hours(self):
+  at=datetime(2026,11,10,6,0,tzinfo=timezone.utc)
+  req=copy.deepcopy(self.req);req.update(provider='eodhd',provider_symbol='MERC.US')
+  schedule={'open':'09:30:00','close':'16:00:00','working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[]}
+  with app.connect() as c:
+   c.execute('INSERT INTO hw_exchange_calendar VALUES(?,?,?,?)',('US',at.isoformat(),'America/New_York',json.dumps(schedule)))
+   self.assertEqual(engine.quiet_market_interval(c,req,'NORMAL',at,60),120)
+   self.assertEqual(engine.quiet_market_interval(c,req,'CRITICAL',at,60),60)
+   self.assertEqual(engine.quiet_market_interval(c,req,'NORMAL',at,60,{'market_status':'AFTER'}),60)
+   pre=at+timedelta(hours=4)
+   self.assertEqual(engine.quiet_market_interval(c,req,'NORMAL',pre,60),60)
+   pre=at+timedelta(hours=2,minutes=58)
+   self.assertEqual(engine.quiet_market_interval(c,req,'NORMAL',pre,60),60)
+   next_day=at+timedelta(days=1);self.assertEqual(engine.quiet_market_interval(c,req,'NORMAL',next_day,60),60)
+   schedule['excluded_dates']=['2026-11-10'];c.execute('UPDATE hw_exchange_calendar SET calendar=? WHERE exchange=?',(json.dumps(schedule),'US'))
+   self.assertEqual(engine.quiet_market_interval(c,req,'NORMAL',at,60),60)
  def test_exchange_status_refresh_does_not_starve_later_exchange(self):
   import hotwatch_service as service
   second=copy.deepcopy(self.req);second.update(watch_id='other-exchange',purpose='other exchange')

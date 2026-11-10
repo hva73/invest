@@ -906,7 +906,7 @@ def admin_diagnostics(connect,uid,now=None):
  from eodhd_capacity import snapshot
  now=now or engine.utc();epoch=now.timestamp();base=Path(app.DB).resolve();path=base.parent/'hotwatch-scans.jsonl'
  with connect() as c:
-  sessions=c.execute("SELECT watch_id,status,request,last_error,last_data,next_due,lease_until FROM hw_sessions WHERE user_id=? AND is_test=0 AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED','PAUSED')",(uid,)).fetchall()
+  sessions=c.execute("SELECT * FROM hw_sessions WHERE user_id=? AND is_test=0 AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED','PAUSED')",(uid,)).fetchall()
   history_sessions=c.execute('SELECT watch_id,request FROM hw_sessions WHERE user_id=? AND is_test=0 ORDER BY id DESC LIMIT 10001',(uid,)).fetchall()
   beat=c.execute('SELECT updated,status FROM hw_heartbeat WHERE id=1').fetchone()
   supervisor=c.execute('SELECT updated,status,attempts FROM hw_supervisor_status WHERE id=1').fetchone()
@@ -917,7 +917,17 @@ def admin_diagnostics(connect,uid,now=None):
   jobs={x['status']:x['n'] for x in c.execute('SELECT status,count(*) AS n FROM jobs WHERE user_id=? AND created>=? GROUP BY status',(uid,epoch-86400))}
   cron=c.execute('SELECT heartbeat FROM worker_state WHERE id=1').fetchone()
   provider=snapshot(c,epoch);journal=c.execute('PRAGMA journal_mode').fetchone()[0];pages=c.execute('PRAGMA page_count').fetchone()[0];page_size=c.execute('PRAGMA page_size').fetchone()[0]
- watches={};states=Counter();errors=Counter();overdue=[]
+  busy=c.execute("SELECT count(*) FROM hw_sessions WHERE lease_owner IS NOT NULL AND lease_until>?",(epoch,)).fetchone()[0]
+  push_rows=c.execute("SELECT s.request,j.status,e.event_type,e.payload FROM push_jobs j JOIN push_devices d ON d.id=j.device_id JOIN hw_sessions s ON s.id=j.watch_row_id LEFT JOIN hw_events e ON e.event_id=j.event_key AND e.watch_row_id=s.id WHERE d.user_id=? AND j.created>=? LIMIT 20000",(uid,epoch-86400)).fetchall()
+  readiness=[]
+  for row in sessions:
+   try:
+    req=json.loads(row['request']);symbol=req.get('provider_symbol') or '';market=symbol.rsplit('.',1)[-1].upper() if '.' in symbol else str(req.get('exchange') or 'UNKNOWN').upper()
+    if not re.fullmatch(r'[A-Z0-9_-]{1,16}',market):market='UNKNOWN'
+    view=engine.view(c,row,now);signals=view.get('signal');reasons=view.get('display_reason_codes') or []
+    readiness.append({'market':market,'signal':signals if signals in ('BUY','SELL','REDUCE','WAIT','NO_DATA','PAUSE') else 'UNKNOWN','blocking':[x for x in reasons if isinstance(x,str) and re.fullmatch(r'[A-Za-z0-9_]{1,80}',x)][:12]})
+   except (ValueError,TypeError,KeyError,AttributeError):readiness.append({'market':'UNKNOWN','signal':'UNKNOWN','blocking':['STATUS_UNAVAILABLE']})
+ watches={};states=Counter();errors=Counter();overdue=[];reduced=[]
  for row in history_sessions[:10000]:
   try:req=json.loads(row['request']);ticker=req.get('ticker','?')
   except (ValueError,TypeError):ticker='?'
@@ -927,10 +937,14 @@ def admin_diagnostics(connect,uid,now=None):
   except (ValueError,TypeError):ticker='?'
   ref=hashlib.sha256(row['watch_id'].encode()).hexdigest()[:16];watches[ref]=ticker if isinstance(ticker,str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,40}',ticker) else '?'
   states[row['status']]+=1
+  try:
+   status_state=json.loads(row['state'])
+   if row['status']!='PAUSED' and status_state.get('quiet_market_poll') is True and row['next_due']>epoch:reduced.append({'ticker':watches[ref],'next_check':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat()})
+  except (ValueError,TypeError,AttributeError):pass
   if row['last_error'] and re.fullmatch(r'[A-Za-z0-9_]{1,100}',row['last_error']):errors[row['last_error']]+=1
   if row['status']!='PAUSED' and row['next_due']<=epoch and row['lease_until']<=epoch:overdue.append({'ticker':watches[ref],'late_s':round(epoch-row['next_due'],1)})
  records=[];files_read=0
- numeric=('queue_ms','claim_ms','provider_ms','ingest_compute_ms','adapter_to_journal_ms','warmup_ms','worker_busy_ms','pluto_context_ms','eodhd_http_ms','websocket_capture_ms')
+ numeric=('queue_ms','claim_ms','provider_ms','ingest_compute_ms','adapter_to_journal_ms','warmup_ms','worker_busy_ms','pluto_context_ms','eodhd_http_ms','websocket_capture_ms','begin_wait_ms','occupied_workers','due_sessions','quiet_avoided_estimate')
  for item in (path,Path(str(path)+'.1'),Path(str(path)+'.2'),Path(str(path)+'.3')):
   try:
    with item.open('rb') as f:f.seek(0,2);f.seek(max(0,f.tell()-1048576));lines=f.read().decode('utf-8',errors='replace').splitlines()
@@ -974,7 +988,34 @@ def admin_diagnostics(connect,uid,now=None):
  timeline=[]
  for i in range(11,-1,-1):
   end=epoch-i*300;start=end-300;group=sorted(x['metrics']['queue_ms'] for x in records if x['status'] in ('processed','degraded') and start<=x['_epoch']<end and 'queue_ms' in x['metrics'])
-  timeline.append({'from':datetime.fromtimestamp(start,timezone.utc).isoformat(),'to':datetime.fromtimestamp(end,timezone.utc).isoformat(),'count':len(group),'p50_ms':group[(len(group)-1)//2] if group else None,'p90_ms':group[math.ceil(.9*len(group))-1] if group else None,'max_ms':group[-1] if group else None})
+  slice_records=[x for x in records if start<=x['_epoch']<end]
+  observed_workers=[x['metrics']['occupied_workers'] for x in slice_records if 'occupied_workers' in x['metrics']]
+  observed_due=[x['metrics']['due_sessions'] for x in slice_records if 'due_sessions' in x['metrics']]
+  timeline.append({'from':datetime.fromtimestamp(start,timezone.utc).isoformat(),'to':datetime.fromtimestamp(end,timezone.utc).isoformat(),'count':len(group),'p50_ms':group[(len(group)-1)//2] if group else None,'p90_ms':group[math.ceil(.9*len(group))-1] if group else None,'max_ms':group[-1] if group else None,'occupied_workers_observed_max':max(observed_workers) if observed_workers else None,'due_sessions_observed_max':max(observed_due) if observed_due else None})
+ # Counts are observations, not attribution: elapsed components overlap.
+ queue_factors={}
+ for label,seconds in (('5m',300),('1h',3600),('24h',86400)):
+  subset=[x for x in records if x['_epoch']>=epoch-seconds]
+  by_busy={};retry=Counter(x['code'] or 'UNKNOWN' for x in subset if x['status']=='deferred')
+  for item in subset:
+   m=item['metrics'];occ=m.get('occupied_workers');q=m.get('queue_ms')
+   if occ is not None and q is not None:by_busy.setdefault(str(int(occ)),[]).append(q)
+  def phase_stat(key):
+   vals=sorted(x['metrics'][key] for x in subset if key in x['metrics'])
+   return {'count':len(vals),'p50_ms':vals[(len(vals)-1)//2],'p90_ms':vals[math.ceil(.9*len(vals))-1],'max_ms':vals[-1]} if vals else None
+  queue_factors[label]={'queue_by_occupied_workers':{k:{'count':len(v),'average_ms':round(sum(v)/len(v),2),'max_ms':max(v)} for k,v in by_busy.items()},'deferred_by_reason':dict(retry),'worker_busy':phase_stat('worker_busy_ms'),'websocket_wait':phase_stat('websocket_ms'),'database_begin_wait':phase_stat('begin_wait_ms'),'note':'Besættelse er målt ved claim; komponenter kan overlappe og summeres ikke til køtiden.'}
+ ready={}
+ for item in readiness:
+  key=item['market'];entry=ready.setdefault(key,{'signals':Counter(),'blockers':Counter()});entry['signals'][item['signal']]+=1
+  for reason in item['blocking']:entry['blockers'][reason]+=1
+ push_detail=Counter()
+ for item in push_rows:
+  try:
+   ticker=json.loads(item['request']).get('ticker','?');ticker=ticker if isinstance(ticker,str) and re.fullmatch(r'[A-Za-z0-9_.-]{1,40}',ticker) else '?'
+   kind=item['event_type'] if isinstance(item['event_type'],str) and re.fullmatch(r'[A-Z0-9_]{1,50}',item['event_type']) else 'UNKNOWN'
+   payload=json.loads(item['payload']) if item['payload'] else {};reason=payload.get('reason','UNKNOWN');reason=reason if isinstance(reason,str) and re.fullmatch(r'[A-Z0-9_]{1,80}',reason) else 'SEE_EVENT_TYPE'
+   push_detail[(ticker,kind,reason,item['status'])]+=1
+  except (ValueError,TypeError,AttributeError):continue
  recent=[{k:v for k,v in x.items() if k!='_epoch'} for x in records[:500]]
  providers=[]
  for row in health:
@@ -994,7 +1035,20 @@ def admin_diagnostics(connect,uid,now=None):
  storage.update(database_bytes=size(base),wal_bytes=size(Path(str(base)+'-wal')),journal_mode=journal,page_count=pages,page_size=page_size)
  import hotwatch_supervisor
  app_errors=hotwatch_supervisor.application_error_fallback()
- return {'application_errors':app_errors,'as_of':now.isoformat(),'scope':'own_sessions_and_shared_process','worker':dict(beat) if beat else None,'supervisor':dict(supervisor) if supervisor else None,'supervisor_events':events,'session_count':len(sessions),'states':dict(states),'errors':dict(errors),'due_count':len(overdue),'overdue':sorted(overdue,key=lambda x:x['late_s'],reverse=True)[:20],'provider_capacity':provider,'providers':providers,'storage':storage,'push':{'last_24h':push,'oldest_pending_age_s':round(max(0,epoch-push_pending),1) if push_pending is not None else None},'scheduled_jobs':{'last_24h':jobs,'worker_last_seen':datetime.fromtimestamp(cron['heartbeat'],timezone.utc).isoformat() if cron else None},'windows':windows,'timeline':timeline,'recent':recent,'log_files_read':files_read,'log_earliest':records[-1]['at'] if records else None,'history_scope_truncated':len(history_sessions)>10000,'log_retention':'Roterende filer; perioderne kan være ufuldstændige. Udskudte indsamlinger tælles separat.','unavailable':'Eksterne processers CPU, hukommelse og fuld versionsidentitet er ikke registreret.'}
+ # Only report explicitly recorded events. Missing crash intervals cannot be reconstructed.
+ gaps=[];stopped=None
+ for ev in reversed(events):
+  if ev['event'] in ('supervisor_stopped','worker_stopped'):stopped=ev
+  elif ev['event']=='worker_started' and stopped:
+   try:gaps.append({'stopped_at':stopped['created'],'started_at':ev['created'],'duration_s':max(0,round((stamp(ev['created'])-stamp(stopped['created'])).total_seconds(),1)),'reason':'not recorded'})
+   except (TypeError,ValueError):pass
+   stopped=None
+ revision=os.environ.get('ESCAPE_BUILD_COMMIT','').strip();revision_source='ESCAPE_BUILD_COMMIT'
+ if not re.fullmatch(r'[0-9a-fA-F]{40}',revision):
+  try:revision=Path(__file__).with_name('BUILD_COMMIT').read_text(encoding='ascii').strip();revision_source='archive metadata'
+  except (OSError,UnicodeError):revision=''
+ if not re.fullmatch(r'[0-9a-fA-F]{40}',revision):revision=None;revision_source='unavailable'
+ return {'installation':{'declared_commit':revision,'commit_source':revision_source,'observed_restart_gaps':gaps,'note':'Genstartshuller bygger kun på registrerede stop og starter; uregistrerede nedbrud er ukendte.'},'application_errors':app_errors,'as_of':now.isoformat(),'scope':'own_sessions_and_shared_process','worker':dict(beat) if beat else None,'supervisor':dict(supervisor) if supervisor else None,'supervisor_events':events,'session_count':len(sessions),'states':dict(states),'errors':dict(errors),'due_count':len(overdue),'overdue':sorted(overdue,key=lambda x:x['late_s'],reverse=True)[:20],'provider_capacity':provider,'provider_forecast':{'minute_remaining':max(0,provider['http_effective_limit_per_minute']-provider['http_used_this_minute']),'daily_remaining_reported':max(0,provider['account']['dailyRateLimit']-provider['account']['apiRequests']) if provider.get('account') and provider['account'].get('apiRequestsDate')==now.date().isoformat() else None,'estimated_daily_usage_at_current_average':round(provider['account']['apiRequests']*86400/max(1,epoch%86400)) if provider.get('account') and provider['account'].get('apiRequestsDate')==now.date().isoformat() and epoch%86400>=3600 else None,'note':'Dagligt restbudget er seneste kontosnapshot, ikke en garanti; ukendte omkostninger og andre klienter kan forekomme.'},'providers':providers,'storage':storage,'push':{'last_24h':push,'oldest_pending_age_s':round(max(0,epoch-push_pending),1) if push_pending is not None else None},'scheduled_jobs':{'last_24h':jobs,'worker_last_seen':datetime.fromtimestamp(cron['heartbeat'],timezone.utc).isoformat() if cron else None},'windows':windows,'queue_factors':queue_factors,'worker_utilization':{'occupied_now':busy,'capacity':max(1,min(10,int(os.environ.get('ESCAPE_HW_CONCURRENCY','2')))) if os.environ.get('ESCAPE_HW_CONCURRENCY','2').isdigit() else None,'note':'Leases viser optagne workers; tidligere målinger findes kun, hvor de er registreret.'},'readiness_by_market':{k:{'signals':dict(v['signals']),'blockers':dict(v['blockers'])} for k,v in ready.items()},'market_sleep':{'sleeping_sessions':0,'next_wake':None,'reduced_polling_sessions':len(reduced),'next_checks':reduced[:60],'estimated_avoided_scans':sum(x['metrics'].get('quiet_avoided_estimate',0) for x in records if x['status'] in ('processed','degraded')) if records else None,'estimated_saved_api_units':None,'late_wakes_after_open':None,'note':'Intet instrument sættes helt i dvale uden verificeret Pluto-handelsadgang. Undgåede scanninger er et estimat fra nye logdata; API-enheder og forsinkede opvågninger er ikke målt.'},'push_detail':{'items':[{'ticker':k[0],'event_type':k[1],'reason':k[2],'status':k[3],'count':v} for k,v in push_detail.items()],'limited':len(push_rows)>=20000,'note':'Skipped omfatter flere årsager og er ikke et særskilt deduplikeringstal.'},'timeline':timeline,'recent':recent,'log_files_read':files_read,'log_earliest':records[-1]['at'] if records else None,'history_scope_truncated':len(history_sessions)>10000,'log_retention':'Roterende filer; perioderne kan være ufuldstændige. Udskudte indsamlinger tælles separat.','unavailable':'Eksterne processers CPU, hukommelse og fuld versionsidentitet er ikke registreret.'}
 
 def worker_settings():
  keys=('ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE','ESCAPE_HW_REQUESTS_PER_MINUTE','ESCAPE_HW_EODHD_FAST_POLL_ENABLED','ESCAPE_HW_EODHD_MIN_POLL_S','ESCAPE_HW_EODHD_WS_TRADES_ENABLED','ESCAPE_HW_EODHD_FUSE_ENABLED','ESCAPE_HW_EODHD_BARS_ENABLED','ESCAPE_HW_EODHD_WS_EU_EXCHANGES','ESCAPE_HW_PARALLEL_SCANS','ESCAPE_HW_CONCURRENCY','ESCAPE_HW_CAPACITY')
@@ -1011,7 +1065,11 @@ class Runner:
    job=engine.claim(self.connect,now,watch_id,exclude_ids=excluded)
   claimed=engine.utc()
   if not job:return False
-  job['scan_timing']={'next_due_at':engine.datetime.fromtimestamp(job['next_due'],engine.timezone.utc).isoformat(),'claimed_at':claimed.isoformat(),'claim_ms':round((time.perf_counter()-claim_started)*1000,3),'queue_ms':max(0,round((claimed.timestamp()-job['next_due'])*1000,3))}
+  job['scan_timing']={'next_due_at':engine.datetime.fromtimestamp(job['next_due'],engine.timezone.utc).isoformat(),'claimed_at':claimed.isoformat(),'claim_ms':round((time.perf_counter()-claim_started)*1000,3),'queue_ms':max(0,round((claimed.timestamp()-job['next_due'])*1000,3)),'occupied_workers':job.get('diagnostic_occupied_workers'),'due_sessions':job.get('diagnostic_due_sessions')}
+  try:
+   prior_state=json.loads(job['state']);baseline=prior_state.get('quiet_baseline_s');scheduled=prior_state.get('scheduled_interval_s')
+   if prior_state.get('quiet_market_poll') is True and type(baseline) in (int,float) and baseline>0 and type(scheduled) in (int,float):job['scan_timing']['quiet_avoided_estimate']=max(0,int(scheduled//baseline)-1)
+  except (ValueError,TypeError,AttributeError):pass
   uid=job['user_id'];r=job['request_data'];wid=job['watch_id'];mode=bool(job['is_test']);lease=job['lease_owner'];adapter=None;sample=None;uses_realtime_history=False;pending_feed=False;scan_log=None;warmup_ms=0;warmup_deferred=False;stale_duplicate=False
   try:
    poll_started=time.perf_counter();job['scan_timing']['poll_started_at']=engine.utc().isoformat()
