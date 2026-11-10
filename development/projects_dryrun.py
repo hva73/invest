@@ -10,7 +10,7 @@ import urllib.error
 OWNER_ID = 351122234
 APP_ID = 1144995
 PREFIX = 'ESCAPE_PROJECTS_DRYRUN_V1 '
-QUERY = '''query($cursor:String){user(login:"hva73"){login projectV2(number:1){number closed
+QUERY = '''query($cursor:String){user(login:"hva73"){login projectV2(number:1){id number closed
  fields(first:100){pageInfo{hasNextPage} nodes{... on ProjectV2SingleSelectField{name options{name}}}}
  items(first:100,after:$cursor,archivedStates:[ARCHIVED,NOT_ARCHIVED]){pageInfo{hasNextPage endCursor} nodes{id isArchived
  content{... on Issue{number repository{nameWithOwner}}}
@@ -164,6 +164,7 @@ def main():
     verify_unedited(selected_second)
     print('DRY RUN: afsender, kort, statusoption og synlige dubletter kontrolleret.')
     print('Ingen status blev ændret. Replay mellem kørsler er IKKE beskyttet.')
+    return {'request': request, 'project_id': project.get('id'), 'item_id': matches[0]['id'], 'comment_id': int(raw_id), 'status': current}
 
 
 if __name__ == '__main__':
