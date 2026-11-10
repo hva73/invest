@@ -59,13 +59,13 @@ def post(token, request_id, outcome, run_id, simulated=False):
         raise AuditFailed('audit outcome uncertain') from None
 
 
-def report_job_failure(token, run_id, attempt):
+def report_job_failure(token, run_id, attempt, simulated=False):
     """Fail-safe workflow-level report when the writer job did not succeed."""
     if (not isinstance(token, str) or not token or not isinstance(run_id, str)
             or not re.fullmatch(r'[1-9][0-9]{0,19}', run_id) or not isinstance(attempt, str)
-            or not re.fullmatch(r'[1-9][0-9]{0,5}', attempt)):
+            or not re.fullmatch(r'[1-9][0-9]{0,5}', attempt) or not isinstance(simulated, bool)):
         raise AuditFailed('invalid workflow audit context')
-    marker = f'<!-- escape-project-status-job:{run_id}:{attempt} -->'
+    marker = f'<!-- escape-project-status-job:{"test:" if simulated else ""}{run_id}:{attempt} -->'
     headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json',
                'Content-Type': 'application/json', 'User-Agent': 'escape-projects-audit'}
     opener = urllib.request.build_opener(NoRedirect())
@@ -83,9 +83,13 @@ def report_job_failure(token, run_id, attempt):
                 break
         else:
             raise AuditFailed('incomplete issue comments')
-        body = (f'{marker}\n**Projects-workflow stoppet.** Udfaldet kan være usikkert. '
-                'Afstem tavle og journal før et nyt forsøg.\n\n'
-                f'[Se Actions-kørsel](https://github.com/hva73/invest/actions/runs/{run_id}/attempts/{attempt}).')
+        if simulated:
+            body = (f'{marker}\n**Projects audit-test: simuleret workflowfejl.** Ingen Projects-status er ændret.\n\n'
+                    f'[Se Actions-kørsel](https://github.com/hva73/invest/actions/runs/{run_id}/attempts/{attempt}).')
+        else:
+            body = (f'{marker}\n**Projects-workflow stoppet.** Udfaldet kan være usikkert. '
+                    'Afstem tavle og journal før et nyt forsøg.\n\n'
+                    f'[Se Actions-kørsel](https://github.com/hva73/invest/actions/runs/{run_id}/attempts/{attempt}).')
         req = urllib.request.Request(URL, method='POST', data=json.dumps({'body': body}).encode(), headers=headers)
         with opener.open(req, timeout=15) as response:
             if response.status != 201:
