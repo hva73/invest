@@ -13,7 +13,7 @@ spec.loader.exec_module(dry)
 
 def comment(identifier=1, author=351122234, edited=False, request_id='a' * 32, expected='In progress', desired='Backlog'):
     import json
-    return {'id': identifier, 'user': {'id': author}, 'author_association': 'OWNER',
+    return {'id': identifier, 'user': {'id': author}, 'author_association': 'OWNER', 'performed_via_github_app': {'id': 1144995},
             'created_at': 'time', 'updated_at': 'changed' if edited else 'time',
             'body': dry.PREFIX + json.dumps({'request_id': request_id, 'expected_status': expected, 'desired_status': desired})}
 
@@ -27,6 +27,13 @@ class DryRun(unittest.TestCase):
             with self.subTest(rows=rows), self.assertRaises(dry.Blocked):
                 dry.validate_request(rows, 1, 'In progress', ['In progress', 'Backlog'])
 
+    def test_rejects_wrong_or_missing_github_app(self):
+        for app in ({'id': 1}, None):
+            row = comment()
+            row['performed_via_github_app'] = app
+            with self.subTest(app=app), self.assertRaises(dry.Blocked):
+                dry.validate_request([row], 1, 'In progress', ['In progress', 'Backlog'])
+
     def test_rejects_stale_invalid_and_same_status(self):
         for row, current, options in [(comment(), 'Review', ['In progress', 'Backlog', 'Review']), (comment(), 'In progress', ['In progress']), (comment(desired='In progress'), 'In progress', ['In progress'])]:
             with self.subTest(row=row), self.assertRaises(dry.Blocked):
@@ -37,7 +44,7 @@ class DryRun(unittest.TestCase):
         self.assertIsNone(dry.parse_request(dry.PREFIX + '{"request_id":"' + 'a' * 32 + '","expected_status":"X","desired_status":"Y","extra":true}'))
 
     def test_full_flow_reads_and_never_writes(self):
-        issue = {'isArchived': False, 'content': {'number': 4, 'repository': {'nameWithOwner': 'hva73/invest'}}, 'fieldValueByName': {'name': 'In progress'}}
+        issue = {'id': 'PVTI_test', 'isArchived': False, 'content': {'number': 4, 'repository': {'nameWithOwner': 'hva73/invest'}}, 'fieldValueByName': {'name': 'In progress'}}
         project = {'number': 1, 'closed': False, 'fields': {'pageInfo': {'hasNextPage': False}, 'nodes': [{'name': 'Status', 'options': [{'name': 'In progress'}, {'name': 'Backlog'}]}]}, 'items': {'pageInfo': {'hasNextPage': False}, 'nodes': [issue]}}
         response = {'data': {'user': {'login': 'hva73', 'projectV2': project}}}
         opener = Mock()
