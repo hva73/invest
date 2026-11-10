@@ -263,7 +263,9 @@ class WatchdogTests(unittest.TestCase):
             env = supervisor.environment()
             self.assertEqual(env['ESCAPE_HW_EODHD_WS_TRADES_ENABLED'], '0')
             self.assertEqual(env['ESCAPE_HW_EODHD_REST_ENABLED'], '1')
-            self.assertEqual(env['ESCAPE_HW_EODHD_WS_EU_EXCHANGES'], 'CO')
+            self.assertEqual(env['ESCAPE_HW_EODHD_WS_EU_EXCHANGES'], 'CO,XETRA,AS')
+        with patch.dict(os.environ, {'ESCAPE_HW_EODHD_WS_EU_EXCHANGES': 'CO'}, clear=True):
+            self.assertEqual(supervisor.environment()['ESCAPE_HW_EODHD_WS_EU_EXCHANGES'], 'CO')
 
     def test_restart_timeout_is_reported(self):
         clock = iter([1, 4, 9, 18])

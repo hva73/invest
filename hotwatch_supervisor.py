@@ -52,7 +52,7 @@ def start_if_enabled():
 
 def environment():
     env = os.environ.copy()
-    for key, value in {'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1', 'ESCAPE_HW_EODHD_FUSE_ENABLED':'1', 'ESCAPE_HW_EODHD_BARS_ENABLED':'1', 'ESCAPE_HW_EODHD_WS_EU_EXCHANGES':'CO'}.items():
+    for key, value in {'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1', 'ESCAPE_HW_EODHD_FUSE_ENABLED':'1', 'ESCAPE_HW_EODHD_BARS_ENABLED':'1', 'ESCAPE_HW_EODHD_WS_EU_EXCHANGES':'CO,XETRA,AS'}.items():
         env.setdefault(key, value)
     if env.get('ESCAPE_EODHD_API_KEY'):
         env.setdefault('ESCAPE_HW_EODHD_REST_ENABLED', '1')

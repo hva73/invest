@@ -84,7 +84,7 @@ def effective_poll_interval(c,request,profile=None):
  limit=http_limit(c)
  ws=os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1'
  bars=os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1'
- eu={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}-{'CC'}
+ eu={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','CO,XETRA,AS').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}-{'CC'}
  rows=c.execute("SELECT s.is_test,s.request,p.symbol AS provisional_symbol FROM hw_sessions s LEFT JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND json_extract(s.request,'$.provider')='eodhd'").fetchall()
  histories=set();rest=set();calendars=set()
  for item in rows:
