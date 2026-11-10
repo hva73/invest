@@ -28,7 +28,7 @@ jobs:
       - name: Check out reviewed immutable revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 400166e16ed95dfde6a4a330280de74a6b70eb79
+          ref: 286f35ba0ccc71ff6e7db92ce43d0ce12a2f0887
           persist-credentials: false
       - name: Disabled status writer
         env:
