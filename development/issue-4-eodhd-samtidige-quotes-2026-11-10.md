@@ -82,6 +82,10 @@ I arbejdssporet er den hidtidige generiske fejldiagnose suppleret med faste kate
 
 Sammenligning af quote-tider bruger desuden faktiske tidspunkter, også når det samme tidspunkt er skrevet med `Z` eller `+00:00`. Samme quote i to formater giver ingen ny observation; forskellige quotes med samme faktiske kildetid bliver fortsat markeret tvetydige.
 
+Den fælles WebSocket-cache bevarer nu også to forskellige quotes med samme kildetid, når de kommer i **hver sin indsamling**. Ellers kunne en efterfølgende cacheopdatering fjerne beviset for tvetydigheden, inden adapteren skulle vælge en spread. Identiske gentagelser afgrænses, den oprindelige modtagelsestid bevares, og en dokumenteret nyere quote kan igen levere en spread. En samlet syntetisk test følger cache → adapter → motor og kontrollerer, at hverken en tvetydig spread eller en kunstig ny handel bruges til at tillade køb.
+
+Uafhængig kildekontrol ca. 21:19 UTC er dokumenteret i [ChatGPTs kommentar på Issue #4](https://github.com/hva73/invest/issues/4#issuecomment-6779560749). IBRX og ZETA havde samme observerede handelstid hos EODHD og motoren; for WIX blev ingen nyere handel end motorens påvist. Et kort eftermarkedsvindue beviser ikke fuld døgndækning, og en nyere quote er ikke en ny handel. Årsagen til det tidligere depotkontekstudfald forblev ukendt.
+
 ## Sammenlignelig kilde- og scanstatus ca. 21:14 UTC
 
 56 sessioner over seks sider. Kun de seneste 30 logposter pr. side var tilgængelige; event og sessionsstatus er ikke et atomisk snapshot. En seneste observeret kildetid beviser ikke, at andre handler ikke findes. N/A betyder, at loggen ikke indeholdt en relevant måling. Køtid er mellem planlagt tid og faktisk claim.

@@ -462,7 +462,19 @@ class EODHDAdapter:
       retained=[m for m in prior[1].get('messages',[]) if m.get('event_time') and 0<=(utc()-stamp(m['event_time'])).total_seconds()<=GLOBAL_RISK['max_quote_age_s']]
       if retained:
        latest=max(retained,key=lambda m:stamp(m['event_time']))
-       if not messages or stamp(latest['event_time'])>max(stamp(m['event_time']) for m in messages):messages=[latest]
+       prior_time=stamp(latest['event_time']);new_time=max((stamp(m['event_time']) for m in messages),default=None)
+       if not new_time or prior_time>new_time:
+        messages=[m for m in retained if stamp(m['event_time'])==prior_time] if feed.endswith('_quotes') else [latest]
+       elif feed.endswith('_quotes') and prior_time==new_time:
+        # Equal source times cannot order different quotes, even when they
+        # arrived in separate batches. Retain distinct quotes at that instant
+        # so poll() can reject an ambiguous spread; bound identical repeats.
+        candidates=[m for m in retained+messages if stamp(m['event_time'])==new_time];seen=set();messages=[]
+        for candidate in candidates:
+         try:quote=(Decimal(str(candidate.get('bid'))),Decimal(str(candidate.get('ask'))))
+         except (InvalidOperation,TypeError,ValueError):quote=(str(candidate.get('bid')),str(candidate.get('ask')))
+         if quote not in seen:messages.append(candidate);seen.add(quote)
+         if len(messages)==2:break
      partial=[m for m in result.get('partial_messages',[]) if m.get('symbol')==item]
      value={**result,'status':'OK' if messages else 'NO_MESSAGES','messages':messages,'message_count':len(messages),'partial_messages':partial,'captured_at':captured_at}
      _ws_batch_cache[(self.uid,credential,feed,item)]=(saved,copy.deepcopy(value))

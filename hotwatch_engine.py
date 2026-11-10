@@ -1422,4 +1422,3 @@ def system_kill(connect,enabled,reason,now=None):
     state=json.loads(row['state']);state.update(signal='PAUSE',pending=None,confirmations=0)
     c.execute("UPDATE hw_sessions SET status='PAUSED',state=?,updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?",(canonical(state),now.isoformat(),row['id']));event(c,row,'OPERATOR_KILL_SWITCH',now,reason,severity='critical')
  return {'ok':True,'killed':enabled,'auto_resumed':False}
-
