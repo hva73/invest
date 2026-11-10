@@ -20,6 +20,10 @@ class Response:
     def __enter__(self): return self
     def __exit__(self, *args): pass
 
+class History(io.BytesIO):
+    status = 200
+    def __init__(self, data=b'[]'): super().__init__(data)
+
 
 class ReplayClaim(unittest.TestCase):
     def test_same_id_maps_to_same_path_even_if_other_fields_change(self):
@@ -31,7 +35,7 @@ class ReplayClaim(unittest.TestCase):
         self.assertNotIn('PVTI_abc', payload.decode())
 
     def test_success_uses_create_only_and_binds_fields(self):
-        opener = Mock(); opener.open.return_value = Response()
+        opener = Mock(); opener.open.side_effect = [History(), Response()]
         with patch('urllib.request.build_opener', return_value=opener):
             self.assertEqual(claim.claim('fake-secret', *ARGS), 'CLAIMED')
         request = opener.open.call_args.args[0]
@@ -55,9 +59,17 @@ class ReplayClaim(unittest.TestCase):
                 claim.claim('fake-secret', *args)
         opener.open.assert_not_called()
 
+    def test_historical_or_invalid_journal_blocks_before_create(self):
+        for data in (b'[{"sha":"abc"}]', b'{}', b'not json'):
+            opener = Mock(); opener.open.return_value = History(data)
+            with self.subTest(data=data), patch('urllib.request.build_opener', return_value=opener), self.assertRaises(claim.ClaimBlocked):
+                claim.claim('fake-secret', *ARGS)
+            self.assertEqual(opener.open.call_count, 1)
+
     def test_simulated_atomic_create_allows_only_one_claim(self):
         lock = threading.Lock(); paths = set()
         def fake_open(request, timeout):
+            if request.get_method() == 'GET': return History()
             with lock:
                 if request.full_url in paths:
                     raise HTTPError(request.full_url, 409, '', {}, io.BytesIO())
