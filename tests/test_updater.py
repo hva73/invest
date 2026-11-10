@@ -60,6 +60,24 @@ print('INSTALLED_RELEASE_HEALTH_PASS')
    self.assertTrue((target/'var/hotwatch-autostart.enabled').is_file())
    for path in [target/'var/escape.db',backup/'escape.db']:
     with sqlite3.connect(path) as c:self.assertEqual(c.execute('SELECT value FROM preserved').fetchone()[0],'private-data')
+ def test_backup_restore_after_simulated_migration(self):
+  # Only temporary files: demonstrate the existing updater's backup can be
+  # independently read and restored after a synthetic schema/data change.
+  with tempfile.TemporaryDirectory() as d:
+   source,target=self.fixture(Path(d));backup=apply_update.apply(source,target)
+   database=target/'var/escape.db'
+   with sqlite3.connect(database) as connection:
+    connection.execute('ALTER TABLE preserved ADD COLUMN migration_marker TEXT')
+    connection.execute("UPDATE preserved SET value='changed'")
+   restored=Path(d)/'isolated-restore';restored.mkdir()
+   with sqlite3.connect('file:'+str(backup/'escape.db')+'?mode=ro',uri=True) as snapshot,sqlite3.connect(restored/'escape.db') as destination:
+    snapshot.backup(destination)
+    self.assertEqual(destination.execute('PRAGMA integrity_check').fetchone()[0],'ok')
+    self.assertEqual(destination.execute('SELECT value FROM preserved').fetchone()[0],'private-data')
+    self.assertEqual([row[1] for row in destination.execute('PRAGMA table_info(preserved)')],['value'])
+   shutil.copy2(backup/'code/app.py',restored/'app.py')
+   self.assertEqual((restored/'app.py').read_text(),'old code')
+   with sqlite3.connect(database) as connection:self.assertEqual(connection.execute('SELECT value FROM preserved').fetchone()[0],'changed')
  def test_notification_key_is_backed_up_without_replacement(self):
   with tempfile.TemporaryDirectory() as d:
    source,target=self.fixture(Path(d));key=target/'var/keys/push_vapid.pem';key.parent.mkdir(parents=True);key.write_bytes(b'private-test-key')

@@ -44,7 +44,7 @@ def _database(path,now):
    for state,count in connection.execute('SELECT status,COUNT(*) FROM hw_sessions WHERE is_test=0 GROUP BY status'):
     counts[state if state in STATES else 'OTHER']+=int(count)
    result['session_counts']=dict(counts)
-   result['due_count']=connection.execute("SELECT COUNT(*) FROM hw_sessions WHERE is_test=0 AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND next_due<=?",(now.timestamp(),)).fetchone()[0]
+   result['due_count']=connection.execute("SELECT COUNT(*) FROM hw_sessions WHERE is_test=0 AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND next_due<=? AND lease_until<=?",(now.timestamp(),now.timestamp())).fetchone()[0]
   except sqlite3.Error:result['session_counts']=None;result['due_count']=None
   return result
  except sqlite3.Error:return {'status':'unavailable','reason':'database_read_failed'}
