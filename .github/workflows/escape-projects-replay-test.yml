@@ -1,0 +1,40 @@
+name: ESCAPE Projects isolated replay test
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+concurrency:
+  group: escape-projects-isolated-item-4-test
+  cancel-in-progress: false
+
+jobs:
+  test-replay:
+    if: >-
+      github.repository == 'hva73/invest' &&
+      github.actor_id == '351122234' &&
+      github.event.issue.number == 4 &&
+      github.event.issue.pull_request == null &&
+      startsWith(github.event.comment.body, 'ESCAPE_PROJECTS_DRYRUN_V1 ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Check out reviewed test code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 0c679bedbd5a1ccbf07f0da997107a43eb585d99
+          persist-credentials: false
+      - name: Test validation and replay without Projects writes
+        env:
+          ESCAPE_PROJECTS_TOKEN: ${{ secrets.ESCAPE_PROJECTS_TOKEN }}
+          JOURNAL_TOKEN: ${{ github.token }}
+          REQUEST_COMMENT_ID: ${{ github.event.comment.id }}
+          GITHUB_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        shell: bash
+        run: |
+          set +x
+          python3 development/projects_replay_actions_test.py
