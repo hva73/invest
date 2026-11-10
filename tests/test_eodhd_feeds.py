@@ -262,6 +262,20 @@ class FeedTests(unittest.TestCase):
     with patch('hotwatch_adapters.PlutoAdapter.context',return_value=tick(at)['context']),patch('hotwatch_adapters.utc',return_value=at):samples.append(adapter.poll({'request_data':req}))
   self.assertEqual([s['session_key'] for s in samples],['2026-11-06:AFTER','2026-11-06:AFTER'])
   self.assertEqual(features(samples,BASELINE['parameters'])['sample_count'],2)
+ def test_afterhours_bars_use_only_the_verified_extended_session(self):
+  from test_hotwatch_engine import request,tick
+  from hotwatch_features import verified_bar_samples
+  from hotwatch_engine import sample_errors
+  req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime(2026,11,6,22,0,tzinfo=timezone.utc);adapter=EODHDAdapter(None,1,Opener({}))
+  class Feeds:
+   def capture(self,feed,*args,**kwargs):
+    if feed.endswith('trades'):return {'status':'OK','messages':[{'event_time':now.isoformat(),'price':'100','market_session':'extended-hours'}]}
+    return {'status':'NO_MESSAGES','messages':[]}
+   def market_status(self,exchange):return {'status':'OK','exchange_open':False,'timezone':'America/New_York','received_at':now.isoformat(),'calendar':{'open':'09:30:00','close':'16:00:00','working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[]}}
+   def minute_bars(self,*args):return {'status':'OK','bars':[{'bar_open_at':at.isoformat(),'open':'100','high':'101','low':'99','close':'100','volume':'10'} for at in (now-timedelta(minutes=62),now-timedelta(minutes=2),now-timedelta(minutes=1))]}
+  env={'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_BARS_ENABLED':'1'}
+  with patch.dict(os.environ,env),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=tick(now)['context']),patch('hotwatch_adapters.utc',return_value=now):sample=adapter.poll({'request_data':req})
+  sample_errors(sample,req,now);self.assertEqual(sample['market_status'],'AFTER');self.assertEqual(len(sample['bar_history']),2);self.assertEqual(len(verified_bar_samples(sample,req,now)),2)
  def test_extended_trade_does_not_override_unclear_instrument_status(self):
   from test_hotwatch_engine import request,tick
   req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime(2026,11,6,22,0,tzinfo=timezone.utc)

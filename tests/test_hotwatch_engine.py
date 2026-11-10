@@ -530,6 +530,25 @@ class HotWatch(unittest.TestCase):
   self.assertEqual(view['data_status']['partial_quote']['source_time'],self.now.isoformat())
   with patch('hotwatch_engine.utc',return_value=self.now+timedelta(hours=1)):old=engine.item(app.connect,1,req['watch_id'],True)['session']
   self.assertNotIn('partial_quote',old['data_status']);self.assertEqual(old['signal'],'NO_DATA')
+ def test_fresh_quote_attached_to_an_old_trade_remains_visible_only_as_quote(self):
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  req=copy.deepcopy(self.req);req.update(watch_id='old-trade-fresh-quote',purpose='quote evidence',provider='eodhd',provider_symbol='MERC.US');engine.create(app.connect,1,req,self.now)
+  observed=tick(self.now-timedelta(seconds=130));observed.update(source='eodhd',price_time_kind='trade',market_status='AFTER',status_at=self.now.isoformat(),quote_feed='us_quotes',bid='12.30',ask='12.40',bid_at=self.now.isoformat(),ask_at=self.now.isoformat())
+  with app.connect() as c:
+   row=c.execute('SELECT id FROM hw_sessions WHERE watch_id=?',(req['watch_id'],)).fetchone()
+   c.execute('INSERT INTO hw_samples(watch_row_id,source,sample_id,event_epoch,received,payload,digest) VALUES(?,?,?,?,?,?,?)',(row['id'],'eodhd','old-trade',(self.now-timedelta(seconds=130)).timestamp(),self.now.isoformat(),json.dumps(observed),'x'))
+   c.execute("UPDATE hw_sessions SET status='DEGRADED',last_data=? WHERE id=?",(observed['event_time'],row['id']))
+  with patch('hotwatch_engine.utc',return_value=self.now):view=engine.item(app.connect,1,req['watch_id'],True)['session']
+  self.assertEqual(view['signal'],'NO_DATA');self.assertEqual(view['data_status']['partial_quote']['bid'],'12.30')
+  self.assertEqual(view['data_status']['partial_quote']['source_time'],self.now.isoformat())
+  self.assertEqual(view['data_status']['quote_status'],'FRESH');self.assertEqual(view['data_status']['price_status'],'STALE');self.assertTrue(view['data_stale'])
+  self.assertEqual(view['display_status'],'EFTERMARKED AKTIVT · SIGNAL AFVENTER')
+  invalid=dict(observed,ask_at=(self.now+timedelta(seconds=1)).isoformat())
+  with app.connect() as c:c.execute('UPDATE hw_samples SET payload=? WHERE watch_row_id=?',(json.dumps(invalid),row['id']))
+  with patch('hotwatch_engine.utc',return_value=self.now):invalid_view=engine.item(app.connect,1,req['watch_id'],True)['session']
+  self.assertNotIn('partial_quote',invalid_view['data_status']);self.assertNotEqual(invalid_view['data_status']['quote_status'],'FRESH');self.assertEqual(invalid_view['signal'],'NO_DATA');self.assertTrue(invalid_view['data_stale'])
+  with patch('hotwatch_engine.utc',return_value=self.now+timedelta(minutes=3)):view=engine.item(app.connect,1,req['watch_id'],True)['session']
+  self.assertNotIn('partial_quote',view['data_status']);self.assertEqual(view['signal'],'NO_DATA')
  def test_pluto_adapter_preserves_untimed_price_as_unverified_observation(self):
   req=copy.deepcopy(self.req);req.update(provider='pluto')
   quote={'asset_id':req['asset_id'],'ticker':req['ticker'],'currency':'USD','price':'12.34','price_time':None,'fetched_at':self.now.isoformat()}
@@ -1099,6 +1118,19 @@ class HotWatch(unittest.TestCase):
    self.assertEqual(after['last_error'],'sample_id_conflict')
    self.assertEqual((after['last_data'],after['last_calculation']),(before['last_data'],before['last_calculation']))
    self.assertEqual(c.execute('SELECT count(*) FROM hw_samples').fetchone()[0],count)
+ def test_deferred_conflict_retry_accepts_only_a_new_valid_observation(self):
+  wid=self.req['watch_id'];original=tick(self.now);self.put(original)
+  conflict=copy.deepcopy(original);conflict['volume']='101'
+  with self.assertRaisesRegex(EngineError,'sample_id_conflict'):self.put(conflict)
+  engine.fault(app.connect,1,wid,True,'sample_id_conflict',self.now)
+  with app.connect() as c:c.execute('UPDATE hw_sessions SET next_due=? WHERE watch_id=?',((self.now+timedelta(minutes=30)).timestamp(),wid))
+  with patch('intel_workflows.candidate_currentness',return_value={'status':'CURRENT'}):engine.reconcile_candidates(app.connect,self.now)
+  later=self.now+timedelta(seconds=1);new=tick(later,1,price='101');result=self.put(new,later)
+  self.assertFalse(result['duplicate']);self.assertEqual(result['session']['watch_id'],wid)
+  with app.connect() as c:
+   rows=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=(SELECT id FROM hw_sessions WHERE watch_id=?) ORDER BY id',(wid,)).fetchall()
+   self.assertEqual([json.loads(x['payload'])['volume'] for x in rows],['100','100'])
+   self.assertIsNone(c.execute('SELECT last_error FROM hw_sessions WHERE watch_id=?',(wid,)).fetchone()['last_error'])
  def test_conflict_backoff_does_not_interrupt_an_active_lease(self):
   wid=self.req['watch_id']
   with app.connect() as c:c.execute("UPDATE hw_sessions SET status='DEGRADED',last_error='sample_id_conflict',next_due=?,lease_owner='synthetic',lease_until=? WHERE watch_id=?",((self.now+timedelta(minutes=30)).timestamp(),(self.now+timedelta(minutes=1)).timestamp(),wid))

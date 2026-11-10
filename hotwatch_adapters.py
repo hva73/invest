@@ -535,11 +535,11 @@ class EODHDAdapter:
         from zoneinfo import ZoneInfo
         local_day=at.astimezone(ZoneInfo(schedule['timezone'])).date().isoformat()
         sample.update(market_status=phase,session_key=local_day+':'+phase,status_at=trade['event_time'],status_feed=market+'_trades')
-      if sample['market_status']=='REGULAR' and os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1':
+      if sample['market_status'] in ('REGULAR','PRE','AFTER') and os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1':
        schedule=client.market_status(exchange);self.last_feed_diagnostics['exchange_status']=schedule['status']
        if schedule['status']=='LOCAL_BUDGET_EXHAUSTED':return sample
        if schedule['status']=='RATE_LIMIT':return sample
-       if schedule.get('status')=='OK' and schedule.get('exchange_open') is True and schedule.get('calendar') and schedule.get('timezone'):
+       if schedule.get('status')=='OK' and schedule.get('exchange_open') is (sample['market_status']=='REGULAR') and schedule.get('calendar') and schedule.get('timezone'):
         bars=client.minute_bars(market,stream_symbol);self.last_feed_diagnostics['minute_bars_status']=bars['status']
         if bars['status']=='LOCAL_BUDGET_EXHAUSTED':return sample
         if bars['status']=='RATE_LIMIT':return sample
@@ -551,9 +551,10 @@ class EODHDAdapter:
           same_session=[]
           for bar in bars.get('bars',[]):
            opened=stamp(bar['bar_open_at']);closed=opened+timedelta(seconds=60);lo=opened.astimezone(zone);lc=closed.astimezone(zone)
-           if lo.date()==local.date()==lc.date() and start<=lo.time()<end and lc.time()<=end and closed<=at:
+           phase=sample['market_status'];in_phase=lambda t:(start<=t<end) if phase=='REGULAR' else (t<start if phase=='PRE' else t>=end)
+           if lo.date()==local.date()==lc.date() and in_phase(lo.time()) and in_phase((closed-timedelta(microseconds=1)).astimezone(zone).time()) and closed<=at:
             same_session.append({k:bar[k] for k in ('bar_open_at','open','high','low','close','volume')})
-          evidence={'provider_symbol':symbol,'market':market,'exchange':exchange,'timezone':schedule['timezone'],'session_date':local.date().isoformat(),'open':calendar['open'],'close':calendar['close'],'working_days':calendar['working_days'],'excluded_dates':calendar['excluded_dates'],'schedule_received_at':schedule['received_at'],'exchange_open':True,'feed':'eodhd_realtime_history'}
+          evidence={'provider_symbol':symbol,'market':market,'exchange':exchange,'timezone':schedule['timezone'],'session_date':local.date().isoformat(),'open':calendar['open'],'close':calendar['close'],'working_days':calendar['working_days'],'excluded_dates':calendar['excluded_dates'],'schedule_received_at':schedule['received_at'],'exchange_open':schedule['exchange_open'],'feed':'eodhd_realtime_history'}
           if same_session:
            sample.update(bar_history=same_session[-120:],bar_evidence=evidence)
            if verified_bar_samples(sample,r,utc()) is None:self.last_feed_diagnostics['bar_history_status']='EVIDENCE_UNVERIFIED'

@@ -610,13 +610,27 @@ def view(c,row,now=None):
  # A fresh quote is useful even if there is no fresh trade. It remains a
  # separately timestamped observation and never changes risk or signal state.
  if effective=='NO_DATA' and request.get('provider')=='eodhd' and (row['is_test'] or instrument_match_verified):
+  # A quote attached to an earlier trade can itself still be fresh after the
+  # trade or another mandatory input has expired. Preserve both source times.
+  try:
+   if latest_payload and (row['is_test'] or quote_feed_verified) and latest_payload.get('source')=='eodhd' and latest_payload.get('currency')==request.get('quote_currency') and latest_payload.get('quote_feed') and latest_payload.get('bid') is not None and latest_payload.get('ask') is not None and Decimal(latest_payload['bid'])>0 and Decimal(latest_payload['ask'])>=Decimal(latest_payload['bid']) and all(0<=(now-stamp(latest_payload[k])).total_seconds()<=request['risk']['max_quote_age_s'] for k in ('bid_at','ask_at')):
+    data_status['partial_quote']={'bid':latest_payload['bid'],'ask':latest_payload['ask'],'currency':latest_payload['currency'],'source_time':min((latest_payload['bid_at'],latest_payload['ask_at']),key=stamp),'received_at':sample['received'],'source':'eodhd'}
+  except (ValueError,TypeError,KeyError,ArithmeticError):pass
   partials=c.execute("SELECT created,payload FROM hw_events WHERE watch_row_id=? AND event_type='PARTIAL_MARKET_OBSERVATION' ORDER BY id DESC LIMIT 10",(row['id'],)).fetchall()
   for partial in partials:
    try:
     item=json.loads(partial['payload'])['supporting_metrics']
     if item.get('quality') in ('TRADE_MISSING','QUOTE_ONLY') and item.get('source')=='eodhd' and item.get('currency')==request.get('quote_currency') and item.get('bid') is not None and item.get('ask') is not None and Decimal(item['bid'])>0 and Decimal(item['ask'])>=Decimal(item['bid']) and 0<=(now-stamp(item['source_time'])).total_seconds()<=request['risk']['max_quote_age_s'] and (row['is_test'] or link and stamp(partial['created']).timestamp()>=link['verified_epoch']):
-     data_status['partial_quote']={k:item.get(k) for k in ('bid','ask','currency','source_time','received_at','source')};break
+     prior=data_status.get('partial_quote')
+     if not prior or stamp(item['source_time'])>stamp(prior['source_time']):data_status['partial_quote']={k:item.get(k) for k in ('bid','ask','currency','source_time','received_at','source')}
+     break
    except (ValueError,TypeError,KeyError,ArithmeticError):continue
+  if data_status.get('partial_quote'):
+   # Quote freshness is independent of the last trade's age and cannot make
+   # that trade, its signal, or its market-status evidence fresh.
+   data_status['quote_status']='FRESH'
+   if display_status in ('MARKED LUKKET (ORDINÆR HANDEL)','DATA MANGLER','DATA FOR GAMLE','AFVENTER SIGNALDATA'):
+    display_status='EFTERMARKED AKTIVT · SIGNAL AFVENTER' if data_status['market_status']=='AFTERHOURS' else 'BID/ASK MODTAGET · SIGNAL AFVENTER'
  import hotwatch_warmup
  data_status['analysis_warmup']=hotwatch_warmup.status(c,row,request,now)
  import hotwatch_buy_plan

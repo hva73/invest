@@ -41,6 +41,17 @@ class BarEvidenceTests(unittest.TestCase):
   self.assertIsNotNone(metrics['macd_histogram'])
   # The absent minute stays absent; period indicators retain observed bars.
   self.assertIsNone(metrics['return_3_pct']);self.assertIsNotNone(metrics['return_1_pct'])
+ def test_extended_bars_require_same_session_and_verified_trade_phase(self):
+  for phase,at in [('PRE',datetime(2026,11,4,13,0,tzinfo=timezone.utc)),('AFTER',datetime(2026,11,4,22,0,tzinfo=timezone.utc))]:
+   with self.subTest(phase=phase):
+    sample=copy.deepcopy(self.sample);sample.update(event_time=at.isoformat(),market_status=phase,session_key='2026-11-04:'+phase,status_at=at.isoformat(),status_feed='us_trades',bid_at=at.isoformat(),ask_at=at.isoformat());sample['context']['as_of']=at.isoformat()
+    sample['bar_evidence'].update(exchange_open=False,schedule_received_at=at.isoformat())
+    sample['bar_history']=[dict(b,bar_open_at=(at-timedelta(minutes=35-i)).isoformat()) for i,b in enumerate(sample['bar_history'])]
+    sample_errors(sample,self.req,at);self.assertEqual(len(verified_bar_samples(sample,self.req,at)),35)
+    for field,value in [('status_feed','us_status'),('status_at',(at-timedelta(seconds=1)).isoformat())]:
+     invalid=copy.deepcopy(sample);invalid[field]=value;self.assertIsNone(verified_bar_samples(invalid,self.req,at))
+    invalid=copy.deepcopy(sample);invalid['bar_history'][0]['bar_open_at']=datetime(2026,11,4,15,0,tzinfo=timezone.utc).isoformat()
+    self.assertIsNone(verified_bar_samples(invalid,self.req,at))
  def test_invalid_ohlc_is_not_eligible_for_features(self):
   sample=copy.deepcopy(self.sample);sample['bar_history'][-1]['high']='1'
   sample_errors(sample,self.req,self.now)
