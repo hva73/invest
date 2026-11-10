@@ -46,37 +46,40 @@ def apply(source,target):
         if destination.is_symlink() or target not in destination.resolve().parents:raise ValueError('Uventet destination')
     backup_root=target.parent/'.escape_backups';backup_root.mkdir(mode=0o700,exist_ok=True);os.chmod(backup_root,0o700)
     backup=Path(tempfile.mkdtemp(prefix=datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-'),dir=backup_root));os.chmod(backup,0o700)
-    with sqlite3.connect(f'file:{database}?mode=ro',uri=True) as original,sqlite3.connect(backup/'escape.db') as copy:
-        original.backup(copy)
-        if copy.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RuntimeError('Databasebackup kunne ikke valideres')
-    os.chmod(backup/'escape.db',0o600)
-    key=target/'var/keys/token.key'
-    if key.exists():
-        if key.is_symlink():raise ValueError('Uventet nøglesti')
-        shutil.copyfile(key,backup/'token.key');os.chmod(backup/'token.key',0o600)
-    push_key=target/'var/keys/push_vapid.pem'
-    if push_key.exists():
-        if push_key.is_symlink():raise ValueError('Uventet notifikationsnøgle')
-        shutil.copyfile(push_key,backup/'push_vapid.pem');os.chmod(backup/'push_vapid.pem',0o600)
-    existed=[]
-    for name in FILES:
-        destination=target/name
-        if destination.exists():
-            saved=backup/'code'/name;saved.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(destination,saved);existed.append(name)
-    # Stage everything before replacing the first code file.
-    with quiesce_hotwatch(target), tempfile.TemporaryDirectory(prefix='.update-stage-',dir=target) as stage:
-        stage=Path(stage)
+    # Keep both motor locks across snapshot and code replacement. The caller
+    # must separately stop and verify Passenger before calling this function.
+    with quiesce_hotwatch(target):
+        with sqlite3.connect(f'file:{database}?mode=ro',uri=True) as original,sqlite3.connect(backup/'escape.db') as copy:
+            original.backup(copy)
+            if copy.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RuntimeError('Databasebackup kunne ikke valideres')
+        os.chmod(backup/'escape.db',0o600)
+        key=target/'var/keys/token.key'
+        if key.exists():
+            if key.is_symlink():raise ValueError('Uventet nøglesti')
+            shutil.copyfile(key,backup/'token.key');os.chmod(backup/'token.key',0o600)
+        push_key=target/'var/keys/push_vapid.pem'
+        if push_key.exists():
+            if push_key.is_symlink():raise ValueError('Uventet notifikationsnøgle')
+            shutil.copyfile(push_key,backup/'push_vapid.pem');os.chmod(backup/'push_vapid.pem',0o600)
+        existed=[]
         for name in FILES:
-            file=stage/name;file.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source/name,file);os.chmod(file,0o644)
-        replaced=[]
-        try:
+            destination=target/name
+            if destination.exists():
+                saved=backup/'code'/name;saved.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(destination,saved);existed.append(name)
+        # Stage everything before replacing the first code file.
+        with tempfile.TemporaryDirectory(prefix='.update-stage-',dir=target) as stage:
+            stage=Path(stage)
             for name in FILES:
-                destination=target/name;destination.parent.mkdir(parents=True,exist_ok=True);os.replace(stage/name,destination);replaced.append(name)
-        except Exception:
-            for name in reversed(replaced):
-                if name in existed:shutil.copy2(backup/'code'/name,target/name)
-                else:(target/name).unlink(missing_ok=True)
-            raise
+                file=stage/name;file.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source/name,file);os.chmod(file,0o644)
+            replaced=[]
+            try:
+                for name in FILES:
+                    destination=target/name;destination.parent.mkdir(parents=True,exist_ok=True);os.replace(stage/name,destination);replaced.append(name)
+            except Exception:
+                for name in reversed(replaced):
+                    if name in existed:shutil.copy2(backup/'code'/name,target/name)
+                    else:(target/name).unlink(missing_ok=True)
+                raise
     disabled=target/'var/hotwatch-autostart.disabled'
     enabled=target/'var/hotwatch-autostart.enabled'
     if not disabled.exists():

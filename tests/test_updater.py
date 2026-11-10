@@ -60,6 +60,21 @@ print('INSTALLED_RELEASE_HEALTH_PASS')
    self.assertTrue((target/'var/hotwatch-autostart.enabled').is_file())
    for path in [target/'var/escape.db',backup/'escape.db']:
     with sqlite3.connect(path) as c:self.assertEqual(c.execute('SELECT value FROM preserved').fetchone()[0],'private-data')
+ def test_database_snapshot_occurs_with_worker_and_supervisor_quiesced(self):
+  with tempfile.TemporaryDirectory() as d:
+   source,target=self.fixture(Path(d));real_connect=sqlite3.connect;observations=[]
+   def verify_lock_on_snapshot(database,*args,**kwargs):
+    if str(database).endswith('?mode=ro'):
+     for name in ('supervisor','worker'):
+      fd=os.open(target/'var'/('hotwatch-'+name+'.lock'),os.O_RDWR)
+      try:
+       try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+       except BlockingIOError:observations.append(name)
+       else:fcntl.flock(fd,fcntl.LOCK_UN)
+      finally:os.close(fd)
+    return real_connect(database,*args,**kwargs)
+   with patch('apply_update.sqlite3.connect',side_effect=verify_lock_on_snapshot):apply_update.apply(source,target)
+   self.assertEqual(observations,['supervisor','worker'])
  def test_backup_restore_after_simulated_migration(self):
   # Only temporary files: demonstrate the existing updater's backup can be
   # independently read and restored after a synthetic schema/data change.
