@@ -38,3 +38,28 @@ jobs:
         run: |
           set +x
           python3 development/projects_replay_actions_test.py
+
+  report-dry-run:
+    needs: test-replay
+    if: >-
+      always() &&
+      needs.test-replay.result != 'skipped' &&
+      github.repository == 'hva73/invest' &&
+      github.actor_id == '351122234' &&
+      github.event.issue.number == 4
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out reviewed feedback code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: c1aa1038d6aafce31a1f8a91978a9adabb57904a
+          persist-credentials: false
+      - name: Document result on the issue
+        env:
+          FEEDBACK_TOKEN: ${{ github.token }}
+          DRYRUN_RESULT: ${{ needs.test-replay.result }}
+        run: python3 development/projects_dryrun_feedback.py
