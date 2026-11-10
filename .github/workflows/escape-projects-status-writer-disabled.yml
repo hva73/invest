@@ -37,7 +37,7 @@ jobs:
       - name: Check out reviewed immutable revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 2d36d808f3881d7a68f98ed28eabe9f8694880fc
+          ref: d92a1243a479880ba5c47d575e85a0e1b9ac0f92
           persist-credentials: false
       - name: Disabled status writer
         env:
@@ -47,3 +47,25 @@ jobs:
           REQUEST_COMMENT_ID: ${{ github.event_name == 'issue_comment' && github.event.comment.id || inputs.comment_id }}
           GITHUB_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
         run: python3 development/projects_status_write_entry.py
+
+  report-failed-writer:
+    needs: disabled-write
+    if: >-
+      always() &&
+      (needs.disabled-write.result == 'failure' ||
+       needs.disabled-write.result == 'cancelled')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out reviewed failure reporter
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: d92a1243a479880ba5c47d575e85a0e1b9ac0f92
+          persist-credentials: false
+      - name: Report uncertain workflow result
+        env:
+          ISSUE_TOKEN: ${{ github.token }}
+        run: python3 development/projects_status_write_failure_report.py
