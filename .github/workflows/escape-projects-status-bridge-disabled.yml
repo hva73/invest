@@ -1,4 +1,4 @@
-name: ESCAPE Projects status bridge (disabled)
+name: ESCAPE Projects status bridge
 
 on:
   issue_comment:
@@ -13,9 +13,7 @@ concurrency:
 
 jobs:
   status-write:
-    # Explicitly disabled until owner-approved activation and successful review.
     if: >-
-      false &&
       github.repository == 'hva73/invest' &&
       github.actor_id == '351122234' &&
       github.ref == 'refs/heads/codex/escape-development' &&
@@ -33,7 +31,7 @@ jobs:
       - name: Check out reviewed status bridge
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: d3f9d97a4cf0e9f4772a98687c5f4fbc1fa26f4b
+          ref: 0fbf24b4d87db08b660a803271cacab2335240f8
           persist-credentials: false
       - name: Process project status request
         env:
@@ -60,7 +58,7 @@ jobs:
       - name: Check out reviewed failure reporter
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: d3f9d97a4cf0e9f4772a98687c5f4fbc1fa26f4b
+          ref: 0fbf24b4d87db08b660a803271cacab2335240f8
           persist-credentials: false
       - name: Report uncertain result
         env:
