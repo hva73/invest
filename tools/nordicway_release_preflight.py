@@ -47,11 +47,12 @@ def inspect(checkout,target,sha):
     node=node/part
     if node.is_symlink():raise ValueError('manifest_symlink')
    if not node.is_file() or not node.resolve().is_relative_to(root):raise ValueError('manifest_missing_file')
+   if node.stat().st_size>50_000_000 or total+node.stat().st_size>250_000_000:raise ValueError('manifest_too_large')
    data=node.read_bytes()
    if data!=_git_blob(checkout,sha,name):raise ValueError('manifest_file_mismatch')
    total+=len(data);digest.update(name.encode()+b'\0'+hashlib.sha256(data).digest())
-  db=target/'var/escape.db'
-  if db.is_symlink() or not db.is_file():raise ValueError('database_unavailable')
+  var=target/'var';db=var/'escape.db'
+  if var.is_symlink() or db.is_symlink() or not db.is_file() or not db.resolve().is_relative_to(target.resolve()):raise ValueError('database_unavailable')
   fs=os.statvfs(target);free=fs.f_bavail*fs.f_frsize
   return {'status':'blocked','requested_sha':sha,'manifest_files':len(names),'manifest_sha256':digest.hexdigest(),'source_bytes':total,'database_bytes':db.stat().st_size,'filesystem_free_bytes':free,'account_quota':'unknown','blockers':['owner_approval_not_confirmed','account_quota_unknown','passenger_quiesce_unverified','restore_and_restart_unverified']}
  except (OSError,ValueError,TypeError,SyntaxError,subprocess.SubprocessError) as error:

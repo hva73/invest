@@ -20,7 +20,7 @@ def _age(value,now):
 def _database(path,now):
  # SQLite's WAL shared memory may require filesystem writes on opening. Skip
  # WAL databases until a separately verified safe snapshot is available.
- if path.is_symlink() or not path.is_file():return {'status':'unavailable','reason':'database_missing_or_unsafe'}
+ if path.parent.is_symlink() or path.is_symlink() or not path.is_file():return {'status':'unavailable','reason':'database_missing_or_unsafe'}
  if any(Path(str(path)+suffix).exists() for suffix in ('-wal','-journal')):return {'status':'unavailable','reason':'database_journal_present'}
  try:
   with path.open('rb') as f:header=f.read(20)

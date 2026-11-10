@@ -31,4 +31,7 @@ class Preflight(unittest.TestCase):
   (self.checkout/'apply_update.py').write_text("FILES=('app.py','BUILD_COMMIT')\n");(self.checkout/'app.py').unlink();(self.checkout/'app.py').symlink_to(self.root/'outside')
   self.git('add','.');self.git('commit','-qm','symlink');sha=self.git('rev-parse','HEAD').strip()
   self.assertEqual(preflight.inspect(self.checkout,self.target,sha)['reason'],'manifest_symlink')
+ def test_database_directory_symlink_is_rejected(self):
+  outside=self.root/'outside';outside.mkdir();(self.target/'var/escape.db').rename(outside/'escape.db');(self.target/'var').rmdir();(self.target/'var').symlink_to(outside,target_is_directory=True)
+  self.assertEqual(preflight.inspect(self.checkout,self.target,self.sha)['reason'],'database_unavailable')
 if __name__=='__main__':unittest.main()
