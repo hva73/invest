@@ -363,7 +363,10 @@ class EODHDAdapter:
    # Share fresh observations for the requesting profile's existing cadence.
    # Empty/status responses keep their short response cache; neither cache
    # duration nor reuse changes a market event's original timestamp.
-   return (fresh and 0<=age<interval) or (0<=age<min(20,interval) and (already_stale or value.get('status')=='NO_MESSAGES' or feed.endswith('_status') and value.get('status')=='OK')) or (allow_older and age>=0 and fresh)
+   # Trade refresh cadence is unchanged, including in extended hours. Only
+   # repeat empty/stale quote lookups less often on slower profiles.
+   negative_ttl=min(30,interval) if feed.endswith('_quotes') else min(20,interval)
+   return (fresh and 0<=age<interval) or (0<=age<negative_ttl and (already_stale or value.get('status')=='NO_MESSAGES' or feed.endswith('_status') and value.get('status')=='OK')) or (allow_older and age>=0 and fresh)
   with _ws_batch_lock:
    cached=_ws_batch_cache.get(key);collecting=group in _ws_batch_inflight
    # A running capture must not tie up both workers. A still-fresh observation

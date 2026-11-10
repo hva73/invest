@@ -129,6 +129,27 @@ class FeedReuse(unittest.TestCase):
   client.capture.return_value={'status':'OK','messages':[{'symbol':'MERC','event_time':later.isoformat(),'received_at':later.isoformat(),'price':'101'}]}
   with patch('hotwatch_adapters.utc',return_value=later):result=self.adapter.capture(client,'us_trades','MERC',self.job)
   self.assertEqual(client.capture.call_count,2);self.assertEqual(result['messages'][0]['price'],'101')
+ def test_quiet_quote_feed_reuses_brief_negative_then_detects_new_quote(self):
+  job=dict(self.job,request_data=dict(self.req,profile='NORMAL'))
+  client=Mock();old=(self.now-timedelta(minutes=5)).isoformat()
+  client.capture.return_value={'status':'OK','messages':[{'symbol':'MERC','event_time':old,'received_at':self.now.isoformat(),'price':'100'}]}
+  self.adapter.capture(client,'us_quotes','MERC',job)
+  with patch('hotwatch_adapters.time.monotonic',return_value=time.monotonic()+25):
+   result=self.adapter.capture(client,'us_quotes','MERC',job)
+   self.assertEqual(result['messages'][0]['event_time'],old);self.assertEqual(client.capture.call_count,1)
+  later=self.now+timedelta(seconds=31)
+  client.capture.return_value={'status':'OK','messages':[{'symbol':'MERC','event_time':later.isoformat(),'received_at':later.isoformat(),'price':'101'}]}
+  with patch('hotwatch_adapters.time.monotonic',return_value=time.monotonic()+31),patch('hotwatch_adapters.utc',return_value=later):
+   result=self.adapter.capture(client,'us_quotes','MERC',job)
+  self.assertEqual(client.capture.call_count,2);self.assertEqual(result['messages'][0]['event_time'],later.isoformat())
+ def test_quiet_trade_feed_keeps_twenty_second_refresh_limit(self):
+  job=dict(self.job,request_data=dict(self.req,profile='NORMAL'));client=Mock()
+  old=(self.now-timedelta(minutes=5)).isoformat()
+  client.capture.return_value={'status':'OK','messages':[{'symbol':'MERC','event_time':old,'received_at':self.now.isoformat(),'price':'100'}]}
+  self.adapter.capture(client,'us_trades','MERC',job)
+  later=self.now+timedelta(seconds=21);client.capture.return_value={'status':'OK','messages':[{'symbol':'MERC','event_time':later.isoformat(),'received_at':later.isoformat(),'price':'101'}]}
+  with patch('hotwatch_adapters.time.monotonic',return_value=time.monotonic()+21),patch('hotwatch_adapters.utc',return_value=later):result=self.adapter.capture(client,'us_trades','MERC',job)
+  self.assertEqual(client.capture.call_count,2);self.assertEqual(result['messages'][0]['event_time'],later.isoformat())
  def test_scan_diagnostics_use_requested_symbol_not_newest_other_batch_member(self):
   job=capacity_fixture.LiveCapacity.add(self,'OTHER.US',1,due=self.now.timestamp())
   client=Mock();client.capture.return_value={'status':'OK','messages':[{'symbol':'MERC','event_time':(self.now-timedelta(minutes=5)).isoformat(),'received_at':self.now.isoformat(),'price':'100'},{'symbol':'OTHER','event_time':self.now.isoformat(),'received_at':self.now.isoformat(),'price':'200'}],'connections_opened':1,'subscriptions_sent':2}
@@ -253,7 +274,9 @@ class FeedReuse(unittest.TestCase):
    try:
     self.assertTrue(entered.wait(1));self.assertTrue(ready.wait(1),'ready exit blocked behind unrelated feed collection')
     self.assertIn((jobs[2]['watch_id'],'processed','SELL'),records)
-    self.assertIn((jobs[1]['watch_id'],'deferred','FEED_COLLECTING'),records)
+    # Either earlier claim may win the shared capture after broker context
+    # returns; the other must yield so the ready exit can run.
+    self.assertTrue(any((job['watch_id'],'deferred','FEED_COLLECTING') in records for job in jobs[:2]))
    finally:release.set();thread.join(4)
   self.assertFalse(thread.is_alive());self.assertEqual(errors,[])
   self.assertEqual(calls.count('us_trades'),1)

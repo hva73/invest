@@ -88,8 +88,8 @@ class ReviewFixes(unittest.TestCase):
   with patch.object(engine,'features',side_effect=concurrent):
    with self.assertRaisesRegex(EngineError,'out_of_order_market_data'):self.ingest(self.sample(),self.at+timedelta(seconds=2))
   self.assertEqual(self.view(2)['last_data_at'],(self.at+timedelta(seconds=1)).isoformat())
- def test_capacity_explicitly_configurable_default_unchanged(self):
-  with patch.dict(os.environ,{},clear=True):self.assertEqual(engine.capacity(),40)
+ def test_capacity_explicitly_configurable_default_sixty(self):
+  with patch.dict(os.environ,{},clear=True):self.assertEqual(engine.capacity(),60)
   for count in (40,60,100,150):
    with patch.dict(os.environ,{'ESCAPE_HW_CAPACITY':str(count)}):self.assertEqual(engine.capacity(),count)
  def test_scan_log_is_private_bounded_and_filtered(self):

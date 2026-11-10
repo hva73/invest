@@ -238,6 +238,33 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
   link=c.execute('SELECT asset_id FROM market_asset_links WHERE user_id=? AND candidate_id=?',(uid,cid)).fetchone()
   if link:prior.add(link['asset_id'])
   if asset and prior and prior!={asset}:return {'status':'IDENTITY_CONFLICT'}
+ # Reopen the actual released session, not a new one: its samples, strategy,
+ # trade cycle and journal remain attached. Recheck everything under the lock.
+ if release_generation:
+  with connect() as c:
+   c.execute('BEGIN IMMEDIATE')
+   row=c.execute("SELECT * FROM hw_sessions WHERE id=? AND user_id=? AND is_test=? AND candidate_id=? AND status='EXPIRED'",(release_generation,uid,int(mode),cid)).fetchone()
+   if not row:return {'status':'CAPACITY_SESSION_CHANGED'}
+   latest_event=c.execute('SELECT event_type FROM hw_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
+   if not latest_event or latest_event['event_type']!='CAPACITY_RELEASED':return {'status':'NOT_NEW'}
+   current_reset=c.execute('SELECT reset_at,generation FROM hw_discovery_resets WHERE user_id=?',(uid,)).fetchone() if not mode else None
+   current_radar=c.execute('SELECT report_cutoff,reset_at FROM radar_resets WHERE user_id=?',(uid,)).fetchone() if not mode else None
+   if (dict(current_reset) if current_reset else None)!=(dict(reset) if reset else None) or (dict(current_radar) if current_radar else None)!=(dict(radar_reset) if radar_reset else None):return {'status':'NOT_NEW'}
+   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0] or c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone() and c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()[0]:return {'status':'kill_switch_active'}
+   opened=c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]
+   if opened>=engine.capacity():return {'status':'global_capacity_limit'}
+   pending=pending_holding_slots(c,uid,engine.utc()) if not mode else 0
+   if pending and opened>=max(0,engine.capacity()-pending):return {'status':'HOLDINGS_PRIORITY'}
+   from intel_workflows import candidate_currentness
+   current=candidate_currentness(c,uid,mode,cid,report_fallback=True)
+   if current['status'] not in ('CURRENT','REPORT_ONLY') or current['status']=='REPORT_ONLY' and (engine.utc()-stamp(current['report_seen_at'])).total_seconds()>86400:return {'status':'NOT_NEW'}
+   req=json.loads(row['request'])
+   expected=asset or (next(iter(prior)) if len(prior)==1 else None)
+   if not expected or req.get('watch_mode')!='entry' or req.get('purpose')!='automatic discovery' or req.get('asset_id')!=expected:return {'status':'IDENTITY_CONFLICT'}
+   state=json.loads(row['state']);state.update(signal='NO_DATA',pending=None,confirmations=0)
+   now=engine.utc();c.execute("UPDATE hw_sessions SET status='VALIDATING',state=?,updated=?,next_due=?,lease_owner=NULL,lease_until=0,revision=revision+1 WHERE id=?",(json.dumps(state),now.isoformat(),now.timestamp(),row['id']))
+   engine.event(c,row,'CAPACITY_RESTORED',now,'Kandidatovervågning genoptaget med bevaret historik og strategi')
+   return {'status':'VALIDATING','watch_id':row['watch_id']}
  try:
   adapter=PlutoAdapter(connect,uid,purpose='candidate_identity') if verify is None else None
   if not asset:

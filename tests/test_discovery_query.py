@@ -37,7 +37,8 @@ class DiscoveryQuery(unittest.TestCase):
         return row
 
     def rows(self,c,user,now):
-        return [tuple(r) for r in c.execute(service.DISCOVERY_CANDIDATES_SQL,(user,user,now))]
+        rows=c.execute(service.DISCOVERY_CANDIDATES_SQL,(user,user,now)).fetchall()
+        return [tuple(r) for r in service.discovery_candidate_order(rows)]
 
     def test_latest_assessment_ties_future_deep_analysis_owner_and_order(self):
         with app.connect() as c:

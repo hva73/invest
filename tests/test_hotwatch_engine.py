@@ -315,16 +315,16 @@ class HotWatch(unittest.TestCase):
    with self.assertRaisesRegex(EngineError,'global_capacity_limit'):engine.create(app.connect,1,d,self.now)
   d=copy.deepcopy(self.req);d.update(watch_id='invalid-prod',is_test=False)
   with self.assertRaisesRegex(EngineError,'synthetic_requires_test_mode'):engine.create(app.connect,1,d,self.now)
- def test_forty_session_default_and_claim_only_charges_real_adapter_requests(self):
-  with patch.dict(os.environ,{},clear=True):self.assertEqual(engine.capacity(),40)
+ def test_sixty_session_default_and_claim_only_charges_real_adapter_requests(self):
+  with patch.dict(os.environ,{},clear=True):self.assertEqual(engine.capacity(),60)
   job=engine.claim(app.connect,self.now)
   self.assertIsNotNone(job)
   with app.connect() as c:self.assertEqual(c.execute('SELECT COALESCE(sum(used),0) FROM hw_request_budget').fetchone()[0],0)
- def test_capacity_supports_40_sessions_and_rejects_41st(self):
+ def test_capacity_supports_60_sessions_and_rejects_61st(self):
   with patch.dict(os.environ,{},clear=True):
-   for i in range(1,40):
+   for i in range(1,60):
     item=copy.deepcopy(self.req);item.update(watch_id='capacity-watch-'+str(i),purpose='capacity '+str(i));engine.create(app.connect,1,item,self.now)
-   with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM hw_sessions').fetchone()[0],40)
+   with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM hw_sessions').fetchone()[0],60)
    item=copy.deepcopy(self.req);item.update(watch_id='capacity-watch-over',purpose='capacity overflow')
    with self.assertRaisesRegex(EngineError,'global_capacity_limit'):engine.create(app.connect,1,item,self.now)
  def test_many_provisional_sessions_use_honest_budget_aware_cadence(self):
@@ -519,6 +519,17 @@ class HotWatch(unittest.TestCase):
   self.assertEqual(len(observed),1);self.assertIsNone(observed[0]['data_timestamp']);self.assertEqual(observed[0]['data']['supporting_metrics']['price'],'12.34')
   self.assertFalse(engine.record_partial_observation(app.connect,1,req['watch_id'],True,error.partial_observation,self.now))
   with self.assertRaises(EngineError):engine.record_partial_observation(app.connect,1,req['watch_id'],True,dict(error.partial_observation,currency='EUR'),self.now)
+ def test_fresh_partial_quote_is_visible_without_becoming_a_trade_or_signal(self):
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  req=copy.deepcopy(self.req);req.update(watch_id='quote-no-trade',purpose='quote only test',provider='eodhd',provider_symbol='MERC.US');engine.create(app.connect,1,req,self.now)
+  quote={'source':'eodhd','price':None,'bid':'12.30','ask':'12.40','currency':'USD','source_time':self.now.isoformat(),'received_at':self.now.isoformat(),'quality':'TRADE_MISSING'}
+  self.assertTrue(engine.record_partial_observation(app.connect,1,req['watch_id'],True,quote,self.now))
+  with patch('hotwatch_engine.utc',return_value=self.now):view=engine.item(app.connect,1,req['watch_id'],True)['session']
+  self.assertEqual(view['signal'],'NO_DATA');self.assertIsNone(view['last_data_at'])
+  self.assertEqual(view['data_status']['partial_quote']['bid'],'12.30')
+  self.assertEqual(view['data_status']['partial_quote']['source_time'],self.now.isoformat())
+  with patch('hotwatch_engine.utc',return_value=self.now+timedelta(hours=1)):old=engine.item(app.connect,1,req['watch_id'],True)['session']
+  self.assertNotIn('partial_quote',old['data_status']);self.assertEqual(old['signal'],'NO_DATA')
  def test_pluto_adapter_preserves_untimed_price_as_unverified_observation(self):
   req=copy.deepcopy(self.req);req.update(provider='pluto')
   quote={'asset_id':req['asset_id'],'ticker':req['ticker'],'currency':'USD','price':'12.34','price_time':None,'fetched_at':self.now.isoformat()}
@@ -1073,6 +1084,28 @@ class HotWatch(unittest.TestCase):
    self.assertEqual(row['last_error'],'sample_id_conflict')
    self.assertAlmostEqual(row['next_due']-self.now.timestamp(),expected)
    self.assertEqual(json.loads(row['state'])['signal'],'NO_DATA')
+ def test_existing_conflict_backoff_is_rescheduled_without_changing_data(self):
+  wid=self.req['watch_id']
+  with app.connect() as c:
+   c.execute("UPDATE hw_sessions SET status='DEGRADED',last_error='sample_id_conflict',next_due=?,state=? WHERE watch_id=?",((self.now+timedelta(minutes=30)).timestamp(),json.dumps({'signal':'NO_DATA','confirmations':0}),wid))
+   before=c.execute('SELECT last_data,last_calculation FROM hw_sessions WHERE watch_id=?',(wid,)).fetchone()
+   count=c.execute('SELECT count(*) FROM hw_samples').fetchone()[0]
+  with patch('intel_workflows.candidate_currentness',return_value={'status':'CURRENT'}):
+   self.assertEqual(engine.reconcile_candidates(app.connect,self.now),1)
+   self.assertEqual(engine.reconcile_candidates(app.connect,self.now),0)
+  with app.connect() as c:
+   after=c.execute('SELECT * FROM hw_sessions WHERE watch_id=?',(wid,)).fetchone()
+   self.assertEqual(after['next_due'],self.now.timestamp())
+   self.assertEqual(after['last_error'],'sample_id_conflict')
+   self.assertEqual((after['last_data'],after['last_calculation']),(before['last_data'],before['last_calculation']))
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_samples').fetchone()[0],count)
+ def test_conflict_backoff_does_not_interrupt_an_active_lease(self):
+  wid=self.req['watch_id']
+  with app.connect() as c:c.execute("UPDATE hw_sessions SET status='DEGRADED',last_error='sample_id_conflict',next_due=?,lease_owner='synthetic',lease_until=? WHERE watch_id=?",((self.now+timedelta(minutes=30)).timestamp(),(self.now+timedelta(minutes=1)).timestamp(),wid))
+  with patch('intel_workflows.candidate_currentness',return_value={'status':'CURRENT'}):self.assertEqual(engine.reconcile_candidates(app.connect,self.now),0)
+  with app.connect() as c:
+   row=c.execute('SELECT next_due,lease_owner FROM hw_sessions WHERE watch_id=?',(wid,)).fetchone()
+   self.assertEqual(row['lease_owner'],'synthetic');self.assertEqual(row['next_due'],(self.now+timedelta(minutes=30)).timestamp())
  def test_eodhd_rate_limit_retry_after_is_observed_and_secret_redacted(self):
   import urllib.error
   class Limited:
@@ -1297,11 +1330,18 @@ class HotWatch(unittest.TestCase):
   self.assertEqual(first['status'],'CREATED')
   with app.connect() as c:
    row=c.execute('SELECT * FROM hw_sessions WHERE watch_id=?',(first['watch_id'],)).fetchone()
+   original_id=row['id'];original_strategy=row['strategy']
+   c.execute('INSERT INTO hw_context_events(watch_row_id,observed,payload) VALUES(?,?,?)',(row['id'],self.now.isoformat(),json.dumps({'status':'verified','position':'none','orders':[],'as_of':self.now.isoformat()})))
    c.execute("UPDATE hw_sessions SET status='EXPIRED' WHERE id=?",(row['id'],))
    engine.event(c,row,'CAPACITY_RELEASED',self.now,'synthetic')
   second=auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:verified)
-  self.assertEqual(second['status'],'CREATED')
-  self.assertNotEqual(first['watch_id'],second['watch_id'])
+  self.assertEqual(second['status'],'VALIDATING')
+  self.assertEqual(first['watch_id'],second['watch_id'])
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions WHERE id=?',(original_id,)).fetchone()
+   self.assertEqual(row['strategy'],original_strategy)
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_context_events WHERE watch_row_id=?',(original_id,)).fetchone()[0],1)
+   self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE watch_row_id=? AND event_type IN ('CAPACITY_RELEASED','CAPACITY_RESTORED')",(original_id,)).fetchone()[0],2)
  def test_auto_discovery_visits_every_report_candidate_without_replaying_completed_attempts(self):
   from hotwatch_service import auto_discover
   report=merc_report(False);report['report_id']='synthetic-all-candidates';report_ingest.save(app.connect,1,report);seen=[]

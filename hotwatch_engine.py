@@ -14,7 +14,7 @@ def trailing_notification_worsened(price,anchor,trailing_pct):
  return Decimal(str(price))<=Decimal(str(anchor))*(Decimal('1')-Decimal(str(trailing_pct))/Decimal('100'))
 
 def capacity():
- try:return max(1,int(os.environ.get('ESCAPE_HW_CAPACITY','40')))
+ try:return max(1,int(os.environ.get('ESCAPE_HW_CAPACITY','60')))
  except (TypeError,ValueError):return 40
 
 def reported_catalyst_priority_until(candidate,now,max_age_minutes=None):
@@ -607,6 +607,16 @@ def view(c,row,now=None):
  if evidence and evidence.get('basis')=='user_authorized_btc_monitoring' and quote_feed_verified and quote_freshness=='FRESH' and effective=='NO_DATA' and not row['last_error'] and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED'):
   display_status='KURS MODTAGET · MARKEDSSTATUS UKENDT' if data_status['market_status']=='UNKNOWN' else 'KURS MODTAGET · AFVENTER SIGNALDATA'
  data_status.update(holding_verified=holding_verified,instrument_match_verified=instrument_match_verified,instrument_match_evidence=evidence,quote_feed_verified=quote_feed_verified,quote_freshness=quote_freshness)
+ # A fresh quote is useful even if there is no fresh trade. It remains a
+ # separately timestamped observation and never changes risk or signal state.
+ if effective=='NO_DATA' and request.get('provider')=='eodhd' and (row['is_test'] or instrument_match_verified):
+  partials=c.execute("SELECT created,payload FROM hw_events WHERE watch_row_id=? AND event_type='PARTIAL_MARKET_OBSERVATION' ORDER BY id DESC LIMIT 10",(row['id'],)).fetchall()
+  for partial in partials:
+   try:
+    item=json.loads(partial['payload'])['supporting_metrics']
+    if item.get('quality') in ('TRADE_MISSING','QUOTE_ONLY') and item.get('source')=='eodhd' and item.get('currency')==request.get('quote_currency') and item.get('bid') is not None and item.get('ask') is not None and Decimal(item['bid'])>0 and Decimal(item['ask'])>=Decimal(item['bid']) and 0<=(now-stamp(item['source_time'])).total_seconds()<=request['risk']['max_quote_age_s'] and (row['is_test'] or link and stamp(partial['created']).timestamp()>=link['verified_epoch']):
+     data_status['partial_quote']={k:item.get(k) for k in ('bid','ask','currency','source_time','received_at','source')};break
+   except (ValueError,TypeError,KeyError,ArithmeticError):continue
  import hotwatch_warmup
  data_status['analysis_warmup']=hotwatch_warmup.status(c,row,request,now)
  import hotwatch_buy_plan
@@ -649,6 +659,7 @@ def reconcile_candidates(connect,now=None,connection=None):
    needed=False
    for row in rows:
     req=json.loads(row['request']);mode=req.get('watch_mode','both')
+    if row['status']=='DEGRADED' and row['last_error']=='sample_id_conflict' and row['lease_until']<=now.timestamp() and row['next_due']>now.timestamp()+effective_poll_interval(preflight,req):needed=True;break
     if req.get('end_at') and stamp(req['end_at'])<=now:needed=True;break
     if mode=='exit' or req.get('purpose')=='automatic holding watch' or req.get('report_id')=='manual-pluto':continue
     current=candidate_currentness(preflight,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=req.get('purpose')=='automatic discovery')
@@ -659,6 +670,9 @@ def reconcile_candidates(connect,now=None,connection=None):
   rows=c.execute("SELECT * FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchall()
   for row in rows:
    req=json.loads(row['request']);mode=req.get('watch_mode','both')
+   if row['status']=='DEGRADED' and row['last_error']=='sample_id_conflict' and row['lease_until']<=now.timestamp() and row['next_due']>now.timestamp()+effective_poll_interval(c,req):
+    c.execute('UPDATE hw_sessions SET next_due=?,updated=?,revision=revision+1 WHERE id=?',(now.timestamp(),now.isoformat(),row['id']))
+    event(c,row,'CONFLICT_RETRY_RESCHEDULED',now,'Tidligere udsat kontrol er fremrykket; konfliktende data er fortsat afvist',data_time=row['last_data']);changed+=1
    if req.get('end_at') and stamp(req['end_at'])<=now:
     c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']))
     event(c,row,'WATCH_EXPIRED',now,'Session deadline reached');changed+=1

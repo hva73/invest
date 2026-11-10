@@ -33,7 +33,7 @@ def run(n,workers,delay):
      with guard:transactions.append(time.perf_counter())
    c.set_trace_callback(trace);return c
   class FakeAdapter:
-   def __init__(self,connect,uid):self.connect=connect
+   def __init__(self,connect,uid):self.connect=connect;self.pluto=object()
    def poll(self,job):
     start=time.perf_counter();at=engine.utc();cap=Capacity(self.connect)
     cap.reserve(1);cap.observe(200,{},delay*1000)
