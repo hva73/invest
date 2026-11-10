@@ -11,7 +11,7 @@ ENV = {'GITHUB_REPOSITORY': 'hva73/invest', 'GITHUB_REF': 'refs/heads/codex/esca
        'GITHUB_EVENT_NAME': 'issue_comment', 'GITHUB_ACTOR_ID': str(single.dryrun.OWNER_ID),
        'GITHUB_RUN_ATTEMPT': '1', 'GITHUB_RUN_ID': '123', 'ESCAPE_PROJECTS_TOKEN': 'fake-project',
        'JOURNAL_TOKEN': 'fake-journal', 'ISSUE_TOKEN': 'fake-issue'}
-CONTEXT = {'request': single.EXPECTED.copy(), 'status': 'In progress', 'project_id': 'PVT_test',
+CONTEXT = {'request': single.EXPECTED.copy(), 'status': 'Backlog', 'project_id': 'PVT_test',
            'item_id': 'PVTI_test', 'comment_id': 123}
 
 
@@ -28,7 +28,7 @@ class OneShot(unittest.TestCase):
 
     def test_unapproved_and_changed_status_are_blocked(self):
         for changed in ({**CONTEXT, 'request': {**single.EXPECTED, 'request_id': 'b' * 32}},
-                        {**CONTEXT, 'status': 'Backlog'},
+                        {**CONTEXT, 'status': 'In progress'},
                         {**CONTEXT, 'request': {**single.EXPECTED, 'desired_status': 'In review'}}):
             with self.subTest(changed=changed), patch.dict(os.environ, ENV, clear=True), patch.object(single.dryrun, 'main', return_value=changed), patch.object(single.runner, 'run') as call:
                 with self.assertRaises(single.writer.Blocked):
@@ -52,3 +52,4 @@ class OneShot(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
