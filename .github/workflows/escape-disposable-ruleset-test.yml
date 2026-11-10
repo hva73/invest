@@ -22,7 +22,7 @@ jobs:
       - name: Check out reviewed test code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 76423291d08682297b8e229974124b5074913b8a
+          ref: 0370daeca174d5c2a9686b89201920b8fd29f5d5
           persist-credentials: false
       - name: Test only disposable branch protection
         env:
