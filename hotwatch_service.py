@@ -909,7 +909,7 @@ class Runner:
   claimed=engine.utc()
   if not job:return False
   job['scan_timing']={'next_due_at':engine.datetime.fromtimestamp(job['next_due'],engine.timezone.utc).isoformat(),'claimed_at':claimed.isoformat(),'claim_ms':round((time.perf_counter()-claim_started)*1000,3),'queue_ms':max(0,round((claimed.timestamp()-job['next_due'])*1000,3))}
-  uid=job['user_id'];r=job['request_data'];wid=job['watch_id'];mode=bool(job['is_test']);lease=job['lease_owner'];adapter=None;uses_realtime_history=False;pending_feed=False
+  uid=job['user_id'];r=job['request_data'];wid=job['watch_id'];mode=bool(job['is_test']);lease=job['lease_owner'];adapter=None;sample=None;uses_realtime_history=False;pending_feed=False
   try:
    poll_started=time.perf_counter();job['scan_timing']['poll_started_at']=engine.utc().isoformat()
    if r['end_at'] and stamp(r['end_at'])<=now:
@@ -958,6 +958,14 @@ class Runner:
     return 'deferred'
    if error.code in ['lease_lost','watch_not_running','kill_switch_active','operator_kill_switch']:
     self.log(job,'cancelled',error.code);return True
+   # A trade's phase can expire while its separately timestamped quote is
+   # collected. Keep the verified quote as observation only; never ingest the
+   # rejected trade or advance signal confirmation with it.
+   if error.code=='market_status_evidence_stale' and isinstance(sample,dict) and sample.get('source')=='eodhd' and sample.get('verification')=='verified' and sample.get('asset_id')==r.get('asset_id') and str(sample.get('ticker','')).casefold()==str(r.get('ticker','')).casefold() and sample.get('currency')==r.get('quote_currency') and sample.get('quote_feed') in ('us_quotes','eu_quotes') and sample.get('bid') is not None and sample.get('ask') is not None and sample.get('bid_at') and sample.get('ask_at'):
+    try:
+     quote_time=min((sample['bid_at'],sample['ask_at']),key=stamp)
+     self.partial(job,{'source':'eodhd','price':None,'currency':sample['currency'],'source_time':quote_time,'received_at':engine.utc().isoformat(),'quality':'QUOTE_ONLY','bid':sample['bid'],'ask':sample['ask']})
+    except (ValueError,TypeError,KeyError):pass
    self.partials(job,adapter,getattr(error,'partial_observation',None))
    # Market-feed availability is independent of current broker ownership.
    # Only the read-only, budgeted Pluto adapter can provide this evidence;

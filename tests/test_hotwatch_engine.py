@@ -530,6 +530,18 @@ class HotWatch(unittest.TestCase):
   self.assertEqual(view['data_status']['partial_quote']['source_time'],self.now.isoformat())
   with patch('hotwatch_engine.utc',return_value=self.now+timedelta(hours=1)):old=engine.item(app.connect,1,req['watch_id'],True)['session']
   self.assertNotIn('partial_quote',old['data_status']);self.assertEqual(old['signal'],'NO_DATA')
+ def test_quote_is_preserved_when_trade_status_expires_during_collection(self):
+  from unittest.mock import Mock
+  from hotwatch_service import Runner
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
+  req=copy.deepcopy(self.req);req.update(watch_id='quote-stale-phase',purpose='quote evidence',provider='eodhd',provider_symbol='MERC.US');engine.create(app.connect,1,req,self.now)
+  sample=tick(self.now-timedelta(seconds=119));sample.update(source='eodhd',feed_type='EODHD WS trade',price_time_kind='trade',market_status='AFTER',status_feed='us_trades',status_at=(self.now-timedelta(seconds=121)).isoformat(),quote_feed='us_quotes',bid='12.30',ask='12.40',bid_at=self.now.isoformat(),ask_at=self.now.isoformat())
+  adapter=Mock();adapter.poll.return_value=sample;adapter.last_partial_observations=[];adapter.capture_metrics=[];adapter.last_feed_diagnostics={};adapter.last_telemetry={}
+  runner=Runner(app.connect);runner.adapters[(1,'eodhd')]=adapter
+  with patch('hotwatch_engine.utc',return_value=self.now):self.assertTrue(runner.once(self.now,watch_id=req['watch_id']));view=engine.item(app.connect,1,req['watch_id'],True)['session']
+  self.assertEqual(view['signal'],'NO_DATA');self.assertEqual(view['last_error'],'market_status_evidence_stale');self.assertIsNone(view['last_data_at'])
+  self.assertEqual(view['data_status']['partial_quote']['bid'],'12.30');self.assertEqual(view['data_status']['partial_quote']['source_time'],self.now.isoformat())
+  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM hw_samples WHERE watch_row_id=(SELECT id FROM hw_sessions WHERE watch_id=?)',(req['watch_id'],)).fetchone()[0],0)
  def test_fresh_quote_attached_to_an_old_trade_remains_visible_only_as_quote(self):
   engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now)
   req=copy.deepcopy(self.req);req.update(watch_id='old-trade-fresh-quote',purpose='quote evidence',provider='eodhd',provider_symbol='MERC.US');engine.create(app.connect,1,req,self.now)
