@@ -46,11 +46,14 @@ def main():
     status, rules = call('/rulesets/' + str(RULESET))
     refs = ((rules.get('conditions') or {}).get('ref_name') or {}) if isinstance(rules, dict) else {}
     types = {r.get('type') for r in rules.get('rules', [])} if isinstance(rules, dict) else set()
-    if (status != 200 or rules.get('id') != RULESET or rules.get('enforcement') != 'active'
-            or REF not in refs.get('include', []) or refs.get('exclude') != []
-            or not {'deletion', 'non_fast_forward'} <= types or rules.get('bypass_actors') != []
-            or rules.get('current_user_can_bypass') != 'never'):
-        raise Blocked('Testgrenen har ikke verificeret identisk beskyttelse uden bypass.')
+    checks = {'ruleset': status == 200 and rules.get('id') == RULESET,
+              'active': rules.get('enforcement') == 'active',
+              'target': REF in refs.get('include', []) and refs.get('exclude') == [],
+              'rules': {'deletion', 'non_fast_forward'} <= types,
+              'no_bypass_actors': rules.get('bypass_actors') == [],
+              'test_identity_no_bypass': rules.get('current_user_can_bypass') == 'never'}
+    if not all(checks.values()):
+        raise Blocked('Beskyttelse kunne ikke verificeres: ' + ', '.join(k for k, v in checks.items() if not v))
 
     status, data = call('/git/ref/heads/' + BRANCH)
     head = (data.get('object') or {}).get('sha') if isinstance(data, dict) else None
