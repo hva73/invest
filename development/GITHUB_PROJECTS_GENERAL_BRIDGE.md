@@ -1,15 +1,29 @@
-# ESCAPE Projects: general status bridge
+# ESCAPE Projects: fælles statusbro
 
-This change prepares the existing Issue-comment → Actions → Projects → audit path for existing issues #1 and #3–#16 in `hva73/invest`, with Project `hva73/1`. The proposed write job and `LIVE_WRITE_ENABLED` both remain disabled. The owner has separately authorized one test: Issue #4 Backlog → In progress.
+Broen behandler statusanmodninger på eksisterende Issues #1 og #3–#16 i `hva73/invest` for Project `hva73/1`. Den opretter ikke Issues eller Project-items og lukker ikke Issues.
 
-A future request is a new, unedited comment on the target Issue, from the verified user and GitHub App, starting with `ESCAPE_PROJECTS_WRITE_V1 ` and a JSON object containing exactly `request_id` (32 lower-case hex characters), `expected_status` and `desired_status`. Status values must be actual existing project Status options; the two values must differ. Issue #3 is limited to Backlog, In progress and In review until its owner-approved completion conditions are satisfied. This bridge never closes an Issue.
+## Brug
 
-The validator obtains the target number from the authenticated GitHub event, verifies the comment, owner, project, unique active Project item and actual status. The writer rechecks identity and status, records one create-only journal claim bound to project/item/comment/transition, rechecks before one parameterized mutation, and reads back afterward. Audit and failure reports go to the same Issue, not to a new Issue. An uncertain result stops without automatic retry or rollback.
+En godkendt agent skriver en ny kommentar på det pågældende Issue:
 
-All cooperating workflows share the existing global concurrency group. `queue: max` allows up to 100 pending requests; additional runs can be canceled when full. Ordering is based on when runs enter the queue, not guaranteed dispatch order. GitHub's mutation does not support atomic expected-value comparison, so a simultaneous manual or external edit can still be overwritten; the owner has accepted this limited risk for reversible task statuses only.
+```text
+ESCAPE_PROJECTS_WRITE_V1 {"request_id":"32-lowercase-hex-characters","expected_status":"Backlog","desired_status":"In progress"}
+```
 
-Status before activation: generalized code and workflow are for review/test. The general writer remains disabled. The only enabled action in this change is the exact owner-approved #4 restoration. The change does not add Project items, create or close Issues, or touch production. A separately approved, one-shot workflow can restore #4 Backlog → In progress; no other board change is authorized by that approval. A real ChatGPT-origin request through the general bridge remains to be verified before Issue #11 can be closed.
+Eksemplet viser formen; `request_id` skal erstattes med 32 faktiske, entydige små hextegn, og statusnavnene skal præcist matche eksisterende Project-optioner. Brug altid den aktuelt aflæste status som `expected_status`. En ny handling kræver et nyt ID. Dry-run bruger et separat præfiks.
 
-## Verification
+GitHub Actions verificerer den godkendte GitHub-bruger og App, at kommentaren ikke er redigeret, projekt, eksisterende entydigt aktivt item og aktuel status. Den registrerer en engangsclaim i den beskyttede journal, kontrollerer igen, skriver højst én status og læser resultatet tilbage. Audit eller fejl rapporteres på samme Issue. #3 kan kun flyttes mellem Backlog, In progress og In review, indtil ejerens krav til færdiggørelse er opfyldt og reglerne ændres særskilt.
 
-Forty-six local tests and [Actions run 42887779295](https://github.com/hva73/invest/actions/runs/42887779295) passed with synthetic Project responses and no Projects secret. Tests cover every allowed Issue number, correct Issue-to-item matching, same-Issue audit routing, unauthorized Issues, stale status, Issue #3 completion protection, Danish status names and simulated uncertain write outcomes. This is not a live multi-issue Projects mutation test. The PR validation run also exercised GitHub's `queue: max` workflow syntax.
+## Fejl og samtidighed
+
+Ved konflikt, manglende data eller uautoriseret afsender stoppes handlingen. Hvis skrivning eller readback har usikkert udfald, må samme ID ikke automatisk genafspilles, og der foretages ingen automatisk rollback; afstem kort, journal og Actions-log som beskrevet i [recoveryvejledningen](GITHUB_PROJECTS_WRITE_RECOVERY.md).
+
+De koordinerede workflows deler én kø. `queue: max` tillader op til 100 ventende runs; yderligere runs kan blive annulleret og skal følges op i Actions. Køen garanterer ikke rækkefølgen af afsendelser. Undgå manuelle kortflytninger, mens køen arbejder: GitHub har ingen atomisk expected-status-kontrol, og en samtidig manuel/ekstern ændring kan blive overskrevet. Ejeren har accepteret denne restrisiko for reversible opgavestatusser.
+
+De to agenters forbindelser optræder med samme GitHub-bruger/App-identitet. Adgangskontrollen verificerer forbindelsen, men kan ikke sikkert bevise, om en kommentar kom fra Codex eller ChatGPT. Reglen om PR til default-branchen kræver aktuelt 0 uafhængige godkendelser; en aktør med tilstrækkelig repository-skriveret kan oprette og merge sin egen PR.
+
+## Afgrænsning og test
+
+Udviklingsgrenen og journalgrenen er beskyttet af separate GitHub-regler. Projects-tokenet ligger i det eksisterende Actions-secret; workflowets `GITHUB_TOKEN` har repository-bred `contents: write` og `issues: write` i writer-jobbet. Broen må ikke bruges til handel, deployment-godkendelser, handelsmandater eller automatisk issue-lukning.
+
+Issue #4 er efter ejerens særskilte godkendelse flyttet tilbage fra Backlog til In progress og derefter læst igen i en separat Actions-kørsel. Den generelle kode er testet med simulerede svar for alle tilladte Issue-numre, audit, forkert status og usikkert udfald. En faktisk ChatGPT-anmodning gennem den generelle writer skal stadig dokumenteres, før Issue #11 lukkes.
