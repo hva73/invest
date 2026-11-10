@@ -521,6 +521,17 @@ def reported_daily_from_history(history,request,price):
  except (KeyError,ValueError,TypeError,ArithmeticError):pass
  return None
 
+def market_observation(data,status,identity_verified):
+ """Display-only observation; no signal, risk or notification mutation."""
+ if status not in ('ACTIVE','DEGRADED') or not identity_verified or data.get('price_status')!='FRESH' or data.get('momentum_status')!='READY' or data.get('market_status') not in ('OPEN','PREMARKET','AFTERHOURS'):return None
+ for minutes in ('5','1','15','30'):
+  value=(data.get('momentum_pct') or {}).get(minutes)
+  try:
+   change=Decimal(str(value))
+   if change.is_finite() and change>0:return {'kind':'RISING','change_pct':format(change,'f'),'window_minutes':int(minutes),'data_timestamp':data.get('event_time'),'source':data.get('source'),'risk_approved':False}
+  except (ValueError,TypeError,ArithmeticError):pass
+ return None
+
 def view(c,row,now=None):
  now=now or utc()
  request=json.loads(row['request']);
@@ -710,6 +721,7 @@ def view(c,row,now=None):
  if effective=='NO_DATA' and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED') and display_status=='DATA MANGLER' and request.get('provider')=='eodhd' and instrument_match_verified and regular['status']=='UNKNOWN' and data_status['market_status']=='UNKNOWN':
   display_status='MARKEDSSTATUS UKENDT'
   display_reasons.append('EXCHANGE_STATUS_UNKNOWN')
+ data_status['market_observation']=market_observation(data_status,row['status'],bool(row['is_test'] or instrument_match_verified))
  # One current status for API, dashboard and engine views. Only a calculation
  # for the latest observation can establish signal warmup; an independent
  # historical-analysis cache cannot override a decision or data/risk gate.
@@ -808,6 +820,15 @@ def acknowledge_signal(connect,uid,wid,mode,event_id,now=None):
 def item(connect,uid,wid,mode=False):
  with connect() as c:return {'session':view(c,row_for(c,uid,wid,mode))}
 
+def installed_revision():
+ """A commit is reported only when explicit archive/deployment metadata exists."""
+ from pathlib import Path
+ value=os.environ.get('ESCAPE_BUILD_COMMIT','').strip();source='ESCAPE_BUILD_COMMIT'
+ if not re.fullmatch(r'[0-9a-fA-F]{40}',value):
+  try:value=Path(__file__).with_name('BUILD_COMMIT').read_text(encoding='ascii').strip();source='archive metadata'
+  except (OSError,UnicodeError):value=''
+ return {'commit':value.lower() if re.fullmatch(r'[0-9a-fA-F]{40}',value) else None,'source':source if re.fullmatch(r'[0-9a-fA-F]{40}',value) else 'unavailable'}
+
 def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=100,summary_only=False):
  """Read owned open sessions and events with separate pagination cursors."""
  # Rendering a full session includes several dependent reads. Bound the
@@ -872,7 +893,7 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
    else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
   more=len(opened)>session_limit
   from eodhd_capacity import snapshot as capacity_snapshot
-  return {'worker_scan_log':recent_scan_log(uid,mode,[r['watch_id'] for r in opened[:session_limit]]),'provider_capacity':capacity_snapshot(c,now.timestamp()),'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'supervisor':supervisor,'supervisor_events':supervisor_events,'application_error_fallback':application_errors,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}
+  return {'installation':installed_revision(),'worker_scan_log':recent_scan_log(uid,mode,[r['watch_id'] for r in opened[:session_limit]]),'provider_capacity':capacity_snapshot(c,now.timestamp()),'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'supervisor':supervisor,'supervisor_events':supervisor_events,'application_error_fallback':application_errors,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}
 
 def control(connect,uid,wid,mode,action,now=None):
  now=now or utc()

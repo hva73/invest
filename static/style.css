@@ -387,3 +387,5 @@ body.pull-refresh-visible #refresh-status{display:none}
 
 /* Vejledende mål på administrationsskærmen. */
 .diag-table .diag-within{color:#83dfb6;font-weight:600}.diag-table .diag-over{color:#ff8c8c;font-weight:600}
+
+.market-observation{display:block;color:#9bdac6;font-size:.8rem;margin-top:.25rem}

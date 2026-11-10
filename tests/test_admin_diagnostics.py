@@ -23,6 +23,18 @@ class AdminDiagnostics(unittest.TestCase):
   self.assertIn('worker_utilization',result);self.assertIn('readiness_by_market',result);self.assertIn('market_sleep',result);self.assertEqual(result['market_sleep']['estimated_avoided_scans'],0);self.assertEqual(result['recent'][0]['metrics']['websocket_ms'],500);self.assertEqual(result['recent'][0]['metrics']['market_conflict']['incoming']['price'],'143.95');self.assertNotIn('DO_NOT_EXPOSE',json.dumps(result));self.assertEqual(result['session_count'],1)
   with app.connect() as c:c.execute("UPDATE hw_sessions SET status='EXPIRED' WHERE watch_id=?",(self.f.req['watch_id'],))
   result=hotwatch_service.admin_diagnostics(app.connect,1,self.now);self.assertEqual(result['session_count'],0);self.assertEqual(result['windows']['1h']['completed'],2)
+ def test_entry_funnel_counts_rules_and_historical_confirmation_moves(self):
+  import hotwatch_engine as engine
+  strategy=engine.BASELINE;now=self.now;req=dict(self.f.req,provider='eodhd',watch_mode='entry')
+  def record(at,signal,codes,price,metrics=None,watch='w',candidate='one'):
+   request=dict(req,candidate_id=candidate);sample=fixture.tick(at,price=price);sample.update(source='eodhd',market_status='REGULAR')
+   calc={'signal':signal,'reason_codes':codes,'data_timestamp':at.isoformat(),'supporting_metrics':metrics or fixture.good_metrics()}
+   return {'watch_id':watch,'request':json.dumps(request),'strategy':json.dumps(strategy),'calculated':at.isoformat(),'calculation':json.dumps(calc),'strategy_checksum':engine.checksum(strategy),'sample':json.dumps(sample)}
+  values=[record(now-timedelta(minutes=7),'WAIT',['CONFIRMATION_PENDING'],'100'),record(now-timedelta(minutes=6),'BUY',['ENTRY_RULES'],'102'),record(now-timedelta(minutes=1),'WAIT',['NO_TRIGGER'],'103')]
+  bad=fixture.good_metrics();bad['relative_volume']='1';values.append(record(now,'WAIT',['NO_TRIGGER'],'100',bad,watch='w2',candidate='two'))
+  out=hotwatch_service.entry_funnel(list(reversed(values)),now);group=out['strategies']['escape_momentum v1.0.0'];volume=next(x for x in group['rules'] if x['rule']=='relative_volume')
+  self.assertEqual(out['candidate_count'],2);self.assertEqual(volume['failed'],1);self.assertEqual(out['confirmation_movement']['confirmed_sequences'],1);self.assertEqual(out['confirmation_movement']['before_confirmation']['median_pct'],2);self.assertEqual(out['confirmation_movement']['five_to_ten_minutes_after']['count'],1)
+  no_data=record(now,'NO_DATA',['DATA_STALE'],'100',watch='w3',candidate='three');self.assertEqual(hotwatch_service.entry_funnel([no_data],now)['missing_or_unverified'],1)
  def test_missing_log_is_explicit_and_read_only(self):
   with app.connect() as c:before=c.total_changes
   result=hotwatch_service.admin_diagnostics(app.connect,1,self.now)

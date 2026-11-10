@@ -206,6 +206,17 @@ class HotWatch(unittest.TestCase):
    next_day=at+timedelta(days=1);self.assertEqual(engine.quiet_market_interval(c,req,'NORMAL',next_day,60),60)
    schedule['excluded_dates']=['2026-11-10'];c.execute('UPDATE hw_exchange_calendar SET calendar=? WHERE exchange=?',(json.dumps(schedule),'US'))
    self.assertEqual(engine.quiet_market_interval(c,req,'NORMAL',at,60),60)
+ def test_installed_revision_is_reported_only_from_valid_build_metadata(self):
+  fake='a'*40
+  with patch.dict(os.environ,{'ESCAPE_BUILD_COMMIT':fake}):self.assertEqual(engine.installed_revision(),{'commit':fake,'source':'ESCAPE_BUILD_COMMIT'})
+  with patch.dict(os.environ,{'ESCAPE_BUILD_COMMIT':'not-a-hash'}):self.assertIsNone(engine.installed_revision()['commit'])
+ def test_observation_requires_fresh_comparable_verified_data_and_never_approves_risk(self):
+  data={'price_status':'FRESH','momentum_status':'READY','market_status':'PREMARKET','momentum_pct':{'5':'1.2'},'event_time':self.now.isoformat(),'source':'eodhd'}
+  obs=engine.market_observation(data,'DEGRADED',True)
+  self.assertEqual(obs['kind'],'RISING');self.assertEqual(obs['change_pct'],'1.2');self.assertFalse(obs['risk_approved'])
+  for changes in ({'price_status':'STALE'},{'momentum_status':'INSUFFICIENT_HISTORY'},{'market_status':'UNKNOWN'},{'market_status':'HALTED'},{'momentum_pct':{'5':'-2'}}):
+   self.assertIsNone(engine.market_observation(dict(data,**changes),'ACTIVE',True))
+  self.assertIsNone(engine.market_observation(data,'PAUSED',True));self.assertIsNone(engine.market_observation(data,'ACTIVE',False))
  def test_daily_budget_still_retries_on_normal_cadence_for_websocket_events(self):
   req=copy.deepcopy(self.req);req.update(watch_id='daily-budget-watch',purpose='daily budget watch',provider='eodhd',provider_symbol='MERC.US')
   engine.create(app.connect,1,req,self.now)

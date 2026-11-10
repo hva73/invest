@@ -897,6 +897,68 @@ def recent_scan_log(uid,mode,watch_ids):
   return {'status':'AVAILABLE','records':rows,'retention':'rotating 3 x 1 MiB; records may be incomplete'}
  except OSError:return {'status':'UNAVAILABLE','records':[]}
 
+def entry_funnel(rows,now):
+ """Bounded historical readout, no strategy/risk changes or backtest claims."""
+ from collections import Counter,defaultdict
+ from decimal import Decimal,InvalidOperation
+ from hotwatch_strategy import rule_state
+ latest={};series=defaultdict(list);truncated=len(rows)>5000
+ for row in rows[:5000]:
+  try:
+   req=json.loads(row['request']);strategy=json.loads(row['strategy']);calc=json.loads(row['calculation']);sample=json.loads(row['sample']) if row['sample'] else None
+   if req.get('watch_mode')=='exit' or req.get('purpose')=='automatic holding watch':continue
+   candidate=req.get('candidate_id') or row['watch_id'];at=stamp(row['calculated'])
+   if at>now or (now-at).total_seconds()>86400:continue
+   # Count the most recent calculation per candidate, even if data missing.
+   if candidate not in latest:latest[candidate]=(req,strategy,calc,sample,at,row['strategy_checksum'])
+   if sample and sample.get('verification')=='verified' and sample.get('source') in ('eodhd','pluto') and calc.get('data_timestamp')==sample.get('event_time') and 0<=(at-stamp(sample['event_time'])).total_seconds()<=req['risk']['max_quote_age_s']:
+    series[row['watch_id']].append((at,calc,sample))
+  except (TypeError,ValueError,KeyError,ArithmeticError):continue
+ groups={};missing=0
+ for req,strategy,calc,sample,at,stored_checksum in latest.values():
+  try:
+   if not sample or sample.get('verification')!='verified' or sample.get('source') not in ('eodhd','pluto') or calc.get('data_timestamp')!=sample.get('event_time') or 'DATA_STALE' in calc.get('reason_codes',[]) or 'DATA_UNVERIFIED' in calc.get('reason_codes',[]) or not 0<=(at-stamp(sample['event_time'])).total_seconds()<=min(req['risk']['max_quote_age_s'],120) or engine.checksum(strategy)!=stored_checksum:missing+=1;continue
+   rules=strategy['entry_rules'].get('all',[strategy['entry_rules']]);params=strategy['parameters'];metrics=calc.get('supporting_metrics') or {}
+   key=strategy['strategy_id']+' v'+strategy['version'];group=groups.setdefault(key,{'eligible':0,'rules':[],'all_passed':0,'signals':Counter()})
+   if not group['rules']:
+    for i,r in enumerate(rules):
+     label=r.get('metric') if isinstance(r,dict) else None
+     group['rules'].append({'rule':label if isinstance(label,str) else 'rule_group_'+str(i+1),'passed':0,'failed':0,'unknown':0,'cumulative_passed':0})
+   if len(group['rules'])!=len(rules):continue
+   group['eligible']+=1;group['signals'][calc.get('signal','UNKNOWN')]+=1;chain=True
+   for index,rule in enumerate(rules):
+    outcome=rule_state(rule,metrics,params);item=group['rules'][index];item['passed' if outcome is True else 'failed' if outcome is False else 'unknown']+=1
+    chain=chain and outcome is True
+    if chain:item['cumulative_passed']+=1
+   if chain:group['all_passed']+=1
+  except (KeyError,ValueError,TypeError,ArithmeticError):missing+=1
+ before=[];after=[];confirmations=0
+ def identity(sample):return tuple(sample.get(k) for k in ('source','asset_id','currency','venue','session_key','market_status','feed_type','price_time_kind'))
+ for items in series.values():
+  items.sort(key=lambda x:x[0]);pending=None
+  for index,(at,calc,sample) in enumerate(items):
+   try:
+    codes=calc.get('reason_codes',[]);price=Decimal(str(sample.get('price')))
+    if not price.is_finite() or price<=0:continue
+    if 'CONFIRMATION_PENDING' in codes:
+     if pending is None:pending=(at,price,identity(sample))
+    elif calc.get('signal')=='BUY':
+     if pending and pending[2]==identity(sample) and 0<=(at-pending[0]).total_seconds()<=600:
+      confirmations+=1;before.append(float((price/pending[1]-1)*100))
+      for future_at,_,future_sample in items[index+1:]:
+       delta=(future_at-at).total_seconds()
+       if delta>600:break
+       if delta>=300 and identity(future_sample)==identity(sample):
+        future=Decimal(str(future_sample.get('price')))
+        if future.is_finite() and future>0:after.append(float((future/price-1)*100))
+        break
+     pending=None
+    else:pending=None
+   except (TypeError,ValueError,ArithmeticError,InvalidOperation):pending=None
+ def movement(values):return {'count':len(values),'average_pct':round(sum(values)/len(values),4) if values else None,'median_pct':round(sorted(values)[(len(values)-1)//2],4) if values else None}
+ for group in groups.values():group['signals']=dict(group['signals'])
+ return {'window_hours':24,'candidate_count':len(latest),'missing_or_unverified':missing,'strategies':groups,'confirmation_movement':{'confirmed_sequences':confirmations,'before_confirmation':movement(before),'five_to_ten_minutes_after':movement(after)},'history_truncated':truncated,'note':'Seneste beregning pr. kandidat blandt de nyeste højst 100000 beregninger og 5000 match. Historiske observationer er ikke en profitabilitetsmåling; manglende målinger er ikke nul.'}
+
 def admin_diagnostics(connect,uid,now=None):
  """Read bounded existing operational evidence; do not initiate work or trade."""
  from pathlib import Path
@@ -918,6 +980,7 @@ def admin_diagnostics(connect,uid,now=None):
   cron=c.execute('SELECT heartbeat FROM worker_state WHERE id=1').fetchone()
   provider=snapshot(c,epoch);journal=c.execute('PRAGMA journal_mode').fetchone()[0];pages=c.execute('PRAGMA page_count').fetchone()[0];page_size=c.execute('PRAGMA page_size').fetchone()[0]
   busy=c.execute("SELECT count(*) FROM hw_sessions WHERE lease_owner IS NOT NULL AND lease_until>?",(epoch,)).fetchone()[0]
+  funnel_rows=c.execute("SELECT s.watch_id,s.request,s.strategy,h.calculated,h.payload AS calculation,h.strategy_checksum,m.payload AS sample FROM hw_calculations h JOIN hw_sessions s ON s.id=h.watch_row_id LEFT JOIN hw_samples m ON m.id=h.sample_row_id WHERE h.id>COALESCE((SELECT max(id)-100000 FROM hw_calculations),0) AND s.user_id=? AND s.is_test=0 AND h.calculated>=? AND h.calculated<=? ORDER BY h.id DESC LIMIT 5001",(uid,(now-timedelta(days=1)).isoformat(),now.isoformat())).fetchall()
   push_rows=c.execute("SELECT s.request,j.status,e.event_type,e.payload FROM push_jobs j JOIN push_devices d ON d.id=j.device_id JOIN hw_sessions s ON s.id=j.watch_row_id LEFT JOIN hw_events e ON e.event_id=j.event_key AND e.watch_row_id=s.id WHERE d.user_id=? AND j.created>=? LIMIT 20000",(uid,epoch-86400)).fetchall()
   readiness=[]
   for row in sessions:
@@ -1044,12 +1107,8 @@ def admin_diagnostics(connect,uid,now=None):
    try:gaps.append({'stopped_at':stopped['created'],'started_at':ev['created'],'duration_s':max(0,round((stamp(ev['created'])-stamp(stopped['created'])).total_seconds(),1)),'reason':'not recorded'})
    except (TypeError,ValueError):pass
    stopped=None
- revision=os.environ.get('ESCAPE_BUILD_COMMIT','').strip();revision_source='ESCAPE_BUILD_COMMIT'
- if not re.fullmatch(r'[0-9a-fA-F]{40}',revision):
-  try:revision=Path(__file__).with_name('BUILD_COMMIT').read_text(encoding='ascii').strip();revision_source='archive metadata'
-  except (OSError,UnicodeError):revision=''
- if not re.fullmatch(r'[0-9a-fA-F]{40}',revision):revision=None;revision_source='unavailable'
- return {'installation':{'declared_commit':revision,'commit_source':revision_source,'observed_restart_gaps':gaps,'note':'Genstartshuller bygger kun på registrerede stop og starter; uregistrerede nedbrud er ukendte.'},'application_errors':app_errors,'as_of':now.isoformat(),'scope':'own_sessions_and_shared_process','worker':dict(beat) if beat else None,'supervisor':dict(supervisor) if supervisor else None,'supervisor_events':events,'session_count':len(sessions),'states':dict(states),'errors':dict(errors),'due_count':len(overdue),'overdue':sorted(overdue,key=lambda x:x['late_s'],reverse=True)[:20],'provider_capacity':provider,'provider_forecast':{'minute_remaining':max(0,provider['http_effective_limit_per_minute']-provider['http_used_this_minute']),'daily_remaining_reported':max(0,provider['account']['dailyRateLimit']-provider['account']['apiRequests']) if provider.get('account') and provider['account'].get('apiRequestsDate')==now.date().isoformat() else None,'estimated_daily_usage_at_current_average':round(provider['account']['apiRequests']*86400/max(1,epoch%86400)) if provider.get('account') and provider['account'].get('apiRequestsDate')==now.date().isoformat() and epoch%86400>=3600 else None,'note':'Dagligt restbudget er seneste kontosnapshot, ikke en garanti; ukendte omkostninger og andre klienter kan forekomme.'},'providers':providers,'storage':storage,'push':{'last_24h':push,'oldest_pending_age_s':round(max(0,epoch-push_pending),1) if push_pending is not None else None},'scheduled_jobs':{'last_24h':jobs,'worker_last_seen':datetime.fromtimestamp(cron['heartbeat'],timezone.utc).isoformat() if cron else None},'windows':windows,'queue_factors':queue_factors,'worker_utilization':{'occupied_now':busy,'capacity':max(1,min(10,int(os.environ.get('ESCAPE_HW_CONCURRENCY','2')))) if os.environ.get('ESCAPE_HW_CONCURRENCY','2').isdigit() else None,'note':'Leases viser optagne workers; tidligere målinger findes kun, hvor de er registreret.'},'readiness_by_market':{k:{'signals':dict(v['signals']),'blockers':dict(v['blockers'])} for k,v in ready.items()},'market_sleep':{'sleeping_sessions':0,'next_wake':None,'reduced_polling_sessions':len(reduced),'next_checks':reduced[:60],'estimated_avoided_scans':sum(x['metrics'].get('quiet_avoided_estimate',0) for x in records if x['status'] in ('processed','degraded')) if records else None,'avoided_intraday_http_requests':sum(x['metrics'].get('intraday_cache_hit',False) for x in records),'estimated_saved_api_units':5*sum(x['metrics'].get('intraday_cache_hit',False) for x in records),'late_wakes_after_open':None,'note':'Intet instrument sættes helt i dvale uden verificeret Pluto-handelsadgang. Undgåede intradag-kald er registrerede cachetræf; API-besparelsen er estimeret til 5 enheder pr. kald. Undgåede scanninger er estimeret, og forsinkede opvågninger er ikke målt.'},'push_detail':{'items':[{'ticker':k[0],'event_type':k[1],'reason':k[2],'status':k[3],'count':v} for k,v in push_detail.items()],'limited':len(push_rows)>=20000,'note':'Skipped omfatter flere årsager og er ikke et særskilt deduplikeringstal.'},'timeline':timeline,'recent':recent,'log_files_read':files_read,'log_earliest':records[-1]['at'] if records else None,'history_scope_truncated':len(history_sessions)>10000,'log_retention':'Roterende filer; perioderne kan være ufuldstændige. Udskudte indsamlinger tælles separat.','unavailable':'Eksterne processers CPU, hukommelse og fuld versionsidentitet er ikke registreret.'}
+ revision_info=engine.installed_revision();revision=revision_info['commit'];revision_source=revision_info['source']
+ return {'installation':{'declared_commit':revision,'commit_source':revision_source,'observed_restart_gaps':gaps,'note':'Genstartshuller bygger kun på registrerede stop og starter; uregistrerede nedbrud er ukendte.'},'application_errors':app_errors,'as_of':now.isoformat(),'scope':'own_sessions_and_shared_process','worker':dict(beat) if beat else None,'supervisor':dict(supervisor) if supervisor else None,'supervisor_events':events,'session_count':len(sessions),'states':dict(states),'errors':dict(errors),'due_count':len(overdue),'overdue':sorted(overdue,key=lambda x:x['late_s'],reverse=True)[:20],'provider_capacity':provider,'provider_forecast':{'minute_remaining':max(0,provider['http_effective_limit_per_minute']-provider['http_used_this_minute']),'daily_remaining_reported':max(0,provider['account']['dailyRateLimit']-provider['account']['apiRequests']) if provider.get('account') and provider['account'].get('apiRequestsDate')==now.date().isoformat() else None,'estimated_daily_usage_at_current_average':round(provider['account']['apiRequests']*86400/max(1,epoch%86400)) if provider.get('account') and provider['account'].get('apiRequestsDate')==now.date().isoformat() and epoch%86400>=3600 else None,'note':'Dagligt restbudget er seneste kontosnapshot, ikke en garanti; ukendte omkostninger og andre klienter kan forekomme.'},'providers':providers,'storage':storage,'push':{'last_24h':push,'oldest_pending_age_s':round(max(0,epoch-push_pending),1) if push_pending is not None else None},'scheduled_jobs':{'last_24h':jobs,'worker_last_seen':datetime.fromtimestamp(cron['heartbeat'],timezone.utc).isoformat() if cron else None},'windows':windows,'queue_factors':queue_factors,'worker_utilization':{'occupied_now':busy,'capacity':max(1,min(10,int(os.environ.get('ESCAPE_HW_CONCURRENCY','2')))) if os.environ.get('ESCAPE_HW_CONCURRENCY','2').isdigit() else None,'note':'Leases viser optagne workers; tidligere målinger findes kun, hvor de er registreret.'},'entry_funnel':entry_funnel(funnel_rows,now),'readiness_by_market':{k:{'signals':dict(v['signals']),'blockers':dict(v['blockers'])} for k,v in ready.items()},'market_sleep':{'sleeping_sessions':0,'next_wake':None,'reduced_polling_sessions':len(reduced),'next_checks':reduced[:60],'estimated_avoided_scans':sum(x['metrics'].get('quiet_avoided_estimate',0) for x in records if x['status'] in ('processed','degraded')) if records else None,'avoided_intraday_http_requests':sum(x['metrics'].get('intraday_cache_hit',False) for x in records),'estimated_saved_api_units':5*sum(x['metrics'].get('intraday_cache_hit',False) for x in records),'late_wakes_after_open':None,'note':'Intet instrument sættes helt i dvale uden verificeret Pluto-handelsadgang. Undgåede intradag-kald er registrerede cachetræf; API-besparelsen er estimeret til 5 enheder pr. kald. Undgåede scanninger er estimeret, og forsinkede opvågninger er ikke målt.'},'push_detail':{'items':[{'ticker':k[0],'event_type':k[1],'reason':k[2],'status':k[3],'count':v} for k,v in push_detail.items()],'limited':len(push_rows)>=20000,'note':'Skipped omfatter flere årsager og er ikke et særskilt deduplikeringstal.'},'timeline':timeline,'recent':recent,'log_files_read':files_read,'log_earliest':records[-1]['at'] if records else None,'history_scope_truncated':len(history_sessions)>10000,'log_retention':'Roterende filer; perioderne kan være ufuldstændige. Udskudte indsamlinger tælles separat.','unavailable':'Eksterne processers CPU, hukommelse og fuld versionsidentitet er ikke registreret.'}
 
 def worker_settings():
  keys=('ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE','ESCAPE_HW_REQUESTS_PER_MINUTE','ESCAPE_HW_EODHD_FAST_POLL_ENABLED','ESCAPE_HW_EODHD_MIN_POLL_S','ESCAPE_HW_EODHD_WS_TRADES_ENABLED','ESCAPE_HW_EODHD_FUSE_ENABLED','ESCAPE_HW_EODHD_BARS_ENABLED','ESCAPE_HW_EODHD_WS_EU_EXCHANGES','ESCAPE_HW_PARALLEL_SCANS','ESCAPE_HW_CONCURRENCY','ESCAPE_HW_CAPACITY')
