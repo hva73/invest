@@ -25,6 +25,8 @@ class Backup(unittest.TestCase):
             with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')):
                 backup = apply_update.apply(source, target)
             self.assertTrue(check.verify_backup(backup, expected))
+            with self.assertRaisesRegex(ValueError, 'invalid_backup'):
+                check.verify_backup(backup, {'files': {}, 'keys': {}})
             baseline = check.database_digest(database)
             self.assertTrue(check.ensure_database_unchanged(database, baseline))
             with sqlite3.connect(database) as db: db.execute("INSERT INTO items VALUES('new user data')")

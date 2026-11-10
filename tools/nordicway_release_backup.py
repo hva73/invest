@@ -73,24 +73,28 @@ def verify_backup(backup, expected):
         raise ValueError('invalid_backup')
     for group, prefix in (('files', 'code/'), ('keys', '')):
         records = expected.get(group)
-        if not isinstance(records, dict):
+        if not isinstance(records, dict) or (group == 'files' and not records) or (group == 'keys' and set(records) != set(KEYS)):
             raise ValueError('invalid_backup')
         for name, digest in records.items():
             path = _path(backup, prefix + name)
             if digest is None:
                 if path.exists(): raise ValueError('backup_mismatch')
-            elif not re.fullmatch(r'[0-9a-f]{64}', digest) or not path.is_file() or _digest(path) != digest:
+            elif not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest) or not path.is_file() or _digest(path) != digest:
                 raise ValueError('backup_mismatch')
     database = _path(backup, 'escape.db')
     if not _offline_database(database):
         raise ValueError('invalid_backup_database')
+    connection = None
     try:
-        with sqlite3.connect('file:' + quote(str(database), safe='/') + '?mode=ro', uri=True, timeout=1) as connection:
-            connection.execute('PRAGMA query_only=ON')
-            if connection.execute('PRAGMA integrity_check').fetchone() != ('ok',):
-                raise ValueError('invalid_backup_database')
+        connection = sqlite3.connect('file:' + quote(str(database), safe='/') + '?mode=ro', uri=True, timeout=1)
+        connection.execute('PRAGMA query_only=ON')
+        if connection.execute('PRAGMA integrity_check').fetchone() != ('ok',):
+            raise ValueError('invalid_backup_database')
     except sqlite3.Error:
         raise ValueError('invalid_backup_database') from None
+    finally:
+        if connection is not None:
+            connection.close()
     return True
 
 
