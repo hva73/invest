@@ -130,6 +130,14 @@ class CapacityTests(unittest.TestCase):
   capacity.Capacity(app.connect,'essential').reserve(1,now+10)
  def test_temporary_buffer_never_relabels_a_stale_account_snapshot(self):
   self.assertEqual(capacity.daily_limit({'dailyRateLimit':100000,'apiRequestsDate':'2026-11-09'},'2026-11-10','routine'),80000)
+ def test_temporary_limit_tracks_provider_remaining_extra_balance(self):
+  account={'dailyRateLimit':100000,'apiRequestsDate':'2026-11-10','apiRequests':95000,'extraLimit':100500}
+  self.assertEqual(capacity.daily_limit(account,'2026-11-10','routine'),200000)
+  account.update(apiRequests=110000,extraLimit=25000)
+  self.assertEqual(capacity.daily_limit(account,'2026-11-10','routine'),135000)
+  account.update(apiRequests=95000,extraLimit=0)
+  self.assertEqual(capacity.daily_limit(account,'2026-11-10','routine'),100000)
+  self.assertEqual(capacity.daily_limit(account,'2026-11-11','routine'),80000)
  def test_history_cache_deduplicates_positions_without_refreshing_source_time(self):
   eodhd_feeds._history_cache.clear();calls=[]
   def fetch(*_):

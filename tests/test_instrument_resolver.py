@@ -4,6 +4,18 @@ from instrument_resolver import resolve_instrument,resolve_cxe,resolve_us,crypto
 from cxe_reference import parse_reference,ReferenceUnavailable
 
 class InstrumentResolver(unittest.TestCase):
+ def test_rocket_lab_name_change_requires_exact_independent_security(self):
+  pluto={'asset_id':'004180fa-1876-448e-889e-04b231119149','ticker':'RKLB','name':'Rocket Lab Corporation Common Stock','exchange':'NASDAQ','currency':'USD','type':'CS'}
+  listing={'Code':'RKLB','Name':'Rocket Lab USA Inc.','Country':'USA','Exchange':'NASDAQ','Currency':'USD','Type':'Common Stock','Isin':'US7731211089'}
+  choice={'symbol':'RKLB.US','exchange':'US','currency':'USD','isin':'US7731211089'}
+  result=resolve_us(pluto,[choice],[listing]);self.assertEqual(result['status'],'VERIFIED');self.assertIn('Endavu',result['type_note'])
+  for fields in ({'asset_id':'other'},{'name':'Rocket Lab Class A Common Stock'},{'exchange':'NYSE'},{'currency':'CAD'},{'type':'ADRC'},{'isin':'US0000000001'}):
+   with self.subTest(fields=fields):self.assertNotEqual(resolve_us(dict(pluto,**fields),[choice],[listing])['status'],'VERIFIED')
+  for fields in ({'Name':'Rocket Lab Europe Inc.'},{'Isin':'US0000000001'},{'Exchange':'NYSE'},{'Type':'Preferred Stock'}):
+   with self.subTest(fields=fields):self.assertNotEqual(resolve_us(pluto,[choice],[dict(listing,**fields)])['status'],'VERIFIED')
+  for fields in ({'isin':None},{'isin':'US0000000001'},{'currency':'EUR'}):
+   with self.subTest(fields=fields):self.assertNotEqual(resolve_us(pluto,[dict(choice,**fields)],[listing])['status'],'VERIFIED')
+  self.assertEqual(resolve_us(pluto,[choice],[listing,listing])['status'],'AMBIGUOUS')
  def test_ferguson_old_name_requires_exact_independently_checked_us_security(self):
   pluto={'asset_id':'13ba8af0-fa33-442a-9610-47fe67b70f1d','ticker':'FERG','name':'Ferguson Enterprises Inc.','exchange':'NYSE','currency':'USD','type':'CS'}
   listing={'Code':'FERG','Name':'Ferguson Plc','Country':'USA','Exchange':'NYSE','Currency':'USD','Type':'Common Stock','Isin':'US31488V1070'}

@@ -20,7 +20,10 @@ TEMPORARY_DAILY_LIMIT_UNITS=200000
 
 def daily_limit(account,day,priority):
  if day==TEMPORARY_DAILY_LIMIT_DAY and account.get('apiRequestsDate')==day:
-  return TEMPORARY_DAILY_LIMIT_UNITS
+  # extraLimit is the provider's remaining purchased balance, not an
+  # increase to dailyRateLimit. Both counters are from the same snapshot.
+  provider_limit=max(account['dailyRateLimit'],account.get('apiRequests',0))+max(0,account.get('extraLimit',0))
+  return min(TEMPORARY_DAILY_LIMIT_UNITS,provider_limit)
  return account['dailyRateLimit']*(95 if priority=='essential' else UTILIZATION)//100
 
 def configured_limit(provider_limit=DOCUMENTED_HTTP_LIMIT):
@@ -164,7 +167,9 @@ def snapshot(c,now=None):
  queue=c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND next_due<=? AND lease_until<=? AND json_extract(request,'$.provider')='eodhd'",(now,now)).fetchone()[0]
  leases=[x for x in state.get('ws_leases',{}).values() if x['until']>now]
  day=datetime.fromtimestamp(now,timezone.utc).date().isoformat()
- temporary={'utc_day':day,'limit_units':TEMPORARY_DAILY_LIMIT_UNITS,'expires_at':'2026-11-11T00:00:00+00:00'} if day==TEMPORARY_DAILY_LIMIT_DAY else None
+ account=state.get('account') or {}
+ effective=daily_limit(account,day,'routine') if account.get('apiRequestsDate')==day and account.get('dailyRateLimit') else None
+ temporary={'utc_day':day,'limit_units':effective,'authorized_max_units':TEMPORARY_DAILY_LIMIT_UNITS,'expires_at':'2026-11-11T00:00:00+00:00'} if day==TEMPORARY_DAILY_LIMIT_DAY else None
  return {'utilization_pct':UTILIZATION,'temporary_daily_limit':temporary,'http_provider_limit_per_minute':limit,'http_limit_basis':state.get('limit_source','documented_default'),'http_effective_limit_per_minute':configured_limit(limit),'http_configured_override':os.environ.get('ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE'),'http_used_this_minute':row['used'] if row else 0,'due_sessions':queue,'ws_connections':len(leases),'ws_subscriptions':sum(x['symbols'] for x in leases),'ws_subscription_limit':40,'ws_connection_limit':51,**{k:state.get(k) for k in ('local_day','requests','errors','http_429','last_http_status','last_http_at','last_latency_ms','latency_total_ms','known_units','unknown_cost_requests','http_retry_at','account','account_checked_at','account_status','ws_retry_at','ws_429')},'endpoint_hourly':state.get('endpoint_hours',{}),'daily_usage_note':'Account snapshot plus known local costs; other clients and unknown endpoint costs require the next account snapshot.'}
 
 def refresh_account(connect,opener=None):

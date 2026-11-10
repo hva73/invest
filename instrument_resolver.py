@@ -81,6 +81,10 @@ def resolve_us(pluto, eodhd_choices, us_rows, cxe_rows=None):
   # 21cf0d88-2b9b-466c-8acb-639bed1f663b. EODHD retains the old issuer name.
   if (pluto.get('asset_id')=='13ba8af0-fa33-442a-9610-47fe67b70f1d' and ticker=='FERG' and exchange=='NYSE' and kind=='CS' and issuer==('FERGUSON','ENTERPRISES') and share_class is None and other==('FERGUSON',) and other_class is None and row.get('Isin')=='US31488V1070'):
    return any(x.get('symbol')=='FERG.US' and x.get('isin')=='US31488V1070' for x in eodhd_choices if isinstance(x,dict))
+  # Pluto says Rocket Lab Corporation, EODHD retains Rocket Lab USA.
+  # Endavu independently confirmed RKLB / XNAS / USD / US7731211089.
+  if (pluto.get('asset_id')=='004180fa-1876-448e-889e-04b231119149' and ticker=='RKLB' and exchange=='NASDAQ' and kind=='CS' and issuer==('ROCKET','LAB') and share_class is None and other==('ROCKET','LAB','USA') and other_class is None and row.get('Isin')=='US7731211089'):
+   return any(x.get('symbol')=='RKLB.US' and x.get('isin')=='US7731211089' and x.get('exchange')=='US' and x.get('currency')=='USD' for x in eodhd_choices if isinstance(x,dict))
   # These provider names were observed for this exact Pluto asset and listing.
   return bool(pluto.get('asset_id')=='bea4a183-d3aa-4893-8071-87b85385e281' and ticker=='FCX' and kind=='CS' and issuer==('FREEPORT','MCMORAN') and share_class is None and other==('FREEPORT','MCMORAN','COPPER','GOLD') and other_class is None and row.get('Isin')=='US35671D8570')
  matches=[row for row in us_rows if isinstance(row,dict) and same_us_class_ticker(row.get('Code'),ticker) and _norm(row.get('Exchange'))==exchange and _norm(row.get('Currency'))=='USD' and _norm(row.get('Country'))=='USA' and _norm(row.get('Type'))=='COMMONSTOCK' and same_issuer(row) and isinstance(row.get('Isin'),str) and re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',row['Isin'])]
@@ -99,6 +103,7 @@ def resolve_us(pluto, eodhd_choices, us_rows, cxe_rows=None):
   result['type_note']=ticker+': Pluto og EODHD bruger forskellige observerede selskabsnavne; Pluto oplyser ikke ISIN.'
   if ticker=='HRTX':result['type_note']+=' EODHD-navnet er forkortet; HRTX/XNAS/USD og ISIN US4277461020 er også kontrolleret hos Endavu 2026-11-09.'
   if ticker=='FERG':result['type_note']+=' EODHD bruger Ferguson Plc; FERG/XNYS/USD og ISIN US31488V1070 er også kontrolleret hos Endavu 2026-11-09.'
+  if ticker=='RKLB':result['type_note']+=' EODHD bruger Rocket Lab USA; RKLB/XNAS/USD og ISIN US7731211089 er også kontrolleret hos Endavu 2026-11-10.'
  if cxe_rows is not None:
   corroborating=[row for row in cxe_rows if isinstance(row,dict) and row.get('isin')==isin and _norm(row.get('instrument_type'))=='EQTY']
   if not corroborating or any(_issuer(row.get('name'))!=issuer for row in corroborating):return {'status':'UNVERIFIED','reason':'CXE_ISIN_NOT_CORROBORATED'}
