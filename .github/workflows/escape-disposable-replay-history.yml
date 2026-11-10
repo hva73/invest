@@ -1,0 +1,30 @@
+name: ESCAPE disposable replay history test
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  history-test:
+    if: >-
+      github.repository == 'hva73/invest' &&
+      github.actor_id == '351122234' &&
+      github.event.issue.number == 4 &&
+      github.event.issue.pull_request == null &&
+      startsWith(github.event.comment.body, 'ESCAPE_DISPOSABLE_REPLAY_HISTORY_V1')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Check out reviewed test code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: b6335db4fdaaea707a13432728ef308b76d790e6
+          persist-credentials: false
+      - name: Test history replay on disposable branch
+        env:
+          JOURNAL_TOKEN: ${{ github.token }}
+        run: python3 development/projects_replay_history_live_test.py
