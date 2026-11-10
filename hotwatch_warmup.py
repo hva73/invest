@@ -34,10 +34,19 @@ def refresh(connect,job,now,client=None):
  req=job['request_data'];symbol=req.get('provider_symbol')
  if job['is_test'] or req.get('provider')!='eodhd' or not symbol or req.get('asset_id')==PEPE_PLUTO_ASSET_ID:return None
  with connect() as c:
-  cached=c.execute('SELECT next_attempt,symbol FROM hw_warmup_history WHERE watch_row_id=?',(job['id'],)).fetchone()
+  cached=c.execute('SELECT next_attempt,symbol,received FROM hw_warmup_history WHERE watch_row_id=?',(job['id'],)).fetchone()
   if cached and cached['symbol']==symbol and cached['next_attempt']>now.timestamp():return None
   row=c.execute("SELECT * FROM hw_sessions WHERE id=? AND user_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED')",(job['id'],job['user_id'])).fetchone()
   if not row or json.loads(row['request'])!=req:return None
+  if cached and cached['symbol']==symbol and row['last_data']:
+   try:
+    # Analysis history is not a live signal. Do not repeatedly buy the same
+    # 5-unit history while closed and no new trade has arrived. The usual
+    # five-minute refresh resumes as soon as the quiet period ends.
+    from hotwatch_engine import quiet_market_interval,effective_poll_interval
+    state=json.loads(row['state']);profile=state.get('adaptive_profile') or req['profile'];base=effective_poll_interval(c,req,profile)
+    if quiet_market_interval(c,req,profile,now,base)>base and stamp(row['last_data'])<=stamp(cached['received']) and 0<=(now-stamp(cached['received'])).total_seconds()<1800:return None
+   except (KeyError,ValueError,TypeError,ArithmeticError):pass
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
   killed=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(job['user_id'],)).fetchone()
   if killed and killed['killed']:return None

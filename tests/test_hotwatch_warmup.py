@@ -50,6 +50,27 @@ class WarmupHistory(unittest.TestCase):
     self.assertEqual(c.execute('SELECT count(*) FROM hw_calculations').fetchone()[0],0)
     self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
   finally:f.tearDown()
+ def test_quiet_history_is_reused_but_refreshes_when_market_wakes_or_new_data_arrives(self):
+  import app,hotwatch_engine as engine,hotwatch_warmup as warmup
+  import test_hotwatch_engine as fixture
+  from unittest.mock import patch
+  f=fixture.HotWatch();f.setUp()
+  try:
+   now=f.now;req=dict(f.req,provider='eodhd',provider_symbol='MERC.US')
+   with app.connect() as c:
+    c.execute('UPDATE hw_sessions SET request=?,is_test=0,last_data=? WHERE watch_id=?',(json.dumps(req),(now-timedelta(minutes=20)).isoformat(),req['watch_id']))
+    row=engine.row_for(c,1,req['watch_id'],False)
+    c.execute('INSERT INTO hw_verified_feed_links VALUES(?,?,?,?,?,?,?,?)',(1,req['asset_id'],req['ticker'],req['quote_currency'],req['exchange'],req['provider_symbol'],'US1234567890',now.timestamp()))
+    c.execute('INSERT INTO hw_warmup_history VALUES(?,?,?,?,?,?)',(row['id'],req['provider_symbol'],(now-timedelta(minutes=10)).isoformat(),'[]',now.timestamp()-1,'NO_DATA'))
+   class Feed:
+    calls=0
+    def intraday(self,*args,**kwargs):self.calls+=1;return {'status':'NO_DATA'}
+   feed=Feed();job={'id':row['id'],'user_id':1,'is_test':False,'request_data':req}
+   with patch('hotwatch_engine.valid_cxe_evidence',return_value=None),patch('hotwatch_engine.effective_poll_interval',return_value=60),patch('hotwatch_engine.quiet_market_interval',return_value=120):
+    self.assertIsNone(warmup.refresh(app.connect,job,now,feed));self.assertEqual(feed.calls,0)
+   with patch('hotwatch_engine.valid_cxe_evidence',return_value=None),patch('hotwatch_engine.effective_poll_interval',return_value=60),patch('hotwatch_engine.quiet_market_interval',return_value=60):
+    self.assertEqual(warmup.refresh(app.connect,job,now,feed),'NO_DATA');self.assertEqual(feed.calls,1)
+  finally:f.tearDown()
  def test_history_can_inform_signals_only_with_fresh_same_session_schedule(self):
   now=datetime(2026,11,6,15,15,tzinfo=timezone.utc);c=sqlite3.connect(':memory:');c.row_factory=sqlite3.Row
   c.execute('CREATE TABLE hw_exchange_calendar(exchange TEXT,received TEXT,timezone TEXT,calendar TEXT)')

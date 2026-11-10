@@ -59,6 +59,31 @@ class CapacityTests(unittest.TestCase):
   self.assertIsNone(capacity.cost('https://ws.eodhistoricaldata.com/history?market=us&symbol=AAPL'))
   for units in (1,5,10,None):self.cap.reserve(units,self.now)
   state=self.state();self.assertEqual(state['known_units'],16);self.assertEqual(state['requests'],4);self.assertEqual(state['unknown_cost_requests'],1)
+ def test_daily_budget_reserves_headroom_for_essential_scans_and_resets_utc(self):
+  from datetime import datetime,timezone
+  now=datetime(2026,11,10,23,59,55,tzinfo=timezone.utc).timestamp()
+  with app.connect() as c:
+   state=capacity.read(c);state.update(local_day='2026-11-10',known_units=0,account={'apiRequests':80,'dailyRateLimit':100,'extraLimit':0,'apiRequestsDate':'2026-11-10'},units_at_account=0);capacity.write(c,state,now)
+  with self.assertRaisesRegex(EngineError,'EODHD_DAILY_BUDGET'):self.cap.reserve(1,now)
+  capacity.Capacity(app.connect,'essential').reserve(1,now)
+  self.cap.reserve(1,now+10)
+ def test_unknown_cost_is_not_assumed_free_near_daily_limit(self):
+  from datetime import datetime,timezone
+  now=datetime(2026,11,10,10,0,tzinfo=timezone.utc).timestamp()
+  with app.connect() as c:
+   state=capacity.read(c);state.update(local_day='2026-11-10',known_units=0,unknown_cost_requests=0,unknown_at_account=0,account={'apiRequests':79,'dailyRateLimit':100,'apiRequestsDate':'2026-11-10'},units_at_account=0);capacity.write(c,state,now)
+  self.cap.reserve(None,now)
+  with self.assertRaisesRegex(EngineError,'EODHD_DAILY_BUDGET'):self.cap.reserve(None,now+1)
+ def test_realtime_history_breakdown_does_not_expose_symbol_or_token(self):
+  class Response:
+   status=200;headers={}
+   def __enter__(self):return self
+   def __exit__(self,*_):pass
+  class Opener:
+   def open(self,*args,**kwargs):return Response()
+  with self.cap.open(Opener(),urllib.request.Request('https://ws.eodhistoricaldata.com/history?market=us&symbol=SECRET&api_token=private')):pass
+  with app.connect() as c:encoded=json.dumps(capacity.snapshot(c)['endpoint_hourly'])
+  self.assertIn('realtime_history:US',encoded);self.assertNotIn('SECRET',encoded);self.assertNotIn('private',encoded)
  def test_websocket_slots_separate_shared_released_on_error(self):
   with self.cap.websocket(20),capacity.Capacity(app.connect).websocket(20):
    with self.assertRaisesRegex(EngineError,'EODHD_WS_CAPACITY'):

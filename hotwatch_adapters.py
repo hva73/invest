@@ -10,6 +10,7 @@ from eodhd_capacity import Capacity,retry_seconds
 class DataUnavailable(EngineError):pass
 
 _quote_cache={}
+_quiet_intraday_empty={}
 _ws_batch_cache={}
 _ws_batch_lock=threading.Lock()
 _ws_batch_inflight={}
@@ -26,6 +27,19 @@ def shared_quote(key,symbol,fetch,enabled=True):
   if len(_quote_cache)>=256:_quote_cache.clear()
   _quote_cache[cache_key]=(time.monotonic(),copy.deepcopy(result))
   return result
+
+def quiet_intraday_lookup(key,symbol,last_data,quiet,fetch):
+ """Reuse a verified empty lookup briefly only while quiet polling applies."""
+ if not quiet:return fetch(),False
+ cache_key=(hashlib.sha256(key.encode()).digest(),symbol,last_data)
+ with _quote_locks[hash(cache_key)%len(_quote_locks)]:
+  cached=_quiet_intraday_empty.get(cache_key)
+  if cached and 0<=time.monotonic()-cached[0]<300:return copy.deepcopy(cached[1]),True
+  result=fetch()
+  if result.get('status')=='NO_DATA':
+   if len(_quiet_intraday_empty)>=512:_quiet_intraday_empty.clear()
+   _quiet_intraday_empty[cache_key]=(time.monotonic(),copy.deepcopy(result))
+  return result,False
 
 def reserve(connect,uid,source,now=None,purpose=None):
  if source=='eodhd':
@@ -330,9 +344,9 @@ class EODHDAdapter:
  def interval(self,request,profile):
   if self.connect is None:return max(PROFILES.get(profile,PROFILES[request['profile']]),provider_floor('eodhd'))
   with self.connect() as c:return effective_poll_interval(c,request,profile)
- def feeds(self):
+ def feeds(self,request=None):
   from eodhd_feeds import EODHDFeeds
-  return EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),capacity=Capacity(self.connect) if self.connect else None,opener=self.opener,share_status=self._shared_quotes)
+  return EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),capacity=Capacity(self.connect,'essential' if request and (request.get('watch_mode')=='exit' or request.get('priority') in ('HIGH','CRITICAL')) else 'routine') if self.connect else None,opener=self.opener,share_status=self._shared_quotes)
  def capture(self,client,feed,symbol,session):
   """Share one bounded stream across due, independently verified watches."""
   req=session['request_data'];capture_started=time.monotonic()
@@ -424,11 +438,15 @@ class EODHDAdapter:
     completed.set()
 
  def poll(self,session):
-  self.last_partial_observations=[];self.capture_metrics=[];self.pending_feed=None
+  self.last_partial_observations=[];self.capture_metrics=[];self.pending_feed=None;self.last_feed_diagnostics={};self.last_telemetry={}
   if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':raise DataUnavailable('EODHD_FEED_NOT_ENABLED')
   key=os.environ.get('ESCAPE_EODHD_API_KEY','').strip()
   if not key:raise DataUnavailable('EODHD_KEY_NOT_CONFIGURED')
   r=session['request_data'];symbol=r.get('provider_symbol')
+  try:scan_state=json.loads(session.get('state') or '{}')
+  except (ValueError,TypeError):scan_state={}
+  priority_request=dict(r)
+  if scan_state.get('adaptive_profile')=='CRITICAL' or isinstance(scan_state.get('catalyst_priority_until'),(int,float)) and scan_state['catalyst_priority_until']>utc().timestamp():priority_request['priority']='CRITICAL'
   if not symbol:raise DataUnavailable('EODHD_SYMBOL_MAPPING_REQUIRED')
   if not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',symbol):raise DataUnavailable('EODHD_SYMBOL_MAPPING_REQUIRED')
   cxe_valid=None;automatic_missing=False
@@ -468,7 +486,7 @@ class EODHDAdapter:
    # Complete slow broker refreshes before acquiring the actionable trade.
    # This prevents a fresh source observation aging in a broker/network queue.
    context_started=time.perf_counter();context=self.pluto.safe_context(r,r.get('quote_currency'));context_ms=(time.perf_counter()-context_started)*1000
-   client=self.feeds();stream_started=time.perf_counter();feed=self.capture(client,market+'_trades',stream_symbol,session);stream_ms=(time.perf_counter()-stream_started)*1000
+   client=self.feeds(priority_request);stream_started=time.perf_counter();feed=self.capture(client,market+'_trades',stream_symbol,session);stream_ms=(time.perf_counter()-stream_started)*1000
    partial=feed.get('partial_messages',[])
    if partial:
     item=partial[-1];self.last_partial_observations.append({'source':'eodhd','price':item.get('price'),'currency':r.get('quote_currency'),'source_time':None,'received_at':item.get('received_at'),'quality':'TIME_UNKNOWN','trade_size':item.get('trade_size')})
@@ -566,7 +584,7 @@ class EODHDAdapter:
   # Bar open times and close prices are recorded as such; never pretend that
   # the bar timestamp is the timestamp of its final trade.
   if os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1' and (exchange=='US' or exchange in eu_exchanges):
-   market='us' if exchange=='US' else 'eu';stream_symbol=realtime_symbol(symbol);client=self.feeds();bars=client.minute_bars(market,stream_symbol);kind='realtime'
+   market='us' if exchange=='US' else 'eu';stream_symbol=realtime_symbol(symbol);client=self.feeds(priority_request);bars=client.minute_bars(market,stream_symbol);kind='realtime'
    self.last_feed_diagnostics['minute_bars_status']=bars['status']
    if bars['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
    if bars['status']=='RATE_LIMIT':
@@ -580,7 +598,19 @@ class EODHDAdapter:
       last=stamp(session['last_data']).timestamp()
       if last<=end:start=max(start,int(last)-60)
     except (ValueError,TypeError,AttributeError,OverflowError):pass
-    bars=client.intraday(symbol,start=start,end=end);kind='intraday';self.last_feed_diagnostics['intraday_status']=bars['status']
+    # Reuse only a short, genuinely empty response while the verified
+    # calendar permits conservative polling. Wake/open, a new trade or a
+    # changed last observation immediately bypasses this negative cache.
+    quiet=False
+    if self.connect is not None:
+     try:
+      from hotwatch_engine import quiet_market_interval
+      profile=scan_state.get('adaptive_profile') or r['profile'];base=self.interval(r,profile)
+      with self.connect() as c:quiet=quiet_market_interval(c,r,profile,utc(),base)>base
+     except (KeyError,TypeError,ValueError):pass
+    bars,reused=quiet_intraday_lookup(key,symbol,session.get('last_data'),quiet,lambda:client.intraday(symbol,start=start,end=end))
+    if reused:self.last_feed_diagnostics['intraday_cache_hit']=True
+    kind='intraday';self.last_feed_diagnostics['intraday_status']=bars['status']
     if bars['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
     if bars['status']=='RATE_LIMIT':
      failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=bars.get('retry_after_s') or retry_seconds(None);raise failure
@@ -602,7 +632,7 @@ class EODHDAdapter:
   def fetch_quote():
    url='https://eodhd.com/api/real-time/'+quote(symbol,safe='')+'?'+urlencode({'api_token':key,'fmt':'json'});http_started=time.perf_counter()
    try:
-    with Capacity(self.connect).open(self.opener,urllib.request.Request(url,headers={'Accept':'application/json'})) as response:
+    with Capacity(self.connect,'essential' if priority_request.get('watch_mode')=='exit' or priority_request.get('priority') in ('HIGH','CRITICAL') else 'routine').open(self.opener,urllib.request.Request(url,headers={'Accept':'application/json'})) as response:
      raw=response.read(131073)
      if len(raw)>131072:raise ValueError()
      received=utc();http_ms=(time.perf_counter()-http_started)*1000

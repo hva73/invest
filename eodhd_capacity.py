@@ -56,7 +56,8 @@ def cost(url):
  return None
 
 class Capacity:
- def __init__(self,connect):self.connect=connect
+ def __init__(self,connect,priority='routine'):
+  self.connect=connect;self.priority='essential' if priority=='essential' else 'routine'
  def reserve(self,units=None,now=None,endpoint=None,market=None):
   now=time.time() if now is None else now;window=int(now//60)
   with self.connect() as c:
@@ -73,8 +74,12 @@ class Capacity:
    if state.get('local_day')!=day:state.update(local_day=day,known_units=0,unknown_cost_requests=0,requests=0,errors=0,http_429=0,latency_total_ms=0)
    account=state.get('account',{})
    if units!=0 and account.get('apiRequestsDate')==day and account.get('dailyRateLimit'):
-    estimate=account['apiRequests']+max(0,state.get('known_units',0)-state.get('units_at_account',0))
-    if estimate+(units or 0)>account['dailyRateLimit']*UTILIZATION//100:raise EngineError('EODHD_DAILY_BUDGET',429)
+    unknown=state.get('unknown_cost_requests',0)
+    state.setdefault('unknown_at_account',unknown)
+    # Unknown endpoint costs are not free; reserve at least one unit until
+    # the next official snapshot reconciles their actual billed cost.
+    estimate=account['apiRequests']+max(0,state.get('known_units',0)-state.get('units_at_account',0))+max(0,unknown-state.get('unknown_at_account',unknown))
+    if estimate+(1 if units is None else units)>account['dailyRateLimit']*(95 if self.priority=='essential' else UTILIZATION)//100:raise EngineError('EODHD_DAILY_BUDGET',429)
    state['known_units']=state.get('known_units',0)+(units or 0)
    state['unknown_cost_requests']=state.get('unknown_cost_requests',0)+(units is None)
    state['requests']=state.get('requests',0)+1
@@ -110,8 +115,9 @@ class Capacity:
  def open(self,opener,request,timeout=8):
   parsed=urlsplit(request.full_url);parts=parsed.path.removeprefix('/api/').split('/')
   allowed={'user','intraday','technical','news','screener','fundamentals','real-time','search','exchanges-list','exchange-details','exchange-symbol-list','calendar','eod','splits','div'}
-  endpoint=parts[0] if parsed.hostname=='eodhd.com' and parts[0] in allowed else 'other'
+  endpoint=parts[0] if parsed.hostname=='eodhd.com' and parts[0] in allowed else 'realtime_history' if parsed.hostname=='ws.eodhistoricaldata.com' and parsed.path=='/history' else 'other'
   raw=parts[1] if len(parts)>1 else '';market=raw.rsplit('.',1)[-1].upper() if '.' in raw else raw.upper() if endpoint in ('exchange-details','exchange-symbol-list') else ''
+  if endpoint=='realtime_history':market=(parse_qs(parsed.query).get('market',['UNKNOWN'])[0] or 'UNKNOWN').upper()
   market=market if re.fullmatch(r'[A-Z0-9_-]{1,16}',market) else 'UNKNOWN'
   self.reserve(cost(request.full_url),endpoint=endpoint,market=market);started=time.perf_counter();status=None;headers={}
   try:
@@ -168,6 +174,6 @@ def refresh_account(connect,opener=None):
   if result['status']=='OK' and isinstance(data,dict) and all(_integer(data.get(k)) is not None for k in ('apiRequests','dailyRateLimit','extraLimit')) and isinstance(data.get('apiRequestsDate'),str):
    # Do not persist name, email, API key, payment or invitation fields.
    state['account']={k:_integer(data[k]) for k in ('apiRequests','dailyRateLimit','extraLimit')}
-   state['account']['apiRequestsDate']=data['apiRequestsDate'][:10];state['units_at_account']=state.get('known_units',0)
+   state['account']['apiRequestsDate']=data['apiRequestsDate'][:10];state['units_at_account']=state.get('known_units',0);state['unknown_at_account']=state.get('unknown_cost_requests',0)
   elif result['status']=='OK':state['account_status']='INVALID_RESPONSE'
   write(c,state,time.time())

@@ -20,6 +20,22 @@ class FeedReuse(unittest.TestCase):
  def tearDown(self):
   adapters._ws_batch_cache.clear();adapters._ws_batch_inflight.clear()
   self.clock.stop();self.env.stop();self.f.tearDown()
+ def test_six_quiet_empty_lookups_cost_two_instead_of_six(self):
+  adapters._quiet_intraday_empty.clear();calls=[]
+  def fetch():calls.append(1);return {'status':'NO_DATA'}
+  for second in (0,60,120,180,240,300):
+   with patch('hotwatch_adapters.time.monotonic',return_value=1000+second):adapters.quiet_intraday_lookup('feed-reuse','MERC.US','old',True,fetch)
+  self.assertEqual(len(calls),2) # Five-minute expiry: 2 instead of 6 calls.
+  adapters._quiet_intraday_empty.clear()
+ def test_closed_market_empty_intraday_cache_wakes_for_new_data(self):
+  adapters._quiet_intraday_empty.clear();calls=[]
+  def fetch():calls.append(1);return {'status':'NO_DATA','received_at':'original'}
+  first,hit=adapters.quiet_intraday_lookup('feed-reuse','MERC.US','old',True,fetch);self.assertFalse(hit)
+  second,hit=adapters.quiet_intraday_lookup('feed-reuse','MERC.US','old',True,fetch);self.assertTrue(hit);self.assertEqual(second['received_at'],'original');self.assertEqual(len(calls),1)
+  adapters.quiet_intraday_lookup('feed-reuse','MERC.US','new',True,fetch)
+  adapters.quiet_intraday_lookup('feed-reuse','MERC.US','old',False,fetch)
+  self.assertEqual(len(calls),3)
+  adapters._quiet_intraday_empty.clear()
  def cached(self,symbol='MERC',feed='us_trades',source_age=10,cache_age=0,uid=1):
   at=(self.now-timedelta(seconds=source_age)).isoformat()
   message={'symbol':symbol,'event_time':at,'received_at':at,'price':'100','market_session':'open'}
