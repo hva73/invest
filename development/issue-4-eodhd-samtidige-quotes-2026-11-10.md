@@ -90,6 +90,8 @@ Uafhængig kildekontrol ca. 21:19 UTC er dokumenteret i [ChatGPTs kommentar på 
 
 56 sessioner over seks sider. Kun de seneste 30 logposter pr. side var tilgængelige; event og sessionsstatus er ikke et atomisk snapshot. En seneste observeret kildetid beviser ikke, at andre handler ikke findes. N/A betyder, at loggen ikke indeholdt en relevant måling. Køtid er mellem planlagt tid og faktisk claim.
 
+De fem sessioner uden scanpost i dette logudsnit var PEPE, CELC, SHOT, HSAI og VOD. Alle fem brugte Pluto som aktiv kilde og havde `PLUTO_QUOTE_TIME_UNKNOWN`; de skal derfor ikke tælles som dokumenterede EODHD-databrud. Feed-recovery angav for PEPE uafklaret kryptoidentitet, for CELC/SHOT/VOD uafklaret EODHD-identitet og for HSAI midlertidigt providerbudget. Dette er statuskoder i snapshots, ikke bevis for en fælles grundfejl.
+
 | Watch-ref | Instrument | Motorvisning | Seneste beregningskode | Seneste scan UTC | Kø sek. | Trade-alder sek. | Kildestatus | Seneste handelskildetid UTC |
 | --- | --- | --- | --- | --- | ---: | ---: | --- | --- |
 | 925b87fd9436e09e | NOVOB | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | 2026-11-10T21:13:54.775969+00:00 | 4.91 | 19130.74 | STALE_OR_FUTURE | 2026-11-10T15:59:00+00:00 |

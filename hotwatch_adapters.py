@@ -472,9 +472,11 @@ class EODHDAdapter:
         candidates=[m for m in retained+messages if stamp(m['event_time'])==new_time];seen=set();messages=[]
         for candidate in candidates:
          try:quote=(Decimal(str(candidate.get('bid'))),Decimal(str(candidate.get('ask'))))
-         except (InvalidOperation,TypeError,ValueError):quote=(str(candidate.get('bid')),str(candidate.get('ask')))
+         except (InvalidOperation,TypeError,ValueError):continue
+         if not all(v.is_finite() for v in quote) or quote[0]<=0 or quote[1]<quote[0]:continue
          if quote not in seen:messages.append(candidate);seen.add(quote)
          if len(messages)==2:break
+        if not messages:messages=candidates[-1:]
      partial=[m for m in result.get('partial_messages',[]) if m.get('symbol')==item]
      value={**result,'status':'OK' if messages else 'NO_MESSAGES','messages':messages,'message_count':len(messages),'partial_messages':partial,'captured_at':captured_at}
      _ws_batch_cache[(self.uid,credential,feed,item)]=(saved,copy.deepcopy(value))

@@ -130,7 +130,9 @@ class SparseFeedRecovery(unittest.TestCase):
   client=Mock();client.capture.return_value={'status':'OK','messages':[first]}
   with patch.dict(os.environ,{'ESCAPE_EODHD_API_KEY':'test-only'}),patch.object(adapters,'utc',return_value=self.now),patch.object(adapters.time,'monotonic',return_value=100):
    adapter.capture(client,'us_quotes','MERC',job)
-  client.capture.return_value={'status':'OK','messages':[second]}
+  equivalent={**first,'bid':'9.000','ask':'9.100'}
+  partial={**first,'bid':None}
+  client.capture.return_value={'status':'OK','messages':[partial,equivalent,second]}
   for elapsed in (21,42,63):
    with patch.dict(os.environ,{'ESCAPE_EODHD_API_KEY':'test-only'}),patch.object(adapters,'utc',return_value=self.now+timedelta(seconds=elapsed)),patch.object(adapters.time,'monotonic',return_value=100+elapsed):
     result=adapter.capture(client,'us_quotes','MERC',job)
