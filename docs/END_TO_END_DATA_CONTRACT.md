@@ -1,5 +1,7 @@
 # ESCAPE — END-TO-END DATA CONTRACT
 
+> **Aktuel læsevejledning (10. november 2026):** Teknisk reviewgrundlag; [masterkontrakten](ESCAPE_MASTER_CONTRACT.md) sammenholder nyere kode, ejeraftaler, eksakt readback og åbne konflikter uden at ændre skemaet.
+
 Contract version: **1.0.0**, 3. november 2026. Status: review on `codex/design-review-wip`; **not a release or permission to install**. Covers Trading Radar/ChatGPT → ESCAPE report/API ingestion → persistence → broker/market observations → display/readback. No automatic changes to prompts, schedules, mandates or production data.
 
 ## 1. Existing contracts and precedence

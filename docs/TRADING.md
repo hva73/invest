@@ -1,5 +1,7 @@
 # Forslag fra ESCAPE til godkendelse i Pluto
 
+> **Aktuel læsevejledning (10. november 2026):** Se [masterkontrakten](ESCAPE_MASTER_CONTRACT.md) for gældende depotmandat og forskellen mellem vurdering, forslag, ordre og faktisk fill.
+
 Plutos værktøjsbeskrivelser modtaget 2. november 2026 siger udtrykkeligt, at `propose_orders` opretter et forslag. Ingen ordre placeres og ingen penge reserveres ved dette kald. Brugeren ser en ny kurs og godkender i Pluto-appen, før rigtige ordrer oprettes. Der findes ifølge den modtagne beskrivelse intet værktøj til direkte ordreafsendelse. ESCAPE omgår ikke denne godkendelse.
 
 ## Forløbet

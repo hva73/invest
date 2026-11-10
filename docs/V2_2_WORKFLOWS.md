@@ -1,5 +1,7 @@
 # V2.2 — beslutninger, HOT WATCH og leveringsbeviser
 
+> **Aktuel læsevejledning (10. november 2026):** Historiske workflows skal læses sammen med [masterkontrakten](ESCAPE_MASTER_CONTRACT.md) og den aktuelle kode; versionsnummeret dokumenterer ikke aktuel installation.
+
 Dette er en additiv udvidelse af ESCAPE Invest, ikke et nyt rapportformat. `schema_version: 2`, eksisterende rapporttyper, report_id, source_ids, journal, analysis_for og analysis_urls er bevaret. Nye felter er valgfrie i den eksisterende rapport; hvis et nyt objekt leveres, gælder objektets fulde kontrakt. Ukendte værdier er null, aldrig konstruerede kurser. MCP-serverens versionsnummer er 2.4.0; dette er forskelligt fra rapportens schema_version og kravtillæggets navn V2.2.
 
 ## Rapportgeneratoren

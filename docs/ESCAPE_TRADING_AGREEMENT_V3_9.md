@@ -113,10 +113,10 @@ Dette ændrer ikke kravet om entydig instrumentidentitet, korrekte data til de r
 
 ## 6. HOT WATCH — hvad der er aftalt, og hvad der er bevist
 
-- HOT WATCH er en **selvstændig backendmotor**, der kan fungere uden aktiv chat. Sessionsstart kræver et **eksplicit autoriseret API/MCP-kald**; rapportstatus eller UI-visning starter ikke automatisk overvågning.
+- HOT WATCH er en **selvstændig backendmotor**, der kan fungere uden aktiv chat. Rapportstatus eller UI-visning starter ikke i sig selv overvågning. Senere tillæg i §9 beskriver også den eksisterende kvalifikationsstyrede automatiske kandidatmotor; se [kodeafstemningen](ESCAPE_MASTER_CONTRACT.md).
 - Motorens eksisterende deklarative strategi, risikogates og sessions-/datakontrakter må ikke ændres uden særskilt beslutning. Motorens signal er **ikke** en brokerordre eller en automatisk handel.
 - Batchaktivering af **20 kandidatsessioner** er syntetisk målt til **36 ms samlet / 21,7 ms i motoren**. Dette beviser kun oprettelse, **ikke** markedsdatadækning eller scanning.
-- Senest rapporteret: **46/46 HOT WATCH-tests**, Python-kompilering og `git diff --check` bestået. Aktive adaptere har et rapporteret gulv på **300 sekunder**; EODHD realtime-/WebSocket-rettigheder **ikke verificeret**.
+- Historisk rapporteret på daværende kode: **46/46 HOT WATCH-tests**, Python-kompilering og `git diff --check` bestået. Aktive adaptere har et rapporteret gulv på **300 sekunder**; EODHD realtime-/WebSocket-rettigheder **ikke verificeret**.
 - Næste leverance: **installationsklar implementeringsfil/arkiv**, med præcist fuldt filnavn efter udpakning, afhængigheder, sikker konfiguration, opdaterings-/rollbackprocedure og testvejledning. Ingen credentials i arkivet.
 - Codex kan ikke teste kontoens EODHD-rettigheder uden adgang. **Efter kontrolleret installation** tilsluttes eksisterende EODHD-adgang; mål så faktiske observationer, datalatens, scheduler, kvoter og overvågning af op til 20 kandidater.
 - Manglende WebSocket-rettighed eller data skal vises som fejl/degradering med dokumenteret fallback, aldrig udgives som realtid.
@@ -211,7 +211,7 @@ Efter ejerens udtrykkelige valg blev den aktive radarliste nulstillet. Rapporter
 
 ### Beholdningskontekst og kapacitet — 9. november 2026
 
-Den tidligere oplysning om en standardgrænse på 20 sessioner var forkert for den aktuelle kode: standarden er 40, og serveren kan være særskilt konfigureret lavere. Den faktiske servergrænse er ikke verificeret. Readback har efterfølgende vist frisk Pluto-beholdningskontekst for nogle, men ikke alle, beholdningssessioner. Det er en tidsafhængig observation, ikke bevis for at alle sessioner nu er friske.
+Historisk korrektion 9. november: den daværende standard var 40, ikke 20. Nyere kode anvender 60 når indstillingen mangler og 40 ved ugyldig værdi; se [aktuel kodeafstemning](ESCAPE_MASTER_CONTRACT.md). Den faktiske servergrænse er ikke verificeret. Readback har efterfølgende vist frisk Pluto-beholdningskontekst for nogle, men ikke alle, beholdningssessioner. Det er en tidsafhængig observation, ikke bevis for at alle sessioner nu er friske.
 
 En kodefejl er rettet på udviklingsgrenen: Når EODHD-adapteren ved en identitetsfejl ledsager fejlen med frisk kontekst hentet fra Pluto, kan den interne worker journalføre den verificerede brokerkontekst uden at oprette en markedsobservation eller et handelssignal. EODHD-data alene accepteres ikke som brokerkontekst. Kurs-/identitetsfejlen forbliver synlig, og alle eksisterende friskheds- og risikokrav er uændrede. Rettelsen kræver installation og produktions-readback, før effekten kan fastslås.
 

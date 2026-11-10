@@ -1,5 +1,7 @@
 # Pluto: integration pr. bruger
 
+> **Aktuel læsevejledning (10. november 2026):** Se [masterkontrakten](ESCAPE_MASTER_CONTRACT.md) for depotmandat, kildeautoritet, tid og verificeret fill. Historiske live-/versionspåstande skal sammenholdes med aktuelle readbacks.
+
 ## Aktuel status
 
 Brugeren har vist en Pluto ChatGPT-installation med OAuth og MCP-adressen https://mcp.prod.pluto.markets/mcp. Dette dokumenterer adressen i brugerens installerede forbindelse, men er ikke dokumentation for tredjepartsappregistrering, API-kontrakter, scopes eller tilladelse til vores webapp. Pluto-værktøjer er ikke eksponeret i denne udviklingssession. Tidligere HTTP-forsøg til Pluto-hjemmesiden blev blokeret af miljøets proxy.

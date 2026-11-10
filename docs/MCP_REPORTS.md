@@ -1,5 +1,7 @@
 # ESCAPE ↔ ChatGPT: privat MCP-rapportforbindelse
 
+> **Aktuel læsevejledning (10. november 2026):** Se [masterkontrakten](ESCAPE_MASTER_CONTRACT.md) for eksakt rapportreadback, `get_hot_watch` kontra `sync_hot_watch` og den konkrete 20/40-batchforskel.
+
 ## Status og grænser
 
 MCP-modtagersiden er implementeret og testes lokalt gennem den faktiske Passenger/WSGI-adapter. Brugeren har nu bekræftet manuel levering og tilbagekontrol fra ChatGPT i produktion; se [REPORT_V2.md](REPORT_V2.md) for kvittering og afgrænsning. **Planlagt automatisk levering er fortsat ikke verificeret**. Dette er en privat rapportintegration; ikke en ny AI-motor, ingen ekstra AI-API og ingen Pluto-værktøjer.

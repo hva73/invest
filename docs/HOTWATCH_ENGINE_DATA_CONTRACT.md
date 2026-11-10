@@ -4,7 +4,7 @@ Kontrakt 1.0.0, 3. november 2026. Supplerer END_TO_END_DATA_CONTRACT.md og HOTWA
 
 ## Arkitektur og overdragelse
 
-Trading Radar/ChatGPT producerer rapportkandidater, anbefaling og rapporteret lifecycle. Rapportmodtagelsen validerer og gemmer kandidatidentitet/journal. En motor starter **kun** ved et eksplicit autoriseret start_hot_watch / sessions-API-kald; HOT_WATCH-lifecycle eller åbning af en side starter ikke en service eller session. Backend-servicen hotwatch_service.py er en separat proces og kræver ingen aktiv ChatGPT-chat.
+Trading Radar/ChatGPT producerer rapportkandidater, anbefaling og rapporteret lifecycle. Rapportmodtagelsen validerer og gemmer kandidatidentitet/journal. HOT_WATCH-lifecycle eller åbning af en side starter ikke i sig selv en service eller session. Foruden eksplicit autoriseret start kan en kørende service oprette en kvalificeret kandidat- eller beholdningssession efter sine særskilte gates; se [aktuel kodeafstemning](ESCAPE_MASTER_CONTRACT.md). Backend-servicen hotwatch_service.py er en separat proces og kræver ingen aktiv ChatGPT-chat.
 
 Et sessionsstartkald refererer til en eksisterende report_id/candidate_id i samme ejer/testkategori og en præcis strategy_id/version. Adapter → datavalidering → featuremotor → deklarativ strategi → obligatorisk risikogate/signalstabilisering → append-only beregning/event → dashboard/readback. Ingen broker-write i motoren.
 
@@ -164,7 +164,9 @@ Tre nye markedsbekræftelser, minimumsvarighed, cooldown og hysterese følger ba
 
 ## Faktisk datatilgang, polling og budget
 
-## Supplerende krav og WIP-løsningsmodel (releaseblokering)
+## Historisk WIP-løsningsmodel fra 3. november (ikke aktuel versionsstatus)
+
+> Følgende tal, feed- og releasepåstande beskriver det daværende WIP. Se [aktuel kodeafstemning](ESCAPE_MASTER_CONTRACT.md) for batchgrænser, kapacitet, automatisk aktivering og WebSocket-kode.
 
 En almindelig rapport med lifecycle `HOT_WATCH` ændrer kun kandidatjournalen. Den starter aldrig en motorsession. Autoriseret aktivering kræver `hotwatch:manage` og et eksplicit værktøj/kald. WIP tilføjer `activate_hot_watch_batch` og `POST /api/v1/hotwatch/activation-requests`: `request_id`, `is_test` og 1–20 fulde sessionsdefinitioner. Alle sessioner skal matche gemte rapportkandidater, instrument/ticker, gyldig risiko, testkategori og kapacitet. Gentaget request-id med identisk payload er idempotent; ændret payload giver konflikt. HTTP kræver matchende `Idempotency-Key`. Kapacitet/validering kontrolleres for hele batchen før oprettelse. Dette opretter sessioner, men starter ikke serviceprocessen og beviser ikke feedberedskab.
 
@@ -243,7 +245,7 @@ Disse supplerer T01–T28 og eksisterende risiko-/matematik-/auth-/kill-switch-t
 
 ### Automatisk beholdningsovervågning og kapacitet (opdateret)
 
-Motoren har nu højst 40 aktive/pausede sessioner som standard, med valgfri lavere `ESCAPE_HW_CAPACITY`. En separat baggrundsløkke forsøger gradvist at overvåge aktuelle, komplet verificerede Pluto-beholdninger. Aktivet skal bekræftes af Pluto og have præcis én EODHD-kandidat med samme ISIN og valuta; ukendte eller tvetydige instrumenter oprettes ikke. Positioner oprettes i exit-tilstand og sender aldrig ordrer. Eksisterende og pausede sessioner genbruges; en manuelt afsluttet session genstartes ikke automatisk. Stale, fejlede eller ufuldstændige depotsnapshots bruges ikke til nye sessioner. `ESCAPE_HW_HOLDINGS_AUTOWATCH=0` deaktiverer denne automatiske oprettelse.
+Historisk snapshot: motoren havde 40 aktive/pausede sessioner som standard. Aktuel kode og den konfigurerede servers begrænsninger skal kontrolleres særskilt; se [kodeafstemningen](ESCAPE_MASTER_CONTRACT.md). En separat baggrundsløkke forsøger gradvist at overvåge aktuelle, komplet verificerede Pluto-beholdninger. Aktivet skal bekræftes af Pluto og have præcis én EODHD-kandidat med samme ISIN og valuta; ukendte eller tvetydige instrumenter oprettes ikke. Positioner oprettes i exit-tilstand og sender aldrig ordrer. Eksisterende og pausede sessioner genbruges; en manuelt afsluttet session genstartes ikke automatisk. Stale, fejlede eller ufuldstændige depotsnapshots bruges ikke til nye sessioner. `ESCAPE_HW_HOLDINGS_AUTOWATCH=0` deaktiverer denne automatiske oprettelse.
 
 Kapacitet er ikke adgang eller frekvens: EODHD-budgettet er delt og tæller alle leverandørkald. Med 40 sessioner kan scanninger blive betydeligt langsommere end 60 sekunder, og adgang, kildetid, kvoter og genstart skal verificeres på installationen. Flere symboler og før-/eftermarked kræver bekræftede feedrettigheder. Ingen købssignaler tillades uden for de eksisterende risikoregler.
 

@@ -1,5 +1,7 @@
 # Pushnotifikationer og strategivalg
 
+> **Aktuel læsevejledning (10. november 2026):** [Issue #13](https://github.com/hva73/invest/issues/13) samler P0-deduplikering og mobilvisning. Gamle events må ikke spamme, men nye væsentligt kritiske exits skal frem; det samlede fix er ikke her dokumenteret installeret.
+
 Første udgave giver web-push ved aktuelle køb-/salgssignaler fra HOT WATCH og et Strategy Center til valg af allerede kvalificerede strategiversioner for nye overvågninger. Rapporternes selvstændige statussignaler er ikke omfattet af push i denne fase. Momentum er automatisk standard; der er ikke aktiveret en ny strategi, Strategy Builder eller backtest.
 
 ## Installation

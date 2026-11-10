@@ -1,5 +1,7 @@
 # Kurser og kandidatgrafer fra Pluto
 
+> **Aktuel læsevejledning (10. november 2026):** Mobil signaldetalje med Dag/Uge/Måned/År, ærlige kilde-/tidsmærker og konstant synlige handlinger er et samlet krav i [Issue #13](https://github.com/hva73/invest/issues/13); denne eksisterende grafbeskrivelse er ikke dokumentation for færdig live-UX.
+
 Kandidatkort i Opportunity Radar og v2-rapportvisningen viser et aktuelt Pluto-opslag ved siden af navn og handlingsstatus. Grafen erstatter ingen rapportdata og påvirker ingen signaler eller handler.
 
 ## Visning

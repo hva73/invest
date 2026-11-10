@@ -1,5 +1,7 @@
 # Rapportlevering: evidens, afgrænsning og diagnostik
 
+> **Aktuel læsevejledning (10. november 2026):** Se [masterkontrakten](ESCAPE_MASTER_CONTRACT.md) for præcis readback og forskellen mellem afsenderpåstand og brokerverificering.
+
 ## Konklusion fra undersøgelsen
 
 Brugeren har efter den oprindelige blokering verificeret en vellykket automatisk driftslevering kl. 15 dansk tid med 12 kandidater, 11 positioner, 15 ordreposter, 13 kilder og 4 regioner. Rapporten blev valideret, sendt og læst tilbage. Dette er brugerens produktionsobservation; udviklingsmiljøet har ikke uafhængig læseadgang til den aktuelle produktion.

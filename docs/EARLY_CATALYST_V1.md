@@ -1,5 +1,7 @@
 # Early Catalyst v1.0 — forskningsversion
 
+> **Aktuel læsevejledning (10. november 2026):** Se [masterkontrakten](ESCAPE_MASTER_CONTRACT.md) for det samlede dataflow, ejermandat og adskillelse af syntetisk test og faktisk live-adgang.
+
 Strategien er registreret som en deklarativ, versionslåst skabelon med status `schema_validated`. Den og strukturelt identiske private kopier kan efter ejerens ønske vælges til en tydeligt mærket live-test; de er ikke historisk kvalificeret til almindelig drift. Kopier kan justeres i Strategy Center. Den gamle Momentum-strategi og eksisterende sessioner ændres ikke. EARLY WATCH er et selvstændigt observationskriterium; det opretter aldrig en ordre eller et købssignal.
 
 ## Regler
