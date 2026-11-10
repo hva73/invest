@@ -608,6 +608,42 @@ class HotWatch(unittest.TestCase):
   self.assertEqual(view['data_status']['partial_quote']['source_time'],self.now.isoformat())
   with patch('hotwatch_engine.utc',return_value=self.now+timedelta(hours=1)):old=engine.item(app.connect,1,req['watch_id'],True)['session']
   self.assertNotIn('partial_quote',old['data_status']);self.assertEqual(old['signal'],'NO_DATA')
+ def test_scan_reuses_only_fresh_same_response_exchange_evidence(self):
+  from unittest.mock import Mock
+  adapter=EODHDAdapter(app.connect,1);client=Mock();client.market_status.return_value={'status':'LOCAL_BUDGET_EXHAUSTED'}
+  calendar={'open':'09:30:00','close':'16:00:00','working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[]}
+  observed=self.now-timedelta(seconds=30)
+  with app.connect() as c:
+   c.execute('INSERT INTO hw_exchange_status(exchange,received,is_open,next_attempt) VALUES(?,?,?,?)',('US',observed.isoformat(),0,0))
+   c.execute('INSERT INTO hw_exchange_calendar VALUES(?,?,?,?)',('US',observed.isoformat(),'America/New_York',json.dumps(calendar)))
+  with patch('hotwatch_adapters.utc',return_value=self.now):
+   result=adapter.market_status(client,'US',120)
+   self.assertEqual(result['received_at'],observed.isoformat());self.assertIs(result['exchange_open'],False)
+   client.market_status.assert_not_called()
+   with app.connect() as c:c.execute('UPDATE hw_exchange_calendar SET received=? WHERE exchange=?',(self.now.isoformat(),'US'))
+   self.assertEqual(adapter.market_status(client,'US',120)['status'],'LOCAL_BUDGET_EXHAUSTED')
+   with app.connect() as c:c.execute('UPDATE hw_exchange_calendar SET received=? WHERE exchange=?',(observed.isoformat(),'US'))
+  with patch('hotwatch_adapters.utc',return_value=self.now+timedelta(seconds=91)):
+   self.assertEqual(adapter.market_status(client,'US',120)['status'],'LOCAL_BUDGET_EXHAUSTED')
+  with patch('hotwatch_adapters.utc',return_value=observed-timedelta(seconds=1)):
+   self.assertEqual(adapter.market_status(client,'US',120)['status'],'LOCAL_BUDGET_EXHAUSTED')
+ def test_premarket_trade_uses_shared_exchange_evidence_when_http_budget_is_blocked(self):
+  from unittest.mock import Mock
+  now=datetime(2026,11,10,13,0,tzinfo=timezone.utc);observed=now-timedelta(seconds=20)
+  calendar={'open':'09:30:00','close':'16:00:00','working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[]}
+  with app.connect() as c:
+   c.execute('INSERT INTO hw_exchange_status(exchange,received,is_open,next_attempt) VALUES(?,?,?,?)',('US',observed.isoformat(),0,0))
+   c.execute('INSERT INTO hw_exchange_calendar VALUES(?,?,?,?)',('US',observed.isoformat(),'America/New_York',json.dumps(calendar)))
+  req=copy.deepcopy(self.req);req.update(provider='eodhd',provider_symbol='MERC.US')
+  feed=Mock();feed.market_status.return_value={'status':'LOCAL_BUDGET_EXHAUSTED'}
+  feed.capture.side_effect=lambda kind,*args,**kwargs: {'status':'OK','messages':[{'event_time':now.isoformat(),'price':'100','trade_size':'2','market_session':'extended-hours'}]} if kind=='us_trades' else {'status':'OK','messages':[{'event_time':now.isoformat(),'bid':'99','ask':'101'}]} if kind=='us_quotes' else {'status':'NO_MESSAGES','messages':[]}
+  adapter=EODHDAdapter(app.connect,1,opener=object())
+  env={'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}
+  with patch.dict(os.environ,env),patch('hotwatch_adapters.utc',return_value=now),patch.object(adapter,'feeds',return_value=feed),patch.object(adapter.pluto,'safe_context',return_value=unknown_context()):
+   sample=adapter.poll({'request_data':req})
+  self.assertEqual(sample['market_status'],'PRE');self.assertEqual(sample['event_time'],now.isoformat())
+  self.assertEqual(sample['status_at'],now.isoformat());self.assertEqual(sample['context']['status'],'unknown')
+  feed.market_status.assert_not_called()
  def test_quote_is_preserved_when_trade_status_expires_during_collection(self):
   from unittest.mock import Mock
   from hotwatch_service import Runner

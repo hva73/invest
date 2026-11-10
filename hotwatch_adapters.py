@@ -354,6 +354,18 @@ class EODHDAdapter:
  def feeds(self,request=None):
   from eodhd_feeds import EODHDFeeds
   return EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),capacity=Capacity(self.connect,'essential' if request and (request.get('watch_mode')=='exit' or request.get('priority') in ('HIGH','CRITICAL')) else 'routine') if self.connect else None,opener=self.opener,share_status=self._shared_quotes)
+ def market_status(self,client,exchange,max_age):
+  """Reuse the maintenance worker's same-response evidence without refreshing its age."""
+  if self.connect is not None:
+   with self.connect() as c:
+    row=c.execute('SELECT s.received,s.is_open,c.received AS calendar_received,c.timezone,c.calendar FROM hw_exchange_status s JOIN hw_exchange_calendar c ON c.exchange=s.exchange WHERE s.exchange=?',(exchange,)).fetchone()
+   if row and row['received']==row['calendar_received'] and row['is_open'] in (0,1):
+    try:
+     if 0<=(utc()-stamp(row['received'])).total_seconds()<=max_age:
+      calendar=json.loads(row['calendar'])
+      if isinstance(calendar,dict) and isinstance(row['timezone'],str):return {'status':'OK','exchange':exchange,'exchange_open':bool(row['is_open']),'received_at':row['received'],'timezone':row['timezone'],'calendar':calendar}
+    except (ValueError,TypeError,KeyError):pass
+  return client.market_status(exchange)
  def capture(self,client,feed,symbol,session):
   """Share one bounded stream across due, independently verified watches."""
   req=session['request_data'];capture_started=time.monotonic()
@@ -551,7 +563,7 @@ class EODHDAdapter:
        if status['trading_status']=='T':sample.update(market_status='REGULAR',session_key=at.date().isoformat()+':REGULAR',status_at=status['event_time'],status_feed=market+'_status')
        else:sample.update(market_status='UNKNOWN',session_key=at.date().isoformat()+':UNKNOWN');sample.pop('status_at',None);sample.pop('status_feed',None)
       if sample['market_status']=='UNKNOWN' and trade.get('market_session') in ('extended-hours','extended hours') and (not statuses or max(statuses,key=lambda x:stamp(x['event_time']))['trading_status']=='T'):
-       schedule=client.market_status(exchange);self.last_feed_diagnostics['exchange_status']=schedule['status']
+       schedule=self.market_status(client,exchange,max_age);self.last_feed_diagnostics['exchange_status']=schedule['status']
        if schedule['status']=='RATE_LIMIT':return sample
        phase=extended_session(trade,schedule,utc(),max_age)
        if phase:
@@ -561,7 +573,7 @@ class EODHDAdapter:
         local_day=at.astimezone(ZoneInfo(schedule['timezone'])).date().isoformat()
         sample.update(market_status=phase,session_key=local_day+':'+phase,status_at=trade['event_time'],status_feed=market+'_trades')
       if sample['market_status'] in ('REGULAR','PRE','AFTER') and os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1':
-       schedule=client.market_status(exchange);self.last_feed_diagnostics['exchange_status']=schedule['status']
+       schedule=self.market_status(client,exchange,max_age);self.last_feed_diagnostics['exchange_status']=schedule['status']
        if schedule['status']=='LOCAL_BUDGET_EXHAUSTED':return sample
        if schedule['status']=='RATE_LIMIT':return sample
        if schedule.get('status')=='OK' and schedule.get('exchange_open') is (sample['market_status']=='REGULAR') and schedule.get('calendar') and schedule.get('timezone'):
