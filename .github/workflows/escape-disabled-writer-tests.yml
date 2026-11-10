@@ -1,8 +1,7 @@
 name: ESCAPE disabled status writer tests
 
 on:
-  issue_comment:
-    types: [created]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -12,9 +11,7 @@ jobs:
     if: >-
       github.repository == 'hva73/invest' &&
       github.actor_id == '351122234' &&
-      github.event.issue.number == 4 &&
-      github.event.issue.pull_request == null &&
-      startsWith(github.event.comment.body, 'ESCAPE_DISABLED_WRITER_TEST_V1')
+      github.ref == 'refs/heads/codex/escape-development'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
