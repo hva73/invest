@@ -25,6 +25,7 @@ jobs:
 
           QUERY = '''query($cursor:String) {
             user(login:"hva73") {
+              login
               projectV2(number:1) {
                 number title closed
                 items(first:100,after:$cursor) {
@@ -66,8 +67,9 @@ jobs:
                       result = json.load(response)
                   if result.get('errors'):
                       fail('GitHub GraphQL afviste opslaget eller returnerede delvise data.')
-                  project = (result.get('data', {}).get('user') or {}).get('projectV2')
-                  if not project or project.get('number') != 1 or project.get('title') != 'ESCAPE Development' or project.get('closed'):
+                  user = result.get('data', {}).get('user') or {}
+                  project = user.get('projectV2')
+                  if user.get('login', '').lower() != 'hva73' or not project or project.get('number') != 1 or project.get('closed'):
                       fail('Det forventede åbne projekt kunne ikke verificeres.')
                   page = project['items']
                   for item in page['nodes']:
@@ -86,7 +88,7 @@ jobs:
               status = value.get('name')
               if not isinstance(status, str) or not status.strip() or len(status) > 80 or not all(c.isalnum() or c in ' -_/' for c in status) or token in status:
                   fail('Projektkortets status kunne ikke verificeres sikkert.')
-              print('PASS: Projekt hva73/1 (ESCAPE Development), Issue hva73/invest#4.')
+              print('PASS: Projekt hva73/1, Issue hva73/invest#4.')
               print('Aktuel status: ' + status)
           except urllib.error.HTTPError as error:
               fail('GitHub API-afvisning (HTTP ' + str(error.code) + ').')
