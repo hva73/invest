@@ -15,6 +15,7 @@ QUERY = '''query($cursor:String){user(login:"hva73"){login projectV2(number:1){n
  items(first:100,after:$cursor,archivedStates:[ARCHIVED,NOT_ARCHIVED]){pageInfo{hasNextPage endCursor} nodes{id isArchived
  content{... on Issue{number repository{nameWithOwner}}}
  fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}'''
+COMMENT_QUERY = '''query($id:ID!){node(id:$id){... on IssueComment{id body lastEditedAt}}}'''
 
 
 class Blocked(Exception):
@@ -112,6 +113,19 @@ def main():
         raise Blocked('Kommentarlisten overstiger sikker grænse.')
 
     first = comments()
+    selected = [c for c in first if c.get('id') == int(raw_id)]
+    if len(selected) != 1 or not isinstance(selected[0].get('node_id'), str):
+        raise Blocked('Anmodningens GitHub-identitet kunne ikke verificeres.')
+
+    def verify_unedited(comment):
+        result = get_json('https://api.github.com/graphql', {'query': COMMENT_QUERY, 'variables': {'id': comment['node_id']}}, True)
+        if result.get('errors'):
+            raise Blocked('Anmodningens redigeringshistorik kunne ikke verificeres.')
+        node = (result.get('data') or {}).get('node') or {}
+        if node.get('id') != comment['node_id'] or 'lastEditedAt' not in node or node['lastEditedAt'] is not None or node.get('body') != comment.get('body'):
+            raise Blocked('Anmodningen er redigeret eller kunne ikke verificeres.')
+
+    verify_unedited(selected[0])
     matches, cursor, seen, options = [], None, set(), None
     while True:
         result = get_json('https://api.github.com/graphql', {'query': QUERY, 'variables': {'cursor': cursor}}, True)
@@ -146,6 +160,8 @@ def main():
     second = comments()
     if validate_request(second, int(raw_id), current, options) != request:
         raise Blocked('Anmodningen blev ændret under kontrollen.')
+    selected_second = next(c for c in second if c.get('id') == int(raw_id))
+    verify_unedited(selected_second)
     print('DRY RUN: afsender, kort, statusoption og synlige dubletter kontrolleret.')
     print('Ingen status blev ændret. Replay mellem kørsler er IKKE beskyttet.')
 
