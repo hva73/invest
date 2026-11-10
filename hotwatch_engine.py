@@ -1208,7 +1208,11 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
     old=anchors.get(code)
     if not isinstance(old,dict) or not old.get('price'):old=None
     changed=bool(old and any(old.get(k)!=current[k] for k in ('quantity','stop_price','exit_deadline','strategy_checksum')))
-    try:worsened=bool(old and new_market_event and trailing_notification_worsened(current['price'],old['price'],strategy_data['parameters']['trailing_pct']))
+    try:
+     threshold=Decimal(str(strategy_data['parameters']['trailing_pct']))
+     if not threshold.is_finite() or not Decimal('0')<threshold<=Decimal('100'):
+      worsened=bool(old and new_market_event and Decimal(current['price'])!=Decimal(str(old['price'])))
+     else:worsened=bool(old and new_market_event and trailing_notification_worsened(current['price'],old['price'],threshold))
     except (ArithmeticError,TypeError,ValueError,KeyError):old=None;worsened=False
     if code in oldcodes and (old is None or changed or worsened):
      event(c,row,'RISK_REJECTION',now,code,metrics,'critical',sample['event_time'])

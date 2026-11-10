@@ -107,6 +107,14 @@ class ReviewFixes(unittest.TestCase):
    row=engine.row_for(c,1,self.req['watch_id'],True)
    events=c.execute("SELECT payload FROM hw_events WHERE watch_row_id=? AND event_type='RISK_REJECTION' AND severity='critical'",(row['id'],)).fetchall()
   self.assertEqual(len(events),2)
+ def test_unusable_trailing_distance_does_not_hide_new_critical_risk(self):
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True);strategy=json.loads(row['strategy']);strategy['parameters']['trailing_pct']='200'
+   c.execute('UPDATE hw_sessions SET strategy=? WHERE id=?',(json.dumps(strategy),row['id']))
+  self.ingest(self.sample('94',0),self.at);self.ingest(self.sample('93.999',10),self.at+timedelta(seconds=10))
+  with app.connect() as c:
+   events=c.execute("SELECT payload FROM hw_events WHERE watch_row_id=? AND event_type='RISK_REJECTION' AND severity='critical'",(row['id'],)).fetchall()
+  self.assertEqual(len(events),2)
  def test_breached_stop_emits_on_changed_limit_and_after_recovery(self):
   self.ingest(self.sample('94',0),self.at)
   with app.connect() as c:
