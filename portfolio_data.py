@@ -227,7 +227,11 @@ def read(connect,user_id,portfolio_id,client_factory=None,strict_positions=False
             from pending_orders import from_positions
             payload['pending_orders']=from_positions(rows,'get_collection')
             payload['positions_complete']=True
-            if strict_positions:payload['positions_strict_verified']=True
+            if strict_positions:
+                payload['positions_strict_verified']=True
+                view=(data.get('holdings') or {}).get('portfolioView') if isinstance(data.get('holdings'),dict) else None
+                if metadata.get('id')==identifier and isinstance(view,dict) and view.get('collectionId')==identifier:
+                    payload['positions_scope']='COLLECTION'
             successful+=1
         except PortfolioFormatError as error:payload['errors'].append('Collection-beholdninger: '+str(error))
         try:
@@ -251,7 +255,7 @@ def read(connect,user_id,portfolio_id,client_factory=None,strict_positions=False
             except PortfolioFormatError as error:payload['errors'].append(section+': '+str(error))
             except Exception:payload['errors'].append(section+': Pluto-opslaget fejlede; ingen gamle værdier vises som nye')
         try:
-            rows=[];cursor=None;seen=set();total=None;collection_count=0
+            rows=[];cursor=None;seen=set();total=None;collection_count=0;direct_scope=True;collection_ids=[]
             for _ in range(30):
                 args={'portfolioId':identifier,'limit':200}
                 if cursor:args['nextToken']=cursor
@@ -259,8 +263,16 @@ def read(connect,user_id,portfolio_id,client_factory=None,strict_positions=False
                 batch=list_data(page,['positions','holdings','rows','items','data']);rows.extend(batch)
                 if isinstance(page,dict):
                     collections=page.get('collections',[])
+                    # Only the explicit Pluto contract with separate direct
+                    # positions and collection rows proves non-overlap.
+                    if not isinstance(page.get('positions'),list) or not isinstance(page.get('collections'),list):direct_scope=False
                     if strict_positions and not isinstance(collections,list):raise PortfolioFormatError('Ukendt Collection-liste i beholdningssvaret')
-                    if isinstance(collections,list):collection_count+=len(collections)
+                    if isinstance(collections,list):
+                        collection_count+=len(collections)
+                        for entry in collections:
+                            identity=entry.get('collectionId') if isinstance(entry,dict) else None
+                            if not isinstance(identity,str) or not identity or identity in collection_ids:direct_scope=False
+                            else:collection_ids.append(identity)
                     if page.get('hasMore') is True and not page.get('nextToken'):raise PortfolioFormatError('Ufuldstændig beholdningsliste')
                     if page.get('nextCursor'):raise PortfolioFormatError('Ukendt beholdningspagination')
                     total=page.get('totalCount',total);cursor=page.get('nextToken')
@@ -275,7 +287,11 @@ def read(connect,user_id,portfolio_id,client_factory=None,strict_positions=False
             from pending_orders import from_positions
             payload['pending_orders']=from_positions(rows,'get_positions')
             payload['positions_complete']=True
-            if strict_positions:payload['positions_strict_verified']=True
+            if strict_positions:
+                payload['positions_strict_verified']=True
+                if direct_scope:
+                    payload['positions_scope']='DIRECT'
+                    payload['positions_collection_ids']=collection_ids
             successful+=1
         except PortfolioFormatError as error:payload['errors'].append('positions: '+str(error))
         except Exception:payload['errors'].append('positions: Pluto-opslaget fejlede eller kunne ikke fuldføres')

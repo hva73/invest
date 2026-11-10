@@ -1573,8 +1573,10 @@ class HotWatch(unittest.TestCase):
   with app.connect() as c:
    portfolios.replace_pluto(c,1,[{'id':'portfolios:root','name':'Root','kind':'portfolio'},{'id':'collections:child','name':'Child','kind':'collection','parent_external_id':'portfolios:root'}])
    ids=[p['id'] for p in portfolios.list_owned(c,1)]
+   root=c.execute("SELECT id FROM portfolios WHERE external_id='portfolios:root'").fetchone()['id']
    for pid in ids:
-    portfolio_data.save(c,1,pid,{'observed':engine.utc().isoformat(),'positions':[],'positions_complete':True,'complete':True,'value':{'value':{'amount':'1000','currency':'DKK'}},'pending_orders':[]})
+    p=c.execute('SELECT kind FROM portfolios WHERE id=?',(pid,)).fetchone();scope='DIRECT' if p['kind']=='portfolio' else 'COLLECTION'
+    portfolio_data.save(c,1,pid,{'observed':engine.utc().isoformat(),'positions':[],'positions_complete':True,'positions_strict_verified':True,'positions_scope':scope,'positions_collection_ids':['child'] if scope=='DIRECT' else [],'complete':True,'value':{'value':{'amount':'1000','currency':'DKK'}},'pending_orders':[]})
   adapter=PlutoAdapter(app.connect,1)
   with patch.object(adapter,'tradability',return_value=('unknown',None)),patch.object(adapter,'inactive_orders',return_value=[]):
    result=adapter.context(self.req,'USD')
@@ -1584,10 +1586,19 @@ class HotWatch(unittest.TestCase):
     exit_context=adapter.context(dict(self.req,watch_mode='exit'),'USD')
    self.assertEqual((exit_context['status'],exit_context['tradability']),('verified','unknown'))
    with app.connect() as c:
-    row=c.execute('SELECT payload FROM portfolio_snapshots WHERE portfolio_id=?',(ids[0],)).fetchone();payload=json.loads(row['payload']);payload['positions']=[{'asset_id':self.req['asset_id'],'ticker':'MERC','quantity':'2'}];c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),ids[0]))
-   overlap=adapter.context(self.req,'USD');self.assertEqual(overlap['status'],'unknown');self.assertEqual(overlap['diagnostic'],'HOLDING_SCOPE_OVERLAP')
+    row=c.execute('SELECT payload FROM portfolio_snapshots WHERE portfolio_id=?',(root,)).fetchone();payload=json.loads(row['payload']);payload['positions']=[{'asset_id':self.req['asset_id'],'ticker':'MERC','quantity':'2'}];c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),root))
+   overlap=adapter.context(self.req,'USD');self.assertEqual((overlap['status'],overlap['position'],overlap['quantity']),('verified','held','2'))
    with app.connect() as c:
-    payload['positions']=[];payload['positions_complete']=False;c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),ids[0]))
+    child=c.execute('SELECT id FROM portfolios WHERE kind=?',('collection',)).fetchone()['id'];saved=c.execute('SELECT payload FROM portfolio_snapshots WHERE portfolio_id=?',(child,)).fetchone();cp=json.loads(saved['payload']);cp['positions']=[{'asset_id':self.req['asset_id'],'ticker':'MERC','quantity':'3'}];c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(cp),child))
+   self.assertEqual(adapter.context(self.req,'USD')['quantity'],'5')
+   with app.connect() as c:
+    payload['positions']=[];c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),root))
+   self.assertEqual(adapter.context(self.req,'USD')['quantity'],'3')
+   with app.connect() as c:
+    payload['positions_collection_ids']=['missing-child'];c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),root))
+   self.assertEqual(adapter.context(self.req,'USD')['diagnostic'],'HOLDING_SCOPE_OVERLAP')
+   with app.connect() as c:
+    payload['positions_collection_ids']=['child'];payload['positions_complete']=False;c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),root))
    incomplete=adapter.context(self.req,'USD');self.assertEqual(incomplete['status'],'unknown');self.assertEqual(incomplete['diagnostic'],'PORTFOLIO_SNAPSHOT_INCOMPLETE')
  def test_exit_position_can_be_verified_independently_of_unrelated_snapshot_sections(self):
   import portfolios,portfolio_data

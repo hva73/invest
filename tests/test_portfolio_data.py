@@ -45,6 +45,19 @@ class Data(unittest.TestCase):
    def request(self,method,params):return {'structuredContent':{'localCurrency':'EUR','accountCurrency':'DKK','value':'120','holdings':[{'name':'Stock','currency':'USD','quantity':1,'value':'100'}],'cashAccounts':[{'currency':'EUR','balance':'20'}]}}
   payload=portfolio_data.read(app.connect,1,self.child,Client)
   self.assertEqual(payload['value']['value']['currency'],'EUR');self.assertEqual(payload['positions'][0]['currency'],'USD');self.assertEqual(payload['accounts'][0]['currency'],'EUR')
+ def test_strict_scope_evidence_requires_explicit_direct_and_collection_identity(self):
+  class Client:
+   def __init__(self,token):pass
+   def tools(self):return TOOLS
+   def request(self,method,params):
+    name=params['name']
+    if name=='get_positions':return {'structuredContent':{'positions':[],'collections':[{'collectionId':'test-child'}],'totalCount':1}}
+    if name=='get_collection':return {'structuredContent':{'collection':{'id':'test-child','localCurrency':'DKK'},'holdings':{'portfolioView':{'collectionId':'test-child','positions':[]}},'accounts':[],'value':{'equity':'0','currency':'DKK'}}}
+    return {'isError':True}
+  parent=portfolio_data.read(app.connect,1,self.root,Client,strict_positions=True)
+  child=portfolio_data.read(app.connect,1,self.child,Client,strict_positions=True)
+  self.assertEqual((parent['positions_scope'],parent['positions_collection_ids']),('DIRECT',['test-child']))
+  self.assertEqual(child['positions_scope'],'COLLECTION')
  def test_user_isolation_before_network(self):
   def forbidden(*args):raise AssertionError('must not open a connection')
   with self.assertRaises(portfolio_data.PortfolioFormatError):portfolio_data.read(app.connect,2,self.root,forbidden)

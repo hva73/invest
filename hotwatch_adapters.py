@@ -218,7 +218,8 @@ class PlutoAdapter:
    payload=json.loads(row['payload']) if row and not row['last_error'] and 0<=(utc()-stamp(row['observed'])).total_seconds()<=300 else None
    # A partial legacy snapshot does not prove the positions list was checked
    # independently. Re-read it with strict pagination/count checks instead.
-   if payload is None or (not payload.get('complete') and not payload.get('positions_strict_verified')):
+   expected_scope='DIRECT' if p.get('kind')=='portfolio' else 'COLLECTION'
+   if payload is None or (not payload.get('complete') and not payload.get('positions_strict_verified')) or (automatic and overlap and payload.get('positions_scope')!=expected_scope):
     payload=portfolio_data.read(self.connect,self.uid,p['id'],client_factory=self.factory,strict_positions=True)
     with self.connect() as c:portfolio_data.save(c,self.uid,p['id'],payload)
    # Independently checked positions establish held/none for either watch.
@@ -227,12 +228,20 @@ class PlutoAdapter:
    if not payload.get('positions_complete') or not (payload.get('complete') or position_only):return unknown_context('PORTFOLIO_SNAPSHOT_INCOMPLETE')
    rows.append(payload)
   if not rows:return unknown_context('NO_ACTIVE_PORTFOLIOS')
+  if automatic and overlap:
+   # Parent get_positions reports direct holdings and collection references,
+   # not a flattened aggregate. Only combine separately verified scopes when
+   # every referenced collection is present and independently complete.
+   for p,payload in zip(portfolios,rows):
+    expected='DIRECT' if p.get('kind')=='portfolio' else 'COLLECTION'
+    if payload.get('positions_scope')!=expected or payload.get('positions_strict_verified') is not True:return unknown_context('HOLDING_SCOPE_OVERLAP')
+    if expected=='DIRECT':
+     listed=payload.get('positions_collection_ids')
+     children=[v['external_id'].split(':',1)[1] for v in portfolios if v.get('kind')=='collection' and v.get('parent_external_id')==p['external_id']]
+     if not isinstance(listed,list) or sorted(listed)!=sorted(children):return unknown_context('HOLDING_SCOPE_OVERLAP')
   # An unidentified holding could be this asset; absence is not proven.
   if any(p.get('kind','holding')=='holding' and not p.get('asset_id') for payload in rows for p in payload['positions']):return unknown_context('HOLDING_ID_MISSING')
   found=[position for payload in rows for position in payload['positions'] if position.get('asset_id')==request['asset_id']]
-  # Parent and collection snapshots may overlap. Their complete absence can
-  # establish zero holdings, but a matching position cannot be safely summed.
-  if overlap and found:return unknown_context('HOLDING_SCOPE_OVERLAP')
   # Buy permissions are irrelevant to exit-only holding watches and each
   # unnecessary check competes with identity/quote requests for Pluto budget.
   # Keep the value unknown rather than claiming a permission was checked.
