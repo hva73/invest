@@ -13,6 +13,15 @@ from hotwatch_contract import EngineError
 SOURCE='eodhd_capacity'
 UTILIZATION=80
 DOCUMENTED_HTTP_LIMIT=1000
+# One-day capacity explicitly purchased for 2026-11-10; UTC is the
+# provider's billing day. This expires without configuration or cleanup.
+TEMPORARY_DAILY_LIMIT_DAY='2026-11-10'
+TEMPORARY_DAILY_LIMIT_UNITS=200000
+
+def daily_limit(account,day,priority):
+ if day==TEMPORARY_DAILY_LIMIT_DAY and account.get('apiRequestsDate')==day:
+  return TEMPORARY_DAILY_LIMIT_UNITS
+ return account['dailyRateLimit']*(95 if priority=='essential' else UTILIZATION)//100
 
 def configured_limit(provider_limit=DOCUMENTED_HTTP_LIMIT):
  limit=max(1,int(provider_limit)*UTILIZATION//100)
@@ -79,7 +88,7 @@ class Capacity:
     # Unknown endpoint costs are not free; reserve at least one unit until
     # the next official snapshot reconciles their actual billed cost.
     estimate=account['apiRequests']+max(0,state.get('known_units',0)-state.get('units_at_account',0))+max(0,unknown-state.get('unknown_at_account',unknown))
-    if estimate+(1 if units is None else units)>account['dailyRateLimit']*(95 if self.priority=='essential' else UTILIZATION)//100:raise EngineError('EODHD_DAILY_BUDGET',429)
+    if estimate+(1 if units is None else units)>daily_limit(account,day,self.priority):raise EngineError('EODHD_DAILY_BUDGET',429)
    state['known_units']=state.get('known_units',0)+(units or 0)
    state['unknown_cost_requests']=state.get('unknown_cost_requests',0)+(units is None)
    state['requests']=state.get('requests',0)+1
@@ -154,7 +163,9 @@ def snapshot(c,now=None):
  row=c.execute("SELECT used FROM hw_request_budget WHERE user_id=0 AND source='eodhd' AND window=?",(int(now//60),)).fetchone()
  queue=c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND next_due<=? AND lease_until<=? AND json_extract(request,'$.provider')='eodhd'",(now,now)).fetchone()[0]
  leases=[x for x in state.get('ws_leases',{}).values() if x['until']>now]
- return {'utilization_pct':UTILIZATION,'http_provider_limit_per_minute':limit,'http_limit_basis':state.get('limit_source','documented_default'),'http_effective_limit_per_minute':configured_limit(limit),'http_configured_override':os.environ.get('ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE'),'http_used_this_minute':row['used'] if row else 0,'due_sessions':queue,'ws_connections':len(leases),'ws_subscriptions':sum(x['symbols'] for x in leases),'ws_subscription_limit':40,'ws_connection_limit':51,**{k:state.get(k) for k in ('local_day','requests','errors','http_429','last_http_status','last_http_at','last_latency_ms','latency_total_ms','known_units','unknown_cost_requests','http_retry_at','account','account_checked_at','account_status','ws_retry_at','ws_429')},'endpoint_hourly':state.get('endpoint_hours',{}),'daily_usage_note':'Account snapshot plus known local costs; other clients and unknown endpoint costs require the next account snapshot.'}
+ day=datetime.fromtimestamp(now,timezone.utc).date().isoformat()
+ temporary={'utc_day':day,'limit_units':TEMPORARY_DAILY_LIMIT_UNITS,'expires_at':'2026-11-11T00:00:00+00:00'} if day==TEMPORARY_DAILY_LIMIT_DAY else None
+ return {'utilization_pct':UTILIZATION,'temporary_daily_limit':temporary,'http_provider_limit_per_minute':limit,'http_limit_basis':state.get('limit_source','documented_default'),'http_effective_limit_per_minute':configured_limit(limit),'http_configured_override':os.environ.get('ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE'),'http_used_this_minute':row['used'] if row else 0,'due_sessions':queue,'ws_connections':len(leases),'ws_subscriptions':sum(x['symbols'] for x in leases),'ws_subscription_limit':40,'ws_connection_limit':51,**{k:state.get(k) for k in ('local_day','requests','errors','http_429','last_http_status','last_http_at','last_latency_ms','latency_total_ms','known_units','unknown_cost_requests','http_retry_at','account','account_checked_at','account_status','ws_retry_at','ws_429')},'endpoint_hourly':state.get('endpoint_hours',{}),'daily_usage_note':'Account snapshot plus known local costs; other clients and unknown endpoint costs require the next account snapshot.'}
 
 def refresh_account(connect,opener=None):
  key=os.environ.get('ESCAPE_EODHD_API_KEY','').strip()

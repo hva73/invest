@@ -59,6 +59,7 @@ class CapacityTests(unittest.TestCase):
   self.assertIsNone(capacity.cost('https://ws.eodhistoricaldata.com/history?market=us&symbol=AAPL'))
   for units in (1,5,10,None):self.cap.reserve(units,self.now)
   state=self.state();self.assertEqual(state['known_units'],16);self.assertEqual(state['requests'],4);self.assertEqual(state['unknown_cost_requests'],1)
+ @patch('eodhd_capacity.TEMPORARY_DAILY_LIMIT_DAY','')
  def test_daily_budget_reserves_headroom_for_essential_scans_and_resets_utc(self):
   from datetime import datetime,timezone
   now=datetime(2026,11,10,23,59,55,tzinfo=timezone.utc).timestamp()
@@ -67,6 +68,7 @@ class CapacityTests(unittest.TestCase):
   with self.assertRaisesRegex(EngineError,'EODHD_DAILY_BUDGET'):self.cap.reserve(1,now)
   capacity.Capacity(app.connect,'essential').reserve(1,now)
   self.cap.reserve(1,now+10)
+ @patch('eodhd_capacity.TEMPORARY_DAILY_LIMIT_DAY','')
  def test_unknown_cost_is_not_assumed_free_near_daily_limit(self):
   from datetime import datetime,timezone
   now=datetime(2026,11,10,10,0,tzinfo=timezone.utc).timestamp()
@@ -94,6 +96,7 @@ class CapacityTests(unittest.TestCase):
   with self.assertRaises(ValueError):
    with self.cap.websocket(40):raise ValueError('test release')
   self.assertFalse(self.state()['ws_leases'])
+ @patch('eodhd_capacity.TEMPORARY_DAILY_LIMIT_DAY','')
  def test_account_refresh_sanitized_and_daily_budget_does_not_stop_websockets(self):
   from datetime import datetime,timezone
   day=datetime.now(timezone.utc).date().isoformat()
@@ -112,6 +115,21 @@ class CapacityTests(unittest.TestCase):
   with self.cap.websocket(5):pass
   self.cap.reserve(0) # Usage endpoint remains available to discover a reset.
   self.cap.reserve(1,time.time()+86400)
+ def test_purchased_buffer_applies_only_to_the_authorized_utc_day(self):
+  from datetime import datetime,timezone
+  now=datetime(2026,11,10,23,59,55,tzinfo=timezone.utc).timestamp()
+  with app.connect() as c:
+   state=capacity.read(c);state.update(local_day='2026-11-10',known_units=0,account={'apiRequests':199999,'dailyRateLimit':100000,'extraLimit':500,'apiRequestsDate':'2026-11-10'},units_at_account=0);capacity.write(c,state,now)
+  self.cap.reserve(1,now)
+  with self.assertRaisesRegex(EngineError,'EODHD_DAILY_BUDGET'):self.cap.reserve(1,now+1)
+  with app.connect() as c:
+   self.assertEqual(capacity.snapshot(c,now)['temporary_daily_limit']['limit_units'],200000)
+   state=capacity.read(c);state.update(local_day='2026-11-11',known_units=0,account={'apiRequests':80000,'dailyRateLimit':100000,'apiRequestsDate':'2026-11-11'},units_at_account=0);capacity.write(c,state,now+10)
+   self.assertIsNone(capacity.snapshot(c,now+10)['temporary_daily_limit'])
+  with self.assertRaisesRegex(EngineError,'EODHD_DAILY_BUDGET'):self.cap.reserve(1,now+10)
+  capacity.Capacity(app.connect,'essential').reserve(1,now+10)
+ def test_temporary_buffer_never_relabels_a_stale_account_snapshot(self):
+  self.assertEqual(capacity.daily_limit({'dailyRateLimit':100000,'apiRequestsDate':'2026-11-09'},'2026-11-10','routine'),80000)
  def test_history_cache_deduplicates_positions_without_refreshing_source_time(self):
   eodhd_feeds._history_cache.clear();calls=[]
   def fetch(*_):
