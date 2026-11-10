@@ -13,6 +13,7 @@ def init(c):
     c.execute('''CREATE TABLE IF NOT EXISTS push_devices(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),endpoint_hash TEXT NOT NULL UNIQUE,payload BLOB NOT NULL,buy INTEGER NOT NULL DEFAULT 1,sell INTEGER NOT NULL DEFAULT 1,created REAL NOT NULL,updated REAL NOT NULL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS push_jobs(id INTEGER PRIMARY KEY,event_key TEXT NOT NULL,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),device_id INTEGER NOT NULL REFERENCES push_devices(id) ON DELETE CASCADE,created REAL NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_attempt REAL NOT NULL DEFAULT 0,lease_until REAL NOT NULL DEFAULT 0,lease_owner TEXT,status TEXT NOT NULL DEFAULT 'pending',UNIQUE(event_key,device_id))''')
     c.execute('CREATE INDEX IF NOT EXISTS push_due ON push_jobs(status,next_attempt,lease_until,id)')
+    c.execute('CREATE INDEX IF NOT EXISTS push_active_watch_device ON push_jobs(device_id,watch_row_id,status,lease_until)')
     c.execute('''CREATE TABLE IF NOT EXISTS push_last(device_id INTEGER NOT NULL REFERENCES push_devices(id) ON DELETE CASCADE,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),signal TEXT NOT NULL,event_key TEXT NOT NULL,updated REAL NOT NULL,PRIMARY KEY(device_id,watch_row_id))''')
 
 
@@ -182,6 +183,83 @@ def _exit_rearmed(c,watch_id,event_key):
     return False
 
 
+def _exit_evidence(result,strategy_checksum):
+    from decimal import Decimal
+    risk=result['risk_parameters'];context=result['position_context'];price=result['supporting_metrics']['price']
+    if context.get('position')!='held' or context.get('status')!='verified' or context.get('quantity') is None or price is None or not strategy_checksum:return None
+    # Account valuation and FX fluctuate with every tick and are entry inputs;
+    # they must not turn an unchanged exit into a new alert. Preserve changes
+    # to position, execution context, stop/deadline and strategy.
+    material={k:context.get(k) for k in ('status','position','quantity','cost_price','tradability','orders','instrument_type')}
+    for key in ('quantity','cost_price'):
+        if material[key] is not None:
+            material[key]=Decimal(str(material[key]))
+            if not material[key].is_finite():return None
+    if isinstance(material['orders'],list):material['orders']=[{k:v for k,v in order.items() if k!='status_time'} if isinstance(order,dict) else order for order in material['orders']]
+    limits={k:risk.get(k) for k in ('stop_price','exit_deadline','exit_allowed')}
+    if limits['stop_price'] is not None:
+        limits['stop_price']=Decimal(str(limits['stop_price']))
+        if not limits['stop_price'].is_finite():return None
+    return (strategy_checksum,limits,material,str(price))
+
+
+def _repeated_critical(c,watch_id,device_id,event_key,reason):
+    """Suppress only when both calculations prove the same risk situation."""
+    current=c.execute('SELECT created FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch_id,event_key)).fetchone()
+    prior=c.execute("""SELECT e.event_id,e.created FROM push_jobs j JOIN hw_events e
+        ON e.watch_row_id=j.watch_row_id AND e.event_id=j.event_key
+        WHERE j.watch_row_id=? AND j.device_id=? AND j.status='sent'
+          AND e.event_type='RISK_REJECTION' AND e.severity='critical'
+          AND CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.reason') END=? ORDER BY j.id DESC LIMIT 1""",(watch_id,device_id,reason)).fetchone()
+    if not current or not prior or _exit_rearmed(c,watch_id,prior['event_id']):return False
+    key='stop_price' if reason=='STOP_BREACHED' else 'exit_deadline'
+    def evidence(created):
+        row=c.execute('SELECT payload,strategy_checksum FROM hw_calculations WHERE watch_row_id=? AND calculated=? ORDER BY id DESC LIMIT 1',(watch_id,created)).fetchone()
+        try:
+            result=json.loads(row['payload'])
+            if result['risk_parameters'].get(key) is None:return None
+            return _exit_evidence(result,row['strategy_checksum'])
+        except (TypeError,ValueError,KeyError,AttributeError,ArithmeticError):return None
+    old,new=evidence(prior['created']),evidence(current['created'])
+    return _same_exit_episode(c,watch_id,old,new)
+
+
+def _same_exit_episode(c,watch_id,old,new):
+    """Use the pinned strategy's trailing distance, never a generic cooldown."""
+    if old is None or new is None or old[:3]!=new[:3]:return False
+    from decimal import Decimal,InvalidOperation
+    try:
+        before,after=Decimal(old[3]),Decimal(new[3])
+        if not before.is_finite() or not after.is_finite() or before<=0 or after<=0:return False
+        if before==after:return True
+        row=c.execute('SELECT strategy FROM hw_sessions WHERE id=?',(watch_id,)).fetchone()
+        strategy=json.loads(row['strategy'])
+        from hotwatch_contract import checksum
+        if checksum(strategy)!=old[0]:return False
+        threshold=Decimal(str(strategy['parameters']['trailing_pct']))
+        if not threshold.is_finite() or not Decimal('0')<threshold<=Decimal('100'):return False
+        from hotwatch_engine import trailing_notification_worsened
+        return not trailing_notification_worsened(after,before,threshold)
+    except (TypeError,ValueError,KeyError,AttributeError,InvalidOperation):return False
+
+
+def _repeated_trailing(c,watch_id,device_id,event_key):
+    """A duplicate trailing event is suppressed only with matching verified evidence."""
+    current=c.execute('SELECT created FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch_id,event_key)).fetchone()
+    prior=c.execute("""SELECT e.event_id,e.created FROM push_jobs j JOIN hw_events e
+        ON e.watch_row_id=j.watch_row_id AND e.event_id=j.event_key
+        WHERE j.watch_row_id=? AND j.device_id=? AND j.status='sent'
+        AND e.event_type='TRAILING_EXIT_WORSENED' ORDER BY j.id DESC LIMIT 1""",(watch_id,device_id)).fetchone()
+    if not current or not prior or _exit_rearmed(c,watch_id,prior['event_id']):return False
+    def evidence(created):
+        row=c.execute('SELECT payload,strategy_checksum FROM hw_calculations WHERE watch_row_id=? AND calculated=? ORDER BY id DESC LIMIT 1',(watch_id,created)).fetchone()
+        try:
+            return _exit_evidence(json.loads(row['payload']),row['strategy_checksum'])
+        except (TypeError,ValueError,KeyError,AttributeError,ArithmeticError):return None
+    old,new=evidence(prior['created']),evidence(current['created'])
+    return _same_exit_episode(c,watch_id,old,new)
+
+
 def _send(subscription,payload,topic):
     from pywebpush import webpush
     import requests
@@ -203,7 +281,7 @@ def dispatch_one(connect,now=None,sender=None):
     with connect() as c:
         c.execute('BEGIN IMMEDIATE')
         c.execute("UPDATE push_jobs SET status='expired' WHERE status='pending' AND created<?",(t-300,))
-        job=c.execute("SELECT j.*,d.user_id,d.payload,d.buy,d.sell FROM push_jobs j JOIN push_devices d ON d.id=j.device_id JOIN users u ON u.id=d.user_id AND u.active=1 WHERE j.status='pending' AND j.next_attempt<=? AND j.lease_until<? ORDER BY j.id LIMIT 1",(t,t)).fetchone()
+        job=c.execute("SELECT j.*,d.user_id,d.payload,d.buy,d.sell FROM push_jobs j JOIN push_devices d ON d.id=j.device_id JOIN users u ON u.id=d.user_id AND u.active=1 WHERE j.status='pending' AND j.next_attempt<=? AND j.lease_until<? AND NOT EXISTS (SELECT 1 FROM push_jobs active WHERE active.watch_row_id=j.watch_row_id AND active.device_id=j.device_id AND active.id<>j.id AND active.status='pending' AND active.lease_until>=?) ORDER BY j.id LIMIT 1",(t,t,t)).fetchone()
         if not job:return False
         c.execute('UPDATE push_jobs SET lease_owner=?,lease_until=?,attempts=attempts+1 WHERE id=?',(owner,t+30,job['id']))
     with connect() as c:
@@ -218,6 +296,8 @@ def dispatch_one(connect,now=None,sender=None):
         except (ValueError,TypeError,AttributeError):reason=None
         critical=bool(e and e['event_type']=='RISK_REJECTION' and e['severity']=='critical' and reason in ('STOP_BREACHED','EXIT_DEADLINE'))
         urgent=bool(e and (e['event_type']=='TRAILING_EXIT_WORSENED' or critical))
+        if (critical and _repeated_critical(c,watch['id'],job['device_id'],job['event_key'],reason) or e and e['event_type']=='TRAILING_EXIT_WORSENED' and _repeated_trailing(c,watch['id'],job['device_id'],job['event_key'])):
+            c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
         critical_only=critical and bool(job['sell']) and current not in ('SELL','REDUCE')
         if (current=='BUY' and not job['buy'] or current in ('SELL','REDUCE') and not job['sell']):
             if previous and previous['signal']==current:

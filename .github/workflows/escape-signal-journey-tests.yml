@@ -1,0 +1,38 @@
+name: ESCAPE signal push and mobile journey
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [codex/escape-development]
+permissions:
+  contents: read
+jobs:
+  signal-journey:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue-13-signal-experience'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Install test dependencies
+        run: |
+          python3 -m pip install -r requirements.txt playwright
+          python3 -m playwright install --with-deps chromium
+      - name: Test push, signal and market contracts
+        env:
+          PYTHONPATH: .:tests
+        run: |
+          python3 -m unittest tests.test_web_push tests.test_review_signal_fixes tests.test_market_data tests.test_hotwatch_engine tests.test_signal_readiness
+          node tests/test_dashboard_data.js
+          node tests/test_dashboard_attention.js
+          node tests/test_signal_notice.js
+          node tests/test_push_service_worker.js
+      - name: Test mobile push journey
+        env:
+          ESCAPE_PLAYWRIGHT_MANAGED: '1'
+          PYTHONPATH: .:tests
+        run: |
+          python3 tests/browser_dashboard_attention.py
+          python3 tests/browser_signal_push_detail.py
+          python3 tests/browser_market_charts.py

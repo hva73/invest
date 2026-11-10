@@ -17,8 +17,10 @@ const iconOf=html=>({dataset:{engineNotice:decode(html.match(/data-engine-notice
   s.signal=signal;s.display_status=label;s.status=signal==='NO_DATA'?'DEGRADED':'ACTIVE';s.last_action_signal.state=phase;
   const html=ctx.window.DashboardUI.render(state),attention=html.match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];
   assert.doesNotMatch(html,/<aside class="signal-notice"|signal-notice-details|data-engine-ack/);
-  assert.match(attention,/signal-alert--unread/);assert.match(attention,/aria-haspopup="dialog"/);
-  await ctx.window.EngineUI.click(iconOf(attention));
+  const source=phase==='ACTIVE'?attention:html;
+  if(phase!=='ACTIVE')assert.doesNotMatch(attention,/signal-alert--unread/);
+  assert.match(source,/signal-alert--unread/);assert.match(source,/aria-haspopup="dialog"/);
+  await ctx.window.EngineUI.click(iconOf(source));
   assert.equal(dialog.open,true);assert.match(dialog.innerHTML,/TRAILING_EXIT &lt;unsafe>/);assert.match(dialog.innerHTML,/18:32:39/);assert.match(dialog.innerHTML,/data-engine-ack/);
   assert.ok(dialog.innerHTML.includes({ACTIVE:'AKTIVT',WITHDRAWN:'BORTFALDET',DATA_MISSING:'DATA MANGLER'}[phase]));
   if(phase!=='ACTIVE'){assert.doesNotMatch(attention,/data-trade-watch/);assert.match(dialog.innerHTML,/ikke et aktuelt handelssignal/)}
