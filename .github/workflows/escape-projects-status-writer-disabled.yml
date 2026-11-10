@@ -1,14 +1,8 @@
-name: ESCAPE status writer prototype - disabled
+name: ESCAPE approved Issue 4 status test
 
 on:
   issue_comment:
     types: [created]
-  workflow_dispatch:
-    inputs:
-      comment_id:
-        description: Existing Issue 4 request comment ID
-        required: true
-        type: string
 
 permissions: {}
 
@@ -17,55 +11,53 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  disabled-write:
-    # Deliberate hard stop. Changing this requires a reviewed change and
-    # separate owner approval for the first actual Projects mutation.
+  approved-single-test:
     if: >-
-      false &&
       github.repository == 'hva73/invest' &&
       github.actor_id == '351122234' &&
       github.ref == 'refs/heads/codex/escape-development' &&
-      (github.event_name == 'workflow_dispatch' ||
-       (github.event.issue.number == 4 && github.event.issue.pull_request == null &&
-        startsWith(github.event.comment.body, 'ESCAPE_PROJECTS_WRITE_V1 ')))
+      github.run_attempt == '1' &&
+      github.event.issue.number == 4 &&
+      github.event.issue.pull_request == null &&
+      github.event.comment.body == 'ESCAPE_PROJECTS_WRITE_V1 {"request_id":"a73f4c0862e04f5db51ed330d8b06c2e","expected_status":"In progress","desired_status":"Backlog"}'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: write
       issues: write
     steps:
-      - name: Check out reviewed immutable revision
+      - name: Check out immutable one-shot revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 143c8fed580fba41ec6fba637566c506aaf0233b
+          ref: c2d82dd64368e117013d2af3fd6567f2e2547183
           persist-credentials: false
-      - name: Disabled status writer
+      - name: Execute only approved Issue 4 transition
         env:
           ESCAPE_PROJECTS_TOKEN: ${{ secrets.ESCAPE_PROJECTS_TOKEN }}
           JOURNAL_TOKEN: ${{ github.token }}
           ISSUE_TOKEN: ${{ github.token }}
-          REQUEST_COMMENT_ID: ${{ github.event_name == 'issue_comment' && github.event.comment.id || inputs.comment_id }}
+          REQUEST_COMMENT_ID: ${{ github.event.comment.id }}
           GITHUB_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
-        run: python3 development/projects_status_write_entry.py
+        run: python3 development/projects_status_single_test.py
 
-  report-failed-writer:
-    needs: disabled-write
+  report-failed-test:
+    needs: approved-single-test
     if: >-
       always() &&
-      (needs.disabled-write.result == 'failure' ||
-       needs.disabled-write.result == 'cancelled')
+      (needs.approved-single-test.result == 'failure' ||
+       needs.approved-single-test.result == 'cancelled')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
       issues: write
     steps:
-      - name: Check out reviewed failure reporter
+      - name: Check out immutable failure reporter
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 143c8fed580fba41ec6fba637566c506aaf0233b
+          ref: c2d82dd64368e117013d2af3fd6567f2e2547183
           persist-credentials: false
-      - name: Report uncertain workflow result
+      - name: Report uncertain test outcome
         env:
           ISSUE_TOKEN: ${{ github.token }}
         run: python3 development/projects_status_write_failure_report.py
