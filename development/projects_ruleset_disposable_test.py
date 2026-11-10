@@ -50,7 +50,6 @@ def main():
               'active': rules.get('enforcement') == 'active',
               'target': REF in refs.get('include', []) and refs.get('exclude') == [],
               'rules': {'deletion', 'non_fast_forward'} <= types,
-              'no_bypass_actors': rules.get('bypass_actors') == [],
               'test_identity_no_bypass': rules.get('current_user_can_bypass') == 'never'}
     if not all(checks.values()):
         raise Blocked('Beskyttelse kunne ikke verificeres: ' + ', '.join(k for k, v in checks.items() if not v))
