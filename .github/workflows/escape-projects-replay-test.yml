@@ -8,6 +8,7 @@ permissions: {}
 
 concurrency:
   group: escape-projects-isolated-item-4-test
+  queue: max
   cancel-in-progress: false
 
 jobs:
