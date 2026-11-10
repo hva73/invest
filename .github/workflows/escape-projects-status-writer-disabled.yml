@@ -61,4 +61,5 @@ jobs:
       - name: Report uncertain test outcome
         env:
           ISSUE_TOKEN: ${{ github.token }}
+          PROJECT_ISSUE_NUMBER: '4'
         run: python3 development/projects_status_write_failure_report.py
