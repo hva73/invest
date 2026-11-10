@@ -19,6 +19,7 @@ class SignalReadiness(unittest.TestCase):
   from mcp_client import PortfolioFormatError
   adapter=adapters.PlutoAdapter(app.connect,1)
   failures=[(sqlite3.OperationalError('secret-value'),'BROKER_CONTEXT_DATABASE_ERROR'),
+            (urllib.error.HTTPError('https://example.invalid/?secret=secret-value',401,'secret-value',{},None),'BROKER_CONTEXT_PROVIDER_HTTP_ERROR'),
             (urllib.error.URLError('secret-value'),'BROKER_CONTEXT_NETWORK_ERROR'),
             (PortfolioFormatError('secret-value'),'BROKER_CONTEXT_READ_UNAVAILABLE'),
             (oauth.SetupRequired('secret-value'),'BROKER_CONTEXT_SETUP_REQUIRED'),
