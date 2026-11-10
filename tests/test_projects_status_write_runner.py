@@ -31,6 +31,11 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(runner.journal.JOURNAL_BRANCH, 'codex/projects-replay-isolated-test')
             claim.assert_called_once_with('fake-journal', 'a' * 32, 123, 'PVT_test', 'PVTI_test', 'In progress', 'Backlog')
 
+    def test_write_prefix_is_distinct_from_automatic_dryrun_prefix(self):
+        body = runner.WRITE_PREFIX + '{"request_id":"' + 'a' * 32 + '","expected_status":"In progress","desired_status":"Backlog"}'
+        self.assertIsNone(runner.dryrun.parse_request(body))
+        self.assertEqual(runner.dryrun.parse_request(body, runner.WRITE_PREFIX)['request_id'], 'a' * 32)
+
     def test_audit_failure_after_write_is_uncertain(self):
         with patch.object(runner.writer, 'LIVE_WRITE_ENABLED', True), patch.object(runner.dryrun, 'main', return_value=CONTEXT), patch.object(runner.writer, 'GraphQL'), patch.object(runner.writer, 'execute', return_value='VERIFIED'), patch.object(runner.audit, 'post', side_effect=runner.audit.AuditFailed):
             with self.assertRaises(runner.writer.Uncertain): runner.run('fake-project', 'fake-journal', 'fake-issue', '123')
