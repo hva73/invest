@@ -1,0 +1,31 @@
+name: ESCAPE synthetic status audit test
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  synthetic-audit:
+    if: >-
+      github.repository == 'hva73/invest' &&
+      github.actor_id == '351122234' &&
+      github.event.issue.number == 4 &&
+      github.event.issue.pull_request == null &&
+      startsWith(github.event.comment.body, 'ESCAPE_SYNTHETIC_STATUS_AUDIT_V1')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out immutable audit test
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 286f35ba0ccc71ff6e7db92ce43d0ce12a2f0887
+          persist-credentials: false
+      - name: Test simulated audit without Projects credential
+        env:
+          ISSUE_TOKEN: ${{ github.token }}
+        run: python3 development/projects_status_audit_live_test.py
