@@ -62,6 +62,29 @@ Den logiske kæde er **DISCOVERY → NÅLEØJET → PLUTO GATE → RAPPORT/JOURN
 
 Hvis nyere ejerbeslutninger eller aktive driftsinstruktioner afviger fra v3.9 (f.eks. kandidattal, rapport-ID eller radarversion v5.1), **identificér præcis konflikt og få kun det reelle mandatvalg afklaret**. Gør ikke en gammel dokumentgrænse til en skjult teknisk blokering eller ændr den stille.
 
+## 5a. Obligatorisk kontraktmatch før ændringer
+
+**Alle ændringer skal matche den dokumenterede data- og samarbejdskæde.** Ingen agent må optimere én komponent isoleret og stiltiende bryde en eksisterende kontrakt, dataautoritet, livscyklus eller aftalt arbejdsdeling. Læs de relevante filer **og sammenhold konkret input → output → lagring → visning → readback** mod dem, inden du ændrer kode eller påstår, at funktionen er færdig.
+
+**Fast referencesæt — læs efter arbejdets type:**
+
+| Område | Aftaler/kontrakter, der skal matches |
+| --- | --- |
+| Overordnet aftale, mandat, radar, natdrift, risiko | `docs/ESCAPE_TRADING_AGREEMENT_V3_9.md` inkl. tillæg; `docs/HOTWATCH_SAMARBEJDSAFTALE.md` |
+| Fælles dataflow og hver parts ansvar | `docs/END_TO_END_DATA_CONTRACT.md`; `docs/HOTWATCH_ENGINE_DATA_CONTRACT.md`; `development/ESCAPE_arkitektur_og_arbejdsmodel_2026-11-10.md` (vejledende udkast) |
+| HOT WATCH-status, sessioner, signaler og drift | `docs/HOTWATCH_ENGINE.md`; `docs/CANDIDATE_STATUS_MODEL.md`; `docs/HOTWATCH_AUTOSTART.md` |
+| Strategi, Early Catalyst, risiko og køb/exit | `docs/EARLY_CATALYST_V1.md`; `docs/HOTWATCH_SAMARBEJDSAFTALE.md`; relevante kodekontrakter og regressionstests |
+| Rapporter, kandidater, validering og MCP | `docs/REPORT_V2.md`; `docs/REPORT_VALIDATION.md`; `docs/REPORT_INGEST.md`; `docs/MCP_REPORTS.md`; `docs/MCP_DELIVERY.md` |
+| Pluto, ordrer, positionsvisning og vurderinger | `docs/PLUTO.md`; `docs/TRADING.md`; `docs/POSITION_ASSESSMENTS.md`; `docs/V2_2_WORKFLOWS.md` |
+| Mobil UX, grafer, notifikationer og eksisterende design | `docs/MARKET_CHARTS.md`; `docs/NOTIFICATIONS_STRATEGY_DA.md`; `docs/DESIGN_STATUS_SPEC_V1_DA.md`; `docs/DESIGN_V1_ACCEPTANCE_MATRIX_DA.md` |
+| Release, installation og faktisk drift | `docs/UPDATE.md`; `docs/HOTWATCH_INSTALL_TEST_DA.md`; `docs/INSTALL_SIGNAL_FIXES_20261109.md`; relevante Issues/PR'er |
+
+**Match-regel i praksis:** Identificér før kodning de berørte kontrakter og eksisterende tests; implementér derefter hele den sammenhængende funktion i den eksisterende arkitektur; kontrollér de relevante grænseflader og kontraktinvarianter med få men dækkende tests. Bevar `source_ids`, timestamps, `asset_id`, `candidate_id`, `watch_id`, strategi/version, risikostatus og ordre-/fill-semantik, hvor de er relevante. Sikr at skærmbilledet fortæller samme sandhed som motoren, rapporten og Pluto. **Ingen syntetiske live-data, ingen stille fallback og ingen ny parallel status-/signalmotor.**
+
+**Hvis dokumenter er indbyrdes uenige:** Vis den **konkrete** uoverensstemmelse (fil/afsnit/felt og konsekvens), undersøg seneste ejerbeslutning og eksisterende kode/tests, og afklar kun et faktisk mandatvalg med ejeren. Undlad at opfinde en ny regel eller automatisk vælge det dokument, der er nemmest at kode efter. Opdater relevante kontraktreferencer sammen med implementeringen, så dokumentation og løsning fortsat passer. Det er en **kort, teknisk konsistenskontrol**, ikke en ny bureaukratisk analysefase.
+
+**Definition af færdig:** Hele flowet virker og er testet op imod både **aftalerne, datakontrakterne, UI/UX og faktiske readbacks** i det omfang miljøet tillader. Grønne unittests eller en færdig PR er ikke i sig selv dokumentation for LIVE PASS. Ejergodkendt produktion og handler er særskilte handlinger.
+
 ## 6. Praktisk startprocedure for ny agent
 
 1. Læs **denne `AGENTS.md`** og det Issue/PR ejeren henviser til.
