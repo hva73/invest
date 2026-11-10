@@ -9,3 +9,7 @@ The validator obtains the target number from the authenticated GitHub event, ver
 All cooperating workflows share the existing global concurrency group. `queue: max` allows up to 100 pending requests; additional runs can be canceled when full. Ordering is based on when runs enter the queue, not guaranteed dispatch order. GitHub's mutation does not support atomic expected-value comparison, so a simultaneous manual or external edit can still be overwritten; the owner has accepted this limited risk for reversible task statuses only.
 
 Status before activation: generalized code and workflow are for review/test. The current change does not enable the writer, add Project items, create Issues, move cards, close Issues, or touch production. The previous owner authorization covered only #4 In progress → Backlog. Restoring #4 Backlog → In progress requires separate approval. A real ChatGPT-origin request through the general bridge remains to be verified before Issue #11 can be closed.
+
+## Verification
+
+Forty-two local tests and [Actions run 42886771267](https://github.com/hva73/invest/actions/runs/42886771267) passed with synthetic Project responses and no Projects secret. Tests cover every allowed Issue number, correct Issue-to-item matching, same-Issue audit routing, unauthorized Issues, stale status, Issue #3 completion protection, Danish status names and simulated uncertain write outcomes. This is not a live multi-issue Projects mutation test. The PR validation run also exercised GitHub's `queue: max` workflow syntax.
