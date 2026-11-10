@@ -44,11 +44,11 @@ def apply(source,target):
         if not file.is_file() or file.is_symlink() or source not in file.resolve().parents:raise ValueError('Opdateringen mangler en forventet kodefil')
         destination=target/name
         if destination.is_symlink() or target not in destination.resolve().parents:raise ValueError('Uventet destination')
-    backup_root=target.parent/'.escape_backups';backup_root.mkdir(mode=0o700,exist_ok=True);os.chmod(backup_root,0o700)
-    backup=Path(tempfile.mkdtemp(prefix=datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-'),dir=backup_root));os.chmod(backup,0o700)
     # Keep both motor locks across snapshot and code replacement. The caller
     # must separately stop and verify Passenger before calling this function.
     with quiesce_hotwatch(target):
+        backup_root=target.parent/'.escape_backups';backup_root.mkdir(mode=0o700,exist_ok=True);os.chmod(backup_root,0o700)
+        backup=Path(tempfile.mkdtemp(prefix=datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-'),dir=backup_root));os.chmod(backup,0o700)
         with sqlite3.connect(f'file:{database}?mode=ro',uri=True) as original,sqlite3.connect(backup/'escape.db') as copy:
             original.backup(copy)
             if copy.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RuntimeError('Databasebackup kunne ikke valideres')

@@ -146,3 +146,14 @@ print('INSTALLED_RELEASE_HEALTH_PASS')
     self.assertEqual((target/'app.py').read_text(),'old code')
     self.assertFalse((target/'var/hotwatch-autostart.disabled').exists())
    finally:os.close(fd)
+ def test_busy_worker_does_not_create_incomplete_backup(self):
+  with tempfile.TemporaryDirectory() as d:
+   source,target=self.fixture(Path(d));fd=os.open(target/'var/hotwatch-worker.lock',os.O_RDWR|os.O_CREAT,0o600)
+   real_quiesce=apply_update.quiesce_hotwatch
+   try:
+    fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    with patch('apply_update.quiesce_hotwatch',side_effect=lambda target:real_quiesce(target,timeout=0)):
+     with self.assertRaisesRegex(RuntimeError,'standsede ikke'):apply_update.apply(source,target)
+    self.assertFalse((target.parent/'.escape_backups').exists())
+    self.assertEqual((target/'app.py').read_text(),'old code')
+   finally:os.close(fd)
