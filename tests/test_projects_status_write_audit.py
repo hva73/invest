@@ -16,6 +16,21 @@ class Response(io.BytesIO):
 
 
 class AuditTest(unittest.TestCase):
+    def test_workflow_failure_report_warns_about_uncertainty(self):
+        with patch('urllib.request.build_opener') as factory:
+            factory.return_value.open.side_effect = [Response([]), Response({}, 201)]
+            self.assertEqual(audit.report_job_failure('fake', '123', '1'), 'RECORDED')
+            body = json.loads(factory.return_value.open.call_args.args[0].data)['body']
+            self.assertIn('Udfaldet kan være usikkert', body)
+            self.assertIn('runs/123/attempts/1', body)
+
+    def test_workflow_failure_report_is_not_duplicated(self):
+        marker = '<!-- escape-project-status-job:123:1 -->'
+        with patch('urllib.request.build_opener') as factory:
+            factory.return_value.open.return_value = Response([{'user': {'id': 41898282}, 'body': marker}])
+            self.assertEqual(audit.report_job_failure('fake', '123', '1'), 'RECORDED')
+            self.assertEqual(factory.return_value.open.call_count, 1)
+
     def test_simulation_is_explicit_and_has_separate_marker(self):
         with patch('urllib.request.build_opener') as factory:
             factory.return_value.open.side_effect = [Response([]), Response({}, 201)]
