@@ -1,5 +1,5 @@
 """Read-only provider adapters. Missing entitlements/fields are explicit faults."""
-import hashlib,json,os,re,time,urllib.request,urllib.error,threading,copy
+import hashlib,json,os,re,sqlite3,time,urllib.request,urllib.error,threading,copy
 from datetime import datetime,timedelta,timezone
 from decimal import Decimal,InvalidOperation
 from urllib.parse import quote,urlencode
@@ -143,7 +143,19 @@ class PlutoAdapter:
  def safe_context(self,request,currency):
   try:return self.context(request,currency)
   except DataUnavailable as error:return unknown_context(error.code if error.code=='PROVIDER_RATE_BUDGET' else 'BROKER_CONTEXT_UNAVAILABLE')
-  except Exception:return unknown_context('BROKER_CONTEXT_UNAVAILABLE')
+  except sqlite3.Error:return unknown_context('BROKER_CONTEXT_DATABASE_ERROR')
+  except urllib.error.HTTPError:return unknown_context('BROKER_CONTEXT_PROVIDER_HTTP_ERROR')
+  except (TimeoutError,ConnectionError,urllib.error.URLError):return unknown_context('BROKER_CONTEXT_NETWORK_ERROR')
+  except Exception as error:
+   # These fixed categories are safe to persist in the session. Never store an
+   # exception string: provider responses may contain credentials or user data.
+   try:
+    from mcp_client import PortfolioFormatError
+    import oauth
+   except Exception:return unknown_context('BROKER_CONTEXT_UNAVAILABLE')
+   if isinstance(error,PortfolioFormatError):return unknown_context('BROKER_CONTEXT_READ_UNAVAILABLE')
+   if isinstance(error,oauth.SetupRequired):return unknown_context('BROKER_CONTEXT_SETUP_REQUIRED')
+   return unknown_context('BROKER_CONTEXT_UNAVAILABLE')
  def factory(self,token):
   if self.gateway and self.gateway.token==token:return self.gateway
   from mcp_client import MCP
@@ -453,7 +465,21 @@ class EODHDAdapter:
       retained=[m for m in prior[1].get('messages',[]) if m.get('event_time') and 0<=(utc()-stamp(m['event_time'])).total_seconds()<=GLOBAL_RISK['max_quote_age_s']]
       if retained:
        latest=max(retained,key=lambda m:stamp(m['event_time']))
-       if not messages or stamp(latest['event_time'])>max(stamp(m['event_time']) for m in messages):messages=[latest]
+       prior_time=stamp(latest['event_time']);new_time=max((stamp(m['event_time']) for m in messages),default=None)
+       if not new_time or prior_time>new_time:
+        messages=[m for m in retained if stamp(m['event_time'])==prior_time] if feed.endswith('_quotes') else [latest]
+       elif feed.endswith('_quotes') and prior_time==new_time:
+        # Equal source times cannot order different quotes, even when they
+        # arrived in separate batches. Retain distinct quotes at that instant
+        # so poll() can reject an ambiguous spread; bound identical repeats.
+        candidates=[m for m in retained+messages if stamp(m['event_time'])==new_time];seen=set();messages=[]
+        for candidate in candidates:
+         try:quote=(Decimal(str(candidate.get('bid'))),Decimal(str(candidate.get('ask'))))
+         except (InvalidOperation,TypeError,ValueError):continue
+         if not all(v.is_finite() for v in quote) or quote[0]<=0 or quote[1]<quote[0]:continue
+         if quote not in seen:messages.append(candidate);seen.add(quote)
+         if len(messages)==2:break
+        if not messages:messages=candidates[-1:]
      partial=[m for m in result.get('partial_messages',[]) if m.get('symbol')==item]
      value={**result,'status':'OK' if messages else 'NO_MESSAGES','messages':messages,'message_count':len(messages),'partial_messages':partial,'captured_at':captured_at}
      _ws_batch_cache[(self.uid,credential,feed,item)]=(saved,copy.deepcopy(value))
@@ -562,7 +588,14 @@ class EODHDAdapter:
       fresh=lambda item:bool(item.get('event_time') and 0<=(now-stamp(item['event_time'])).total_seconds()<=max_age)
       quotes=[x for x in quote_feed.get('messages',[]) if fresh(x) and x.get('bid') and x.get('ask') and Decimal(x['bid'])>0 and Decimal(x['ask'])>=Decimal(x['bid'])]
       if quotes:
-       q=max(quotes,key=lambda x:stamp(x['event_time']));sample.update(bid=q['bid'],ask=q['ask'],bid_at=q['event_time'],ask_at=q['event_time'],quote_feed=market+'_quotes')
+       latest=max(stamp(q['event_time']) for q in quotes);same_time=[q for q in quotes if stamp(q['event_time'])==latest]
+       if len({(Decimal(q['bid']),Decimal(q['ask'])) for q in same_time})==1:
+        q=same_time[0];sample.update(bid=q['bid'],ask=q['ask'],bid_at=q['event_time'],ask_at=q['event_time'],quote_feed=market+'_quotes')
+       else:
+        # Equal provider timestamps do not establish quote ordering. Keep the
+        # independently timed trade but do not invent a tradable spread.
+        sample.update(bid=None,ask=None,bid_at=same_time[0]['event_time'],ask_at=same_time[0]['event_time'],quote_feed=None)
+        self.last_feed_diagnostics['websocket_quote_status']='AMBIGUOUS_SAME_TIMESTAMP'
       # A subsequent quote/status failure must not discard an already
       # received trade. Missing evidence remains unknown and cannot permit BUY.
       if quote_feed['status']=='RATE_LIMIT' or status_feed['status'] in ('RATE_LIMIT','LOCAL_BUDGET_EXHAUSTED'):return sample

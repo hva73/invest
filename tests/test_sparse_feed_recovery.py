@@ -123,5 +123,37 @@ class SparseFeedRecovery(unittest.TestCase):
    self.assertEqual(r['messages'],[message] if seconds<=120 else [])
   # Freshness is always the provider event time, never the new capture time.
   self.assertEqual(client.capture.call_count,4)
+ def test_conflicting_same_time_quotes_survive_separate_cached_batches(self):
+  adapter=adapters.EODHDAdapter(app.connect,1);req=dict(self.req,is_test=False,profile='ACTIVE');job={'id':999,'request_data':req}
+  first={'symbol':'MERC','event_time':self.now.isoformat(),'received_at':self.now.isoformat(),'bid':'9.00','ask':'9.10'}
+  second={**first,'received_at':(self.now+timedelta(seconds=21)).isoformat(),'bid':'9.01'}
+  client=Mock();client.capture.return_value={'status':'OK','messages':[first]}
+  with patch.dict(os.environ,{'ESCAPE_EODHD_API_KEY':'test-only'}),patch.object(adapters,'utc',return_value=self.now),patch.object(adapters.time,'monotonic',return_value=100):
+   adapter.capture(client,'us_quotes','MERC',job)
+  equivalent={**first,'bid':'9.000','ask':'9.100'}
+  partial={**first,'bid':None}
+  client.capture.return_value={'status':'OK','messages':[partial,equivalent,second]}
+  for elapsed in (21,42,63):
+   with patch.dict(os.environ,{'ESCAPE_EODHD_API_KEY':'test-only'}),patch.object(adapters,'utc',return_value=self.now+timedelta(seconds=elapsed)),patch.object(adapters.time,'monotonic',return_value=100+elapsed):
+    result=adapter.capture(client,'us_quotes','MERC',job)
+   self.assertEqual({(m['bid'],m['ask']) for m in result['messages']},{('9.00','9.10'),('9.01','9.10')})
+   self.assertEqual(len(result['messages']),2)
+  self.assertEqual(client.capture.call_count,4)
+  at=self.now+timedelta(seconds=63)
+  def captured(client,feed,symbol,session):
+   if feed=='us_trades':return {'status':'OK','messages':[{'symbol':'MERC','event_time':at.isoformat(),'price':'100','market_session':'open'}]}
+   if feed=='us_quotes':return result
+   return {'status':'NO_MESSAGES','messages':[]}
+  env={'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'test-only','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}
+  with patch.dict(os.environ,env),patch.object(adapters,'utc',return_value=at),patch.object(adapter,'capture',side_effect=captured),patch.object(adapter,'feeds',return_value=Mock()),patch.object(adapter.pluto,'safe_context',return_value=fixture.tick(at,held=False)['context']):
+   sample=adapter.poll({'request_data':self.req})
+  self.assertEqual(sample['price'],'100');self.assertEqual(sample['event_time'],at.isoformat());self.assertIsNone(sample['bid']);self.assertIsNone(sample['ask'])
+  result=engine.ingest(app.connect,1,self.req['watch_id'],True,sample,at)
+  self.assertIsNone(result['session']['data_status']['bid']);self.assertNotEqual(result['calculation']['signal'],'BUY')
+  newer={**second,'event_time':(self.now+timedelta(seconds=64)).isoformat(),'received_at':(self.now+timedelta(seconds=64)).isoformat(),'bid':'9.02'}
+  client.capture.return_value={'status':'OK','messages':[newer]}
+  with patch.dict(os.environ,{'ESCAPE_EODHD_API_KEY':'test-only'}),patch.object(adapters,'utc',return_value=self.now+timedelta(seconds=84)),patch.object(adapters.time,'monotonic',return_value=184):
+   restored=adapter.capture(client,'us_quotes','MERC',job)
+  self.assertEqual(restored['messages'],[newer])
 
 if __name__=='__main__':unittest.main()

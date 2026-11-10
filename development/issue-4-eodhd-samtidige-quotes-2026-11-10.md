@@ -1,0 +1,152 @@
+# Issue #4: EODHD-quote med samme kildetid
+
+Status: undersøgelse og syntetisk kodetest. Dette er ikke et afsluttet produktionsfix.
+
+En samtidig stikprøve omkring 20:36 UTC viste to EODHD-quotes for ZETA med samme tidsstempel `1794342966200` og samme ask 34,46, men forskellig bid 34,16 og 34,27. Uden et kilde-sekvensnummer kan tidsstemplet alene ikke afgøre rækkefølgen. Disse quotes beviser ikke årsagen til fejlen i AAON eller øvrige sessioner.
+
+I `EODHDAdapter.poll` kunne forskellige quotes med samme højeste kildetid vælges vilkårligt. I `refreshed_trade_evidence` kunne en forskellig quote med samme kildetid som tidligere quote føre til `sample_id_conflict`, selv når den underliggende handel var uændret. Den foreslåede ændring beholder handlens uændrede kildepris og -tid, markerer spredningen ukendt ved en tvetydig quote, og tillader først en senere quote at genoprette spredningen. En faktisk modstridende handel afvises fortsat. Ingen quote bliver en handel, og risikoregler eller handelsmandat ændres ikke.
+
+Tests omfatter tvetydig quote i samme feedopsamling, tvetydig fornyelse af en allerede lagret handel, gentagelse, efterfølgende nyere quote, modstridende handel, købssikring ved ukendt spread samt uafhængigt gyldigt kritisk exit. Lokalt bestod 215 tests i `test_eodhd_feeds`, `test_signal_readiness` og `test_hotwatch_engine`; testdata er syntetiske.
+
+En anden pagineret driftsaflæsning viste 55 åbne sessioner: 33 ACTIVE/WAIT, 2 ACTIVE/SELL, 11 DEGRADED/NO_DATA med DATA_STALE, 6 med manglende Pluto-kurstid, 2 med ukendt markedsstatus og 1 med `sample_id_conflict`. Aflæsningen var ikke atomisk og grupperne beskriver viste første tilstande, ikke dokumenterede grundårsager. For WIX, AMZN, IBRX, CRSP, ZETA, TLS og SANM viste det pågældende øjeblik friske data; det udelukker ikke tidligere eller senere problemer.
+
+Før #4 kan afsluttes, kræves en samlet kilde-til-visning-gennemgang med readback pr. session og årsagsklassifikation samt review, relevante CI-tests og separat godkendt installation med produktionsreadback. Ændringen her forklarer ikke i sig selv alle DATA_STALE-tilfælde eller beviseligt AAON-konflikten.
+
+## Pagineret readback ca. 20:48 UTC
+
+55 åbne sessioner, hentet over flere sider og derfor ikke et atomisk øjebliksbillede. Kolonnerne viser tilstand og beregningens årsagskoder; de er ikke i sig selv bevis for den første tekniske grundfejl. Kildetiden er den seneste registrerede markedshændelse, ikke indhentningstidspunktet. Providerdiagnostik er udtrykkeligt fælles for provider og kan ikke bruges som dokumentation for den enkelte session.
+
+| Watch-slutning | Instrument | Formål | Motorstatus / signal | Visning | Seneste beregning | Kontekstdiagnose | Seneste kildetid UTC |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| d75d3e46 | NOVOB | automatic holding watch | DEGRADED / NO_DATA | MARKED LUKKET (ORDINÆR HANDEL) | WARMUP, DATA_STALE, MARKET_STATUS_UNKNOWN | — | 2026-11-10T15:59:00+00:00 |
+| fc2302b8 | ASML | automatic holding watch | DEGRADED / NO_DATA | MARKED LUKKET (ORDINÆR HANDEL) | WARMUP, DATA_STALE, MARKET_STATUS_UNKNOWN | — | 2026-11-10T16:39:00+00:00 |
+| 01e47a9e | MSFT | automatic holding watch | ACTIVE / WAIT | AFVENT | NO_TRIGGER | — | 2026-11-10T20:47:49.826000+00:00 |
+| 5f929d9d | BTC | automatic holding watch | DEGRADED / NO_DATA | KURS MODTAGET · MARKEDSSTATUS UKENDT | MARKET_STATUS_UNKNOWN | — | 2026-11-10T20:47:00+00:00 |
+| 201f502a | TSM | automatic holding watch | ACTIVE / WAIT | AFVENT | NO_TRIGGER | — | 2026-11-10T20:47:55.776000+00:00 |
+| 47589e91 | LHA | automatic holding watch | DEGRADED / NO_DATA | MARKED LUKKET (ORDINÆR HANDEL) | WARMUP, DATA_STALE, MARKET_STATUS_UNKNOWN, POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T16:35:00+00:00 |
+| 2fcce32e | AMZN | automatic holding watch | ACTIVE / NO_DATA | BID/ASK MODTAGET · SIGNAL AFVENTER | NO_TRIGGER | — | 2026-11-10T20:47:51.382000+00:00 |
+| 93db1b99 | MPWR | automatic holding watch | ACTIVE / NO_DATA | BID/ASK MODTAGET · SIGNAL AFVENTER | NO_TRIGGER | — | 2026-11-10T20:47:32.005000+00:00 |
+| 15178c69 | ORCL | automatic holding watch | ACTIVE / NO_DATA | BID/ASK MODTAGET · SIGNAL AFVENTER | NO_TRIGGER | — | 2026-11-10T20:47:40.215000+00:00 |
+| 17846b7c | ETN | automatic holding watch | DEGRADED / NO_DATA | BID/ASK MODTAGET · SIGNAL AFVENTER | POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T20:47:27.919000+00:00 |
+| 4573b6ad | VRT | automatic holding watch | DEGRADED / NO_DATA | BID/ASK MODTAGET · SIGNAL AFVENTER | POSITION_CONTEXT_UNKNOWN | BROKER_CONTEXT_UNAVAILABLE | 2026-11-10T20:47:30.033000+00:00 |
+| 459cd1b5 | PEPE | automatic holding watch | DEGRADED / NO_DATA | KURSTID MANGLER | PLUTO_QUOTE_TIME_UNKNOWN | — | — |
+| 1743c5ce | BTC | automatic holding watch | DEGRADED / NO_DATA | KURS MODTAGET · MARKEDSSTATUS UKENDT | MARKET_STATUS_UNKNOWN | — | 2026-11-10T20:47:00+00:00 |
+| ff970020 | AMGN | automatic holding watch | ACTIVE / NO_DATA | BID/ASK MODTAGET · SIGNAL AFVENTER | NO_TRIGGER | — | 2026-11-10T20:47:21.571000+00:00 |
+| 888cadf0 | MDLZ | automatic holding watch | DEGRADED / NO_DATA | BID/ASK MODTAGET · SIGNAL AFVENTER | POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T20:48:06.002000+00:00 |
+| 0b40a92e | FCX | automatic holding watch | ACTIVE / NO_DATA | BID/ASK MODTAGET · SIGNAL AFVENTER | NO_TRIGGER | — | 2026-11-10T20:47:47.950000+00:00 |
+| 9f3c5eea | GMAB | automatic holding watch | DEGRADED / NO_DATA | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | — | 2026-11-10T15:59:00+00:00 |
+| bf0b78e9 | HIMS | automatic discovery | ACTIVE / NO_DATA | REVURDERING FORFALDET | RISK_INPUTS_UNKNOWN | — | 2026-11-10T20:46:53.470000+00:00 |
+| 39dfab54 | BRK.B | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T20:47:47.169000+00:00 |
+| d2fff6ef | GD | automatic holding watch | DEGRADED / NO_DATA | BID/ASK MODTAGET · SIGNAL AFVENTER | WARMUP, POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T20:47:52.601000+00:00 |
+| 6073fe50 | CABA | automatic holding watch | DEGRADED / NO_DATA | BID/ASK MODTAGET · SIGNAL AFVENTER | POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T20:47:39.522000+00:00 |
+| 74f21dee | JDZG | automatic holding watch | DEGRADED / NO_DATA | BID/ASK MODTAGET · SIGNAL AFVENTER | POSITION_CONTEXT_UNKNOWN | BROKER_CONTEXT_UNAVAILABLE | 2026-11-10T20:47:21.591000+00:00 |
+| 79185f54 | NRG | automatic holding watch | ACTIVE / NO_DATA | BID/ASK MODTAGET · SIGNAL AFVENTER | NO_TRIGGER | — | 2026-11-10T20:46:05.606000+00:00 |
+| 6c360108 | VRDN | automatic discovery | ACTIVE / NO_DATA | REVURDERING FORFALDET | FEATURES_INSUFFICIENT, RISK_INPUTS_UNKNOWN | — | 2026-11-10T20:46:46.606000+00:00 |
+| 0ecc9701 | CELC | automatic discovery | DEGRADED / NO_DATA | KURSTID MANGLER | PLUTO_QUOTE_TIME_UNKNOWN | — | — |
+| 5d1bc107 | IBRX | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T20:48:09.571000+00:00 |
+| 84211ead | CRSP | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T20:47:38.510000+00:00 |
+| 4538aa04 | KMDA | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | DATA_STALE | — | 2026-11-10T20:40:55.857000+00:00 |
+| 9402fb63 | TTD | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | POSITION_CONTEXT_UNKNOWN | BROKER_CONTEXT_UNAVAILABLE | 2026-11-10T20:47:32.501000+00:00 |
+| 1eb376c9 | ZETA | automatic holding watch | ACTIVE / NO_DATA | BID/ASK MODTAGET · SIGNAL AFVENTER | TRAILING_EXIT | — | 2026-11-10T20:47:17.926000+00:00 |
+| 329f25ce | OXY | automatic holding watch | DEGRADED / NO_DATA | BID/ASK MODTAGET · SIGNAL AFVENTER | POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T20:47:39.287000+00:00 |
+| 80b52f74 | RKLB | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | POSITION_CONTEXT_UNKNOWN | BROKER_CONTEXT_UNAVAILABLE | 2026-11-10T20:47:32.051000+00:00 |
+| fb81fb9b | ASTS | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | POSITION_CONTEXT_UNKNOWN | BROKER_CONTEXT_UNAVAILABLE | 2026-11-10T20:47:31.196000+00:00 |
+| 8754e066 | GFR | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | DATA_STALE | — | 2026-11-10T20:40:01.364000+00:00 |
+| 136422d7 | TTWO | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T20:48:16.356000+00:00 |
+| 32f45e5b | QXO | automatic discovery | ACTIVE / NO_DATA | REVURDERING FORFALDET | RISK_INPUTS_UNKNOWN | — | 2026-11-10T20:47:00.232000+00:00 |
+| 699eb083 | TLS | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T20:47:18.314000+00:00 |
+| b616f253 | DCTH | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T20:48:06.429000+00:00 |
+| e29fb832 | ZYME | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | POSITION_CONTEXT_UNKNOWN | BROKER_CONTEXT_UNAVAILABLE | 2026-11-10T20:47:27.059000+00:00 |
+| 5fca3c4b | CRWV | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T20:48:06.216000+00:00 |
+| 2d2298d9 | SANM | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | POSITION_CONTEXT_UNKNOWN | BROKER_CONTEXT_UNAVAILABLE | 2026-11-10T20:46:39.282000+00:00 |
+| d36e580d | QLYS | automatic discovery | ACTIVE / NO_DATA | REVURDERING FORFALDET | TRADABILITY_UNCONFIRMED, RISK_INPUTS_UNKNOWN | — | 2026-11-10T20:47:11.176000+00:00 |
+| 03ef140e | SHOT | automatic discovery | DEGRADED / NO_DATA | KURSTID MANGLER | PLUTO_QUOTE_TIME_UNKNOWN | — | — |
+| d683468b | IFX | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | DATA_STALE, MARKET_STATUS_UNKNOWN, POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T16:40:00+00:00 |
+| 7e5d60df | WIX | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T20:46:31.589000+00:00 |
+| 7043bd78 | HSAI | automatic discovery | DEGRADED / NO_DATA | KURSTID MANGLER | PLUTO_QUOTE_TIME_UNKNOWN | — | — |
+| c55b2106 | EXK | automatic discovery | ACTIVE / NO_DATA | REVURDERING FORFALDET | FEATURES_INSUFFICIENT, RISK_INPUTS_UNKNOWN | — | 2026-11-10T20:46:11.793000+00:00 |
+| d62c8b3e | SMC | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | DATA_STALE | — | 2026-11-10T20:43:32.741000+00:00 |
+| 5dea96d8 | HAG | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | WARMUP, DATA_STALE, MARKET_STATUS_UNKNOWN, POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T16:35:00+00:00 |
+| 7a09d92e | VOD | automatic discovery | DEGRADED / NO_DATA | KURSTID MANGLER | PLUTO_QUOTE_TIME_UNKNOWN | — | — |
+| 9a46f712 | VG | automatic discovery | ACTIVE / NO_DATA | REVURDERING FORFALDET | FEATURES_INSUFFICIENT, RISK_INPUTS_UNKNOWN | — | 2026-11-10T20:46:33.166000+00:00 |
+| 5866817e | SECZ | automatic discovery | DEGRADED / NO_DATA | REVURDERING FORFALDET | POSITION_CONTEXT_UNKNOWN | BROKER_CONTEXT_UNAVAILABLE | 2026-11-10T20:47:27.101000+00:00 |
+| cfbb142c | AAON | automatic discovery | DEGRADED / NO_DATA | BID/ASK MODTAGET · SIGNAL AFVENTER | POSITION_CONTEXT_UNKNOWN | — | 2026-11-10T20:47:56.957000+00:00 |
+| 6038e64d | EMBJ | automatic discovery | DEGRADED / NO_DATA | KURSTID MANGLER | PLUTO_QUOTE_TIME_UNKNOWN | — | — |
+| e75729ee | TURB | automatic discovery | DEGRADED / NO_DATA | DATA FOR GAMLE | WARMUP, DATA_STALE, MARKET_STATUS_UNKNOWN | — | 2026-11-10T20:20:00+00:00 |
+
+Eksempelvis havde AMZN, ZETA og SANM modtaget kursdata, mens en positionskontekst var ukendt; for SANM oplyste diagnosen `BROKER_CONTEXT_UNAVAILABLE`. Denne generiske diagnose kan repræsentere flere fejl i depotopslag og fastslår ikke alene en årsag. For ZETA var seneste beregning `TRAILING_EXIT`, mens den aktuelle visning rapporterede manglende positionskontekst: de to tidspunkter/lag må ikke sammenblandes til et aktuelt salgssignal.
+
+## Præcisering af diagnostik
+
+I arbejdssporet er den hidtidige generiske fejldiagnose suppleret med faste kategorier for database-, netværks-, depotlæse- og opsætningsfejl. Alle efterlader positionskonteksten ukendt og bevarer de eksisterende risikogates; de indeholder aldrig selve fejlteksten. Depotlæsefejl er en bred kategori og beviser ikke, at Plutos dataformat er årsagen. Denne ændring kan først hjælpe med at identificere en eventuel fremtidig fejl efter en særskilt godkendt installation; den kan ikke diagnosticere hændelsen bagudrettet.
+
+Sammenligning af quote-tider bruger desuden faktiske tidspunkter, også når det samme tidspunkt er skrevet med `Z` eller `+00:00`. Samme quote i to formater giver ingen ny observation; forskellige quotes med samme faktiske kildetid bliver fortsat markeret tvetydige.
+
+Den fælles WebSocket-cache bevarer nu også to forskellige quotes med samme kildetid, når de kommer i **hver sin indsamling**. Ellers kunne en efterfølgende cacheopdatering fjerne beviset for tvetydigheden, inden adapteren skulle vælge en spread. Identiske gentagelser afgrænses, den oprindelige modtagelsestid bevares, og en dokumenteret nyere quote kan igen levere en spread. En samlet syntetisk test følger cache → adapter → motor og kontrollerer, at hverken en tvetydig spread eller en kunstig ny handel bruges til at tillade køb.
+
+Uafhængig kildekontrol ca. 21:19 UTC er dokumenteret i [ChatGPTs kommentar på Issue #4](https://github.com/hva73/invest/issues/4#issuecomment-6779560749). IBRX og ZETA havde samme observerede handelstid hos EODHD og motoren; for WIX blev ingen nyere handel end motorens påvist. Et kort eftermarkedsvindue beviser ikke fuld døgndækning, og en nyere quote er ikke en ny handel. Årsagen til det tidligere depotkontekstudfald forblev ukendt.
+
+## Sammenlignelig kilde- og scanstatus ca. 21:14 UTC
+
+56 sessioner over seks sider. Kun de seneste 30 logposter pr. side var tilgængelige; event og sessionsstatus er ikke et atomisk snapshot. En seneste observeret kildetid beviser ikke, at andre handler ikke findes. N/A betyder, at loggen ikke indeholdt en relevant måling. Køtid er mellem planlagt tid og faktisk claim.
+
+De fem sessioner uden scanpost i dette logudsnit var PEPE, CELC, SHOT, HSAI og VOD. Alle fem brugte Pluto som aktiv kilde og havde `PLUTO_QUOTE_TIME_UNKNOWN`; de skal derfor ikke tælles som dokumenterede EODHD-databrud. Feed-recovery angav for PEPE uafklaret kryptoidentitet, for CELC/SHOT/VOD uafklaret EODHD-identitet og for HSAI midlertidigt providerbudget. Dette er statuskoder i snapshots, ikke bevis for en fælles grundfejl.
+
+| Watch-ref | Instrument | Motorvisning | Seneste beregningskode | Seneste scan UTC | Kø sek. | Trade-alder sek. | Kildestatus | Seneste handelskildetid UTC |
+| --- | --- | --- | --- | --- | ---: | ---: | --- | --- |
+| 925b87fd9436e09e | NOVOB | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | 2026-11-10T21:13:54.775969+00:00 | 4.91 | 19130.74 | STALE_OR_FUTURE | 2026-11-10T15:59:00+00:00 |
+| cbc52b53447fd308 | ASML | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | 2026-11-10T21:13:56.237303+00:00 | 10.15 | 17036.07 | STALE_OR_FUTURE | 2026-11-10T16:39:00+00:00 |
+| 0c56bf9d13ae767e | MSFT | BID/ASK MODTAGET · SIGNAL AFVENTER | DATA_STALE | 2026-11-10T21:13:49.017439+00:00 | 2.51 | 260.20 | STALE_OR_FUTURE | 2026-11-10T21:09:24.696000+00:00 |
+| b04b5af09cf9d4a8 | BTC | KURS MODTAGET · MARKEDSSTATUS UKENDT | MARKET_STATUS_UNKNOWN | 2026-11-10T21:13:44.881431+00:00 | 6.59 | — | MARKET_MAPPING_UNVERIFIED | 2026-11-10T21:13:00+00:00 |
+| 1ac5f30f0204a15a | TSM | AFVENT | NO_TRIGGER | 2026-11-10T21:14:28.499883+00:00 | 2.70 | 8.36 | OK | 2026-11-10T21:14:19.635000+00:00 |
+| ea5b94a01a8620eb | LHA | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | 2026-11-10T21:12:56.897607+00:00 | 19.30 | 16984.55 | STALE_OR_FUTURE | 2026-11-10T16:35:00+00:00 |
+| 1541c2edc7eff6db | AMZN | AFVENT | NO_TRIGGER | 2026-11-10T21:14:24.308556+00:00 | 3.88 | 7.06 | OK | 2026-11-10T21:14:14.149000+00:00 |
+| 38dc1b1fcff84ace | MPWR | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | 2026-11-10T21:14:33.167470+00:00 | 0.91 | 803.10 | STALE_OR_FUTURE | 2026-11-10T21:01:08.995000+00:00 |
+| 84c77b5e1c651dc2 | ORCL | AFVENT | NO_TRIGGER | 2026-11-10T21:14:27.428025+00:00 | 1.82 | 59.35 | OK | 2026-11-10T21:13:22.302000+00:00 |
+| a8afad0b543f0338 | ETN | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | 2026-11-10T21:13:37.305962+00:00 | 7.06 | 817.70 | STALE_OR_FUTURE | 2026-11-10T20:59:58.630000+00:00 |
+| 538ae2c6b9589567 | VRT | BID/ASK MODTAGET · SIGNAL AFVENTER | DATA_STALE | 2026-11-10T21:14:29.582820+00:00 | 0.12 | 462.25 | STALE_OR_FUTURE | 2026-11-10T21:06:46.266000+00:00 |
+| 11ee4bfd2a8b87ce | PEPE | KURSTID MANGLER | PLUTO_QUOTE_TIME_UNKNOWN | — | — | — | — | — |
+| e4389bb1760f5faa | BTC | KURS MODTAGET · MARKEDSSTATUS UKENDT | MARKET_STATUS_UNKNOWN | 2026-11-10T21:13:41.322133+00:00 | 1.92 | — | MARKET_MAPPING_UNVERIFIED | 2026-11-10T21:13:00+00:00 |
+| 1278b44f4f7c803f | AMGN | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | 2026-11-10T21:14:32.594693+00:00 | 1.59 | 731.25 | STALE_OR_FUTURE | 2026-11-10T21:02:20.345000+00:00 |
+| 463d178371d8ce05 | MDLZ | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | 2026-11-10T21:14:14.756976+00:00 | 0.52 | 469.42 | STALE_OR_FUTURE | 2026-11-10T21:06:22.116000+00:00 |
+| 7b2477a789cfcce2 | FCX | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | 2026-11-10T21:14:01.064409+00:00 | 10.13 | 210.08 | STALE_OR_FUTURE | 2026-11-10T21:10:29.600000+00:00 |
+| 40b7b2f5d6bbc641 | GMAB | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | 2026-11-10T21:13:58.644414+00:00 | 12.44 | 19138.24 | STALE_OR_FUTURE | 2026-11-10T15:59:00+00:00 |
+| 4702eb383bcdbc75 | HIMS | REVURDERING FORFALDET | OUTSIDE_REGULAR_SESSION, RISK_INPUTS_UNKNOWN | 2026-11-10T21:14:28.037391+00:00 | 2.00 | 36.75 | OK | 2026-11-10T21:13:51.269000+00:00 |
+| 410b57d30c82ed52 | BRK.B | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:14:37.807340+00:00 | 0.47 | 323.56 | STALE_OR_FUTURE | 2026-11-10T21:09:13.222000+00:00 |
+| a88aabbf4280eeb7 | GD | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | 2026-11-10T21:14:25.298230+00:00 | 4.31 | 874.30 | STALE_OR_FUTURE | 2026-11-10T20:59:50.013000+00:00 |
+| 0d72623211ae59e3 | CABA | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | 2026-11-10T21:14:08.321181+00:00 | 8.72 | 863.49 | STALE_OR_FUTURE | 2026-11-10T20:59:41.883000+00:00 |
+| d2fdd20c5823e21c | JDZG | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | 2026-11-10T21:13:42.841715+00:00 | 4.58 | 209.06 | STALE_OR_FUTURE | 2026-11-10T21:10:10.075000+00:00 |
+| fc113d44e8a6d54e | NRG | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | 2026-11-10T21:14:33.605959+00:00 | 0.81 | 332.27 | STALE_OR_FUTURE | 2026-11-10T21:09:00.333000+00:00 |
+| 54f7444506d7abae | VRDN | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:13:40.132352+00:00 | 5.93 | 821.79 | STALE_OR_FUTURE | 2026-11-10T20:59:57.348000+00:00 |
+| 69fe99c0e0345601 | CELC | KURSTID MANGLER | PLUTO_QUOTE_TIME_UNKNOWN | — | — | — | — | — |
+| 912ecf0d05561a4e | IBRX | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:14:20.362768+00:00 | 3.07 | 860.78 | STALE_OR_FUTURE | 2026-11-10T20:59:58.605000+00:00 |
+| 5dd4f53b559c9b74 | CRSP | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:14:36.776023+00:00 | 0.96 | 873.25 | STALE_OR_FUTURE | 2026-11-10T20:59:59.923000+00:00 |
+| f8758ac9a44a76e5 | KMDA | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:14:01.371239+00:00 | 12.79 | 860.84 | STALE_OR_FUTURE | 2026-11-10T20:59:39.507000+00:00 |
+| 16073dba454b6d38 | TTD | REVURDERING FORFALDET | TRADABILITY_UNCONFIRMED, OUTSIDE_REGULAR_SESSION, SPREAD_TOO_WIDE, FEATURES_INSUFFICIENT, RISK_INPUTS_UNKNOWN | 2026-11-10T21:14:27.976998+00:00 | 4.35 | 46.04 | OK | 2026-11-10T21:13:41.404000+00:00 |
+| c08b45358f0d0963 | ZETA | BID/ASK MODTAGET · SIGNAL AFVENTER | DATA_STALE | 2026-11-10T21:13:39.124414+00:00 | 6.28 | 139.39 | STALE_OR_FUTURE | 2026-11-10T21:11:18.687000+00:00 |
+| 09dbc53248b54122 | OXY | BID/ASK MODTAGET · SIGNAL AFVENTER | DATA_STALE | 2026-11-10T21:14:02.094796+00:00 | 15.16 | 676.31 | STALE_OR_FUTURE | 2026-11-10T21:02:44.761000+00:00 |
+| eacf6b09d90dc963 | RKLB | REVURDERING FORFALDET | OUTSIDE_REGULAR_SESSION, FEATURES_INSUFFICIENT, RISK_INPUTS_UNKNOWN | 2026-11-10T21:14:25.365134+00:00 | 3.17 | 83.97 | OK | 2026-11-10T21:13:01.379000+00:00 |
+| 231ab60a16776958 | ASTS | REVURDERING FORFALDET | OUTSIDE_REGULAR_SESSION, FEATURES_INSUFFICIENT, RISK_INPUTS_UNKNOWN | 2026-11-10T21:14:25.342321+00:00 | 4.98 | 25.92 | OK | 2026-11-10T21:13:59.390000+00:00 |
+| 03d091b9ff7d43cb | GFR | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:14:21.343291+00:00 | 3.21 | 873.14 | STALE_OR_FUTURE | 2026-11-10T20:59:47.236000+00:00 |
+| fc159ea6317c9ab8 | TTWO | REVURDERING FORFALDET | WARMUP, OUTSIDE_REGULAR_SESSION, FEATURES_INSUFFICIENT, RISK_INPUTS_UNKNOWN | 2026-11-10T21:14:28.087259+00:00 | 1.56 | 33.40 | OK | 2026-11-10T21:13:54.649000+00:00 |
+| 2a91f33e31322cb5 | QXO | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:14:29.083686+00:00 | 0.31 | 868.50 | STALE_OR_FUTURE | 2026-11-10T20:59:59.594000+00:00 |
+| 9e62a6f208982209 | TLS | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:14:06.418204+00:00 | 9.62 | 681.22 | STALE_OR_FUTURE | 2026-11-10T21:02:42.149000+00:00 |
+| 5fd482f965e0f003 | DCTH | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:13:50.298267+00:00 | 5.64 | 836.27 | STALE_OR_FUTURE | 2026-11-10T20:59:52.759000+00:00 |
+| 2b62b93ec3a4757a | ZYME | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:13:57.239814+00:00 | 11.83 | 862.85 | STALE_OR_FUTURE | 2026-11-10T20:59:33.400000+00:00 |
+| 8b7f6eb8d365ca0e | CRWV | REVURDERING FORFALDET | TRADABILITY_UNCONFIRMED, OUTSIDE_REGULAR_SESSION, FEATURES_INSUFFICIENT, RISK_INPUTS_UNKNOWN | 2026-11-10T21:14:32.089260+00:00 | 0.82 | 5.00 | OK | 2026-11-10T21:14:26.603000+00:00 |
+| fa5f3b871ce239b9 | SANM | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:14:14.526159+00:00 | 1.55 | 873.70 | STALE_OR_FUTURE | 2026-11-10T20:59:39.843000+00:00 |
+| 90f986eb7e8a10f2 | QLYS | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:14:21.199239+00:00 | 2.01 | 863.00 | STALE_OR_FUTURE | 2026-11-10T20:59:55.166000+00:00 |
+| c762d81cfc4acc1f | SHOT | KURSTID MANGLER | PLUTO_QUOTE_TIME_UNKNOWN | — | — | — | — | — |
+| 95f36d0e4e2844b5 | IFX | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:12:57.942127+00:00 | 19.47 | 16978.09 | STALE_OR_FUTURE | 2026-11-10T16:40:00+00:00 |
+| ad48454544ed751d | WIX | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:13:59.670393+00:00 | 11.57 | 839.75 | STALE_OR_FUTURE | 2026-11-10T20:59:58.919000+00:00 |
+| 7c3826e80f027d09 | HSAI | KURSTID MANGLER | PLUTO_QUOTE_TIME_UNKNOWN | — | — | — | — | — |
+| 5879569787f0972d | EXK | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:14:09.330538+00:00 | 3.92 | 848.36 | STALE_OR_FUTURE | 2026-11-10T20:59:59.977000+00:00 |
+| fdfd51f6484cae65 | SMC | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:13:57.694644+00:00 | 6.41 | 841.34 | STALE_OR_FUTURE | 2026-11-10T20:59:51.608000+00:00 |
+| ee09829294cf1aa5 | HAG | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:12:55.863149+00:00 | 14.13 | 16976.14 | STALE_OR_FUTURE | 2026-11-10T16:35:00+00:00 |
+| 95e2adbf3649ac3e | VOD | KURSTID MANGLER | PLUTO_QUOTE_TIME_UNKNOWN | — | — | — | — | — |
+| 627b1207ab1474d8 | VG | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:13:38.330645+00:00 | 6.26 | 819.81 | STALE_OR_FUTURE | 2026-11-10T20:59:57.506000+00:00 |
+| 0e4f80c366bf8e4c | SECZ | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:14:40.341437+00:00 | 0.81 | 190.00 | STALE_OR_FUTURE | 2026-11-10T21:11:28.896000+00:00 |
+| 1f93311212978308 | AAON | REVURDERING FORFALDET | DATA_STALE | 2026-11-10T21:14:18.140056+00:00 | 1.17 | 874.99 | STALE_OR_FUTURE | 2026-11-10T20:59:42.166000+00:00 |
+| 51dd7ee951193341 | EMBJ | REVURDERING FORFALDET | PROVIDER_RATE_BUDGET | 2026-11-10T21:14:27.988563+00:00 | 4.88 | — | — | — |
+| 5f3a2b5d4c237c3e | TURB | MARKED LUKKET (ORDINÆR HANDEL) | DATA_STALE | 2026-11-10T21:14:19.371477+00:00 | 3.20 | 3409.21 | STALE_OR_FUTURE | 2026-11-10T20:57:00+00:00 |
+| e1c71fa6fcceabc2 | SENS | DATA MANGLER | PROVIDER_RATE_BUDGET | 2026-11-10T21:14:40.392188+00:00 | 0.25 | — | — | — |

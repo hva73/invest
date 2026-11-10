@@ -1,0 +1,28 @@
+name: ESCAPE EODHD data-path regressions
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [codex/escape-development]
+permissions:
+  contents: read
+jobs:
+  data-path:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue-4-quote-time-collision'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: |
+          python -m venv "$RUNNER_TEMP/escape-data-venv"
+          "$RUNNER_TEMP/escape-data-venv/bin/python" -m pip install -r requirements.txt
+      - name: Verify EODHD, HOT WATCH and push regressions
+        env:
+          PYTHONPATH: .:tests
+        run: '"$RUNNER_TEMP/escape-data-venv/bin/python" -m unittest tests.test_eodhd_feeds tests.test_signal_readiness tests.test_sparse_feed_recovery tests.test_hotwatch_engine tests.test_review_signal_fixes tests.test_web_push'
