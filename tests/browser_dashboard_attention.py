@@ -21,6 +21,12 @@ def main():
    panel=page.locator('.dash-attention');expect(panel.locator('.dash-count')).to_have_text('2');expect(panel.locator('tbody tr')).to_have_count(2)
    expect(panel).to_contain_text('Depot 1');expect(panel).to_contain_text('Depot 2');expect(panel).not_to_contain_text('ASML');expect(panel).not_to_contain_text('Tidligere')
    expect(panel.locator('[data-view="hot-watch"]')).to_have_text('Se alle overvågninger →')
+   page.evaluate('''() => {
+    const o={key:'order:synthetic',verified_id:true,portfolio_id:1,portfolio_name:'Depot 1',ticker:'XYZ',status:'AWAITING_APPROVAL',source:'Pluto',verification:'broker_snapshot',observed_at:new Date().toISOString()};
+    testState.dashboard.orders=[o,{...o}];document.querySelector('#screen').innerHTML=window.DashboardUI.render(testState);
+   }''')
+   expect(page.locator('.dash-attention .dash-count')).to_have_text('3');expect(page.locator('.dash-approval')).to_have_count(1);expect(page.locator('.dash-approval')).to_contain_text('ikke en udført handel');expect(page.locator('.dash-approval [data-open-portfolio="1"]')).to_be_visible()
+   page.evaluate("testState.dashboard.orders=[]")
    page.evaluate("testState.dashboard.positions=testState.dashboard.positions.slice(0,8);document.querySelector('#screen').innerHTML=window.DashboardUI.render(testState)")
    expect(page.locator('.dash-attention .dash-count')).to_have_text('0');expect(page.locator('.dash-attention')).to_contain_text('Ingen aktuelle købs-, salgs- eller handlingskrævende advarsler')
    page.close()
