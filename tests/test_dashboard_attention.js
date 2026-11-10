@@ -1,0 +1,10 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const ctx={window:{},document:{getElementById:()=>null},Intl,Date,Number,String,console};
+vm.runInNewContext(fs.readFileSync('static/dashboard-ui.js','utf8'),ctx);
+ctx.window.DashboardUI.setup({api:()=>{},escape:String,formatTime:String,formatQuantity:String,state:()=>({})});
+const row=(ticker,id,signal,status='ACTIVE',when='2026-11-10T12:00:00Z')=>({key:ticker+id,ticker,name:ticker,portfolio_id:id,portfolio_name:'Depot '+id,conflicts:[],hot_watch:{session:{watch_id:ticker+id,status,signal,display_status:({SELL:'SÆLGSSIGNAL',BUY:'KØBSSIGNAL',WAIT:'AFVENT',NO_DATA:'DATA FOR GAMLE'})[signal],last_calculation_at:when,last_action_signal:{event_id:'old',event_type:'SELL_SIGNAL',state:'WITHDRAWN'}}}});
+const state={dashboard:{positions:[row('ASML',1,'WAIT'),row('MSFT',1,'NO_DATA','DEGRADED'),row('ZETA',1,'SELL'),row('ZETA',2,'SELL'),row('BUY',1,'BUY'),row('ZETA',1,'SELL')],accounts:[],totals:[],warnings:[],orders:[],critical_sessions:[]}};
+const section=()=>ctx.window.DashboardUI.render(state).match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];
+let html=section();assert.doesNotMatch(html,/ASML|MSFT|Tidligere advarsel/);assert.equal((html.match(/<tr class="dash-row">/g)||[]).length,3);assert.match(html,/<span class="dash-count">3<\/span>/);assert.ok(html.indexOf('ZETA')<html.indexOf('>BUY<'));assert.match(html,/Depot 1/);assert.match(html,/Depot 2/);assert.match(html,/Se alle overvågninger/);
+state.dashboard.positions=[row('ORCL',1,'WAIT')];html=section();assert.match(html,/Ingen aktuelle købs-, salgs- eller handlingskrævende advarsler/);assert.match(html,/<span class="dash-count">0<\/span>/);
+console.log('PASS: only current actions, no stale history, deduplicated per watch and portfolio');

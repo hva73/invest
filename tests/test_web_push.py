@@ -139,12 +139,49 @@ class Push(unittest.TestCase):
   def critical(offset,stop):
    at=self.now+timedelta(seconds=offset)
    with app.connect() as c:
-    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps({'risk_parameters':{'stop_price':stop},'reason_codes':['STOP_BREACHED']}),'x'))
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps({'risk_parameters':{'stop_price':stop},'position_context':{'position':'held','status':'verified','quantity':'10'},'supporting_metrics':{'price':'9'},'reason_codes':['STOP_BREACHED']}),'x'))
     engine.event(c,self.watch,'RISK_REJECTION',at,'STOP_BREACHED',severity='critical')
    with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,at,lambda s,p,t:sent.append(p))
   critical(0,'10');critical(1,'10');critical(2,'11')
   self.assertEqual(len(sent),2)
   with app.connect() as c:self.assertEqual([r['status'] for r in c.execute('SELECT status FROM push_jobs ORDER BY id')],['sent','skipped','sent'])
+ def test_changed_position_and_price_notify_each_device(self):
+  self.subscribe();web_push.subscribe(app.connect,1,{'subscription':{**self.sub,'endpoint':self.sub['endpoint']+'-second'},'buy':True,'sell':True});sent=[]
+  def critical(offset,quantity,price):
+   at=self.now+timedelta(seconds=offset)
+   payload={'risk_parameters':{'stop_price':'10'},'position_context':{'position':'held','status':'verified','quantity':quantity},'supporting_metrics':{'price':price}}
+   with app.connect() as c:
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps(payload),'x'))
+    engine.event(c,self.watch,'RISK_REJECTION',at,'STOP_BREACHED',severity='critical')
+   with patch('web_push._actionable',return_value='SELL'):
+    for _ in range(2):web_push.dispatch_one(app.connect,at,lambda s,p,t:sent.append(s['endpoint']))
+  critical(0,'10','9');critical(1,'10','9');critical(2,'20','9');critical(3,'20','8')
+  self.assertEqual(len(sent),6)
+  self.assertEqual(sent.count(self.sub['endpoint']),3)
+  self.assertEqual(sent.count(self.sub['endpoint']+'-second'),3)
+ def test_deadline_change_in_position_is_not_suppressed(self):
+  self.subscribe();sent=[]
+  for offset,quantity in enumerate(('10','10','20')):
+   at=self.now+timedelta(seconds=offset)
+   payload={'risk_parameters':{'exit_deadline':'2026-11-10T20:00:00Z'},'position_context':{'position':'held','status':'verified','quantity':quantity},'supporting_metrics':{'price':'9'}}
+   with app.connect() as c:
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps(payload),'x'))
+    engine.event(c,self.watch,'RISK_REJECTION',at,'EXIT_DEADLINE',severity='critical')
+   with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,at,lambda sub,p,t:sent.append(p))
+  self.assertEqual(len(sent),2)
+ def test_duplicate_trailing_only_suppressed_when_evidence_unchanged(self):
+  self.subscribe();sent=[]
+  def event(offset,price,quantity='10',complete=True):
+   at=self.now+timedelta(seconds=offset)
+   payload={'risk_parameters':{'trailing_pct':'2'},'position_context':{'position':'held','status':'verified','quantity':quantity},'supporting_metrics':{'price':price}}
+   if not complete:payload.pop('position_context')
+   with app.connect() as c:
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps(payload),'x'))
+    engine.event(c,self.watch,'TRAILING_EXIT_WORSENED',at,'worsened',severity='warning')
+   with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,at,lambda s,p,t:sent.append(p))
+  event(0,'10');event(1,'10');event(2,'9');event(3,'9','20');event(4,'9','20',False)
+  self.assertEqual(len(sent),4)
+  with app.connect() as c:self.assertEqual([r['status'] for r in c.execute('SELECT status FROM push_jobs ORDER BY id')],['sent','skipped','sent','sent','sent'])
  def test_unknown_stop_level_does_not_hide_critical_alert(self):
   self.subscribe();sent=[]
   with patch('web_push._actionable',return_value='SELL'):
@@ -158,7 +195,7 @@ class Push(unittest.TestCase):
   def critical(offset):
    at=self.now+timedelta(seconds=offset)
    with app.connect() as c:
-    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps({'risk_parameters':{'stop_price':'10'}}),'x'))
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps({'risk_parameters':{'stop_price':'10'},'position_context':{'position':'held','status':'verified','quantity':'10'},'supporting_metrics':{'price':'9'}}),'x'))
     engine.event(c,self.watch,'RISK_REJECTION',at,'STOP_BREACHED',severity='critical')
    with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,at,lambda s,p,t:sent.append(p))
   critical(0)

@@ -24,6 +24,8 @@ jobs:
           PYTHONPATH: .:tests
         run: |
           python3 -m unittest tests.test_web_push tests.test_review_signal_fixes tests.test_market_data
+          node tests/test_dashboard_data.js
+          node tests/test_dashboard_attention.js
           node tests/test_signal_notice.js
           node tests/test_push_service_worker.js
       - name: Test mobile push journey
@@ -31,5 +33,6 @@ jobs:
           ESCAPE_PLAYWRIGHT_MANAGED: '1'
           PYTHONPATH: .:tests
         run: |
+          python3 tests/browser_dashboard_attention.py
           python3 tests/browser_signal_push_detail.py
           python3 tests/browser_market_charts.py
