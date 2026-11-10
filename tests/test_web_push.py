@@ -145,6 +145,14 @@ class Push(unittest.TestCase):
   critical(0,'10');critical(1,'10');critical(2,'11')
   self.assertEqual(len(sent),2)
   with app.connect() as c:self.assertEqual([r['status'] for r in c.execute('SELECT status FROM push_jobs ORDER BY id')],['sent','skipped','sent'])
+ def test_unknown_stop_level_does_not_hide_critical_alert(self):
+  self.subscribe();sent=[]
+  with patch('web_push._actionable',return_value='SELL'):
+   for offset in range(2):
+    at=self.now+timedelta(seconds=offset)
+    with app.connect() as c:engine.event(c,self.watch,'RISK_REJECTION',at,'STOP_BREACHED',severity='critical')
+    web_push.dispatch_one(app.connect,at,lambda s,p,t:sent.append(p))
+  self.assertEqual(len(sent),2)
  def test_new_stop_after_verified_recovery_is_not_suppressed(self):
   self.subscribe();sent=[]
   def critical(offset):
