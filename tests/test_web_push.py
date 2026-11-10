@@ -159,6 +159,18 @@ class Push(unittest.TestCase):
   self.assertEqual(len(sent),6)
   self.assertEqual(sent.count(self.sub['endpoint']),3)
   self.assertEqual(sent.count(self.sub['endpoint']+'-second'),3)
+ def test_queued_duplicate_critical_jobs_are_deduplicated_per_device(self):
+  self.subscribe();web_push.subscribe(app.connect,1,{'subscription':{**self.sub,'endpoint':self.sub['endpoint']+'-second'},'buy':True,'sell':True});sent=[]
+  for offset in range(2):
+   at=self.now+timedelta(seconds=offset)
+   payload={'risk_parameters':{'stop_price':'10'},'position_context':{'position':'held','status':'verified','quantity':'10'},'supporting_metrics':{'price':'9'}}
+   with app.connect() as c:
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps(payload),'x'))
+    engine.event(c,self.watch,'RISK_REJECTION',at,'STOP_BREACHED',severity='critical')
+  with patch('web_push._actionable',return_value='SELL'):
+   for _ in range(4):self.assertTrue(web_push.dispatch_one(app.connect,self.now+timedelta(seconds=2),lambda sub,p,t:sent.append(sub['endpoint'])))
+  self.assertEqual(sorted(sent),sorted([self.sub['endpoint'],self.sub['endpoint']+'-second']))
+  with app.connect() as c:self.assertEqual(c.execute("SELECT count(*) FROM push_jobs WHERE status='skipped'").fetchone()[0],2)
  def test_deadline_change_in_position_is_not_suppressed(self):
   self.subscribe();sent=[]
   for offset,quantity in enumerate(('10','10','20')):
