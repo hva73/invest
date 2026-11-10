@@ -8,10 +8,11 @@ import urllib.request
 import urllib.error
 
 OWNER_ID = 351122234
+APP_ID = 1144995
 PREFIX = 'ESCAPE_PROJECTS_DRYRUN_V1 '
 QUERY = '''query($cursor:String){user(login:"hva73"){login projectV2(number:1){number closed
  fields(first:100){pageInfo{hasNextPage} nodes{... on ProjectV2SingleSelectField{name options{name}}}}
- items(first:100,after:$cursor){pageInfo{hasNextPage endCursor} nodes{isArchived
+ items(first:100,after:$cursor,archivedStates:[ARCHIVED,NOT_ARCHIVED]){pageInfo{hasNextPage endCursor} nodes{id isArchived
  content{... on Issue{number repository{nameWithOwner}}}
  fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}}}}}}}'''
 
@@ -52,6 +53,8 @@ def validate_request(comments, comment_id, current_status, options):
     comment = selected[0]
     if (comment.get('user') or {}).get('id') != OWNER_ID or comment.get('author_association') != 'OWNER':
         raise Blocked('Anmodningens afsender er ikke godkendt.')
+    if (comment.get('performed_via_github_app') or {}).get('id') != APP_ID:
+        raise Blocked('Anmodningens GitHub App er ikke godkendt.')
     if not comment.get('created_at') or comment.get('updated_at') != comment.get('created_at'):
         raise Blocked('Redigerede anmodninger afvises.')
     request = parse_request(comment.get('body'))
@@ -136,7 +139,7 @@ def main():
         if not cursor or cursor in seen:
             raise Blocked('Projektlisten er ufuldstændig.')
         seen.add(cursor)
-    if len(matches) != 1 or matches[0].get('isArchived') is not False:
+    if len(matches) != 1 or matches[0].get('isArchived') is not False or not isinstance(matches[0].get('id'), str) or not matches[0]['id'].startswith('PVTI_'):
         raise Blocked('Projektkortet er ikke entydigt og aktivt.')
     current = (matches[0].get('fieldValueByName') or {}).get('name')
     request = validate_request(first, int(raw_id), current, options)
