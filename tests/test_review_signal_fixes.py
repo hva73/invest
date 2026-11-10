@@ -40,6 +40,25 @@ class ReviewFixes(unittest.TestCase):
   v=self.view(91);self.assertEqual(v['signal'],'SELL');self.assertEqual(v['last_action_signal']['state'],'ACTIVE')
   self.assertEqual(self.view(121)['signal'],'NO_DATA')
   self.assertEqual(self.view(121)['last_action_signal']['state'],'DATA_MISSING')
+ def test_bar_blocker_explains_expiry_without_refreshing_trade_or_enabling_buy(self):
+  s=self.sample('100');s['context']['position']='none';s['context']['quantity']='0'
+  first=self.ingest(s)['calculation'];self.assertNotEqual(first['signal'],'BUY')
+  before=self.view(0);self.assertNotIn('bar_blocking_detail',before['data_status'])
+  after=self.view(91);self.assertEqual(after['signal'],'NO_DATA')
+  self.assertIn('BAR_EVIDENCE_STALE',after['display_reason_codes'])
+  detail=after['data_status']['bar_blocking_detail']
+  self.assertEqual(detail['blocking_inputs'],['bar']);self.assertEqual(detail['bar_age_s'],121)
+  self.assertEqual(detail['schedule_age_s'],91);self.assertTrue(detail['analysis_uses_bars'])
+  self.assertEqual(after['last_data_at'],s['event_time'])
+  with patch('hotwatch_engine.utc',return_value=self.at+timedelta(seconds=91)):
+   summary=next(x for x in engine.sync(app.connect,1,True,summary_only=True)['open_sessions'] if x['watch_id']==self.req['watch_id'])
+  self.assertEqual(summary['bar_blocking_detail']['blocking_inputs'],['bar']);self.assertEqual(summary['signal'],'NO_DATA')
+ def test_bar_blocker_identifies_expired_calendar_separately(self):
+  s=self.sample('100');s['context']['position']='none';s['context']['quantity']='0'
+  s['bar_evidence']['schedule_received_at']=(self.at-timedelta(seconds=60)).isoformat()
+  self.ingest(s);view=self.view(61)
+  self.assertEqual(view['signal'],'NO_DATA')
+  self.assertEqual(view['data_status']['bar_blocking_detail']['blocking_inputs'],['schedule'])
  def test_stale_optional_history_is_saved_without_blocking_fresh_stop(self):
   s=self.sample(offset=91);r=self.ingest(s,self.at+timedelta(seconds=91))['calculation']
   self.assertEqual(r['signal'],'SELL');self.assertEqual(r['supporting_metrics']['bar_history_status'],'INVALID_OR_STALE')

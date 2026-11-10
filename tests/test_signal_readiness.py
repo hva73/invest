@@ -79,6 +79,10 @@ class SignalReadiness(unittest.TestCase):
   detail=rejected.exception.market_conflict
   self.assertIn('price',detail['fields']);self.assertEqual(detail['previous']['price'],'100');self.assertEqual(detail['incoming']['price'],'101')
   self.assertNotIn('context',detail['fields']);self.assertNotIn('asset_id',detail['previous'])
+  self.assertEqual(detail['observations']['previous']['event_time'],s['event_time'])
+  self.assertEqual(detail['observations']['incoming']['event_time'],s['event_time'])
+  self.assertEqual(detail['observations']['previous']['sample_ref'],detail['observations']['incoming']['sample_ref'])
+  self.assertIn('previous_journal_received_at',detail);self.assertEqual(detail['ingest_attempt_at'],later.isoformat())
  def test_conflict_diagnostics_reach_existing_scan_log_without_broker_context(self):
   previous=self.sample(held=True);incoming=copy.deepcopy(previous);incoming['price']='101';incoming['context']['diagnostic']='private-broker-detail'
   error=engine.sample_conflict(previous,incoming,{'price','context','asset_id','feed_type'})

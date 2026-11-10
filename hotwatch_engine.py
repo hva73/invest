@@ -544,7 +544,7 @@ def view(c,row,now=None):
  last=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
  last_action=c.execute("SELECT event_id,event_type,created,data_timestamp,payload FROM hw_events WHERE watch_row_id=? AND event_type IN ('BUY_SIGNAL','SELL_SIGNAL','REDUCE_SIGNAL') ORDER BY id DESC LIMIT 1",(row['id'],)).fetchone()
  stale=not row['last_data'] or (now-stamp(row['last_data'])).total_seconds()>request['risk']['max_quote_age_s']
- display_reasons=[]
+ display_reasons=[];bar_blocking_detail=None
  if row['last_error']:display_reasons.append(row['last_error'])
  if stale and row['last_data']:display_reasons.append('DATA_STALE')
  effective='NO_DATA' if stale and state.get('signal') not in ['PAUSE','NO_DATA'] else state.get('signal','NO_DATA')
@@ -560,7 +560,10 @@ def view(c,row,now=None):
     from datetime import timedelta
     try:
      bar_end=stamp(latest_sample['bar_history'][-1]['bar_open_at'])+timedelta(seconds=60)
-     if not 0<=(now-bar_end).total_seconds()<=max_age or not 0<=(now-stamp(latest_sample['bar_evidence']['schedule_received_at'])).total_seconds()<=max_age:effective='NO_DATA';display_reasons.append('BAR_EVIDENCE_STALE')
+     schedule_at=stamp(latest_sample['bar_evidence']['schedule_received_at']);bar_age=(now-bar_end).total_seconds();schedule_age=(now-schedule_at).total_seconds()
+     if not 0<=bar_age<=max_age or not 0<=schedule_age<=max_age:
+      effective='NO_DATA';display_reasons.append('BAR_EVIDENCE_STALE')
+      bar_blocking_detail={'bar_last_closed_at':bar_end.isoformat(),'schedule_received_at':schedule_at.isoformat(),'bar_age_s':round(bar_age,3),'schedule_age_s':round(schedule_age,3),'max_age_s':max_age,'blocking_inputs':[name for name,age in (('bar',bar_age),('schedule',schedule_age)) if not 0<=age<=max_age],'analysis_uses_bars':True}
     except (KeyError,TypeError,ValueError,IndexError):effective='NO_DATA';display_reasons.append('BAR_EVIDENCE_STALE')
  # A pilot BUY must still satisfy its evidence at the time it is shown or
  # sent to the manual trading flow, even before the next market sample.
@@ -595,6 +598,7 @@ def view(c,row,now=None):
  if latest_payload and latest_payload.get('bar_history') and verified_bar_samples(latest_payload,request,now) is None:
   history[-1]={k:v for k,v in latest_payload.items() if k not in ('bar_history','bar_evidence')}
  data_status=observation_status(history,now,request['risk']['max_quote_age_s'],effective,row['status'])
+ if bar_blocking_detail:data_status['bar_blocking_detail']=bar_blocking_detail
  # Exchange-open evidence is separate from the instrument's session and can
  # never assert that extended-hours trading is unavailable.
  regular={'status':'UNKNOWN','received_at':None,'exchange':None,'source':'EODHD exchange details'}
@@ -889,7 +893,7 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
      except (ValueError,TypeError):pass
     context_diagnostic=(detail.get('latest_context') or {}).get('diagnostic')
     if not isinstance(context_diagnostic,str) or not re.fullmatch(r'[A-Z0-9_]{1,100}',context_diagnostic):context_diagnostic=None
-    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'last_calculation_at':r['last_calculation'],'last_computed_signal':detail['last_computed_signal'],'signal':detail['signal'],'display_status':detail['display_status'],'last_action_signal':detail['last_action_signal'],'context_diagnostic':context_diagnostic,'last_calculation_reason_codes':reasons,'display_reason_codes':detail['display_reason_codes'],'next_due_at':detail['next_due_at'],'effective_min_interval_s':detail['effective_min_interval_s'],'interval_basis':detail['interval_basis'],'provider_feed_diagnostics':provider_diagnostics,'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'price_status':data_status.get('price_status'),'bid_ask_status':data_status.get('quote_status'),'next_market_session':data_status.get('next_market_session'),'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
+    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'last_calculation_at':r['last_calculation'],'last_computed_signal':detail['last_computed_signal'],'signal':detail['signal'],'display_status':detail['display_status'],'last_action_signal':detail['last_action_signal'],'context_diagnostic':context_diagnostic,'last_calculation_reason_codes':reasons,'display_reason_codes':detail['display_reason_codes'],'next_due_at':detail['next_due_at'],'effective_min_interval_s':detail['effective_min_interval_s'],'interval_basis':detail['interval_basis'],'provider_feed_diagnostics':provider_diagnostics,'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'price_status':data_status.get('price_status'),'bid_ask_status':data_status.get('quote_status'),'bar_blocking_detail':data_status.get('bar_blocking_detail'),'next_market_session':data_status.get('next_market_session'),'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
    else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
   more=len(opened)>session_limit
   from eodhd_capacity import snapshot as capacity_snapshot
@@ -1010,6 +1014,24 @@ def sample_conflict(previous,current,keys):
  fields=sorted(k for k in keys if k!='context' and k in SAMPLE['properties'] and previous.get(k)!=current.get(k))
  public={'event_time','price','bid','ask','volume','volume_type','open','high','low','close','trade_size','interval_s','price_time_kind','market_status','bid_at','ask_at','status_at'}
  error.market_conflict={'fields':fields,'previous':{k:previous.get(k) for k in fields if k in public},'incoming':{k:current.get(k) for k in fields if k in public}}
+ # Safe market-only identity and original event times make two conflicting
+ # observations diagnosable without recording broker context or credentials.
+ def observation(sample):
+  result={}
+  if sample.get('source') in ('eodhd','pluto','synthetic','report_inbox'):result['source']=sample['source']
+  if sample.get('price_time_kind') in ('trade','bar_open'):result['price_time_kind']=sample['price_time_kind']
+  feed=sample.get('feed_type')
+  if isinstance(feed,str):
+   for prefix,kind in (('EODHD WebSocket us trade','US_WS_TRADE'),('EODHD WebSocket eu trade','EU_WS_TRADE'),('EODHD realtime closed 1m bar','REALTIME_BAR'),('EODHD intraday closed 1m bar','INTRADAY_BAR'),('EODHD REST real-time endpoint','REST_SNAPSHOT')):
+    if feed.startswith(prefix):result['feed_kind']=kind;break
+  for key in ('event_time','bid_at','ask_at','status_at'):
+   try:
+    if sample.get(key):result[key]=stamp(sample[key]).isoformat()
+   except (ValueError,TypeError,AttributeError):pass
+  identity=sample.get('sample_id')
+  if isinstance(identity,str) and identity:result['sample_ref']=hashlib.sha256(identity.encode()).hexdigest()[:16]
+  return result
+ error.market_conflict['observations']={'previous':observation(previous),'incoming':observation(current)}
  return error
 
 def refreshed_trade_evidence(previous,current,request,now):
@@ -1071,18 +1093,24 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   sample_errors(sample,request,now)
   newest=c.execute('SELECT id,digest FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
   same_history=prepared_version==(row['request'],row['strategy'],(newest['id'],newest['digest']) if newest else None) and sample==prepared_samples[-1]
-  old=c.execute('SELECT id,digest,payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(row['id'],sample['source'],sample['sample_id'])).fetchone()
-  if old is None and row['last_data'] and stamp(sample['event_time'])==stamp(row['last_data']):old=c.execute('SELECT id,digest,payload FROM hw_samples WHERE watch_row_id=? AND source=? AND event_epoch=? ORDER BY id DESC LIMIT 1',(row['id'],sample['source'],stamp(sample['event_time']).timestamp())).fetchone()
+  old=c.execute('SELECT id,digest,payload,received FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(row['id'],sample['source'],sample['sample_id'])).fetchone()
+  if old is None and row['last_data'] and stamp(sample['event_time'])==stamp(row['last_data']):old=c.execute('SELECT id,digest,payload,received FROM hw_samples WHERE watch_row_id=? AND source=? AND event_epoch=? ORDER BY id DESC LIMIT 1',(row['id'],sample['source'],stamp(sample['event_time']).timestamp())).fetchone()
   new_market_event=True
   if old:
    if row['last_data'] and stamp(json.loads(old['payload'])['event_time'])!=stamp(row['last_data']):raise EngineError('historical_sample_context_update',409)
    previous_sample=json.loads(old['payload']);incoming=sample
-   sample=refreshed_trade_evidence(previous_sample,sample,request,now)
+   try:sample=refreshed_trade_evidence(previous_sample,sample,request,now)
+   except EngineError as error:
+    if error.code=='sample_id_conflict' and getattr(error,'market_conflict',None):error.market_conflict.update(previous_journal_received_at=old['received'],ingest_attempt_at=now.isoformat())
+    raise
    if sample!=incoming:
     same_history=False;sample_errors(sample,request,now)
    previous_market={k:v for k,v in previous_sample.items() if k not in ['context','sample_id']};current_market={k:v for k,v in sample.items() if k not in ['context','sample_id']}
    evidence_changed=previous_market!=current_market
-   if evidence_changed and not (sample['source']=='eodhd' and sample.get('price_time_kind')=='trade'):raise sample_conflict(previous_market,current_market,set(previous_market)|set(current_market))
+   if evidence_changed and not (sample['source']=='eodhd' and sample.get('price_time_kind')=='trade'):
+    error=sample_conflict(previous_sample,sample,set(previous_market)|set(current_market))
+    error.market_conflict.update(previous_journal_received_at=old['received'],ingest_attempt_at=now.isoformat())
+    raise error
    extra=c.execute('SELECT payload FROM hw_context_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
    prior_context=json.loads(extra['payload']) if extra else previous_sample['context'];current_context=sample['context']
    if prior_context.get('as_of') and current_context.get('as_of') and stamp(current_context['as_of'])<stamp(prior_context['as_of']):

@@ -1041,6 +1041,24 @@ def admin_diagnostics(connect,uid,now=None):
        for field in fields:
         value=values.get(field)
         if isinstance(value,str) and re.fullmatch(r'\d{1,31}(?:\.\d{1,12})?',value):clean['market_conflict'][side][field]=value
+      observations=conflict.get('observations')
+      if isinstance(observations,dict):
+       clean['market_conflict']['observations']={}
+       for side in ('previous','incoming'):
+        item=observations.get(side) if isinstance(observations.get(side),dict) else {};safe={}
+        if item.get('source') in ('eodhd','pluto','synthetic','report_inbox'):safe['source']=item['source']
+        if item.get('price_time_kind') in ('trade','bar_open'):safe['price_time_kind']=item['price_time_kind']
+        if item.get('feed_kind') in ('US_WS_TRADE','EU_WS_TRADE','REALTIME_BAR','INTRADAY_BAR','REST_SNAPSHOT'):safe['feed_kind']=item['feed_kind']
+        if isinstance(item.get('sample_ref'),str) and re.fullmatch(r'[0-9a-f]{16}',item['sample_ref']):safe['sample_ref']=item['sample_ref']
+        for key in ('event_time','bid_at','ask_at','status_at'):
+         try:
+          if item.get(key):safe[key]=stamp(item[key]).isoformat()
+         except (ValueError,TypeError,AttributeError):pass
+        clean['market_conflict']['observations'][side]=safe
+      for key in ('previous_journal_received_at','ingest_attempt_at'):
+       try:
+        if conflict.get(key):clean['market_conflict'][key]=stamp(conflict[key]).isoformat()
+       except (ValueError,TypeError,AttributeError):pass
     status=rec.get('status');code=rec.get('code');source=rec.get('source')
     records.append({'at':at.isoformat(),'ticker':watches[ref],'status':status if status in ('processed','degraded','deferred','cancelled','context_rejected') else 'unknown','code':code if isinstance(code,str) and re.fullmatch(r'[A-Za-z0-9_]{1,100}',code) else None,'source':source if source in ('eodhd','pluto','report_inbox','synthetic') else 'unknown','metrics':clean,'_epoch':at.timestamp()})
    except (ValueError,TypeError,KeyError,AttributeError,OverflowError):continue
