@@ -16,3 +16,14 @@ To agenters automatiske test er nu dokumenteret: Codex [42861393806](https://git
 - Projects-write er ikke implementeret eller aktiveret. En reel statusændring kræver ejerens særskilte godkendelse. Issue #11 forbliver åben.
 
 Ingen tavlestatus eller produktionssystem blev ændret.
+
+
+## Live-test af reglernes håndhævelse
+
+Ejeren tilføjede `refs/heads/codex/replay-protection-disposable` til ruleset 26966131 uden at fjerne journalgrenen. GitHub API bekræftede begge targets, aktiv enforcement, deletion/non_fast_forward og tom bypass-liste ved connectorens læsning. Actions-identitetens eget opslag bekræftede `current_user_can_bypass: never`; denne identitet får ikke returneret bypass-listen, så listen er separat kontrolleret gennem connectoren.
+
+[Actions-run 42872131340](https://github.com/hva73/invest/actions/runs/42872131340) gennemførte på engangsgrenen begge forespørgsler: sletning og non-fast-forward blev afvist med en genkendt regelafvisning. Scriptet kontrollerede efter hvert forsøg, at grenens commit var uændret. Et separat connectoropslag viste fortsat commit `382fca6f8760d2b9449588157a5f5a75b2e12389` og intakt testmarkør. Den eksisterende journalgren blev ikke udsat for disse forsøg, og ingen Projects-secret blev brugt.
+
+Første teststarter blev sprunget over eller stoppede sikkert: Actions-tokenets ruleset-svar udelader bypass-aktørlisten, selv om connectoren kan se den. Dette blev diagnosticeret uden rå credential- eller API-logging, og testen blev justeret til at kræve, at den konkrete Actions-identitet ikke kan bypass'e. Disse fejlslagne teststarter kan have sendt GitHub-fejlmail. Efter den beståede test blev workflowet begrænset til manuel start.
+
+**Fortsat begrænsning:** Resultatet verificerer de to specifikke grenregler for denne Actions-identitet og engangsgren. Det beviser ikke, at eksisterende journalfiler ikke kan ændres i fast-forward commits, at journalen eller default-branch er sikret mod alle aktører, eller at status kan opdateres atomisk mod mennesker og andre workflows. Projects-write forbliver deaktiveret; første reelle ændring kræver særskilt ejer-godkendelse.
