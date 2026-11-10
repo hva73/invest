@@ -1,8 +1,12 @@
 name: ESCAPE writer GraphQL read-only probe
 
 on:
-  issue_comment:
-    types: [created]
+  workflow_dispatch:
+    inputs:
+      comment_id:
+        description: Existing Issue 4 request comment ID
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -12,9 +16,7 @@ jobs:
     if: >-
       github.repository == 'hva73/invest' &&
       github.actor_id == '351122234' &&
-      github.event.issue.number == 4 &&
-      github.event.issue.pull_request == null &&
-      startsWith(github.event.comment.body, 'ESCAPE_PROJECTS_DRYRUN_V1 {"request_id":"9f3d52aab8d04b9ca256152fa8cc8160"')
+      github.ref == 'refs/heads/codex/escape-development'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -26,6 +28,6 @@ jobs:
       - name: Validate actual project query without mutation
         env:
           ESCAPE_PROJECTS_TOKEN: ${{ secrets.ESCAPE_PROJECTS_TOKEN }}
-          REQUEST_COMMENT_ID: ${{ github.event.comment.id }}
+          REQUEST_COMMENT_ID: ${{ inputs.comment_id }}
           GITHUB_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
         run: python3 development/projects_status_write_readonly_probe.py
