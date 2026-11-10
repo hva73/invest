@@ -69,8 +69,14 @@ jobs:
                       fail('GitHub GraphQL afviste opslaget eller returnerede delvise data.')
                   user = result.get('data', {}).get('user') or {}
                   project = user.get('projectV2')
-                  if user.get('login', '').lower() != 'hva73' or not project or project.get('number') != 1 or project.get('closed'):
-                      fail('Det forventede åbne projekt kunne ikke verificeres.')
+                  if user.get('login', '').lower() != 'hva73':
+                      fail('Projektejer kunne ikke verificeres.')
+                  if not project:
+                      fail('Projekt 1 blev ikke returneret eller er ikke tilgængeligt.')
+                  if project.get('number') != 1:
+                      fail('Projektnummer kunne ikke verificeres.')
+                  if project.get('closed') is not False:
+                      fail('Projektet er lukket eller åben tilstand kunne ikke verificeres.')
                   page = project['items']
                   for item in page['nodes']:
                       content = item.get('content') or {}
