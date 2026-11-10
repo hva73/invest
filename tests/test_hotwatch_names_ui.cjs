@@ -1,0 +1,10 @@
+const vm=require('vm'),fs=require('fs'),assert=require('assert');
+const document={querySelector:()=>null,getElementById:()=>null};const window={};const context={window,document,Intl,Date,Number,String,Set,JSON,URLSearchParams,setTimeout,clearTimeout};vm.createContext(context);
+let source=fs.readFileSync('static/engine-ui.js','utf8').replace('return {openHoldingStatus,','return {sessionName,sessionRow,setTestData:x=>data=x,openHoldingStatus,');vm.runInContext(source,context);
+const ui=window.EngineUI;let state={dashboard:{positions:[{asset_id:'a',ticker:'CRWV',name:'CoreWeave, Inc.'}]}};const escape=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));ui.setup({escape,formatTime:x=>x,formatAmount:x=>x,owner:()=> 'u',state:()=>state});ui.setTestData({candidates:[{candidate:{candidate_id:'c',ticker:'CRWV',company_name:'Report Name'}}]});
+const row={watch_id:'w',request:{asset_id:'a',ticker:'CRWV',exchange:'NASDAQ',provider:'eodhd',candidate_id:'c'},data_status:{},status:'DEGRADED',signal:'NO_DATA'};
+assert.equal(ui.sessionName(row),'CoreWeave, Inc.');assert(ui.sessionRow(row).includes('CoreWeave, Inc.'));
+state.dashboard.positions=[];assert.equal(ui.sessionName(row),'Report Name');row.data_status={instrument_match_verified:true,instrument_match_evidence:{pluto:{name:'Verified & Company'}}};assert.equal(ui.sessionName(row),'Verified & Company');assert(ui.sessionRow(row).includes('Verified &amp; Company'));row.data_status={};row.request.ticker='OTHER';assert.equal(ui.sessionName(row),'');
+row.data_status={next_market_session:{kind:'REGULAR',expected_at:'2026-11-10T14:30:00Z',same_day_copenhagen:true}};const html=ui.sessionRow(row);assert(html.includes('AFVENT · ÅBNER 15.30'));assert(html.includes('data-explain-watch="w"'));assert(!html.includes('førmarked ikke bekræftet'));
+row.data_status.next_market_session.same_day_copenhagen=false;assert(ui.sessionRow(row).includes('10.11'));
+console.log('PASS HOT WATCH names from verified instrument, matching holdings and report');

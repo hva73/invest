@@ -90,6 +90,33 @@ class HotWatch(unittest.TestCase):
    self.assertIsNone(engine.scheduled_regular_close(c,'CO',datetime(2026,11,6,19,57,tzinfo=timezone.utc)))
    cal['excluded_dates']=['2026-11-05'];c.execute('UPDATE hw_exchange_calendar SET calendar=? WHERE exchange=?',(json.dumps(cal),'CO'))
    self.assertIsNone(engine.scheduled_regular_close(c,'CO',datetime(2026,11,5,19,57,tzinfo=timezone.utc)))
+ def test_next_open_uses_current_calendar_and_never_guesses_premarket_or_holidays(self):
+  at=datetime(2026,11,10,5,40,tzinfo=timezone.utc);req=dict(self.req,exchange='NASDAQ',provider='eodhd',provider_symbol='MERC.US')
+  calendar={'open':'09:30:00','close':'16:00:00','working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[]}
+  with app.connect() as c:
+   c.execute('INSERT INTO hw_exchange_calendar VALUES(?,?,?,?)',('US',at.isoformat(),'America/New_York',json.dumps(calendar)))
+   result=engine.expected_regular_open(c,req,at);self.assertEqual(result['kind'],'REGULAR');self.assertEqual(result['expected_at'],'2026-11-10T14:30:00+00:00');self.assertFalse(result['execution_confirmed'])
+   self.assertIsNone(engine.expected_regular_open(c,req,at+timedelta(hours=10)))
+   calendar['excluded_dates']=['2026-11-10'];c.execute('UPDATE hw_exchange_calendar SET calendar=? WHERE exchange=?',(json.dumps(calendar),'US'));self.assertIsNone(engine.expected_regular_open(c,req,at))
+   calendar['excluded_dates']=[];c.execute('UPDATE hw_exchange_calendar SET received=?,calendar=? WHERE exchange=?',((at-timedelta(days=1)).isoformat(),json.dumps(calendar),'US'));self.assertIsNone(engine.expected_regular_open(c,req,at))
+   saturday=datetime(2026,11,14,12,0,tzinfo=timezone.utc);c.execute("UPDATE hw_exchange_calendar SET received=? WHERE exchange='US'",(saturday.isoformat(),))
+   weekend=engine.expected_regular_open(c,req,saturday);self.assertEqual(weekend['expected_at'],'2026-11-16T14:30:00+00:00');self.assertFalse(weekend['same_day_copenhagen'])
+   dst=datetime(2026,3,9,5,40,tzinfo=timezone.utc);c.execute("UPDATE hw_exchange_calendar SET received=? WHERE exchange='US'",(dst.isoformat(),))
+   self.assertEqual(engine.expected_regular_open(c,req,dst)['expected_at'],'2026-03-09T13:30:00+00:00')
+ def test_next_open_flows_from_engine_to_front_page_without_changing_signal(self):
+  import dashboard_projection
+  at=datetime(2026,11,10,5,40,tzinfo=timezone.utc);calendar={'open':'09:30:00','close':'16:00:00','working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[]}
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions WHERE watch_id=?',(self.req['watch_id'],)).fetchone();req=json.loads(row['request']);req.update(provider='pluto',exchange='NASDAQ',report_id='manual-pluto')
+   c.execute('UPDATE hw_sessions SET is_test=0,request=? WHERE id=?',(json.dumps(req),row['id']));c.execute('INSERT INTO hw_exchange_calendar VALUES(?,?,?,?)',('US',at.isoformat(),'America/New_York',json.dumps(calendar)))
+   row=c.execute('SELECT * FROM hw_sessions WHERE id=?',(row['id'],)).fetchone()
+   with patch('hotwatch_engine.utc',return_value=at):
+    session=engine.view(c,row);front=dashboard_projection.position_hotwatch(c,1,1,req['asset_id'],None)['session']
+   self.assertEqual(session['signal'],'NO_DATA');self.assertEqual(front['signal'],'NO_DATA');self.assertEqual(front['next_market_session'],session['data_status']['next_market_session']);self.assertEqual(front['next_market_session']['expected_at'],'2026-11-10T14:30:00+00:00')
+   pre=at+timedelta(hours=7);c.execute('UPDATE hw_exchange_calendar SET received=? WHERE exchange=?',(pre.isoformat(),'US'))
+   quality=observation_status([],pre,120,'NO_DATA','CREATED');quality['market_status']='PREMARKET'
+   with patch('hotwatch_engine.utc',return_value=pre),patch('hotwatch_engine.observation_status',return_value=quality):session=engine.view(c,row)
+   self.assertEqual(session['signal'],'NO_DATA');self.assertEqual(session['data_status']['next_market_session']['expected_at'],'2026-11-10T14:30:00+00:00')
  def test_closed_market_without_other_errors_is_a_normal_active_session(self):
   sample=tick(self.now,held=True);sample.update(market_status='CLOSED',session_key='SYNTHETIC-CLOSED')
   result=engine.ingest(app.connect,1,self.req['watch_id'],True,sample,self.now)

@@ -189,6 +189,35 @@ def scheduled_regular_close(c,exchange,now):
  except (KeyError,TypeError,ValueError,ZoneInfoNotFoundError):pass
  return None
 
+def expected_regular_open(c,request,now):
+ """Display-only next regular opening from a current provider calendar."""
+ from datetime import time as local_time
+ from zoneinfo import ZoneInfo,ZoneInfoNotFoundError
+ symbol=request.get('provider_symbol') or ''
+ exchange=symbol.rsplit('.',1)[-1].upper() if '.' in symbol else str(request.get('exchange','')).upper()
+ if exchange in ('NASDAQ','NYSE','AMEX','NYSE ARCA'):exchange='US'
+ if not re.fullmatch(r'[A-Z0-9_-]{1,16}',exchange) or exchange in ('CC','FOREX'):return None
+ row=c.execute('SELECT received,timezone,calendar FROM hw_exchange_calendar WHERE exchange=?',(exchange,)).fetchone()
+ if not row or not row['timezone']:return None
+ try:
+  zone=ZoneInfo(row['timezone']);local=now.astimezone(zone);received=stamp(row['received']);calendar=json.loads(row['calendar'])
+  if received>now or received.astimezone(zone).date()!=local.date():return None
+  opening=local_time.fromisoformat(calendar['open']);closing=local_time.fromisoformat(calendar['close']);days=calendar['working_days'];excluded=calendar['excluded_dates']
+  if opening.tzinfo or closing.tzinfo or opening>=closing or not isinstance(days,list) or not days or not isinstance(excluded,list):return None
+  day=local.date();weekday=lambda d:('Mon','Tue','Wed','Thu','Fri','Sat','Sun')[d.weekday()]
+  if weekday(day) in days and day.isoformat() in excluded:return None
+  if weekday(day) in days and opening<=local.time()<closing:return None
+  if weekday(day) in days and local.time()>=opening:day+=timedelta(days=1)
+  for _ in range(8):
+   if weekday(day) in days:
+    # The provider combines full holidays and early closes. Do not guess.
+    if day.isoformat() in excluded:return None
+    target=datetime.combine(day,opening,zone)
+    if target>local:return {'kind':'REGULAR','expected_at':target.astimezone(timezone.utc).isoformat(),'same_day_copenhagen':target.astimezone(ZoneInfo('Europe/Copenhagen')).date()==now.astimezone(ZoneInfo('Europe/Copenhagen')).date(),'basis':'EODHD exchange calendar','execution_confirmed':False}
+   day+=timedelta(days=1)
+ except (KeyError,ValueError,TypeError,AttributeError,ZoneInfoNotFoundError):return None
+ return None
+
 def event(c,row,kind,now,reason,metrics=None,severity='info',data_time=None):
  payload={'watch_id':row['watch_id'],'event_type':kind,'reason':reason,'supporting_metrics':metrics or {},'strategy_version':json.loads(row['strategy'])['version']}
  event_id='hw-'+secrets.token_hex(12)
@@ -546,6 +575,8 @@ def view(c,row,now=None):
      effective='NO_DATA';data_status['signal_status']='WAITING_FOR_DATA';display_reasons.append('REGULAR_SESSION_CLOSED')
   except (ValueError,TypeError):regular={'status':'UNKNOWN','received_at':None,'exchange':exchange,'source':'EODHD exchange details'}
  data_status['regular_session']=regular
+ if effective=='NO_DATA' and (regular['status']=='CLOSED' or request.get('provider')=='pluto' and regular['status']=='UNKNOWN') and data_status['market_status'] not in ('AFTERHOURS','HALTED'):
+  data_status['next_market_session']=expected_regular_open(c,request,now)
  # A previous-close value from an earlier EODHD snapshot for this same watch
  # can accompany a later trade only on the same verified exchange-local date.
  # It remains a provider-reported reference, never an official-close claim.
@@ -607,6 +638,7 @@ def view(c,row,now=None):
  if evidence and evidence.get('basis')=='user_authorized_btc_monitoring' and quote_feed_verified and quote_freshness=='FRESH' and effective=='NO_DATA' and not row['last_error'] and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED'):
   display_status='KURS MODTAGET · MARKEDSSTATUS UKENDT' if data_status['market_status']=='UNKNOWN' else 'KURS MODTAGET · AFVENTER SIGNALDATA'
  data_status.update(holding_verified=holding_verified,instrument_match_verified=instrument_match_verified,instrument_match_evidence=evidence,quote_feed_verified=quote_feed_verified,quote_freshness=quote_freshness)
+ if not row['is_test'] and request.get('provider')=='eodhd' and not instrument_match_verified:data_status.pop('next_market_session',None)
  # A fresh quote is useful even if there is no fresh trade. It remains a
  # separately timestamped observation and never changes risk or signal state.
  if effective=='NO_DATA' and request.get('provider')=='eodhd' and (row['is_test'] or instrument_match_verified):
@@ -797,7 +829,7 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
      except (ValueError,TypeError):pass
     context_diagnostic=(detail.get('latest_context') or {}).get('diagnostic')
     if not isinstance(context_diagnostic,str) or not re.fullmatch(r'[A-Z0-9_]{1,100}',context_diagnostic):context_diagnostic=None
-    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'last_calculation_at':r['last_calculation'],'last_computed_signal':detail['last_computed_signal'],'signal':detail['signal'],'display_status':detail['display_status'],'last_action_signal':detail['last_action_signal'],'context_diagnostic':context_diagnostic,'last_calculation_reason_codes':reasons,'display_reason_codes':detail['display_reason_codes'],'next_due_at':detail['next_due_at'],'effective_min_interval_s':detail['effective_min_interval_s'],'interval_basis':detail['interval_basis'],'provider_feed_diagnostics':provider_diagnostics,'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
+    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'last_calculation_at':r['last_calculation'],'last_computed_signal':detail['last_computed_signal'],'signal':detail['signal'],'display_status':detail['display_status'],'last_action_signal':detail['last_action_signal'],'context_diagnostic':context_diagnostic,'last_calculation_reason_codes':reasons,'display_reason_codes':detail['display_reason_codes'],'next_due_at':detail['next_due_at'],'effective_min_interval_s':detail['effective_min_interval_s'],'interval_basis':detail['interval_basis'],'provider_feed_diagnostics':provider_diagnostics,'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'next_market_session':data_status.get('next_market_session'),'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
    else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
   more=len(opened)>session_limit
   from eodhd_capacity import snapshot as capacity_snapshot
