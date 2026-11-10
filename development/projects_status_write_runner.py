@@ -1,7 +1,6 @@
-"""Disabled prototype adapter for existing issue validation and replay claims.
+"""Connect trusted issue validation, journal claims and status audit.
 
-Not an Actions entrypoint. There is no automatic trigger or credential loading.
-The caller must arrange shared serialization and durable issue audit first.
+The Actions workflow provides shared serialization and required credentials.
 """
 import os
 
