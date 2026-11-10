@@ -384,3 +384,6 @@ body.pull-refresh-visible #refresh-status{display:none}
 .engine-list-identity .engine-list-company{display:block;color:#a8bac5;letter-spacing:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 
 @media(max-width:700px){.dash-table th .dash-sort-header{min-height:40px}}
+
+/* Vejledende mål på administrationsskærmen. */
+.diag-table .diag-within{color:#83dfb6;font-weight:600}.diag-table .diag-over{color:#ff8c8c;font-weight:600}
