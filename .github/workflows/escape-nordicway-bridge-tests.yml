@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Test requests, host verification, redaction and bounded transport
-        run: python -m unittest tests.test_nordicway_request tests.test_nordicway_hostkey tests.test_nordicway_readonly_diagnostics tests.test_nordicway_readonly_client tests.test_nordicway_release_preflight tests.test_nordicway_server_guard tests.test_nordicway_provision_readonly tests.test_nordicway_release_stage tests.test_updater.Updater.test_backup_restore_after_simulated_migration tests.test_updater.Updater.test_database_snapshot_occurs_with_worker_and_supervisor_quiesced tests.test_updater.Updater.test_snapshot_failure_preserves_code_and_releases_worker_locks tests.test_updater.Updater.test_busy_worker_does_not_create_incomplete_backup
+        run: python -m unittest tests.test_nordicway_request tests.test_nordicway_hostkey tests.test_nordicway_readonly_diagnostics tests.test_nordicway_readonly_client tests.test_nordicway_release_preflight tests.test_nordicway_server_guard tests.test_nordicway_provision_readonly tests.test_nordicway_release_stage tests.test_nordicway_release_service tests.test_updater.Updater.test_backup_restore_after_simulated_migration tests.test_updater.Updater.test_database_snapshot_occurs_with_worker_and_supervisor_quiesced tests.test_updater.Updater.test_snapshot_failure_preserves_code_and_releases_worker_locks tests.test_updater.Updater.test_busy_worker_does_not_create_incomplete_backup
       - name: Test encrypted synthetic key with ephemeral SSH agent
         run: |
           set -eu
