@@ -10,6 +10,7 @@ import urllib.error
 OWNER_ID = 351122234
 APP_ID = 1144995
 PREFIX = 'ESCAPE_PROJECTS_DRYRUN_V1 '
+ALLOWED_ISSUES = frozenset({1, *range(3, 17)})
 QUERY = '''query($cursor:String){user(login:"hva73"){login projectV2(number:1){id number closed
  fields(first:100){pageInfo{hasNextPage} nodes{... on ProjectV2SingleSelectField{name options{name}}}}
  items(first:100,after:$cursor,archivedStates:[ARCHIVED,NOT_ARCHIVED]){pageInfo{hasNextPage endCursor} nodes{id isArchived
@@ -33,7 +34,7 @@ def parse_request(body, prefix=PREFIX):
         return None
     if not isinstance(value['request_id'], str) or not re.fullmatch(r'[a-f0-9]{32}', value['request_id']):
         return None
-    if any(not isinstance(value[k], str) or not re.fullmatch(r'[A-Za-z0-9 _/-]{1,60}', value[k]) for k in ('expected_status', 'desired_status')):
+    if any(not isinstance(value[k], str) or not 1 <= len(value[k]) <= 60 or not value[k].isprintable() for k in ('expected_status', 'desired_status')):
         return None
     return value
 
@@ -78,7 +79,9 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def main(prefix=PREFIX):
+def main(prefix=PREFIX, issue_number=4):
+    if type(issue_number) is not int or issue_number not in ALLOWED_ISSUES:
+        raise Blocked('Issue er ikke tilladt.')
     if os.environ.get('GITHUB_ACTOR_ID') != str(OWNER_ID) or os.environ.get('GITHUB_TRIGGERING_ACTOR', '').lower() != 'hva73':
         raise Blocked('Workflowets afsender er ikke godkendt.')
     if os.environ.get('GITHUB_REPOSITORY') != 'hva73/invest' or os.environ.get('GITHUB_REF') != 'refs/heads/codex/escape-development':
@@ -104,7 +107,7 @@ def main(prefix=PREFIX):
     def comments():
         result = []
         for page in range(1, 101):
-            values = get_json(f'https://api.github.com/repos/hva73/invest/issues/4/comments?per_page=100&page={page}')
+            values = get_json(f'https://api.github.com/repos/hva73/invest/issues/{issue_number}/comments?per_page=100&page={page}')
             if not isinstance(values, list):
                 raise Blocked('Kommentarlisten kunne ikke læses komplet.')
             result.extend(values)
@@ -145,7 +148,7 @@ def main(prefix=PREFIX):
         items = project['items']
         for item in items['nodes']:
             content = item.get('content') or {}
-            if content.get('number') == 4 and (content.get('repository') or {}).get('nameWithOwner') == 'hva73/invest':
+            if content.get('number') == issue_number and (content.get('repository') or {}).get('nameWithOwner') == 'hva73/invest':
                 matches.append(item)
         if not items['pageInfo']['hasNextPage']:
             break
@@ -167,7 +170,7 @@ def main(prefix=PREFIX):
         print('Ingen status blev ændret. Replay mellem kørsler er IKKE beskyttet.')
     else:
         print('Anmodning, afsender, kort og statusoption er foreløbigt kontrolleret.')
-    return {'request': request, 'project_id': project.get('id'), 'item_id': matches[0]['id'], 'comment_id': int(raw_id), 'status': current}
+    return {'request': request, 'project_id': project.get('id'), 'item_id': matches[0]['id'], 'comment_id': int(raw_id), 'status': current, 'issue_number': issue_number}
 
 
 if __name__ == '__main__':
@@ -179,3 +182,4 @@ if __name__ == '__main__':
     except Exception:
         print('BLOCKED: Opslag fejlede; ingen rå svardata er udskrevet.')
         sys.exit(1)
+

@@ -8,9 +8,10 @@ import json
 import re
 import urllib.error
 import urllib.request
+from projects_dryrun import ALLOWED_ISSUES
 
 LIVE_WRITE_ENABLED = False  # Hard stop: changing this requires a reviewed change.
-TRANSITIONS = {('Backlog', 'In progress'), ('In progress', 'Backlog')}
+ISSUE_3_ALLOWED = frozenset({'backlog', 'in progress', 'in review'})
 
 READ = '''query($item:ID!){user(login:"hva73"){login projectV2(number:1){id number closed
  fields(first:100){pageInfo{hasNextPage} nodes{... on ProjectV2SingleSelectField{id name options{id name}}}}}}
@@ -62,7 +63,7 @@ def _status(data, context):
         if project['id'] != context['project_id'] or item['id'] != context['item_id'] or item['project']['id'] != project['id'] or item['isArchived'] is not False:
             raise Blocked('unexpected project item')
         content = item['content']
-        if content['number'] != 4 or content['repository']['nameWithOwner'] != 'hva73/invest':
+        if content['number'] != context.get('issue_number', 4) or content['repository']['nameWithOwner'] != 'hva73/invest':
             raise Blocked('unexpected issue')
         fields = project['fields']
         if fields['pageInfo']['hasNextPage'] is not False:
@@ -86,8 +87,13 @@ def execute(context, validate_comment, claim_once, graphql):
     try:
         request = context['request']
         expected, target = request['expected_status'], request['desired_status']
-        if (expected, target) not in TRANSITIONS or not re.fullmatch(r'[a-f0-9]{32}', request['request_id']):
+        issue_number = context.get('issue_number', 4)
+        if type(issue_number) is not int or issue_number not in ALLOWED_ISSUES:
+            raise Blocked('issue not allowed')
+        if not isinstance(expected, str) or not isinstance(target, str) or expected == target or not re.fullmatch(r'[a-f0-9]{32}', request['request_id']):
             raise Blocked('transition not allowed')
+        if issue_number == 3 and target.strip().casefold() not in ISSUE_3_ALLOWED:
+            raise Blocked('issue 3 completion requires owner approval')
         if not isinstance(context['comment_id'], int) or isinstance(context['comment_id'], bool) or context['comment_id'] < 1:
             raise Blocked('invalid comment')
         for key, prefix in (('project_id', 'PVT_'), ('item_id', 'PVTI_')):
@@ -123,3 +129,4 @@ def execute(context, validate_comment, claim_once, graphql):
             raise
         raise Uncertain('write or readback uncertain; do not retry') from None
     return 'VERIFIED'
+

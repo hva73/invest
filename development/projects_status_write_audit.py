@@ -2,6 +2,7 @@
 import json
 import re
 import urllib.request
+from projects_dryrun import ALLOWED_ISSUES
 
 URL = 'https://api.github.com/repos/hva73/invest/issues/4/comments'
 
@@ -15,20 +16,21 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def post(token, request_id, outcome, run_id, simulated=False):
+def post(token, request_id, outcome, run_id, simulated=False, issue_number=4):
     if (not isinstance(token, str) or not token or not isinstance(request_id, str)
             or not re.fullmatch(r'[a-f0-9]{32}', request_id)
             or outcome not in ('verified', 'blocked', 'uncertain')
             or not isinstance(run_id, str) or not re.fullmatch(r'[1-9][0-9]{0,19}', run_id)
-            or not isinstance(simulated, bool)):
+            or not isinstance(simulated, bool) or type(issue_number) is not int or issue_number not in ALLOWED_ISSUES):
         raise AuditFailed('invalid audit context')
+    url = f'https://api.github.com/repos/hva73/invest/issues/{issue_number}/comments'
     marker = f'<!-- escape-project-status:{"test:" if simulated else ""}{request_id}:{outcome} -->'
     headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json',
                'Content-Type': 'application/json', 'User-Agent': 'escape-projects-audit'}
     opener = urllib.request.build_opener(NoRedirect())
     try:
         for page in range(1, 101):
-            req = urllib.request.Request(f'{URL}?per_page=100&page={page}', headers=headers)
+            req = urllib.request.Request(f'{url}?per_page=100&page={page}', headers=headers)
             with opener.open(req, timeout=15) as response:
                 comments = json.load(response)
             if not isinstance(comments, list):
@@ -48,7 +50,7 @@ def post(token, request_id, outcome, run_id, simulated=False):
             body = f'{marker}\n**Projects audit-test: {label}.** Ingen Projects-status er ændret.\n\n[Se Actions-kørsel](https://github.com/hva73/invest/actions/runs/{run_id}).'
         else:
             body = f'{marker}\n**Projects:** {labels[outcome]}\n\n[Se Actions-kørsel](https://github.com/hva73/invest/actions/runs/{run_id}).'
-        req = urllib.request.Request(URL, method='POST', data=json.dumps({'body': body}).encode(), headers=headers)
+        req = urllib.request.Request(url, method='POST', data=json.dumps({'body': body}).encode(), headers=headers)
         with opener.open(req, timeout=15) as response:
             if response.status != 201:
                 raise AuditFailed('audit outcome uncertain')
@@ -59,19 +61,21 @@ def post(token, request_id, outcome, run_id, simulated=False):
         raise AuditFailed('audit outcome uncertain') from None
 
 
-def report_job_failure(token, run_id, attempt, simulated=False):
+def report_job_failure(token, run_id, attempt, simulated=False, issue_number=4):
     """Fail-safe workflow-level report when the writer job did not succeed."""
     if (not isinstance(token, str) or not token or not isinstance(run_id, str)
             or not re.fullmatch(r'[1-9][0-9]{0,19}', run_id) or not isinstance(attempt, str)
-            or not re.fullmatch(r'[1-9][0-9]{0,5}', attempt) or not isinstance(simulated, bool)):
+            or not re.fullmatch(r'[1-9][0-9]{0,5}', attempt) or not isinstance(simulated, bool)
+            or type(issue_number) is not int or issue_number not in ALLOWED_ISSUES):
         raise AuditFailed('invalid workflow audit context')
+    url = f'https://api.github.com/repos/hva73/invest/issues/{issue_number}/comments'
     marker = f'<!-- escape-project-status-job:{"test:" if simulated else ""}{run_id}:{attempt} -->'
     headers = {'Authorization': 'Bearer ' + token, 'Accept': 'application/vnd.github+json',
                'Content-Type': 'application/json', 'User-Agent': 'escape-projects-audit'}
     opener = urllib.request.build_opener(NoRedirect())
     try:
         for page in range(1, 101):
-            req = urllib.request.Request(f'{URL}?per_page=100&page={page}', headers=headers)
+            req = urllib.request.Request(f'{url}?per_page=100&page={page}', headers=headers)
             with opener.open(req, timeout=15) as response:
                 comments = json.load(response)
             if not isinstance(comments, list):
@@ -90,7 +94,7 @@ def report_job_failure(token, run_id, attempt, simulated=False):
             body = (f'{marker}\n**Projects-workflow stoppet.** Udfaldet kan være usikkert. '
                     'Afstem tavle og journal før et nyt forsøg.\n\n'
                     f'[Se Actions-kørsel](https://github.com/hva73/invest/actions/runs/{run_id}/attempts/{attempt}).')
-        req = urllib.request.Request(URL, method='POST', data=json.dumps({'body': body}).encode(), headers=headers)
+        req = urllib.request.Request(url, method='POST', data=json.dumps({'body': body}).encode(), headers=headers)
         with opener.open(req, timeout=15) as response:
             if response.status != 201:
                 raise AuditFailed('workflow audit outcome uncertain')
@@ -99,3 +103,4 @@ def report_job_failure(token, run_id, attempt, simulated=False):
         raise
     except Exception:
         raise AuditFailed('workflow audit outcome uncertain') from None
+

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One approved test only: Issue #4, In progress -> Backlog.
+"""One approved test only: Issue #4, Backlog -> In progress.
 
 The normal writer remains disabled. This process enables it only after
 validating the exact approved request, comment identity and current status.
@@ -11,8 +11,8 @@ import projects_dryrun as dryrun
 import projects_status_write_prototype as writer
 import projects_status_write_runner as runner
 
-REQUEST_ID = 'a73f4c0862e04f5db51ed330d8b06c2e'
-EXPECTED = {'request_id': REQUEST_ID, 'expected_status': 'In progress', 'desired_status': 'Backlog'}
+REQUEST_ID = '8f104c1ecc5e456d99f54572e6e17d87'
+EXPECTED = {'request_id': REQUEST_ID, 'expected_status': 'Backlog', 'desired_status': 'In progress'}
 
 
 def main():
@@ -26,7 +26,7 @@ def main():
     if not token:
         raise writer.Blocked('missing project credential')
     context = dryrun.main(prefix=runner.WRITE_PREFIX)
-    if context.get('request') != EXPECTED or context.get('status') != 'In progress':
+    if context.get('request') != EXPECTED or context.get('status') != 'Backlog':
         raise writer.Blocked('request is not the approved transition')
     os.environ['ESCAPE_PROJECTS_TOKEN'] = token
     try:
@@ -49,3 +49,4 @@ if __name__ == '__main__':
     except Exception:
         print('BLOCKED: testen blev ikke fuldført; ingen rå svardata udskrives.')
         sys.exit(1)
+

@@ -26,7 +26,7 @@ class RunnerTest(unittest.TestCase):
             return 'VERIFIED'
         with patch.dict(os.environ, {}, clear=True), patch.object(runner.writer, 'LIVE_WRITE_ENABLED', True), patch.object(runner.dryrun, 'main', return_value=context), patch.object(runner.journal, 'claim', return_value='CLAIMED') as claim, patch.object(runner.writer, 'GraphQL', return_value=Mock()), patch.object(runner.writer, 'execute', side_effect=exercise), patch.object(runner.audit, 'post', return_value='RECORDED') as audit:
             self.assertEqual(runner.run('fake-project', 'fake-journal', 'fake-issue', '123'), 'VERIFIED')
-            audit.assert_called_once_with('fake-issue', 'a' * 32, 'verified', '123')
+            audit.assert_called_once_with('fake-issue', 'a' * 32, 'verified', '123', issue_number=4)
             self.assertNotIn('ESCAPE_PROJECTS_TOKEN', os.environ)
             self.assertEqual(runner.journal.JOURNAL_BRANCH, 'codex/projects-replay-isolated-test')
             claim.assert_called_once_with('fake-journal', 'a' * 32, 123, 'PVT_test', 'PVTI_test', 'In progress', 'Backlog')
@@ -42,3 +42,4 @@ class RunnerTest(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
