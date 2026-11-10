@@ -1,7 +1,8 @@
 name: ESCAPE synthetic status audit test
 
 on:
-  workflow_dispatch:
+  issue_comment:
+    types: [created]
 
 permissions: {}
 
@@ -10,7 +11,9 @@ jobs:
     if: >-
       github.repository == 'hva73/invest' &&
       github.actor_id == '351122234' &&
-      github.ref == 'refs/heads/codex/escape-development'
+      github.event.issue.number == 4 &&
+      github.event.issue.pull_request == null &&
+      startsWith(github.event.comment.body, 'ESCAPE_SYNTHETIC_FAILURE_AUDIT_V1')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -20,7 +23,7 @@ jobs:
       - name: Check out immutable audit test
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 286f35ba0ccc71ff6e7db92ce43d0ce12a2f0887
+          ref: 143c8fed580fba41ec6fba637566c506aaf0233b
           persist-credentials: false
       - name: Test simulated audit without Projects credential
         env:
