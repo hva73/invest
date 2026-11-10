@@ -21,7 +21,10 @@ def _git_blob(checkout,sha,name):
 def manifest(checkout):
  source=checkout/'apply_update.py'
  if source.is_symlink() or not source.is_file():raise ValueError('manifest_unavailable')
- tree=ast.parse(source.read_text(encoding='utf-8'))
+ return parse_manifest(source.read_text(encoding='utf-8'))
+
+def parse_manifest(source):
+ tree=ast.parse(source)
  nodes=[node.value for node in tree.body if isinstance(node,ast.Assign) and len(node.targets)==1 and isinstance(node.targets[0],ast.Name) and node.targets[0].id=='FILES']
  if len(nodes)!=1:raise ValueError('manifest_invalid')
  try:files=ast.literal_eval(nodes[0])
