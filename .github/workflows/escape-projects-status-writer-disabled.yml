@@ -1,6 +1,8 @@
 name: ESCAPE status writer prototype - disabled
 
 on:
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       comment_id:
@@ -18,7 +20,14 @@ jobs:
   disabled-write:
     # Deliberate hard stop. Changing this requires a reviewed change and
     # separate owner approval for the first actual Projects mutation.
-    if: ${{ false }}
+    if: >-
+      false &&
+      github.repository == 'hva73/invest' &&
+      github.actor_id == '351122234' &&
+      github.ref == 'refs/heads/codex/escape-development' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.issue.number == 4 && github.event.issue.pull_request == null &&
+        startsWith(github.event.comment.body, 'ESCAPE_PROJECTS_WRITE_V1 ')))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -28,13 +37,13 @@ jobs:
       - name: Check out reviewed immutable revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 286f35ba0ccc71ff6e7db92ce43d0ce12a2f0887
+          ref: 2d36d808f3881d7a68f98ed28eabe9f8694880fc
           persist-credentials: false
       - name: Disabled status writer
         env:
           ESCAPE_PROJECTS_TOKEN: ${{ secrets.ESCAPE_PROJECTS_TOKEN }}
           JOURNAL_TOKEN: ${{ github.token }}
           ISSUE_TOKEN: ${{ github.token }}
-          REQUEST_COMMENT_ID: ${{ inputs.comment_id }}
+          REQUEST_COMMENT_ID: ${{ github.event_name == 'issue_comment' && github.event.comment.id || inputs.comment_id }}
           GITHUB_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
         run: python3 development/projects_status_write_entry.py
