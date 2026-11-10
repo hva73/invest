@@ -22,6 +22,21 @@ def rule(include):
 
 
 class RuleTest(unittest.TestCase):
+    def test_expected_rejections_and_readback(self):
+        head = 'a' * 40
+        methods = []
+        values = iter([Response(rule([test.REF])), Response({'object': {'sha': head}}), Response({'parents': [{'sha': 'b' * 40}]}), Response({'object': {'sha': head}}), Response({'object': {'sha': head}})])
+        def open_(req, timeout):
+            methods.append(req.get_method())
+            if req.get_method() in ('DELETE', 'PATCH'):
+                self.assertIn(test.BRANCH, req.full_url)
+                raise HTTPError(req.full_url, 422, '', {}, io.BytesIO(b'{"message":"GH013 repository rule violation"}'))
+            return next(values)
+        with patch.dict(os.environ, {'GITHUB_REPOSITORY': 'hva73/invest', 'RULE_TEST_TOKEN': 'fake'}, clear=True), patch('urllib.request.build_opener') as factory:
+            factory.return_value.open.side_effect = open_
+            test.main()
+        self.assertEqual(methods, ['GET', 'GET', 'GET', 'DELETE', 'GET', 'PATCH', 'GET'])
+
     def test_uncovered_branch_stops_before_mutations(self):
         calls = []
         def open_(req, timeout):
