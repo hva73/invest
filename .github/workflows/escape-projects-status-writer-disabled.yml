@@ -1,4 +1,4 @@
-name: ESCAPE approved Issue 4 status test
+name: ESCAPE approved Issue 4 restoration
 
 on:
   issue_comment:
@@ -20,7 +20,7 @@ jobs:
       github.run_attempt == '1' &&
       github.event.issue.number == 4 &&
       github.event.issue.pull_request == null &&
-      github.event.comment.body == 'ESCAPE_PROJECTS_WRITE_V1 {"request_id":"a73f4c0862e04f5db51ed330d8b06c2e","expected_status":"In progress","desired_status":"Backlog"}'
+      github.event.comment.body == 'ESCAPE_PROJECTS_WRITE_V1 {"request_id":"8f104c1ecc5e456d99f54572e6e17d87","expected_status":"Backlog","desired_status":"In progress"}'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -30,7 +30,7 @@ jobs:
       - name: Check out immutable one-shot revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: c2d82dd64368e117013d2af3fd6567f2e2547183
+          ref: b9f2b456cb80a23733bf0465415e02cecc49823e
           persist-credentials: false
       - name: Execute only approved Issue 4 transition
         env:
@@ -56,7 +56,7 @@ jobs:
       - name: Check out immutable failure reporter
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: c2d82dd64368e117013d2af3fd6567f2e2547183
+          ref: b9f2b456cb80a23733bf0465415e02cecc49823e
           persist-credentials: false
       - name: Report uncertain test outcome
         env:
