@@ -9,16 +9,17 @@ class Client(unittest.TestCase):
  def setUp(self):
   name=b'ssh-ed25519';raw=struct.pack('>I',len(name))+name+struct.pack('>I',32)+b'X'*32
   self.env={'NORDICWAY_READONLY_AUTHORIZED':'1','NORDICWAY_KNOWN_HOST':key.HOST+' ssh-ed25519 '+base64.b64encode(raw).decode(),'NORDICWAY_VERIFIED_FINGERPRINT':'SHA256:'+base64.b64encode(hashlib.sha256(raw).digest()).decode().rstrip('='),'SSH_AUTH_SOCK':'/tmp/synthetic-agent'}
+  self.env['NORDICWAY_RESTRICTED_KEY_VERIFIED']='1'
   self.report={'scope':'read_only_aggregate','observed_at':'2026-11-10T21:00:00+00:00','installation':{'declared_commit':'a'*40,'secret':'hidden'},'database':{'status':'ok','worker':{'status':'running','age_seconds':2,'token':'hidden'},'session_counts':{'ACTIVE':2,'secret-private-ticker':10},'due_count':1},'processes':{'status':'ok','counts':{'worker':1},'args':'hidden'},'storage':{'filesystem_free_bytes':123,'account_quota':'hidden'},'private':'hidden'}
  def test_no_ssh_without_each_explicit_prerequisite(self):
-  for name in ['NORDICWAY_READONLY_AUTHORIZED','NORDICWAY_KNOWN_HOST','NORDICWAY_VERIFIED_FINGERPRINT','SSH_AUTH_SOCK']:
+  for name in ['NORDICWAY_READONLY_AUTHORIZED','NORDICWAY_RESTRICTED_KEY_VERIFIED','NORDICWAY_KNOWN_HOST','NORDICWAY_VERIFIED_FINGERPRINT','SSH_AUTH_SOCK']:
    env=dict(self.env);env.pop(name);runner=Mock();result=client.run(env,runner)
    self.assertEqual(result['status'],'blocked');runner.assert_not_called()
  def test_only_fixed_remote_script_and_sanitized_aggregates(self):
   def runner(command,**kwargs):
-   self.assertEqual(command[-2:],[client.HOST,'python3 -']);self.assertIn('StrictHostKeyChecking=yes',command);self.assertIn('/dev/null',command)
-   self.assertTrue(kwargs['input'].startswith(b'"""Fixed, redacted'))
-   return type('Result',(),{'returncode':0,'stdout':json.dumps(self.report).encode()})()
+   self.assertEqual(command[-2:],[client.HOST,'escape-readonly-v1 diagnostics']);self.assertIn('StrictHostKeyChecking=yes',command);self.assertIn('/dev/null',command)
+   self.assertEqual(kwargs['input'],b'')
+   return type('Result',(),{'returncode':0,'stdout':json.dumps({'protocol':client.PROTOCOL,'operation':'diagnostics','report':self.report}).encode()})()
   result=client.run(self.env,runner);self.assertEqual(result['status'],'ok')
   self.assertEqual(result['report']['database']['session_counts'],{'ACTIVE':2})
   self.assertNotIn('hidden',json.dumps(result));self.assertNotIn('secret-private-ticker',json.dumps(result))
@@ -30,9 +31,9 @@ class Client(unittest.TestCase):
   env={**self.env,'NORDICWAY_OPERATION':'release_preflight','NORDICWAY_RELEASE_SHA':'b'*40}
   payload={'status':'blocked','requested_sha':'b'*40,'manifest_sha256':'c'*64,'manifest_files':71,'source_bytes':100,'database_bytes':200,'filesystem_free_bytes':300,'blockers':sorted(client.PREFLIGHT_BLOCKERS),'private':'secret'}
   def runner(command,**kwargs):
-   self.assertEqual(command[-2:],[client.HOST,'python3 -'])
-   self.assertIn(b"ESCAPE_RELEASE_SHA']='"+b'b'*40+b"'",kwargs['input'])
-   return type('Result',(),{'returncode':0,'stdout':json.dumps(payload).encode()})()
+   self.assertEqual(command[-2:],[client.HOST,'escape-readonly-v1 preflight '+'b'*40])
+   self.assertEqual(kwargs['input'],b'')
+   return type('Result',(),{'returncode':0,'stdout':json.dumps({'protocol':client.PROTOCOL,'operation':'release_preflight','report':payload}).encode()})()
   result=client.run(env,runner);self.assertEqual(result['status'],'ok');self.assertEqual(result['report']['status'],'blocked');self.assertNotIn('secret',json.dumps(result))
   env['NORDICWAY_RELEASE_SHA']='$(id)';runner=Mock();self.assertEqual(client.run(env,runner)['reason'],'invalid_operation');runner.assert_not_called()
  def test_transport_bounds_stdout_and_timeout(self):

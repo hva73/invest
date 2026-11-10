@@ -6,8 +6,7 @@ from types import SimpleNamespace
 from nordicway_hostkey import verify
 
 HOST='nordicr4@cp14.nordicway.dk'
-SCRIPT=Path(__file__).with_name('nordicway_readonly_diagnostics.py')
-PREFLIGHT_SCRIPT=Path(__file__).with_name('nordicway_release_preflight.py')
+PROTOCOL='escape-readonly-v1'
 STATES={'running','stopped','starting','restarting','timeout','run_once','unknown','unavailable'}
 SESSION_STATES={'CREATED','VALIDATING','ACTIVE','DEGRADED','PAUSED','ERROR','COMPLETED','EXPIRED','OTHER'}
 REASONS={'database_missing_or_unsafe','database_journal_present','database_header_invalid','database_journal_mode_unsupported','database_read_failed'}
@@ -91,22 +90,23 @@ def run(env=None,runner=None):
  env=os.environ if env is None else env
  runner=_run_limited if runner is None else runner
  if env.get('NORDICWAY_READONLY_AUTHORIZED')!='1':return {'status':'blocked','reason':'diagnostics_not_authorized'}
+ if env.get('NORDICWAY_RESTRICTED_KEY_VERIFIED')!='1':return {'status':'blocked','reason':'server_key_restrictions_unverified'}
  try:known=verify(env.get('NORDICWAY_KNOWN_HOST',''),env.get('NORDICWAY_VERIFIED_FINGERPRINT',''))
  except ValueError:return {'status':'blocked','reason':'host_key_unverified'}
  if not env.get('SSH_AUTH_SOCK'):return {'status':'blocked','reason':'ssh_agent_unavailable'}
  operation=env.get('NORDICWAY_OPERATION','diagnostics');sha=env.get('NORDICWAY_RELEASE_SHA','')
  if operation not in ('diagnostics','release_preflight') or not isinstance(sha,str) or (operation=='release_preflight' and not re.fullmatch(r'[0-9a-f]{40}',sha)) or (operation=='diagnostics' and sha):return {'status':'blocked','reason':'invalid_operation'}
  try:
-  script=(SCRIPT if operation=='diagnostics' else PREFLIGHT_SCRIPT).read_bytes()
-  if not script or len(script)>100000:return {'status':'blocked','reason':'diagnostics_script_invalid'}
-  if operation=='release_preflight':script=("import os;os.environ['ESCAPE_RELEASE_SHA']='"+sha+"'\n").encode('ascii')+script
+  remote_command=PROTOCOL+' diagnostics' if operation=='diagnostics' else PROTOCOL+' preflight '+sha
   with tempfile.TemporaryDirectory(prefix='escape-hostkey-') as tmp:
    hosts=Path(tmp)/'known_hosts';hosts.write_text(known,encoding='ascii');hosts.chmod(0o600)
-   command=['ssh','-F','/dev/null','-T','-p','33','-o','BatchMode=yes','-o','PasswordAuthentication=no','-o','KbdInteractiveAuthentication=no','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(hosts),'-o','GlobalKnownHostsFile=/dev/null','-o','ForwardAgent=no','-o','ClearAllForwardings=yes','-o','ConnectTimeout=10',HOST,'python3 -']
-   result=runner(command,input=script,capture_output=True,timeout=30,env=env)
+   command=['ssh','-F','/dev/null','-T','-p','33','-o','BatchMode=yes','-o','PasswordAuthentication=no','-o','KbdInteractiveAuthentication=no','-o','StrictHostKeyChecking=yes','-o','UserKnownHostsFile='+str(hosts),'-o','GlobalKnownHostsFile=/dev/null','-o','ForwardAgent=no','-o','ClearAllForwardings=yes','-o','ConnectTimeout=10',HOST,remote_command]
+   result=runner(command,input=b'',capture_output=True,timeout=30,env=env)
   if result.returncode!=0 or len(result.stdout)>100000:return {'status':'failed','reason':'ssh_or_report_failed'}
   parsed=json.loads(result.stdout)
-  return {'status':'ok','report':sanitize(parsed) if operation=='diagnostics' else sanitize_preflight(parsed,sha)}
+  if not isinstance(parsed,dict) or parsed.get('protocol')!=PROTOCOL or parsed.get('operation')!=operation:raise ValueError('invalid_report')
+  report=parsed.get('report')
+  return {'status':'ok','report':sanitize(report) if operation=='diagnostics' else sanitize_preflight(report,sha)}
  except (OSError,subprocess.SubprocessError,ValueError,TypeError,UnicodeError):return {'status':'failed','reason':'ssh_or_report_failed'}
 
 if __name__=='__main__':

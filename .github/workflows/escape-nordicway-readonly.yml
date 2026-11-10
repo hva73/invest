@@ -44,6 +44,7 @@ jobs:
         id: request
         env:
           NORDICWAY_READONLY_AUTHORIZED: ${{ vars.ESCAPE_NORDICWAY_READONLY_AUTHORIZED }}
+          NORDICWAY_RESTRICTED_KEY_VERIFIED: ${{ vars.ESCAPE_NORDICWAY_RESTRICTED_KEY_VERIFIED }}
           NORDICWAY_KNOWN_HOST: ${{ secrets.ESCAPE_NORDICWAY_KNOWN_HOST }}
           NORDICWAY_VERIFIED_FINGERPRINT: ${{ secrets.ESCAPE_NORDICWAY_VERIFIED_FINGERPRINT }}
         run: |
@@ -53,10 +54,15 @@ jobs:
             printf '%s\n' 'Read-only diagnostics have not been enabled.'
             exit 1
           fi
+          if [ "$NORDICWAY_RESTRICTED_KEY_VERIFIED" != '1' ]; then
+            printf '%s\n' 'Server-side SSH key restrictions have not been verified.'
+            exit 1
+          fi
           python tools/nordicway_hostkey.py
       - name: Run fixed redacted diagnostics
         env:
           NORDICWAY_READONLY_AUTHORIZED: ${{ vars.ESCAPE_NORDICWAY_READONLY_AUTHORIZED }}
+          NORDICWAY_RESTRICTED_KEY_VERIFIED: ${{ vars.ESCAPE_NORDICWAY_RESTRICTED_KEY_VERIFIED }}
           NORDICWAY_KNOWN_HOST: ${{ secrets.ESCAPE_NORDICWAY_KNOWN_HOST }}
           NORDICWAY_VERIFIED_FINGERPRINT: ${{ secrets.ESCAPE_NORDICWAY_VERIFIED_FINGERPRINT }}
           NORDICWAY_PRIVATE_KEY: ${{ secrets.ESCAPE_NORDICWAY_SSH_PRIVATE_KEY }}
