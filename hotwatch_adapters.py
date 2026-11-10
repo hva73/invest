@@ -562,7 +562,14 @@ class EODHDAdapter:
       fresh=lambda item:bool(item.get('event_time') and 0<=(now-stamp(item['event_time'])).total_seconds()<=max_age)
       quotes=[x for x in quote_feed.get('messages',[]) if fresh(x) and x.get('bid') and x.get('ask') and Decimal(x['bid'])>0 and Decimal(x['ask'])>=Decimal(x['bid'])]
       if quotes:
-       q=max(quotes,key=lambda x:stamp(x['event_time']));sample.update(bid=q['bid'],ask=q['ask'],bid_at=q['event_time'],ask_at=q['event_time'],quote_feed=market+'_quotes')
+       latest=max(stamp(q['event_time']) for q in quotes);same_time=[q for q in quotes if stamp(q['event_time'])==latest]
+       if len({(Decimal(q['bid']),Decimal(q['ask'])) for q in same_time})==1:
+        q=same_time[0];sample.update(bid=q['bid'],ask=q['ask'],bid_at=q['event_time'],ask_at=q['event_time'],quote_feed=market+'_quotes')
+       else:
+        # Equal provider timestamps do not establish quote ordering. Keep the
+        # independently timed trade but do not invent a tradable spread.
+        sample.update(bid=None,ask=None,bid_at=same_time[0]['event_time'],ask_at=same_time[0]['event_time'],quote_feed=None)
+        self.last_feed_diagnostics['websocket_quote_status']='AMBIGUOUS_SAME_TIMESTAMP'
       # A subsequent quote/status failure must not discard an already
       # received trade. Missing evidence remains unknown and cannot permit BUY.
       if quote_feed['status']=='RATE_LIMIT' or status_feed['status'] in ('RATE_LIMIT','LOCAL_BUDGET_EXHAUSTED'):return sample

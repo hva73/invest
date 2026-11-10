@@ -83,6 +83,34 @@ class SignalReadiness(unittest.TestCase):
   self.assertEqual(detail['observations']['incoming']['event_time'],s['event_time'])
   self.assertEqual(detail['observations']['previous']['sample_ref'],detail['observations']['incoming']['sample_ref'])
   self.assertIn('previous_journal_received_at',detail);self.assertEqual(detail['ingest_attempt_at'],later.isoformat())
+ def test_quote_collision_preserves_trade_and_blocks_buy_until_newer_quote(self):
+  original=self.sample(held=False);at=self.now
+  first=engine.ingest(app.connect,1,self.req['watch_id'],True,original,at)
+  collision=copy.deepcopy(original);collision['bid']='99.93';collision['ask']='100.03'
+  result=engine.ingest(app.connect,1,self.req['watch_id'],True,collision,at+timedelta(seconds=1))
+  self.assertFalse(result['calculation']['new_market_observation'])
+  self.assertEqual(result['session']['last_data_at'],original['event_time'])
+  self.assertIsNone(result['session']['data_status']['bid']);self.assertIsNone(result['session']['data_status']['ask'])
+  self.assertNotEqual(result['calculation']['signal'],'BUY')
+  repeated=engine.ingest(app.connect,1,self.req['watch_id'],True,collision,at+timedelta(seconds=2))
+  self.assertTrue(repeated['duplicate']);self.assertIsNone(repeated['session']['data_status']['bid'])
+  newer=copy.deepcopy(collision);newer['bid_at']=newer['ask_at']=(at+timedelta(seconds=3)).isoformat()
+  restored=engine.ingest(app.connect,1,self.req['watch_id'],True,newer,at+timedelta(seconds=3))
+  self.assertFalse(restored['calculation']['new_market_observation']);self.assertEqual(restored['session']['data_status']['bid'],'99.93')
+  changed_trade=copy.deepcopy(newer);changed_trade['price']='101';changed_trade['high']='101.1';changed_trade['close']='101'
+  with self.assertRaisesRegex(EngineError,'sample_id_conflict'):engine.ingest(app.connect,1,self.req['watch_id'],True,changed_trade,at+timedelta(seconds=3))
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_samples WHERE watch_row_id=(SELECT id FROM hw_sessions WHERE watch_id=?)',(self.req['watch_id'],)).fetchone()[0],1)
+   self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
+ def test_ambiguous_quote_does_not_hide_separately_valid_exit(self):
+  with app.connect() as c:
+   req=json.loads(engine.row_for(c,1,self.req['watch_id'],True)['request']);req['risk']['stop_price']='101'
+   c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),self.req['watch_id']))
+  original=self.sample(held=True);engine.ingest(app.connect,1,self.req['watch_id'],True,original,self.now)
+  collision=copy.deepcopy(original);collision.update(bid='99.93',ask='100.03')
+  result=engine.ingest(app.connect,1,self.req['watch_id'],True,collision,self.now+timedelta(seconds=1))
+  self.assertEqual(result['calculation']['signal'],'SELL');self.assertEqual(result['session']['signal'],'SELL')
+  self.assertIsNone(result['session']['data_status']['bid']);self.assertFalse(result['calculation']['new_market_observation'])
  def test_conflict_diagnostics_reach_existing_scan_log_without_broker_context(self):
   previous=self.sample(held=True);incoming=copy.deepcopy(previous);incoming['price']='101';incoming['context']['diagnostic']='private-broker-detail'
   error=engine.sample_conflict(previous,incoming,{'price','context','asset_id','feed_type'})

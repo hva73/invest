@@ -246,6 +246,21 @@ class FeedTests(unittest.TestCase):
   with patch.dict(os.environ,env,clear=True),patch.object(adapter,'feeds',return_value=Feeds()),patch.object(adapter.pluto,'safe_context',return_value=context),patch('hotwatch_adapters.utc',return_value=now):sample=adapter.poll({'request_data':req})
   self.assertIn(('eu_trades','LHA.XETRA'),calls);self.assertIn(('eu_quotes','LHA.XETRA'),calls)
   self.assertEqual(sample['event_time'],trade_at);self.assertEqual(sample['bid_at'],quote_at);self.assertEqual(sample['ask_at'],quote_at);self.assertEqual(sample['price'],'8.844');self.assertEqual(sample['market_status'],'REGULAR');self.assertEqual(sample['context']['position'],'held')
+ def test_conflicting_quotes_at_same_source_time_preserve_trade_without_spread(self):
+  from test_hotwatch_engine import request,tick
+  req=request();req.update(ticker='LHA',exchange='CHIX',asset_id='synthetic-LHA',quote_currency='EUR',provider='eodhd',provider_symbol='LHA.XETRA')
+  now=datetime(2026,11,10,9,45,tzinfo=timezone.utc);trade_at=(now-timedelta(seconds=20)).isoformat();quote_at=(now-timedelta(seconds=5)).isoformat();adapter=EODHDAdapter(None,1,Opener({}))
+  class Feeds:
+   def capture(self,feed,symbol,**kwargs):
+    if feed=='eu_trades':return {'status':'OK','messages':[{'event_time':trade_at,'received_at':now.isoformat(),'price':'8.844','trade_size':'705','market_session':'open'}]}
+    if feed=='eu_quotes':return {'status':'OK','messages':[{'event_time':quote_at,'bid':'8.842','ask':'8.846'},{'event_time':quote_at,'bid':'8.843','ask':'8.846'}]}
+    return {'status':'NO_MESSAGES','messages':[]}
+  env={'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}
+  with patch.dict(os.environ,env,clear=True),patch.object(adapter,'feeds',return_value=Feeds()),patch.object(adapter.pluto,'safe_context',return_value=tick(now,held=True)['context']),patch('hotwatch_adapters.utc',return_value=now):sample=adapter.poll({'request_data':req})
+  self.assertEqual(sample['event_time'],trade_at);self.assertEqual(sample['price'],'8.844');self.assertIsNone(sample['bid']);self.assertIsNone(sample['ask'])
+  self.assertEqual(adapter.last_feed_diagnostics['websocket_quote_status'],'AMBIGUOUS_SAME_TIMESTAMP')
+  import hotwatch_engine
+  hotwatch_engine.sample_errors(sample,req,now)
  def test_amsterdam_default_stream_is_used_without_changing_source_time(self):
   from test_hotwatch_engine import request,tick
   req=request();req.update(ticker='ASML',exchange='AMS',asset_id='synthetic-ASML',quote_currency='EUR',provider='eodhd',provider_symbol='ASML.AS')
