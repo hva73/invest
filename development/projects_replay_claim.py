@@ -34,7 +34,7 @@ def prepare_claim(request_id, comment_id, project_id, item_id, expected, target)
         raise ClaimBlocked('invalid project or item ID')
     if not project_id.startswith('PVT_') or not item_id.startswith('PVTI_'):
         raise ClaimBlocked('invalid project or item ID')
-    if any(not isinstance(v, str) or not re.fullmatch(r'[A-Za-z0-9 _/-]{1,60}', v) for v in (expected, target)) or expected == target:
+    if any(not isinstance(v, str) or not 1 <= len(v) <= 60 or not v.isprintable() for v in (expected, target)) or expected == target:
         raise ClaimBlocked('invalid status transition')
     name = hashlib.sha256(request_id.encode()).hexdigest()
     fields = {'request_id': request_id, 'comment_id': comment_id, 'project_id': project_id,
@@ -85,3 +85,4 @@ def claim(token, request_id, comment_id, project_id, item_id, expected, target):
     except (OSError, ValueError):
         raise ClaimBlocked('claim outcome uncertain') from None
     return 'CLAIMED'
+
