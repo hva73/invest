@@ -1,0 +1,36 @@
+name: ESCAPE approved status test validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [codex/escape-development]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.number == 17
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out pull request without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Run simulated writer and one-shot tests
+        run: >-
+          python3 -m unittest
+          tests.test_projects_status_single_test
+          tests.test_projects_status_write_integration
+          tests.test_projects_status_write_readonly_probe
+          tests.test_projects_status_write_entry
+          tests.test_projects_status_write_audit
+          tests.test_projects_status_write_runner
+          tests.test_projects_status_write_prototype
+          tests.test_projects_dryrun_feedback
+          tests.test_projects_ruleset_disposable_test
+          tests.test_projects_replay_claim
+          tests.test_projects_dryrun
+          tests.test_projects_replay_actions_test
