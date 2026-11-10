@@ -13,16 +13,18 @@ import projects_status_write_audit as audit
 WRITE_PREFIX = 'ESCAPE_PROJECTS_WRITE_V1 '
 
 
-def run(project_token, journal_token, issue_token, run_id):
+def run(project_token, journal_token, issue_token, run_id, issue_number=4):
     if writer.LIVE_WRITE_ENABLED is not True:
         raise writer.Blocked('live status writing is disabled')
     if not project_token or not journal_token or not issue_token:
         raise writer.Blocked('missing credential')
+    if type(issue_number) is not int or issue_number not in dryrun.ALLOWED_ISSUES:
+        raise writer.Blocked('issue not allowed')
 
     def validate():
         os.environ['ESCAPE_PROJECTS_TOKEN'] = project_token
         try:
-            return dryrun.main(prefix=WRITE_PREFIX)
+            return dryrun.main(prefix=WRITE_PREFIX, issue_number=issue_number)
         finally:
             os.environ.pop('ESCAPE_PROJECTS_TOKEN', None)
 
@@ -36,7 +38,7 @@ def run(project_token, journal_token, issue_token, run_id):
     initial = validate()
     def record(outcome):
         try:
-            if audit.post(issue_token, initial['request']['request_id'], outcome, run_id) != 'RECORDED':
+            if audit.post(issue_token, initial['request']['request_id'], outcome, run_id, issue_number=issue_number) != 'RECORDED':
                 raise audit.AuditFailed('unexpected audit outcome')
         except Exception:
             raise writer.Uncertain('audit outcome uncertain; reconcile, do not retry') from None
@@ -56,3 +58,4 @@ def run(project_token, journal_token, issue_token, run_id):
         raise writer.Uncertain('unknown write result; do not retry')
     record('verified')
     return result
+
