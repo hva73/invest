@@ -183,6 +183,24 @@ def _exit_rearmed(c,watch_id,event_key):
     return False
 
 
+def _repeated_critical(c,watch_id,device_id,event_key,reason):
+    """Suppress the same verified stop/deadline episode, not a changed risk level."""
+    current=c.execute('SELECT created FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch_id,event_key)).fetchone()
+    prior=c.execute("""SELECT e.event_id,e.created FROM push_jobs j JOIN hw_events e
+        ON e.watch_row_id=j.watch_row_id AND e.event_id=j.event_key
+        WHERE j.watch_row_id=? AND j.device_id=? AND j.status='sent'
+          AND e.event_type='RISK_REJECTION' AND e.severity='critical'
+          AND CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.reason') END=? ORDER BY j.id DESC LIMIT 1""",(watch_id,device_id,reason)).fetchone()
+    if not current or not prior or _exit_rearmed(c,watch_id,prior['event_id']):return False
+    key='stop_price' if reason=='STOP_BREACHED' else 'exit_deadline'
+    def risk_value(created):
+        row=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? AND calculated<=? ORDER BY id DESC LIMIT 1',(watch_id,created)).fetchone()
+        try:return (json.loads(row['payload']).get('risk_parameters') or {}).get(key) if row else None
+        except (TypeError,ValueError,AttributeError):return None
+    old,new=risk_value(prior['created']),risk_value(current['created'])
+    return old is not None and new is not None and str(old)==str(new)
+
+
 def _send(subscription,payload,topic):
     from pywebpush import webpush
     import requests
@@ -219,6 +237,8 @@ def dispatch_one(connect,now=None,sender=None):
         except (ValueError,TypeError,AttributeError):reason=None
         critical=bool(e and e['event_type']=='RISK_REJECTION' and e['severity']=='critical' and reason in ('STOP_BREACHED','EXIT_DEADLINE'))
         urgent=bool(e and (e['event_type']=='TRAILING_EXIT_WORSENED' or critical))
+        if critical and _repeated_critical(c,watch['id'],job['device_id'],job['event_key'],reason):
+            c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
         critical_only=critical and bool(job['sell']) and current not in ('SELL','REDUCE')
         if (current=='BUY' and not job['buy'] or current in ('SELL','REDUCE') and not job['sell']):
             if previous and previous['signal']==current:

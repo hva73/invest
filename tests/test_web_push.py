@@ -134,6 +134,29 @@ class Push(unittest.TestCase):
    with app.connect() as c:engine.event(c,self.watch,'TRAILING_EXIT_WORSENED',self.now,'worsened',severity='warning')
    web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
   self.assertEqual(len(sent),3)
+ def test_repeated_stop_episode_is_suppressed_but_changed_stop_is_not(self):
+  self.subscribe();sent=[]
+  def critical(offset,stop):
+   at=self.now+timedelta(seconds=offset)
+   with app.connect() as c:
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps({'risk_parameters':{'stop_price':stop},'reason_codes':['STOP_BREACHED']}),'x'))
+    engine.event(c,self.watch,'RISK_REJECTION',at,'STOP_BREACHED',severity='critical')
+   with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,at,lambda s,p,t:sent.append(p))
+  critical(0,'10');critical(1,'10');critical(2,'11')
+  self.assertEqual(len(sent),2)
+  with app.connect() as c:self.assertEqual([r['status'] for r in c.execute('SELECT status FROM push_jobs ORDER BY id')],['sent','skipped','sent'])
+ def test_new_stop_after_verified_recovery_is_not_suppressed(self):
+  self.subscribe();sent=[]
+  def critical(offset):
+   at=self.now+timedelta(seconds=offset)
+   with app.connect() as c:
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps({'risk_parameters':{'stop_price':'10'}}),'x'))
+    engine.event(c,self.watch,'RISK_REJECTION',at,'STOP_BREACHED',severity='critical')
+   with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,at,lambda s,p,t:sent.append(p))
+  critical(0)
+  recovery={'signal':'WAIT','reason_codes':['NO_TRIGGER'],'new_market_observation':True,'position_context':{'position':'held'},'risk_level':'normal','risk_parameters':{'stop_price':'10'}}
+  with app.connect() as c:c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],(self.now+timedelta(seconds=1)).isoformat(),json.dumps(recovery),'x'))
+  critical(2);self.assertEqual(len(sent),2)
  def test_critical_stop_is_reported_when_data_is_temporarily_unavailable(self):
   self.subscribe();sent=[];self.event('SELL_SIGNAL')
   with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
