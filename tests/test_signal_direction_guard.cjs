@@ -12,6 +12,8 @@ const make=(signal,display)=>({status:'ACTIVE',signal,display_status:display,req
   session=make(actual,display);await assert.rejects(context.click({dataset:{tradeWatch:'w',tradeSignal:shown}}),/ændret/);assert.equal(opened.length,0);assert.equal(closed,0);
  }
  session=make('SELL','SÆLGSSIGNAL');await assert.rejects(context.click({dataset:{tradeWatch:'w'}}),/ændret/);assert.equal(opened.length,0);
+ session=make('SELL','SÆLGSSIGNAL');session.last_action_signal={event_id:'new',state:'ACTIVE'};await assert.rejects(context.click({dataset:{tradeWatch:'w',tradeSignal:'SELL',tradeEvent:'old'}}),/ændret/);assert.equal(opened.length,0);
+ session.last_action_signal={event_id:'old',state:'WITHDRAWN'};await assert.rejects(context.click({dataset:{tradeWatch:'w',tradeSignal:'SELL',tradeEvent:'old'}}),/ændret/);assert.equal(opened.length,0);
  session=make('SELL','SÆLGSSIGNAL');session.status='DEGRADED';await assert.rejects(context.click({dataset:{tradeWatch:'w',tradeSignal:'SELL'}}),/ikke længere aktuelt/);
  session=make('SELL','SÆLGSSIGNAL');await context.click({dataset:{tradeWatch:'w',tradeSignal:'SELL'}});assert.equal(opened.length,1);assert.equal(opened[0].signal,'SELL');assert.equal(closed,1);
  session=make('BUY','KØBSSIGNAL');await context.click({dataset:{tradeWatch:'w',tradeSignal:'BUY'}});assert.equal(opened[1].signal,'BUY');
