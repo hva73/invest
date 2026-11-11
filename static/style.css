@@ -435,6 +435,7 @@ body.pull-refresh-visible #refresh-status{display:none}
  .dash-holdings .dash-daily{grid-column:2;grid-row:3;text-align:right!important}
  .dash-holdings .dash-depot{grid-column:1;grid-row:4;text-align:left!important}
  .dash-holdings .dash-action{grid-column:2;grid-row:4;text-align:right!important}
+ .dash-holdings .dash-row:not(.dash-critical) .dash-action{display:none}
  .dash-holdings .dash-price,.dash-holdings .dash-since{display:none}
  .dash-holdings .dash-instrument button{min-height:44px}
  #dashboard-detail .market-slot{border-radius:18px}
