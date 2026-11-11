@@ -39,7 +39,16 @@ try:
    page.go_forward();expect(page.locator('#login')).to_be_visible()
    assert not errors,(width,errors)
    page.close()
-  browser.close()
+  # An existing genuine login remains unchanged while demo uses only fixture data.
+  page=browser.new_page(viewport={'width':390,'height':844})
+  page.goto(f'http://127.0.0.1:{server.server_port}/')
+  page.locator('#login-form [name=password]').fill('test-password-long-enough')
+  page.locator('#login-form button').click();expect(page.locator('.dashboard-v1')).to_be_visible()
+  page.goto(f'http://127.0.0.1:{server.server_port}/demo');expect(page.locator('.demo-banner')).to_be_visible()
+  expect(page.get_by_role('button',name='Åbn position TSLA i Demodepot')).to_be_visible()
+  page.get_by_role('link',name='Afslut demo / Log ind').click();expect(page.locator('.dashboard-v1')).to_be_visible()
+  expect(page.locator('.demo-banner')).to_have_count(0)
+  page.close();browser.close()
  print('PASS: anonymous demo, four widths, safe simulated actions and blocked API requests')
 finally:
  server.shutdown();server.server_close();case.tearDown()
