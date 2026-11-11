@@ -60,6 +60,7 @@ class Adapter:
         self.service = service
         self.inventory = None
         self.started_at = None
+        self.motor_state = None
         self.backup_observer = None
         self.state_observer = None
 
@@ -126,12 +127,23 @@ class Adapter:
 
     def service_status(self):
         status = self.service.status()
-        if self.state_observer is not None and status in ('started', 'stopped'):
+        if status in ('started', 'stopped'):
             try:
-                self.state_observer(status)
+                before = self._motor_state()
+                if self.state_observer is not None:
+                    self.state_observer(status)
+                if self._motor_state() != before:
+                    raise ValueError('motor_state_changed')
+                self.motor_state = before
             except Exception:
                 raise ValueError('state_record_failed') from None
         return status
+
+    def _motor_state(self):
+        var = self.target / 'var'
+        if var.is_symlink() or not var.is_dir():
+            raise ValueError('invalid_motor_state')
+        return tuple(nordicway_autostart._present(var / name) for name in nordicway_autostart.NAMES)
 
     def stop_service(self):
         if self.service.transition('stop') != 'stopped':
@@ -194,5 +206,7 @@ class Adapter:
             raise ValueError('health_unverified')
 
     def verify_recovery_health(self):
-        if self.started_at is None or nordicway_deploy_health.wait_recovery(self.target, self.started_at) is not True:
+        if (self.started_at is None or self.motor_state is None or self._motor_state() != self.motor_state
+                or nordicway_deploy_health.wait_recovery(self.target, self.started_at) is not True
+                or self._motor_state() != self.motor_state):
             raise ValueError('recovery_health_unverified')

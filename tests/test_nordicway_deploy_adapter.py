@@ -84,6 +84,17 @@ class AdapterIntegration(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '^state_record_failed$'):
             adapter.service_status()
 
+    def test_recovery_does_not_accept_changed_motor_state(self):
+        from datetime import datetime, timezone
+        enabled = self.app / 'var' / 'hotwatch-autostart.enabled'
+        enabled.touch()
+        adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000, None, None, self.service)
+        self.assertEqual(adapter.service_status(), 'started')
+        adapter.started_at = datetime.now(timezone.utc)
+        enabled.unlink()
+        with self.assertRaisesRegex(ValueError, '^recovery_health_unverified$'):
+            adapter.verify_recovery_health()
+
     def test_restricted_runner_reaches_real_backup_and_update(self):
         import nordicway_deploy_guard
         import nordicway_deploy_runner
