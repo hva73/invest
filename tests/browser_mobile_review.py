@@ -6,6 +6,7 @@ with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     page = browser.new_page(viewport={'width': 390, 'height': 844}, is_mobile=True, has_touch=True)
     page.set_content('<!doctype html><html lang="da"><body><main></main></body></html>')
+    page.add_style_tag(path=str(Path('static/style.css').resolve()))
     page.add_script_tag(path=str(Path('static/trade-ui.js').resolve()))
     page.evaluate('''() => {
       window.calls = [];
@@ -33,6 +34,8 @@ with sync_playwright() as p:
         dialog=page.locator('#quick-trade-dialog')
         expect(dialog.locator('h2')).to_be_focused()
         dialog.locator('[name=size]').fill('50')
+        expect(dialog.locator('[name=size]')).to_be_focused()
+        assert dialog.locator('[name=size]').evaluate("e=>parseFloat(getComputedStyle(e).fontSize)")>=16
         before=page.evaluate("calls.filter(c=>c.name==='trade/send').length")
         dialog.locator('button[type=submit]').click()
         expect(dialog.locator('#quick-trade-review')).to_contain_text('Gennemgå')
