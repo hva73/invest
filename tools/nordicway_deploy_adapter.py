@@ -7,10 +7,12 @@ import fcntl
 import os
 import re
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 import apply_update
 import nordicway_autostart
+import nordicway_deploy_health
 import nordicway_quota
 import nordicway_quiescence
 import nordicway_release_backup
@@ -53,6 +55,7 @@ class Adapter:
         self.health_check = health_check
         self.service = service
         self.inventory = None
+        self.started_at = None
 
     @contextmanager
     def lock(self):
@@ -122,9 +125,14 @@ class Adapter:
             raise ValueError('installed_content_mismatch')
 
     def start_service(self):
+        self.started_at = datetime.now(timezone.utc)
         if self.service.transition('start') != 'started':
             raise ValueError('service_start_failed')
 
     def verify_health(self, sha):
-        if self.health_check(sha) is not True:
+        if self.started_at is None:
+            raise ValueError('service_start_unverified')
+        check = (self.health_check(sha) if self.health_check is not None else
+                 nordicway_deploy_health.wait(self.target, sha, self.started_at))
+        if check is not True:
             raise ValueError('health_unverified')
