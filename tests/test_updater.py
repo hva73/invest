@@ -62,9 +62,13 @@ print('INSTALLED_RELEASE_HEALTH_PASS')
     with sqlite3.connect(path) as c:self.assertEqual(c.execute('SELECT value FROM preserved').fetchone()[0],'private-data')
  def test_database_snapshot_occurs_with_worker_and_supervisor_quiesced(self):
   with tempfile.TemporaryDirectory() as d:
-   source,target=self.fixture(Path(d));real_connect=sqlite3.connect;observations=[]
-   def verify_lock_on_snapshot(database,*args,**kwargs):
-    if str(database).endswith('?mode=ro'):
+   source,target=self.fixture(Path(d));real_run=subprocess.run;real_replace=os.replace;observations=[]
+   def probe_writer(stage):
+    code="import sqlite3,sys; c=sqlite3.connect(sys.argv[1],timeout=0.1); c.execute(\"INSERT INTO preserved VALUES('must-not-write')\"); c.commit()"
+    result=real_run([sys.executable,'-c',code,str(target/'var/escape.db')],capture_output=True,text=True,timeout=5)
+    self.assertNotEqual(result.returncode,0);self.assertIn('locked',result.stderr);observations.append(stage)
+   def verify_lock_on_snapshot(args,*pos,**kwargs):
+    if len(args)>3 and args[1:4]==['-I','-S','-c']:
      for name in ('supervisor','worker'):
       fd=os.open(target/'var'/('hotwatch-'+name+'.lock'),os.O_RDWR)
       try:
@@ -72,9 +76,15 @@ print('INSTALLED_RELEASE_HEALTH_PASS')
        except BlockingIOError:observations.append(name)
        else:fcntl.flock(fd,fcntl.LOCK_UN)
       finally:os.close(fd)
-    return real_connect(database,*args,**kwargs)
-   with patch('apply_update.sqlite3.connect',side_effect=verify_lock_on_snapshot):apply_update.apply(source,target)
-   self.assertEqual(observations,['supervisor','worker'])
+     probe_writer('snapshot')
+    return real_run(args,*pos,**kwargs)
+   def verify_lock_on_replace(*args,**kwargs):
+    if 'replacement' not in observations:probe_writer('replacement')
+    return real_replace(*args,**kwargs)
+   with patch('apply_update.subprocess.run',side_effect=verify_lock_on_snapshot),patch('apply_update.os.replace',side_effect=verify_lock_on_replace):
+    apply_update.apply(source,target)
+   self.assertEqual(observations,['supervisor','worker','snapshot','replacement'])
+   with sqlite3.connect(target/'var/escape.db') as db:self.assertEqual(db.execute('SELECT COUNT(*) FROM preserved').fetchone()[0],1)
  def test_snapshot_failure_preserves_code_and_releases_worker_locks(self):
   with tempfile.TemporaryDirectory() as d:
    source,target=self.fixture(Path(d))
@@ -86,6 +96,21 @@ print('INSTALLED_RELEASE_HEALTH_PASS')
     fd=os.open(target/'var'/('hotwatch-'+name+'.lock'),os.O_RDWR)
     try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB);fcntl.flock(fd,fcntl.LOCK_UN)
     finally:os.close(fd)
+ def test_wal_mode_is_rejected_before_code_is_changed(self):
+  with tempfile.TemporaryDirectory() as d:
+   source,target=self.fixture(Path(d));database=target/'var/escape.db'
+   with sqlite3.connect(database) as db:self.assertEqual(db.execute('PRAGMA journal_mode=WAL').fetchone()[0],'wal')
+   with self.assertRaisesRegex(RuntimeError,'databasejournal|låst backup'):apply_update.apply(source,target)
+   self.assertEqual((target/'app.py').read_text(),'old code')
+ def test_snapshot_copy_failure_releases_database_and_keeps_old_code(self):
+  with tempfile.TemporaryDirectory() as d:
+   source,target=self.fixture(Path(d));database=target/'var/escape.db'
+   with patch('apply_update.subprocess.run',side_effect=subprocess.CalledProcessError(1,'synthetic-copy')):
+    with self.assertRaises(subprocess.CalledProcessError):apply_update.apply(source,target)
+   self.assertEqual((target/'app.py').read_text(),'old code')
+   self.assertFalse((target/'var/hotwatch-autostart.disabled').exists())
+   with sqlite3.connect(database,timeout=0.1) as db:
+    db.execute("INSERT INTO preserved VALUES('after failure')")
  def test_backup_restore_after_simulated_migration(self):
   # Only temporary files: demonstrate the existing updater's backup can be
   # independently read and restored after a synthetic schema/data change.
