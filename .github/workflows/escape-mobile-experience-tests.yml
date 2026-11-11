@@ -32,6 +32,11 @@ jobs:
           node tests/test_dashboard_attention.js
           node tests/test_signal_notice.js
           node tests/test_quick_review.cjs
+          node tests/test_signal_direction_guard.cjs
+          node tests/test_signal_detail_context.cjs
+          node tests/test_notification_ui.cjs
+          node tests/test_notification_sale_review.cjs
+          python -m unittest test_trade_service test_hotwatch_buy_plan
           node tests/test_market_expansion.cjs
           node tests/test_holding_chart_marker.cjs
           python tests/browser_mobile_layout.py

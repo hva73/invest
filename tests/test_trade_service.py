@@ -167,7 +167,7 @@ class Trading(unittest.TestCase):
   self.assertFalse(self.writes())
  def test_hotwatch_signal_is_rechecked_and_asset_is_bound(self):
   session={'status':'ACTIVE','signal':'BUY','display_status':'KØBSSIGNAL','request':{'asset_id':'asset-test','ticker':'TEST','portfolio_ids':[self.root]}}
-  request=dict(self.request,report_id='@hotwatch',candidate_id='watch-1',size_mode='amount',size='100',order_type='MARKET')
+  request=dict(self.request,report_id='@hotwatch',candidate_id='watch-1',expected_side='BUY',size_mode='amount',size='100',order_type='MARKET')
   # This test isolates source direction; plan binding is tested against real
   # disposable sessions in test_hotwatch_buy_plan.
   with patch('hotwatch_engine.item',return_value={'session':session}),patch('hotwatch_buy_plan.check_proposal'):
@@ -176,6 +176,25 @@ class Trading(unittest.TestCase):
    session['signal']='SELL';session['display_status']='SÆLGSSIGNAL'
    with self.assertRaisesRegex(trade.TradeError,'retning'):self.send(proposal)
   self.assertFalse(self.writes())
+ def test_hotwatch_estimate_binds_direction_before_and_after_position_lookup(self):
+  request=dict(self.request,report_id='@hotwatch',candidate_id='watch-1',expected_side='SELL',size_mode='percent',size='25',order_type='MARKET')
+  sell={'signal':'SÆLG','asset_id':'asset-test','portfolio_ids':[self.root]};buy={**sell,'signal':'KØB'}
+  with patch('trade_service.signal_source',side_effect=[sell,buy]),patch('trade_service.direct_sell_basis',return_value={'shares':'2','quantity':'8','percentage':'25'}):
+   with self.assertRaisesRegex(trade.TradeError,'retning er ændret'):self.estimate(request)
+  self.assertFalse(any(c['name']=='estimate_order' for c in self.calls));self.assertFalse(self.writes())
+  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
+ def test_hotwatch_estimate_requires_the_selected_direction(self):
+  request=dict(self.request,report_id='@hotwatch',candidate_id='watch-1',size_mode='shares',size='2')
+  sell={'signal':'SÆLG','asset_id':'asset-test','portfolio_ids':[self.root]}
+  with patch('trade_service.signal_source',return_value=sell):
+   with self.assertRaisesRegex(trade.TradeError,'retning mangler'):self.estimate(request)
+   with self.assertRaisesRegex(trade.TradeError,'retning er ændret'):self.estimate(dict(request,expected_side='BUY'))
+  self.assertFalse(self.calls);self.assertFalse(self.writes())
+ def test_report_percentage_sell_cannot_become_buy_between_reads(self):
+  request=dict(self.request,size_mode='percent',size='25',order_type='MARKET')
+  with patch('trade_service.signal_source',side_effect=[{'signal':'SÆLG'},{'signal':'KØB'}]),patch('trade_service.direct_sell_basis',return_value={'shares':'2','quantity':'8','percentage':'25'}):
+   with self.assertRaisesRegex(trade.TradeError,'retning er ændret'):self.estimate(request)
+  self.assertFalse(any(c['name']=='estimate_order' for c in self.calls));self.assertFalse(self.writes())
  def test_report_signal_reversal_cannot_send_the_old_order(self):
   proposal=self.estimate()
   with patch('trade_service.candidate',return_value={'signal':'SÆLG'}):
