@@ -16,6 +16,7 @@ import nordicway_deploy_health
 import nordicway_uapi_quota
 import nordicway_quiescence
 import nordicway_writer_check
+from nordicway_deploy_sequence import BackupVerificationFailure
 import nordicway_release_backup
 import nordicway_release_preflight
 import nordicway_release_service
@@ -126,9 +127,16 @@ class Adapter:
     def backup_and_apply(self, release):
         names = apply_update.FILES
         self.inventory = nordicway_release_backup.inventory(self.target, names)
+        def verify_before_replace(backup):
+            try:
+                if self.verify_backup(backup) is not True:
+                    raise ValueError('backup_unverified')
+            except Exception as exc:
+                raise BackupVerificationFailure('backup_unverified') from exc
+            return True
         with nordicway_autostart.preserve(self.target / 'var'):
             return apply_update.apply(release['path'], self.target,
-                                      verify_backup=self.verify_backup)
+                                      verify_backup=verify_before_replace)
 
     def verify_backup(self, backup):
         return nordicway_release_backup.verify_backup(backup, self.inventory)
