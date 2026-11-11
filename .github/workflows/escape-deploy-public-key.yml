@@ -12,6 +12,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Test restricted probe workflow
+        run: python -m unittest tests.test_issue16_probe_workflow
       - name: Verify public key derivation
         run: |
           set -eu
@@ -56,3 +61,34 @@ jobs:
           fingerprint="$(ssh-keygen -lf "$hosts" -E sha256 | awk '{print $2}')"
           test "$fingerprint" = 'SHA256:U8MQZwyzMoDmDyRnBIqFqN14BVifmGKNSi+7B8OACDI'
           ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts" -p 33 nordicr4@cp14.nordicway.dk 'escape-deploy-v1 ping'
+
+  write_probe:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.repository == 'hva73/invest' &&
+      github.event.issue.number == 16 &&
+      github.event.comment.user.id == 351122234 &&
+      github.event.comment.body == '/escape-deploy-write-probe'
+    runs-on: ubuntu-latest
+    environment: ESCAPE_NORDICWAY_DEPLOY
+    timeout-minutes: 2
+    steps:
+      - name: Run restricted SSH write probe
+        env:
+          DEPLOY_PRIVATE_KEY: ${{ secrets.ESCAPE_NORDICWAY_DEPLOY_PRIVATE_KEY }}
+          WRITE_PROBE_AUTHORIZED: ${{ vars.ESCAPE_WRITE_PROBE_AUTHORIZED }}
+        run: |
+          set -eu
+          umask 077
+          test "$WRITE_PROBE_AUTHORIZED" = 1
+          test -n "$DEPLOY_PRIVATE_KEY"
+          key="$RUNNER_TEMP/deploy-probe-key"
+          hosts="$RUNNER_TEMP/deploy-probe-hosts"
+          trap 'rm -f "$key" "$hosts"' EXIT
+          printf '%s\n' "$DEPLOY_PRIVATE_KEY" > "$key"
+          unset DEPLOY_PRIVATE_KEY
+          ssh-keyscan -T 10 -t ed25519 -p 33 cp14.nordicway.dk > "$hosts" 2>/dev/null
+          fingerprint="$(ssh-keygen -lf "$hosts" -E sha256 | awk '{print $2}')"
+          test "$fingerprint" = 'SHA256:U8MQZwyzMoDmDyRnBIqFqN14BVifmGKNSi+7B8OACDI'
+          reply="$(ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$hosts" -p 33 nordicr4@cp14.nordicway.dk 'escape-deploy-v1 write-probe')"
+          printf '%s\n' "$reply" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d == {"operation":"write_probe","status":"ok"}; print("write_probe:ok")'
