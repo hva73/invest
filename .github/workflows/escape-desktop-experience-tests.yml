@@ -30,6 +30,8 @@ jobs:
           node tests/test_dashboard_data.js
           node tests/test_dashboard_attention.js
           node tests/test_signal_notice.js
+          node tests/test_sidebar_scope.js
+          node tests/test_sidebar_scope.js static/desktop-experience.css
           python tests/browser_desktop_experience.py
       - name: Upload synthetic screenshots
         if: always()
