@@ -18,9 +18,11 @@ STAGES = {'authorization', 'preflight', 'quota', 'stage', 'service_state',
 def run(env=None, transport=_run_limited):
     env = os.environ if env is None else env
     sha, token = env.get('ESCAPE_RELEASE_SHA', ''), env.get('ESCAPE_CPANEL_API_TOKEN', '')
+    operation = env.get('ESCAPE_DEPLOY_OPERATION', 'deploy')
     if (env.get('ESCAPE_DEPLOY_AUTHORIZED') != '1' or not env.get('SSH_AUTH_SOCK')
             or not re.fullmatch(r'[0-9a-f]{40}', sha)
-            or not re.fullmatch(r'[A-Za-z0-9_-]{10,256}', token)):
+            or operation not in ('deploy', 'resume')
+            or (operation == 'deploy' and not re.fullmatch(r'[A-Za-z0-9_-]{10,256}', token))):
         return {'status': 'blocked', 'reason': 'configuration_unavailable'}
     try:
         known = verify(env.get('NORDICWAY_KNOWN_HOST', ''), env.get('NORDICWAY_VERIFIED_FINGERPRINT', ''))
@@ -33,13 +35,20 @@ def run(env=None, transport=_run_limited):
                        '-o', 'StrictHostKeyChecking=yes', '-o', 'UserKnownHostsFile=' + str(hosts),
                        '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'ForwardAgent=no',
                        '-o', 'ClearAllForwardings=yes', '-o', 'ConnectTimeout=10',
-                       HOST, 'escape-deploy-v1 deploy ' + sha]
+                       HOST, 'escape-deploy-v1 ' + operation + ' ' + sha]
             # Token is sent only over SSH stdin, never in command arguments or logs.
-            payload = json.dumps({'cpanel_token': token}, separators=(',', ':')).encode()
+            payload = json.dumps({'cpanel_token': token}, separators=(',', ':')).encode() if operation == 'deploy' else b''
             result = transport(command, input=payload, capture_output=True, timeout=900, env=env)
         if len(result.stdout) > 1024:
             raise ValueError('invalid_reply')
         reply = json.loads(result.stdout)
+        if operation == 'resume':
+            if (not isinstance(reply, dict) or set(reply) != {'operation', 'status', 'recovery_required'}
+                    or reply['operation'] != 'resume' or reply['status'] not in ('ok', 'failed')
+                    or type(reply['recovery_required']) is not bool
+                    or (reply['status'] == 'ok' and (result.returncode != 0 or reply['recovery_required']))):
+                raise ValueError('invalid_reply')
+            return reply
         if (not isinstance(reply, dict) or set(reply) != {'operation', 'status', 'stage',
                 'service_restored', 'recovery_required'} or reply['operation'] != 'deploy'
                 or reply['status'] not in ('ok', 'failed', 'updated_stopped')

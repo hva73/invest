@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: 'Ping or deploy an independently approved SHA'
+        description: 'Ping, deploy, or resume an independently approved SHA'
         type: choice
-        options: [ping, deploy]
+        options: [ping, deploy, resume]
         default: ping
         required: true
       release_sha:
@@ -103,7 +103,7 @@ jobs:
   deploy:
     if: >-
       github.event_name == 'workflow_dispatch' &&
-      inputs.operation == 'deploy' &&
+      (inputs.operation == 'deploy' || inputs.operation == 'resume') &&
       github.repository == 'hva73/invest' &&
       github.actor_id == '351122234' &&
       github.triggering_actor == 'hva73' &&
@@ -119,6 +119,7 @@ jobs:
       - name: Install approved release
         env:
           ESCAPE_RELEASE_SHA: ${{ inputs.release_sha }}
+          ESCAPE_DEPLOY_OPERATION: ${{ inputs.operation }}
           ESCAPE_DEPLOY_AUTHORIZED: ${{ vars.ESCAPE_DEPLOY_AUTHORIZED }}
           ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
           NORDICWAY_KNOWN_HOST: ${{ secrets.ESCAPE_NORDICWAY_KNOWN_HOST }}

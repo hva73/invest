@@ -31,6 +31,17 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(client.run(self.env, transport)['status'], 'blocked')
         transport.assert_not_called()
 
+    def test_resume_has_no_token_or_arbitrary_command(self):
+        self.env['ESCAPE_DEPLOY_OPERATION'] = 'resume'
+        self.env.pop('ESCAPE_CPANEL_API_TOKEN')
+        reply = {'operation': 'resume', 'status': 'ok', 'recovery_required': False}
+        send = Mock(return_value=SimpleNamespace(returncode=0, stdout=json.dumps(reply).encode()))
+        with patch.object(client, 'verify', return_value='host key\n'):
+            self.assertEqual(client.run(self.env, send), reply)
+        args, kwargs = send.call_args
+        self.assertEqual(args[0][-1], 'escape-deploy-v1 resume ' + 'a' * 40)
+        self.assertEqual(kwargs['input'], b'')
+
     def test_timeout_and_untrusted_reply_are_unknown(self):
         for transport in (Mock(side_effect=subprocess.TimeoutExpired('ssh', 1)),
                           Mock(return_value=SimpleNamespace(returncode=0, stdout=b'{"status":"ok"}'))):

@@ -28,5 +28,15 @@ class GuardTests(unittest.TestCase):
             guard.dispatch('escape-deploy-v1 deploy ' + sha + ';id', runner)
         self.assertEqual(seen, [sha])
 
+    def test_resume_requires_exact_sha_and_fixed_handler(self):
+        seen = []
+        self.assertEqual(guard.dispatch('escape-deploy-v1 resume ' + 'a' * 40)['status'], 'blocked')
+        result = guard.dispatch('escape-deploy-v1 resume ' + 'a' * 40,
+                                recovery=lambda sha: seen.append(sha) or {'status': 'ok'})
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(seen, ['a' * 40])
+        with self.assertRaises(ValueError):
+            guard.dispatch('escape-deploy-v1 resume ' + 'a' * 40 + ';id', recovery=lambda sha: None)
+
 if __name__ == '__main__':
     unittest.main()

@@ -61,6 +61,7 @@ class Adapter:
         self.inventory = None
         self.started_at = None
         self.backup_observer = None
+        self.state_observer = None
 
     @contextmanager
     def lock(self):
@@ -109,7 +110,10 @@ class Adapter:
         return nordicway_release_stage.stage(self.checkout, self.target, sha, approved_sha=self.approved_sha)
 
     def service_status(self):
-        return self.service.status()
+        status = self.service.status()
+        if self.state_observer is not None and status in ('started', 'stopped'):
+            self.state_observer(status)
+        return status
 
     def stop_service(self):
         if self.service.transition('stop') != 'stopped':

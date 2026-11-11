@@ -144,6 +144,87 @@ class AdapterIntegration(unittest.TestCase):
         self.assertEqual((backup / 'code/app.py').read_text(), 'old')
         with sqlite3.connect(backup / 'escape.db') as db:
             self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
+
+    def test_resume_restarts_only_complete_verified_install(self):
+        import nordicway_deploy_runner
+        bridge = self.root / 'bridge'
+        bridge.mkdir(mode=0o700)
+        approval = bridge / 'approved-sha'
+        approval.write_text(self.sha + '\n')
+        approval.chmod(0o600)
+        healthy = [False]
+        def factory(checkout, target, approved, required, quiescence, health, cpanel_token=None):
+            return concrete.Adapter(checkout, target, approved, required,
+                lambda: True, lambda sha: healthy[0], self.service,
+                quota_reader=lambda path, required: {'required_bytes': required,
+                    'account_free_lower_bytes': required + 1, 'filesystem_free_bytes': required + 1})
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')):
+            result = nordicway_deploy_runner.run(self.sha, 'test_token_12345', bridge=bridge,
+                       checkout=self.checkout, target=self.app, adapter_factory=factory)
+            self.assertEqual((result['status'], result['stage']), ('failed', 'health'))
+            self.assertTrue(result['recovery_required'])
+            # An incomplete or damaged installed tree cannot be resumed.
+            self.service.state = 'stopped'
+            (self.app / 'app.py').write_text('partial')
+            failed = nordicway_deploy_runner.resume(self.sha, bridge=bridge,
+                       checkout=self.checkout, target=self.app, adapter_factory=factory)
+            self.assertEqual(failed['status'], 'failed')
+            self.assertEqual(self.service.state, 'stopped')
+            (self.app / 'app.py').write_text('new')
+            healthy[0] = True
+            disabled = self.app / 'var' / 'hotwatch-autostart.disabled'
+            disabled.touch()
+            refused = nordicway_deploy_runner.resume(self.sha, bridge=bridge,
+                       checkout=self.checkout, target=self.app, adapter_factory=factory)
+            self.assertEqual(refused['status'], 'failed')
+            self.assertEqual(self.service.state, 'stopped')
+            disabled.unlink()
+            resumed = nordicway_deploy_runner.resume(self.sha, bridge=bridge,
+                       checkout=self.checkout, target=self.app, adapter_factory=factory)
+        self.assertEqual(resumed['status'], 'ok')
+        self.assertEqual(self.service.state, 'started')
+        self.assertFalse((bridge / 'deployment-incomplete.json').exists())
+        with sqlite3.connect(self.app / 'var' / 'escape.db') as db:
+            self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
+
+    def test_process_death_after_first_code_replace_is_not_resumed(self):
+        import multiprocessing
+        import nordicway_deploy_runner
+        bridge = self.root / 'bridge'
+        bridge.mkdir(mode=0o700)
+        approval = bridge / 'approved-sha'
+        approval.write_text(self.sha + '\n')
+        approval.chmod(0o600)
+        def factory(checkout, target, approved, required, quiescence, health, cpanel_token=None):
+            return concrete.Adapter(checkout, target, approved, required,
+                lambda: True, lambda sha: True, self.service,
+                quota_reader=lambda path, required: {'required_bytes': required,
+                    'account_free_lower_bytes': required + 1, 'filesystem_free_bytes': required + 1})
+        def killed_update():
+            replace = os.replace
+            def replace_then_die(source, destination):
+                replace(source, destination)
+                if Path(destination) == self.app / 'app.py':
+                    os._exit(23)
+            with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')), \
+                 patch.object(os, 'replace', side_effect=replace_then_die):
+                nordicway_deploy_runner.run(self.sha, 'test_token_12345', bridge=bridge,
+                    checkout=self.checkout, target=self.app, adapter_factory=factory)
+        child = multiprocessing.get_context('fork').Process(target=killed_update)
+        child.start()
+        child.join(15)
+        self.assertEqual(child.exitcode, 23)
+        self.assertEqual((self.app / 'app.py').read_text(), 'new')
+        self.assertNotEqual((self.app / 'BUILD_COMMIT').read_text().strip(), self.sha)
+        self.service.state = 'stopped'
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')):
+            result = nordicway_deploy_runner.resume(self.sha, bridge=bridge,
+                       checkout=self.checkout, target=self.app, adapter_factory=factory)
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(self.service.state, 'stopped')
+        self.assertTrue((bridge / 'deployment-incomplete.json').exists())
+        with sqlite3.connect(self.app / 'var' / 'escape.db') as db:
+            self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
     def test_failed_backup_verification_prevents_any_code_replacement(self):
         adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
                                    lambda: True, lambda sha: True, self.service)
