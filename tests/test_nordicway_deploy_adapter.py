@@ -70,6 +70,16 @@ class AdapterIntegration(unittest.TestCase):
         with sqlite3.connect(str(Path(result.backup) / 'escape.db')) as db:
             self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
 
+    def test_invalid_quota_reader_cannot_authorize_release(self):
+        adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
+                                   lambda: True, lambda sha: True, self.service,
+                                   quota_reader=lambda path, required: {'status':'ok'})
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')):
+            result = sequence.deploy(adapter, self.sha)
+        self.assertEqual((result.status, result.stage), ('failed', 'quota'))
+        self.assertEqual(self.service.state, 'started')
+        self.assertEqual((self.app / 'app.py').read_text(), 'old')
+
     def test_space_estimate_covers_database_staging_backup_and_margin(self):
         db_size = (self.app / 'var' / 'escape.db').stat().st_size
         estimate = concrete.estimate_required_bytes(self.checkout, self.app)

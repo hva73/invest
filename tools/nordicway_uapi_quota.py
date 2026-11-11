@@ -3,6 +3,11 @@
 Units and freshness must be verified against the hosting provider before use.
 """
 import re
+import os
+import json
+import urllib.request
+import urllib.error
+import nordicway_uapi_probe
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 
 
@@ -34,3 +39,35 @@ def parse(payload):
                 'free_lower_bytes': limit_bytes - used_bytes}
     except (KeyError, ValueError, TypeError, AttributeError, InvalidOperation):
         raise ValueError('quota_unavailable') from None
+
+
+def read(token, opener=None):
+    """Fetch and parse a UAPI response without exposing token or raw data."""
+    if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{10,256}', token):
+        raise ValueError('quota_unavailable')
+    try:
+        opener = opener or urllib.request.build_opener(nordicway_uapi_probe.NoRedirect())
+        request = urllib.request.Request(nordicway_uapi_probe.URL,
+                  headers={'Authorization':'cpanel nordicr4:' + token, 'Accept':'application/json'})
+        with opener.open(request, timeout=15) as response:
+            if response.status != 200: raise ValueError()
+            raw = response.read(65537)
+        if len(raw) > 65536: raise ValueError()
+        return parse(json.loads(raw))
+    except (OSError, ValueError, TypeError, AttributeError, urllib.error.URLError):
+        raise ValueError('quota_unavailable') from None
+
+
+def verify_space(path, required_bytes, token, *, opener=None, statvfs=os.statvfs):
+    if type(required_bytes) is not int or required_bytes <= 0:
+        raise ValueError('invalid_space_requirement')
+    quota = read(token, opener)
+    try:
+        fs = statvfs(path)
+        fs_free = fs.f_bavail * fs.f_frsize
+    except OSError:
+        raise ValueError('filesystem_space_unavailable') from None
+    if quota['free_lower_bytes'] < required_bytes or fs_free < required_bytes:
+        raise ValueError('insufficient_space')
+    return {'account_free_lower_bytes':quota['free_lower_bytes'],
+            'filesystem_free_bytes':fs_free, 'required_bytes':required_bytes}
