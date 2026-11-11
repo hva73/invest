@@ -898,7 +898,7 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
      try:
       payload=json.loads(health['payload']);allowed=('websocket_trade_status','websocket_quote_status','websocket_status_status','exchange_status','minute_bars_status','bar_history_status','intraday_status')
       fields={k:payload[k] for k in allowed if isinstance(payload,dict) and isinstance(payload.get(k),str) and re.fullmatch(r'[A-Z0-9_]{1,80}',payload[k])}
-      timing={k:payload[k] for k in ('begin_wait_ms','work_before_commit_ms','ingest_compute_ms') if isinstance(payload,dict) and type(payload.get(k)) in (int,float) and 0<=payload[k]<=3600000}
+      timing={k:payload[k] for k in ('begin_wait_ms','scope_entry_wait_ms','sqlite_begin_ms','work_before_commit_ms','ingest_compute_ms') if isinstance(payload,dict) and type(payload.get(k)) in (int,float) and 0<=payload[k]<=3600000}
       pipeline={k:payload[k] for k in ('provider_ms','pluto_context_ms','websocket_capture_ms','adapter_to_journal_ms','event_to_adapter_receive_ms') if isinstance(payload,dict) and type(payload.get(k)) in (int,float) and 0<=payload[k]<=3600000}
       provider_diagnostics={'scope':'provider_wide_not_session','last_attempt_at':health['attempted'],'last_success_at':health['succeeded'],'last_error':health['code'],'last_successful_feed_statuses':fields,'last_successful_sqlite_timing_ms':timing,'last_successful_pipeline_timing_ms':pipeline}
       settings=payload.get('worker_settings') if isinstance(payload,dict) else None
@@ -1104,6 +1104,9 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   prepared_version=None
  lock_requested=time.perf_counter()
  with connect() as c:
+  # Scope entry includes the worker's serialized gate and connection setup;
+  # BEGIN time includes the SQL call itself, not only lock contention.
+  scope_entered=time.perf_counter()
   c.execute('BEGIN IMMEDIATE');lock_acquired=time.perf_counter();row=row_for(c,uid,wid,mode);request=json.loads(row['request'])
   if lease and (row['lease_owner']!=lease or row['lease_until']<now.timestamp()):raise EngineError('lease_lost',409)
   if row['status'] not in ['CREATED','VALIDATING','ACTIVE','DEGRADED']:raise EngineError('watch_not_running',409)
@@ -1285,7 +1288,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   nextstate['quiet_market_poll']=interval>baseline
   nextstate['quiet_baseline_s']=baseline if interval>baseline else None
   c.execute('UPDATE hw_sessions SET status=?,state=?,updated=?,last_data=?,last_calculation=?,next_due=?,failures=0,last_error=NULL,lease_owner=NULL,lease_until=0 WHERE id=?',(new_status,canonical(nextstate),now.isoformat(),sample['event_time'],now.isoformat(),now.timestamp()+interval,row['id']))
-  response={'ok':True,'duplicate':False,'calculation':result,'sqlite_timing':{'begin_wait_ms':round((lock_acquired-lock_requested)*1000,3),'work_before_commit_ms':round((time.perf_counter()-lock_acquired)*1000,3)}}
+  response={'ok':True,'duplicate':False,'calculation':result,'sqlite_timing':{'begin_wait_ms':round((lock_acquired-lock_requested)*1000,3),'scope_entry_wait_ms':round((scope_entered-lock_requested)*1000,3),'sqlite_begin_ms':round((lock_acquired-scope_entered)*1000,3),'work_before_commit_ms':round((time.perf_counter()-lock_acquired)*1000,3)}}
   if include_session:response['session']=view(c,row_for(c,uid,wid,mode),now)
   return response
 
@@ -1357,11 +1360,20 @@ def observe_context(connect,uid,wid,mode,context,now=None,lease=None,broker_sour
   prior_key=state.get('exit_context_key');current_key=exit_context_key(context,scope)
   changed=bool(prior_key and prior_key!=current_key)
   material_changed=not previous or material(old)!=material(context)
-  reset_trailing=state.pop('position_trailing',None) is not None if material_changed or changed else False
+  prior_trailing=state.get('position_trailing');reset_trailing=False;refreshed=False
+  if prior_trailing and (material_changed or changed):
+   from hotwatch_strategy import position_trailing
+   last_sample=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
+   risk=dict(request['risk'],_position_scope=scope)
+   candidate,_=position_trailing(dict(json.loads(last_sample['payload']),context=context),risk,state,now,False) if last_sample else (None,None)
+   if candidate and candidate.get('basis')==prior_trailing.get('basis') and candidate.get('high')==prior_trailing.get('high') and candidate.get('high_time')==prior_trailing.get('high_time'):
+    state['position_trailing']=candidate;refreshed=True
+   else:
+    state.pop('position_trailing',None);reset_trailing=True
   if current_key is None:state.pop('exit_context_key',None)
   else:state['exit_context_key']=current_key
   if (reset_trailing or changed) and state.get('pending') in ('SELL','REDUCE'):state.update(pending=None,confirmations=0,pending_since=None)
-  if reset_trailing or prior_key!=current_key:c.execute('UPDATE hw_sessions SET state=? WHERE id=?',(canonical(state),row['id']))
+  if refreshed or reset_trailing or prior_key!=current_key:c.execute('UPDATE hw_sessions SET state=? WHERE id=?',(canonical(state),row['id']))
   if not previous or material(old)!=material(context):event(c,row,'BROKER_CONTEXT_UPDATED',now,'Verified broker context without usable market timestamp; no market signal calculated',data_time=context['as_of'])
   return {'ok':True,'duplicate':False}
 

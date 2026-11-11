@@ -37,7 +37,7 @@ class EntryBasis(unittest.TestCase):
   state={};metrics=good_metrics();metrics['distance_high_pct']='-25'
   for seconds,price in ((0,'100'),(10,'105'),(20,'102'),(30,'102'),(40,'102')):
    now=at+timedelta(seconds=seconds);sample=tick(now,seconds,price=price,held=True)
-   sample['context'].update(orders_complete=True,position_history_complete=True)
+   sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(at-timedelta(days=1)).isoformat(),position_history_through=sample['context']['as_of'])
    result,state=calculate(sample,metrics,BASELINE,risk,state,now)
    state=json.loads(json.dumps(state)) # persisted state across restart
   self.assertEqual(result['signal'],'SELL')
@@ -56,7 +56,7 @@ class EntryBasis(unittest.TestCase):
   def run(second,price='100',change=None,scope=None):
    nonlocal state
    now=at+timedelta(seconds=second);sample=tick(now,second,price=price,held=True)
-   sample['context'].update(orders_complete=True,position_history_complete=True)
+   sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(at-timedelta(days=1)).isoformat(),position_history_through=sample['context']['as_of'])
    if change:sample['context'].update(change)
    r=dict(risk)
    if scope is not None:r['_position_scope']=scope
@@ -79,7 +79,7 @@ class EntryBasis(unittest.TestCase):
   state={};metrics=good_metrics()
   for seconds,price in ((0,'100'),(10,'105'),(20,'104')):
    now=at+timedelta(seconds=seconds);sample=tick(now,seconds,price=price,held=True)
-   sample['context'].update(orders_complete=True,position_history_complete=True)
+   sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(at-timedelta(days=1)).isoformat(),position_history_through=sample['context']['as_of'])
    if seconds==20:sample['context']['orders']=[{'order_id':'not-filled','status':'OPEN','requested_quantity':'1','filled_quantity':'0','side':'BUY'}]
    result,state=calculate(sample,metrics,BASELINE,risk,state,now)
   self.assertEqual(result['position_trailing']['high'],'105')
@@ -89,14 +89,33 @@ class EntryBasis(unittest.TestCase):
   state={};metrics=good_metrics()
   for seconds,price in ((0,'100'),(10,'105'),(311,'100')):
    now=at+timedelta(seconds=seconds);sample=tick(now,seconds,price=price,held=True)
-   sample['context'].update(orders_complete=True,position_history_complete=True)
+   sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(at-timedelta(days=1)).isoformat(),position_history_through=sample['context']['as_of'])
    result,state=calculate(sample,metrics,BASELINE,risk,state,now)
   self.assertIsNone(result['position_trailing']['high'])
   self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
 
+ def test_history_must_cover_whole_observation_interval(self):
+  at=datetime(2026,11,11,15,0,tzinfo=timezone.utc);risk=copy.deepcopy(request()['risk']);risk.update(stop_price=None,_position_scope='same-depot')
+  metrics=good_metrics();state={}
+  for seconds,price in ((0,'100'),(10,'105')):
+   now=at+timedelta(seconds=seconds);sample=tick(now,seconds,price=price,held=True)
+   sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=at.isoformat(),position_history_through=now.isoformat())
+   result,state=calculate(sample,metrics,BASELINE,risk,state,now)
+  self.assertEqual(result['position_trailing']['high'],'105')
+  now=at+timedelta(seconds=20);sample=tick(now,20,price='100',held=True)
+  sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(at+timedelta(seconds=15)).isoformat(),position_history_through=now.isoformat())
+  result,state=calculate(sample,metrics,BASELINE,risk,state,now)
+  self.assertIsNone(result['position_trailing']['high']);self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
+  sample['context']['position_history_through']=(now-timedelta(seconds=1)).isoformat()
+  result,state=calculate(sample,metrics,BASELINE,risk,state,now)
+  self.assertNotIn('position_trailing',state);self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
+  sample['context']['position_history_through']=(now+timedelta(seconds=1)).isoformat()
+  result,state=calculate(sample,metrics,BASELINE,risk,state,now)
+  self.assertNotIn('position_trailing',state);self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
+
  def test_open_orders_and_ambiguous_depot_do_not_prove_fill_history(self):
   at=datetime(2026,11,11,15,0,tzinfo=timezone.utc);metrics=good_metrics();risk=copy.deepcopy(request()['risk']);risk.update(stop_price=None,_position_scope='depot-one')
-  for change,scope in (({'orders_complete':True},'depot-one'),({'orders_complete':True,'position_history_complete':True},None)):
+  for change,scope in (({'orders_complete':True},'depot-one'),({'orders_complete':True,'position_history_complete':True},'depot-one'),({'orders_complete':True,'position_history_complete':True},None)):
    state={};r=dict(risk);r['_position_scope']=scope
    for seconds,price in ((0,'100'),(10,'105'),(20,'100'),(30,'100'),(40,'100')):
     now=at+timedelta(seconds=seconds);sample=tick(now,seconds,price=price,held=True);sample['context'].update(change)
@@ -108,7 +127,7 @@ class EntryBasis(unittest.TestCase):
   at=datetime(2026,11,11,15,0,tzinfo=timezone.utc);metrics=good_metrics();risk=copy.deepcopy(request()['risk']);risk.update(stop_price=None,_position_scope='depot-one');state={}
   for seconds,price in ((0,'150'),(10,'100'),(20,'99'),(30,'99'),(40,'99')):
    now=at+timedelta(seconds=seconds);sample=tick(now,seconds,price=price,held=True)
-   sample['context'].update(orders_complete=True,position_history_complete=True)
+   sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(at-timedelta(days=1)).isoformat(),position_history_through=sample['context']['as_of'])
    result,state=calculate(sample,metrics,BASELINE,risk,state,now)
   self.assertEqual(result['position_trailing']['high'],'100')
   self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
@@ -117,7 +136,7 @@ class EntryBasis(unittest.TestCase):
   at=datetime(2026,11,11,15,0,tzinfo=timezone.utc);metrics=good_metrics();risk=copy.deepcopy(request()['risk']);risk.update(stop_price=None,_position_scope='depot-one');state={}
   for seconds,price,held in ((0,'100',True),(10,'105',True),(20,'100',False),(30,'100',True)):
    now=at+timedelta(seconds=seconds);sample=tick(now,seconds,price=price,held=held)
-   sample['context'].update(orders_complete=True,position_history_complete=True)
+   sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(at-timedelta(days=1)).isoformat(),position_history_through=sample['context']['as_of'])
    result,state=calculate(sample,metrics,BASELINE,risk,state,now)
    if not held:self.assertNotIn('position_trailing',state)
   self.assertIsNone(result['position_trailing']['high'])
@@ -126,10 +145,10 @@ class EntryBasis(unittest.TestCase):
  def test_changed_position_does_not_reuse_old_sell_confirmations(self):
   at=datetime(2026,11,11,15,0,tzinfo=timezone.utc);metrics=good_metrics();risk=copy.deepcopy(request()['risk']);risk.update(stop_price=None,_position_scope='depot-one');state={}
   for seconds,price in ((0,'100'),(10,'105'),(20,'102'),(30,'102')):
-   now=at+timedelta(seconds=seconds);sample=tick(now,seconds,price=price,held=True);sample['context'].update(orders_complete=True,position_history_complete=True)
+   now=at+timedelta(seconds=seconds);sample=tick(now,seconds,price=price,held=True);sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(at-timedelta(days=1)).isoformat(),position_history_through=sample['context']['as_of'])
    result,state=calculate(sample,metrics,BASELINE,risk,state,now)
   self.assertEqual(state['confirmations'],2)
-  now=at+timedelta(seconds=40);sample=tick(now,40,price='102',held=True);sample['context'].update(orders_complete=True,position_history_complete=True,quantity='11')
+  now=at+timedelta(seconds=40);sample=tick(now,40,price='102',held=True);sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(at-timedelta(days=1)).isoformat(),position_history_through=sample['context']['as_of'],quantity='11')
   metrics.update(return_3_pct='-3',breakdown=True)
   result,state=calculate(sample,metrics,BASELINE,risk,state,now)
   self.assertEqual(result['signal'],'WAIT')

@@ -195,6 +195,8 @@ def position_trailing(sample,risk,state,now,new_market_event):
  try:
   if not scope or context['status']!='verified' or context['position']!='held' or context.get('orders_complete') is not True or context.get('position_history_complete') is not True:raise ValueError()
   as_of=stamp(context['as_of']);event_at=stamp(sample['event_time']);age=(now-as_of).total_seconds()
+  covered_from=stamp(context['position_history_from']);covered_through=stamp(context['position_history_through'])
+  if covered_from>as_of or covered_through<as_of or covered_through>now:raise ValueError()
   if not 0<=age<=300 or not 0<=(now-event_at).total_seconds()<=min(risk['max_quote_age_s'],GLOBAL_RISK['max_quote_age_s']) or sample['verification']!='verified' or sample.get('error_code') or sample['market_status'] in ('UNKNOWN','CLOSED','HALTED') or sample['price'] is None or Decimal(sample['price'])<=0 or Decimal(context['quantity'])<=0:raise ValueError()
   if sample.get('source')=='eodhd' and sample.get('price_time_kind')!='trade':raise ValueError()
   orders=context['orders'];ids=[o['order_id'] for o in orders]
@@ -205,7 +207,7 @@ def position_trailing(sample,risk,state,now,new_market_event):
   current={'basis':basis,'as_of':context['as_of'],'high':None,'high_time':None}
   if isinstance(previous,dict) and previous.get('basis')==basis and previous.get('as_of'):
    old=stamp(previous['as_of']);gap=(as_of-old).total_seconds()
-   if 0<=gap<=300 and (now-old).total_seconds()<=300:
+   if 0<=gap<=300 and (now-old).total_seconds()<=300 and covered_from<=old:
     current.update(high=previous.get('high'),high_time=previous.get('high_time'))
     if new_market_event and old<event_at<=as_of:
      price=Decimal(sample['price']);high=Decimal(current['high']) if current['high'] is not None else None

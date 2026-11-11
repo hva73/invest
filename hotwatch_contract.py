@@ -23,6 +23,7 @@ CONTEXT['properties']['orders_complete']={'type':'boolean'}
 # Stronger than a complete list of open orders: the trusted adapter must have
 # accounted for all fills affecting this scoped position over the observation.
 CONTEXT['properties']['position_history_complete']={'type':'boolean'}
+CONTEXT['properties'].update({'position_history_from':AT,'position_history_through':AT})
 CONTEXT['properties']['diagnostic']=nullable(string(100))
 # Pluto get_asset type evidence is optional and distinct from sender claims.
 CONTEXT['properties'].update({'instrument_type':nullable(string(100)),'instrument_type_at':TIME})

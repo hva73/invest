@@ -80,10 +80,10 @@ class ReviewFixes(unittest.TestCase):
   with app.connect() as c:
    req=copy.deepcopy(self.req);req['risk']['stop_price']=None;req['portfolio_ids']=[1];c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
   for offset,price,expected in [(0,'100','WAIT'),(10,'100','WAIT'),(20,'94','WAIT'),(30,'94','WAIT'),(40,'94','SELL')]:
-   sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True)
+   sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(self.at-timedelta(days=1)).isoformat(),position_history_through=sample['context']['as_of'])
    r=self.ingest(sample,self.at+timedelta(seconds=offset))['calculation'];self.assertEqual(r['signal'],expected)
   self.assertEqual(self.view(40)['signal'],'SELL')
-  sample=self.sample('100',50);sample['context'].update(orders_complete=True,position_history_complete=True)
+  sample=self.sample('100',50);sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(self.at-timedelta(days=1)).isoformat(),position_history_through=sample['context']['as_of'])
   r=self.ingest(sample,self.at+timedelta(seconds=50))['calculation'];self.assertEqual(r['signal'],'WAIT')
   a=self.view(50)['last_action_signal'];self.assertEqual(a['state'],'WITHDRAWN');self.assertIn('Kursen',a['reason']);self.assertIsNone(a['acknowledged_at'])
   import web_push
@@ -92,7 +92,7 @@ class ReviewFixes(unittest.TestCase):
   with app.connect() as c:
    req=copy.deepcopy(self.req);req['risk']['stop_price']=None;req['portfolio_ids']=[1];c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
   def put(price,offset):
-   sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True)
+   sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(self.at-timedelta(days=1)).isoformat(),position_history_through=sample['context']['as_of'])
    return self.ingest(sample,self.at+timedelta(seconds=offset))
   for offset,price in ((0,'100'),(10,'100'),(20,'94'),(30,'94'),(40,'94')):put(price,offset)
   for offset,price in ((50,'93.999'),(60,'93.998'),(70,'93.997')):put(price,offset)
@@ -105,7 +105,7 @@ class ReviewFixes(unittest.TestCase):
   with app.connect() as c:
    req=copy.deepcopy(self.req);req['risk']['stop_price']=None;req['portfolio_ids']=[1];c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
   for offset,price in ((0,'100'),(10,'100'),(20,'94'),(30,'94'),(40,'94')):
-   sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True)
+   sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(self.at-timedelta(days=1)).isoformat(),position_history_through=sample['context']['as_of'])
    result=self.ingest(sample,self.at+timedelta(seconds=offset))['calculation']
   self.assertEqual(result['signal'],'SELL');self.assertEqual(self.view(40)['last_action_signal']['state'],'ACTIVE')
   now=self.at+timedelta(seconds=50);context=copy.deepcopy(sample['context']);context.update(as_of=now.isoformat(),quantity='9')
@@ -113,11 +113,24 @@ class ReviewFixes(unittest.TestCase):
   view=self.view(50);self.assertEqual(view['signal'],'NO_DATA');self.assertEqual(view['last_action_signal']['state'],'DATA_MISSING')
   import web_push
   with app.connect() as c:self.assertIsNone(web_push._actionable(c,engine.row_for(c,1,self.req['watch_id'],True),now))
+ def test_unchanged_context_refresh_preserves_verified_trailing(self):
+  with app.connect() as c:
+   req=copy.deepcopy(self.req);req['risk']['stop_price']=None;req['portfolio_ids']=[1];c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
+  for offset,price in ((0,'100'),(10,'100'),(20,'94'),(30,'94'),(40,'94')):
+   sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(self.at-timedelta(days=1)).isoformat(),position_history_through=sample['context']['as_of'])
+   result=self.ingest(sample,self.at+timedelta(seconds=offset))['calculation']
+  self.assertEqual(result['signal'],'SELL')
+  now=self.at+timedelta(seconds=45);context=copy.deepcopy(sample['context']);context.update(as_of=now.isoformat(),position_history_through=now.isoformat())
+  engine.observe_context(app.connect,1,self.req['watch_id'],True,context,now,broker_source='pluto')
+  self.assertEqual(self.view(45)['signal'],'SELL')
+  now=self.at+timedelta(seconds=50);context['as_of']=now.isoformat() # coverage stops at 45
+  engine.observe_context(app.connect,1,self.req['watch_id'],True,context,now,broker_source='pluto')
+  self.assertEqual(self.view(50)['signal'],'NO_DATA')
  def test_context_only_position_change_clears_pending_exit_confirmations(self):
   with app.connect() as c:
    req=copy.deepcopy(self.req);req['risk']['stop_price']=None;req['portfolio_ids']=[1];c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
   for offset,price in ((0,'100'),(10,'100'),(20,'94'),(30,'94')):
-   sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True)
+   sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(self.at-timedelta(days=1)).isoformat(),position_history_through=sample['context']['as_of'])
    self.ingest(sample,self.at+timedelta(seconds=offset))
   with app.connect() as c:
    state=json.loads(engine.row_for(c,1,self.req['watch_id'],True)['state']);self.assertEqual(state['confirmations'],2)
@@ -178,7 +191,7 @@ class ReviewFixes(unittest.TestCase):
     # Fresh independent session for each scope; no actual depot access occurs.
     req['watch_id']='scope-'+str(len(portfolio_ids));req['purpose']='synthetic scope '+str(len(portfolio_ids));engine.create(app.connect,1,req,self.at)
     for offset,price in ((0,'100'),(10,'100'),(20,'94'),(30,'94'),(40,'94')):
-     sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True)
+     sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True,position_history_from=(self.at-timedelta(days=1)).isoformat(),position_history_through=sample['context']['as_of'])
      now=self.at+timedelta(seconds=offset);result=engine.ingest(app.connect,1,req['watch_id'],True,sample,now,include_session=False)['calculation']
     self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
     self.assertEqual(result['position_trailing']['status'],'WAITING_FOR_VERIFIED_POSITION_HISTORY')
