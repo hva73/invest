@@ -3,8 +3,9 @@ import json
 import os
 import subprocess
 
-# cPanel documents --user as mandatory. Live access remains unverified.
-COMMAND = ['/usr/local/cpanel/bin/cpapi2', '--user=nordicr4', '--output=json',
+# The process already runs as nordicr4: --user triggers a root-only setuid.
+# The no-user variant also failed on this host; quota remains unverified.
+COMMAND = ['/usr/local/cpanel/bin/cpapi2', '--output=json',
            'DiskUsage', 'fetchdiskusagewithextras']
 
 
