@@ -72,6 +72,18 @@ class AdapterIntegration(unittest.TestCase):
         with sqlite3.connect(str(Path(result.backup) / 'escape.db')) as db:
             self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
 
+    def test_failed_backup_verification_prevents_any_code_replacement(self):
+        adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
+                                   lambda: True, lambda sha: True, self.service)
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')), \
+             patch.object(adapter, 'verify_backup', side_effect=ValueError('invalid_backup')):
+            release = nordicway_release_stage.stage(self.checkout, self.app, self.sha,
+                                                    approved_sha=self.sha)
+            with self.assertRaisesRegex(ValueError, 'invalid_backup'):
+                adapter.backup_and_apply(release)
+        self.assertEqual((self.app / 'app.py').read_text(), 'old')
+        self.assertEqual((self.app / 'BUILD_COMMIT').read_text().strip(), '0' * 40)
+
     def test_uapi_reader_feeds_real_deploy_sequence(self):
         import io, json
         from types import SimpleNamespace
