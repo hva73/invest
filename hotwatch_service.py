@@ -1030,7 +1030,7 @@ def admin_diagnostics(connect,uid,now=None):
     ws=metrics.get('websocket') or []
     if not isinstance(ws,list):ws=[]
     clean['websocket_ms']=round(sum(x.get('wait_ms',0) for x in ws if isinstance(x,dict) and isinstance(x.get('wait_ms'),(int,float)) and not isinstance(x.get('wait_ms'),bool) and math.isfinite(x['wait_ms']) and 0<=x['wait_ms']<=60000),3)
-    clean['websocket']=[{k:x[k] for k in ('feed','status','wait_ms','source_age_s','received_age_s','connections_opened','subscriptions_sent','cache_hit') if k in x and (isinstance(x[k],bool) or isinstance(x[k],(int,float)) and math.isfinite(x[k]) and abs(x[k])<=86400000 or isinstance(x[k],str) and re.fullmatch(r'[A-Za-z0-9_]{1,40}',x[k]))} for x in ws[:10] if isinstance(x,dict)]
+    clean['websocket']=[{k:x[k] for k in ('feed','status','wait_ms','source_age_s','received_age_s','connections_opened','subscriptions_sent','cache_hit','batch_valid_count','batch_partial_count','batch_limit_reached') if k in x and (isinstance(x[k],bool) or isinstance(x[k],(int,float)) and math.isfinite(x[k]) and abs(x[k])<=86400000 or isinstance(x[k],str) and re.fullmatch(r'[A-Za-z0-9_]{1,40}',x[k]))} for x in ws[:10] if isinstance(x,dict)]
     conflict=metrics.get('market_conflict')
     if isinstance(conflict,dict):
      fields=[x for x in (conflict.get('fields') or []) if isinstance(x,str) and x in ('price','bid','ask','volume','open','high','low','close')]
