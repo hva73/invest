@@ -33,6 +33,18 @@ class ProbeTests(unittest.TestCase):
         self.assertEqual(p.probe('a' * 40, opener), {'status':'api_rejected'})
         self.assertEqual(p.probe('bad\n', opener), {'status':'invalid_credential'})
 
+    def test_untrusted_values_are_classified_not_exposed(self):
+        payload = {'status':1, 'data':[{'id':'diskusage', 'units':'private-value',
+                   '_count':'secret-value', '_max':'1024', 'count':'7.5 GB', 'max':'10 GB'}]}
+        opener = Mock(); opener.open.return_value = Response(json.dumps(payload).encode())
+        result = p.probe('a' * 40, opener)
+        self.assertEqual(result['shapes']['_count'], 'other')
+        self.assertEqual(result['shapes']['_max'], 'number')
+        self.assertEqual(result['shapes']['count'], 'number_with_unit')
+        self.assertEqual(result['unit'], 'other')
+        self.assertNotIn('secret-value', str(result))
+        self.assertNotIn('private-value', str(result))
+
     def test_direct_envelope_and_id_are_supported(self):
         payload = {'status':1, 'data':[{'id':'diskusage', 'units':'MB'}]}
         opener = Mock(); opener.open.return_value = Response(json.dumps(payload).encode())
