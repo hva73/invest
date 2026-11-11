@@ -13,11 +13,11 @@ try:
   for width in (320,390,768,1280):
    page=browser.new_page(viewport={'width':width,'height':844});requests=[];errors=[]
    page.on('request',lambda r:requests.append(r.url));page.on('pageerror',lambda e:errors.append(str(e)))
-   page.goto(f'http://127.0.0.1:{server.server_port}/');expect(page.locator('#login')).to_be_visible()
+   page.goto(f'http://127.0.0.1:{server.server_port}/');expect(page.locator('#login')).to_be_visible();expect(page.locator('aside nav')).to_be_hidden()
    shot=os.environ.get('ESCAPE_SCREENSHOTS')
    if shot and width in (320,390):page.screenshot(path=f'{shot}/demo-welcome-{width}.png')
    page.get_by_role('link',name='Prøv ESCAPE med demodata').click();expect(page.locator('.demo-banner')).to_be_visible()
-   expect(page.locator('.dashboard-v1')).to_be_visible();expect(page.locator('.dash-chart-svg')).to_be_visible();requests.clear()
+   expect(page.locator('.dashboard-v1')).to_be_visible();expect(page.locator('aside nav')).to_be_visible();expect(page.locator('.dash-chart-svg')).to_be_visible();requests.clear()
    if shot and width in (320,390):page.screenshot(path=f'{shot}/demo-overview-{width}.png')
    row=page.get_by_role('button',name='Åbn position TSLA i Demodepot');row.click()
    dialog=page.locator('#dashboard-detail');expect(dialog).to_be_visible();dialog.locator('[data-market-period=week]').click()
