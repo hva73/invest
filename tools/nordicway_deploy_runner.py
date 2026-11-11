@@ -184,7 +184,7 @@ def run(sha, token, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
         # Paths, tokens and exception details are deliberately not returned.
         return {'operation': 'deploy', 'status': result.status, 'stage': result.stage,
                 'service_restored': result.service_restored,
-                'recovery_required': marker.exists()}
+                'recovery_required': marker.exists(), 'backup_cleanup': result.backup_cleanup}
     except Exception:
         # Uncertainty is not proof that no production change occurred.
         if not sequence_started:
@@ -194,7 +194,8 @@ def run(sha, token, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
             except OSError:
                 pass
         return {'operation': 'deploy', 'status': 'failed', 'stage': 'runner',
-                'service_restored': False, 'recovery_required': sequence_started or marker.exists()}
+                'service_restored': False, 'recovery_required': sequence_started or marker.exists(),
+                'backup_cleanup': 'not_run'}
 
 
 def run_request(sha, stream):
@@ -269,8 +270,13 @@ def resume(sha, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
                     raise ValueError('health_unverified')
             else:
                 raise ValueError('service_state_unknown')
+            try:
+                adapter.cleanup_backup(backup)
+                cleanup = 'ok'
+            except Exception:
+                cleanup = 'failed'
             marker.unlink()
             _sync_dir(bridge)
-        return {'operation': 'resume', 'status': 'ok', 'recovery_required': False}
+        return {'operation': 'resume', 'status': 'ok', 'recovery_required': False, 'backup_cleanup': cleanup}
     except Exception:
-        return {'operation': 'resume', 'status': 'failed', 'recovery_required': True}
+        return {'operation': 'resume', 'status': 'failed', 'recovery_required': True, 'backup_cleanup': 'not_run'}

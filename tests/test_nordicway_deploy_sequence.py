@@ -39,6 +39,7 @@ class Adapter:
     def verify_installed(self, sha): return self._step('verify_install')
     def start_service(self): return self._step('start')
     def verify_health(self, sha): return self._step('health')
+    def cleanup_backup(self, backup): return self._step('cleanup')
 
 
 class SequenceTests(unittest.TestCase):
@@ -47,7 +48,13 @@ class SequenceTests(unittest.TestCase):
         self.assertEqual(seq.deploy(a, 'a' * 40).status, 'ok')
         self.assertEqual(a.events, ['lock', 'authorize', 'preflight', 'quota', 'stage',
                         'status', 'stop', 'drain', 'backup_and_apply', 'verify_backup',
-                        'verify_install', 'start', 'health', 'unlock'])
+                        'verify_install', 'start', 'health', 'cleanup', 'unlock'])
+
+    def test_cleanup_failure_reports_warning_after_successful_health(self):
+        a = Adapter(fail='cleanup')
+        result = seq.deploy(a, 'a' * 40)
+        self.assertEqual((result.status, result.stage, result.backup_cleanup), ('ok', 'complete', 'failed'))
+        self.assertLess(a.events.index('health'), a.events.index('cleanup'))
 
     def test_missing_quota_never_stops_service(self):
         a = Adapter(fail='quota')

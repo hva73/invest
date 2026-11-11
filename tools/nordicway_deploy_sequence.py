@@ -16,6 +16,7 @@ class Outcome:
     stage: str
     service_restored: bool
     backup: str | None = None
+    backup_cleanup: str = 'not_run'
 
 
 def deploy(adapter, sha):
@@ -67,7 +68,16 @@ def deploy(adapter, sha):
                     adapter.start_service()
                     stage = 'health'
                     adapter.verify_health(sha)
-                return Outcome('ok' if was_running else 'updated_stopped', 'complete', was_running, str(backup))
+                # Keep the earlier backup through verified restart. Retention
+                # is outside the SQLite lock and cannot turn a successful
+                # release into a misleading deploy failure.
+                try:
+                    adapter.cleanup_backup(backup)
+                    cleanup = 'ok'
+                except Exception:
+                    cleanup = 'failed'
+                return Outcome('ok' if was_running else 'updated_stopped', 'complete',
+                               was_running, str(backup), cleanup)
             except Exception as exc:
                 # Keep the deployment lock held until recovery finishes.
                 restored = False

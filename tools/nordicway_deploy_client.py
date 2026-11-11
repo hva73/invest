@@ -50,20 +50,28 @@ def run(env=None, transport=_run_limited):
                 raise ValueError('invalid_reply')
             return reply
         if operation == 'resume':
-            if (not isinstance(reply, dict) or set(reply) != {'operation', 'status', 'recovery_required'}
+            if (not isinstance(reply, dict) or set(reply) not in ({'operation', 'status', 'recovery_required'},
+                    {'operation', 'status', 'recovery_required', 'backup_cleanup'})
                     or reply['operation'] != 'resume' or reply['status'] not in ('ok', 'failed')
                     or type(reply['recovery_required']) is not bool
+                    or ('backup_cleanup' in reply and reply['backup_cleanup'] not in ('ok', 'failed', 'not_run'))
                     or (reply['status'] == 'ok' and (result.returncode != 0 or reply['recovery_required']))):
                 raise ValueError('invalid_reply')
+            # Older bridge versions have no retention status. Never imply
+            # that backup cleanup ran when a legacy reply omits the field.
+            reply.setdefault('backup_cleanup', 'unknown')
             return reply
-        if (not isinstance(reply, dict) or set(reply) != {'operation', 'status', 'stage',
-                'service_restored', 'recovery_required'} or reply['operation'] != 'deploy'
+        expected = {'operation', 'status', 'stage', 'service_restored', 'recovery_required'}
+        if (not isinstance(reply, dict) or set(reply) not in (expected, expected | {'backup_cleanup'})
+                or ('backup_cleanup' in reply and reply['backup_cleanup'] not in ('ok', 'failed', 'not_run'))
+                or reply['operation'] != 'deploy'
                 or reply['status'] not in ('ok', 'failed', 'updated_stopped')
                 or reply['stage'] not in STAGES or type(reply['service_restored']) is not bool
                 or type(reply['recovery_required']) is not bool
                 or (reply['status'] == 'ok' and (result.returncode != 0
                     or reply['stage'] != 'complete' or reply['recovery_required']))):
             raise ValueError('invalid_reply')
+        reply.setdefault('backup_cleanup', 'unknown')
         return reply
     except (OSError, ValueError, TypeError, subprocess.SubprocessError):
         # The remote process may have continued after a lost SSH connection.

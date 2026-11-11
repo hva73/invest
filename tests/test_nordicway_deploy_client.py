@@ -13,7 +13,7 @@ class ClientTests(unittest.TestCase):
                     'ESCAPE_DEPLOY_AUTHORIZED': '1', 'SSH_AUTH_SOCK': '/tmp/agent',
                     'NORDICWAY_KNOWN_HOST': 'hostkey', 'NORDICWAY_VERIFIED_FINGERPRINT': 'fingerprint'}
         self.reply = {'operation': 'deploy', 'status': 'ok', 'stage': 'complete',
-                      'service_restored': True, 'recovery_required': False}
+                      'service_restored': True, 'recovery_required': False, 'backup_cleanup': 'ok'}
 
     def test_fixed_command_and_secret_on_stdin(self):
         send = Mock(return_value=SimpleNamespace(returncode=0, stdout=json.dumps(self.reply).encode()))
@@ -25,6 +25,27 @@ class ClientTests(unittest.TestCase):
         self.assertNotIn(self.env['ESCAPE_CPANEL_API_TOKEN'], repr(args))
         self.assertEqual(json.loads(kwargs['input']), {'cpanel_token': self.env['ESCAPE_CPANEL_API_TOKEN']})
 
+    def test_cleanup_warning_is_reported_without_mislabeling_release(self):
+        self.reply['backup_cleanup'] = 'failed'
+        send = Mock(return_value=SimpleNamespace(returncode=0, stdout=json.dumps(self.reply).encode()))
+        with patch.object(client, 'verify', return_value='host key\n'):
+            result = client.run(self.env, send)
+        self.assertEqual((result['status'], result['backup_cleanup']), ('ok', 'failed'))
+
+    def test_unknown_cleanup_status_is_rejected(self):
+        self.reply['backup_cleanup'] = 'unknown-value'
+        send = Mock(return_value=SimpleNamespace(returncode=0, stdout=json.dumps(self.reply).encode()))
+        with patch.object(client, 'verify', return_value='host key\n'):
+            result = client.run(self.env, send)
+        self.assertEqual(result['status'], 'unknown')
+
+    def test_legacy_reply_marks_cleanup_unknown(self):
+        del self.reply['backup_cleanup']
+        send = Mock(return_value=SimpleNamespace(returncode=0, stdout=json.dumps(self.reply).encode()))
+        with patch.object(client, 'verify', return_value='host key\n'):
+            result = client.run(self.env, send)
+        self.assertEqual(result['backup_cleanup'], 'unknown')
+
     def test_invalid_sha_never_connects(self):
         transport = Mock()
         self.env['ESCAPE_RELEASE_SHA'] = 'a' * 40 + ';id'
@@ -34,7 +55,7 @@ class ClientTests(unittest.TestCase):
     def test_resume_has_no_token_or_arbitrary_command(self):
         self.env['ESCAPE_DEPLOY_OPERATION'] = 'resume'
         self.env.pop('ESCAPE_CPANEL_API_TOKEN')
-        reply = {'operation': 'resume', 'status': 'ok', 'recovery_required': False}
+        reply = {'operation': 'resume', 'status': 'ok', 'recovery_required': False, 'backup_cleanup': 'ok'}
         send = Mock(return_value=SimpleNamespace(returncode=0, stdout=json.dumps(reply).encode()))
         with patch.object(client, 'verify', return_value='host key\n'):
             self.assertEqual(client.run(self.env, send), reply)

@@ -240,41 +240,54 @@ class AdapterIntegration(unittest.TestCase):
         self.assertEqual((self.app / 'BUILD_COMMIT').read_text().strip(), '0' * 40)
         self.assertTrue(prior.exists())
 
-    def test_verified_new_backup_removes_previous_before_code_change(self):
+    def test_verified_new_backup_removes_previous_after_health_and_lock_release(self):
+        import nordicway_release_backup
         prior = self.root / '.escape_backups' / '20200101-000000-old'
         prior.mkdir(parents=True)
+        def health(sha):
+            self.assertTrue(prior.exists())
+            with sqlite3.connect(self.app / 'var' / 'escape.db', timeout=0) as db:
+                db.execute('BEGIN IMMEDIATE')
+                db.rollback()
+            return True
         adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
-                                   lambda: True, lambda sha: True, self.service)
-        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')):
-            release = nordicway_release_stage.stage(self.checkout, self.app, self.sha,
-                                                    approved_sha=self.sha)
-            replace = os.replace
-            def check_before_replace(source, destination):
-                if Path(destination) == self.app / 'app.py':
-                    self.assertFalse(prior.exists())
-                    snapshots = list((self.root / '.escape_backups').iterdir())
-                    self.assertEqual(len(snapshots), 1)
-                    self.assertTrue((snapshots[0] / 'escape.db').is_file())
-                return replace(source, destination)
-            with patch.object(os, 'replace', side_effect=check_before_replace):
-                backup = adapter.backup_and_apply(release)
+                                   lambda: True, health, self.service,
+                                   quota_reader=lambda path, required: {
+                                       'required_bytes': required,
+                                       'account_free_lower_bytes': required + 1,
+                                       'filesystem_free_bytes': required + 1})
+        cleanup = nordicway_release_backup.remove_older_backups
+        def cleanup_without_db_lock(root, backup):
+            self.assertEqual(self.service.state, 'started')
+            with sqlite3.connect(self.app / 'var' / 'escape.db', timeout=0) as db:
+                db.execute('BEGIN IMMEDIATE')
+                db.rollback()
+            return cleanup(root, backup)
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')), \
+             patch.object(nordicway_release_backup, 'remove_older_backups', side_effect=cleanup_without_db_lock):
+            result = sequence.deploy(adapter, self.sha)
+        self.assertEqual((result.status, result.backup_cleanup), ('ok', 'ok'))
+        backup = Path(result.backup)
         self.assertFalse(prior.exists())
         self.assertTrue((backup / 'escape.db').is_file())
         with sqlite3.connect(backup / 'escape.db') as db:
             self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
 
-    def test_retention_failure_stops_before_file_change_and_keeps_new_backup(self):
+    def test_retention_failure_reports_warning_but_keeps_running_release_and_backups(self):
         prior = self.root / '.escape_backups' / '20200101-000000-old'
         prior.mkdir(parents=True)
         adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
-                                   lambda: True, lambda sha: True, self.service)
+                                   lambda: True, lambda sha: True, self.service,
+                                   quota_reader=lambda path, required: {
+                                       'required_bytes': required,
+                                       'account_free_lower_bytes': required + 1,
+                                       'filesystem_free_bytes': required + 1})
         with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')):
-            release = nordicway_release_stage.stage(self.checkout, self.app, self.sha,
-                                                    approved_sha=self.sha)
-            with patch('nordicway_release_backup.shutil.rmtree', side_effect=OSError('denied')):
-                with self.assertRaises(sequence.BackupVerificationFailure):
-                    adapter.backup_and_apply(release)
-        self.assertEqual((self.app / 'app.py').read_text(), 'old')
+            with patch('nordicway_release_backup.remove_older_backups', side_effect=OSError('denied')):
+                result = sequence.deploy(adapter, self.sha)
+        self.assertEqual((result.status, result.backup_cleanup), ('ok', 'failed'))
+        self.assertEqual(self.service.state, 'started')
+        self.assertEqual((self.app / 'app.py').read_text(), 'new')
         self.assertTrue(prior.exists())
         self.assertEqual(len(list((self.root / '.escape_backups').iterdir())), 2)
 
