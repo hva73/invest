@@ -432,7 +432,8 @@ body.pull-refresh-visible #refresh-status{display:none}
  .dash-holdings .dash-action{grid-column:2;grid-row:4;text-align:right!important}
  .dash-holdings .dash-price,.dash-holdings .dash-since{display:none}
  .dash-holdings .dash-instrument button{min-height:44px}
- body > aside nav:has(.mobile-more-panel .active) > #mobile-more{color:#91ecd6;background:#1c4c4375}
  #dashboard-detail .market-slot{border-radius:18px}
  #dashboard-detail .market-plot svg{height:clamp(180px,48vw,260px)}
 }
+
+@media (max-width:900px){body > aside nav:has(.mobile-more-panel .active) > #mobile-more{color:#91ecd6;background:#1c4c4375}}
