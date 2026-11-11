@@ -347,3 +347,17 @@ async function loadAdminDiagnostics(){
 }
 function exportAdminDiagnostics(){if(!diagnosticsData||diagnosticsOwner!==state?.user?.username||state?.user?.role!=='admin'||view!=='diagnostics')return;const url=URL.createObjectURL(new Blob([JSON.stringify(diagnosticsData,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='escape-driftslog.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 setInterval(()=>{if(view==='diagnostics'&&!document.hidden)loadAdminDiagnostics()},15000);
+
+// The mobile menu uses the existing navigation buttons and routing.
+(function(){
+ const more=document.getElementById('mobile-more'), panel=document.getElementById('mobile-more-panel');
+ const actions=document.querySelector('main > header .header-actions'), header=actions?.parentElement;
+ const mobile=window.matchMedia('(max-width: 900px)');
+ function placeActions(){if(actions&&header)(mobile.matches?panel:header).append(actions)}
+ placeActions();mobile.addEventListener('change',placeActions);
+ function setOpen(open){more.setAttribute('aria-expanded',String(open));panel.classList.toggle('is-open',open)}
+ more.addEventListener('click',()=>setOpen(more.getAttribute('aria-expanded')!=='true'));
+ document.addEventListener('click',e=>{if(!e.target.closest('nav') || e.target.closest('nav [data-view], nav .header-actions button'))setOpen(false)});
+ window.matchMedia('(min-width: 901px)').addEventListener('change',e=>{if(e.matches)setOpen(false)});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&more.getAttribute('aria-expanded')==='true'){setOpen(false);more.focus()}});
+})();
