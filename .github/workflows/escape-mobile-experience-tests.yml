@@ -33,5 +33,6 @@ jobs:
           node tests/test_holding_chart_marker.cjs
           python tests/browser_mobile_layout.py
           python tests/browser_mobile_review.py
+          python tests/browser_mobile_navigation_app.py
           python tests/browser_asset_trade.py
           python tests/browser_quick_trade.py
