@@ -263,6 +263,21 @@ class AdapterIntegration(unittest.TestCase):
         with sqlite3.connect(backup / 'escape.db') as db:
             self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
 
+    def test_retention_failure_stops_before_file_change_and_keeps_new_backup(self):
+        prior = self.root / '.escape_backups' / '20200101-000000-old'
+        prior.mkdir(parents=True)
+        adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
+                                   lambda: True, lambda sha: True, self.service)
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')):
+            release = nordicway_release_stage.stage(self.checkout, self.app, self.sha,
+                                                    approved_sha=self.sha)
+            with patch('nordicway_release_backup.shutil.rmtree', side_effect=OSError('denied')):
+                with self.assertRaises(sequence.BackupVerificationFailure):
+                    adapter.backup_and_apply(release)
+        self.assertEqual((self.app / 'app.py').read_text(), 'old')
+        self.assertTrue(prior.exists())
+        self.assertEqual(len(list((self.root / '.escape_backups').iterdir())), 2)
+
     def test_failed_prewrite_backup_restarts_unchanged_service(self):
         adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
                                    lambda: True, lambda sha: True, self.service,
