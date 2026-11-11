@@ -24,12 +24,12 @@ class ExitCurrentness(unittest.TestCase):
   now=at+timedelta(seconds=20);sample=tick(now,20,price='100',held=True);sample['context']['quantity']='11'
   result,state=calculate(sample,metrics,BASELINE,risk,state,now)
   self.assertEqual(result['signal'],'WAIT');self.assertEqual(state['confirmations'],1)
- def test_existing_trailing_and_critical_stop_remain_independent(self):
+ def test_unverified_trailing_does_not_suppress_critical_stop(self):
   at=datetime(2026,11,11,15,tzinfo=timezone.utc);metrics=good_metrics();metrics['distance_high_pct']='-3'
   risk=copy.deepcopy(request()['risk']);risk['stop_price']=None;state={}
   for seconds in (0,10,20):
    now=at+timedelta(seconds=seconds);result,state=calculate(tick(now,seconds,held=True),metrics,BASELINE,risk,state,now)
-  self.assertEqual(result['signal'],'SELL');self.assertIn('TRAILING_EXIT',result['reason_codes'])
+  self.assertNotEqual(result['signal'],'SELL');self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
   now=at+timedelta(seconds=30);risk['stop_price']='101';sample=tick(now,30,held=True);sample['context']['quantity']='11'
   result,_=calculate(sample,metrics,BASELINE,risk,state,now)
   self.assertEqual(result['signal'],'SELL');self.assertIn('STOP_BREACHED',result['reason_codes'])

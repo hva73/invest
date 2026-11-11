@@ -230,6 +230,46 @@ class Push(unittest.TestCase):
   recovery={'signal':'WAIT','reason_codes':['NO_TRIGGER'],'new_market_observation':True,'position_context':{'position':'held'},'risk_level':'normal','risk_parameters':{'stop_price':'10'}}
   with app.connect() as c:c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],(self.now+timedelta(seconds=1)).isoformat(),json.dumps(recovery),'x'))
   critical(2);self.assertEqual(len(sent),2)
+ def test_new_verified_position_basis_rearms_exit_without_duplicate_pushes(self):
+  with app.connect() as c:
+   engine.event(c,self.watch,'SELL_SIGNAL',self.now,'first cycle')
+   event=c.execute("SELECT event_id FROM hw_events WHERE watch_row_id=? AND event_type='SELL_SIGNAL' ORDER BY id DESC LIMIT 1",(self.watch['id'],)).fetchone()['event_id']
+   def calc(at,basis):
+    result={'signal':'WAIT','reason_codes':['CONFIRMATION_PENDING'],'new_market_observation':True,'position_trailing':{'status':'VERIFIED','basis':basis},'position_context':{'position':'held','status':'verified','as_of':at.isoformat()}}
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps(result),'x'))
+   calc(self.now,'cycle-one');calc(self.now+timedelta(seconds=1),'cycle-one')
+   self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+   calc(self.now+timedelta(seconds=2),'cycle-two')
+   self.assertTrue(web_push._exit_rearmed(c,self.watch['id'],event))
+ def test_new_evidence_alone_does_not_prove_a_new_exit_episode(self):
+  with app.connect() as c:
+   engine.event(c,self.watch,'SELL_SIGNAL',self.now,'first exit with no verified cycle')
+   event=c.execute("SELECT event_id FROM hw_events WHERE watch_row_id=? AND event_type='SELL_SIGNAL' ORDER BY id DESC LIMIT 1",(self.watch['id'],)).fetchone()['event_id']
+   original={'signal':'SELL','reason_codes':['STOP_BREACHED'],'position_trailing':None}
+   current={'signal':'WAIT','reason_codes':['CONFIRMATION_PENDING'],'new_market_observation':True,'position_trailing':{'status':'VERIFIED','basis':'same-position-possibly'}}
+   for at,payload in ((self.now,original),(self.now+timedelta(seconds=1),current)):
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps(payload),'x'))
+   self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+ def test_unverified_previous_trailing_basis_does_not_rearm(self):
+  with app.connect() as c:
+   engine.event(c,self.watch,'SELL_SIGNAL',self.now,'exit without verified trailing')
+   event=c.execute("SELECT event_id FROM hw_events WHERE watch_row_id=? AND event_type='SELL_SIGNAL' ORDER BY id DESC LIMIT 1",(self.watch['id'],)).fetchone()['event_id']
+   prior={'position_trailing':{'status':'WAITING_FOR_VERIFIED_POSITION_HISTORY','basis':'unproven'}}
+   at=self.now+timedelta(seconds=1)
+   current={'signal':'WAIT','reason_codes':['CONFIRMATION_PENDING'],'new_market_observation':True,'position_trailing':{'status':'VERIFIED','basis':'verified'},'position_context':{'position':'held','status':'verified','as_of':at.isoformat()}}
+   for when,payload in ((self.now,prior),(at,current)):
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],when.isoformat(),json.dumps(payload),'x'))
+   self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+ def test_changed_verified_exposure_rearms_exit_without_complete_fill_history(self):
+  with app.connect() as c:
+   engine.event(c,self.watch,'SELL_SIGNAL',self.now,'previous exposure')
+   event=c.execute("SELECT event_id FROM hw_events WHERE watch_row_id=? AND event_type='SELL_SIGNAL' ORDER BY id DESC LIMIT 1",(self.watch['id'],)).fetchone()['event_id']
+   def calc(offset,key,status='verified'):
+    payload={'signal':'WAIT','reason_codes':['CONFIRMATION_PENDING'],'new_market_observation':True,'exit_context_key':key,'position_context':{'position':'held','status':status,'as_of':(self.now+timedelta(seconds=offset)).isoformat()},'risk_level':'normal'}
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],(self.now+timedelta(seconds=offset)).isoformat(),json.dumps(payload),'x'))
+   calc(0,'exposure-one');calc(1,'exposure-one');self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+   calc(2,'exposure-two','unknown');self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+   calc(3,'exposure-two');self.assertTrue(web_push._exit_rearmed(c,self.watch['id'],event))
  def test_critical_stop_is_reported_when_data_is_temporarily_unavailable(self):
   self.subscribe();sent=[];self.event('SELL_SIGNAL')
   with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))

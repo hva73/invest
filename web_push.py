@@ -177,6 +177,8 @@ def _exit_rearmed(c,watch_id,event_key,through=None):
     first=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? AND calculated=? ORDER BY id DESC LIMIT 1',(watch_id,event['created'])).fetchone()
     try:prior_result=json.loads(first['payload']) if first else {};prior_key=prior_result.get('exit_context_key')
     except (ValueError,TypeError,AttributeError):prior_result={};prior_key=None
+    prior_trailing=prior_result.get('position_trailing') or {}
+    prior_basis=prior_trailing.get('basis') if prior_trailing.get('status')=='VERIFIED' else None
     from hotwatch_contract import stamp
     closed=[]
     def remember_closed(context,observed):
@@ -200,6 +202,8 @@ def _exit_rearmed(c,watch_id,event_key,through=None):
             if result.get('new_market_observation') is True and context.get('status')=='verified' and context.get('position')=='held':
                 as_of=stamp(context['as_of']);calculated=stamp(row['calculated'])
                 if not 0<=(calculated-as_of).total_seconds()<=300:continue
+                trailing=result.get('position_trailing') or {}
+                if trailing.get('status')=='VERIFIED' and prior_basis and trailing.get('basis') and trailing['basis']!=prior_basis:return True
                 if result.get('risk_level')=='normal' and prior_key and current_key and current_key!=prior_key:return True
                 if result.get('risk_level')=='normal' and not prior_key:
                     # Old persisted calculations have no key but may retain a

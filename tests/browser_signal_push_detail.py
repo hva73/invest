@@ -44,9 +44,10 @@ def main():
    d.locator('[data-engine-ack=synthetic-push]').click();expect(d).not_to_be_visible()
    assert acknowledgements==[{'event_id':'hw-'+'a'*24,'is_test':False}],acknowledgements
    session.update(status='DEGRADED',signal='NO_DATA',display_status='DATA FOR GAMLE',data_stale=True,latest_context={})
+   session['latest_calculation']['position_trailing']={'status':'WAITING_FOR_VERIFIED_POSITION_HISTORY'}
    session['data_status']={'price':None,'price_status':'STALE','market_status':'UNKNOWN'}
    page.evaluate("window.EngineUI.openNotification('synthetic-push')")
-   expect(d).to_contain_text('forældet eller er ikke bekræftet');expect(d.locator('[data-trade-watch]')).to_have_count(0)
+   expect(d).to_contain_text('forældet eller er ikke bekræftet');expect(d).to_contain_text('Trailing-exit er ikke aktivt');expect(d.locator('[data-trade-watch]')).to_have_count(0)
    d.locator('[data-engine-close]').first.click();expect(d).not_to_be_visible()
    assert not errors,errors;assert not orders,orders
    browser.close()
