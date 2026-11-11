@@ -421,6 +421,11 @@ body.pull-refresh-visible #refresh-status{display:none}
 
 /* Compact mobile holdings keep the detail and signal controls in the same table. */
 @media (max-width:700px){
+ .dash-holdings .responsive-table tr{margin:0;border:0;border-bottom:1px solid #304653;border-radius:0;background:transparent}
+ .dash-holdings .responsive-table td:first-child{grid-column:1;padding:0;border:0}
+ .dash-holdings .responsive-table td:before{content:none}
+ .dash-holdings .responsive-table td.dash-daily:before{content:'I dag ';display:inline;margin:0;color:#b8c9d3;font-size:10px;letter-spacing:0;text-transform:none}
+ .dash-holdings .responsive-table td.dash-pnl:before{content:'P/L ';display:inline;margin:0;color:#b8c9d3;font-size:10px;letter-spacing:0;text-transform:none}
  .dash-holdings .dash-row{grid-template-columns:minmax(0,1fr) minmax(110px,auto);grid-template-rows:auto auto auto auto;gap:2px 10px;padding:10px 4px;align-items:center}
  .dash-holdings .dash-instrument{grid-column:1;grid-row:1 / 3;min-width:0}
  .dash-holdings .dash-instrument small{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
