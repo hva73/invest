@@ -65,6 +65,18 @@ def dispatch(command, runner=None, recovery=None, probe=None):
     raise ValueError('invalid_operation')
 
 
+def exit_code(result):
+    """Only acknowledge a completed, unblocked deployment as successful."""
+    if result.get('status') == 'ok':
+        return 0
+    if (result.get('operation') == 'deploy'
+            and result.get('status') == 'updated_stopped'
+            and result.get('stage') == 'complete'
+            and result.get('recovery_required') is False):
+        return 0
+    return 1
+
+
 def main():
     try:
         command = os.environ.get('SSH_ORIGINAL_COMMAND', '')
@@ -84,7 +96,7 @@ def main():
     except (ImportError, OSError, ValueError):
         result = {'status': 'failed', 'reason': 'operation_unavailable'}
     print(json.dumps(result, separators=(',', ':'), sort_keys=True))
-    return 0 if result['status'] == 'ok' else 1
+    return exit_code(result)
 
 
 if __name__ == '__main__':

@@ -49,6 +49,26 @@ class GuardTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 guard.dispatch(command, probe=lambda: {'status': 'ok'})
 
+    def test_completed_stopped_release_has_success_exit_code(self):
+        self.assertEqual(guard.exit_code({
+            'operation': 'deploy', 'status': 'updated_stopped',
+            'stage': 'complete', 'recovery_required': False}), 0)
+        # A partial or uncertain install must never be reported as success.
+        for response in (
+            {'operation': 'deploy', 'status': 'updated_stopped',
+             'stage': 'verify_install', 'recovery_required': True},
+            {'operation': 'deploy', 'status': 'updated_stopped',
+             'stage': 'complete', 'recovery_required': True},
+            {'operation': 'deploy', 'status': 'updated_stopped',
+             'stage': 'complete'},
+            {'operation': 'resume', 'status': 'updated_stopped',
+             'stage': 'complete', 'recovery_required': False},
+            {'operation': 'deploy', 'status': 'failed',
+             'stage': 'complete', 'recovery_required': False},
+        ):
+            self.assertEqual(guard.exit_code(response), 1)
+        self.assertEqual(guard.exit_code({'status': 'ok', 'operation': 'ping'}), 0)
+
     def test_ping_and_deploy_blocked(self):
         self.assertEqual(guard.dispatch('escape-deploy-v1 ping')['status'], 'ok')
         self.assertEqual(guard.dispatch('escape-deploy-v1 deploy ' + 'a' * 40)['status'], 'blocked')
