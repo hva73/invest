@@ -33,7 +33,7 @@ try:
             expect(page.locator('.dash-holdings')).to_contain_text('ALFA')
             expect(page.locator('.dash-holdings')).to_contain_text('DELTA')
             page.locator('[data-dashboard-range=week]').click()
-            expect(page.locator('.dash-chart-point')).to_have_count(5)
+            assert page.locator('.dash-chart-point').count() >= 70
             before = page.evaluate('''() => {
               const a = document.querySelector('body > aside').getBoundingClientRect();
               const m = document.querySelector('main').getBoundingClientRect();

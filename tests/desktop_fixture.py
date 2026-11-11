@@ -2,6 +2,7 @@
 from datetime import timedelta
 from decimal import Decimal
 import json
+import math
 
 import app
 import dashboard_projection
@@ -10,10 +11,17 @@ import portfolios
 
 
 def seed(case):
-    for hours, value, result in [(72, '48040.12', '-1020.55'), (48, '48963.26', '-620.18'),
-                                 (24, '48532.17', '-399.46'), (2, '49818.42', '-181.58'),
-                                 (0, '50127.36', '127.36')]:
-        case.save(case.root, value, case.now - timedelta(hours=hours), result=result)
+    # Synthetic snapshots, not instrument quotes: a varied 15-minute history
+    # whose portfolio result stays consistent with the fixed 50,000 DKK cost.
+    anchors = [(0, 48040.12), (96, 48963.26), (192, 48532.17),
+               (280, 49818.42), (288, 50127.36)]
+    for index in range(289):
+        left, right = next((a, b) for a, b in zip(anchors, anchors[1:]) if a[0] <= index <= b[0])
+        fraction = (index - left[0]) / (right[0] - left[0])
+        wave = 4 * fraction * (1 - fraction) * (32 * math.sin(index * .77) + 18 * math.sin(index * .21))
+        amount = Decimal(str(left[1] + (right[1] - left[1]) * fraction + wave)).quantize(Decimal('.01'))
+        case.save(case.root, str(amount), case.now - timedelta(minutes=15 * (288 - index)),
+                  result=str(amount - Decimal('50000')))
     observed = case.now.isoformat()
     specs = [('ALFA', '13', '1000', '13000', '200'),
              ('BETA', '25', '500', '12500', '-340'),
