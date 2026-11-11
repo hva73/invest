@@ -66,6 +66,29 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             self.run_deploy(Outcome('ok', 'complete', True))
 
+    def test_pre_stop_rejection_does_not_leave_recovery_block(self):
+        for stage in ('authorization', 'preflight', 'quota', 'stage', 'service_state'):
+            with self.subTest(stage=stage):
+                result = self.run_deploy(Outcome('failed', stage, False))
+                self.assertFalse(result['recovery_required'])
+                self.assertFalse((self.bridge / 'deployment-incomplete.json').exists())
+        self.assertEqual(self.run_deploy(Outcome('ok', 'complete', True))['status'], 'ok')
+
+    def test_stop_failure_still_requires_recovery(self):
+        result = self.run_deploy(Outcome('failed', 'stop', False))
+        self.assertTrue(result['recovery_required'])
+
+    def test_checkout_failure_does_not_leave_recovery_block(self):
+        def failed_checkout(checkout, sha):
+            raise ValueError('checkout_not_clean')
+        factory = Mock()
+        result = runner.run(SHA, TOKEN, bridge=self.bridge, adapter_factory=factory,
+                            prepare=failed_checkout)
+        self.assertEqual(result['status'], 'failed')
+        self.assertFalse(result['recovery_required'])
+        self.assertFalse((self.bridge / 'deployment-incomplete.json').exists())
+        factory.assert_not_called()
+
     def test_process_death_leaves_durable_block(self):
         child = multiprocessing.get_context('fork').Process(target=crash_during_deploy, args=(str(self.bridge),))
         child.start()

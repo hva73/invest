@@ -91,6 +91,11 @@ class Adapter:
         # "blocked" is not approval; the sequence separately checks gates.
         if result.get('status') != 'blocked' or 'reason' in result:
             raise ValueError('preflight_failed')
+        # Staging reads the selected release's manifest while apply_update is
+        # imported from the installed bridge. Detect version skew before the
+        # service stops or any files are replaced.
+        if nordicway_release_preflight.manifest(self.checkout) != apply_update.FILES:
+            raise ValueError('updater_manifest_mismatch')
 
     def check_quota(self):
         required = max(self.required_bytes, estimate_required_bytes(self.checkout, self.target))

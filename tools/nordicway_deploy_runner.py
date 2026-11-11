@@ -165,16 +165,20 @@ def run(sha, token, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
     # runs and blocks retries after a process crash until investigated.
     marker = _claim(bridge, sha)
     result = None
+    sequence_started = False
     try:
         prepare(checkout, sha)
         adapter = adapter_factory(checkout, target, sha, 1, None, None, cpanel_token=token)
         adapter.state_observer = lambda state: _record_state(bridge, marker, target, sha, state)
         adapter.backup_observer = lambda backup: _record_backup(bridge, marker, target, sha, backup)
+        sequence_started = True
         result = deploy(adapter, sha)
-        if result.status in ('ok', 'updated_stopped') and result.stage == 'complete':
-            # An intentionally stopped app is a completed installation too.
-            # Never leave a stale recovery marker merely because no restart
-            # was requested; true failures remain fail-closed.
+        if ((result.status in ('ok', 'updated_stopped') and result.stage == 'complete')
+                or (result.status == 'failed' and result.stage in
+                    ('authorization', 'preflight', 'quota', 'stage', 'service_state'))):
+            # Before the stop step no app/DB mutation has occurred. A rejected
+            # preflight or quota must not require manual recovery. Failures
+            # from stop onward remain blocked unless deployment completed.
             marker.unlink()
             _sync_dir(bridge)
         # Paths, tokens and exception details are deliberately not returned.
@@ -183,8 +187,14 @@ def run(sha, token, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
                 'recovery_required': marker.exists()}
     except Exception:
         # Uncertainty is not proof that no production change occurred.
+        if not sequence_started:
+            try:
+                marker.unlink()
+                _sync_dir(bridge)
+            except OSError:
+                pass
         return {'operation': 'deploy', 'status': 'failed', 'stage': 'runner',
-                'service_restored': False, 'recovery_required': True}
+                'service_restored': False, 'recovery_required': sequence_started or marker.exists()}
 
 
 def run_request(sha, stream):
