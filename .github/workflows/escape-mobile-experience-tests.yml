@@ -8,7 +8,7 @@ permissions:
 jobs:
   mobile-experience:
     if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/mobile-experience-2'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -27,5 +27,6 @@ jobs:
           node tests/test_dashboard_data.js
           node tests/test_quick_review.cjs
           node tests/test_market_expansion.cjs
+          node tests/test_holding_chart_marker.cjs
           python tests/browser_mobile_layout.py
           python tests/browser_mobile_review.py
