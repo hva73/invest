@@ -210,6 +210,20 @@ class FeedReuse(unittest.TestCase):
   self.assertEqual(self.adapter.capture(client,'us_trades','MERC',self.job)['status'],'NO_MESSAGES')
   self.assertEqual(self.adapter.capture(client,'us_trades','MERC',self.job)['status'],'NO_MESSAGES')
   self.assertEqual(client.capture.call_count,1);self.assertTrue(self.adapter.capture_metrics[-1]['cache_hit'])
+ def test_incomplete_trade_still_collects_quote_without_promoting_it_to_trade(self):
+  from decimal import Decimal
+  old=self.now-timedelta(minutes=5);calls=[]
+  def capture(client,feed,symbol,session):
+   calls.append(feed)
+   if feed.endswith('trades'):return {'status':'INCOMPLETE','messages':[]}
+   return {'status':'OK','messages':[{'symbol':'MERC','event_time':self.now.isoformat(),'received_at':self.now.isoformat(),'bid':'99','ask':'101'}]}
+  rest=({'code':'MERC.US','close':'100','currency':'USD'},self.now,1,old,Decimal('100'))
+  env={'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}
+  with patch.dict(os.environ,env),patch.object(self.adapter,'capture',side_effect=capture),patch.object(self.adapter,'feeds',return_value=Mock()),patch.object(self.adapter.pluto,'safe_context',return_value=fixture.tick(self.now,held=True)['context']),patch.object(adapters,'shared_quote',return_value=rest):
+   sample=self.adapter.poll(self.job)
+  self.assertEqual(calls,['us_trades','us_quotes']);self.assertEqual(self.adapter.last_feed_diagnostics['websocket_trade_status'],'INCOMPLETE')
+  self.assertEqual(sample['event_time'],old.isoformat());self.assertNotEqual(sample.get('price_time_kind'),'trade')
+  self.assertEqual(self.adapter.last_partial_observations[-1]['quality'],'TRADE_MISSING')
  def test_cached_stale_trade_and_fresh_quotes_cannot_become_actionable(self):
   from decimal import Decimal
   from hotwatch_strategy import BASELINE,calculate
