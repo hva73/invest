@@ -124,7 +124,8 @@ class Adapter:
         names = apply_update.FILES
         self.inventory = nordicway_release_backup.inventory(self.target, names)
         with nordicway_autostart.preserve(self.target / 'var'):
-            return apply_update.apply(release['path'], self.target)
+            return apply_update.apply(release['path'], self.target,
+                                      verify_backup=self.verify_backup)
 
     def verify_backup(self, backup):
         return nordicway_release_backup.verify_backup(backup, self.inventory)
