@@ -19,7 +19,9 @@ def run(env=None, transport=_run_limited):
     env = os.environ if env is None else env
     sha, token = env.get('ESCAPE_RELEASE_SHA', ''), env.get('ESCAPE_CPANEL_API_TOKEN', '')
     operation = env.get('ESCAPE_DEPLOY_OPERATION', 'deploy')
-    if (env.get('ESCAPE_DEPLOY_AUTHORIZED') != '1' or not env.get('SSH_AUTH_SOCK')
+    access = (env.get('ESCAPE_WRITE_PROBE_AUTHORIZED') == '1' if operation == 'write-probe'
+              else env.get('ESCAPE_DEPLOY_AUTHORIZED') == '1')
+    if (not access or not env.get('SSH_AUTH_SOCK')
             or operation not in ('deploy', 'resume', 'write-probe')
             or (operation in ('deploy', 'resume') and not re.fullmatch(r'[0-9a-f]{40}', sha))
             or (operation == 'write-probe' and bool(sha))
