@@ -63,7 +63,7 @@ class Adapter:
         return nordicway_quota.verify_space(self.target, self.required_bytes)
 
     def stage(self, sha):
-        return nordicway_release_stage.stage(self.checkout, self.target, sha)
+        return nordicway_release_stage.stage(self.checkout, self.target, sha, approved_sha=self.approved_sha)
 
     def service_status(self):
         return self.service.status()

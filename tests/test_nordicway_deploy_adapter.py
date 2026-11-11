@@ -56,8 +56,7 @@ class AdapterIntegration(unittest.TestCase):
         adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
                                    lambda: quiescent, lambda sha: sha == self.sha,
                                    self.service)
-        with patch.object(nordicway_release_stage, 'APPROVED_SHA', self.sha), \
-             patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')), \
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')), \
              patch.object(nordicway_quota, 'verify_space',
                           side_effect=None if quota_ok else ValueError('quota_unavailable')):
             return sequence.deploy(adapter, self.sha)
@@ -74,6 +73,21 @@ class AdapterIntegration(unittest.TestCase):
     def test_unknown_quota_never_stops_or_modifies(self):
         result = self.run_test(quota_ok=False)
         self.assertEqual((result.status, result.stage), ('failed', 'quota'))
+        self.assertEqual(self.service.state, 'started')
+        self.assertEqual((self.app / 'app.py').read_text(), 'old')
+
+    def test_unapproved_sha_never_stops_or_modifies(self):
+        adapter = concrete.Adapter(self.checkout, self.app, 'b' * 40, 1000,
+                                   lambda: True, lambda sha: True, self.service)
+        result = sequence.deploy(adapter, self.sha)
+        self.assertEqual((result.status, result.stage), ('failed', 'authorization'))
+        self.assertEqual(self.service.state, 'started')
+        self.assertEqual((self.app / 'app.py').read_text(), 'old')
+
+    def test_already_installed_version_is_not_reinstalled(self):
+        (self.app / 'BUILD_COMMIT').write_text(self.sha + '\n')
+        result = self.run_test()
+        self.assertEqual((result.status, result.stage), ('failed', 'authorization'))
         self.assertEqual(self.service.state, 'started')
         self.assertEqual((self.app / 'app.py').read_text(), 'old')
 

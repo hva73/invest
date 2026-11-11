@@ -16,8 +16,13 @@ APPROVED_SHA = '8ed0e6d41b24db18b8687729b344133ae5fb28fd'
 MAX_BYTES = 250_000_000
 
 
-def stage(checkout, target, sha):
-    if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-f]{40}', sha) or sha != APPROVED_SHA:
+def stage(checkout, target, sha, *, approved_sha=None):
+    # approved_sha must come from a trusted policy, never directly from SSH input.
+    # The existing fixed approved release is retained for older callers.
+    allowed = APPROVED_SHA if approved_sha is None else approved_sha
+    if (not isinstance(sha, str) or not re.fullmatch(r'[0-9a-f]{40}', sha)
+            or not isinstance(allowed, str) or not re.fullmatch(r'[0-9a-f]{40}', allowed)
+            or sha != allowed):
         raise ValueError('unapproved_release')
     checkout, target = Path(checkout), Path(target)
     report = preflight.inspect(checkout, target, sha)
