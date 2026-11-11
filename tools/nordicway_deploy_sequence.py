@@ -6,6 +6,10 @@ connect to the server or decide which releases are authorized.
 from dataclasses import dataclass
 
 
+class BackupVerificationFailure(Exception):
+    """Backup verification failed before any code replacement began."""
+
+
 @dataclass(frozen=True)
 class Outcome:
     status: str
@@ -63,10 +67,11 @@ def deploy(adapter, sha):
                     stage = 'health'
                     adapter.verify_health(sha)
                 return Outcome('ok' if was_running else 'updated_stopped', 'complete', was_running, str(backup))
-            except Exception:
+            except Exception as exc:
                 # Keep the deployment lock held until recovery finishes.
                 restored = False
-                if was_running and stop_attempted and not mutation_started:
+                safe_to_restart = not mutation_started or isinstance(exc, BackupVerificationFailure)
+                if was_running and stop_attempted and safe_to_restart:
                     try:
                         adapter.start_service()
                         restored = True
