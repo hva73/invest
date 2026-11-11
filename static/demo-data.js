@@ -127,7 +127,8 @@ window.ESCAPE_DEMO_HISTORY=(()=>{
   if(route==='market/quote'){
    const id=payload.holding_asset_id||payload.asset_id||'synthetic-asset-TSLA',p=position(id)||position('synthetic-asset-TSLA');
    const series=window.ESCAPE_DEMO_HISTORY.period(p,payload.period||'ONE_WEEK'),day=series.filter(x=>x.epoch>series.at(-1).epoch-86400),first=Number(day[0].price),last=Number(day.at(-1).price),week=window.ESCAPE_DEMO_HISTORY.period(p,'ONE_WEEK');
-   return ok({asset_id:p.asset_id,ticker:p.ticker,name:p.name,exchange:'DEMO',asset_type:'CS',currency:'DKK',price:p.price.amount,price_time:p.price_time,fetched_at:now(),daily_change_percent:p.daily.percent,daily_change:String(Number(p.daily.amount)/Number(p.quantity)),daily_note:null,week_change_percent:String((last/Number(week[0].price)-1)*100),series});
+   const isCrypto=['BTC','PEPE'].includes(p.ticker);
+   return ok({asset_id:p.asset_id,ticker:p.ticker,name:p.name,exchange:isCrypto?'DEMO CRYPTO':'DEMO AKTIE',asset_type:isCrypto?'CRYPTO':'CS',currency:'DKK',price:p.price.amount,price_time:p.price_time,fetched_at:now(),daily_change_percent:p.daily.percent,daily_change:String(Number(p.daily.amount)/Number(p.quantity)),daily_note:null,week_change_percent:String((last/Number(week[0].price)-1)*100),series});
   }
   if(route==='trade/preview')return ok({read_only:true,estimate:{quote:{message:'Simuleret estimat'},buying_power_checked:true,accounts:[]},asset:{},payload:{orders:[]}});
   if(route==='trade/search')return ok({assets:demo.state.dashboard.positions.map(p=>({asset_id:p.asset_id,name:p.name,ticker:p.ticker,currency:p.price?.currency||'DKK',isin:'TEST'}))});
