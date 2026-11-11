@@ -96,5 +96,17 @@ class WriterTests(unittest.TestCase):
              patch.object(check, 'database_user_failure', return_value=None):
             self.assertIsNone(check.failure_reason('/database'))
 
+    def test_wait_for_passenger_exit_rechecks_all_gates_and_times_out(self):
+        with patch.object(check, 'failure_reason', side_effect=['passenger_active', None]) as gate:
+            self.assertIsNone(check.wait_for_quiescence('/database', clock=lambda: 0, sleep=lambda _: None))
+            self.assertEqual(gate.call_count, 2)
+        with patch.object(check, 'failure_reason', side_effect=['passenger_active', 'database_in_use']):
+            self.assertEqual(check.wait_for_quiescence('/database', clock=lambda: 0, sleep=lambda _: None),
+                             'database_in_use')
+        with patch.object(check, 'failure_reason', return_value='passenger_active'):
+            ticks = iter([0, 1])
+            self.assertEqual(check.wait_for_quiescence('/database', timeout=1, clock=lambda: next(ticks),
+                                                      sleep=lambda _: None), 'passenger_active')
+
 
 if __name__ == '__main__': unittest.main()

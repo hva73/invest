@@ -6,6 +6,7 @@ The updater separately takes its exclusive SQLite lock before copying data.
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -90,3 +91,16 @@ def failure_reason(database):
 
 def verify(database):
     return failure_reason(database) is None
+
+
+def wait_for_quiescence(database, timeout=30, *, clock=time.monotonic, sleep=time.sleep):
+    """Allow Passenger to finish stopping without relaxing any writer gate."""
+    deadline = clock() + timeout
+    while True:
+        reason = failure_reason(database)
+        if reason != 'passenger_active':
+            return reason
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return reason
+        sleep(min(0.5, remaining))

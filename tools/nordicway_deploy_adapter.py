@@ -157,7 +157,7 @@ class Adapter:
                 if self.quiescence_check() is not True:
                     raise ValueError('quiescence_unverified')
             else:
-                reason = nordicway_writer_check.failure_reason(self.target / 'var' / 'escape.db')
+                reason = nordicway_writer_check.wait_for_quiescence(self.target / 'var' / 'escape.db')
                 if reason is not None:
                     raise ValueError(reason)
             yield
