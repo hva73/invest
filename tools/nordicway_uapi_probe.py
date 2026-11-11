@@ -63,12 +63,18 @@ def probe(token, opener=None):
                 if n < 100000: return '100_to_99999'
                 return '100000_or_more'
             except (InvalidOperation, TypeError, ValueError): return 'unknown'
+        def near(value, low, high):
+            try:
+                n = Decimal(value)
+                return n.is_finite() and Decimal(low) <= n <= Decimal(high)
+            except (InvalidOperation, TypeError, ValueError): return False
         unit = row.get('units')
         safe_unit = unit if unit in ('B','KB','MB','GB','TB','KiB','MiB','GiB','TiB') else 'other'
         return {'status': 'ok', 'fields': {key: type(row.get(key)).__name__
                 for key in ('count', 'max', '_count', '_max', 'units', 'normalized')},
                 'shapes': {key: shape(row.get(key)) for key in ('count','max','_count','_max')},
                 'magnitude': {key: band(row.get(key)) for key in ('_count','_max')},
+                'prior_display_compatible': (safe_unit == 'MB' and near(row.get('_max'), 10000, 10500) and near(row.get('_count'), 6500, 9500)),
                 'unit': safe_unit, 'normalized': row.get('normalized') if row.get('normalized') in (0,1) else 'unknown'}
     except urllib.error.HTTPError as exc:
         return {'status': 'http_error', 'code': exc.code}
