@@ -130,8 +130,7 @@ jobs:
           ESCAPE_DEPLOY_AUTHORIZED: ${{ vars.ESCAPE_DEPLOY_AUTHORIZED }}
           ESCAPE_WRITE_PROBE_AUTHORIZED: ${{ vars.ESCAPE_WRITE_PROBE_AUTHORIZED }}
           ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
-          NORDICWAY_KNOWN_HOST: ${{ secrets.ESCAPE_NORDICWAY_KNOWN_HOST }}
-          NORDICWAY_VERIFIED_FINGERPRINT: ${{ secrets.ESCAPE_NORDICWAY_VERIFIED_FINGERPRINT }}
+          NORDICWAY_VERIFIED_FINGERPRINT: 'SHA256:U8MQZwyzMoDmDyRnBIqFqN14BVifmGKNSi+7B8OACDI'
           NORDICWAY_PRIVATE_KEY: ${{ secrets.ESCAPE_NORDICWAY_DEPLOY_PRIVATE_KEY }}
           NORDICWAY_KEY_PASSPHRASE: ${{ secrets.ESCAPE_NORDICWAY_DEPLOY_PASSPHRASE }}
         run: |
@@ -146,6 +145,8 @@ jobs:
           else
             [ "$ESCAPE_DEPLOY_AUTHORIZED" = "1" ] || { printf '%s\n' 'Deployment is not authorized.'; exit 1; }
           fi
+          NORDICWAY_KNOWN_HOST="$(ssh-keyscan -T 10 -t ed25519 -p 33 cp14.nordicway.dk 2>/dev/null)"
+          export NORDICWAY_KNOWN_HOST
           python tools/nordicway_hostkey.py
           eval "$(ssh-agent -s)" >/dev/null
           askpass="$RUNNER_TEMP/escape-deploy-ssh-askpass"
