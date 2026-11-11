@@ -37,6 +37,7 @@ jobs:
           key="$RUNNER_TEMP/escape-deploy-key"
           trap 'rm -f "$key"' EXIT
           test -n "$DEPLOY_PRIVATE_KEY"
+          python3 -c 'import os,json; v=os.environ.get("DEPLOY_PRIVATE_KEY",""); print(json.dumps({"begin":v.startswith("-----BEGIN OPENSSH PRIVATE KEY-----"), "end":"-----END OPENSSH PRIVATE KEY-----" in v, "multiline":chr(10) in v, "literal_backslash_n":chr(92)+chr(110) in v}))'
           printf '%s\n' "$DEPLOY_PRIVATE_KEY" > "$key"
           unset DEPLOY_PRIVATE_KEY
           ssh-keygen -y -f "$key"
