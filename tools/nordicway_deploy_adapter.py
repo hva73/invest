@@ -13,7 +13,7 @@ from pathlib import Path
 import apply_update
 import nordicway_autostart
 import nordicway_deploy_health
-import nordicway_quota
+import nordicway_uapi_quota
 import nordicway_quiescence
 import nordicway_release_backup
 import nordicway_release_preflight
@@ -46,7 +46,7 @@ def estimate_required_bytes(checkout, target):
 
 class Adapter:
     def __init__(self, checkout, target, approved_sha, required_bytes,
-                 quiescence_check, health_check, service=nordicway_release_service, quota_reader=None):
+                 quiescence_check, health_check, service=nordicway_release_service, quota_reader=None, cpanel_token=None):
         self.checkout = Path(checkout)
         self.target = Path(target)
         self.approved_sha = approved_sha
@@ -54,6 +54,7 @@ class Adapter:
         self.quiescence_check = quiescence_check
         self.health_check = health_check
         self.quota_reader = quota_reader
+        self.cpanel_token = cpanel_token
         self.service = service
         self.inventory = None
         self.started_at = None
@@ -91,14 +92,15 @@ class Adapter:
         required = max(self.required_bytes, estimate_required_bytes(self.checkout, self.target))
         if self.quota_reader is not None:
             result = self.quota_reader(self.target, required)
-            if (not isinstance(result, dict) or result.get('required_bytes') != required
-                    or type(result.get('account_free_lower_bytes')) is not int
-                    or type(result.get('filesystem_free_bytes')) is not int
-                    or result['account_free_lower_bytes'] < required
-                    or result['filesystem_free_bytes'] < required):
-                raise ValueError('quota_unavailable')
-            return result
-        return nordicway_quota.verify_space(self.target, required)
+        else:
+            result = nordicway_uapi_quota.verify_space(self.target, required, self.cpanel_token)
+        if (not isinstance(result, dict) or result.get('required_bytes') != required
+                or type(result.get('account_free_lower_bytes')) is not int
+                or type(result.get('filesystem_free_bytes')) is not int
+                or result['account_free_lower_bytes'] < required
+                or result['filesystem_free_bytes'] < required):
+            raise ValueError('quota_unavailable')
+        return result
 
     def stage(self, sha):
         return nordicway_release_stage.stage(self.checkout, self.target, sha, approved_sha=self.approved_sha)

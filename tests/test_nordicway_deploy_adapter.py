@@ -9,7 +9,7 @@ from unittest.mock import patch
 import apply_update
 import nordicway_deploy_adapter as concrete
 import nordicway_deploy_sequence as sequence
-import nordicway_quota
+import nordicway_uapi_quota
 import nordicway_release_stage
 
 
@@ -57,8 +57,10 @@ class AdapterIntegration(unittest.TestCase):
                                    lambda: quiescent, lambda sha: sha == self.sha,
                                    self.service)
         with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')), \
-             patch.object(nordicway_quota, 'verify_space',
-                          side_effect=None if quota_ok else ValueError('quota_unavailable')):
+             patch.object(nordicway_uapi_quota, 'verify_space',
+                          side_effect=(lambda path, required, token: {
+                              'required_bytes': required, 'account_free_lower_bytes': required + 1,
+                              'filesystem_free_bytes': required + 1}) if quota_ok else ValueError('quota_unavailable')):
             return sequence.deploy(adapter, self.sha)
 
     def test_actual_stage_updater_backup_and_installed_content(self):
@@ -69,6 +71,29 @@ class AdapterIntegration(unittest.TestCase):
         self.assertEqual((self.app / 'BUILD_COMMIT').read_text().strip(), self.sha)
         with sqlite3.connect(str(Path(result.backup) / 'escape.db')) as db:
             self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
+
+    def test_uapi_reader_feeds_real_deploy_sequence(self):
+        import io, json
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        class Response(io.BytesIO):
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): self.close()
+        payload = {'result': {'status': 1, 'data': [{'id':'diskusage', '_count':'10',
+                    '_max':'1000', 'units':'MB', 'normalized':1}]}}
+        opener = Mock(); opener.open.return_value = Response(json.dumps(payload).encode())
+        fs = lambda path: SimpleNamespace(f_bavail=10_000_000_000, f_frsize=1)
+        reader = lambda path, required: nordicway_uapi_quota.verify_space(
+                 path, required, 'a'*40, opener=opener, statvfs=fs)
+        adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
+                                   lambda: True, lambda sha: True, self.service,
+                                   quota_reader=reader)
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')):
+            result = sequence.deploy(adapter, self.sha)
+        self.assertEqual(result.status, 'ok')
+        self.assertEqual((self.app / 'app.py').read_text(), 'new')
+        self.assertNotIn('a' * 40, repr(result))
 
     def test_invalid_quota_reader_cannot_authorize_release(self):
         adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
