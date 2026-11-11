@@ -150,6 +150,7 @@ jobs:
           python -c 'import os,sys; sys.path.insert(0,"tools"); import nordicway_hostkey as h
           try: h.verify(os.environ.get("NORDICWAY_KNOWN_HOST", ""), os.environ.get("NORDICWAY_VERIFIED_FINGERPRINT", ""))
           except ValueError as e:
+              lines=os.environ.get("NORDICWAY_KNOWN_HOST", "").splitlines(); print("Host key shape:", [(len(x.split()), x.split()[0] == h.HOST if x.split() else False) for x in lines])
               print("Host key check failed:", str(e) if str(e) in ("invalid_host_key", "invalid_fingerprint", "host_key_mismatch") else "invalid_host_key"); sys.exit(1)
           print("Host key verified.")'
           eval "$(ssh-agent -s)" >/dev/null
