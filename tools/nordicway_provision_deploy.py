@@ -23,19 +23,42 @@ def _private_dir(path):
 
 
 def _public_key(text):
-    if not isinstance(text, str) or len(text) > 512:
+    """Accept Ed25519 or RSA public keys without accepting key options."""
+    if not isinstance(text, str) or len(text) > 2500:
         raise ValueError('invalid_key')
     parts = text.strip().split()
-    if len(parts) not in (2, 3) or parts[0] != 'ssh-ed25519':
+    if len(parts) not in (2, 3) or parts[0] not in ('ssh-ed25519', 'ssh-rsa'):
         raise ValueError('invalid_key')
-    if len(parts) == 3 and not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}', parts[2]):
+    if len(parts) == 3 and not re.fullmatch(r'[A-Za-z0-9_.@-]{1,120}', parts[2]):
         raise ValueError('invalid_key')
     try:
         raw = base64.b64decode(parts[1], validate=True)
-    except (ValueError, binascii.Error):
+        fields = []
+        offset = 0
+        while offset < len(raw):
+            if offset + 4 > len(raw):
+                raise ValueError('invalid_key')
+            size = int.from_bytes(raw[offset:offset + 4], 'big')
+            offset += 4
+            if size > len(raw) - offset:
+                raise ValueError('invalid_key')
+            fields.append(raw[offset:offset + size])
+            offset += size
+        if parts[0] == 'ssh-ed25519':
+            if len(fields) != 2 or fields[0] != b'ssh-ed25519' or len(fields[1]) != 32:
+                raise ValueError('invalid_key')
+        else:
+            if len(fields) != 3 or fields[0] != b'ssh-rsa':
+                raise ValueError('invalid_key')
+            def mpint(data):
+                if not data or data[0] & 128 or (len(data) > 1 and data[0] == 0 and data[1] < 128):
+                    raise ValueError('invalid_key')
+                return int.from_bytes(data, 'big')
+            exponent, modulus = mpint(fields[1]), mpint(fields[2])
+            if exponent < 3 or exponent % 2 != 1 or not 2048 <= modulus.bit_length() <= 8192:
+                raise ValueError('invalid_key')
+    except (ValueError, binascii.Error, OverflowError):
         raise ValueError('invalid_key') from None
-    if len(raw) != 51 or raw[:19] != b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20':
-        raise ValueError('invalid_key')
     return parts[1], ' '.join(parts)
 
 
@@ -96,7 +119,7 @@ if __name__ == '__main__':
             raise ValueError('guard_unavailable')
         outcome = provision(Path('/home/nordicr4'),
                             '/home/nordicr4/virtualenv/escape_app/3.11/bin/python',
-                            sys.stdin.read(513), source.read_bytes(),
+                            sys.stdin.read(2501), source.read_bytes(),
                             'bbd75eada2851a8be8756d1f2ef41c45ecfe8fc60234f0a2e9894a136e0b6b29')
         print('Deploy SSH ping identity: ' + outcome)
     except (OSError, ValueError):
