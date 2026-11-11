@@ -5,6 +5,7 @@ import re
 import sys
 import ssl
 import socket
+from decimal import Decimal, InvalidOperation
 import urllib.error
 import urllib.request
 
@@ -54,11 +55,20 @@ def probe(token, opener=None):
             if re.fullmatch(r'[0-9]+(?:\.[0-9]+)?\s*(?:B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)', value, re.I): return 'number_with_unit'
             if value.lower() == 'unlimited': return 'unlimited'
             return 'other'
+        def band(value):
+            try:
+                n = Decimal(value)
+                if not n.is_finite() or n < 0: return 'unknown'
+                if n < 100: return 'under_100'
+                if n < 100000: return '100_to_99999'
+                return '100000_or_more'
+            except (InvalidOperation, TypeError, ValueError): return 'unknown'
         unit = row.get('units')
         safe_unit = unit if unit in ('B','KB','MB','GB','TB','KiB','MiB','GiB','TiB') else 'other'
         return {'status': 'ok', 'fields': {key: type(row.get(key)).__name__
                 for key in ('count', 'max', '_count', '_max', 'units', 'normalized')},
                 'shapes': {key: shape(row.get(key)) for key in ('count','max','_count','_max')},
+                'magnitude': {key: band(row.get(key)) for key in ('_count','_max')},
                 'unit': safe_unit, 'normalized': row.get('normalized') if row.get('normalized') in (0,1) else 'unknown'}
     except urllib.error.HTTPError as exc:
         return {'status': 'http_error', 'code': exc.code}
