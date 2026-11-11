@@ -94,5 +94,34 @@ class EntryBasis(unittest.TestCase):
   self.assertIsNone(result['position_trailing']['high'])
   self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
 
+ def test_open_orders_and_ambiguous_depot_do_not_prove_fill_history(self):
+  at=datetime(2026,11,11,15,0,tzinfo=timezone.utc);metrics=good_metrics();risk=copy.deepcopy(request()['risk']);risk.update(stop_price=None,_position_scope='depot-one')
+  for change,scope in (({'orders_complete':True},'depot-one'),({'orders_complete':True,'position_history_complete':True},None)):
+   state={};r=dict(risk);r['_position_scope']=scope
+   for seconds,price in ((0,'100'),(10,'105'),(20,'100'),(30,'100'),(40,'100')):
+    now=at+timedelta(seconds=seconds);sample=tick(now,seconds,price=price,held=True);sample['context'].update(change)
+    result,state=calculate(sample,metrics,BASELINE,r,state,now)
+   self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
+   self.assertNotIn('position_trailing',state)
+
+ def test_market_observation_before_position_proof_cannot_be_the_high(self):
+  at=datetime(2026,11,11,15,0,tzinfo=timezone.utc);metrics=good_metrics();risk=copy.deepcopy(request()['risk']);risk.update(stop_price=None,_position_scope='depot-one');state={}
+  for seconds,price in ((0,'150'),(10,'100'),(20,'99'),(30,'99'),(40,'99')):
+   now=at+timedelta(seconds=seconds);sample=tick(now,seconds,price=price,held=True)
+   sample['context'].update(orders_complete=True,position_history_complete=True)
+   result,state=calculate(sample,metrics,BASELINE,risk,state,now)
+  self.assertEqual(result['position_trailing']['high'],'100')
+  self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
+
+ def test_complete_sale_and_new_position_discard_previous_high(self):
+  at=datetime(2026,11,11,15,0,tzinfo=timezone.utc);metrics=good_metrics();risk=copy.deepcopy(request()['risk']);risk.update(stop_price=None,_position_scope='depot-one');state={}
+  for seconds,price,held in ((0,'100',True),(10,'105',True),(20,'100',False),(30,'100',True)):
+   now=at+timedelta(seconds=seconds);sample=tick(now,seconds,price=price,held=held)
+   sample['context'].update(orders_complete=True,position_history_complete=True)
+   result,state=calculate(sample,metrics,BASELINE,risk,state,now)
+   if not held:self.assertNotIn('position_trailing',state)
+  self.assertIsNone(result['position_trailing']['high'])
+  self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
+
 
 if __name__=='__main__':unittest.main()

@@ -86,6 +86,8 @@ class ReviewFixes(unittest.TestCase):
   sample=self.sample('100',50);sample['context'].update(orders_complete=True,position_history_complete=True)
   r=self.ingest(sample,self.at+timedelta(seconds=50))['calculation'];self.assertEqual(r['signal'],'WAIT')
   a=self.view(50)['last_action_signal'];self.assertEqual(a['state'],'WITHDRAWN');self.assertIn('Kursen',a['reason']);self.assertIsNone(a['acknowledged_at'])
+  import web_push
+  with app.connect() as c:self.assertIsNone(web_push._actionable(c,engine.row_for(c,1,self.req['watch_id'],True),self.at+timedelta(seconds=50)))
  def test_real_event_generation_ignores_small_ticks_but_emits_trailing_worsening(self):
   with app.connect() as c:
    req=copy.deepcopy(self.req);req['risk']['stop_price']=None;req['portfolio_ids']=[1];c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
@@ -99,6 +101,33 @@ class ReviewFixes(unittest.TestCase):
    self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE watch_row_id=? AND event_type='TRAILING_EXIT_WORSENED'",(row['id'],)).fetchone()[0],0)
   put('92.12',80)
   with app.connect() as c:self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE watch_row_id=? AND event_type='TRAILING_EXIT_WORSENED'",(row['id'],)).fetchone()[0],1)
+ def test_context_only_partial_sale_invalidates_active_trailing_for_readback_and_push(self):
+  with app.connect() as c:
+   req=copy.deepcopy(self.req);req['risk']['stop_price']=None;req['portfolio_ids']=[1];c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
+  for offset,price in ((0,'100'),(10,'100'),(20,'94'),(30,'94'),(40,'94')):
+   sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True)
+   result=self.ingest(sample,self.at+timedelta(seconds=offset))['calculation']
+  self.assertEqual(result['signal'],'SELL');self.assertEqual(self.view(40)['last_action_signal']['state'],'ACTIVE')
+  now=self.at+timedelta(seconds=50);context=copy.deepcopy(sample['context']);context.update(as_of=now.isoformat(),quantity='9')
+  engine.observe_context(app.connect,1,self.req['watch_id'],True,context,now,broker_source='pluto')
+  view=self.view(50);self.assertEqual(view['signal'],'NO_DATA');self.assertEqual(view['last_action_signal']['state'],'DATA_MISSING')
+  import web_push
+  with app.connect() as c:self.assertIsNone(web_push._actionable(c,engine.row_for(c,1,self.req['watch_id'],True),now))
+ def test_aggregated_depot_scope_never_inherits_a_trailing_high(self):
+  import portfolios
+  with app.connect() as c:
+   portfolios.replace_pluto(c,1,[{'id':'portfolios:synthetic-one','name':'Synthetic one','kind':'portfolio'},{'id':'portfolios:synthetic-two','name':'Synthetic two','kind':'portfolio'}])
+   ids=[p['id'] for p in portfolios.list_owned(c,1)]
+  for portfolio_ids in ([],ids):
+   with self.subTest(portfolio_ids=portfolio_ids):
+    req=copy.deepcopy(self.req);req['risk']['stop_price']=None;req['portfolio_ids']=portfolio_ids
+    # Fresh independent session for each scope; no actual depot access occurs.
+    req['watch_id']='scope-'+str(len(portfolio_ids));req['purpose']='synthetic scope '+str(len(portfolio_ids));engine.create(app.connect,1,req,self.at)
+    for offset,price in ((0,'100'),(10,'100'),(20,'94'),(30,'94'),(40,'94')):
+     sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True)
+     now=self.at+timedelta(seconds=offset);result=engine.ingest(app.connect,1,req['watch_id'],True,sample,now,include_session=False)['calculation']
+    self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
+    self.assertEqual(result['position_trailing']['status'],'WAITING_FOR_VERIFIED_POSITION_HISTORY')
  def test_stop_can_recur_after_unknown_context_without_verified_recovery(self):
   self.ingest(self.sample('94',0),self.at)
   missing=self.sample('93.999',10);missing['context']['status']='unknown';missing['context']['position']='unknown';missing['context']['quantity']=None
