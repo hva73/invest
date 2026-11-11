@@ -7,6 +7,8 @@ import json
 import os
 import re
 import stat
+import subprocess
+import tempfile
 from pathlib import Path
 
 import nordicway_deploy_adapter
@@ -16,6 +18,33 @@ HOME = Path('/home/nordicr4')
 BRIDGE = HOME / '.escape_deploy_bridge'
 CHECKOUT = HOME / 'escape_deploy' / 'invest'
 TARGET = HOME / 'escape_app'
+REPOSITORY = 'https://github.com/hva73/invest.git'
+
+
+def prepare_checkout(checkout, sha, runner=subprocess.run):
+    """Select the approved commit in the separate clean deployment checkout."""
+    if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-f]{40}', sha):
+        raise ValueError('invalid_request')
+    checkout = Path(checkout)
+    if checkout.is_symlink() or not checkout.is_dir():
+        raise ValueError('checkout_unavailable')
+    env = {**os.environ, 'GIT_TERMINAL_PROMPT': '0', 'GIT_OPTIONAL_LOCKS': '0'}
+    prefix = ['git', '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
+              '-C', str(checkout)]
+    def call(args, timeout=30):
+        return runner(prefix + args, capture_output=True, timeout=timeout, check=False, env=env)
+    status = call(['status', '--porcelain=v1', '--untracked-files=all'])
+    if status.returncode != 0 or status.stdout:
+        raise ValueError('checkout_not_clean')
+    if call(['cat-file', '-e', sha + '^{commit}']).returncode != 0:
+        fetched = call(['fetch', '--no-tags', '--no-recurse-submodules', REPOSITORY, sha], timeout=120)
+        if fetched.returncode != 0 or call(['cat-file', '-e', sha + '^{commit}']).returncode != 0:
+            raise ValueError('checkout_unavailable')
+    if call(['checkout', '--detach', sha]).returncode != 0:
+        raise ValueError('checkout_unavailable')
+    head = call(['rev-parse', '--verify', 'HEAD^{commit}'])
+    if head.returncode != 0 or head.stdout.strip() != sha.encode('ascii'):
+        raise ValueError('checkout_unavailable')
 
 
 def _private_directory(path):
@@ -64,9 +93,32 @@ def _claim(bridge, sha):
     return marker
 
 
+def _record_backup(bridge, marker, target, sha, backup):
+    backup = Path(backup)
+    parent = Path(target).parent / '.escape_backups'
+    if (parent.is_symlink() or backup.is_symlink() or not backup.is_dir()
+            or backup.parent.resolve() != parent.resolve()
+            or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', backup.name)):
+        raise ValueError('invalid_backup')
+    # The verified backup is recorded before the first code file is replaced.
+    fd, name = tempfile.mkstemp(prefix='.recovery-', dir=bridge)
+    try:
+        with os.fdopen(fd, 'w', encoding='ascii') as out:
+            json.dump({'format': 1, 'sha': sha, 'backup': backup.name}, out,
+                      separators=(',', ':'))
+            out.write('\n')
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(name, marker)
+        _sync_dir(bridge)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
 def run(sha, token, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
         adapter_factory=nordicway_deploy_adapter.Adapter,
-        deploy=nordicway_deploy_sequence.deploy):
+        deploy=nordicway_deploy_sequence.deploy, prepare=prepare_checkout):
     if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-f]{40}', sha):
         raise ValueError('invalid_request')
     if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{10,256}', token):
@@ -79,7 +131,9 @@ def run(sha, token, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
     marker = _claim(bridge, sha)
     result = None
     try:
+        prepare(checkout, sha)
         adapter = adapter_factory(checkout, target, sha, 1, None, None, cpanel_token=token)
+        adapter.backup_observer = lambda backup: _record_backup(bridge, marker, target, sha, backup)
         result = deploy(adapter, sha)
         if result.status == 'ok' and result.stage == 'complete':
             marker.unlink()

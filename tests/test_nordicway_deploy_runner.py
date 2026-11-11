@@ -16,7 +16,8 @@ TOKEN = 'test_token_12345'
 def crash_during_deploy(bridge):
     def die(adapter, sha):
         os._exit(23)
-    runner.run(SHA, TOKEN, bridge=Path(bridge), adapter_factory=Mock(), deploy=die)
+    runner.run(SHA, TOKEN, bridge=Path(bridge), adapter_factory=Mock(), deploy=die,
+               prepare=lambda checkout, sha: None)
 
 
 class RunnerTests(unittest.TestCase):
@@ -32,7 +33,7 @@ class RunnerTests(unittest.TestCase):
     def run_deploy(self, result):
         factory = Mock()
         response = runner.run(SHA, TOKEN, bridge=self.bridge, adapter_factory=factory,
-                              deploy=lambda adapter, sha: result)
+                              deploy=lambda adapter, sha: result, prepare=lambda checkout, sha: None)
         self.assertEqual(factory.call_args.kwargs['cpanel_token'], TOKEN)
         self.assertNotIn(TOKEN, str(response))
         return response

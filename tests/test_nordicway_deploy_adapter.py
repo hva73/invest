@@ -99,6 +99,51 @@ class AdapterIntegration(unittest.TestCase):
         with sqlite3.connect(self.app / 'var' / 'escape.db') as db:
             self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
 
+    def test_prepare_checkout_pins_commit_and_preserves_dirty_checkout(self):
+        import nordicway_deploy_runner
+        first = self.sha
+        (self.checkout / 'app.py').write_text('later')
+        self.git('add', 'app.py')
+        self.git('commit', '-qm', 'later')
+        later = self.git('rev-parse', 'HEAD').strip()
+        nordicway_deploy_runner.prepare_checkout(self.checkout, first)
+        self.assertEqual(self.git('rev-parse', 'HEAD').strip(), first)
+        (self.checkout / 'app.py').write_text('unsaved work')
+        with self.assertRaisesRegex(ValueError, 'checkout_not_clean'):
+            nordicway_deploy_runner.prepare_checkout(self.checkout, later)
+        self.assertEqual((self.checkout / 'app.py').read_text(), 'unsaved work')
+        self.assertEqual(self.git('rev-parse', 'HEAD').strip(), first)
+
+    def test_interrupted_runner_records_verified_backup_before_replacement(self):
+        import json
+        import nordicway_deploy_runner
+        bridge = self.root / 'bridge'
+        bridge.mkdir(mode=0o700)
+        approval = bridge / 'approved-sha'
+        approval.write_text(self.sha + '\n')
+        approval.chmod(0o600)
+        def factory(checkout, target, approved, required, quiescence, health, cpanel_token):
+            return concrete.Adapter(checkout, target, approved, required,
+                lambda: True, lambda sha: True, self.service,
+                quota_reader=lambda path, required: {'required_bytes': required,
+                    'account_free_lower_bytes': required + 1, 'filesystem_free_bytes': required + 1})
+        replace = os.replace
+        def fail_code_replace(source, destination):
+            if Path(destination) == self.app / 'app.py':
+                raise OSError('simulated failure')
+            return replace(source, destination)
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')), \
+             patch.object(os, 'replace', side_effect=fail_code_replace):
+            result = nordicway_deploy_runner.run(self.sha, 'test_token_12345', bridge=bridge,
+                       checkout=self.checkout, target=self.app, adapter_factory=factory)
+        self.assertEqual(result['status'], 'failed')
+        self.assertTrue(result['recovery_required'])
+        record = json.loads((bridge / 'deployment-incomplete.json').read_text())
+        self.assertEqual(record['sha'], self.sha)
+        backup = self.root / '.escape_backups' / record['backup']
+        self.assertEqual((backup / 'code/app.py').read_text(), 'old')
+        with sqlite3.connect(backup / 'escape.db') as db:
+            self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
     def test_failed_backup_verification_prevents_any_code_replacement(self):
         adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
                                    lambda: True, lambda sha: True, self.service)

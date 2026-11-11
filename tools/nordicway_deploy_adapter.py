@@ -60,6 +60,7 @@ class Adapter:
         self.service = service
         self.inventory = None
         self.started_at = None
+        self.backup_observer = None
 
     @contextmanager
     def lock(self):
@@ -131,6 +132,8 @@ class Adapter:
             try:
                 if self.verify_backup(backup) is not True:
                     raise ValueError('backup_unverified')
+                if self.backup_observer is not None:
+                    self.backup_observer(backup)
             except Exception as exc:
                 raise BackupVerificationFailure('backup_unverified') from exc
             return True
