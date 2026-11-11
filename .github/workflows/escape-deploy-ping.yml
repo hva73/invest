@@ -14,6 +14,8 @@ on:
         required: false
   pull_request:
     branches: [codex/issue-16-nordicway-bridge, codex/issue16-deploy-guard]
+  issue_comment:
+    types: [created]
 permissions:
   contents: read
 jobs:
@@ -28,7 +30,7 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
-      - run: python -m unittest tests.test_nordicway_upgrade_probe_guard tests.test_nordicway_install_bridge tests.test_nordicway_deploy_guard tests.test_nordicway_deploy_runner tests.test_nordicway_deploy_client tests.test_nordicway_provision_deploy tests.test_nordicway_deploy_ping tests.test_nordicway_quota tests.test_nordicway_autostart tests.test_nordicway_deploy_sequence tests.test_nordicway_deploy_adapter tests.test_nordicway_release_backup tests.test_nordicway_release_stage tests.test_nordicway_quiescence tests.test_nordicway_deploy_health tests.test_nordicway_writer_check tests.test_nordicway_uapi_probe tests.test_nordicway_uapi_quota
+      - run: python -m unittest tests.test_nordicway_deploy_request tests.test_nordicway_upgrade_probe_guard tests.test_nordicway_install_bridge tests.test_nordicway_deploy_guard tests.test_nordicway_deploy_runner tests.test_nordicway_deploy_client tests.test_nordicway_provision_deploy tests.test_nordicway_deploy_ping tests.test_nordicway_quota tests.test_nordicway_autostart tests.test_nordicway_deploy_sequence tests.test_nordicway_deploy_adapter tests.test_nordicway_release_backup tests.test_nordicway_release_stage tests.test_nordicway_quiescence tests.test_nordicway_deploy_health tests.test_nordicway_writer_check tests.test_nordicway_uapi_probe tests.test_nordicway_uapi_quota
   ping:
     if: >-
       github.event_name == 'workflow_dispatch' &&
@@ -102,8 +104,10 @@ jobs:
 
   deploy:
     if: >-
-      github.event_name == 'workflow_dispatch' &&
-      (inputs.operation == 'write-probe' || inputs.operation == 'deploy' || inputs.operation == 'resume') &&
+      ((github.event_name == 'workflow_dispatch' &&
+        (inputs.operation == 'write-probe' || inputs.operation == 'deploy' || inputs.operation == 'resume')) ||
+       (github.event_name == 'issue_comment' && github.event.issue.number == 16 &&
+        startsWith(github.event.comment.body, 'ESCAPE_DEPLOY_V1 '))) &&
       github.repository == 'hva73/invest' &&
       github.actor_id == '351122234' &&
       github.triggering_actor == 'hva73' &&
@@ -116,10 +120,13 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Validate fixed deployment request
+        id: release_request
+        run: python tools/nordicway_deploy_request.py
       - name: Install approved release
         env:
-          ESCAPE_RELEASE_SHA: ${{ inputs.release_sha }}
-          ESCAPE_DEPLOY_OPERATION: ${{ inputs.operation }}
+          ESCAPE_RELEASE_SHA: ${{ steps.release_request.outputs.sha }}
+          ESCAPE_DEPLOY_OPERATION: ${{ steps.release_request.outputs.operation }}
           ESCAPE_DEPLOY_AUTHORIZED: ${{ vars.ESCAPE_DEPLOY_AUTHORIZED }}
           ESCAPE_WRITE_PROBE_AUTHORIZED: ${{ vars.ESCAPE_WRITE_PROBE_AUTHORIZED }}
           ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
