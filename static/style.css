@@ -412,8 +412,9 @@ body.pull-refresh-visible #refresh-status{display:none}
  .mobile-more-panel{display:none;position:absolute;bottom:calc(100% + 10px);right:0;min-width:min(280px,calc(100vw - 24px));max-height:60dvh;overflow:auto;padding:8px;border:1px solid #527578;border-radius:18px;background:#102632;box-shadow:0 12px 35px #000a}
  .mobile-more-panel.is-open{display:block}.mobile-more-panel .nav-group-label{display:none}.mobile-more-panel button{display:flex;width:100%;min-height:48px;justify-content:flex-start;flex-direction:row;text-align:left;font-size:13px;padding:10px 12px}.mobile-more-panel #admin-nav{display:contents}.mobile-more-panel #admin-nav[hidden]{display:none}
  main{padding-bottom:calc(100px + env(safe-area-inset-bottom,0px))}.pull-refresh-status{bottom:calc(86px + env(safe-area-inset-bottom,0px))}
- body:has(input:focus) > aside nav,body:has(textarea:focus) > aside nav,body:has(select:focus) > aside nav{visibility:hidden}
+ body:has(input:not([type=checkbox]):not([type=radio]):focus) > aside nav,body:has(textarea:focus) > aside nav{visibility:hidden}
  .quick-trade-dialog{width:100%;max-width:none;max-height:92dvh;margin:auto 0 0;padding:20px 18px calc(20px + env(safe-area-inset-bottom,0px));border-radius:22px 22px 0 0;overscroll-behavior:contain}
  .quick-trade-dialog input,.quick-trade-dialog select{font-size:16px;min-height:46px}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
