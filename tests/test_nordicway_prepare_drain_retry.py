@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -107,6 +108,27 @@ class PrepareRetryTests(unittest.TestCase):
             (self.app / 'app.py').symlink_to(self.app / 'BUILD_COMMIT')
             with self.assertRaisesRegex(ValueError, 'unsafe_app_file'):
                 recovery._verify_files(self.repo, self.app)
+
+    def test_real_git_manifest_comparison_and_prebackup_recovery(self):
+        def git(*args):
+            return subprocess.check_output(['git', '-C', str(self.repo), *args], stderr=subprocess.DEVNULL)
+        git('init', '-q')
+        git('config', 'user.name', 'Test')
+        git('config', 'user.email', 'test@example.invalid')
+        (self.repo / 'apply_update.py').write_text("FILES=('BUILD_COMMIT','app.py')\n")
+        (self.repo / 'BUILD_COMMIT').write_text('$Format:%H$\n')
+        (self.repo / 'app.py').write_bytes(b'original code')
+        git('add', '.')
+        git('commit', '-qm', 'fixture')
+        sha = git('rev-parse', 'HEAD').decode().strip()
+        (self.app / 'BUILD_COMMIT').write_text(sha + '\n')
+        (self.app / 'app.py').write_bytes(b'original code')
+        with patch.object(recovery, 'INSTALLED', sha):
+            outcome = recovery.prepare(self.repo, self.bridge, self.app,
+                                       verify_runtime=self.runtime, install=self.install)
+        self.assertEqual(outcome['status'], 'ready')
+        self.assertFalse(self.marker.exists())
+        self.assertEqual((self.app / 'var' / 'escape.db').read_bytes(), b'holdings and new writes')
 
     def test_runtime_requires_actual_processes_and_fresh_heartbeats(self):
         import sys
