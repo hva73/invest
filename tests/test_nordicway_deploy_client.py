@@ -128,6 +128,9 @@ class ClientTests(unittest.TestCase):
         send = Mock(return_value=SimpleNamespace(returncode=1, stdout=json.dumps(reply).encode()))
         with patch.object(client, 'verify', return_value='host key\n'):
             self.assertEqual(client.run(self.env, send)['reason'], 'selector_failed')
+            reply['reason'] = 'selector_exit_nonzero'
+            send.return_value.stdout = json.dumps(reply).encode()
+            self.assertEqual(client.run(self.env, send)['reason'], 'selector_exit_nonzero')
             for value in ('secret content', 'other'):
                 reply['reason'] = value
                 send.return_value.stdout = json.dumps(reply).encode()

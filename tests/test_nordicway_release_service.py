@@ -45,5 +45,19 @@ class Service(unittest.TestCase):
         self.assertEqual(service.transition('stop', runner), 'stopped')
         self.assertEqual(runner.call_count, 1)
 
+    def test_selector_failure_categories_do_not_expose_output(self):
+        cases = [
+            (Mock(side_effect=OSError('secret path')), 'selector_exec_unavailable'),
+            (Mock(return_value=subprocess.CompletedProcess([], 1, 'secret output', 'secret error')), 'selector_exit_nonzero'),
+            (Mock(return_value=subprocess.CompletedProcess([], 0, 'secret output', '')), 'selector_invalid_json'),
+            (Mock(return_value=result({'result': 'failure', 'secret': 'private-value'})), 'selector_result_failed'),
+            (Mock(return_value=subprocess.CompletedProcess([], 0, 'x' * 1000001, '')), 'selector_response_too_large'),
+        ]
+        for runner, category in cases:
+            with self.subTest(category=category):
+                with self.assertRaises(ValueError) as error:
+                    service.status(runner)
+                self.assertEqual(str(error.exception), category)
+
 
 if __name__ == '__main__': unittest.main()

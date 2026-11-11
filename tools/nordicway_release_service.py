@@ -16,15 +16,20 @@ def _invoke(operation, runner):
     args = [PROXY, SELECTOR, operation, '--json', '--interpreter', 'python']
     if operation != 'get':
         args += ['--app-root', APP_ROOT]
-    result = runner(args, capture_output=True, text=True, timeout=30, check=False)
-    if result.returncode != 0 or len(result.stdout) > 1_000_000:
-        raise ValueError('selector_failed')
+    try:
+        result = runner(args, capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        raise ValueError('selector_exec_unavailable') from None
+    if result.returncode != 0:
+        raise ValueError('selector_exit_nonzero')
+    if len(result.stdout) > 1_000_000:
+        raise ValueError('selector_response_too_large')
     try:
         data = json.loads(result.stdout)
     except (ValueError, TypeError):
-        raise ValueError('selector_failed') from None
+        raise ValueError('selector_invalid_json') from None
     if not isinstance(data, dict) or data.get('result') != 'success':
-        raise ValueError('selector_failed')
+        raise ValueError('selector_result_failed')
     return data
 
 

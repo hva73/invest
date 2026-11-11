@@ -103,6 +103,8 @@ class SequenceTests(unittest.TestCase):
 
     def test_service_state_diagnostic_is_fixed_and_redacted(self):
         for error, expected in ((ValueError('selector_failed'), 'selector_failed'),
+                                (ValueError('selector_exit_nonzero'), 'selector_exit_nonzero'),
+                                (ValueError('selector_result_failed'), 'selector_result_failed'),
                                 (ValueError('state_record_failed'), 'state_record_failed'),
                                 (ValueError('secret server content'), 'service_state_unavailable'),
                                 (OSError('secret file path'), 'service_state_unavailable')):

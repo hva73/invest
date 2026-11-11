@@ -93,7 +93,9 @@ def deploy(adapter, sha):
                         pass
                 reason = None
                 if stage == 'service_state':
-                    allowed = ('selector_failed', 'application_state_unknown',
+                    allowed = ('selector_failed', 'selector_exec_unavailable',
+                               'selector_exit_nonzero', 'selector_response_too_large',
+                               'selector_invalid_json', 'selector_result_failed', 'application_state_unknown',
                                'service_status_unknown', 'state_record_failed')
                     reason = str(exc) if isinstance(exc, ValueError) and str(exc) in allowed else 'service_state_unavailable'
                 return Outcome('failed', stage, restored, str(backup) if backup else None, reason=reason)
