@@ -32,6 +32,19 @@ class WriterTests(unittest.TestCase):
             self.assertIn('SSH_ORIGINAL_COMMAND', os.environ)
             self.assertIn('SSH_CONNECTION', os.environ)
 
+    def test_real_crontab_subprocess_preserves_cron_veto_under_ssh(self):
+        with tempfile.TemporaryDirectory() as temp:
+            fake = Path(temp) / 'crontab'
+            fake.write_text('#!/bin/sh\n'
+                'if [ -n "$SSH_ORIGINAL_COMMAND" ] || [ -n "$SSH_CONNECTION" ]; then exit 2; fi\n'
+                'echo "no crontab for user" >&2\nexit 1\n')
+            fake.chmod(0o700)
+            with patch.dict(os.environ, {'PATH': temp, 'SSH_ORIGINAL_COMMAND': 'remote command',
+                                         'SSH_CONNECTION': 'remote connection'}):
+                self.assertTrue(check.no_cron())
+                fake.write_text('#!/bin/sh\nprintf "* * * * * task\\n"\n')
+                self.assertFalse(check.no_cron())
+
     def test_open_database_file_and_passenger_block(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
