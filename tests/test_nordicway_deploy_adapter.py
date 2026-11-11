@@ -84,6 +84,28 @@ class AdapterIntegration(unittest.TestCase):
         self.assertEqual((self.app / 'app.py').read_text(), 'old')
         self.assertEqual((self.app / 'BUILD_COMMIT').read_text().strip(), '0' * 40)
 
+    def test_interrupted_file_replacement_restores_original_code_and_database(self):
+        adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
+                                   lambda: True, lambda sha: True, self.service)
+        real_replace = os.replace
+        calls = []
+        def fail_second(source, destination):
+            calls.append(str(destination))
+            if len(calls) == 2:
+                raise OSError('simulated replacement failure')
+            return real_replace(source, destination)
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')):
+            release = nordicway_release_stage.stage(self.checkout, self.app, self.sha,
+                                                    approved_sha=self.sha)
+            with patch.object(apply_update.os, 'replace', side_effect=fail_second):
+                with self.assertRaisesRegex(OSError, 'simulated replacement failure'):
+                    adapter.backup_and_apply(release)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual((self.app / 'app.py').read_text(), 'old')
+        self.assertEqual((self.app / 'BUILD_COMMIT').read_text().strip(), '0' * 40)
+        with sqlite3.connect(self.app / 'var' / 'escape.db') as db:
+            self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
+
     def test_uapi_reader_feeds_real_deploy_sequence(self):
         import io, json
         from types import SimpleNamespace
