@@ -1,5 +1,5 @@
 """Exercise an anonymous demo with synthetic fixtures and no API traffic."""
-import os,sys,threading
+import os,re,sys,threading
 sys.path[:0]=['.','tests']
 import app
 from test_design_v1_acceptance import DesignAcceptance
@@ -25,7 +25,7 @@ try:
    dialog.locator('[data-asset-trade=BUY]').click();quick=page.locator('#quick-trade-dialog');expect(quick).to_contain_text('Køb · TSLA')
    quick.locator('[name=size]').fill('50');quick.locator('button[type=submit]').click();expect(quick).to_contain_text('Gennemgå købet')
    assert not any('/api/' in url for url in requests),requests
-   quick.locator('#quick-trade-confirm').check();quick.locator('[data-quick-send]').click();expect(quick).to_contain_text('simuleret')
+   quick.locator('#quick-trade-confirm').check();quick.locator('[data-quick-send]').click();expect(quick).to_contain_text(re.compile('simuleret',re.I))
    quick.locator('[data-quick-close]').click();dialog.locator('[data-dashboard-close]').click()
    if width<=900:page.locator('#mobile-more').click()
    page.locator('nav [data-view=sectors]').click();expect(page.locator('.sector-shell')).to_be_visible()
