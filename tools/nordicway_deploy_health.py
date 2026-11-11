@@ -12,7 +12,7 @@ import nordicway_readonly_diagnostics
 HEALTH_URL = 'https://escape.nordic-response.dk/api/health'
 
 
-def web_health():
+def web_health(sha):
     request = urllib.request.Request(HEALTH_URL, headers={'Cache-Control': 'no-cache'})
     with urllib.request.urlopen(request, timeout=8) as response:
         if response.status != 200 or response.geturl() != HEALTH_URL:
@@ -21,7 +21,8 @@ def web_health():
     if len(data) > 4096:
         return False
     payload = json.loads(data)
-    return isinstance(payload, dict) and payload.get('status') == 'ok' and payload.get('database') is True
+    return (isinstance(payload, dict) and payload.get('status') == 'ok'
+            and payload.get('database') is True and payload.get('build_commit') == sha)
 
 
 def verify(root, sha, started_at, *, web=web_health, inspect=nordicway_readonly_diagnostics.inspect,
@@ -33,7 +34,7 @@ def verify(root, sha, started_at, *, web=web_health, inspect=nordicway_readonly_
     marker = root / 'BUILD_COMMIT'
     if marker.is_symlink() or not marker.is_file() or marker.stat().st_size > 128:
         return False
-    if marker.read_text(encoding='ascii').strip() != sha or web() is not True:
+    if marker.read_text(encoding='ascii').strip() != sha or web(sha) is not True:
         return False
     report = inspect(root=root, now=now())
     db = report.get('database', {})

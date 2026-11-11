@@ -1,8 +1,12 @@
 import tempfile
 import unittest
+import json
+import sqlite3
+import sys
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import nordicway_deploy_health as health
 
@@ -61,6 +65,34 @@ class HealthTests(unittest.TestCase):
         self.assertFalse(health.wait(self.root, self.sha, self.started, timeout=5,
                                      verify_fn=verifier, clock=lambda: next(ticks), sleep=lambda _: None))
         self.assertGreaterEqual(verifier.call_count, 2)
+
+    def test_web_health_requires_running_process_version(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.status = 200
+        response.geturl.return_value = health.HEALTH_URL
+        with patch.object(health.urllib.request, 'urlopen', return_value=response):
+            for version, expected in ((self.sha, True), ('b' * 40, False), (None, False)):
+                response.read.return_value = json.dumps({'status': 'ok', 'database': True,
+                                                          'build_commit': version}).encode()
+                self.assertEqual(health.web_health(self.sha), expected)
+
+    def test_health_endpoint_reports_startup_version_after_marker_changes(self):
+        import app
+        marker = self.root / 'BUILD_COMMIT'
+        with patch.object(app, 'ROOT', self.root):
+            startup = app._startup_build_commit()
+            marker.write_text('b' * 40)
+            self.assertNotEqual(startup, app._startup_build_commit())
+        handler = Mock()
+        handler.path = '/api/health'
+        with patch.object(app, 'STARTUP_BUILD_COMMIT', startup), \
+             patch.object(app, 'connect', side_effect=lambda: sqlite3.connect(':memory:')), \
+             patch.dict(sys.modules, {'hotwatch_api': SimpleNamespace(handle=lambda *args: False),
+                                      'mcp_reports': SimpleNamespace(handle=lambda *args: False)}):
+            app.Handler._get(handler)
+        self.assertEqual(handler.send.call_args.args[1]['build_commit'], self.sha)
 
 
 if __name__ == '__main__': unittest.main()

@@ -8,6 +8,16 @@ from urllib.parse import urlsplit,parse_qs
 import oauth
 from report_validation import ReportValidationError,unique_object
 ROOT=Path(__file__).parent
+def _startup_build_commit():
+    # Capture once at process startup: reading this on each request would make
+    # an old Passenger process report the new version after files are replaced.
+    try:
+        marker=(ROOT/'BUILD_COMMIT').read_text(encoding='ascii').strip()
+    except (OSError, UnicodeError):
+        return None
+    return marker if len(marker)==40 and all(c in '0123456789abcdef' for c in marker) else None
+
+STARTUP_BUILD_COMMIT=_startup_build_commit()
 DB=os.environ.get('ESCAPE_DB',str(ROOT/'var/escape.db'))
 SESSIONS={}
 class DatabaseConnection(sqlite3.Connection):
@@ -260,7 +270,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(303);self.send_header('Location','/?pluto='+result);self.send_header('Cache-Control','no-store');self.send_header('Referrer-Policy','no-referrer');self.send_header('Content-Length','0');self.end_headers();return
         if self.path=='/api/health':
             with connect() as c: database=bool(c.execute('SELECT 1').fetchone())
-            return self.send(200,{'status':'ok','database':database})
+            return self.send(200,{'status':'ok','database':database,'build_commit':STARTUP_BUILD_COMMIT})
         if self.path=='/api/session':
             s=self.session(); return self.send(200,{'authenticated':bool(s),'csrf':s['csrf'] if s else None,'user':{'username':s['username'],'role':s['role']} if s else None})
         if self.path.startswith('/api/'):
