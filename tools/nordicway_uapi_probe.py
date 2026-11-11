@@ -3,6 +3,8 @@ import json
 import os
 import re
 import sys
+import ssl
+import socket
 import urllib.error
 import urllib.request
 
@@ -38,8 +40,20 @@ def probe(token, opener=None):
         # No raw response, free-form messages, values or token in logs.
         return {'status': 'ok', 'fields': {key: type(row.get(key)).__name__
                 for key in ('count', 'max', '_count', '_max', 'units', 'normalized')}}
-    except (OSError, ValueError, TypeError, AttributeError, urllib.error.URLError):
-        return {'status': 'unavailable'}
+    except urllib.error.HTTPError as exc:
+        return {'status': 'http_error', 'code': exc.code}
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, ssl.SSLError):
+            return {'status': 'tls_error'}
+        if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+            return {'status': 'timeout'}
+        return {'status': 'connection_error'}
+    except (TimeoutError, socket.timeout):
+        return {'status': 'timeout'}
+    except ssl.SSLError:
+        return {'status': 'tls_error'}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {'status': 'invalid_response'}
 
 
 if __name__ == '__main__':

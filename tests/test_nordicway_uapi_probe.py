@@ -30,8 +30,14 @@ class ProbeTests(unittest.TestCase):
     def test_error_and_invalid_token_never_expose_response(self):
         opener = Mock()
         opener.open.return_value = Response(b'{"result":{"status":0,"errors":["sensitive"]}}')
-        self.assertEqual(p.probe('a' * 40, opener), {'status':'unavailable'})
+        self.assertEqual(p.probe('a' * 40, opener), {'status':'invalid_response'})
         self.assertEqual(p.probe('bad\n', opener), {'status':'invalid_credential'})
+
+    def test_http_error_is_categorised_without_body(self):
+        import urllib.error
+        opener = Mock()
+        opener.open.side_effect = urllib.error.HTTPError(p.URL, 401, 'private', {}, None)
+        self.assertEqual(p.probe('a' * 40, opener), {'status':'http_error', 'code':401})
 
     def test_redirect_is_rejected(self):
         with self.assertRaises(ValueError):
