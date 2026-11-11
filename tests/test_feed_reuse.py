@@ -178,12 +178,38 @@ class FeedReuse(unittest.TestCase):
   client=Mock();client.capture.return_value={'status':'OK','messages':[{'symbol':'OTHER','event_time':self.now.isoformat(),'received_at':self.now.isoformat(),'price':'200'}],'batch_valid_count':250,'batch_partial_count':0,'batch_limit_reached':True}
   with patch('hotwatch_engine.verified_automatic_feed',return_value=True):
    result=self.adapter.capture(client,'us_trades','MERC',self.job)
-   self.assertEqual(result['status'],'NO_MESSAGES')
+   self.assertEqual(result['status'],'INCOMPLETE')
    self.assertTrue(self.adapter.capture_metrics[-1]['batch_limit_reached'])
    self.assertEqual(self.adapter.capture_metrics[-1]['batch_valid_count'],250)
    self.adapter.capture(client,'us_trades','MERC',self.job)
-  self.assertTrue(self.adapter.capture_metrics[-1]['cache_hit'])
+  self.assertFalse(self.adapter.capture_metrics[-1]['cache_hit'])
   self.assertTrue(self.adapter.capture_metrics[-1]['batch_limit_reached'])
+  self.assertEqual(client.capture.call_count,2)
+ def test_saturated_partial_batch_is_incomplete_then_recovers_on_next_scan(self):
+  client=Mock();client.capture.side_effect=[
+   {'status':'NO_MESSAGES','messages':[],'partial_messages':[{'symbol':'MERC','price':'100'}],'batch_valid_count':0,'batch_partial_count':250,'batch_limit_reached':True},
+   {'status':'OK','messages':[{'symbol':'MERC','event_time':self.now.isoformat(),'received_at':self.now.isoformat(),'price':'101'}],'batch_valid_count':1,'batch_partial_count':0,'batch_limit_reached':False}]
+  first=self.adapter.capture(client,'us_trades','MERC',self.job)
+  self.assertEqual(first['status'],'INCOMPLETE');self.assertEqual(first['partial_messages'][0]['price'],'100');self.assertEqual(client.capture.call_count,1)
+  second=self.adapter.capture(client,'us_trades','MERC',self.job)
+  self.assertEqual(second['status'],'OK');self.assertEqual(second['messages'][0]['price'],'101');self.assertEqual(client.capture.call_count,2)
+ def test_real_capture_limit_does_not_cache_missing_batch_symbol(self):
+  from eodhd_feeds import EODHDFeeds
+  from test_eodhd_feeds import WS
+  capacity_fixture.LiveCapacity.add(self,'OTHER.US',1,due=self.now.timestamp())
+  at=int(self.now.timestamp()*1000)
+  first_ws=WS([{'s':'OTHER','t':at,'p':200} for _ in range(250)]+[{'s':'MERC','t':at,'p':100}])
+  second_ws=WS([{'s':'MERC','t':at,'p':101}]);streams=iter([first_ws,second_ws]);client=EODHDFeeds('SYNTHETIC',ws_factory=lambda *a,**kw:next(streams))
+  with patch('hotwatch_engine.verified_automatic_feed',return_value=True):
+   first=self.adapter.capture(client,'us_trades','MERC',self.job)
+   self.assertEqual(first['status'],'INCOMPLETE');self.assertEqual(len(first_ws.messages),1)
+   second=self.adapter.capture(client,'us_trades','MERC',self.job)
+  self.assertEqual(second['status'],'OK');self.assertEqual(second['messages'][0]['price'],'101')
+ def test_non_saturated_empty_batch_still_uses_negative_cache(self):
+  client=Mock();client.capture.return_value={'status':'NO_MESSAGES','messages':[],'batch_limit_reached':False}
+  self.assertEqual(self.adapter.capture(client,'us_trades','MERC',self.job)['status'],'NO_MESSAGES')
+  self.assertEqual(self.adapter.capture(client,'us_trades','MERC',self.job)['status'],'NO_MESSAGES')
+  self.assertEqual(client.capture.call_count,1);self.assertTrue(self.adapter.capture_metrics[-1]['cache_hit'])
  def test_cached_stale_trade_and_fresh_quotes_cannot_become_actionable(self):
   from decimal import Decimal
   from hotwatch_strategy import BASELINE,calculate
