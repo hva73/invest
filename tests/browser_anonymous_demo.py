@@ -28,7 +28,12 @@ try:
    expect(page.locator('.dash-hero-metrics')).to_contain_text('52.080,00');requests.clear()
    if shot and width in (320,390):page.screenshot(path=f'{shot}/demo-overview-{width}.png')
    row=page.get_by_role('button',name='Åbn position TSLA i Demodepot');row.click()
-   dialog=page.locator('#dashboard-detail');expect(dialog).to_be_visible();dialog.locator('[data-market-period=week]').click()
+   dialog=page.locator('#dashboard-detail');expect(dialog).to_be_visible()
+   for period in ('day','week','month','year'):
+    dialog.locator(f'[data-market-period={period}]').click()
+    chart=dialog.locator('.market-chart svg[role=img]');expect(chart).to_be_visible()
+    expect(chart).to_have_attribute('aria-label',re.compile(r'\b(?:1\d\d|2\d\d|3[0-6]\d) observerede punkter'))
+    if shot:page.screenshot(path=f'{shot}/demo-chart-{width}-{period}.png')
    if shot and width==390:page.screenshot(path=f'{shot}/demo-position-390.png')
    dialog.locator('[data-asset-trade=BUY]').click();quick=page.locator('#quick-trade-dialog');expect(quick).to_contain_text('Køb · TSLA')
    quick.locator('[name=size]').fill('50');quick.locator('button[type=submit]').click();expect(quick).to_contain_text('Gennemgå købet')
