@@ -70,6 +70,17 @@ class AdapterIntegration(unittest.TestCase):
         with sqlite3.connect(str(Path(result.backup) / 'escape.db')) as db:
             self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
 
+    def test_space_estimate_covers_database_staging_backup_and_margin(self):
+        db_size = (self.app / 'var' / 'escape.db').stat().st_size
+        estimate = concrete.estimate_required_bytes(self.checkout, self.app)
+        self.assertGreaterEqual(estimate, 2 * db_size + 256 * 1024 * 1024)
+
+    def test_space_estimate_rejects_unsafe_source(self):
+        (self.checkout / 'app.py').unlink()
+        (self.checkout / 'app.py').symlink_to(self.app / 'app.py')
+        with self.assertRaisesRegex(ValueError, 'unsafe_manifest_file'):
+            concrete.estimate_required_bytes(self.checkout, self.app)
+
     def test_unknown_quota_never_stops_or_modifies(self):
         result = self.run_test(quota_ok=False)
         self.assertEqual((result.status, result.stage), ('failed', 'quota'))

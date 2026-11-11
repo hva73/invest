@@ -19,6 +19,29 @@ import nordicway_release_service
 import nordicway_release_stage
 
 
+def estimate_required_bytes(checkout, target):
+    """Conservative reservation for DB backup/journal, code and two stages."""
+    checkout, target = Path(checkout), Path(target)
+    database = target / 'var' / 'escape.db'
+    if database.is_symlink() or not database.is_file():
+        raise ValueError('database_unavailable')
+    names = nordicway_release_preflight.manifest(checkout)
+    source_total = 0
+    existing_total = 0
+    for name in names:
+        source = checkout / name
+        installed = target / name
+        if source.is_symlink() or not source.is_file() or installed.is_symlink():
+            raise ValueError('unsafe_manifest_file')
+        source_total += source.stat().st_size
+        if installed.exists():
+            if not installed.is_file():
+                raise ValueError('unsafe_manifest_file')
+            existing_total += installed.stat().st_size
+    base = database.stat().st_size * 2 + source_total * 2 + existing_total
+    return base + max(256 * 1024 * 1024, (base + 9) // 10)
+
+
 class Adapter:
     def __init__(self, checkout, target, approved_sha, required_bytes,
                  quiescence_check, health_check, service=nordicway_release_service):
@@ -61,7 +84,8 @@ class Adapter:
             raise ValueError('preflight_failed')
 
     def check_quota(self):
-        return nordicway_quota.verify_space(self.target, self.required_bytes)
+        required = max(self.required_bytes, estimate_required_bytes(self.checkout, self.target))
+        return nordicway_quota.verify_space(self.target, required)
 
     def stage(self, sha):
         return nordicway_release_stage.stage(self.checkout, self.target, sha, approved_sha=self.approved_sha)
