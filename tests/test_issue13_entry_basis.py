@@ -1,4 +1,4 @@
-"""Regression target for issue 13; all observations are synthetic."""
+"""Regression target for issue 13; no live data access or side effects."""
 import copy
 import unittest
 import json
@@ -9,6 +9,24 @@ from test_hotwatch_engine import good_metrics, request, tick
 
 
 class EntryBasis(unittest.TestCase):
+ def test_rskd_logged_analysis_high_is_not_position_trailing_evidence(self):
+  # Production readback: four SELL calculations all used a $10.69 analysis
+  # high; no fill-history completeness was attested. The observations do not
+  # establish when that high occurred or prove uninterrupted ownership.
+  cases=(('18:20:08.718558','18:19:22.894000','18:18:05.005620','9.945','-6.969130028063610851262862490'),
+         ('18:23:53.359959','18:23:25.060000','18:23:07.270566','9.9','-7.390084190832553788587464920'),
+         ('18:35:31.766297','18:35:13.584000','18:34:06.940099','9.83','-8.044901777362020579981290930'),
+         ('18:41:41.312438','18:41:33.899000','18:40:01.095649','9.86','-7.764265668849391955098222640'))
+  risk=copy.deepcopy(request()['risk']);risk.update(stop_price=None,_position_scope='rskd-root');state={}
+  def dt(value):return datetime.fromisoformat('2026-11-11T'+value+'+00:00')
+  for calculated,event,observed,price,distance in cases:
+   now=dt(calculated);sample=tick(dt(event),price=price,held=True)
+   sample['context'].update(status='verified',position='held',quantity='3.739393939',cost_price='9.9',as_of=dt(observed).isoformat(),orders_complete=False)
+   metrics=good_metrics();metrics.update(price=price,distance_high_pct=distance)
+   result,state=calculate(sample,metrics,BASELINE,risk,state,now)
+   self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
+   self.assertEqual(result['position_trailing']['status'],'WAITING_FOR_VERIFIED_POSITION_HISTORY')
+
  def test_historical_market_high_is_not_a_verified_position_high(self):
   # The instrument reached 10.50 before the position was bought at 9.90.
   # There is no verified entry time or position high in the broker context.
