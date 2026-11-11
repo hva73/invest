@@ -31,6 +31,7 @@ with sync_playwright() as p:
     for side in ('BUY','SELL'):
         page.evaluate("side => TradeUI.openQuick({report_id:side==='BUY'?'@manual-buy':'@manual-sell',ticker:'TEST',asset_id:'test-id',portfolio_id:7,signal:side})", side)
         dialog=page.locator('#quick-trade-dialog')
+        expect(dialog.locator('h2')).to_be_focused()
         dialog.locator('[name=size]').fill('50')
         before=page.evaluate("calls.filter(c=>c.name==='trade/send').length")
         dialog.locator('button[type=submit]').click()
