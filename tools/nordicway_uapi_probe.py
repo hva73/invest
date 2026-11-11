@@ -48,9 +48,18 @@ def probe(token, opener=None):
         if len(matches) != 1:
             return {'status': 'diskusage_not_unique', 'rows': len(rows)}
         row = matches[0]
-        # No raw response, free-form messages, values or token in logs.
+        def shape(value):
+            if not isinstance(value, str): return 'non_string'
+            if re.fullmatch(r'[0-9]+(?:\.[0-9]+)?', value): return 'number'
+            if re.fullmatch(r'[0-9]+(?:\.[0-9]+)?\s*(?:B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)', value, re.I): return 'number_with_unit'
+            if value.lower() == 'unlimited': return 'unlimited'
+            return 'other'
+        unit = row.get('units')
+        safe_unit = unit if unit in ('B','KB','MB','GB','TB','KiB','MiB','GiB','TiB') else 'other'
         return {'status': 'ok', 'fields': {key: type(row.get(key)).__name__
-                for key in ('count', 'max', '_count', '_max', 'units', 'normalized')}}
+                for key in ('count', 'max', '_count', '_max', 'units', 'normalized')},
+                'shapes': {key: shape(row.get(key)) for key in ('count','max','_count','_max')},
+                'unit': safe_unit, 'normalized': row.get('normalized') if row.get('normalized') in (0,1) else 'unknown'}
     except urllib.error.HTTPError as exc:
         return {'status': 'http_error', 'code': exc.code}
     except urllib.error.URLError as exc:
