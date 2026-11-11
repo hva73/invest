@@ -11,6 +11,7 @@ import nordicway_deploy_adapter as concrete
 import nordicway_deploy_sequence as sequence
 import nordicway_uapi_quota
 import nordicway_release_stage
+import nordicway_writer_check
 
 
 class FakeService:
@@ -175,6 +176,21 @@ class AdapterIntegration(unittest.TestCase):
         result = self.run_test(quiescent=False)
         self.assertEqual((result.status, result.stage), ('failed', 'drain'))
         self.assertTrue(result.service_restored)
+        self.assertEqual(self.service.state, 'started')
+        self.assertEqual((self.app / 'app.py').read_text(), 'old')
+
+    def test_default_writer_check_refuses_release_before_update(self):
+        adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
+                                   None, lambda sha: True, self.service,
+                                   quota_reader=lambda path, required: {
+                                       'required_bytes': required,
+                                       'account_free_lower_bytes': required + 1,
+                                       'filesystem_free_bytes': required + 1})
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')), \
+             patch.object(nordicway_writer_check, 'verify', return_value=False) as verify:
+            result = sequence.deploy(adapter, self.sha)
+        verify.assert_called_once_with(self.app / 'var' / 'escape.db')
+        self.assertEqual((result.status, result.stage), ('failed', 'drain'))
         self.assertEqual(self.service.state, 'started')
         self.assertEqual((self.app / 'app.py').read_text(), 'old')
 
