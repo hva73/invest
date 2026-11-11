@@ -2,6 +2,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import hashlib
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,6 +31,30 @@ class ProvisionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'key_already_authorized_differently'):
                 p.provision(home, '/bin/sh', KEY, DATA, HASH)
             self.assertEqual(auth.read_text(), KEY + '\n')
+
+    def test_cpanel_rsa_key_is_restricted_and_existing_key_preserved(self):
+        with tempfile.TemporaryDirectory() as root:
+            home = Path(root)
+            keyfile = home / 'test-key'
+            subprocess.run(['ssh-keygen', '-q', '-t', 'rsa', '-b', '2048', '-N', '',
+                            '-f', str(keyfile)], check=True, capture_output=True)
+            key = keyfile.with_suffix('.pub').read_text().strip()
+            (home / '.ssh').mkdir(mode=0o700)
+            auth = home / '.ssh' / 'authorized_keys'
+            auth.write_text('existing-key\n')
+            auth.chmod(0o600)
+            self.assertEqual(p.provision(home, '/bin/sh', key, DATA, HASH), 'configured')
+            self.assertIn('existing-key\nrestrict,command=', auth.read_text())
+            self.assertIn(key, auth.read_text())
+            self.assertEqual(p.provision(home, '/bin/sh', key, DATA, HASH), 'already_configured')
+
+    def test_small_rsa_key_is_rejected(self):
+        with tempfile.TemporaryDirectory() as root:
+            keyfile = Path(root) / 'weak-key'
+            subprocess.run(['ssh-keygen', '-q', '-t', 'rsa', '-b', '1024', '-N', '',
+                            '-f', str(keyfile)], check=True, capture_output=True)
+            with self.assertRaisesRegex(ValueError, 'invalid_key'):
+                p._public_key(keyfile.with_suffix('.pub').read_text())
 
     def test_invalid_hash_key_and_symlink_denied(self):
         with tempfile.TemporaryDirectory() as root:
