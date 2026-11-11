@@ -1,3 +1,4 @@
+import os
 """Synthetic end-to-end interaction; all trade endpoints are mocked."""
 import sys,threading
 sys.path[:0]=['.','tests']
@@ -10,7 +11,7 @@ enable(app.DB,'owner','Root')
 server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
 try:
  with sync_playwright() as p:
-  browser=p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
+  browser=(p.chromium.launch(headless=True) if os.environ.get('ESCAPE_PLAYWRIGHT_MANAGED')=='1' else p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox']))
   page=browser.new_page(viewport={'width':390,'height':844});errors=[];calls=[];page.on('pageerror',lambda e:errors.append(str(e)))
   def estimate(route):
    data=route.request.post_data_json;calls.append(('estimate',data));sell=data['size_mode']=='percent'
