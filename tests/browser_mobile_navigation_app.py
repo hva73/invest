@@ -1,5 +1,5 @@
 """Real application routing on a disposable fixture; no live broker calls."""
-import sys,threading
+import os,sys,threading
 from pathlib import Path
 from unittest.mock import patch
 sys.path[:0]=[str(Path(__file__).resolve().parents[1]),str(Path(__file__).resolve().parent)]
@@ -18,6 +18,10 @@ try:
    page.goto(f'http://127.0.0.1:{server.server_port}')
    page.locator('#login-form [name=password]').fill('test-password-long-enough')
    page.locator('#login-form button').click();expect(page.locator('.dashboard-v1')).to_be_visible()
+   screenshot_dir=os.environ.get('ESCAPE_SCREENSHOTS')
+   if screenshot_dir:
+    Path(screenshot_dir).mkdir(parents=True,exist_ok=True)
+    page.screenshot(path=str(Path(screenshot_dir)/f'overview-{width}.png'))
    nav=page.locator('body > aside nav')
    if width<=900:
     more=page.locator('#mobile-more');expect(more).to_be_visible()
@@ -26,6 +30,7 @@ try:
      expect(nav.locator(f':scope > [data-view="{target}"]')).to_have_class('active')
      assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1'),(width,target)
     more.click();expect(page.locator('#mobile-more-panel')).to_be_visible()
+    if screenshot_dir:page.screenshot(path=str(Path(screenshot_dir)/f'menu-{width}.png'))
     page.locator('#mobile-more-panel [data-view=trade]').click()
     expect(page.locator('.broker-trade')).to_be_visible();expect(page.locator('#mobile-more-panel')).to_be_hidden()
     assert page.locator('#mobile-more-panel [data-view=trade]').evaluate("e=>e.classList.contains('active')")
