@@ -1358,7 +1358,9 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   if request['provider']=='eodhd' and code in ('EODHD_RATE_LIMIT','PROVIDER_RATE_BUDGET') and retry_after_s is not None:interval=max(1,retry_after_s)
   elif retry_after_s is not None:interval=max(interval,max(0,retry_after_s))
   state['scheduled_interval_s']=interval
-  baseline=effective_poll_interval(c,request,state.get('adaptive_profile',request['profile']))
+  # Only stale-data scheduling uses the quiet-market baseline. Other errors
+  # do not need a full shared-session budget lookup while holding the writer.
+  baseline=effective_poll_interval(c,request,state.get('adaptive_profile',request['profile'])) if code=='DATA_STALE' else None
   state['quiet_market_poll']=code=='DATA_STALE' and interval>baseline
   state['quiet_baseline_s']=baseline if state['quiet_market_poll'] else None
   if row['last_error']!=code:
