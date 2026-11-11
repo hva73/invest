@@ -39,6 +39,30 @@ class ClientTests(unittest.TestCase):
             result = client.run(self.env, send)
         self.assertEqual(result['status'], 'unknown')
 
+    def test_completed_stopped_release_is_successful_but_remains_stopped(self):
+        self.reply.update(status='updated_stopped', service_restored=False)
+        send = Mock(return_value=SimpleNamespace(returncode=0, stdout=json.dumps(self.reply).encode()))
+        with patch.object(client, 'verify', return_value='host key\n'):
+            result = client.run(self.env, send)
+        self.assertEqual(result['status'], 'updated_stopped')
+        self.assertEqual(client.exit_code(result), 0)
+        self.assertFalse(result['service_restored'])
+
+    def test_incomplete_or_failed_stopped_reply_is_never_success(self):
+        for changed in ({'stage': 'verify_install'}, {'recovery_required': True}):
+            with self.subTest(changed=changed):
+                self.reply.update(status='updated_stopped', stage='complete', recovery_required=False)
+                self.reply.update(changed)
+                send = Mock(return_value=SimpleNamespace(returncode=0, stdout=json.dumps(self.reply).encode()))
+                with patch.object(client, 'verify', return_value='host key\n'):
+                    result = client.run(self.env, send)
+                self.assertEqual(result['status'], 'unknown')
+                self.assertEqual(client.exit_code(result), 1)
+        self.reply.update(status='updated_stopped', stage='complete', recovery_required=False)
+        send = Mock(return_value=SimpleNamespace(returncode=1, stdout=json.dumps(self.reply).encode()))
+        with patch.object(client, 'verify', return_value='host key\n'):
+            self.assertEqual(client.run(self.env, send)['status'], 'unknown')
+
     def test_legacy_reply_marks_cleanup_unknown(self):
         del self.reply['backup_cleanup']
         send = Mock(return_value=SimpleNamespace(returncode=0, stdout=json.dumps(self.reply).encode()))

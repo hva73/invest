@@ -68,7 +68,7 @@ def run(env=None, transport=_run_limited):
                 or reply['status'] not in ('ok', 'failed', 'updated_stopped')
                 or reply['stage'] not in STAGES or type(reply['service_restored']) is not bool
                 or type(reply['recovery_required']) is not bool
-                or (reply['status'] == 'ok' and (result.returncode != 0
+                or (reply['status'] in ('ok', 'updated_stopped') and (result.returncode != 0
                     or reply['stage'] != 'complete' or reply['recovery_required']))):
             raise ValueError('invalid_reply')
         reply.setdefault('backup_cleanup', 'unknown')
@@ -78,7 +78,16 @@ def run(env=None, transport=_run_limited):
         return {'status': 'unknown', 'reason': 'transport_or_reply_failed', 'recovery_required': True}
 
 
+def exit_code(result):
+    if result.get('status') == 'ok':
+        return 0
+    if (result.get('operation') == 'deploy' and result.get('status') == 'updated_stopped'
+            and result.get('stage') == 'complete' and result.get('recovery_required') is False):
+        return 0
+    return 1
+
+
 if __name__ == '__main__':
     result = run()
     print(json.dumps(result, sort_keys=True, separators=(',', ':')))
-    raise SystemExit(0 if result.get('status') == 'ok' else 1)
+    raise SystemExit(exit_code(result))
