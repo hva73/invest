@@ -45,6 +45,15 @@ class ProbeTests(unittest.TestCase):
         self.assertNotIn('secret-value', str(result))
         self.assertNotIn('private-value', str(result))
 
+    def test_previous_display_comparison_does_not_print_amounts(self):
+        payload = {'status':1, 'data':[{'id':'diskusage', 'units':'MB', 'normalized':1,
+                   '_count':'8022.09', '_max':'10240'}]}
+        opener = Mock(); opener.open.return_value = Response(json.dumps(payload).encode())
+        result = p.probe('a' * 40, opener)
+        self.assertTrue(result['prior_display_compatible'])
+        self.assertNotIn('8022.09', str(result))
+        self.assertNotIn('10240', str(result))
+
     def test_direct_envelope_and_id_are_supported(self):
         payload = {'status':1, 'data':[{'id':'diskusage', 'units':'MB'}]}
         opener = Mock(); opener.open.return_value = Response(json.dumps(payload).encode())
