@@ -15,6 +15,7 @@ import nordicway_autostart
 import nordicway_deploy_health
 import nordicway_uapi_quota
 import nordicway_quiescence
+import nordicway_writer_check
 import nordicway_release_backup
 import nordicway_release_preflight
 import nordicway_release_service
@@ -116,7 +117,9 @@ class Adapter:
     def quiescence(self):
         with nordicway_quiescence.stopped_motor(self.target / 'var'):
             # Separate check must cover Passenger, cron and other writers.
-            if self.quiescence_check() is not True:
+            check = (self.quiescence_check() if self.quiescence_check is not None else
+                     nordicway_writer_check.verify(self.target / 'var' / 'escape.db'))
+            if check is not True:
                 raise ValueError('quiescence_unverified')
             yield
 
