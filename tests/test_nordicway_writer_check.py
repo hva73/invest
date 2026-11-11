@@ -18,6 +18,20 @@ class WriterTests(unittest.TestCase):
         self.assertFalse(check.no_cron(run('', 1, 'permission denied')))
         self.assertFalse(check.no_cron(Mock(side_effect=OSError())))
 
+    def test_cron_check_uses_local_environment_without_ssh_metadata(self):
+        def run(args, **kwargs):
+            self.assertEqual(args, ['crontab', '-l'])
+            self.assertNotIn('SSH_ORIGINAL_COMMAND', kwargs['env'])
+            self.assertNotIn('SSH_CONNECTION', kwargs['env'])
+            self.assertEqual(kwargs['env']['ESCAPE_TEST_PRESERVED'], 'yes')
+            return subprocess.CompletedProcess(args, 1, '', 'no crontab for user')
+        with patch.dict(os.environ, {'SSH_ORIGINAL_COMMAND': 'escape-deploy-v1 deploy ' + 'a' * 40,
+                                     'SSH_CONNECTION': '127.0.0.1 12345 127.0.0.1 33',
+                                     'ESCAPE_TEST_PRESERVED': 'yes'}):
+            self.assertTrue(check.no_cron(run))
+            self.assertIn('SSH_ORIGINAL_COMMAND', os.environ)
+            self.assertIn('SSH_CONNECTION', os.environ)
+
     def test_open_database_file_and_passenger_block(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

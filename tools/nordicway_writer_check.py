@@ -11,7 +11,12 @@ from pathlib import Path
 
 def no_cron(runner=subprocess.run):
     try:
-        result = runner(['crontab', '-l'], capture_output=True, text=True, timeout=5)
+        # CloudLinux wrappers can interpret SSH metadata as a command context.
+        # Check cron in the same local context as the fixed selector operation.
+        env = os.environ.copy()
+        env.pop('SSH_ORIGINAL_COMMAND', None)
+        env.pop('SSH_CONNECTION', None)
+        result = runner(['crontab', '-l'], capture_output=True, text=True, timeout=5, env=env)
         if result.returncode != 0:
             return 'no crontab for' in result.stderr.lower()
         for line in result.stdout.splitlines():
