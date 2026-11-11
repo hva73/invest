@@ -48,7 +48,7 @@ try:
    dialog=page.locator('#quick-trade-dialog');expect(dialog).to_be_visible()
    if side=='BUY':
     expect(dialog.locator('[name=size]')).to_be_disabled();expect(dialog).to_contain_text('Din kontrollerede købsplan')
-   else:dialog.locator('[name=size]').fill(size)
+   else:dialog.locator('[name=size]').fill(size);dialog.locator('[name=currency]').select_option('DKK')
    count=len([x for x in calls if x[0]=='send'])
    review_and_send(dialog)
    assert calls[-2][1]['size_mode']==expected and calls[-2][1]['size']==size
