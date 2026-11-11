@@ -241,6 +241,7 @@ def calculate(sample,metrics,strategy,risk,state,now,killed=False,new_market_eve
  if raw=='NO_DATA' and signal in ('WAIT','BUY'):signal='NO_DATA'
  if killed:signal='PAUSE';risk_codes=['KILL_SWITCH'];critical=[]
  reasons+=risk_codes+critical;at=now.timestamp();previous=state.get('signal','NO_DATA');newstate=dict(state)
+ newstate.pop('exit_context_changed',None)
  if trailing_state is None:newstate.pop('position_trailing',None)
  else:newstate['position_trailing']=trailing_state
  context_key=exit_context_key(sample['context'],risk.get('_position_scope'))

@@ -170,24 +170,53 @@ def _reconcile(c,now):
                 WHERE push_jobs.status IN ('expired','failed') AND push_jobs.created<?""",('stale:'+item['event_key'],item['watch_row_id'],item['device_id'],now.timestamp(),now.timestamp()-300))
 
 
-def _exit_rearmed(c,watch_id,event_key):
-    """Only a fresh, verified calculation with no exit trigger ends an episode."""
+def _exit_rearmed(c,watch_id,event_key,through=None):
+    """Rearm only after verified recovery, changed exposure or closure/re-entry."""
     event=c.execute('SELECT created FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch_id,event_key)).fetchone()
     if not event:return False
     first=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? AND calculated=? ORDER BY id DESC LIMIT 1',(watch_id,event['created'])).fetchone()
-    try:
-        prior_result=json.loads(first['payload']) if first else {};prior_basis=(prior_result.get('position_trailing') or {}).get('basis');prior_context_key=prior_result.get('exit_context_key')
-    except (ValueError,TypeError,AttributeError):prior_basis=None;prior_context_key=None
-    rows=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? AND calculated>? ORDER BY id',(watch_id,event['created'])).fetchall()
+    try:prior_result=json.loads(first['payload']) if first else {};prior_key=prior_result.get('exit_context_key')
+    except (ValueError,TypeError,AttributeError):prior_result={};prior_key=None
+    prior_basis=(prior_result.get('position_trailing') or {}).get('basis')
+    from hotwatch_contract import stamp
+    closed=[]
+    def remember_closed(context,observed):
+        try:
+            as_of=stamp(context['as_of']);seen=stamp(observed)
+            if context.get('status')=='verified' and context.get('position')=='none' and as_of>stamp(event['created']) and 0<=(seen-as_of).total_seconds()<=300:closed.append(as_of)
+        except (KeyError,ValueError,TypeError,AttributeError):pass
+    time_bound=' AND observed<=?' if through else ''
+    args=(watch_id,event['created'],through) if through else (watch_id,event['created'])
+    for row in c.execute('SELECT observed,payload FROM hw_context_events WHERE watch_row_id=? AND observed>?'+time_bound+' ORDER BY id',args):
+        try:remember_closed(json.loads(row['payload']),row['observed'])
+        except (ValueError,TypeError):pass
+    time_bound=' AND calculated<=?' if through else ''
+    rows=c.execute('SELECT calculated,payload FROM hw_calculations WHERE watch_row_id=? AND calculated>?'+time_bound+' ORDER BY id',args).fetchall()
     for row in rows:
         try:
             result=json.loads(row['payload']);codes=set(result.get('reason_codes',[]))
+            context=result.get('position_context') or {};remember_closed(context,row['calculated'])
             if result.get('signal')=='WAIT' and codes=={'NO_TRIGGER'} and result.get('new_market_observation') is True and result.get('position_context',{}).get('position')=='held' and result.get('risk_level')=='normal':return True
-            trailing=result.get('position_trailing') or {}
-            if result.get('new_market_observation') is True and trailing.get('status')=='VERIFIED' and prior_basis and trailing.get('basis') and trailing['basis']!=prior_basis:return True
             current_key=result.get('exit_context_key')
-            if result.get('new_market_observation') is True and prior_context_key and current_key and current_key!=prior_context_key and result.get('position_context',{}).get('status')=='verified' and result.get('position_context',{}).get('position')=='held' and result.get('risk_level')=='normal':return True
-        except (ValueError,TypeError,AttributeError):continue
+            if result.get('new_market_observation') is True and context.get('status')=='verified' and context.get('position')=='held':
+                as_of=stamp(context['as_of']);calculated=stamp(row['calculated'])
+                if not 0<=(calculated-as_of).total_seconds()<=300:continue
+                trailing=result.get('position_trailing') or {}
+                if trailing.get('status')=='VERIFIED' and prior_basis and trailing.get('basis') and trailing['basis']!=prior_basis:return True
+                if result.get('risk_level')=='normal' and prior_key and current_key and current_key!=prior_key:return True
+                if result.get('risk_level')=='normal' and not prior_key:
+                    # Old persisted calculations have no key but may retain a
+                    # verified position snapshot. Compare only observed amounts;
+                    # equality is never treated as proof of uninterrupted ownership.
+                    from hotwatch_strategy import exit_context_key
+                    old_context=prior_result.get('position_context') or {}
+                    try:old_age=(stamp(event['created'])-stamp(old_context['as_of'])).total_seconds()
+                    except (KeyError,ValueError,TypeError,AttributeError):old_age=None
+                    old_observed=exit_context_key(old_context,None) if old_age is not None and 0<=old_age<=300 else None;new_observed=exit_context_key(context,None)
+                    if old_observed and new_observed and old_observed!=new_observed:return True
+                valid=result.get('risk_level')=='normal' or result.get('risk_level')=='critical' and result.get('signal') in ('SELL','REDUCE')
+                if valid and any(t<as_of for t in closed):return True
+        except (KeyError,ValueError,TypeError,AttributeError):continue
     return False
 
 
@@ -219,7 +248,7 @@ def _repeated_critical(c,watch_id,device_id,event_key,reason):
         WHERE j.watch_row_id=? AND j.device_id=? AND j.status='sent'
           AND e.event_type='RISK_REJECTION' AND e.severity='critical'
           AND CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.reason') END=? ORDER BY j.id DESC LIMIT 1""",(watch_id,device_id,reason)).fetchone()
-    if not current or not prior or _exit_rearmed(c,watch_id,prior['event_id']):return False
+    if not current or not prior or _exit_rearmed(c,watch_id,prior['event_id'],current['created']):return False
     key='stop_price' if reason=='STOP_BREACHED' else 'exit_deadline'
     def evidence(created):
         row=c.execute('SELECT payload,strategy_checksum FROM hw_calculations WHERE watch_row_id=? AND calculated=? ORDER BY id DESC LIMIT 1',(watch_id,created)).fetchone()
@@ -258,7 +287,7 @@ def _repeated_trailing(c,watch_id,device_id,event_key):
         ON e.watch_row_id=j.watch_row_id AND e.event_id=j.event_key
         WHERE j.watch_row_id=? AND j.device_id=? AND j.status='sent'
         AND e.event_type='TRAILING_EXIT_WORSENED' ORDER BY j.id DESC LIMIT 1""",(watch_id,device_id)).fetchone()
-    if not current or not prior or _exit_rearmed(c,watch_id,prior['event_id']):return False
+    if not current or not prior or _exit_rearmed(c,watch_id,prior['event_id'],current['created']):return False
     def evidence(created):
         row=c.execute('SELECT payload,strategy_checksum FROM hw_calculations WHERE watch_row_id=? AND calculated=? ORDER BY id DESC LIMIT 1',(watch_id,created)).fetchone()
         try:
@@ -299,7 +328,7 @@ def dispatch_one(connect,now=None,sender=None):
             c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
         try:current=_actionable(c,watch,now)
         except Exception:current=None
-        e=c.execute('SELECT event_type,severity,payload FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch['id'],job['event_key'])).fetchone()
+        e=c.execute('SELECT event_type,severity,payload,created FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch['id'],job['event_key'])).fetchone()
         try:reason=json.loads(e['payload']).get('reason') if e else None
         except (ValueError,TypeError,AttributeError):reason=None
         critical=bool(e and e['event_type']=='RISK_REJECTION' and e['severity']=='critical' and reason in ('STOP_BREACHED','EXIT_DEADLINE'))
@@ -308,7 +337,7 @@ def dispatch_one(connect,now=None,sender=None):
             try:
                 context=engine.view(c,watch,now).get('latest_context') or {}
                 from hotwatch_contract import stamp
-                if context.get('status')=='verified' and context.get('position')=='none' and context.get('as_of') and 0<=(now-stamp(context['as_of'])).total_seconds()<=300:
+                if context.get('status')=='verified' and context.get('position')=='none' and context.get('as_of') and stamp(context['as_of'])>stamp(e['created']) and 0<=(now-stamp(context['as_of'])).total_seconds()<=300:
                     c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
             except (ValueError,TypeError,KeyError,AttributeError):pass
         if (critical and _repeated_critical(c,watch['id'],job['device_id'],job['event_key'],reason) or e and e['event_type']=='TRAILING_EXIT_WORSENED' and _repeated_trailing(c,watch['id'],job['device_id'],job['event_key'])):
@@ -325,7 +354,7 @@ def dispatch_one(connect,now=None,sender=None):
             c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
         if not is_action and not previous_action and not critical_only:
             c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
-        if is_action and previous and previous['signal']==current and not (current=='SELL' and (urgent or _exit_rearmed(c,watch['id'],previous['event_key']))):
+        if is_action and previous and previous['signal']==current and not (current=='SELL' and (urgent or e and _exit_rearmed(c,watch['id'],previous['event_key'],e['created']))):
             c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
         signal=current if is_action else 'CHANGED'
         title,body=_message(c,watch,current if is_action else None)
