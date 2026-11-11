@@ -175,8 +175,8 @@ def _exit_rearmed(c,watch_id,event_key,through=None):
     event=c.execute('SELECT created FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch_id,event_key)).fetchone()
     if not event:return False
     first=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? AND calculated=? ORDER BY id DESC LIMIT 1',(watch_id,event['created'])).fetchone()
-    try:prior_key=json.loads(first['payload']).get('exit_context_key') if first else None
-    except (ValueError,TypeError,AttributeError):prior_key=None
+    try:prior_result=json.loads(first['payload']) if first else {};prior_key=prior_result.get('exit_context_key')
+    except (ValueError,TypeError,AttributeError):prior_result={};prior_key=None
     from hotwatch_contract import stamp
     closed=[]
     def remember_closed(context,observed):
@@ -201,6 +201,13 @@ def _exit_rearmed(c,watch_id,event_key,through=None):
                 as_of=stamp(context['as_of']);calculated=stamp(row['calculated'])
                 if not 0<=(calculated-as_of).total_seconds()<=300:continue
                 if result.get('risk_level')=='normal' and prior_key and current_key and current_key!=prior_key:return True
+                if result.get('risk_level')=='normal' and not prior_key:
+                    # Old persisted calculations have no key but may retain a
+                    # verified position snapshot. Compare only observed amounts;
+                    # equality is never treated as proof of uninterrupted ownership.
+                    from hotwatch_strategy import exit_context_key
+                    old_observed=exit_context_key(prior_result.get('position_context') or {},None);new_observed=exit_context_key(context,None)
+                    if old_observed and new_observed and old_observed!=new_observed:return True
                 valid=result.get('risk_level')=='normal' or result.get('risk_level')=='critical' and result.get('signal') in ('SELL','REDUCE')
                 if valid and any(t<as_of for t in closed):return True
         except (KeyError,ValueError,TypeError,AttributeError):continue

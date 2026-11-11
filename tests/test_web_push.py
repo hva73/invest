@@ -275,6 +275,16 @@ class Push(unittest.TestCase):
    at=self.now+timedelta(seconds=10);payload={'signal':'WAIT','reason_codes':['CONFIRMATION_PENDING'],'new_market_observation':True,'exit_context_key':'newly-known','position_context':{'position':'held','status':'verified','as_of':at.isoformat()},'risk_level':'normal'}
    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps(payload),'x'))
    self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+ def test_legacy_snapshot_rearms_only_for_observed_exposure_change(self):
+  with app.connect() as c:
+   engine.event(c,self.watch,'SELL_SIGNAL',self.now,'legacy exit');event=c.execute("SELECT event_id FROM hw_events WHERE event_type='SELL_SIGNAL' ORDER BY id DESC LIMIT 1").fetchone()['event_id']
+   previous={'position_context':{'position':'held','status':'verified','quantity':'10','cost_price':'98'}}
+   c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],self.now.isoformat(),json.dumps(previous),'x'))
+   def calc(offset,quantity):
+    at=self.now+timedelta(seconds=offset);payload={'signal':'WAIT','reason_codes':['CONFIRMATION_PENDING'],'new_market_observation':True,'position_context':{'position':'held','status':'verified','quantity':quantity,'cost_price':'98.00','as_of':at.isoformat()},'risk_level':'normal'}
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps(payload),'x'))
+   calc(1,'10.0');self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+   calc(2,'9');self.assertTrue(web_push._exit_rearmed(c,self.watch['id'],event))
  def test_observed_close_then_same_quantity_reentry_rearms(self):
   with app.connect() as c:
    engine.event(c,self.watch,'SELL_SIGNAL',self.now,'prior exit');event=c.execute("SELECT event_id FROM hw_events WHERE event_type='SELL_SIGNAL' ORDER BY id DESC LIMIT 1").fetchone()['event_id']
