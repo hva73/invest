@@ -16,6 +16,7 @@ class AdminDiagnostics(unittest.TestCase):
   path=Path(app.DB).parent/'hotwatch-scans.jsonl'
   first=record(5,'processed',1000);first['metrics'].update(scope_entry_wait_ms=12,sqlite_begin_ms=2);first['metrics']['market_conflict']={'fields':['price'],'previous':{'price':'143.7536','secret':'DO_NOT_EXPOSE'},'incoming':{'price':'143.95'},'observations':{'previous':{'source':'eodhd','price_time_kind':'trade','event_time':self.now.isoformat(),'sample_ref':'0123456789abcdef','secret':'DO_NOT_EXPOSE'},'incoming':{'source':'eodhd','event_time':self.now.isoformat(),'sample_ref':'invalid-secret'}},'ingest_attempt_at':self.now.isoformat()}
   first['metrics']['websocket'][0].update(batch_valid_count=250,batch_partial_count=0,batch_limit_reached=True)
+  first['metrics']['websocket'].append({'batch_valid_count':'PRIVATE_FEED_PAYLOAD','batch_partial_count':251,'batch_limit_reached':'PRIVATE_FEED_PAYLOAD'})
   path.write_text('\n'.join(json.dumps(x) for x in [first,record(6,'deferred',9000),record(7,'processed',2000,2)]))
   Path(str(path)+'.1').write_text(json.dumps(record(400,'degraded',3000)))
   result=hotwatch_service.admin_diagnostics(app.connect,1,self.now)
@@ -24,6 +25,7 @@ class AdminDiagnostics(unittest.TestCase):
   self.assertIn('worker_utilization',result);self.assertIn('readiness_by_market',result);self.assertIn('market_sleep',result);self.assertEqual(result['market_sleep']['estimated_avoided_scans'],0);self.assertEqual(result['recent'][0]['metrics']['websocket_ms'],500);self.assertEqual(result['recent'][0]['metrics']['market_conflict']['incoming']['price'],'143.95');self.assertNotIn('DO_NOT_EXPOSE',json.dumps(result));self.assertEqual(result['session_count'],1)
   self.assertEqual(result['recent'][0]['metrics']['scope_entry_wait_ms'],12);self.assertEqual(result['recent'][0]['metrics']['sqlite_begin_ms'],2)
   ws=result['recent'][0]['metrics']['websocket'][0];self.assertEqual(ws['batch_valid_count'],250);self.assertEqual(ws['batch_partial_count'],0);self.assertIs(ws['batch_limit_reached'],True)
+  self.assertEqual(result['recent'][0]['metrics']['websocket'][1],{});self.assertNotIn('PRIVATE_FEED_PAYLOAD',json.dumps(result))
   diagnostic=result['recent'][0]['metrics']['market_conflict'];self.assertEqual(diagnostic['observations']['previous']['sample_ref'],'0123456789abcdef');self.assertNotIn('sample_ref',diagnostic['observations']['incoming']);self.assertNotIn('invalid-secret',json.dumps(result))
   with app.connect() as c:c.execute("UPDATE hw_sessions SET status='EXPIRED' WHERE watch_id=?",(self.f.req['watch_id'],))
   result=hotwatch_service.admin_diagnostics(app.connect,1,self.now);self.assertEqual(result['session_count'],0);self.assertEqual(result['windows']['1h']['completed'],2)
