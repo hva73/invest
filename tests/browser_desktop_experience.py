@@ -70,6 +70,23 @@ try:
                 assert page.locator('body > aside').evaluate('e => e.getBoundingClientRect().width') == 224
                 assert page.locator('main').evaluate('e => e.getBoundingClientRect().left') >= 224
                 assert page.locator('nav [data-view=overview]').evaluate('e => e.getBoundingClientRect().height') >= 44
+                # Explicit fixture responses make the screenshot exercise actual
+                # rendered signal rows; no engine or broker operation is made.
+                def sessions_route(route):
+                    rows = [] if 'view=history' in route.request.url else [
+                        {'watch_id': 'fixture-buy', 'watch_kind': 'candidate', 'status': 'ACTIVE',
+                         'signal': 'BUY', 'display_status': 'KØBSSIGNAL',
+                         'request': {'ticker': 'ALFA', 'exchange': 'TEST', 'provider': 'synthetic', 'quote_currency': 'DKK'},
+                         'last_calculation_at': case.now.isoformat(), 'data_status': {'price': '1000', 'price_status': 'FRESH'},
+                         'latest_calculation': {'signal': 'BUY', 'reason_codes': ['SYNTHETIC'] }},
+                        {'watch_id': 'fixture-sell', 'watch_kind': 'candidate', 'status': 'ACTIVE',
+                         'signal': 'SELL', 'display_status': 'SÆLGSSIGNAL',
+                         'request': {'ticker': 'BETA', 'exchange': 'TEST', 'provider': 'synthetic', 'quote_currency': 'DKK'},
+                         'last_calculation_at': case.now.isoformat(), 'data_status': {'price': '500', 'price_status': 'FRESH'},
+                         'latest_calculation': {'signal': 'SELL', 'reason_codes': ['SYNTHETIC'] }}]
+                    route.fulfill(json={'sessions': rows, 'kill_switch': {'killed': False}, 'worker': None,
+                                        'discovery_attempts': [], 'truncated': False})
+                page.route('**/api/v1/hotwatch/sessions?*', sessions_route)
                 for view, target in [('portfolios', '.portfolio-catalog-heading'), ('hot-watch', '.engine-overview'), ('sectors', '.sector-shell'), ('trade', '.broker-trade'), ('overview', '.dashboard-v1')]:
                     page.locator(f'nav [data-view="{view}"]').click()
                     expect(page.locator(target)).to_be_visible()
@@ -82,6 +99,14 @@ try:
                         assert name['x'] + name['width'] <= preview['x'] + 1, (width, name, preview)
                         assert badge['height'] < 60, (width, badge)
                         assert card.locator('[data-open-portfolio]').first.is_visible()
+                    if view == 'hot-watch':
+                        expect(page.locator('.engine-list-row')).to_have_count(2)
+                        expect(page.locator('.engine-list-row').first).to_contain_text('KØBSSIGNAL')
+                        expect(page.locator('.engine-list-row').last).to_contain_text('SÆLGSSIGNAL')
+                        page.locator('[data-engine-filter=BUY]').click()
+                        expect(page.locator('.engine-list-row:visible')).to_have_count(1)
+                        page.locator('[data-engine-filter=all]').click()
+                        expect(page.locator('.engine-list-row:visible')).to_have_count(2)
                     if width == 1440 and view in ('portfolios', 'hot-watch', 'sectors'):
                         page.screenshot(path=str(screens / f'{view}-{width}.png'), full_page=True)
                 page.locator('nav [data-view=overview]').focus()
