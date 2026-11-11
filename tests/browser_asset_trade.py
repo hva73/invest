@@ -19,8 +19,11 @@ try:
    assert route.request.post_data_json.get('holding_asset_id'), 'Chart must use holding identity'
    route.fulfill(json={'asset_id':'synthetic-asset','ticker':'TSLA','name':'Synthetic stock','exchange':'NASDAQ','currency':'DKK','price':'52','price_time':now.isoformat(),'fetched_at':now.isoformat(),'daily_change_percent':'2','daily_change':'1','series':series})
   page.route('**/api/market/quote',quote)
+  page.set_viewport_size({'width':320,'height':700})
+  more=page.locator('.mobile-holdings [data-mobile-more]')
+  if more.count(): more.click()
   row=page.locator('.mobile-holdings .mobile-holding').filter(has_text='TSLA').first
-  page.set_viewport_size({'width':320,'height':700});row.scroll_into_view_if_needed()
+  row.scroll_into_view_if_needed()
   screenshot_dir=os.environ.get('ESCAPE_SCREENSHOTS')
   if screenshot_dir:
    Path(screenshot_dir).mkdir(parents=True,exist_ok=True);page.screenshot(path=str(Path(screenshot_dir)/'holdings-320.png'))
