@@ -1,0 +1,10 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert'),path=require('path');
+let dialog=null,actions=null;
+const source={dataset:{marketReport:'',marketCandidate:'',marketPortfolio:'',marketPosition:'',marketTest:'false',marketHoldingPortfolio:'42',marketHoldingAsset:'asset-a',marketMarkers:JSON.stringify([{kind:'entry',value:12,currency:'DKK'}])},querySelectorAll:()=>[button]};
+const button={hasAttribute:name=>name==='data-market-expand',closest:()=>source};
+const document={hidden:false,querySelector:s=>s==='#market-chart-dialog'?dialog:s==='#content'?{append(n){dialog=n}}:null,querySelectorAll:()=>[],createElement:()=>({setAttribute(){},addEventListener(){},showModal(){this.open=true}}),addEventListener(){}};
+const escape=v=>String(v??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+const ctx={document,window:{TradeUI:{assetActions(v){actions=v;return ''}}},setInterval(){},Intl,Date,Map,JSON,innerHeight:900,console};
+vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../static/market-ui.js'),'utf8'),ctx);
+const ui=ctx.window.MarketUI;ui.setup({api(){throw Error('unexpected request')},escape,formatAmount:String,formatTime:String,owner:()=> 'owner',connected:()=>false,now:()=>Date.now(),age:()=>({tone:'fresh'})});
+(async()=>{await ui.click(button);assert(dialog.open);assert.match(dialog.innerHTML,/data-market-holding-portfolio="42"/);assert.match(dialog.innerHTML,/data-market-holding-asset="asset-a"/);assert.match(dialog.innerHTML,/&quot;kind&quot;:&quot;entry&quot;/);assert.equal(actions.portfolioId,'42');assert.equal(actions.position,true);console.log('PASS: expanded chart retains portfolio, asset and verified markers');})().catch(e=>{console.error(e);process.exitCode=1});
