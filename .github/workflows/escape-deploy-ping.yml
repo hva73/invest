@@ -146,6 +146,7 @@ jobs:
             [ "$ESCAPE_DEPLOY_AUTHORIZED" = "1" ] || { printf '%s\n' 'Deployment is not authorized.'; exit 1; }
           fi
           NORDICWAY_KNOWN_HOST="$(ssh-keyscan -T 10 -t ed25519 -p 33 cp14.nordicway.dk 2>/dev/null)"
+          NORDICWAY_KNOWN_HOST="$(printf '%s\n' "$NORDICWAY_KNOWN_HOST" | awk '$1 == "[cp14.nordicway.dk]:33"')"
           export NORDICWAY_KNOWN_HOST
           python -c 'import os,sys; sys.path.insert(0,"tools"); import nordicway_hostkey as h
           try: h.verify(os.environ.get("NORDICWAY_KNOWN_HOST", ""), os.environ.get("NORDICWAY_VERIFIED_FINGERPRINT", ""))
