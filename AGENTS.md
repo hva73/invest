@@ -31,6 +31,19 @@ Den logiske kæde er **DISCOVERY → NÅLEØJET → PLUTO GATE → RAPPORT/JOURN
 
 **Vigtigt:** Pragmatisk udvikling ændrer **ikke** ejerens beslutningsret: Codex må ikke på eget initiativ ændre handelsmandat, globale risikogrænser eller strategi, udføre reelle brokerhandler, aktivere nye broker-write-rettigheder eller installere i produktion uden særskilt godkendelse. Bevar secrets, brugerdata og SQLite-database; udfør ikke destruktive ændringer for at spare en test. En *konkret* sikkerhedsrisiko er grund til målrettet kontrol, ikke til at blokere almindeligt arbejde med hypotetiske kontrolrunder.
 
+## 2a. Grundværdi: Skyd ikke gråspurve med kanoner (ejerbeslutning 11. november 2026)
+
+**ESCAPE er lige nu til få brugere. Vi skal først bevise, at strategien kan skabe positivt nettoafkast efter omkostninger.** Kode, agenter og infrastruktur er midler, ikke målet.
+
+1. **Vælg den enkleste forsvarlige løsning.** Genbrug eksisterende kode, SQLite, scripts, cPanel og allerede testede arbejdsgange. Indfør kun nye services, locks, frameworks eller workflows for konkrete, dokumenterede behov – ikke hypotetisk millionbelastning.
+2. **Færdiggør brugerresultatet før infrastrukturen.** En release kræver en versionslåst pakke, én konsistent verificeret backup, filopdatering, genstart og faktisk live-readback. En eksisterende manuel installationsvej er acceptabel. Automatisering er en efterfølgende forbedring, hvis den ikke er nødvendig for at løse den konkrete opgave.
+3. **Proportional sikkerhed, aldrig sløseri.** Bevar database, nøgler, beholdninger og historik; brug nødvendig adgangskontrol, backup og rollbackmulighed. Spring ikke reelle datarisici over, men tilføj ikke ekstra tekniske sikkerhedslag eller gentagne accept-runder uden en påvist risiko.
+4. **Mål succes på handel og drift.** Prioritér tidlige signaler, korrekte og friske data, fornuftige entry/exit-beslutninger, gebyrer, risiko og dokumenteret afkast over mange handler. Ingen profitgaranti. Antal commits, tests, analyser og processer er ikke produktets succeskriterium.
+5. **Stop scope creep.** Spørg: Hvilken virkelig fejl løser vi nu? Kan den eksisterende løsning klare det? Hvad er den korteste relevante test? Hvis der ikke er et konkret svar, udskyd udvidelsen. Revieweren skal aktivt afvise overengineering; udvikleren skal forenkle og færdiggøre.
+6. **Respektér ejerens tid.** Lever en konkret fungerende funktion eller højst én kort samlet nødvendig brugerhandling. Undgå at bruge en ny arbejdssession på at redesigne en allerede fungerende installations- eller udviklingsproces.
+
+Disse principper ændrer **ikke** handelsmandat, faktiske brokerrettigheder eller eksisterende datakontrakter. Nødvendig sikkerhed for finansielle data og faktisk produktion bevares.
+
 ## 3. Fælles arbejdsflade
 
 - Repo: **`hva73/invest`**. Primær udviklingsgren: **`codex/escape-development`** (genlæs aktuel branche-/PR-status).
