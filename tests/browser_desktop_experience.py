@@ -2,19 +2,18 @@
 import os
 import sys
 import threading
-from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path[:0] = [str(Path(__file__).resolve().parents[1]), str(Path(__file__).resolve().parent)]
 import app
 from playwright.sync_api import expect, sync_playwright
+from desktop_fixture import seed
 from test_portfolio_value_chart import PortfolioValueChart
 
 case = PortfolioValueChart()
 case.setUp()
-case.save(case.root, '47213.42', case.now - timedelta(hours=2), result='-148.23')
-case.save(case.root, '50127.36', case.now, result='127.36')
+seed(case)
 server = app.ThreadingHTTPServer(('127.0.0.1', 0), app.Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 screens = Path(os.environ.get('ESCAPE_SCREENSHOTS', '/tmp/escape-desktop-screens'))
@@ -31,6 +30,10 @@ try:
             page.locator('#login-form [name=password]').fill('test-password-long-enough')
             page.locator('#login-form button').click()
             expect(page.locator('.dashboard-v1')).to_be_visible()
+            expect(page.locator('.dash-holdings')).to_contain_text('ALFA')
+            expect(page.locator('.dash-holdings')).to_contain_text('DELTA')
+            page.locator('[data-dashboard-range=week]').click()
+            expect(page.locator('.dash-chart-point')).to_have_count(5)
             before = page.evaluate('''() => {
               const a = document.querySelector('body > aside').getBoundingClientRect();
               const m = document.querySelector('main').getBoundingClientRect();
@@ -46,6 +49,10 @@ try:
                   return {aside: a.width, main: m.x, nav: getComputedStyle(document.querySelector('nav')).position};
                 }''')
                 assert before == after, (width, before, after)
+                page.locator('nav > [data-view=portfolios]').click()
+                expect(page.locator('.portfolio-catalog-heading')).to_be_visible()
+                page.locator('nav > [data-view=overview]').click()
+                expect(page.locator('.dashboard-v1')).to_be_visible()
             else:
                 assert page.locator('body > aside').evaluate('e => e.getBoundingClientRect().width') == 224
                 assert page.locator('main').evaluate('e => e.getBoundingClientRect().left') >= 224
@@ -57,7 +64,8 @@ try:
                     if width == 1440 and view in ('portfolios', 'hot-watch', 'sectors'):
                         page.screenshot(path=str(screens / f'{view}-{width}.png'), full_page=True)
                 page.locator('nav [data-view=overview]').focus()
-                assert page.locator('nav [data-view=overview]').evaluate('e => e.matches(":focus-visible")')
+                page.keyboard.press('Tab')
+                assert page.evaluate('document.activeElement.matches(":focus-visible")')
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), width
             if width in (320, 390, 768, 1280, 1920):
                 page.screenshot(path=str(screens / f'overview-after-{width}.png'), full_page=True)
