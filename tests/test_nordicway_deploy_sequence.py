@@ -35,7 +35,7 @@ class Adapter:
         self._step('drain')
         yield
     def backup_and_apply(self, release): return self._step('backup_and_apply', 'backup')
-    def verify_backup(self, backup): return self._step('verify_backup')
+    def verify_backup(self, backup): return self._step('verify_backup', True)
     def verify_installed(self, sha): return self._step('verify_install')
     def start_service(self): return self._step('start')
     def verify_health(self, sha): return self._step('health')
@@ -72,6 +72,13 @@ class SequenceTests(unittest.TestCase):
                 result = seq.deploy(a, 'a' * 40)
                 self.assertEqual(result.status, 'failed')
                 self.assertNotIn('start', a.events)
+
+    def test_unconfirmed_backup_never_restarts_service(self):
+        a = Adapter()
+        a.verify_backup = lambda backup: False
+        result = seq.deploy(a, 'a' * 40)
+        self.assertEqual((result.status, result.stage), ('failed', 'verify_backup'))
+        self.assertNotIn('start', a.events)
 
     def test_stopped_service_is_not_started(self):
         a = Adapter(state='stopped')
@@ -120,7 +127,7 @@ class RealUpdaterIntegration(unittest.TestCase):
 
                 def verify_backup(self, backup):
                     self._step('verify_backup')
-                    nordicway_release_backup.verify_backup(backup, self.expected)
+                    return nordicway_release_backup.verify_backup(backup, self.expected)
 
                 def verify_installed(self, sha):
                     self._step('verify_install')
@@ -168,7 +175,7 @@ class RealUpdaterIntegration(unittest.TestCase):
 
                 def verify_backup(self, backup):
                     self._step('verify_backup')
-                    nordicway_release_backup.verify_backup(backup, self.expected)
+                    return nordicway_release_backup.verify_backup(backup, self.expected)
 
                 def start_service(self):
                     self._step('start')

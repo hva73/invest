@@ -58,7 +58,8 @@ def deploy(adapter, sha):
                     mutation_started = True
                     backup = adapter.backup_and_apply(release)
                     stage = 'verify_backup'
-                    adapter.verify_backup(backup)
+                    if adapter.verify_backup(backup) is not True:
+                        raise ValueError('backup_unverified')
                     stage = 'verify_install'
                     adapter.verify_installed(sha)
                 if was_running:
