@@ -3,7 +3,9 @@ import json
 import os
 import subprocess
 
-COMMAND = ['/usr/local/cpanel/bin/cpapi2', '--user=nordicr4', '--output=json',
+# The process runs as the cPanel account itself; --user may try setuid and
+# fail for an unprivileged user. Confirm the command on the target server.
+COMMAND = ['/usr/local/cpanel/bin/cpapi2', '--output=json',
            'DiskUsage', 'fetchdiskusagewithextras']
 
 
