@@ -19,17 +19,15 @@ try:
    assert route.request.post_data_json.get('holding_asset_id'), 'Chart must use holding identity'
    route.fulfill(json={'asset_id':'synthetic-asset','ticker':'TSLA','name':'Synthetic stock','exchange':'NASDAQ','currency':'DKK','price':'52','price_time':now.isoformat(),'fetched_at':now.isoformat(),'daily_change_percent':'2','daily_change':'1','series':series})
   page.route('**/api/market/quote',quote)
-  row=page.locator('.dash-holdings .dash-row').filter(has=page.locator('.dash-instrument strong',has_text='TSLA')).first
+  row=page.locator('.mobile-holdings .mobile-holding').filter(has_text='TSLA').first
   page.set_viewport_size({'width':320,'height':700});row.scroll_into_view_if_needed()
   screenshot_dir=os.environ.get('ESCAPE_SCREENSHOTS')
   if screenshot_dir:
    Path(screenshot_dir).mkdir(parents=True,exist_ok=True);page.screenshot(path=str(Path(screenshot_dir)/'holdings-320.png'))
   assert row.bounding_box()['height']<170,row.bounding_box()
-  for left,right in [('.dash-instrument','.dash-value'),('.dash-instrument','.dash-pnl'),('.dash-watch','.dash-daily')]:
-   if row.locator(left).count() and row.locator(right).count():
-    a=row.locator(left).bounding_box();b=row.locator(right).bounding_box()
-    assert a['x']+a['width']<=b['x']+1,(left,right,a,b)
-  page.set_viewport_size({'width':390,'height':700});row.locator('[data-dashboard-open]').first.click();dialog=page.locator('#dashboard-detail');expect(dialog).to_be_visible()
+  a=row.locator('.mobile-holding-name').bounding_box();b=row.locator('.mobile-holding-value').bounding_box()
+  assert a['x']+a['width']<=b['x']+1,(a,b)
+  page.set_viewport_size({'width':390,'height':700});row.click();dialog=page.locator('#dashboard-detail');expect(dialog).to_be_visible()
   
   graph=dialog.locator('.market-slot');expect(graph.locator('.market-line')).to_be_visible();graph.locator('[data-market-period=week]').click();expect(graph.locator('.market-line')).to_be_visible()
   boxes=[graph.locator(f'[data-market-period={p}]').bounding_box() for p in ('day','week','month','year')];assert max(b['y'] for b in boxes)-min(b['y'] for b in boxes)<2,boxes
