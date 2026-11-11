@@ -215,7 +215,8 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self,fmt,*args): pass
     def send(self,status,data,kind='application/json'):
         body=json.dumps(data,ensure_ascii=False).encode() if kind=='application/json' else data
-        self.send_response(status); self.send_header('Content-Type',kind); self.send_header('Content-Length',str(len(body))); self.send_header('Cache-Control','no-store' if self.path.startswith('/api') else 'no-cache'); self.send_header('X-Content-Type-Options','nosniff'); self.send_header('X-Frame-Options','DENY'); self.send_header('Referrer-Policy','no-referrer'); self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'");
+        policy=("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; form-action 'none'; worker-src 'none'; frame-ancestors 'none'; base-uri 'none'" if self.path=='/demo' else "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+        self.send_response(status); self.send_header('Content-Type',kind); self.send_header('Content-Length',str(len(body))); self.send_header('Cache-Control','no-store' if self.path.startswith('/api') else 'no-cache'); self.send_header('X-Content-Type-Options','nosniff'); self.send_header('X-Frame-Options','DENY'); self.send_header('Referrer-Policy','no-referrer'); self.send_header('Content-Security-Policy',policy);
         if hasattr(self,'cookie'): self.send_header('Set-Cookie',self.cookie)
         self.end_headers(); self.wfile.write(body)
     def session(self):
@@ -385,11 +386,18 @@ class Handler(BaseHTTPRequestHandler):
                 with connect() as c: profile=user_profile.read(c,user_id)
                 return self.send(200,{'profile':profile,'provider_status':provider_status,'dashboard':dashboard,'test_trade_signal':test_trade_signal,'broker_proposals':trade_service.summaries(connect,user_id),'portfolio_snapshots':snapshots,'portfolio_summary':summary,'portfolios':owned,'user':{'username':s['username'],'role':s['role']},'connection':connection_state(user_id),'opportunities':opportunities,'proposals':p,'journal':j,'time':now(),'integrations':{'Pluto Markets':'Ikke tilsluttet','Markedsdata':'Ikke tilsluttet','Nyheder og AI':'Ikke tilsluttet'},'reports':{'timezone':'Europe/Copenhagen','schedule':['08:00','14:00','22:00'],'status':'Afventer datakilder og scheduler'}})
             return self.send(404,{'error':'Ukendt endpoint'})
-        path={'/':'index.html','/app.js':'app.js','/report-ui.js':'report-ui.js','/style.css':'style.css','/manifest.json':'manifest.json','/sw.js':'sw.js','/icon.svg':'icon.svg'}.get(self.path)
+        path={'/':'index.html','/demo':'index.html','/demo-data.js':'demo-data.js','/demo-app.js':'app.js','/app.js':'app.js','/report-ui.js':'report-ui.js','/style.css':'style.css','/manifest.json':'manifest.json','/sw.js':'sw.js','/icon.svg':'icon.svg'}.get(self.path)
         if not path:return self.send(404,{'error':'Ikke fundet'})
         kind={'.html':'text/html; charset=utf-8','.js':'application/javascript','.css':'text/css','.json':'application/manifest+json','.svg':'image/svg+xml'}[Path(path).suffix]
         body=(ROOT/'static'/path).read_bytes()
         if path=='app.js':body=(ROOT/'static/sector-ui.js').read_bytes()+b'\n'+(ROOT/'static/journal-ui.js').read_bytes()+b'\n'+(ROOT/'static/dashboard-ui.js').read_bytes()+b'\n'+(ROOT/'static/candidate-ui.js').read_bytes()+b'\n'+(ROOT/'static/engine-ui.js').read_bytes()+b'\n'+(ROOT/'static/intel-ui.js').read_bytes()+b'\n'+(ROOT/'static/position-ui.js').read_bytes()+b'\n'+(ROOT/'static/overview-ui.js').read_bytes()+b'\n'+(ROOT/'static/market-ui.js').read_bytes()+b'\n'+(ROOT/'static/report-ui.js').read_bytes()+b'\n'+(ROOT/'static/trade-ui.js').read_bytes()+b'\n'+body
+        if self.path=='/demo':
+            body=body.replace(b'<body>',b'<body class="demo-mode"><div class="demo-banner" role="status"><span>DEMO \xc2\xb7 Fiktive data</span><a href="/">Afslut demo / Log ind</a></div>',1).replace(b'<link rel="manifest" href="/manifest.json">',b'').replace(b'<script src="/app.js" defer></script>',b'<script src="/demo-data.js"></script><script src="/demo-app.js" defer></script>')
+        if self.path=='/demo-app.js':
+            body=body.replace(b"if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});boot();",b'boot();')
+            body=body.replace(b"const supported='serviceWorker'in navigator&&",b"const supported=false&&'serviceWorker'in navigator&&")
+            for before,after in [('Forslaget sendes til godkendelse i Pluto. Det udfører ikke handlen her.','DEMO: Alle handlinger er fiktive og kan ikke sendes.'),('Aktivet kontrolleres hos Pluto før afsendelse.','Fiktivt aktiv. Ingen forbindelse til Pluto.'),('Send forslag til Pluto','Simulér afsendelse'),('Forslaget er sendt til Pluto.','Forslaget er simuleret.'),('Åbn Pluto for at gennemgå og godkende forslaget.','Ingen ordre er sendt.'),('Åbn Pluto for at gennemgå og godkende det.','Ingen ordre er sendt.')]:
+                body=body.replace(before.encode(),after.encode())
         self.send(200,body,kind)
     def do_POST(self):
         import hotwatch_api

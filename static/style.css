@@ -470,3 +470,12 @@ body.pull-refresh-visible #refresh-status{display:none}
  #dashboard-detail > .asset-trade-bar button,.market-chart-dialog > .asset-trade-bar button{min-height:44px;min-width:0;border-radius:999px;font-weight:650}
  #dashboard-detail > .asset-trade-bar small,.market-chart-dialog > .asset-trade-bar small{font-size:10px;line-height:1.3}
 }
+
+/* Anonymous, isolated demo entry and persistent context. */
+.demo-entry{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:18px 0 5px;padding:14px 16px;min-height:48px;border:1px solid #72d7bd;border-radius:14px;color:#a4f2de;background:#17483f;text-decoration:none;font-weight:700}
+.demo-entry:hover,.demo-entry:focus-visible{background:#226151;outline:2px solid #a4f2de;outline-offset:2px}
+.demo-entry-note{display:block;margin:0 0 18px;letter-spacing:0;color:#afc9c5}
+.demo-banner{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 14px;color:#08231e;background:#9ce7d2;font-size:12px;font-weight:700}
+.demo-banner a{color:#08231e;text-decoration:underline;white-space:nowrap}
+.demo-mode #profile-open,.demo-mode #refresh-current,.demo-mode #logout{display:none!important}
+@media(max-width:700px){.demo-banner{font-size:11px;padding:8px 10px}.demo-entry{font-size:14px}}
