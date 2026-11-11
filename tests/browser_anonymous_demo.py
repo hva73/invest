@@ -45,6 +45,7 @@ try:
    quick.locator('#quick-trade-confirm').check();quick.locator('[data-quick-send]').click();expect(quick).to_contain_text(re.compile('simuleret',re.I))
    quick.locator('[data-quick-close]').click();dialog.locator('[data-dashboard-close]').click()
    page.locator('nav [data-view=hot-watch]').click();expect(page.locator('.engine-list-row')).to_have_count(3)
+   expect(page.locator('#notice')).not_to_contain_text('ikke tilsluttet')
    if shot:page.screenshot(path=f'{shot}/demo-hotwatch-{width}.png')
    page.locator('[data-engine-detail=demo-TSLA]').first.click();engine=page.locator('#engine-dialog');expect(engine.locator('.engine-chart')).to_be_visible()
    if shot:engine.locator('.engine-chart').screenshot(path=f'{shot}/demo-hotwatch-chart-{width}.png')

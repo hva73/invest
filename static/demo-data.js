@@ -120,6 +120,7 @@ window.ESCAPE_DEMO_HISTORY=(()=>{
   if(route==='state'){demo.state.time=now();return ok(demo.state)}
   if(route==='automation')return ok(demo.automation);
   if(route==='reports/desk')return ok(demo.desk);
+  if(route==='reports/hot-watch')return ok({groups:[]});
   if(route==='sector-intelligence'){
    const sectors=['Teknologi','Sundhed','Finans','Industri'];
    const dashboard=JSON.parse(JSON.stringify(demo.state.dashboard));
