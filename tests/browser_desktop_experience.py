@@ -61,6 +61,14 @@ try:
                     page.locator(f'nav [data-view="{view}"]').click()
                     expect(page.locator(target)).to_be_visible()
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), (width, view)
+                    if view == 'portfolios' and width >= 1100:
+                        card = page.locator('.portfolio-card-root').first
+                        name = card.locator(':scope > h2').bounding_box()
+                        preview = card.locator(':scope > .portfolio-preview').bounding_box()
+                        badge = card.locator(':scope > .badge').bounding_box()
+                        assert name['x'] + name['width'] <= preview['x'] + 1, (width, name, preview)
+                        assert badge['height'] < 60, (width, badge)
+                        assert card.locator('[data-open-portfolio]').first.is_visible()
                     if width == 1440 and view in ('portfolios', 'hot-watch', 'sectors'):
                         page.screenshot(path=str(screens / f'{view}-{width}.png'), full_page=True)
                 page.locator('nav [data-view=overview]').focus()

@@ -29,10 +29,32 @@
   .dash-holdings .dash-table th, .dash-attention .dash-table th { padding-top: 12px; padding-bottom: 12px; }
   .dash-holdings .dash-table tbody tr:hover, .dash-attention .dash-table tbody tr:hover { background: #ffffff08; }
   .engine-overview, .sector-panel, .portfolio-card { min-width: 0; }
+  .engine-hero { padding: 18px 22px; }
+  .engine-hero h2 { font-size: clamp(25px, 2.2vw, 32px); margin: 7px 0 5px; }
+  .engine-hero p { margin-bottom: 8px; }
+  .engine-section-heading { margin-top: 16px; }
+  .engine-counts { margin: 12px 0 16px; }
+  .engine-list-heading { margin: 12px 0; }
   .engine-list-row { padding: 14px 16px; }
   .engine-list-row:hover { background: #ffffff08; }
   .sector-layout > *, .sector-shell .sector-panel { min-width: 0; }
   .sector-heatmap { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+}
+@media (min-width: 1100px) {
+  .portfolio-card {
+    display: grid;
+    grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr);
+    grid-template-rows: 22px max-content max-content max-content 1fr;
+    column-gap: 32px;
+    align-content: start;
+  }
+  .portfolio-card > small, .portfolio-card > h2,
+  .portfolio-card > .badge, .portfolio-card > p { grid-column: 1; justify-self: start; align-self: start; }
+  .portfolio-card > .portfolio-preview { grid-column: 2; grid-row: 1 / span 5; min-width: 0; margin-top: 0; }
+  .portfolio-card > .collection-spec { grid-column: 1 / -1; }
+  .portfolio-card > p { margin: 8px 0; }
+  .engine-section-heading { display: inline-block; width: calc(100% - 190px); vertical-align: middle; }
+  .engine-strategy-link { display: inline-flex; width: 180px; justify-content: flex-end; vertical-align: middle; }
 }
 @media (min-width: 1500px) {
   .dashboard-v1 { gap: 18px; }
