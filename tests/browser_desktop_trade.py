@@ -1,17 +1,46 @@
 """Display and review buy/sell dialogs with local stub responses only."""
 import os
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from playwright.sync_api import expect, sync_playwright
 
 screens = Path(os.environ.get('ESCAPE_SCREENSHOTS', '/tmp/escape-desktop-screens'))
 screens.mkdir(parents=True, exist_ok=True)
-with sync_playwright() as p:
+
+class FixtureHandler(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        paths = {'/style.css': 'style.css', '/desktop-experience.css': 'desktop-experience.css',
+                 '/trade-ui.js': 'trade-ui.js'}
+        if self.path == '/':
+            body = (b'<!doctype html><html lang="da"><head><meta name="viewport" content="width=device-width,initial-scale=1">'
+                    b'<link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/desktop-experience.css">'
+                    b'<script src="/trade-ui.js"></script></head><body><main></main></body></html>')
+            kind = 'text/html; charset=utf-8'
+        elif self.path in paths:
+            body = (Path('static') / paths[self.path]).read_bytes()
+            kind = 'text/css' if self.path.endswith('.css') else 'application/javascript'
+        else:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header('Content-Type', kind)
+        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+server = ThreadingHTTPServer(('127.0.0.1', 0), FixtureHandler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+try:
+ with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     page = browser.new_page(viewport={'width': 1440, 'height': 900})
-    page.set_content('<!doctype html><html lang="da"><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><main></main></body></html>')
-    page.add_style_tag(path=str(Path('static/style.css').resolve()))
-    page.add_style_tag(path=str(Path('static/desktop-experience.css').resolve()))
-    page.add_script_tag(path=str(Path('static/trade-ui.js').resolve()))
+    page.goto(f'http://127.0.0.1:{server.server_port}/')
     page.evaluate('''() => {
       window.calls = [];
       const state = {user:{username:'test'},portfolios:[{id:7,name:'Testdepot',source:'pluto',active:true,kind:'portfolio'}]};
@@ -46,4 +75,7 @@ with sync_playwright() as p:
         page.screenshot(path=str(screens / f'trade-{side.lower()}-1440.png'))
         dialog.locator('[data-quick-close]').click()
     browser.close()
+finally:
+    server.shutdown()
+    server.server_close()
 print('PASS: synthetic desktop buy/sell dialogs; no order submitted')

@@ -11,10 +11,18 @@ from playwright.sync_api import expect, sync_playwright
 from desktop_fixture import seed
 from test_portfolio_value_chart import PortfolioValueChart
 
+class DesktopTestHandler(app.Handler):
+    """Serve only the unintegrated stylesheet in addition to the real app routes."""
+    def _get(self):
+        if self.path == '/desktop-experience.css':
+            return self.send(200, Path('static/desktop-experience.css').read_bytes(), 'text/css')
+        return super()._get()
+
+
 case = PortfolioValueChart()
 case.setUp()
 seed(case)
-server = app.ThreadingHTTPServer(('127.0.0.1', 0), app.Handler)
+server = app.ThreadingHTTPServer(('127.0.0.1', 0), DesktopTestHandler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 screens = Path(os.environ.get('ESCAPE_SCREENSHOTS', '/tmp/escape-desktop-screens'))
 screens.mkdir(parents=True, exist_ok=True)
@@ -41,7 +49,12 @@ try:
             }''')
             if width in (1280, 1920):
                 page.screenshot(path=str(screens / f'overview-before-{width}.png'), full_page=True)
-            page.add_style_tag(path=str(Path('static/desktop-experience.css').resolve()))
+            page.evaluate('''() => new Promise((resolve, reject) => {
+              const link = document.createElement('link');
+              link.rel = 'stylesheet'; link.href = '/desktop-experience.css';
+              link.onload = resolve; link.onerror = () => reject(new Error('Desktop stylesheet failed to load'));
+              document.head.append(link);
+            })''')
             if width <= 900:
                 after = page.evaluate('''() => {
                   const a = document.querySelector('body > aside').getBoundingClientRect();
