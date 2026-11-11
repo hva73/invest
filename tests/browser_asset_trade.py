@@ -1,5 +1,6 @@
 import os
 import sys,threading
+from datetime import datetime,timezone,timedelta
 from pathlib import Path
 from unittest.mock import patch
 sys.path[:0]=[str(Path(__file__).resolve().parents[1]),str(Path(__file__).resolve().parent)]
@@ -12,8 +13,15 @@ try:
  with patch('mcp_client.MCP.request',side_effect=AssertionError('No live broker calls')),sync_playwright() as pw:
   browser=(pw.chromium.launch(headless=True) if os.environ.get('ESCAPE_PLAYWRIGHT_MANAGED')=='1' else pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox']));page=browser.new_page(viewport={'width':390,'height':700});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
   page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click()
+  page.locator('.dashboard-v1').wait_for();page.evaluate('state.connection.connected=true')
+  now=datetime.now(timezone.utc);series=[{'price':str(47+i),'epoch':(now-timedelta(hours=5-i)).timestamp(),'timestamp':(now-timedelta(hours=5-i)).isoformat(),'date':now.date().isoformat()} for i in range(6)]
+  def quote(route):
+   assert route.request.post_data_json.get('holding_asset_id'), 'Chart must use holding identity'
+   route.fulfill(json={'asset_id':'synthetic-asset','ticker':'TSLA','name':'Synthetic stock','exchange':'NASDAQ','currency':'DKK','price':'52','price_time':now.isoformat(),'fetched_at':now.isoformat(),'daily_change_percent':'2','daily_change':'1','series':series})
+  page.route('**/api/market/quote',quote)
   row=page.locator('.dash-row').filter(has=page.locator('.dash-instrument strong',has_text='TSLA'));row.locator('[data-dashboard-open]').first.click();dialog=page.locator('#dashboard-detail');expect(dialog).to_be_visible()
   
+  graph=dialog.locator('.market-slot');expect(graph.locator('.market-line')).to_be_visible();graph.locator('[data-market-period=week]').click();expect(graph.locator('.market-line')).to_be_visible()
   screenshot_dir=os.environ.get('ESCAPE_SCREENSHOTS')
   if screenshot_dir:
    Path(screenshot_dir).mkdir(parents=True,exist_ok=True);page.screenshot(path=str(Path(screenshot_dir)/'holding-390.png'))
