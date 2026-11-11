@@ -548,10 +548,17 @@ def view(c,row,now=None):
  if row['last_error']:display_reasons.append(row['last_error'])
  if stale and row['last_data']:display_reasons.append('DATA_STALE')
  effective='NO_DATA' if stale and state.get('signal') not in ['PAUSE','NO_DATA'] else state.get('signal','NO_DATA')
+ if effective in ('SELL','REDUCE') and context and context.get('status')=='verified' and context.get('position')=='none':
+  effective='NO_DATA';display_reasons.append('POSITION_CONTEXT_CHANGED')
  # Legacy calculations used the market-window high. Never present or dispatch
  # that historical trailing signal as a currently verified position exit.
  if effective in ('SELL','REDUCE') and last:
   old_calculation=json.loads(last['payload']);old_reasons=set(old_calculation.get('reason_codes',[]))
+  if old_calculation.get('exit_context_key') and not old_reasons.intersection({'STOP_BREACHED','EXIT_DEADLINE'}):
+   from hotwatch_strategy import exit_context_key
+   portfolio_ids=request.get('portfolio_ids',[]);scope=checksum({'asset_id':request['asset_id'],'portfolio_id':portfolio_ids[0],'watch_id':row['watch_id'],'trade_cycle_id':request.get('trade_cycle_id')}) if len(portfolio_ids)==1 else None
+   if not context or exit_context_key(context,scope)!=old_calculation['exit_context_key']:
+    effective='NO_DATA';display_reasons.append('POSITION_CONTEXT_CHANGED')
   if 'TRAILING_EXIT' in old_reasons and old_calculation.get('signal_basis') not in ('verified_position_high','price_context') and not old_reasons.intersection({'STOP_BREACHED','EXIT_DEADLINE'}):
    effective='NO_DATA';display_reasons.append('POSITION_TRAILING_EVIDENCE_REQUIRED')
   elif old_calculation.get('signal_basis')=='verified_position_high':
@@ -1344,9 +1351,17 @@ def observe_context(connect,uid,wid,mode,context,now=None,lease=None,broker_sour
   cycle=request.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':wid})[:24]
   candidate_lifecycle.observe_pluto(c,uid,mode,request['candidate_id'],context,now.isoformat(),wid,cycle,'NO_DATA',synthetic=request['provider']=='synthetic')
   material=lambda value:{k:v for k,v in value.items() if k!='as_of'}
-  if not previous or material(old)!=material(context):
-   state=json.loads(row['state'])
-   if state.pop('position_trailing',None) is not None:c.execute('UPDATE hw_sessions SET state=? WHERE id=?',(canonical(state),row['id']))
+  state=json.loads(row['state'])
+  from hotwatch_strategy import exit_context_key
+  portfolio_ids=request.get('portfolio_ids',[]);scope=checksum({'asset_id':request['asset_id'],'portfolio_id':portfolio_ids[0],'watch_id':wid,'trade_cycle_id':request.get('trade_cycle_id')}) if len(portfolio_ids)==1 else None
+  prior_key=state.get('exit_context_key');current_key=exit_context_key(context,scope)
+  changed=bool(prior_key and prior_key!=current_key)
+  material_changed=not previous or material(old)!=material(context)
+  reset_trailing=state.pop('position_trailing',None) is not None if material_changed or changed else False
+  if current_key is None:state.pop('exit_context_key',None)
+  else:state['exit_context_key']=current_key
+  if (reset_trailing or changed) and state.get('pending') in ('SELL','REDUCE'):state.update(pending=None,confirmations=0,pending_since=None)
+  if reset_trailing or prior_key!=current_key:c.execute('UPDATE hw_sessions SET state=? WHERE id=?',(canonical(state),row['id']))
   if not previous or material(old)!=material(context):event(c,row,'BROKER_CONTEXT_UPDATED',now,'Verified broker context without usable market timestamp; no market signal calculated',data_time=context['as_of'])
   return {'ok':True,'duplicate':False}
 

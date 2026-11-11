@@ -123,5 +123,30 @@ class EntryBasis(unittest.TestCase):
   self.assertIsNone(result['position_trailing']['high'])
   self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
 
+ def test_changed_position_does_not_reuse_old_sell_confirmations(self):
+  at=datetime(2026,11,11,15,0,tzinfo=timezone.utc);metrics=good_metrics();risk=copy.deepcopy(request()['risk']);risk.update(stop_price=None,_position_scope='depot-one');state={}
+  for seconds,price in ((0,'100'),(10,'105'),(20,'102'),(30,'102')):
+   now=at+timedelta(seconds=seconds);sample=tick(now,seconds,price=price,held=True);sample['context'].update(orders_complete=True,position_history_complete=True)
+   result,state=calculate(sample,metrics,BASELINE,risk,state,now)
+  self.assertEqual(state['confirmations'],2)
+  now=at+timedelta(seconds=40);sample=tick(now,40,price='102',held=True);sample['context'].update(orders_complete=True,position_history_complete=True,quantity='11')
+  metrics.update(return_3_pct='-3',breakdown=True)
+  result,state=calculate(sample,metrics,BASELINE,risk,state,now)
+  self.assertEqual(result['signal'],'WAIT')
+  self.assertIn('CONFIRMATION_PENDING',result['reason_codes'])
+  self.assertEqual(state['confirmations'],1)
+
+ def test_independent_exit_confirmations_reset_on_observed_quantity_change_without_fill_history(self):
+  at=datetime(2026,11,11,15,0,tzinfo=timezone.utc);metrics=good_metrics();metrics.update(return_3_pct='-3',breakdown=True)
+  risk=copy.deepcopy(request()['risk']);risk.update(stop_price=None,_position_scope='depot-one');state={}
+  for seconds in (0,10):
+   now=at+timedelta(seconds=seconds);sample=tick(now,seconds,price='100',held=True)
+   result,state=calculate(sample,metrics,BASELINE,risk,state,now)
+  self.assertEqual(state['confirmations'],2)
+  now=at+timedelta(seconds=20);sample=tick(now,20,price='100',held=True);sample['context']['quantity']='11'
+  result,state=calculate(sample,metrics,BASELINE,risk,state,now)
+  self.assertEqual(result['signal'],'WAIT')
+  self.assertEqual(state['confirmations'],1)
+
 
 if __name__=='__main__':unittest.main()

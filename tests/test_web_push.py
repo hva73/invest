@@ -240,6 +240,25 @@ class Push(unittest.TestCase):
    self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
    calc(self.now+timedelta(seconds=2),'cycle-two')
    self.assertTrue(web_push._exit_rearmed(c,self.watch['id'],event))
+ def test_new_evidence_alone_does_not_prove_a_new_exit_episode(self):
+  with app.connect() as c:
+   engine.event(c,self.watch,'SELL_SIGNAL',self.now,'first exit with no verified cycle')
+   event=c.execute("SELECT event_id FROM hw_events WHERE watch_row_id=? AND event_type='SELL_SIGNAL' ORDER BY id DESC LIMIT 1",(self.watch['id'],)).fetchone()['event_id']
+   original={'signal':'SELL','reason_codes':['STOP_BREACHED'],'position_trailing':None}
+   current={'signal':'WAIT','reason_codes':['CONFIRMATION_PENDING'],'new_market_observation':True,'position_trailing':{'status':'VERIFIED','basis':'same-position-possibly'}}
+   for at,payload in ((self.now,original),(self.now+timedelta(seconds=1),current)):
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps(payload),'x'))
+   self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+ def test_changed_verified_exposure_rearms_exit_without_complete_fill_history(self):
+  with app.connect() as c:
+   engine.event(c,self.watch,'SELL_SIGNAL',self.now,'previous exposure')
+   event=c.execute("SELECT event_id FROM hw_events WHERE watch_row_id=? AND event_type='SELL_SIGNAL' ORDER BY id DESC LIMIT 1",(self.watch['id'],)).fetchone()['event_id']
+   def calc(offset,key,status='verified'):
+    payload={'signal':'WAIT','reason_codes':['CONFIRMATION_PENDING'],'new_market_observation':True,'exit_context_key':key,'position_context':{'position':'held','status':status},'risk_level':'normal'}
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],(self.now+timedelta(seconds=offset)).isoformat(),json.dumps(payload),'x'))
+   calc(0,'exposure-one');calc(1,'exposure-one');self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+   calc(2,'exposure-two','unknown');self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+   calc(3,'exposure-two');self.assertTrue(web_push._exit_rearmed(c,self.watch['id'],event))
  def test_critical_stop_is_reported_when_data_is_temporarily_unavailable(self):
   self.subscribe();sent=[];self.event('SELL_SIGNAL')
   with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
@@ -249,6 +268,22 @@ class Push(unittest.TestCase):
   with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
   self.assertEqual(len(sent),2)
   self.assertIn('kritisk exitadvarsel',sent[1]['title'])
+ def test_critical_push_is_not_sent_for_verified_closed_position(self):
+  self.subscribe();sent=[]
+  with app.connect() as c:engine.event(c,self.watch,'RISK_REJECTION',self.now,'STOP_BREACHED',severity='critical')
+  closed={'latest_context':{'status':'verified','position':'none','as_of':self.now.isoformat()}}
+  with patch('web_push._actionable',return_value=None),patch('hotwatch_engine.view',return_value=closed):
+   web_push.dispatch_one(app.connect,self.now,lambda *args:sent.append(args))
+  self.assertEqual(sent,[])
+  with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM push_jobs').fetchone()['status'],'skipped')
+ def test_stale_closed_position_does_not_hide_critical_push(self):
+  self.subscribe();sent=[]
+  with app.connect() as c:engine.event(c,self.watch,'RISK_REJECTION',self.now,'STOP_BREACHED',severity='critical')
+  stale={'latest_context':{'status':'verified','position':'none','as_of':(self.now-timedelta(seconds=301)).isoformat()}}
+  with patch('web_push._actionable',return_value=None),patch('hotwatch_engine.view',return_value=stale):
+   web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+  self.assertEqual(len(sent),1)
+  self.assertIn('kritisk exitadvarsel',sent[0]['title'])
  def test_worsening_uses_configured_trailing_distance(self):
   self.assertFalse(engine.trailing_notification_worsened('0.394','0.4','2'))
   self.assertTrue(engine.trailing_notification_worsened('0.392','0.4','2'))

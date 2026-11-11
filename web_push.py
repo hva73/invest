@@ -175,15 +175,18 @@ def _exit_rearmed(c,watch_id,event_key):
     event=c.execute('SELECT created FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch_id,event_key)).fetchone()
     if not event:return False
     first=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? AND calculated=? ORDER BY id DESC LIMIT 1',(watch_id,event['created'])).fetchone()
-    try:prior_basis=(json.loads(first['payload']).get('position_trailing') or {}).get('basis') if first else None
-    except (ValueError,TypeError,AttributeError):prior_basis=None
+    try:
+        prior_result=json.loads(first['payload']) if first else {};prior_basis=(prior_result.get('position_trailing') or {}).get('basis');prior_context_key=prior_result.get('exit_context_key')
+    except (ValueError,TypeError,AttributeError):prior_basis=None;prior_context_key=None
     rows=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? AND calculated>? ORDER BY id',(watch_id,event['created'])).fetchall()
     for row in rows:
         try:
             result=json.loads(row['payload']);codes=set(result.get('reason_codes',[]))
             if result.get('signal')=='WAIT' and codes=={'NO_TRIGGER'} and result.get('new_market_observation') is True and result.get('position_context',{}).get('position')=='held' and result.get('risk_level')=='normal':return True
             trailing=result.get('position_trailing') or {}
-            if result.get('new_market_observation') is True and trailing.get('status')=='VERIFIED' and trailing.get('basis') and trailing['basis']!=prior_basis:return True
+            if result.get('new_market_observation') is True and trailing.get('status')=='VERIFIED' and prior_basis and trailing.get('basis') and trailing['basis']!=prior_basis:return True
+            current_key=result.get('exit_context_key')
+            if result.get('new_market_observation') is True and prior_context_key and current_key and current_key!=prior_context_key and result.get('position_context',{}).get('status')=='verified' and result.get('position_context',{}).get('position')=='held' and result.get('risk_level')=='normal':return True
         except (ValueError,TypeError,AttributeError):continue
     return False
 
@@ -301,6 +304,13 @@ def dispatch_one(connect,now=None,sender=None):
         except (ValueError,TypeError,AttributeError):reason=None
         critical=bool(e and e['event_type']=='RISK_REJECTION' and e['severity']=='critical' and reason in ('STOP_BREACHED','EXIT_DEADLINE'))
         urgent=bool(e and (e['event_type']=='TRAILING_EXIT_WORSENED' or critical))
+        if critical and current not in ('SELL','REDUCE'):
+            try:
+                context=engine.view(c,watch,now).get('latest_context') or {}
+                from hotwatch_contract import stamp
+                if context.get('status')=='verified' and context.get('position')=='none' and context.get('as_of') and 0<=(now-stamp(context['as_of'])).total_seconds()<=300:
+                    c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
+            except (ValueError,TypeError,KeyError,AttributeError):pass
         if (critical and _repeated_critical(c,watch['id'],job['device_id'],job['event_key'],reason) or e and e['event_type']=='TRAILING_EXIT_WORSENED' and _repeated_trailing(c,watch['id'],job['device_id'],job['event_key'])):
             c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
         critical_only=critical and bool(job['sell']) and current not in ('SELL','REDUCE')

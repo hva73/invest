@@ -113,6 +113,60 @@ class ReviewFixes(unittest.TestCase):
   view=self.view(50);self.assertEqual(view['signal'],'NO_DATA');self.assertEqual(view['last_action_signal']['state'],'DATA_MISSING')
   import web_push
   with app.connect() as c:self.assertIsNone(web_push._actionable(c,engine.row_for(c,1,self.req['watch_id'],True),now))
+ def test_context_only_position_change_clears_pending_exit_confirmations(self):
+  with app.connect() as c:
+   req=copy.deepcopy(self.req);req['risk']['stop_price']=None;req['portfolio_ids']=[1];c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
+  for offset,price in ((0,'100'),(10,'100'),(20,'94'),(30,'94')):
+   sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True)
+   self.ingest(sample,self.at+timedelta(seconds=offset))
+  with app.connect() as c:
+   state=json.loads(engine.row_for(c,1,self.req['watch_id'],True)['state']);self.assertEqual(state['confirmations'],2)
+  now=self.at+timedelta(seconds=35);context=copy.deepcopy(sample['context']);context.update(as_of=now.isoformat(),quantity='9')
+  engine.observe_context(app.connect,1,self.req['watch_id'],True,context,now,broker_source='pluto')
+  with app.connect() as c:
+   state=json.loads(engine.row_for(c,1,self.req['watch_id'],True)['state']);self.assertIsNone(state['pending']);self.assertEqual(state['confirmations'],0)
+ def test_context_only_change_clears_independent_exit_without_fill_history(self):
+  from test_hotwatch_engine import good_metrics
+  with app.connect() as c:
+   req=copy.deepcopy(self.req);req['risk']['stop_price']=None;req['portfolio_ids']=[1];c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
+  metrics=good_metrics();metrics.update(return_3_pct='-3',breakdown=True)
+  with patch('hotwatch_engine.features',side_effect=lambda *args:copy.deepcopy(metrics)):
+   for offset in (0,10):
+    sample=self.sample('100',offset);self.ingest(sample,self.at+timedelta(seconds=offset))
+  with app.connect() as c:
+   state=json.loads(engine.row_for(c,1,self.req['watch_id'],True)['state']);self.assertEqual(state['confirmations'],2);self.assertNotIn('position_trailing',state)
+  now=self.at+timedelta(seconds=15);context=copy.deepcopy(sample['context']);context.update(as_of=now.isoformat(),quantity='9')
+  engine.observe_context(app.connect,1,self.req['watch_id'],True,context,now,broker_source='pluto')
+  with app.connect() as c:
+   state=json.loads(engine.row_for(c,1,self.req['watch_id'],True)['state']);self.assertIsNone(state['pending']);self.assertEqual(state['confirmations'],0)
+ def test_changed_context_with_old_material_clears_pending_and_current_exit(self):
+  from test_hotwatch_engine import good_metrics
+  import web_push
+  with app.connect() as c:
+   req=copy.deepcopy(self.req);req['risk']['stop_price']=None;req['portfolio_ids']=[1];c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
+  first=self.sample('100',0)['context'];engine.observe_context(app.connect,1,self.req['watch_id'],True,first,self.at,broker_source='pluto')
+  metrics=good_metrics();metrics.update(return_3_pct='-3',breakdown=True)
+  with patch('hotwatch_engine.features',side_effect=lambda *args:copy.deepcopy(metrics)):
+   for offset in (10,20,30):
+    sample=self.sample('100',offset);sample['context']['quantity']='11';result=self.ingest(sample,self.at+timedelta(seconds=offset))['calculation']
+  self.assertEqual(result['signal'],'SELL');self.assertEqual(self.view(30)['last_action_signal']['state'],'ACTIVE')
+  now=self.at+timedelta(seconds=35);context=copy.deepcopy(first);context['as_of']=now.isoformat()
+  engine.observe_context(app.connect,1,self.req['watch_id'],True,context,now,broker_source='pluto')
+  view=self.view(35);self.assertEqual(view['signal'],'NO_DATA');self.assertIn('POSITION_CONTEXT_CHANGED',view['display_reason_codes']);self.assertEqual(view['last_action_signal']['state'],'DATA_MISSING')
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True);state=json.loads(row['state']);self.assertIsNone(state['pending']);self.assertEqual(state['confirmations'],0);self.assertIsNone(web_push._actionable(c,row,now))
+ def test_verified_stop_remains_current_when_quantity_changes(self):
+  sample=self.sample('94',0);self.ingest(sample)
+  now=self.at+timedelta(seconds=10);context=copy.deepcopy(sample['context']);context.update(as_of=now.isoformat(),quantity='9')
+  engine.observe_context(app.connect,1,self.req['watch_id'],True,context,now,broker_source='pluto')
+  self.assertEqual(self.view(10)['signal'],'SELL')
+ def test_closed_position_does_not_retain_old_critical_exit(self):
+  sample=self.sample('94',0);self.ingest(sample)
+  now=self.at+timedelta(seconds=10);context=copy.deepcopy(sample['context']);context.update(as_of=now.isoformat(),position='none',quantity='0',cost_price=None)
+  engine.observe_context(app.connect,1,self.req['watch_id'],True,context,now,broker_source='pluto')
+  view=self.view(10);self.assertEqual(view['signal'],'NO_DATA');self.assertEqual(view['last_action_signal']['state'],'DATA_MISSING')
+  import web_push
+  with app.connect() as c:self.assertIsNone(web_push._actionable(c,engine.row_for(c,1,self.req['watch_id'],True),now))
  def test_aggregated_depot_scope_never_inherits_a_trailing_high(self):
   import portfolios
   with app.connect() as c:
