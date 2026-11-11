@@ -396,3 +396,24 @@ body.pull-refresh-visible #refresh-status{display:none}
 .signal-chart-peak{display:grid;gap:3px;margin:10px 0;padding:10px 12px;border:1px solid #315360;border-radius:10px;background:#193641}.signal-chart-peak small{color:#b5c9d0}.signal-chart-peak strong{font-size:1.15rem}
 .market-marker{stroke-width:1.2;stroke-dasharray:4 3}.market-marker-stop{stroke:#ff9aa9}.market-marker-entry{stroke:#8cd9c5}.market-marker-legend{font-size:11px;color:#b5c9d0;margin:4px 0}
 .market-marker-signal{stroke:#e9c875;stroke-width:1;stroke-dasharray:2 2}
+
+/* Mobile command navigation: the desktop sidebar keeps its existing layout. */
+.mobile-more-panel{display:contents}#mobile-more{display:none}
+@media(max-width:900px){
+ body > aside{position:static;display:block;width:auto;padding:14px 16px 0;border:0;background:transparent}
+ body > aside .brand{display:inline-block}body > aside > footer{display:none}
+ body > aside nav{position:fixed;z-index:50;left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom,0px));display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;margin:0;padding:5px;border:1px solid #618c8970;border-radius:22px;background:rgba(12,29,39,.94);box-shadow:0 12px 36px #000a;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+ body > aside nav > .nav-group-label{display:none}
+ body > aside nav > button{display:flex;min-width:0;min-height:56px;padding:5px 2px;font-size:9px;gap:3px;line-height:1.1;border-color:transparent;background:transparent;color:#afc3c8}
+ body > aside nav > button.active{color:#91ecd6;background:#1c4c4375;box-shadow:none;border-color:transparent}
+ body > aside nav > button[data-view=radar] .nav-text{font-size:0}body > aside nav > button[data-view=radar] .nav-text:after{content:'Radar';font-size:9px}
+ body > aside nav .nav-icon{width:20px;height:20px;flex-basis:20px}
+ #mobile-more{display:flex}#mobile-more[aria-expanded=true]{color:#91ecd6;background:#1c4c4375}
+ .mobile-more-panel{display:none;position:absolute;bottom:calc(100% + 10px);right:0;min-width:min(280px,calc(100vw - 24px));max-height:60dvh;overflow:auto;padding:8px;border:1px solid #527578;border-radius:18px;background:#102632;box-shadow:0 12px 35px #000a}
+ .mobile-more-panel.is-open{display:block}.mobile-more-panel .nav-group-label{display:none}.mobile-more-panel button{display:flex;width:100%;min-height:48px;justify-content:flex-start;flex-direction:row;text-align:left;font-size:13px;padding:10px 12px}.mobile-more-panel #admin-nav{display:contents}.mobile-more-panel #admin-nav[hidden]{display:none}
+ main{padding-bottom:calc(100px + env(safe-area-inset-bottom,0px))}.pull-refresh-status{bottom:calc(86px + env(safe-area-inset-bottom,0px))}
+ body:has(input:focus) > aside nav,body:has(textarea:focus) > aside nav,body:has(select:focus) > aside nav{visibility:hidden}
+ .quick-trade-dialog{width:100%;max-width:none;max-height:92dvh;margin:auto 0 0;padding:20px 18px calc(20px + env(safe-area-inset-bottom,0px));border-radius:22px 22px 0 0;overscroll-behavior:contain}
+ .quick-trade-dialog input,.quick-trade-dialog select{font-size:16px;min-height:46px}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
