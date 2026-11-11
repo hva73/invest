@@ -37,7 +37,8 @@ try:
   if screenshot_dir:
    Path(screenshot_dir).mkdir(parents=True,exist_ok=True);page.screenshot(path=str(Path(screenshot_dir)/'holding-390.png'))
   buy=dialog.locator('[data-asset-trade=BUY]');sell=dialog.locator('[data-asset-trade=SELL]');expect(buy).to_be_visible();expect(sell).to_be_enabled()
-  dialog.evaluate('(n)=>n.scrollTop=0');box1=buy.bounding_box();dialog.evaluate('(n)=>n.scrollTop=n.scrollHeight');box2=buy.bounding_box();assert abs(box1['y']-box2['y'])<8,(box1,box2)
+  body=dialog.locator('.dashboard-detail-body');body.evaluate('(n)=>n.scrollTop=0');box1=buy.bounding_box();body.evaluate('(n)=>n.scrollTop=n.scrollHeight');box2=buy.bounding_box();assert abs(box1['y']-box2['y'])<8,(box1,box2)
+  graph.locator('[data-market-period=day]').click();assert graph.locator('[data-market-period=day]').bounding_box()['y']+graph.locator('[data-market-period=day]').bounding_box()['height']<=buy.bounding_box()['y'], 'Chart controls must remain clear of the action bar'
   sell.click();quick=page.locator('#quick-trade-dialog');expect(quick).to_contain_text('Sælg · TSLA');assert quick.locator('[name=size]').input_value()=='';assert quick.locator('[name=asset_id]').input_value()!='';quick.locator('[data-quick-close]').click()
   buy.click();expect(quick).to_contain_text('Køb · TSLA');
   if screenshot_dir:page.screenshot(path=str(Path(screenshot_dir)/'trade-390.png'))

@@ -30,6 +30,8 @@ try:
      expect(nav.locator(f':scope > [data-view="{target}"]')).to_have_class('active')
      assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1'),(width,target)
     more.click();expect(page.locator('#mobile-more-panel')).to_be_visible()
+    for action in ('profile-open','refresh-current','logout'):
+     assert page.locator(f'#mobile-more-panel #{action}').count()==1,(width,action)
     if screenshot_dir:page.screenshot(path=str(Path(screenshot_dir)/f'menu-{width}.png'))
     page.locator('#mobile-more-panel [data-view=trade]').click()
     expect(page.locator('.broker-trade')).to_be_visible();expect(page.locator('#mobile-more-panel')).to_be_hidden()
@@ -39,7 +41,7 @@ try:
     before=nav.bounding_box();page.evaluate('window.scrollTo(0,document.body.scrollHeight)');after=nav.bounding_box()
     assert abs(before['y']-after['y'])<2,(width,before,after)
    else:
-    expect(page.locator('#mobile-more')).to_be_hidden();nav.locator('[data-view=trade]').click();expect(page.locator('.broker-trade')).to_be_visible()
+    expect(page.locator('#mobile-more')).to_be_hidden();assert page.locator('main > header #logout').count()==1;nav.locator('[data-view=trade]').click();expect(page.locator('.broker-trade')).to_be_visible()
    assert not errors,(width,errors)
    page.close()
   browser.close()

@@ -445,3 +445,28 @@ body.pull-refresh-visible #refresh-status{display:none}
 }
 
 @media (max-width:900px){body > aside nav:has(.mobile-more-panel .active) > #mobile-more{color:#91ecd6;background:#1c4c4375}}
+
+/* Compact overview and dedicated dialog action space on small screens. */
+@media(max-width:900px){
+ .mobile-more-panel .header-actions{display:grid;gap:2px;margin:8px 0 0;padding:8px 0 0;border-top:1px solid #52757870}
+ .mobile-more-panel .header-actions button[hidden]{display:none}
+}
+@media(max-width:700px){
+ body > aside{padding:10px 14px 0}
+ body:has(#content .dashboard-v1) main > header{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);margin:0;padding:0}
+ .dash-hero{display:flex;flex-direction:column;gap:12px;padding:16px}
+ .dash-hero-top{display:contents}
+ .dash-hero-intro{order:0}
+ .dash-hero-intro h2{font-size:23px;line-height:1.15;margin:5px 0}
+ .dash-hero-intro p{font-size:11px;line-height:1.4;margin:0 0 5px}
+ .dash-hero-metrics{order:1;margin:0;gap:0}
+ .dash-hero-metrics > div{padding:12px 8px 4px}
+ .dash-hero-metrics > div:first-child{padding-left:0}
+ .dash-hero-top #dashboard-value-chart{order:2;width:100%}
+ .dash-hero-top .dash-chart{border-top:1px solid #74b09b33;padding-top:12px}
+ #dashboard-detail[open],.market-chart-dialog[open]{display:grid;grid-template-rows:auto minmax(0,1fr) auto;overflow:hidden;max-height:calc(100dvh - 20px)}
+ #dashboard-detail .dashboard-detail-body,.market-chart-dialog > .market-slot{min-height:0;overflow-y:auto;overscroll-behavior:contain}
+ #dashboard-detail > .asset-trade-bar,.market-chart-dialog > .asset-trade-bar{position:static;z-index:auto;margin:0;padding:8px 2px calc(6px + env(safe-area-inset-bottom,0px));background:transparent;box-shadow:none;border-top:1px solid #52757870;gap:8px}
+ #dashboard-detail > .asset-trade-bar button,.market-chart-dialog > .asset-trade-bar button{min-height:44px;min-width:0;border-radius:999px;font-weight:650}
+ #dashboard-detail > .asset-trade-bar small,.market-chart-dialog > .asset-trade-bar small{font-size:10px;line-height:1.3}
+}
