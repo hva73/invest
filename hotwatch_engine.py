@@ -129,9 +129,9 @@ def quiet_market_interval(c,request,profile,now,interval,sample=None):
  if seconds<=300:return interval
  return max(interval,min(120,int(seconds-300)))
 
-def observation_poll_interval(c,request,profile,now,sample):
+def observation_poll_interval(c,request,profile,now,sample,baseline=None):
  """Recheck aging live trades at the existing ACTIVE cadence, within budget."""
- interval=effective_poll_interval(c,request,profile)
+ interval=effective_poll_interval(c,request,profile) if baseline is None else baseline
  if sample and request['provider']=='eodhd' and sample.get('price_time_kind')=='trade' and sample.get('market_status') in ('REGULAR','PRE','AFTER'):
   age=min(request['risk']['max_quote_age_s'],GLOBAL_RISK['max_quote_age_s'])
   deadlines=[stamp(sample['event_time']).timestamp()+age]
@@ -143,7 +143,7 @@ def observation_poll_interval(c,request,profile,now,sample):
    deadlines.extend([stamp(sample['bar_history'][-1]['bar_open_at']).timestamp()+60+age,stamp(sample['bar_evidence']['schedule_received_at']).timestamp()+age])
   remaining=min(deadlines)-now.timestamp()
   if remaining<=interval:
-   interval=min(interval,effective_poll_interval(c,request,'ACTIVE'))
+   interval=min(interval,interval if profile=='ACTIVE' else effective_poll_interval(c,request,'ACTIVE'))
  return quiet_market_interval(c,request,profile,now,interval,sample)
 
 def init(c):
@@ -877,7 +877,7 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
      try:
       payload=json.loads(health['payload']);allowed=('websocket_trade_status','websocket_quote_status','websocket_status_status','exchange_status','minute_bars_status','bar_history_status','intraday_status')
       fields={k:payload[k] for k in allowed if isinstance(payload,dict) and isinstance(payload.get(k),str) and re.fullmatch(r'[A-Z0-9_]{1,80}',payload[k])}
-      timing={k:payload[k] for k in ('begin_wait_ms','work_before_commit_ms','ingest_compute_ms') if isinstance(payload,dict) and type(payload.get(k)) in (int,float) and 0<=payload[k]<=3600000}
+      timing={k:payload[k] for k in ('begin_wait_ms','scope_entry_wait_ms','sqlite_begin_ms','work_before_commit_ms','ingest_compute_ms') if isinstance(payload,dict) and type(payload.get(k)) in (int,float) and 0<=payload[k]<=3600000}
       pipeline={k:payload[k] for k in ('provider_ms','pluto_context_ms','websocket_capture_ms','adapter_to_journal_ms','event_to_adapter_receive_ms') if isinstance(payload,dict) and type(payload.get(k)) in (int,float) and 0<=payload[k]<=3600000}
       provider_diagnostics={'scope':'provider_wide_not_session','last_attempt_at':health['attempted'],'last_success_at':health['succeeded'],'last_error':health['code'],'last_successful_feed_statuses':fields,'last_successful_sqlite_timing_ms':timing,'last_successful_pipeline_timing_ms':pipeline}
       settings=payload.get('worker_settings') if isinstance(payload,dict) else None
@@ -1083,6 +1083,9 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   prepared_version=None
  lock_requested=time.perf_counter()
  with connect() as c:
+  # Scope entry includes the worker's serialized gate and connection setup;
+  # BEGIN time includes the SQL call itself, not only lock contention.
+  scope_entered=time.perf_counter()
   c.execute('BEGIN IMMEDIATE');lock_acquired=time.perf_counter();row=row_for(c,uid,wid,mode);request=json.loads(row['request'])
   if lease and (row['lease_owner']!=lease or row['lease_until']<now.timestamp()):raise EngineError('lease_lost',409)
   if row['status'] not in ['CREATED','VALIDATING','ACTIVE','DEGRADED']:raise EngineError('watch_not_running',409)
@@ -1249,14 +1252,14 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   adaptive='CRITICAL' if result['risk_level']=='critical' else 'ACTIVE' if metrics.get('breakout') or nextstate.get('volume_spike') else 'IDLE' if sample['market_status'] in ['CLOSED','HALTED'] else request['profile']
   nextstate['adaptive_profile']=adaptive
   nextstate['provider_floor_s']=provider_floor(request['provider'])
-  interval=observation_poll_interval(c,request,adaptive,now,sample)
+  baseline=effective_poll_interval(c,request,adaptive)
+  interval=observation_poll_interval(c,request,adaptive,now,sample,baseline=baseline)
   if sample['market_status'] in ['CLOSED','HALTED']:interval=max(interval,300)
   nextstate['scheduled_interval_s']=interval
-  baseline=effective_poll_interval(c,request,adaptive)
   nextstate['quiet_market_poll']=interval>baseline
   nextstate['quiet_baseline_s']=baseline if interval>baseline else None
   c.execute('UPDATE hw_sessions SET status=?,state=?,updated=?,last_data=?,last_calculation=?,next_due=?,failures=0,last_error=NULL,lease_owner=NULL,lease_until=0 WHERE id=?',(new_status,canonical(nextstate),now.isoformat(),sample['event_time'],now.isoformat(),now.timestamp()+interval,row['id']))
-  response={'ok':True,'duplicate':False,'calculation':result,'sqlite_timing':{'begin_wait_ms':round((lock_acquired-lock_requested)*1000,3),'work_before_commit_ms':round((time.perf_counter()-lock_acquired)*1000,3)}}
+  response={'ok':True,'duplicate':False,'calculation':result,'sqlite_timing':{'begin_wait_ms':round((lock_acquired-lock_requested)*1000,3),'scope_entry_wait_ms':round((scope_entered-lock_requested)*1000,3),'sqlite_begin_ms':round((lock_acquired-scope_entered)*1000,3),'work_before_commit_ms':round((time.perf_counter()-lock_acquired)*1000,3)}}
   if include_session:response['session']=view(c,row_for(c,uid,wid,mode),now)
   return response
 
@@ -1358,7 +1361,9 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   if request['provider']=='eodhd' and code in ('EODHD_RATE_LIMIT','PROVIDER_RATE_BUDGET') and retry_after_s is not None:interval=max(1,retry_after_s)
   elif retry_after_s is not None:interval=max(interval,max(0,retry_after_s))
   state['scheduled_interval_s']=interval
-  baseline=effective_poll_interval(c,request,state.get('adaptive_profile',request['profile']))
+  # Only stale-data scheduling uses the quiet-market baseline. Other errors
+  # do not need a full shared-session budget lookup while holding the writer.
+  baseline=effective_poll_interval(c,request,state.get('adaptive_profile',request['profile'])) if code=='DATA_STALE' else None
   state['quiet_market_poll']=code=='DATA_STALE' and interval>baseline
   state['quiet_baseline_s']=baseline if state['quiet_market_poll'] else None
   if row['last_error']!=code:
@@ -1405,8 +1410,9 @@ def release(connect,job,now=None,sample=None,pending_feed=False):
    c.execute('UPDATE hw_sessions SET lease_owner=NULL,lease_until=0 WHERE id=? AND lease_owner=?',(job['id'],job['lease_owner']))
    return
   profile=json.loads(job.get('state') or '{}').get('adaptive_profile') or request['profile']
-  interval=observation_poll_interval(c,request,profile,now,sample)
-  baseline=effective_poll_interval(c,request,profile);reduced=interval>baseline
+  baseline=effective_poll_interval(c,request,profile)
+  interval=observation_poll_interval(c,request,profile,now,sample,baseline=baseline)
+  reduced=interval>baseline
   c.execute("UPDATE hw_sessions SET next_due=?,state=json_set(state,'$.scheduled_interval_s',?,'$.quiet_market_poll',json(?),'$.quiet_baseline_s',?),lease_owner=NULL,lease_until=0 WHERE id=? AND lease_owner=?",(now.timestamp()+interval,interval,'true' if reduced else 'false',baseline if reduced else None,job['id'],job['lease_owner']))
 
 

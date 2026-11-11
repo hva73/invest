@@ -56,11 +56,12 @@ class HotWatch(unittest.TestCase):
 
  def test_provider_pipeline_times_are_bounded_and_do_not_expose_other_fields(self):
   self.put(tick(self.now))
-  values={'provider_ms':70000,'pluto_context_ms':62000,'websocket_capture_ms':2000,'adapter_to_journal_ms':7,'event_to_adapter_receive_ms':None,'secret':'not-for-client','begin_wait_ms':.1}
+  values={'provider_ms':70000,'pluto_context_ms':62000,'websocket_capture_ms':2000,'adapter_to_journal_ms':7,'event_to_adapter_receive_ms':None,'secret':'not-for-client','begin_wait_ms':.3,'scope_entry_wait_ms':.1,'sqlite_begin_ms':.2}
   with app.connect() as c:
    c.execute('INSERT INTO hw_provider_health VALUES(?,?,?,?,?,?,?)',(1,1,'synthetic',self.now.isoformat(),self.now.isoformat(),None,json.dumps(values)))
   item=engine.sync(app.connect,1,True,session_limit=1,summary_only=True)['open_sessions'][0]
   diag=item['provider_feed_diagnostics']
+  self.assertEqual(diag['last_successful_sqlite_timing_ms'],{k:values[k] for k in ('begin_wait_ms','scope_entry_wait_ms','sqlite_begin_ms')})
   self.assertEqual(diag['last_successful_pipeline_timing_ms'],{k:values[k] for k in ('provider_ms','pluto_context_ms','websocket_capture_ms','adapter_to_journal_ms')})
   self.assertEqual(diag['scope'],'provider_wide_not_session')
   self.assertNotIn('not-for-client',json.dumps(item))
@@ -1059,6 +1060,44 @@ class HotWatch(unittest.TestCase):
   for result in results:
    self.assertTrue(result['ok']);self.assertNotEqual(result['calculation']['signal'],'BUY')
    self.assertGreaterEqual(result['sqlite_timing']['begin_wait_ms'],0);self.assertGreaterEqual(result['sqlite_timing']['work_before_commit_ms'],0)
+ def test_ingest_timing_distinguishes_scope_entry_from_sqlite_begin(self):
+  import time
+  from contextlib import contextmanager
+  calls=[]
+  @contextmanager
+  def slow_second_scope():
+   calls.append(1)
+   if len(calls)==2:time.sleep(.06)
+   with app.connect() as c:yield c
+  timing=engine.ingest(slow_second_scope,1,self.req['watch_id'],True,tick(self.now),self.now,include_session=False)['sqlite_timing']
+  self.assertGreaterEqual(timing['scope_entry_wait_ms'],45)
+  self.assertGreaterEqual(timing['sqlite_begin_ms'],0)
+  self.assertAlmostEqual(timing['begin_wait_ms'],timing['scope_entry_wait_ms']+timing['sqlite_begin_ms'],delta=.01)
+ def test_ingest_timing_records_sqlite_writer_wait_separately(self):
+  import threading
+  from contextlib import contextmanager
+  ready=threading.Event();entered=threading.Event();errors=[];calls=[]
+  def writer():
+   try:
+    with app.connect() as c:
+     c.execute('BEGIN IMMEDIATE');ready.set()
+     if not entered.wait(5):raise RuntimeError('ingest did not start writer scope')
+     threading.Event().wait(.08)
+   except Exception as exc:errors.append(exc);ready.set()
+  @contextmanager
+  def notify_second_scope():
+   calls.append(1)
+   with app.connect() as c:
+    if len(calls)==2:entered.set()
+    yield c
+  thread=threading.Thread(target=writer);thread.start()
+  try:
+   self.assertTrue(ready.wait(5));self.assertFalse(errors)
+   timing=engine.ingest(notify_second_scope,1,self.req['watch_id'],True,tick(self.now),self.now,include_session=False)['sqlite_timing']
+  finally:entered.set();thread.join(5)
+  self.assertFalse(thread.is_alive());self.assertFalse(errors)
+  self.assertGreaterEqual(timing['sqlite_begin_ms'],50)
+  self.assertAlmostEqual(timing['begin_wait_ms'],timing['scope_entry_wait_ms']+timing['sqlite_begin_ms'],delta=.01)
  def test_latest_observations_have_indexes_after_repeat_initialization(self):
   app.init()
   with app.connect() as c:
