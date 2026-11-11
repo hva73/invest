@@ -1,0 +1,42 @@
+name: ESCAPE deploy public key
+on:
+  issue_comment:
+    types: [created]
+  pull_request:
+    branches: [codex/escape-development]
+permissions:
+  contents: read
+jobs:
+  test:
+    if: github.event_name == 'pull_request' && github.repository == 'hva73/invest'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Verify public key derivation
+        run: |
+          set -eu
+          ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/test-key"
+          ssh-keygen -y -f "$RUNNER_TEMP/test-key" | ssh-keygen -lf -
+  public_key:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      github.repository == 'hva73/invest' &&
+      github.event.issue.number == 16 &&
+      github.event.comment.user.id == 351122234 &&
+      github.event.comment.body == '/escape-deploy-public-key'
+    runs-on: ubuntu-latest
+    environment: ESCAPE_NORDICWAY_DEPLOY
+    timeout-minutes: 2
+    steps:
+      - name: Derive only the public key
+        env:
+          DEPLOY_PRIVATE_KEY: ${{ secrets.ESCAPE_NORDICWAY_DEPLOY_PRIVATE_KEY }}
+        run: |
+          set -eu
+          umask 077
+          key="$RUNNER_TEMP/escape-deploy-key"
+          trap 'rm -f "$key"' EXIT
+          test -n "$DEPLOY_PRIVATE_KEY"
+          printf '%s\n' "$DEPLOY_PRIVATE_KEY" > "$key"
+          unset DEPLOY_PRIVATE_KEY
+          ssh-keygen -y -f "$key"
