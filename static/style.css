@@ -402,7 +402,7 @@ body.pull-refresh-visible #refresh-status{display:none}
 @media(max-width:900px){
  body > aside{position:static;display:block;width:auto;padding:14px 16px 0;border:0;background:transparent}
  body > aside .brand{display:inline-block}body > aside > footer{display:none}
- body > aside nav{position:fixed;z-index:50;left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom,0px));display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;margin:0;padding:5px;border:1px solid #618c8970;border-radius:22px;background:rgba(12,29,39,.94);box-shadow:0 12px 36px #000a;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
+ body > aside nav{position:fixed;overflow:visible;z-index:50;left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom,0px));display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px;margin:0;padding:5px;border:1px solid #618c8970;border-radius:22px;background:rgba(12,29,39,.94);box-shadow:0 12px 36px #000a;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
  body > aside nav > .nav-group-label{display:none}
  body > aside nav > button{display:flex;min-width:0;min-height:56px;padding:5px 2px;font-size:9px;gap:3px;line-height:1.1;border-color:transparent;background:transparent;color:#afc3c8}
  body > aside nav > button.active{color:#91ecd6;background:#1c4c4375;box-shadow:none;border-color:transparent}
