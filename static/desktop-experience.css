@@ -1,0 +1,42 @@
+/* Desktop Experience: the existing components and data semantics remain intact. */
+@media (min-width: 901px) {
+  body > aside {
+    width: 224px;
+    padding: 28px 16px 24px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+  body > aside .brand { padding: 0 8px; font-size: 24px; letter-spacing: 4px; }
+  body > aside nav { margin-top: 24px; gap: 3px; }
+  body > aside nav button { min-height: 42px; padding: 9px 11px; }
+  body > aside .nav-group-label { margin: 15px 11px 2px; }
+  body > aside footer { padding: 18px 8px 0; }
+  main { margin-left: 224px; max-width: none; padding: 26px clamp(22px, 2.4vw, 48px) 40px; }
+  main > header { margin-bottom: 24px; gap: 20px; }
+  main > header h1 { font-size: clamp(25px, 2vw, 32px); }
+  #content, .dashboard-v1, .sector-shell { min-width: 0; }
+  .dashboard-v1 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .dashboard-v1 > .dash-hero,
+  .dashboard-v1 > .dash-attention,
+  .dashboard-v1 > .dash-holdings { grid-column: 1 / -1; }
+  .dashboard-v1 > .dash-signals,
+  .dashboard-v1 > .dash-quality { min-width: 0; }
+  .dash-hero { padding: 26px 30px 0; }
+  .dash-hero-intro h2 { font-size: clamp(28px, 2.5vw, 40px); margin: 12px 0 8px; }
+  .dash-hero-intro p { margin-bottom: 12px; }
+  .dash-hero-metrics { margin-top: 22px; }
+  .dash-hero-metrics > div { padding-top: 16px; padding-bottom: 18px; }
+  .dash-holdings .dash-table th, .dash-attention .dash-table th { padding-top: 12px; padding-bottom: 12px; }
+  .dash-holdings .dash-table tbody tr:hover, .dash-attention .dash-table tbody tr:hover { background: #ffffff08; }
+  .engine-overview, .sector-panel, .portfolio-card { min-width: 0; }
+  .engine-list-row { padding: 14px 16px; }
+  .engine-list-row:hover { background: #ffffff08; }
+  .sector-layout > *, .sector-shell .sector-panel { min-width: 0; }
+  .sector-heatmap { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+}
+@media (min-width: 1500px) {
+  .dashboard-v1 { gap: 18px; }
+  .dash-hero-top { gap: 36px; }
+  .dash-hero-top #dashboard-value-chart { flex-basis: 62%; }
+  .dash-chart-svg { height: 180px; }
+}
