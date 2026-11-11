@@ -41,7 +41,7 @@ try:
   review_and_send(dialog)
   assert calls[-2][1]['report_id']=='@manual-buy' and calls[-2][1]['size']=='20' and calls[-1][0]=='send'
   dialog.locator('[data-quick-close]').click()
-  page.evaluate("() => {const b=document.createElement('button');b.dataset.tradeWatch='watch-1';b.textContent='KØB';document.body.append(b)}")
+  page.evaluate("() => {const b=document.createElement('button');b.dataset.tradeWatch='watch-1';b.textContent='KØB';document.getElementById('content').append(b)}")
   expect(page.locator('[data-explain-watch="watch-1"]')).to_be_visible();page.locator('[data-explain-watch="watch-1"]').click();expect(page.locator('#signal-explanation-dialog')).to_contain_text('betingelser for køb er opfyldt');expect(page.locator('#signal-explanation-dialog')).to_contain_text('2,5%');expect(page.locator('#signal-explanation-dialog')).to_contain_text('1.200');expect(page.locator('#signal-explanation-dialog')).to_contain_text('0,25 %');expect(page.locator('#signal-explanation-dialog')).to_contain_text('10,1 USD');expect(page.locator('#signal-explanation-dialog')).to_contain_text('for gamle');page.locator('[data-explanation-close]').click()
   for side,size,expected in [('BUY','1','shares'),('SELL','50','percent')]:
    page.evaluate("""([side,pid])=>window.TradeUI.openQuick({report_id:'@hotwatch',candidate_id:'watch-1',ticker:'TEST',asset_id:'asset-test',signal:side,risk_plan:side==='BUY'?{portfolio_id:pid,budget_dkk:'100',quantity:'1',limit_price:'12',stop_price:'10'}:null})""",[side,case.root])
@@ -57,7 +57,7 @@ try:
    dialog.locator('[data-quick-close]').click()
   page.evaluate("""() => {
    state.report_desk=state.report_desk||{};state.report_desk.candidates=[{report_id:'report-1',candidate:{candidate_id:'candidate-1',ticker:'TEST',asset_id:'asset-test',signal:'KØB'}}];
-   const b=document.createElement('button');b.dataset.tradeReport='report-1';b.dataset.tradeCandidate='candidate-1';b.textContent='KØB';document.body.append(b);
+   const b=document.createElement('button');b.dataset.tradeReport='report-1';b.dataset.tradeCandidate='candidate-1';b.textContent='KØB';document.getElementById('content').append(b);
   }""")
   page.locator('[data-trade-report="report-1"]').click();dialog=page.locator('#quick-trade-dialog');dialog.locator('[name=size]').fill('75');review_and_send(dialog)
   assert calls[-2][1]['report_id']=='report-1' and calls[-2][1]['candidate_id']=='candidate-1'
