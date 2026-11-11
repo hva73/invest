@@ -65,6 +65,8 @@ def main():
    session.update(signal='BUY',display_status='KØBSSIGNAL');session['last_action_signal'].update(state='ACTIVE',event_type='BUY_SIGNAL');page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_contain_text('muligt køb');expect(d.get_by_role('button',name='Afvent')).to_be_visible();expect(d.locator('[data-trade-watch]')).to_have_count(0)
    if shot:page.screenshot(path=f'{shot}/signal-buy-390.png')
    d.locator('[data-engine-close]').first.click()
+   session['data_status']['market_status']='OPEN';session['buy_plan']={'fresh':True,'portfolio_id':case.root,'quantity':'2','budget_dkk':'500','limit_price':'20','stop_price':'18'}
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.get_by_role('button',name='Gennemgå køb →')).to_be_visible();expect(d.locator('[data-trade-watch]')).to_have_attribute('data-trade-signal','BUY');d.locator('[data-engine-close]').first.click()
    assert not errors,errors;assert not orders,orders
    browser.close()
   print('PASS: synthetic push → mobile detail, four periods, Pluto identity, real-point high, sticky actions and no order')
