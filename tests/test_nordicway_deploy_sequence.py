@@ -30,7 +30,10 @@ class Adapter:
     def stage(self, sha): return self._step('stage', 'release')
     def service_status(self): return self._step('status', self.state)
     def stop_service(self): return self._step('stop')
-    def wait_for_quiescence(self): return self._step('drain')
+    @contextlib.contextmanager
+    def quiescence(self):
+        self._step('drain')
+        yield
     def backup_and_apply(self, release): return self._step('backup_and_apply', 'backup')
     def verify_backup(self, backup): return self._step('verify_backup')
     def verify_installed(self, sha): return self._step('verify_install')

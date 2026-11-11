@@ -12,6 +12,7 @@ from pathlib import Path
 import apply_update
 import nordicway_autostart
 import nordicway_quota
+import nordicway_quiescence
 import nordicway_release_backup
 import nordicway_release_preflight
 import nordicway_release_service
@@ -72,9 +73,13 @@ class Adapter:
         if self.service.transition('stop') != 'stopped':
             raise ValueError('service_stop_failed')
 
-    def wait_for_quiescence(self):
-        if self.quiescence_check() is not True:
-            raise ValueError('quiescence_unverified')
+    @contextmanager
+    def quiescence(self):
+        with nordicway_quiescence.stopped_motor(self.target / 'var'):
+            # Separate check must cover Passenger, cron and other writers.
+            if self.quiescence_check() is not True:
+                raise ValueError('quiescence_unverified')
+            yield
 
     def backup_and_apply(self, release):
         names = apply_update.FILES

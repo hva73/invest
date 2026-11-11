@@ -46,17 +46,17 @@ def deploy(adapter, sha):
                     stop_attempted = True
                     adapter.stop_service()
                 stage = 'drain'
-                adapter.wait_for_quiescence()
-                stage = 'backup_and_apply'
-                # The existing updater checks its fresh backup before replacing
-                # files. It may fail after a partial replacement, so never
-                # assume the old code remains usable after entering this call.
-                mutation_started = True
-                backup = adapter.backup_and_apply(release)
-                stage = 'verify_backup'
-                adapter.verify_backup(backup)
-                stage = 'verify_install'
-                adapter.verify_installed(sha)
+                with adapter.quiescence():
+                    stage = 'backup_and_apply'
+                    # The existing updater checks its fresh backup before replacing
+                    # files. It may fail after a partial replacement, so never
+                    # assume the old code remains usable after entering this call.
+                    mutation_started = True
+                    backup = adapter.backup_and_apply(release)
+                    stage = 'verify_backup'
+                    adapter.verify_backup(backup)
+                    stage = 'verify_install'
+                    adapter.verify_installed(sha)
                 if was_running:
                     stage = 'start'
                     adapter.start_service()
