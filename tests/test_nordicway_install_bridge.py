@@ -31,7 +31,7 @@ class BridgeInstallerTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def _run(self):
-        with patch.object(bridge_installer, '_sources', return_value=self.files), \\
+        with patch.object(bridge_installer, '_sources', return_value=self.files), \
                 patch.object(bridge_installer, 'OLD_GUARD_SHA256',
                              hashlib.sha256(b'old guard').hexdigest()):
             return bridge_installer.install(self.root, self.bridge, self.sha)
