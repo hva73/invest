@@ -8,7 +8,7 @@
   }
   body > aside .brand { padding: 0 8px; font-size: 24px; letter-spacing: 4px; }
   body > aside nav { margin-top: 24px; gap: 3px; }
-  body > aside nav button { min-height: 42px; padding: 9px 11px; }
+  body > aside nav button { min-height: 44px; padding: 9px 11px; }
   body > aside .nav-group-label { margin: 15px 11px 2px; }
   body > aside footer { padding: 18px 8px 0; }
   main { margin-left: 224px; max-width: none; padding: 26px clamp(22px, 2.4vw, 48px) 40px; }
