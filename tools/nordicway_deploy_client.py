@@ -13,6 +13,8 @@ from nordicway_readonly_client import _run_limited
 STAGES = {'authorization', 'preflight', 'quota', 'stage', 'service_state',
           'stop', 'drain', 'backup_and_apply', 'verify_backup', 'verify_install',
           'start', 'health', 'complete', 'runner'}
+SERVICE_STATE_REASONS = {'selector_failed', 'application_state_unknown',
+                         'service_status_unknown', 'state_record_failed', 'service_state_unavailable'}
 
 
 def run(env=None, transport=_run_limited):
@@ -62,8 +64,11 @@ def run(env=None, transport=_run_limited):
             reply.setdefault('backup_cleanup', 'unknown')
             return reply
         expected = {'operation', 'status', 'stage', 'service_restored', 'recovery_required'}
-        if (not isinstance(reply, dict) or set(reply) not in (expected, expected | {'backup_cleanup'})
+        if (not isinstance(reply, dict) or set(reply) not in (expected, expected | {'backup_cleanup'},
+                expected | {'reason'}, expected | {'backup_cleanup', 'reason'})
                 or ('backup_cleanup' in reply and reply['backup_cleanup'] not in ('ok', 'failed', 'not_run'))
+                or ('reason' in reply and (reply['status'] != 'failed' or reply['stage'] != 'service_state'
+                    or reply['reason'] not in SERVICE_STATE_REASONS))
                 or reply['operation'] != 'deploy'
                 or reply['status'] not in ('ok', 'failed', 'updated_stopped')
                 or reply['stage'] not in STAGES or type(reply['service_restored']) is not bool
