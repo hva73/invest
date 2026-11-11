@@ -1,4 +1,5 @@
 import hashlib
+import subprocess
 import os
 import stat
 import sys
@@ -70,6 +71,30 @@ class BridgeInstallerTests(unittest.TestCase):
         marker.write_text('b' * 40)
         self._run()
         self.assertEqual(marker.read_text(), 'b' * 40)
+
+    def test_exact_committed_bundle_imports_in_isolated_python(self):
+        """Test real Git objects and the forced-command -I -S import environment."""
+        repo = Path(__file__).resolve().parents[1]
+        sha = subprocess.check_output(
+            ['git', '-C', str(repo), 'rev-parse', '--verify', 'HEAD^{commit}'],
+            text=True, timeout=10).strip()
+        files = bridge_installer._sources(repo, sha)
+        self.assertEqual(len(files), len(bridge_installer.MODULES))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for name, data in files.items():
+                path = root / name
+                path.write_bytes(data)
+                path.chmod(0o600)
+            source = ("import sys;sys.path.insert(0,sys.argv[1]);"
+                      "import nordicway_deploy_guard,nordicway_deploy_runner;"
+                      "assert nordicway_deploy_guard.dispatch("
+                      "'escape-deploy-v1 ping')['status']=='ok'")
+            result = subprocess.run(
+                [sys.executable, '-I', '-S', '-c', source, str(root)],
+                capture_output=True, text=True, timeout=20, check=False)
+            self.assertEqual(result.returncode, 0,
+                             'Bridge modules cannot import in isolated runtime')
 
     def test_bad_sha_is_rejected_before_git_or_writes(self):
         with self.assertRaisesRegex(ValueError, 'invalid_sha'):
