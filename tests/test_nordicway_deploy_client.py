@@ -44,6 +44,8 @@ class ClientTests(unittest.TestCase):
 
     def test_write_probe_is_fixed_and_needs_no_release_or_token(self):
         self.env['ESCAPE_DEPLOY_OPERATION'] = 'write-probe'
+        self.env['ESCAPE_WRITE_PROBE_AUTHORIZED'] = '1'
+        self.env.pop('ESCAPE_DEPLOY_AUTHORIZED')
         self.env.pop('ESCAPE_RELEASE_SHA')
         self.env.pop('ESCAPE_CPANEL_API_TOKEN')
         reply = {'operation': 'write_probe', 'status': 'ok'}
@@ -53,6 +55,19 @@ class ClientTests(unittest.TestCase):
         args, kwargs = send.call_args
         self.assertEqual(args[0][-1], 'escape-deploy-v1 write-probe')
         self.assertEqual(kwargs['input'], b'')
+
+    def test_probe_never_inherits_full_deploy_permission(self):
+        transport = Mock()
+        self.env['ESCAPE_DEPLOY_OPERATION'] = 'write-probe'
+        self.env.pop('ESCAPE_RELEASE_SHA')
+        self.assertEqual(client.run(self.env, transport)['status'], 'blocked')
+        transport.assert_not_called()
+        self.env.pop('ESCAPE_DEPLOY_AUTHORIZED')
+        self.env['ESCAPE_WRITE_PROBE_AUTHORIZED'] = '1'
+        self.env['ESCAPE_DEPLOY_OPERATION'] = 'deploy'
+        self.env['ESCAPE_RELEASE_SHA'] = 'a' * 40
+        self.assertEqual(client.run(self.env, transport)['status'], 'blocked')
+        transport.assert_not_called()
 
     def test_timeout_and_untrusted_reply_are_unknown(self):
         for transport in (Mock(side_effect=subprocess.TimeoutExpired('ssh', 1)),
