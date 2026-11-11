@@ -395,7 +395,10 @@ class EODHDAdapter:
    messages=value.get('messages',[]);latest=max(messages,key=lambda m:stamp(m['event_time'])) if messages else {}
    age=(utc()-stamp(latest['event_time'])).total_seconds() if latest.get('event_time') else None
    received_age=(utc()-stamp(latest['received_at'])).total_seconds() if latest.get('received_at') else None
-   self.capture_metrics.append({'source_age_s':round(age,3) if age is not None else None,'received_age_s':round(received_age,3) if received_age is not None else None,'feed':feed,'subscriptions_sent':0 if reused else value.get('subscriptions_sent'),'connections_opened':0 if reused else value.get('connections_opened'),'batch_symbols':symbols,'capture_attempts':0 if reused else 1,'cache_hit':reused and value.get('status')!='COLLECTING','status':value.get('status'),'wait_ms':round((time.monotonic()-capture_started)*1000,3),'messages':len(value.get('messages',[]))})
+   metric={'source_age_s':round(age,3) if age is not None else None,'received_age_s':round(received_age,3) if received_age is not None else None,'feed':feed,'subscriptions_sent':0 if reused else value.get('subscriptions_sent'),'connections_opened':0 if reused else value.get('connections_opened'),'batch_symbols':symbols,'capture_attempts':0 if reused else 1,'cache_hit':reused and value.get('status')!='COLLECTING','status':value.get('status'),'wait_ms':round((time.monotonic()-capture_started)*1000,3),'messages':len(value.get('messages',[]))}
+   for field in ('batch_valid_count','batch_partial_count','batch_limit_reached'):
+    if field in value:metric[field]=value[field]
+   self.capture_metrics.append(metric)
    return value
   if not self._shared_quotes or self.connect is None or session.get('id') is None or req.get('is_test'):
    return record(client.capture(feed,symbol,duration=2),1,False)
