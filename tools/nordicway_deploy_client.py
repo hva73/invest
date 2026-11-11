@@ -20,8 +20,9 @@ def run(env=None, transport=_run_limited):
     sha, token = env.get('ESCAPE_RELEASE_SHA', ''), env.get('ESCAPE_CPANEL_API_TOKEN', '')
     operation = env.get('ESCAPE_DEPLOY_OPERATION', 'deploy')
     if (env.get('ESCAPE_DEPLOY_AUTHORIZED') != '1' or not env.get('SSH_AUTH_SOCK')
-            or not re.fullmatch(r'[0-9a-f]{40}', sha)
-            or operation not in ('deploy', 'resume')
+            or operation not in ('deploy', 'resume', 'write-probe')
+            or (operation in ('deploy', 'resume') and not re.fullmatch(r'[0-9a-f]{40}', sha))
+            or (operation == 'write-probe' and bool(sha))
             or (operation == 'deploy' and not re.fullmatch(r'[A-Za-z0-9_-]{10,256}', token))):
         return {'status': 'blocked', 'reason': 'configuration_unavailable'}
     try:
@@ -35,13 +36,17 @@ def run(env=None, transport=_run_limited):
                        '-o', 'StrictHostKeyChecking=yes', '-o', 'UserKnownHostsFile=' + str(hosts),
                        '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'ForwardAgent=no',
                        '-o', 'ClearAllForwardings=yes', '-o', 'ConnectTimeout=10',
-                       HOST, 'escape-deploy-v1 ' + operation + ' ' + sha]
+                       HOST, 'escape-deploy-v1 ' + operation + ((' ' + sha) if sha else '')]
             # Token is sent only over SSH stdin, never in command arguments or logs.
             payload = json.dumps({'cpanel_token': token}, separators=(',', ':')).encode() if operation == 'deploy' else b''
             result = transport(command, input=payload, capture_output=True, timeout=900, env=env)
         if len(result.stdout) > 1024:
             raise ValueError('invalid_reply')
         reply = json.loads(result.stdout)
+        if operation == 'write-probe':
+            if result.returncode != 0 or reply != {'status': 'ok', 'operation': 'write_probe'}:
+                raise ValueError('invalid_reply')
+            return reply
         if operation == 'resume':
             if (not isinstance(reply, dict) or set(reply) != {'operation', 'status', 'recovery_required'}
                     or reply['operation'] != 'resume' or reply['status'] not in ('ok', 'failed')

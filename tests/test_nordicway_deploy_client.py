@@ -42,6 +42,18 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(args[0][-1], 'escape-deploy-v1 resume ' + 'a' * 40)
         self.assertEqual(kwargs['input'], b'')
 
+    def test_write_probe_is_fixed_and_needs_no_release_or_token(self):
+        self.env['ESCAPE_DEPLOY_OPERATION'] = 'write-probe'
+        self.env.pop('ESCAPE_RELEASE_SHA')
+        self.env.pop('ESCAPE_CPANEL_API_TOKEN')
+        reply = {'operation': 'write_probe', 'status': 'ok'}
+        send = Mock(return_value=SimpleNamespace(returncode=0, stdout=json.dumps(reply).encode()))
+        with patch.object(client, 'verify', return_value='host key\n'):
+            self.assertEqual(client.run(self.env, send), reply)
+        args, kwargs = send.call_args
+        self.assertEqual(args[0][-1], 'escape-deploy-v1 write-probe')
+        self.assertEqual(kwargs['input'], b'')
+
     def test_timeout_and_untrusted_reply_are_unknown(self):
         for transport in (Mock(side_effect=subprocess.TimeoutExpired('ssh', 1)),
                           Mock(return_value=SimpleNamespace(returncode=0, stdout=b'{"status":"ok"}'))):

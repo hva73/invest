@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: 'Ping, deploy, or resume an independently approved SHA'
+        description: 'Ping, write-probe, deploy, or resume an approved release'
         type: choice
-        options: [ping, deploy, resume]
+        options: [ping, write-probe, deploy, resume]
         default: ping
         required: true
       release_sha:
@@ -103,7 +103,7 @@ jobs:
   deploy:
     if: >-
       github.event_name == 'workflow_dispatch' &&
-      (inputs.operation == 'deploy' || inputs.operation == 'resume') &&
+      (inputs.operation == 'write-probe' || inputs.operation == 'deploy' || inputs.operation == 'resume') &&
       github.repository == 'hva73/invest' &&
       github.actor_id == '351122234' &&
       github.triggering_actor == 'hva73' &&
