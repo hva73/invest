@@ -411,6 +411,34 @@ class AdapterIntegration(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'unsafe_manifest_file'):
             concrete.estimate_required_bytes(self.checkout, self.app)
 
+    def test_space_estimate_reserves_wal_and_journal_and_rejects_symlinks(self):
+        before = concrete.estimate_required_bytes(self.checkout, self.app)
+        wal = self.app / 'var' / 'escape.db-wal'
+        journal = self.app / 'var' / 'escape.db-journal'
+        wal.write_bytes(b'w' * 2000)
+        journal.write_bytes(b'j' * 3000)
+        after = concrete.estimate_required_bytes(self.checkout, self.app)
+        self.assertGreaterEqual(after - before, 10000)
+        wal.unlink()
+        wal.symlink_to(self.app / 'var' / 'escape.db')
+        with self.assertRaisesRegex(ValueError, 'database_unavailable'):
+            concrete.estimate_required_bytes(self.checkout, self.app)
+
+    def test_sidecar_space_shortage_stops_before_service(self):
+        available = concrete.estimate_required_bytes(self.checkout, self.app)
+        (self.app / 'var' / 'escape.db-wal').write_bytes(b'w' * 4096)
+        adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1, lambda: True,
+                                   lambda sha: True, self.service,
+                                   quota_reader=lambda path, required: {
+                                       'required_bytes': required,
+                                       'account_free_lower_bytes': available,
+                                       'filesystem_free_bytes': available})
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')):
+            result = sequence.deploy(adapter, self.sha)
+        self.assertEqual((result.status, result.stage), ('failed', 'quota'))
+        self.assertEqual(self.service.state, 'started')
+        self.assertEqual((self.app / 'app.py').read_text(), 'old')
+
     def test_unknown_quota_never_stops_or_modifies(self):
         result = self.run_test(quota_ok=False)
         self.assertEqual((result.status, result.stage), ('failed', 'quota'))
