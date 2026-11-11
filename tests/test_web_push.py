@@ -122,8 +122,9 @@ class Push(unittest.TestCase):
   with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
   recovery={'signal':'WAIT','reason_codes':['NO_TRIGGER'],'new_market_observation':True,'position_context':{'position':'held'},'risk_level':'normal'}
   with app.connect() as c:c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],(self.now+timedelta(seconds=1)).isoformat(),json.dumps(recovery),'x'))
-  self.event('SELL_SIGNAL')
-  with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now+timedelta(seconds=2),lambda s,p,t:sent.append(p))
+  at=self.now+timedelta(seconds=2)
+  with app.connect() as c:engine.event(c,self.watch,'SELL_SIGNAL',at,'new exit after recovery')
+  with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,at,lambda s,p,t:sent.append(p))
   self.assertEqual(len(sent),2)
  def test_critical_stop_and_worsening_notify_even_during_sell(self):
   self.subscribe();sent=[];self.event('SELL_SIGNAL')
@@ -304,6 +305,22 @@ class Push(unittest.TestCase):
    engine.event(c,self.watch,'SELL_SIGNAL',entry,'new position')
   with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,entry,lambda s,p,t:sent.append(p))
   self.assertEqual(len(sent),2)
+ def test_old_queued_exit_is_not_rearmed_by_a_future_reentry(self):
+  self.subscribe();sent=[];self.event('SELL_SIGNAL')
+  with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+  closed=self.now+timedelta(seconds=10);old=self.now+timedelta(seconds=12);entry=self.now+timedelta(seconds=20)
+  with app.connect() as c:
+   context={'position':'none','status':'verified','as_of':closed.isoformat()};c.execute('INSERT INTO hw_context_events(watch_row_id,observed,payload) VALUES(?,?,?)',(self.watch['id'],closed.isoformat(),json.dumps(context)))
+   engine.event(c,self.watch,'SELL_SIGNAL',old,'old queued signal')
+   payload={'signal':'SELL','reason_codes':['EXIT_RULES'],'new_market_observation':True,'exit_context_key':'same-quantity','position_context':{'position':'held','status':'verified','as_of':entry.isoformat()},'risk_level':'normal'}
+   c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],entry.isoformat(),json.dumps(payload),'x'))
+   engine.event(c,self.watch,'SELL_SIGNAL',entry,'new position')
+  with patch('web_push._actionable',return_value='SELL'):
+   web_push.dispatch_one(app.connect,entry,lambda s,p,t:sent.append(p));self.assertEqual(len(sent),1)
+   web_push.dispatch_one(app.connect,entry,lambda s,p,t:sent.append(p));self.assertEqual(len(sent),2)
+  with app.connect() as c:
+   rows=c.execute('SELECT j.status,e.created FROM push_jobs j JOIN hw_events e ON e.event_id=j.event_key WHERE j.watch_row_id=? ORDER BY j.id',(self.watch['id'],)).fetchall()
+  self.assertEqual([(row['status'],row['created']) for row in rows],[('sent',self.now.isoformat()),('skipped',old.isoformat()),('sent',entry.isoformat())])
   with app.connect() as c:engine.event(c,self.watch,'SELL_SIGNAL',entry+timedelta(seconds=1),'duplicate')
   with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,entry+timedelta(seconds=1),lambda s,p,t:sent.append(p))
   self.assertEqual(len(sent),2)

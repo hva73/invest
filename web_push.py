@@ -170,7 +170,7 @@ def _reconcile(c,now):
                 WHERE push_jobs.status IN ('expired','failed') AND push_jobs.created<?""",('stale:'+item['event_key'],item['watch_row_id'],item['device_id'],now.timestamp(),now.timestamp()-300))
 
 
-def _exit_rearmed(c,watch_id,event_key):
+def _exit_rearmed(c,watch_id,event_key,through=None):
     """Rearm only after verified recovery, changed exposure or closure/re-entry."""
     event=c.execute('SELECT created FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch_id,event_key)).fetchone()
     if not event:return False
@@ -184,10 +184,13 @@ def _exit_rearmed(c,watch_id,event_key):
             as_of=stamp(context['as_of']);seen=stamp(observed)
             if context.get('status')=='verified' and context.get('position')=='none' and as_of>stamp(event['created']) and 0<=(seen-as_of).total_seconds()<=300:closed.append(as_of)
         except (KeyError,ValueError,TypeError,AttributeError):pass
-    for row in c.execute('SELECT observed,payload FROM hw_context_events WHERE watch_row_id=? AND observed>? ORDER BY id',(watch_id,event['created'])):
+    time_bound=' AND observed<=?' if through else ''
+    args=(watch_id,event['created'],through) if through else (watch_id,event['created'])
+    for row in c.execute('SELECT observed,payload FROM hw_context_events WHERE watch_row_id=? AND observed>?'+time_bound+' ORDER BY id',args):
         try:remember_closed(json.loads(row['payload']),row['observed'])
         except (ValueError,TypeError):pass
-    rows=c.execute('SELECT calculated,payload FROM hw_calculations WHERE watch_row_id=? AND calculated>? ORDER BY id',(watch_id,event['created'])).fetchall()
+    time_bound=' AND calculated<=?' if through else ''
+    rows=c.execute('SELECT calculated,payload FROM hw_calculations WHERE watch_row_id=? AND calculated>?'+time_bound+' ORDER BY id',args).fetchall()
     for row in rows:
         try:
             result=json.loads(row['payload']);codes=set(result.get('reason_codes',[]))
@@ -232,7 +235,7 @@ def _repeated_critical(c,watch_id,device_id,event_key,reason):
         WHERE j.watch_row_id=? AND j.device_id=? AND j.status='sent'
           AND e.event_type='RISK_REJECTION' AND e.severity='critical'
           AND CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.reason') END=? ORDER BY j.id DESC LIMIT 1""",(watch_id,device_id,reason)).fetchone()
-    if not current or not prior or _exit_rearmed(c,watch_id,prior['event_id']):return False
+    if not current or not prior or _exit_rearmed(c,watch_id,prior['event_id'],current['created']):return False
     key='stop_price' if reason=='STOP_BREACHED' else 'exit_deadline'
     def evidence(created):
         row=c.execute('SELECT payload,strategy_checksum FROM hw_calculations WHERE watch_row_id=? AND calculated=? ORDER BY id DESC LIMIT 1',(watch_id,created)).fetchone()
@@ -271,7 +274,7 @@ def _repeated_trailing(c,watch_id,device_id,event_key):
         ON e.watch_row_id=j.watch_row_id AND e.event_id=j.event_key
         WHERE j.watch_row_id=? AND j.device_id=? AND j.status='sent'
         AND e.event_type='TRAILING_EXIT_WORSENED' ORDER BY j.id DESC LIMIT 1""",(watch_id,device_id)).fetchone()
-    if not current or not prior or _exit_rearmed(c,watch_id,prior['event_id']):return False
+    if not current or not prior or _exit_rearmed(c,watch_id,prior['event_id'],current['created']):return False
     def evidence(created):
         row=c.execute('SELECT payload,strategy_checksum FROM hw_calculations WHERE watch_row_id=? AND calculated=? ORDER BY id DESC LIMIT 1',(watch_id,created)).fetchone()
         try:
@@ -338,7 +341,7 @@ def dispatch_one(connect,now=None,sender=None):
             c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
         if not is_action and not previous_action and not critical_only:
             c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
-        if is_action and previous and previous['signal']==current and not (current=='SELL' and (urgent or _exit_rearmed(c,watch['id'],previous['event_key']))):
+        if is_action and previous and previous['signal']==current and not (current=='SELL' and (urgent or e and _exit_rearmed(c,watch['id'],previous['event_key'],e['created']))):
             c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
         signal=current if is_action else 'CHANGED'
         title,body=_message(c,watch,current if is_action else None)
