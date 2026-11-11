@@ -17,6 +17,9 @@ SERVICE_STATE_REASONS = {'selector_failed', 'application_state_unknown',
                          'selector_exec_unavailable', 'selector_exit_nonzero',
                          'selector_response_too_large', 'selector_invalid_json', 'selector_result_failed',
                          'service_status_unknown', 'state_record_failed', 'service_state_unavailable'}
+DRAIN_REASONS = {'cron_unverified', 'database_unavailable', 'passenger_active', 'database_in_use',
+                 'process_inspection_unavailable', 'quiescence_unverified',
+                 'motor_stop_timeout', 'drain_unavailable'}
 
 
 def run(env=None, transport=_run_limited):
@@ -69,8 +72,9 @@ def run(env=None, transport=_run_limited):
         if (not isinstance(reply, dict) or set(reply) not in (expected, expected | {'backup_cleanup'},
                 expected | {'reason'}, expected | {'backup_cleanup', 'reason'})
                 or ('backup_cleanup' in reply and reply['backup_cleanup'] not in ('ok', 'failed', 'not_run'))
-                or ('reason' in reply and (reply['status'] != 'failed' or reply['stage'] != 'service_state'
-                    or reply['reason'] not in SERVICE_STATE_REASONS))
+                or ('reason' in reply and (reply['status'] != 'failed' or
+                    not ((reply['stage'] == 'service_state' and reply['reason'] in SERVICE_STATE_REASONS)
+                         or (reply['stage'] == 'drain' and reply['reason'] in DRAIN_REASONS))))
                 or reply['operation'] != 'deploy'
                 or reply['status'] not in ('ok', 'failed', 'updated_stopped')
                 or reply['stage'] not in STAGES or type(reply['service_restored']) is not bool
