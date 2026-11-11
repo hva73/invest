@@ -71,11 +71,13 @@ def deploy(adapter, sha):
                 # Keep the earlier backup through verified restart. Retention
                 # is outside the SQLite lock and cannot turn a successful
                 # release into a misleading deploy failure.
-                try:
-                    adapter.cleanup_backup(backup)
-                    cleanup = 'ok'
-                except Exception:
-                    cleanup = 'failed'
+                cleanup = 'not_run'
+                if was_running:
+                    try:
+                        adapter.cleanup_backup(backup)
+                        cleanup = 'ok'
+                    except Exception:
+                        cleanup = 'failed'
                 return Outcome('ok' if was_running else 'updated_stopped', 'complete',
                                was_running, str(backup), cleanup)
             except Exception as exc:

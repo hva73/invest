@@ -291,6 +291,23 @@ class AdapterIntegration(unittest.TestCase):
         self.assertTrue(prior.exists())
         self.assertEqual(len(list((self.root / '.escape_backups').iterdir())), 2)
 
+    def test_stopped_service_keeps_old_backup_without_health(self):
+        prior = self.root / '.escape_backups' / '20200101-000000-old'
+        prior.mkdir(parents=True)
+        self.service.state = 'stopped'
+        adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
+                                   lambda: True, lambda sha: True, self.service,
+                                   quota_reader=lambda path, required: {
+                                       'required_bytes': required,
+                                       'account_free_lower_bytes': required + 1,
+                                       'filesystem_free_bytes': required + 1})
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')):
+            result = sequence.deploy(adapter, self.sha)
+        self.assertEqual((result.status, result.backup_cleanup), ('updated_stopped', 'not_run'))
+        self.assertEqual(self.service.state, 'stopped')
+        self.assertTrue(prior.exists())
+        self.assertTrue((Path(result.backup) / 'escape.db').is_file())
+
     def test_failed_prewrite_backup_restarts_unchanged_service(self):
         adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
                                    lambda: True, lambda sha: True, self.service,

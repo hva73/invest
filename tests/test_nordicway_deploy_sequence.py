@@ -89,10 +89,12 @@ class SequenceTests(unittest.TestCase):
 
     def test_stopped_service_is_not_started(self):
         a = Adapter(state='stopped')
-        self.assertEqual(seq.deploy(a, 'a' * 40).status, 'updated_stopped')
+        result = seq.deploy(a, 'a' * 40)
+        self.assertEqual((result.status, result.backup_cleanup), ('updated_stopped', 'not_run'))
         self.assertNotIn('start', a.events)
         self.assertNotIn('stop', a.events)
         self.assertNotIn('health', a.events)
+        self.assertNotIn('cleanup', a.events)
 
     def test_unknown_service_never_applies(self):
         a = Adapter(state='unknown')
