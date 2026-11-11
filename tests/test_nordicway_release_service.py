@@ -1,9 +1,10 @@
 import json
+import os
 import subprocess
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import nordicway_release_service as service
@@ -58,6 +59,20 @@ class Service(unittest.TestCase):
                 with self.assertRaises(ValueError) as error:
                     service.status(runner)
                 self.assertEqual(str(error.exception), category)
+
+    def test_selector_does_not_inherit_ssh_request_metadata(self):
+        def invoke(args, **kwargs):
+            env = kwargs['env']
+            self.assertNotIn('SSH_ORIGINAL_COMMAND', env)
+            self.assertNotIn('SSH_CONNECTION', env)
+            self.assertEqual(env['ESCAPE_TEST_PRESERVED'], 'yes')
+            return result(response('started'))
+        with patch.dict(os.environ, {'SSH_ORIGINAL_COMMAND': 'escape-deploy-v1 deploy ' + 'a' * 40,
+                                     'SSH_CONNECTION': '127.0.0.1 12345 127.0.0.1 33',
+                                     'ESCAPE_TEST_PRESERVED': 'yes'}):
+            self.assertEqual(service.status(invoke), 'started')
+            self.assertIn('SSH_ORIGINAL_COMMAND', os.environ)
+            self.assertIn('SSH_CONNECTION', os.environ)
 
 
 if __name__ == '__main__': unittest.main()
