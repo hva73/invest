@@ -153,6 +153,10 @@ class Adapter:
                     raise ValueError('backup_unverified')
                 if self.backup_observer is not None:
                     self.backup_observer(backup)
+                # The fresh, verified backup is durable before any old backup
+                # is removed, and before the updater replaces app files.
+                nordicway_release_backup.remove_older_backups(
+                    self.target.parent / '.escape_backups', backup)
             except Exception as exc:
                 raise BackupVerificationFailure('backup_unverified') from exc
             return True

@@ -6,12 +6,43 @@ hashes and are private; do not publish them in Actions logs or Issue comments.
 import hashlib
 import os
 import re
+import shutil
 import sqlite3
+import stat
 from pathlib import Path
 from urllib.parse import quote
 
 PART = re.compile(r'[A-Za-z0-9_.-]+\Z')
 KEYS = ('token.key', 'push_vapid.pem')
+BACKUP_NAME = re.compile(r'(\d{8}-\d{6})-[A-Za-z0-9_-]+\Z')
+
+
+def remove_older_backups(root, verified_backup):
+    """Remove older known backups only after the caller verified the new one.
+
+    Unknown entries, symlinks, same-second backups, and newer backups remain.
+    This function never chooses the backup to retain from an ordering guess.
+    """
+    root, verified_backup = Path(root), Path(verified_backup)
+    info = root.lstat()
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+            or info.st_mode & 0o077 or verified_backup.parent != root):
+        raise ValueError('unsafe_backup_directory')
+    match = BACKUP_NAME.fullmatch(verified_backup.name)
+    current = verified_backup.lstat()
+    if (not match or not stat.S_ISDIR(current.st_mode)
+            or current.st_uid != os.getuid()):
+        raise ValueError('invalid_verified_backup')
+    for candidate in root.iterdir():
+        previous = BACKUP_NAME.fullmatch(candidate.name)
+        if not previous or previous.group(1) >= match.group(1):
+            continue
+        try:
+            entry = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISDIR(entry.st_mode) and entry.st_uid == os.getuid():
+            shutil.rmtree(candidate)
 
 
 def _offline_database(path):

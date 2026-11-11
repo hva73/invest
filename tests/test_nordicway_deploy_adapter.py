@@ -226,6 +226,8 @@ class AdapterIntegration(unittest.TestCase):
         with sqlite3.connect(self.app / 'var' / 'escape.db') as db:
             self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
     def test_failed_backup_verification_prevents_any_code_replacement(self):
+        prior = self.root / '.escape_backups' / '20200101-000000-old'
+        prior.mkdir(parents=True)
         adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
                                    lambda: True, lambda sha: True, self.service)
         with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')), \
@@ -236,6 +238,30 @@ class AdapterIntegration(unittest.TestCase):
                 adapter.backup_and_apply(release)
         self.assertEqual((self.app / 'app.py').read_text(), 'old')
         self.assertEqual((self.app / 'BUILD_COMMIT').read_text().strip(), '0' * 40)
+        self.assertTrue(prior.exists())
+
+    def test_verified_new_backup_removes_previous_before_code_change(self):
+        prior = self.root / '.escape_backups' / '20200101-000000-old'
+        prior.mkdir(parents=True)
+        adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
+                                   lambda: True, lambda sha: True, self.service)
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')):
+            release = nordicway_release_stage.stage(self.checkout, self.app, self.sha,
+                                                    approved_sha=self.sha)
+            replace = os.replace
+            def check_before_replace(source, destination):
+                if Path(destination) == self.app / 'app.py':
+                    self.assertFalse(prior.exists())
+                    snapshots = list((self.root / '.escape_backups').iterdir())
+                    self.assertEqual(len(snapshots), 1)
+                    self.assertTrue((snapshots[0] / 'escape.db').is_file())
+                return replace(source, destination)
+            with patch.object(os, 'replace', side_effect=check_before_replace):
+                backup = adapter.backup_and_apply(release)
+        self.assertFalse(prior.exists())
+        self.assertTrue((backup / 'escape.db').is_file())
+        with sqlite3.connect(backup / 'escape.db') as db:
+            self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
 
     def test_failed_prewrite_backup_restarts_unchanged_service(self):
         adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,

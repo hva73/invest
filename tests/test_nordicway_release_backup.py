@@ -11,6 +11,26 @@ import nordicway_release_backup as check
 
 
 class Backup(unittest.TestCase):
+    def test_retention_only_removes_older_owned_backup_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old = root / '20250101-000000-old'; old.mkdir()
+            same = root / '20261111-120000-same'; same.mkdir()
+            current = root / '20261111-120000-current'; current.mkdir()
+            future = root / '20261111-120001-future'; future.mkdir()
+            unrelated = root / 'other'; unrelated.mkdir()
+            link = root / '20240101-000000-link'; link.symlink_to(unrelated, target_is_directory=True)
+            check.remove_older_backups(root, current)
+            self.assertFalse(old.exists())
+            self.assertTrue(all(p.exists() for p in (current, same, future, unrelated, link)))
+
+    def test_retention_refuses_unverified_path_or_unsafe_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); old = root / '20250101-000000-old'; old.mkdir()
+            with self.assertRaises((ValueError, FileNotFoundError)):
+                check.remove_older_backups(root, root / '20261111-120000-missing')
+            self.assertTrue(old.exists())
+
     def test_real_synthetic_backup_is_complete_and_changed_data_blocks_restore(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / 'app'; source = target / 'opdatering/release'; source.mkdir(parents=True)
