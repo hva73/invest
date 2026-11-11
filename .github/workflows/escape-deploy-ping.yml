@@ -147,7 +147,11 @@ jobs:
           fi
           NORDICWAY_KNOWN_HOST="$(ssh-keyscan -T 10 -t ed25519 -p 33 cp14.nordicway.dk 2>/dev/null)"
           export NORDICWAY_KNOWN_HOST
-          python tools/nordicway_hostkey.py
+          python -c 'import os,sys; sys.path.insert(0,"tools"); import nordicway_hostkey as h
+          try: h.verify(os.environ.get("NORDICWAY_KNOWN_HOST", ""), os.environ.get("NORDICWAY_VERIFIED_FINGERPRINT", ""))
+          except ValueError as e:
+              print("Host key check failed:", str(e) if str(e) in ("invalid_host_key", "invalid_fingerprint", "host_key_mismatch") else "invalid_host_key"); sys.exit(1)
+          print("Host key verified.")'
           eval "$(ssh-agent -s)" >/dev/null
           askpass="$RUNNER_TEMP/escape-deploy-ssh-askpass"
           trap 'ssh-agent -k >/dev/null 2>&1 || true; rm -f "$askpass"' EXIT
