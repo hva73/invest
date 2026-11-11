@@ -13,10 +13,16 @@ try:
   browser=(pw.chromium.launch(headless=True) if os.environ.get('ESCAPE_PLAYWRIGHT_MANAGED')=='1' else pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox']));page=browser.new_page(viewport={'width':390,'height':700});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
   page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click()
   row=page.locator('.dash-row').filter(has=page.locator('.dash-instrument strong',has_text='TSLA'));row.locator('[data-dashboard-open]').first.click();dialog=page.locator('#dashboard-detail');expect(dialog).to_be_visible()
+  
+  screenshot_dir=os.environ.get('ESCAPE_SCREENSHOTS')
+  if screenshot_dir:
+   Path(screenshot_dir).mkdir(parents=True,exist_ok=True);page.screenshot(path=str(Path(screenshot_dir)/'holding-390.png'))
   buy=dialog.locator('[data-asset-trade=BUY]');sell=dialog.locator('[data-asset-trade=SELL]');expect(buy).to_be_visible();expect(sell).to_be_enabled()
   dialog.evaluate('(n)=>n.scrollTop=0');box1=buy.bounding_box();dialog.evaluate('(n)=>n.scrollTop=n.scrollHeight');box2=buy.bounding_box();assert abs(box1['y']-box2['y'])<8,(box1,box2)
   sell.click();quick=page.locator('#quick-trade-dialog');expect(quick).to_contain_text('Sælg · TSLA');assert quick.locator('[name=size]').input_value()=='';assert quick.locator('[name=asset_id]').input_value()!='';quick.locator('[data-quick-close]').click()
-  buy.click();expect(quick).to_contain_text('Køb · TSLA');assert quick.locator('[name=size]').input_value()=='';quick.locator('[data-quick-close]').click();dialog.locator('[data-dashboard-close]').click()
+  buy.click();expect(quick).to_contain_text('Køb · TSLA');
+  if screenshot_dir:page.screenshot(path=str(Path(screenshot_dir)/'trade-390.png'))
+  assert quick.locator('[name=size]').input_value()=='';quick.locator('[data-quick-close]').click();dialog.locator('[data-dashboard-close]').click()
   page.evaluate('''() => {const host=document.createElement('dialog');host.id='test-unowned';document.body.append(host);host.innerHTML=window.TradeUI.assetActions({ticker:'NY',assetId:'unowned-id'});host.showModal()}''')
   assert page.locator('#test-unowned [data-asset-trade=BUY]').count()==1;assert page.locator('#test-unowned [data-asset-trade=SELL]').count()==0
   page.locator('#test-unowned [data-asset-trade=BUY]').click();expect(quick).to_contain_text('Køb · NY');assert quick.locator('[name=asset_id]').input_value()=='unowned-id';assert not errors,errors
