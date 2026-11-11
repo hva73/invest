@@ -195,6 +195,13 @@ class Trading(unittest.TestCase):
   with patch('trade_service.signal_source',side_effect=[{'signal':'SÆLG'},{'signal':'KØB'}]),patch('trade_service.direct_sell_basis',return_value={'shares':'2','quantity':'8','percentage':'25'}):
    with self.assertRaisesRegex(trade.TradeError,'retning er ændret'):self.estimate(request)
   self.assertFalse(any(c['name']=='estimate_order' for c in self.calls));self.assertFalse(self.writes())
+ def test_signal_reversal_during_provider_estimate_is_not_returned_as_reviewable(self):
+  request=dict(self.request,report_id='@hotwatch',candidate_id='watch-1',expected_side='BUY',size_mode='amount',size='100',order_type='MARKET')
+  buy={'signal':'KØB','asset_id':'asset-test','portfolio_ids':[self.root]};sell={**buy,'signal':'SÆLG'}
+  with patch('trade_service.signal_source',side_effect=[buy,sell]),patch('trade_service.read_estimate',return_value=({'quote':{}},{})),patch('hotwatch_buy_plan.check_proposal'):
+   with self.assertRaisesRegex(trade.TradeError,'retning'):self.estimate(request)
+  with app.connect() as c:self.assertEqual(c.execute("SELECT count(*) FROM broker_proposals WHERE status='estimated'").fetchone()[0],0)
+  self.assertFalse(self.writes())
  def test_report_signal_reversal_cannot_send_the_old_order(self):
   proposal=self.estimate()
   with patch('trade_service.candidate',return_value={'signal':'SÆLG'}):

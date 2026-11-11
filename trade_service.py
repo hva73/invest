@@ -359,6 +359,9 @@ def estimate(connect,user_id,data,factory=None):
     if data.get('report_id')=='@hotwatch' and kind=='direct' and payload['orders'][0]['side']=='BUY':
         import hotwatch_buy_plan
         hotwatch_buy_plan.check_proposal(connect,user_id,data['candidate_id'],payload,p['id'],result['quote'])
+    # The signal may change while the external, read-only estimate is pending.
+    # Do not present an estimate for an action that is no longer current.
+    verify_proposal_source(connect,user_id,row)
     with connect() as c:
         c.execute("UPDATE broker_proposals SET status='estimated',estimated=?,review_token=?,estimate=?,asset=?,sell_basis=?,error=NULL WHERE id=? AND user_id=? AND status IN ('draft','estimated')",(time.time(),secrets.token_urlsafe(24),json.dumps(result),json.dumps(asset),json.dumps(basis) if basis else None,pid,user_id))
     return {'proposal':view(get(connect,user_id,pid))}
