@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   mobile-experience:
-    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/mobile-experience-2' || github.event.pull_request.head.ref == 'codex/issue57-release-management')
+    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue54-signal-decision-ux' || github.event.pull_request.head.ref == 'codex/mobile-experience-2' || github.event.pull_request.head.ref == 'codex/issue57-release-management')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
