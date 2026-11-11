@@ -99,7 +99,7 @@ window.ESCAPE_DEMO_HISTORY=(()=>{
   const why=s.signal==='BUY'?'Simuleret køb: kursen stiger i de seneste observationer.':s.signal==='SELL'?'Simuleret salg: kursen falder i de seneste observationer.':'Simuleret afvent: intet køb eller salg i eksemplet.';
   s.data_status.price=p.price.amount;s.data_status.price_status='DELAYED';s.data_status.market_status='CLOSED';s.last_data_at=p.price_time;s.last_computed_signal=s.signal;s.last_calculation_at=p.price_time;s.request.activation_reason='DEMO · Simuleret forløb, ikke handelsråd.';
   s.latest_calculation={signal:s.signal,reason_codes:[why],risk_level:'medium',supporting_metrics:{return_3_pct:ret.toFixed(4)}};
-  p.hot_watch.session=s;p.critical=s.signal!=='WAIT';
+  p.hot_watch.session=s;p.critical=s.signal!=='WAIT';p.action=s.signal==='BUY'?'KØB':s.signal==='SELL'?'SÆLG':'AFVENT';p.assessment={...p.assessment,action:p.action,reason:why,assessed_at:p.price_time,next_action:'Simuleret eksempel – ikke handelsråd.'};
  });
  const candidate=demo.desk.candidates[0];if(candidate){candidate.candidate.signal='KØB';candidate.decision={status:'KØB',buy_plan:{expires_at:new Date(Date.now()+3600000).toISOString(),portfolio_id:1,budget_dkk:'1800',quantity:'2',limit_price:'900',stop_price:'855'}}}
 
