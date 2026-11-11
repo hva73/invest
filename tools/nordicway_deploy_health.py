@@ -65,6 +65,13 @@ def _runtime_health(root, started_at, *, inspect, now):
         elapsed = (now() - started_at.astimezone(timezone.utc)).total_seconds()
         if elapsed < 0:
             return False
+        processes = report.get('processes', {})
+        counts = processes.get('counts', {}) if isinstance(processes, dict) else {}
+        if (not isinstance(processes, dict) or processes.get('status') != 'ok'
+                or not isinstance(counts, dict)
+                or any(type(counts.get(name)) is not int or counts[name] < 1
+                       for name in ('worker', 'supervisor'))):
+            return False
         for name in ('worker', 'supervisor'):
             item = db.get(name, {})
             age = item.get('age_seconds')

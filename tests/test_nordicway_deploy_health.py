@@ -21,7 +21,8 @@ class HealthTests(unittest.TestCase):
         self.now = datetime(2026, 11, 11, 12, tzinfo=timezone.utc)
         self.started = self.now - timedelta(seconds=20)
         self.data = {'database': {'status': 'ok', 'worker': {'status': 'running', 'age_seconds': 5},
-                                  'supervisor': {'status': 'running', 'age_seconds': 6}}}
+                                  'supervisor': {'status': 'running', 'age_seconds': 6}},
+                     'processes': {'status': 'ok', 'counts': {'worker': 1, 'supervisor': 1}}}
         self.inspect = Mock(return_value=self.data)
         self.web = Mock(return_value=True)
 
@@ -57,6 +58,14 @@ class HealthTests(unittest.TestCase):
         web.return_value = False
         self.assertFalse(health.verify_recovery(self.root, self.started, web=web,
                                                inspect=self.inspect, now=lambda: self.now))
+
+    def test_enabled_motor_requires_actual_processes_as_well_as_heartbeats(self):
+        (self.root / 'var' / 'hotwatch-autostart.enabled').touch()
+        self.data['processes']['counts']['worker'] = 0
+        self.assertFalse(self.verify())
+        self.data['processes']['counts']['worker'] = 1
+        self.data['processes']['status'] = 'unavailable'
+        self.assertFalse(self.verify())
 
     def test_recovery_web_supports_old_health_without_build_commit(self):
         response = Mock()
