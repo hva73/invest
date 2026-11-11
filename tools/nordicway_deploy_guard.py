@@ -3,12 +3,47 @@ import json
 import os
 import re
 import sys
+import stat
 PROTOCOL = 'escape-deploy-v1'
 
 
-def dispatch(command, runner=None):
+# This fixed probe only tests the app-owned data directory. It never touches
+# the database, app source, service status, SSH configuration or credentials.
+PROBE_DIRECTORY = '/home/nordicr4/escape_app/var'
+PROBE_FILENAME = '.escape-deploy-write-probe'
+
+
+def write_probe(directory=PROBE_DIRECTORY):
+    flags = os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0) | getattr(os, 'O_NOFOLLOW', 0)
+    directory_fd = os.open(directory, flags)
+    try:
+        directory_stat = os.fstat(directory_fd)
+        if (not stat.S_ISDIR(directory_stat.st_mode)
+                or directory_stat.st_uid != os.getuid()
+                or directory_stat.st_mode & 0o022):
+            raise ValueError('unsafe_probe_directory')
+        fd = os.open(PROBE_FILENAME, os.O_CREAT | os.O_EXCL | os.O_RDWR |
+                     getattr(os, 'O_NOFOLLOW', 0), 0o600, dir_fd=directory_fd)
+        try:
+            with os.fdopen(fd, 'w+b') as output:
+                output.write(b'escape-deploy-write-probe-v1\\n')
+                output.flush()
+                os.fsync(output.fileno())
+                output.seek(0)
+                if output.read() != b'escape-deploy-write-probe-v1\\n':
+                    raise ValueError('probe_readback_failed')
+        finally:
+            os.unlink(PROBE_FILENAME, dir_fd=directory_fd)
+        return {'status': 'ok', 'operation': 'write_probe'}
+    finally:
+        os.close(directory_fd)
+
+
+def dispatch(command, runner=None, probe=None):
     if command == PROTOCOL + ' ping':
         return {'status': 'ok', 'operation': 'ping'}
+    if command == PROTOCOL + ' write-probe':
+        return (probe or write_probe)()
     match = re.fullmatch(PROTOCOL + r' deploy ([0-9a-f]{40})', command)
     if match:
         if runner is None:
