@@ -7,6 +7,19 @@ import tempfile
 import nordicway_deploy_guard as guard
 
 class GuardTests(unittest.TestCase):
+    def test_deploy_activation_is_explicit_private_and_not_a_symlink(self):
+        with tempfile.TemporaryDirectory() as root:
+            marker = Path(root) / 'enabled'
+            self.assertFalse(guard.deployment_enabled(marker))
+            marker.write_text('1\n')
+            marker.chmod(0o600)
+            self.assertTrue(guard.deployment_enabled(marker))
+            marker.chmod(0o644)
+            self.assertFalse(guard.deployment_enabled(marker))
+            marker.unlink()
+            marker.symlink_to('/dev/null')
+            self.assertFalse(guard.deployment_enabled(marker))
+
     def test_write_probe_creates_verifies_and_removes_only_fixed_marker(self):
         with tempfile.TemporaryDirectory() as root:
             self.assertEqual(guard.write_probe(root), {'status': 'ok', 'operation': 'write_probe'})

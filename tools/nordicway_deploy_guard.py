@@ -7,6 +7,20 @@ import sys
 PROTOCOL = 'escape-deploy-v1'
 PROBE_DIRECTORY = '/home/nordicr4/escape_app/var'
 PROBE_FILENAME = '.escape-deploy-write-probe'
+DEPLOY_ENABLED = '/home/nordicr4/.escape_deploy_bridge/deploy-enabled'
+
+
+def deployment_enabled(path=DEPLOY_ENABLED):
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+        try:
+            info = os.fstat(fd)
+            return (stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
+                    and not info.st_mode & 0o077 and os.read(fd, 4) == b'1\n')
+        finally:
+            os.close(fd)
+    except OSError:
+        return False
 
 
 def write_probe(directory=PROBE_DIRECTORY):
@@ -57,6 +71,9 @@ def main():
         runner = None
         recovery = None
         if re.fullmatch(PROTOCOL + r' (deploy|resume) [0-9a-f]{40}', command):
+            if not deployment_enabled():
+                print(json.dumps({'status': 'blocked', 'reason': 'deployment_not_ready'}, separators=(',', ':')))
+                return 1
             # A reviewed copy of the runner and its dependencies must be installed
             # alongside this guard. The currently installed ping guard lacks it.
             sys.path.insert(0, '/home/nordicr4/.escape_deploy_bridge')
