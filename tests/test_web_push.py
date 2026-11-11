@@ -238,6 +238,75 @@ class Push(unittest.TestCase):
   with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
   self.assertEqual(len(sent),2)
   self.assertIn('kritisk exitadvarsel',sent[1]['title'])
+ def test_critical_push_skips_fresh_closed_position_not_stale_data(self):
+  for stale in (False,True):
+   with self.subTest(stale=stale):
+    self.subscribe();at=self.now+timedelta(seconds=10 if stale else 0);sent=[]
+    with app.connect() as c:engine.event(c,self.watch,'RISK_REJECTION',at,'STOP_BREACHED',severity='critical')
+    after=at+timedelta(seconds=1);snapshot={'latest_context':{'status':'verified','position':'none','as_of':(at-timedelta(seconds=301) if stale else after).isoformat()}}
+    with patch('web_push._actionable',return_value=None),patch('hotwatch_engine.view',return_value=snapshot):web_push.dispatch_one(app.connect,after,lambda s,p,t:sent.append(p))
+    self.assertEqual(len(sent),1 if stale else 0)
+ def test_closed_snapshot_before_critical_event_does_not_hide_new_warning(self):
+  self.subscribe();sent=[]
+  with app.connect() as c:engine.event(c,self.watch,'RISK_REJECTION',self.now,'STOP_BREACHED',severity='critical')
+  snapshot={'latest_context':{'status':'verified','position':'none','as_of':(self.now-timedelta(seconds=1)).isoformat()}}
+  with patch('web_push._actionable',return_value=None),patch('hotwatch_engine.view',return_value=snapshot):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+  self.assertEqual(len(sent),1)
+ def test_closed_snapshot_at_same_time_does_not_prove_order(self):
+  self.subscribe();sent=[]
+  with app.connect() as c:engine.event(c,self.watch,'RISK_REJECTION',self.now,'STOP_BREACHED',severity='critical')
+  snapshot={'latest_context':{'status':'verified','position':'none','as_of':self.now.isoformat()}}
+  with patch('web_push._actionable',return_value=None),patch('hotwatch_engine.view',return_value=snapshot):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+  self.assertEqual(len(sent),1)
+ def test_changed_exposure_rearms_only_with_two_verified_keys(self):
+  with app.connect() as c:
+   engine.event(c,self.watch,'SELL_SIGNAL',self.now,'prior exit');event=c.execute("SELECT event_id FROM hw_events WHERE event_type='SELL_SIGNAL' ORDER BY id DESC LIMIT 1").fetchone()['event_id']
+   def calc(offset,key,status='verified',age=0):
+    at=self.now+timedelta(seconds=offset);payload={'signal':'WAIT','reason_codes':['CONFIRMATION_PENDING'],'new_market_observation':True,'exit_context_key':key,'position_context':{'position':'held','status':status,'as_of':(at-timedelta(seconds=age)).isoformat()},'risk_level':'normal'}
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps(payload),'x'))
+   calc(0,'first');calc(1,'first');self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+   calc(2,'second','unknown');self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+   calc(3,'second',age=301);self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+   calc(4,'second');self.assertTrue(web_push._exit_rearmed(c,self.watch['id'],event))
+ def test_first_exposure_evidence_is_not_itself_a_new_trade(self):
+  with app.connect() as c:
+   engine.event(c,self.watch,'SELL_SIGNAL',self.now,'prior exit without exposure evidence');event=c.execute("SELECT event_id FROM hw_events WHERE event_type='SELL_SIGNAL' ORDER BY id DESC LIMIT 1").fetchone()['event_id']
+   at=self.now+timedelta(seconds=10);payload={'signal':'WAIT','reason_codes':['CONFIRMATION_PENDING'],'new_market_observation':True,'exit_context_key':'newly-known','position_context':{'position':'held','status':'verified','as_of':at.isoformat()},'risk_level':'normal'}
+   c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps(payload),'x'))
+   self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+ def test_observed_close_then_same_quantity_reentry_rearms(self):
+  with app.connect() as c:
+   engine.event(c,self.watch,'SELL_SIGNAL',self.now,'prior exit');event=c.execute("SELECT event_id FROM hw_events WHERE event_type='SELL_SIGNAL' ORDER BY id DESC LIMIT 1").fetchone()['event_id']
+   entry=self.now+timedelta(seconds=20);payload={'signal':'WAIT','reason_codes':['CONFIRMATION_PENDING'],'new_market_observation':True,'exit_context_key':'same-quantity','position_context':{'position':'held','status':'verified','as_of':entry.isoformat()},'risk_level':'normal'}
+   c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],entry.isoformat(),json.dumps(payload),'x'))
+   self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+   stale={'position':'none','status':'verified','as_of':(self.now-timedelta(seconds=301)).isoformat()}
+   c.execute('INSERT INTO hw_context_events(watch_row_id,observed,payload) VALUES(?,?,?)',(self.watch['id'],(self.now+timedelta(seconds=1)).isoformat(),json.dumps(stale)))
+   self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+   earlier={'position':'none','status':'verified','as_of':(self.now-timedelta(seconds=1)).isoformat()}
+   c.execute('INSERT INTO hw_context_events(watch_row_id,observed,payload) VALUES(?,?,?)',(self.watch['id'],(self.now+timedelta(seconds=2)).isoformat(),json.dumps(earlier)))
+   unknown={'position':'none','status':'unknown','as_of':(self.now+timedelta(seconds=5)).isoformat()}
+   c.execute('INSERT INTO hw_context_events(watch_row_id,observed,payload) VALUES(?,?,?)',(self.watch['id'],(self.now+timedelta(seconds=5)).isoformat(),json.dumps(unknown)))
+   self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+   closed=self.now+timedelta(seconds=10);context={'position':'none','status':'verified','as_of':closed.isoformat()}
+   c.execute('INSERT INTO hw_context_events(watch_row_id,observed,payload) VALUES(?,?,?)',(self.watch['id'],closed.isoformat(),json.dumps(context)))
+   self.assertTrue(web_push._exit_rearmed(c,self.watch['id'],event))
+   payload.update(signal='SELL',risk_level='critical');c.execute('UPDATE hw_calculations SET payload=? WHERE watch_row_id=? AND calculated=?',(json.dumps(payload),self.watch['id'],entry.isoformat()))
+   self.assertTrue(web_push._exit_rearmed(c,self.watch['id'],event))
+ def test_push_once_again_after_observed_close_and_same_quantity_reentry(self):
+  self.subscribe();sent=[];self.event('SELL_SIGNAL')
+  with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))
+  closed=self.now+timedelta(seconds=10);entry=self.now+timedelta(seconds=20)
+  with app.connect() as c:
+   context={'position':'none','status':'verified','as_of':closed.isoformat()};c.execute('INSERT INTO hw_context_events(watch_row_id,observed,payload) VALUES(?,?,?)',(self.watch['id'],closed.isoformat(),json.dumps(context)))
+   payload={'signal':'SELL','reason_codes':['EXIT_RULES'],'new_market_observation':True,'exit_context_key':'same-quantity','position_context':{'position':'held','status':'verified','as_of':entry.isoformat()},'risk_level':'normal'}
+   c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],entry.isoformat(),json.dumps(payload),'x'))
+   engine.event(c,self.watch,'SELL_SIGNAL',entry,'new position')
+  with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,entry,lambda s,p,t:sent.append(p))
+  self.assertEqual(len(sent),2)
+  with app.connect() as c:engine.event(c,self.watch,'SELL_SIGNAL',entry+timedelta(seconds=1),'duplicate')
+  with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,entry+timedelta(seconds=1),lambda s,p,t:sent.append(p))
+  self.assertEqual(len(sent),2)
  def test_worsening_uses_configured_trailing_distance(self):
   self.assertFalse(engine.trailing_notification_worsened('0.394','0.4','2'))
   self.assertTrue(engine.trailing_notification_worsened('0.392','0.4','2'))

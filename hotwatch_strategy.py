@@ -178,6 +178,13 @@ def risk_gate(sample,metrics,risk,now,raw,require_macd=True):
   context.prec=80
   return _risk_gate(sample,metrics,risk,now,raw,require_macd)
 
+def exit_context_key(context,scope):
+ """Detect observed exposure changes; equality does not prove continuity."""
+ try:
+  if context.get('status')!='verified' or context.get('position')!='held' or Decimal(context['quantity'])<=0:return None
+  return checksum({'scope':scope,'quantity':str(Decimal(context['quantity']).normalize()),'cost_price':str(Decimal(context['cost_price']).normalize()) if context.get('cost_price') is not None else None})
+ except (KeyError,TypeError,ValueError,ArithmeticError):return None
+
 def calculate(sample,metrics,strategy,risk,state,now,killed=False,new_market_event=True):
  p=strategy['parameters'];held=sample['context']['position']=='held';raw='WAIT';reasons=[]
  # Exit rules need their own inputs, not unrelated entry indicators (MACD etc.).
@@ -200,8 +207,13 @@ def calculate(sample,metrics,strategy,risk,state,now,killed=False,new_market_eve
  if raw=='NO_DATA' and signal in ('WAIT','BUY'):signal='NO_DATA'
  if killed:signal='PAUSE';risk_codes=['KILL_SWITCH'];critical=[]
  reasons+=risk_codes+critical;at=now.timestamp();previous=state.get('signal','NO_DATA');newstate=dict(state)
+ newstate.pop('exit_context_changed',None)
+ context_key=exit_context_key(sample['context'],risk.get('_position_scope'));old_context_key=state.get('exit_context_key')
+ if context_key is None:newstate.pop('exit_context_key',None)
+ else:newstate['exit_context_key']=context_key
  if signal in ['BUY','SELL','REDUCE'] and not critical:
-  pending=state.get('pending')==signal;count=state.get('confirmations',0)+(1 if new_market_event else 0) if pending else (1 if new_market_event else 0)
+  changed=bool(old_context_key and old_context_key!=context_key)
+  pending=state.get('pending')==signal and not (signal in ('SELL','REDUCE') and changed);count=state.get('confirmations',0)+(1 if new_market_event else 0) if pending else (1 if new_market_event else 0)
   since=state.get('pending_since',at) if pending else at
   newstate.update(pending=signal,confirmations=count,pending_since=since)
   if not new_market_event and signal!=previous:signal='WAIT';reasons.append('NEW_MARKET_CONFIRMATION_REQUIRED')
@@ -220,6 +232,7 @@ def calculate(sample,metrics,strategy,risk,state,now,killed=False,new_market_eve
  score=0 if signal in ['NO_DATA','PAUSE'] else sum(1 for k in ['return_3_pct','relative_volume','spread_pct','volatility_pct','macd_histogram'] if metrics.get(k) is not None)*20
  explanations={'NO_TRIGGER':'Ingen bekræftet trigger','ENTRY_RULES':'Momentum, volumen, trend og kursbrud opfylder de deklarative indgangsregler','EXIT_RULES':'De deklarative exitbetingelser er opfyldt','TRAILING_EXIT':'Kursen er faldet fra toppen i det analyserede kursvindue; dette er ikke afkast siden køb eller et broker-stop','WARMUP':'Afventer de indikatorer, som den aktuelle regel kræver; særskilte exitregler vurderes uafhængigt','CONFIRMATION_PENDING':'Afventer gentagne bekræftelser og minimumsvarighed','COOLDOWN':'Et nyt handlingssignal afventer cooldown','DATA_STALE':'Kursdata er for gamle','DATA_UNVERIFIED':'Kilden er ikke verificeret','STOP_BREACHED':'Den konfigurerede stopgrænse er brudt','EXIT_DEADLINE':'Den konfigurerede exitdeadline er nået','SPREAD_TOO_WIDE':'Spread overstiger den centrale risikogrænse','SPREAD_UNKNOWN':'Bid/ask-grundlaget mangler','POSITION_CONTEXT_UNKNOWN':'Aktuel depotkontekst mangler','TRADABILITY_UNCONFIRMED':'Pluto-handelsbarhed er ikke bekræftet','RISK_INPUTS_UNKNOWN':'Der mangler oplysninger om størrelse, valuta, gebyrer eller risiko','MARKET_STATUS_UNKNOWN':'Handelssessionen er ikke verificeret','NEW_MARKET_CONFIRMATION_REQUIRED':'En opdateret depotstatus tæller ikke som ny kursbekræftelse'}
  result={'signal':signal,'confidence_score':score,'signal_strength':'strong' if signal in ['BUY','SELL','REDUCE'] else 'neutral','reason_codes':list(dict.fromkeys(reasons)) or ['NO_TRIGGER'],'human_readable_explanation':'; '.join(explanations.get(code,code.replace('_',' ').lower()) for code in (list(dict.fromkeys(reasons)) or ['NO_TRIGGER'])),'supporting_metrics':metrics,'invalidating_conditions':['stale/unverified data','risk rejection','changed position','market halt'],'next_trigger':'Ny verificeret observation og opfyldte bekræftelses-/risikoregler','recommended_action':{'BUY':'KØB-signal · kræver særskilt godkendt handelsflow','SELL':'SÆLG-signal · ingen ordre oprettet','REDUCE':'REDUCÉR-signal · ingen ordre oprettet','WAIT':'VENT','NO_DATA':'INGEN DATA','PAUSE':'PAUSE'}[signal],'risk_level':'critical' if critical else 'high' if risk_codes else 'normal','calculation_timestamp':now.isoformat(),'data_timestamp':sample['event_time'],'strategy_id':strategy['strategy_id'],'strategy_version':strategy['version'],'strategy_checksum':checksum(strategy),'critical_override':bool(critical and signal=='SELL' and previous!='SELL'),'rules_score_note':'0–100 datapunktsdækning af fem regelinputs; ikke en statistisk sandsynlighed eller performanceprognose.'}
+ if context_key is not None:result['exit_context_key']=context_key
  result['signal_basis']='price_context' if critical and signal=='SELL' else 'live_price_window' if 'TRAILING_EXIT' in reasons and signal=='SELL' else 'analysis'
  result['decision_diagnostics']=decision_diagnostics(strategy,metrics,raw,signal,risk_codes,reasons,held)
  return result,newstate

@@ -171,15 +171,36 @@ def _reconcile(c,now):
 
 
 def _exit_rearmed(c,watch_id,event_key):
-    """Only a fresh, verified calculation with no exit trigger ends an episode."""
+    """Rearm only after verified recovery, changed exposure or closure/re-entry."""
     event=c.execute('SELECT created FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch_id,event_key)).fetchone()
     if not event:return False
-    rows=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? AND calculated>? ORDER BY id',(watch_id,event['created'])).fetchall()
+    first=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? AND calculated=? ORDER BY id DESC LIMIT 1',(watch_id,event['created'])).fetchone()
+    try:prior_key=json.loads(first['payload']).get('exit_context_key') if first else None
+    except (ValueError,TypeError,AttributeError):prior_key=None
+    from hotwatch_contract import stamp
+    closed=[]
+    def remember_closed(context,observed):
+        try:
+            as_of=stamp(context['as_of']);seen=stamp(observed)
+            if context.get('status')=='verified' and context.get('position')=='none' and as_of>stamp(event['created']) and 0<=(seen-as_of).total_seconds()<=300:closed.append(as_of)
+        except (KeyError,ValueError,TypeError,AttributeError):pass
+    for row in c.execute('SELECT observed,payload FROM hw_context_events WHERE watch_row_id=? AND observed>? ORDER BY id',(watch_id,event['created'])):
+        try:remember_closed(json.loads(row['payload']),row['observed'])
+        except (ValueError,TypeError):pass
+    rows=c.execute('SELECT calculated,payload FROM hw_calculations WHERE watch_row_id=? AND calculated>? ORDER BY id',(watch_id,event['created'])).fetchall()
     for row in rows:
         try:
             result=json.loads(row['payload']);codes=set(result.get('reason_codes',[]))
+            context=result.get('position_context') or {};remember_closed(context,row['calculated'])
             if result.get('signal')=='WAIT' and codes=={'NO_TRIGGER'} and result.get('new_market_observation') is True and result.get('position_context',{}).get('position')=='held' and result.get('risk_level')=='normal':return True
-        except (ValueError,TypeError,AttributeError):continue
+            current_key=result.get('exit_context_key')
+            if result.get('new_market_observation') is True and context.get('status')=='verified' and context.get('position')=='held':
+                as_of=stamp(context['as_of']);calculated=stamp(row['calculated'])
+                if not 0<=(calculated-as_of).total_seconds()<=300:continue
+                if result.get('risk_level')=='normal' and prior_key and current_key and current_key!=prior_key:return True
+                valid=result.get('risk_level')=='normal' or result.get('risk_level')=='critical' and result.get('signal') in ('SELL','REDUCE')
+                if valid and any(t<as_of for t in closed):return True
+        except (KeyError,ValueError,TypeError,AttributeError):continue
     return False
 
 
@@ -291,11 +312,18 @@ def dispatch_one(connect,now=None,sender=None):
             c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
         try:current=_actionable(c,watch,now)
         except Exception:current=None
-        e=c.execute('SELECT event_type,severity,payload FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch['id'],job['event_key'])).fetchone()
+        e=c.execute('SELECT event_type,severity,payload,created FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch['id'],job['event_key'])).fetchone()
         try:reason=json.loads(e['payload']).get('reason') if e else None
         except (ValueError,TypeError,AttributeError):reason=None
         critical=bool(e and e['event_type']=='RISK_REJECTION' and e['severity']=='critical' and reason in ('STOP_BREACHED','EXIT_DEADLINE'))
         urgent=bool(e and (e['event_type']=='TRAILING_EXIT_WORSENED' or critical))
+        if critical and current not in ('SELL','REDUCE'):
+            try:
+                context=engine.view(c,watch,now).get('latest_context') or {}
+                from hotwatch_contract import stamp
+                if context.get('status')=='verified' and context.get('position')=='none' and context.get('as_of') and stamp(context['as_of'])>stamp(e['created']) and 0<=(now-stamp(context['as_of'])).total_seconds()<=300:
+                    c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
+            except (ValueError,TypeError,KeyError,AttributeError):pass
         if (critical and _repeated_critical(c,watch['id'],job['device_id'],job['event_key'],reason) or e and e['event_type']=='TRAILING_EXIT_WORSENED' and _repeated_trailing(c,watch['id'],job['device_id'],job['event_key'])):
             c.execute("UPDATE push_jobs SET status='skipped',lease_until=0 WHERE id=? AND lease_owner=?",(job['id'],owner));return True
         critical_only=critical and bool(job['sell']) and current not in ('SELL','REDUCE')
