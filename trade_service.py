@@ -128,6 +128,14 @@ def signal_source(connect,user_id,report_id,candidate_id):
     if not isinstance(asset,str) or not asset:raise TradeError('Signalets Pluto-aktiv er ikke verificeret.')
     return {'signal':'KØB' if signal=='BUY' else 'SÆLG','asset_id':asset,'ticker':request.get('ticker'),'portfolio_ids':request.get('portfolio_ids',[])}
 
+def verify_expected_side(data,source):
+    """Bind a HOT WATCH estimate to the direction the user actually selected."""
+    if data.get('report_id')!='@hotwatch':return
+    expected=data.get('expected_side')
+    if expected not in ('BUY','SELL'):raise TradeError('Signalets retning mangler. Åbn signalet igen før du fortsætter.')
+    if expected!=('BUY' if source['signal']=='KØB' else 'SELL'):
+        raise TradeError('Signalets retning er ændret. Kontrollér signalet og start igen.')
+
 def verify_proposal_source(connect,user_id,row):
     source=signal_source(connect,user_id,row['report_id'],row['candidate_id'])
     payload=json.loads(row['payload']);orders=payload.get('orders') or []
@@ -157,6 +165,7 @@ def build(connect,user_id,data,preview=False):
         side=data['side']
     else:
         c=signal_source(connect,user_id,str(data.get('report_id','')),str(data.get('candidate_id','')))
+        verify_expected_side(data,c)
         side='BUY' if c['signal']=='KØB' else 'SELL'
     try:pid=int(data.get('portfolio_id'))
     except (ValueError,TypeError):raise TradeError('Vælg en aktiv Pluto-enhed før beregningen.')
@@ -327,12 +336,16 @@ def estimate(connect,user_id,data,factory=None):
         data={**data,'candidate_id':data.get('asset_id')}
     if data.get('kind')=='direct' and data.get('size_mode')=='percent':
         c=signal_source(connect,user_id,str(data.get('report_id','')),str(data.get('candidate_id','')))
+        verify_expected_side(data,c)
         if c['signal']!='SÆLG':raise TradeError('Procent af en beholdning kan kun bruges til salg.')
         try:portfolio_id=int(data.get('portfolio_id'))
         except (ValueError,TypeError):raise TradeError('Vælg et depot.')
         basis=direct_sell_basis(connect,user_id,portfolio_id,data.get('asset_id'),data.get('size'),factory)
         data={**data,'size_mode':'shares','size':basis['shares']}
-    p,payload=build(connect,user_id,data);kind=data['kind'];fingerprint=hashlib.sha256(json.dumps({'report':data['report_id'],'candidate':data['candidate_id'],'kind':kind,'payload':payload},sort_keys=True).encode()).hexdigest()
+    p,payload=build(connect,user_id,data);kind=data['kind']
+    if basis is not None and (len(payload.get('orders') or [])!=1 or payload['orders'][0].get('side')!='SELL'):
+        raise TradeError('Signalets retning er ændret. Kontrollér signalet og start igen.')
+    fingerprint=hashlib.sha256(json.dumps({'report':data['report_id'],'candidate':data['candidate_id'],'kind':kind,'payload':payload},sort_keys=True).encode()).hexdigest()
     with connect() as c:
         c.execute('BEGIN IMMEDIATE')
         active=c.execute("SELECT * FROM broker_proposals WHERE user_id=? AND kind=? AND payload=? AND status IN ('sending','sent','uncertain') ORDER BY id DESC LIMIT 1",(user_id,kind,json.dumps(payload))).fetchone()
