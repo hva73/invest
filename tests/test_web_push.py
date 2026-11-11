@@ -250,6 +250,16 @@ class Push(unittest.TestCase):
    for at,payload in ((self.now,original),(self.now+timedelta(seconds=1),current)):
     c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps(payload),'x'))
    self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+ def test_unverified_previous_trailing_basis_does_not_rearm(self):
+  with app.connect() as c:
+   engine.event(c,self.watch,'SELL_SIGNAL',self.now,'exit without verified trailing')
+   event=c.execute("SELECT event_id FROM hw_events WHERE watch_row_id=? AND event_type='SELL_SIGNAL' ORDER BY id DESC LIMIT 1",(self.watch['id'],)).fetchone()['event_id']
+   prior={'position_trailing':{'status':'WAITING_FOR_VERIFIED_POSITION_HISTORY','basis':'unproven'}}
+   at=self.now+timedelta(seconds=1)
+   current={'signal':'WAIT','reason_codes':['CONFIRMATION_PENDING'],'new_market_observation':True,'position_trailing':{'status':'VERIFIED','basis':'verified'},'position_context':{'position':'held','status':'verified','as_of':at.isoformat()}}
+   for when,payload in ((self.now,prior),(at,current)):
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],when.isoformat(),json.dumps(payload),'x'))
+   self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
  def test_changed_verified_exposure_rearms_exit_without_complete_fill_history(self):
   with app.connect() as c:
    engine.event(c,self.watch,'SELL_SIGNAL',self.now,'previous exposure')

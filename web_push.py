@@ -177,7 +177,8 @@ def _exit_rearmed(c,watch_id,event_key,through=None):
     first=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? AND calculated=? ORDER BY id DESC LIMIT 1',(watch_id,event['created'])).fetchone()
     try:prior_result=json.loads(first['payload']) if first else {};prior_key=prior_result.get('exit_context_key')
     except (ValueError,TypeError,AttributeError):prior_result={};prior_key=None
-    prior_basis=(prior_result.get('position_trailing') or {}).get('basis')
+    prior_trailing=prior_result.get('position_trailing') or {}
+    prior_basis=prior_trailing.get('basis') if prior_trailing.get('status')=='VERIFIED' else None
     from hotwatch_contract import stamp
     closed=[]
     def remember_closed(context,observed):
