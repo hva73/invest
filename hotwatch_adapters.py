@@ -253,7 +253,7 @@ class PlutoAdapter:
      if not isinstance(listed,list) or sorted(listed)!=sorted(children):return unknown_context('HOLDING_SCOPE_OVERLAP')
   # An unidentified holding could be this asset; absence is not proven.
   if any(p.get('kind','holding')=='holding' and not p.get('asset_id') for payload in rows for p in payload['positions']):return unknown_context('HOLDING_ID_MISSING')
-  found=[position for payload in rows for position in payload['positions'] if position.get('asset_id')==request['asset_id']]
+  found=[position for payload in rows for position in payload['positions'] if position.get('kind','holding')=='holding' and position.get('asset_id')==request['asset_id']]
   # Buy permissions are irrelevant to exit-only holding watches and each
   # unnecessary check competes with identity/quote requests for Pluto budget.
   # Keep the value unknown rather than claiming a permission was checked.
