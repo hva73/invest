@@ -14,6 +14,8 @@ STAGES = {'authorization', 'preflight', 'quota', 'stage', 'service_state',
           'stop', 'drain', 'backup_and_apply', 'verify_backup', 'verify_install',
           'start', 'health', 'complete', 'runner'}
 SERVICE_STATE_REASONS = {'selector_failed', 'application_state_unknown',
+                         'selector_exec_unavailable', 'selector_exit_nonzero',
+                         'selector_response_too_large', 'selector_invalid_json', 'selector_result_failed',
                          'service_status_unknown', 'state_record_failed', 'service_state_unavailable'}
 
 
