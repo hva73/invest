@@ -66,3 +66,23 @@ jobs:
           fi
           unset NORDICWAY_PRIVATE_KEY NORDICWAY_KEY_PASSPHRASE
           python tools/nordicway_deploy_ping.py
+
+  quota_probe:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'hva73/invest' &&
+      github.actor_id == '351122234' &&
+      github.triggering_actor == 'hva73' &&
+      github.ref == 'refs/heads/codex/escape-development'
+    runs-on: ubuntu-latest
+    environment: ESCAPE_NORDICWAY_DEPLOY
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check UAPI response shape
+        env:
+          ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
+        run: python tools/nordicway_uapi_probe.py

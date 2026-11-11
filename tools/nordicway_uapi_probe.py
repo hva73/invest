@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import sys
 import urllib.error
 import urllib.request
 
@@ -42,4 +43,6 @@ def probe(token, opener=None):
 
 
 if __name__ == '__main__':
-    print(json.dumps(probe(os.environ.get('ESCAPE_CPANEL_API_TOKEN', '')), sort_keys=True))
+    result = probe(os.environ.get('ESCAPE_CPANEL_API_TOKEN', ''))
+    print(json.dumps(result, sort_keys=True))
+    sys.exit(0 if result['status'] == 'ok' else 1)
