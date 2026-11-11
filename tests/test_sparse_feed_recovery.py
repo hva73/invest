@@ -56,6 +56,23 @@ class SparseFeedRecovery(unittest.TestCase):
    self.assertEqual(engine.observation_poll_interval(c,self.req,'IDLE',self.now,dict(s,market_status='CLOSED')),300)
   with patch.dict(os.environ,dict(live,ESCAPE_HW_EODHD_FAST_POLL_ENABLED='1',ESCAPE_HW_EODHD_MIN_POLL_S='60'),clear=True),app.connect() as c:
    self.assertEqual(engine.observation_poll_interval(c,self.req,'NORMAL',self.now,s),60)
+ def test_poll_budget_is_computed_once_per_profile_per_release(self):
+  job=engine.claim(app.connect,self.now,self.req['watch_id'])
+  sample=self.sample(held=True);sample['event_time']=(self.now-timedelta(seconds=110)).isoformat()
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'},clear=True),patch.object(engine,'effective_poll_interval',wraps=engine.effective_poll_interval) as calc:
+   engine.release(app.connect,job,self.now,sample=sample)
+  profiles=[call.args[2] for call in calc.call_args_list]
+  self.assertEqual(profiles.count('NORMAL'),1)
+  self.assertEqual(profiles.count('ACTIVE'),1)
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True)
+   self.assertEqual(row['next_due'],self.now.timestamp()+15)
+ def test_active_profile_is_not_recomputed_for_aging_trade(self):
+  sample=self.sample();sample['event_time']=(self.now-timedelta(seconds=110)).isoformat()
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1'},clear=True),app.connect() as c,patch.object(engine,'effective_poll_interval',wraps=engine.effective_poll_interval) as calc:
+   result=engine.observation_poll_interval(c,self.req,'ACTIVE',self.now,sample)
+  self.assertEqual(result,15)
+  self.assertEqual(calc.call_count,1)
  def test_newer_broker_read_is_not_discarded_when_same_trade_is_reused(self):
   s=self.sample(held=True);s['context']['as_of']=(self.now-timedelta(seconds=290)).isoformat()
   first=engine.ingest(app.connect,1,self.req['watch_id'],True,s,self.now,include_session=False)
