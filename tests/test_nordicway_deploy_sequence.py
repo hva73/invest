@@ -133,3 +133,55 @@ class RealUpdaterIntegration(unittest.TestCase):
             with sqlite3.connect(result.backup + '/escape.db') as db:
                 self.assertEqual(db.execute('SELECT value FROM holdings').fetchone(), ('preserve',))
             self.assertEqual(len(list((root / '.escape_backups').iterdir())), 1)
+
+    def test_health_failure_never_restores_stale_database(self):
+        import sqlite3
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        import apply_update
+        import nordicway_autostart
+        import nordicway_release_backup
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            app = root / 'escape_app'
+            (app / 'var').mkdir(parents=True)
+            stage = app / 'opdatering' / 'release'
+            stage.mkdir(parents=True)
+            (app / 'app.py').write_text('old')
+            (stage / 'app.py').write_text('new')
+            database = app / 'var' / 'escape.db'
+            with sqlite3.connect(database) as db:
+                db.execute('CREATE TABLE holdings(value TEXT)')
+                db.execute("INSERT INTO holdings VALUES ('before')")
+
+            class HealthFailureAdapter(Adapter):
+                def backup_and_apply(self, release):
+                    self._step('backup_and_apply')
+                    self.expected = nordicway_release_backup.inventory(app, ('app.py',))
+                    with nordicway_autostart.preserve(app / 'var'):
+                        return apply_update.apply(stage, app)
+
+                def verify_backup(self, backup):
+                    self._step('verify_backup')
+                    nordicway_release_backup.verify_backup(backup, self.expected)
+
+                def start_service(self):
+                    self._step('start')
+                    with sqlite3.connect(database) as db:
+                        db.execute("INSERT INTO holdings VALUES ('after_start')")
+
+                def verify_health(self, sha):
+                    self._step('health')
+                    raise ValueError('synthetic health failure')
+
+            adapter = HealthFailureAdapter()
+            with patch.object(apply_update, 'FILES', ('app.py',)):
+                result = seq.deploy(adapter, 'a' * 40)
+            self.assertEqual((result.status, result.stage), ('failed', 'health'))
+            with sqlite3.connect(database) as db:
+                self.assertEqual(db.execute('SELECT value FROM holdings ORDER BY rowid').fetchall(),
+                                 [('before',), ('after_start',)])
+            with sqlite3.connect(result.backup + '/escape.db') as db:
+                self.assertEqual(db.execute('SELECT value FROM holdings').fetchall(), [('before',)])
