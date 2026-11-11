@@ -30,8 +30,17 @@ class ProbeTests(unittest.TestCase):
     def test_error_and_invalid_token_never_expose_response(self):
         opener = Mock()
         opener.open.return_value = Response(b'{"result":{"status":0,"errors":["sensitive"]}}')
-        self.assertEqual(p.probe('a' * 40, opener), {'status':'invalid_response'})
+        self.assertEqual(p.probe('a' * 40, opener), {'status':'api_rejected'})
         self.assertEqual(p.probe('bad\n', opener), {'status':'invalid_credential'})
+
+    def test_direct_envelope_and_id_are_supported(self):
+        payload = {'status':1, 'data':[{'id':'diskusage', 'units':'MB'}]}
+        opener = Mock(); opener.open.return_value = Response(json.dumps(payload).encode())
+        self.assertEqual(p.probe('a' * 40, opener)['status'], 'ok')
+
+    def test_non_json_does_not_print_response(self):
+        opener = Mock(); opener.open.return_value = Response(b'<html>secret</html>')
+        self.assertEqual(p.probe('a' * 40, opener), {'status':'non_json_response'})
 
     def test_http_error_is_categorised_without_body(self):
         import urllib.error

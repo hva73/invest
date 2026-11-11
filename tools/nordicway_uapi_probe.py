@@ -29,13 +29,24 @@ def probe(token, opener=None):
             raw = response.read(65537)
         if len(raw) > 65536:
             raise ValueError('response_too_large')
-        result = json.loads(raw).get('result', {})
+        try:
+            payload = json.loads(raw)
+        except (ValueError, UnicodeDecodeError):
+            return {'status': 'non_json_response'}
+        if not isinstance(payload, dict):
+            return {'status': 'unexpected_top_level'}
+        result = payload.get('result', payload)
+        if not isinstance(result, dict):
+            return {'status': 'unexpected_result'}
+        if result.get('status') not in (1, '1'):
+            return {'status': 'api_rejected'}
         rows = result.get('data')
-        if result.get('status') != 1 or not isinstance(rows, list):
-            raise ValueError('invalid_response')
-        matches = [row for row in rows if isinstance(row, dict) and row.get('name') == 'diskusage']
+        if not isinstance(rows, list):
+            return {'status': 'missing_data_list'}
+        matches = [row for row in rows if isinstance(row, dict) and
+                   (row.get('name') == 'diskusage' or row.get('id') == 'diskusage')]
         if len(matches) != 1:
-            raise ValueError('invalid_response')
+            return {'status': 'diskusage_not_unique', 'rows': len(rows)}
         row = matches[0]
         # No raw response, free-form messages, values or token in logs.
         return {'status': 'ok', 'fields': {key: type(row.get(key)).__name__
