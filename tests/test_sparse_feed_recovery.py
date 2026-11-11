@@ -73,6 +73,15 @@ class SparseFeedRecovery(unittest.TestCase):
    result=engine.observation_poll_interval(c,self.req,'ACTIVE',self.now,sample)
   self.assertEqual(result,15)
   self.assertEqual(calc.call_count,1)
+ def test_rate_budget_fault_skips_unused_quiet_baseline(self):
+  with patch.object(engine,'effective_poll_interval',wraps=engine.effective_poll_interval) as calc:
+   engine.fault(app.connect,1,self.req['watch_id'],True,'PROVIDER_RATE_BUDGET',self.now)
+  calc.assert_not_called()
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True);state=json.loads(row['state'])
+  self.assertEqual(row['status'],'DEGRADED')
+  self.assertEqual(row['next_due'],self.now.timestamp()+31)
+  self.assertFalse(state['quiet_market_poll']);self.assertIsNone(state['quiet_baseline_s'])
  def test_newer_broker_read_is_not_discarded_when_same_trade_is_reused(self):
   s=self.sample(held=True);s['context']['as_of']=(self.now-timedelta(seconds=290)).isoformat()
   first=engine.ingest(app.connect,1,self.req['watch_id'],True,s,self.now,include_session=False)
