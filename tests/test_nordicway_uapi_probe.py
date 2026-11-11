@@ -1,6 +1,9 @@
 import io
 import json
 import unittest
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 from unittest.mock import Mock
 import nordicway_uapi_probe as p
 
