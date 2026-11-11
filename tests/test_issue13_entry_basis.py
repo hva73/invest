@@ -84,5 +84,15 @@ class EntryBasis(unittest.TestCase):
    result,state=calculate(sample,metrics,BASELINE,risk,state,now)
   self.assertEqual(result['position_trailing']['high'],'105')
 
+ def test_long_observation_gap_cannot_reuse_the_old_high(self):
+  at=datetime(2026,11,11,15,0,tzinfo=timezone.utc);risk=copy.deepcopy(request()['risk']);risk.update(stop_price=None,_position_scope='same-depot')
+  state={};metrics=good_metrics()
+  for seconds,price in ((0,'100'),(10,'105'),(311,'100')):
+   now=at+timedelta(seconds=seconds);sample=tick(now,seconds,price=price,held=True)
+   sample['context'].update(orders_complete=True,position_history_complete=True)
+   result,state=calculate(sample,metrics,BASELINE,risk,state,now)
+  self.assertIsNone(result['position_trailing']['high'])
+  self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
+
 
 if __name__=='__main__':unittest.main()
