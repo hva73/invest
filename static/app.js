@@ -353,6 +353,7 @@ setInterval(()=>{if(view==='diagnostics'&&!document.hidden)loadAdminDiagnostics(
  const more=document.getElementById('mobile-more'), panel=document.getElementById('mobile-more-panel');
  function setOpen(open){more.setAttribute('aria-expanded',String(open));panel.classList.toggle('is-open',open)}
  more.addEventListener('click',()=>setOpen(more.getAttribute('aria-expanded')!=='true'));
- document.addEventListener('click',e=>{if(!e.target.closest('nav'))setOpen(false);else if(e.target.closest('#mobile-more-panel [data-view]'))setOpen(false)});
+ document.addEventListener('click',e=>{if(!e.target.closest('nav') || e.target.closest('nav [data-view]'))setOpen(false)});
+ window.matchMedia('(min-width: 901px)').addEventListener('change',e=>{if(e.matches)setOpen(false)});
  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&more.getAttribute('aria-expanded')==='true'){setOpen(false);more.focus()}});
 })();
