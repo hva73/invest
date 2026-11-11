@@ -171,7 +171,10 @@ def run(sha, token, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
         adapter.state_observer = lambda state: _record_state(bridge, marker, target, sha, state)
         adapter.backup_observer = lambda backup: _record_backup(bridge, marker, target, sha, backup)
         result = deploy(adapter, sha)
-        if result.status == 'ok' and result.stage == 'complete':
+        if result.status in ('ok', 'updated_stopped') and result.stage == 'complete':
+            # An intentionally stopped app is a completed installation too.
+            # Never leave a stale recovery marker merely because no restart
+            # was requested; true failures remain fail-closed.
             marker.unlink()
             _sync_dir(bridge)
         # Paths, tokens and exception details are deliberately not returned.
