@@ -12,7 +12,7 @@ import nordicway_readonly_diagnostics
 HEALTH_URL = 'https://escape.nordic-response.dk/api/health'
 
 
-def web_health(sha):
+def _web_payload():
     request = urllib.request.Request(HEALTH_URL, headers={'Cache-Control': 'no-cache'})
     with urllib.request.urlopen(request, timeout=8) as response:
         if response.status != 200 or response.geturl() != HEALTH_URL:
@@ -21,8 +21,19 @@ def web_health(sha):
     if len(data) > 4096:
         return False
     payload = json.loads(data)
+    return payload if isinstance(payload, dict) else {}
+
+
+def web_health(sha):
+    payload = _web_payload()
     return (isinstance(payload, dict) and payload.get('status') == 'ok'
             and payload.get('database') is True and payload.get('build_commit') == sha)
+
+
+def web_recovery_health():
+    """Wake Passenger and check the existing app after a pre-update failure."""
+    payload = _web_payload()
+    return isinstance(payload, dict) and payload.get('status') == 'ok' and payload.get('database') is True
 
 
 def verify(root, sha, started_at, *, web=web_health, inspect=nordicway_readonly_diagnostics.inspect,
@@ -36,6 +47,10 @@ def verify(root, sha, started_at, *, web=web_health, inspect=nordicway_readonly_
         return False
     if marker.read_text(encoding='ascii').strip() != sha or web(sha) is not True:
         return False
+    return _runtime_health(root, started_at, inspect=inspect, now=now)
+
+
+def _runtime_health(root, started_at, *, inspect, now):
     report = inspect(root=root, now=now())
     db = report.get('database', {})
     if db.get('status') != 'ok':
@@ -56,6 +71,31 @@ def verify(root, sha, started_at, *, web=web_health, inspect=nordicway_readonly_
             if item.get('status') != 'running' or type(age) not in (int, float) or not 0 <= age <= min(60, elapsed):
                 return False
     return True
+
+
+def verify_recovery(root, started_at, *, web=web_recovery_health,
+                    inspect=nordicway_readonly_diagnostics.inspect,
+                    now=lambda: datetime.now(timezone.utc)):
+    if not isinstance(started_at, datetime) or started_at.tzinfo is None:
+        return False
+    if web() is not True:
+        return False
+    return _runtime_health(Path(root), started_at, inspect=inspect, now=now)
+
+
+def wait_recovery(root, started_at, timeout=90, *, verify_fn=verify_recovery,
+                  clock=time.monotonic, sleep=time.sleep):
+    deadline = clock() + timeout
+    while True:
+        try:
+            if verify_fn(root, started_at):
+                return True
+        except (OSError, ValueError, TypeError, urllib.error.URLError):
+            pass
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return False
+        sleep(min(2, remaining))
 
 
 def wait(root, sha, started_at, timeout=90, *, verify_fn=verify, clock=time.monotonic, sleep=time.sleep):

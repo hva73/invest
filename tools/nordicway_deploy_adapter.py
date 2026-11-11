@@ -141,10 +141,13 @@ class Adapter:
     def quiescence(self):
         with nordicway_quiescence.stopped_motor(self.target / 'var'):
             # Separate check must cover Passenger, cron and other writers.
-            check = (self.quiescence_check() if self.quiescence_check is not None else
-                     nordicway_writer_check.verify(self.target / 'var' / 'escape.db'))
-            if check is not True:
-                raise ValueError('quiescence_unverified')
+            if self.quiescence_check is not None:
+                if self.quiescence_check() is not True:
+                    raise ValueError('quiescence_unverified')
+            else:
+                reason = nordicway_writer_check.failure_reason(self.target / 'var' / 'escape.db')
+                if reason is not None:
+                    raise ValueError(reason)
             yield
 
     def backup_and_apply(self, release):
@@ -189,3 +192,7 @@ class Adapter:
                  nordicway_deploy_health.wait(self.target, sha, self.started_at))
         if check is not True:
             raise ValueError('health_unverified')
+
+    def verify_recovery_health(self):
+        if self.started_at is None or nordicway_deploy_health.wait_recovery(self.target, self.started_at) is not True:
+            raise ValueError('recovery_health_unverified')

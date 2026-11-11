@@ -39,6 +39,7 @@ class Adapter:
     def verify_installed(self, sha): return self._step('verify_install')
     def start_service(self): return self._step('start')
     def verify_health(self, sha): return self._step('health')
+    def verify_recovery_health(self): return self._step('recovery_health')
     def cleanup_backup(self, backup): return self._step('cleanup')
 
 
@@ -70,7 +71,32 @@ class SequenceTests(unittest.TestCase):
                 self.assertTrue(result.service_restored)
                 self.assertNotIn('backup_and_apply', a.events)
                 self.assertEqual(a.events.count('start'), 1)
+                self.assertIn('recovery_health', a.events)
                 self.assertLess(a.events.index('start'), a.events.index('unlock'))
+
+    def test_failed_recovery_health_is_not_reported_as_restored(self):
+        a = Adapter(fail='drain')
+        a.verify_recovery_health = Mock(side_effect=ValueError('unavailable'))
+        result = seq.deploy(a, 'a' * 40)
+        self.assertEqual((result.stage, result.service_restored), ('drain', False))
+        a.verify_recovery_health.assert_called_once()
+        self.assertNotIn('backup_and_apply', a.events)
+
+    def test_drain_failure_reasons_are_redacted(self):
+        for error, reason in ((ValueError('cron_unverified'), 'cron_unverified'),
+                              (ValueError('database_in_use'), 'database_in_use'),
+                              (TimeoutError('private detail'), 'motor_stop_timeout'),
+                              (OSError('private detail'), 'drain_unavailable')):
+            a = Adapter()
+            @contextlib.contextmanager
+            def drain():
+                raise error
+                yield
+            a.quiescence = drain
+            result = seq.deploy(a, 'a' * 40)
+            self.assertEqual((result.stage, result.reason), ('drain', reason))
+            self.assertNotIn('private', repr(result))
+            self.assertNotIn('backup_and_apply', a.events)
 
     def test_failed_apply_or_installed_check_does_not_restart(self):
         for step in ('backup_and_apply', 'verify_backup', 'verify_install'):

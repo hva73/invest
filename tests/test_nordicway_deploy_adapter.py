@@ -24,6 +24,9 @@ class FakeService:
 
 class AdapterIntegration(unittest.TestCase):
     def setUp(self):
+        recovery = patch('nordicway_deploy_health.wait_recovery', return_value=True)
+        recovery.start()
+        self.addCleanup(recovery.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.checkout = self.root / 'checkout'
@@ -496,10 +499,11 @@ class AdapterIntegration(unittest.TestCase):
                                        'account_free_lower_bytes': required + 1,
                                        'filesystem_free_bytes': required + 1})
         with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')), \
-             patch.object(nordicway_writer_check, 'verify', return_value=False) as verify:
+             patch.object(nordicway_writer_check, 'failure_reason', return_value='database_in_use') as verify:
             result = sequence.deploy(adapter, self.sha)
         verify.assert_called_once_with(self.app / 'var' / 'escape.db')
         self.assertEqual((result.status, result.stage), ('failed', 'drain'))
+        self.assertEqual(result.reason, 'database_in_use')
         self.assertEqual(self.service.state, 'started')
         self.assertEqual((self.app / 'app.py').read_text(), 'old')
 

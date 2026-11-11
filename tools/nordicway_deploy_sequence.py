@@ -88,6 +88,7 @@ def deploy(adapter, sha):
                 if was_running and stop_attempted and safe_to_restart:
                     try:
                         adapter.start_service()
+                        adapter.verify_recovery_health()
                         restored = True
                     except Exception:
                         pass
@@ -98,6 +99,13 @@ def deploy(adapter, sha):
                                'selector_invalid_json', 'selector_result_failed', 'application_state_unknown',
                                'service_status_unknown', 'state_record_failed')
                     reason = str(exc) if isinstance(exc, ValueError) and str(exc) in allowed else 'service_state_unavailable'
+                elif stage == 'drain':
+                    allowed = ('cron_unverified', 'database_unavailable', 'passenger_active',
+                               'database_in_use', 'process_inspection_unavailable', 'quiescence_unverified')
+                    if isinstance(exc, TimeoutError):
+                        reason = 'motor_stop_timeout'
+                    else:
+                        reason = str(exc) if isinstance(exc, ValueError) and str(exc) in allowed else 'drain_unavailable'
                 return Outcome('failed', stage, restored, str(backup) if backup else None, reason=reason)
     except Exception:
         # Includes failure to acquire the deployment lock.

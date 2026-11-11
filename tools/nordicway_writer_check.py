@@ -24,23 +24,23 @@ def no_cron(runner=subprocess.run):
         return False
 
 
-def no_open_database_users(database, proc=Path('/proc'), uid=None, self_pid=None):
+def database_user_failure(database, proc=Path('/proc'), uid=None, self_pid=None):
     database = Path(database)
     uid = os.getuid() if uid is None else uid
     self_pid = os.getpid() if self_pid is None else self_pid
     identities = set()
     try:
         if database.is_symlink() or not database.is_file():
-            return False
+            return 'database_unavailable'
         for suffix in ('', '-wal', '-shm', '-journal'):
             path = Path(str(database) + suffix)
             if path.is_symlink():
-                return False
+                return 'database_unavailable'
             if path.exists():
                 info = path.stat()
                 identities.add((info.st_dev, info.st_ino))
         if not identities:
-            return False
+            return 'database_unavailable'
         for process in proc.iterdir():
             if not process.name.isdigit() or int(process.name) == self_pid:
                 continue
@@ -52,25 +52,36 @@ def no_open_database_users(database, proc=Path('/proc'), uid=None, self_pid=None
                 # the wsgi file; inspect privately, return only a boolean.
                 if (b'passenger_wsgi.py' in cmd or
                     (b'Passenger' in cmd and b'escape_app' in cmd)):
-                    return False
+                    return 'passenger_active'
                 for fd in (process / 'fd').iterdir():
                     try:
                         info = fd.stat()
                     except FileNotFoundError:
                         continue
                     if (info.st_dev, info.st_ino) in identities:
-                        return False
+                        return 'database_in_use'
             except FileNotFoundError:
                 # Only ignore a process that actually disappeared.
                 if process.exists():
-                    return False
+                    return 'process_inspection_unavailable'
                 continue
             except (OSError, PermissionError):
-                return False
-        return True
+                return 'process_inspection_unavailable'
+        return None
     except OSError:
-        return False
+        return 'process_inspection_unavailable'
+
+
+def no_open_database_users(database, proc=Path('/proc'), uid=None, self_pid=None):
+    return database_user_failure(database, proc, uid, self_pid) is None
+
+
+def failure_reason(database):
+    """Report only the failed gate; never expose cron or process contents."""
+    if not no_cron():
+        return 'cron_unverified'
+    return database_user_failure(database)
 
 
 def verify(database):
-    return no_cron() and no_open_database_users(database)
+    return failure_reason(database) is None

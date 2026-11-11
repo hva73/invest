@@ -3,7 +3,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import nordicway_writer_check as check
 
@@ -30,9 +30,11 @@ class WriterTests(unittest.TestCase):
             self.assertTrue(check.no_open_database_users(db, proc, self_pid=4321))
             (process / 'fd' / '8').symlink_to(db)
             self.assertFalse(check.no_open_database_users(db, proc, self_pid=4321))
+            self.assertEqual(check.database_user_failure(db, proc, self_pid=4321), 'database_in_use')
             (process / 'fd' / '8').unlink()
             (process / 'cmdline').write_bytes(b'Passenger AppPreloader: /home/u/escape_app\0')
             self.assertFalse(check.no_open_database_users(db, proc, self_pid=4321))
+            self.assertEqual(check.database_user_failure(db, proc, self_pid=4321), 'passenger_active')
 
     def test_missing_or_symlink_database_is_unknown(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -54,6 +56,18 @@ class WriterTests(unittest.TestCase):
             proc = root / 'proc'
             (proc / '1234').mkdir(parents=True)
             self.assertFalse(check.no_open_database_users(db, proc, self_pid=4321))
+
+    def test_failure_reason_identifies_only_the_gate(self):
+        with patch.object(check, 'no_cron', return_value=False), \
+             patch.object(check, 'database_user_failure') as processes:
+            self.assertEqual(check.failure_reason('/database'), 'cron_unverified')
+            processes.assert_not_called()
+        with patch.object(check, 'no_cron', return_value=True), \
+             patch.object(check, 'database_user_failure', return_value='database_in_use'):
+            self.assertEqual(check.failure_reason('/database'), 'database_in_use')
+        with patch.object(check, 'no_cron', return_value=True), \
+             patch.object(check, 'database_user_failure', return_value=None):
+            self.assertIsNone(check.failure_reason('/database'))
 
 
 if __name__ == '__main__': unittest.main()

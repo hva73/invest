@@ -45,6 +45,30 @@ class HealthTests(unittest.TestCase):
         self.data['database'] = {'status': 'ok'}
         self.assertTrue(self.verify())
 
+    def test_recovery_wakes_web_and_requires_fresh_enabled_motor(self):
+        (self.root / 'var' / 'hotwatch-autostart.enabled').touch()
+        web = Mock(return_value=True)
+        self.assertTrue(health.verify_recovery(self.root, self.started, web=web,
+                                              inspect=self.inspect, now=lambda: self.now))
+        web.assert_called_once()
+        self.data['database']['worker']['age_seconds'] = 21
+        self.assertFalse(health.verify_recovery(self.root, self.started, web=web,
+                                               inspect=self.inspect, now=lambda: self.now))
+        web.return_value = False
+        self.assertFalse(health.verify_recovery(self.root, self.started, web=web,
+                                               inspect=self.inspect, now=lambda: self.now))
+
+    def test_recovery_web_supports_old_health_without_build_commit(self):
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.status = 200
+        response.geturl.return_value = health.HEALTH_URL
+        response.read.return_value = json.dumps({'status': 'ok', 'database': True}).encode()
+        with patch.object(health.urllib.request, 'urlopen', return_value=response):
+            self.assertTrue(health.web_recovery_health())
+            self.assertFalse(health.web_health(self.sha))
+
     def test_bad_web_database_or_marker_fails(self):
         self.web.return_value = False
         self.assertFalse(self.verify())

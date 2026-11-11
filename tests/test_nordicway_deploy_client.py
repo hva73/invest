@@ -135,3 +135,13 @@ class ClientTests(unittest.TestCase):
                 reply['reason'] = value
                 send.return_value.stdout = json.dumps(reply).encode()
                 self.assertEqual(client.run(self.env, send)['status'], 'unknown')
+
+    def test_drain_reason_requires_fixed_value_and_failed_drain(self):
+        reply = dict(self.reply, status='failed', stage='drain', service_restored=True,
+                     recovery_required=True, backup_cleanup='not_run', reason='database_in_use')
+        send = Mock(return_value=SimpleNamespace(returncode=1, stdout=json.dumps(reply).encode()))
+        with patch.object(client, 'verify', return_value='host key\n'):
+            self.assertEqual(client.run(self.env, send)['reason'], 'database_in_use')
+            reply['reason'] = 'private command line'
+            send.return_value.stdout = json.dumps(reply).encode()
+            self.assertEqual(client.run(self.env, send)['status'], 'unknown')
