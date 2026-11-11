@@ -479,3 +479,5 @@ body.pull-refresh-visible #refresh-status{display:none}
 .demo-banner a{color:#08231e;text-decoration:underline;white-space:nowrap}
 .demo-mode #profile-open,.demo-mode #refresh-current,.demo-mode #logout{display:none!important}
 @media(max-width:700px){.demo-banner{font-size:11px;padding:8px 10px}.demo-entry{font-size:14px}}
+.demo-mode dialog[open]{padding-top:36px}
+.demo-mode dialog[open]::before{content:'DEMO · ingen rigtige handler';position:absolute;top:8px;left:16px;color:#9ce7d2;font-size:10px;font-weight:700;letter-spacing:.04em}
