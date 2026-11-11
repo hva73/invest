@@ -17,7 +17,7 @@ try:
    shot=os.environ.get('ESCAPE_SCREENSHOTS')
    if shot and width in (320,390):page.screenshot(path=f'{shot}/demo-welcome-{width}.png')
    page.get_by_role('link',name='Prøv ESCAPE med demodata').click();expect(page.locator('.demo-banner')).to_be_visible()
-   expect(page.locator('.dashboard-v1')).to_be_visible();requests.clear()
+   expect(page.locator('.dashboard-v1')).to_be_visible();expect(page.locator('.dash-chart-svg')).to_be_visible();requests.clear()
    if shot and width in (320,390):page.screenshot(path=f'{shot}/demo-overview-{width}.png')
    row=page.get_by_role('button',name='Åbn position TSLA i Demodepot');row.click()
    dialog=page.locator('#dashboard-detail');expect(dialog).to_be_visible();dialog.locator('[data-market-period=week]').click()
@@ -25,12 +25,18 @@ try:
    dialog.locator('[data-asset-trade=BUY]').click();quick=page.locator('#quick-trade-dialog');expect(quick).to_contain_text('Køb · TSLA')
    quick.locator('[name=size]').fill('50');quick.locator('button[type=submit]').click();expect(quick).to_contain_text('Gennemgå købet')
    assert not any('/api/' in url for url in requests),requests
+   quick.locator('#quick-trade-confirm').check();quick.locator('[data-quick-send]').click();expect(quick).to_contain_text('simuleret')
    quick.locator('[data-quick-close]').click();dialog.locator('[data-dashboard-close]').click()
+   if width<=900:page.locator('#mobile-more').click()
+   page.locator('nav [data-view=sectors]').click();expect(page.locator('.sector-shell')).to_be_visible()
+   expect(page.locator('.sector-shell')).to_contain_text('Teknologi')
    blocked=page.evaluate('''() => new Promise(resolve => {const x=new XMLHttpRequest();x.open('POST','/api/trade/send');x.onload=()=>resolve(false);x.onerror=()=>resolve(true);try{x.send('{}')}catch(e){resolve(true)}})''')
    assert blocked,'CSP must block direct XMLHttpRequest'
    assert not any('/api/' in url for url in requests),requests
    expect(page.locator('.demo-banner')).to_contain_text('Fiktive data')
    page.get_by_role('link',name='Afslut demo / Log ind').click();expect(page.locator('#login')).to_be_visible()
+   page.go_back();expect(page.locator('.demo-banner')).to_be_visible();page.reload();expect(page.locator('.dashboard-v1')).to_be_visible()
+   page.go_forward();expect(page.locator('#login')).to_be_visible()
    assert not errors,(width,errors)
    page.close()
   browser.close()
