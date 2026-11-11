@@ -5,7 +5,7 @@ from playwright.sync_api import sync_playwright, expect
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     page = browser.new_page(viewport={'width': 390, 'height': 844}, is_mobile=True, has_touch=True)
-    page.set_content('<!doctype html><html lang="da"><body><main></main></body></html>')
+    page.set_content('<!doctype html><html lang="da"><head><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"></head><body><main></main></body></html>')
     page.add_style_tag(path=str(Path('static/style.css').resolve()))
     page.add_script_tag(path=str(Path('static/trade-ui.js').resolve()))
     page.evaluate('''() => {
