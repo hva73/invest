@@ -94,8 +94,18 @@ class Adapter:
         # Staging reads the selected release's manifest while apply_update is
         # imported from the installed bridge. Detect version skew before the
         # service stops or any files are replaced.
-        if nordicway_release_preflight.manifest(self.checkout) != apply_update.FILES:
+        names = nordicway_release_preflight.manifest(self.checkout)
+        if names != apply_update.FILES:
             raise ValueError('updater_manifest_mismatch')
+        if 'requirements.txt' in names:
+            source, installed = self.checkout / 'requirements.txt', self.target / 'requirements.txt'
+            if (source.is_symlink() or installed.is_symlink() or not source.is_file()
+                    or not installed.is_file() or source.stat().st_size > 1_000_000
+                    or installed.stat().st_size > 1_000_000
+                    or source.read_bytes() != installed.read_bytes()):
+                # The current sequence does not install Python dependencies.
+                # Do not stop a running app and discover that only afterwards.
+                raise ValueError('requirements_change_requires_setup')
 
     def check_quota(self):
         required = max(self.required_bytes, estimate_required_bytes(self.checkout, self.target))

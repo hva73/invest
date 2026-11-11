@@ -339,6 +339,24 @@ class AdapterIntegration(unittest.TestCase):
         self.assertEqual((self.app / 'app.py').read_text(), 'old')
         self.assertFalse((self.root / '.escape_backups').exists())
 
+    def test_changed_requirements_fail_before_service_stop(self):
+        (self.checkout / 'apply_update.py').write_text("FILES=('app.py','BUILD_COMMIT','requirements.txt')\n")
+        (self.checkout / 'requirements.txt').write_text('example==2\n')
+        (self.app / 'requirements.txt').write_text('example==1\n')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'changed dependencies')
+        self.sha = self.git('rev-parse', 'HEAD').strip()
+        adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
+                                   lambda: True, lambda sha: True, self.service)
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT', 'requirements.txt')):
+            result = sequence.deploy(adapter, self.sha)
+            self.assertEqual((result.status, result.stage), ('failed', 'preflight'))
+            self.assertEqual(self.service.state, 'started')
+            self.assertEqual((self.app / 'app.py').read_text(), 'old')
+            # Matching requirements pass this gate without stopping the app.
+            (self.app / 'requirements.txt').write_text('example==2\n')
+            adapter.preflight(self.sha)
+
     def test_quota_rejection_via_runner_allows_later_retry(self):
         import nordicway_deploy_runner
         bridge = self.root / 'bridge'
