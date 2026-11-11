@@ -459,8 +459,9 @@ body.pull-refresh-visible #refresh-status{display:none}
  .dash-hero-intro{order:0}
  .dash-hero-intro h2{font-size:23px;line-height:1.15;margin:5px 0}
  .dash-hero-intro p{font-size:11px;line-height:1.4;margin:0 0 5px}
- .dash-hero-metrics{order:1;margin:0;gap:0}
- .dash-hero-metrics > div{padding:12px 8px 4px}
+ .dash-hero-metrics{order:1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));margin:0;gap:0}
+ .dash-hero-metrics > div{padding:12px 8px 4px;min-width:0}
+ .dash-hero-metrics > div:first-child{grid-column:1/-1;border-right:0;border-bottom:1px solid #74b09b33}
  .dash-hero-metrics > div:first-child{padding-left:0}
  .dash-hero-top #dashboard-value-chart{order:2;width:100%}
  .dash-hero-top .dash-chart{border-top:1px solid #74b09b33;padding-top:12px}

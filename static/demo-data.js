@@ -41,19 +41,27 @@ window.ESCAPE_DEMO_HISTORY=(()=>{
  const end=Date.parse('2026-11-06T21:00:00Z'), start=end-365*86400000, cache=new Map();
  const zones={ASML:'Europe/Amsterdam',NOVOB:'Europe/Copenhagen',GMAB:'Europe/Copenhagen'}, calendars=new Map();
  const crypto=new Set(['BTC','PEPE']);
+ // Calendars cover this demo's fixed 2025-11-06 to 2026-11-06 window only.
+ // Sources: Nasdaq US and Copenhagen calendars, Euronext Amsterdam calendar.
+ const closures={
+  'America/New_York':new Set(['2025-11-27','2025-12-25','2026-01-01','2026-01-19','2026-02-16','2026-04-03','2026-05-25','2026-06-19','2026-07-03','2026-09-07']),
+  'Europe/Copenhagen':new Set(['2025-12-24','2025-12-25','2025-12-26','2025-12-31','2026-01-01','2026-04-02','2026-04-03','2026-04-06','2026-05-14','2026-05-15','2026-05-25','2026-06-05']),
+  'Europe/Amsterdam':new Set(['2025-12-25','2025-12-26','2026-01-01','2026-04-03','2026-04-06','2026-05-01'])
+ };
+ const earlyClose={'America/New_York':{'2025-11-28':780,'2025-12-24':780},'Europe/Amsterdam':{'2025-12-24':845,'2025-12-31':845}};
  const money=n=>({amount:Number(n).toFixed(2),currency:'DKK'});
  function history(p){
   const key=p.asset_id;if(cache.has(key))return cache.get(key);
   const isCrypto=crypto.has(p.ticker),zone=zones[p.ticker]||'America/New_York';
-  const local=new Intl.DateTimeFormat('en-US',{timeZone:zone,weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+  const local=new Intl.DateTimeFormat('en-US',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
   let seed=2166136261;for(const c of key)seed=Math.imul(seed^c.charCodeAt(0),16777619)>>>0;
   const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296};
   const calendarKey=isCrypto?'crypto':zone;
   if(!calendars.has(calendarKey)){
    const timestamps=[],step=(isCrypto?10:3)*60000;
    for(let t=start;t<=end;t+=step){
-    if(!isCrypto){const parts=local.formatToParts(new Date(t)),get=k=>parts.find(x=>x.type===k)?.value,weekday=get('weekday'),minute=Number(get('hour'))*60+Number(get('minute'));
-     if(weekday==='Sat'||weekday==='Sun'||minute<(zones[p.ticker]?540:570)||minute>(zones[p.ticker]?1020:960))continue;
+    if(!isCrypto){const parts=local.formatToParts(new Date(t)),get=k=>parts.find(x=>x.type===k)?.value,weekday=get('weekday'),day=get('year')+'-'+get('month')+'-'+get('day'),minute=Number(get('hour'))*60+Number(get('minute')),close=earlyClose[zone]?.[day]??(zones[p.ticker]?1020:960);
+     if(weekday==='Sat'||weekday==='Sun'||closures[zone].has(day)||minute<(zones[p.ticker]?540:570)||minute>close)continue;
     }
     timestamps.push(t);
    }

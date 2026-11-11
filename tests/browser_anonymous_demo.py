@@ -26,7 +26,11 @@ try:
    expect(page.locator('.dashboard-v1')).to_be_visible();expect(page.locator('aside nav')).to_be_visible();expect(page.locator('.dash-chart-svg')).to_be_visible()
    expect(page.locator('.dash-attention')).to_contain_text('KØBSSIGNAL');expect(page.locator('.dash-attention')).to_contain_text('SÆLGSSIGNAL')
    expect(page.locator('.dash-hero-metrics')).to_contain_text('52.080,00');requests.clear()
-   if shot and width in (320,390):page.screenshot(path=f'{shot}/demo-overview-{width}.png')
+   boxes=page.locator('.dash-hero-metrics > div').evaluate_all('nodes => nodes.map(n => {const r=n.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,scroll:n.scrollWidth,width:n.clientWidth}})')
+   assert all(b['scroll']<=b['width']+1 for b in boxes),(width,boxes)
+   for i,a in enumerate(boxes):
+    for b in boxes[i+1:]:assert a['right']<=b['left']+1 or b['right']<=a['left']+1 or a['bottom']<=b['top']+1 or b['bottom']<=a['top']+1,(width,boxes)
+   if shot:page.screenshot(path=f'{shot}/demo-overview-{width}.png')
    row=page.get_by_role('button',name='Åbn position TSLA i Demodepot');row.click()
    dialog=page.locator('#dashboard-detail');expect(dialog).to_be_visible()
    for period in ('day','week','month','year'):
@@ -40,6 +44,11 @@ try:
    assert not any('/api/' in url for url in requests),requests
    quick.locator('#quick-trade-confirm').check();quick.locator('[data-quick-send]').click();expect(quick).to_contain_text(re.compile('simuleret',re.I))
    quick.locator('[data-quick-close]').click();dialog.locator('[data-dashboard-close]').click()
+   page.locator('nav [data-view=hot-watch]').click();expect(page.locator('.engine-list-row')).to_have_count(3)
+   if shot:page.screenshot(path=f'{shot}/demo-hotwatch-{width}.png')
+   page.locator('[data-engine-detail=demo-TSLA]').first.click();engine=page.locator('#engine-dialog');expect(engine.locator('.engine-chart')).to_be_visible()
+   if shot:engine.locator('.engine-chart').screenshot(path=f'{shot}/demo-hotwatch-chart-{width}.png')
+   engine.get_by_role('button',name='Luk motordetaljer').click()
    if width<=900:page.locator('#mobile-more').click()
    page.locator('nav [data-view=sectors]').click();expect(page.locator('.sector-shell')).to_be_visible()
    expect(page.locator('.sector-shell')).to_contain_text('Teknologi')
