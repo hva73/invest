@@ -33,6 +33,7 @@ jobs:
           node tests/test_sidebar_scope.js
           node tests/test_sidebar_scope.js static/desktop-experience.css
           python tests/browser_desktop_experience.py
+          python tests/browser_desktop_trade.py
       - name: Upload synthetic screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
