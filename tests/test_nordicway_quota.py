@@ -25,7 +25,7 @@ class QuotaTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'insufficient_space'):
             q.verify_space('/tmp', 500, run, fs)
         self.assertEqual(run.call_args.args[0], [
-            '/usr/local/cpanel/bin/cpapi2', '--user=nordicr4', '--output=json',
+            '/usr/local/cpanel/bin/cpapi2', '--output=json',
             'DiskUsage', 'fetchdiskusagewithextras'])
 
     def test_unknown_or_failed_quota_fails_closed(self):
