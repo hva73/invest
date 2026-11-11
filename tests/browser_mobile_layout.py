@@ -7,10 +7,12 @@ aside = html[html.index('<aside>'):html.index('</aside>')+len('</aside>')]
 css = str(Path('static/style.css').resolve())
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
-    for width,height in [(320,700),(390,844),(768,1024),(1280,800)]:
+    for width,height in [(320,700),(390,844),(844,390),(768,1024),(1280,800)]:
         page=browser.new_page(viewport={'width':width,'height':height})
         page.set_content('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'+aside+'<main><div style="height:1800px">Testindhold</div></main>')
         page.add_style_tag(path=css)
+        page.emulate_media(reduced_motion='reduce')
+        assert page.evaluate("parseFloat(getComputedStyle(document.querySelector('nav button')).transitionDuration)") <= 0.00001
         nav=page.locator('body > aside nav')
         position=nav.evaluate("n=>getComputedStyle(n).position")
         if width<=900:
