@@ -73,6 +73,32 @@ class AdapterIntegration(unittest.TestCase):
         with sqlite3.connect(str(Path(result.backup) / 'escape.db')) as db:
             self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
 
+    def test_restricted_runner_reaches_real_backup_and_update(self):
+        import nordicway_deploy_guard
+        import nordicway_deploy_runner
+        bridge = self.root / 'bridge'
+        bridge.mkdir(mode=0o700)
+        approval = bridge / 'approved-sha'
+        approval.write_text(self.sha + '\n')
+        approval.chmod(0o600)
+        def factory(checkout, target, approved, required, quiescence, health, cpanel_token):
+            self.assertEqual(cpanel_token, 'test_token_12345')
+            return concrete.Adapter(checkout, target, approved, required,
+                 lambda: True, lambda sha: sha == self.sha, self.service,
+                 quota_reader=lambda path, required: {'required_bytes': required,
+                   'account_free_lower_bytes': required + 1, 'filesystem_free_bytes': required + 1})
+        def restricted(sha):
+            return nordicway_deploy_runner.run(sha, 'test_token_12345', bridge=bridge,
+                   checkout=self.checkout, target=self.app, adapter_factory=factory)
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')):
+            result = nordicway_deploy_guard.dispatch('escape-deploy-v1 deploy ' + self.sha, restricted)
+        self.assertEqual(result['status'], 'ok')
+        self.assertFalse(result['recovery_required'])
+        self.assertEqual(self.service.state, 'started')
+        self.assertEqual((self.app / 'app.py').read_text(), 'new')
+        with sqlite3.connect(self.app / 'var' / 'escape.db') as db:
+            self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
+
     def test_failed_backup_verification_prevents_any_code_replacement(self):
         adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
                                    lambda: True, lambda sha: True, self.service)

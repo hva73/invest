@@ -16,5 +16,17 @@ class GuardTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 guard.dispatch(cmd)
 
+    def test_only_exact_deploy_command_reaches_runner(self):
+        seen = []
+        def runner(sha):
+            seen.append(sha)
+            return {'status': 'ok', 'operation': 'deploy'}
+        sha = 'b' * 40
+        self.assertEqual(guard.dispatch('escape-deploy-v1 deploy ' + sha, runner)['status'], 'ok')
+        self.assertEqual(seen, [sha])
+        with self.assertRaises(ValueError):
+            guard.dispatch('escape-deploy-v1 deploy ' + sha + ';id', runner)
+        self.assertEqual(seen, [sha])
+
 if __name__ == '__main__':
     unittest.main()
