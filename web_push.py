@@ -206,7 +206,10 @@ def _exit_rearmed(c,watch_id,event_key,through=None):
                     # verified position snapshot. Compare only observed amounts;
                     # equality is never treated as proof of uninterrupted ownership.
                     from hotwatch_strategy import exit_context_key
-                    old_observed=exit_context_key(prior_result.get('position_context') or {},None);new_observed=exit_context_key(context,None)
+                    old_context=prior_result.get('position_context') or {}
+                    try:old_age=(stamp(event['created'])-stamp(old_context['as_of'])).total_seconds()
+                    except (KeyError,ValueError,TypeError,AttributeError):old_age=None
+                    old_observed=exit_context_key(old_context,None) if old_age is not None and 0<=old_age<=300 else None;new_observed=exit_context_key(context,None)
                     if old_observed and new_observed and old_observed!=new_observed:return True
                 valid=result.get('risk_level')=='normal' or result.get('risk_level')=='critical' and result.get('signal') in ('SELL','REDUCE')
                 if valid and any(t<as_of for t in closed):return True
