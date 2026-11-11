@@ -147,7 +147,7 @@ window.EngineUI=(()=>{
   const stop=req.risk?.stop_price,stopText=stop!=null?text(stop)+' '+esc(req.quote_currency||''):'—',stopDistance=Number(stop)>0&&Number(d.price)>0&&req.quote_currency===s.latest_currency&&!stale?movement((Number(stop)/Number(d.price)-1)*100,' %'):'—';
   const reasons=(s.display_reason_codes?.length?s.display_reason_codes:c.reason_codes||[]).slice(0,3).map(reason);
   const ack=a?.event_id&&!a.acknowledged_at&&!a.acknowledged?`<button type="button" data-engine-ack="${esc(wid)}" data-event-id="${esc(a.event_id)}" data-is-test="false">Markér beskeden som set</button>`:a?.event_id?'<span role="status">Kvitteret</span>':'';
-  const trade=canSell?`<button type="button" class="primary asset-sell" data-trade-watch="${esc(wid)}" data-trade-signal="${esc(s.signal)}">Gennemgå salg →</button>`:'';
+  const trade=canSell?`<button type="button" class="primary asset-sell" data-trade-watch="${esc(wid)}" data-trade-signal="${esc(s.signal)}" data-signal-help-attached="true">Gennemgå salg →</button>`:'';
   const title=(req.ticker||'Aktiv')+' · '+(s.display_status||'Signal');
   const explanation=c.human_readable_explanation||((a?.reason&&!/^[-_A-Z0-9]+$/.test(a.reason))?a.reason:'');
   const understandable=reasons.filter(x=>!/^[-_A-Z0-9]+$/.test(x));

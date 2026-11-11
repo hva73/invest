@@ -29,6 +29,7 @@ def main():
    page.evaluate("window.EngineUI.openNotification('synthetic-push')")
    d=page.locator('#engine-dialog');expect(d).to_contain_text('SÆLGSSIGNAL');expect(d.locator('h2')).to_contain_text('TSM · SÆLGSSIGNAL');expect(d).to_contain_text('siden køb');expect(d).to_contain_text('ikke sendt en ordre')
    expect(d).to_contain_text('Data brugt til signalet');expect(d).to_contain_text('Seneste modtagne data');expect(d).to_contain_text('Kursændring i dag');expect(d).to_contain_text('Min position');expect(d.get_by_role('button',name='Gennemgå salg →')).to_be_visible();expect(d.get_by_role('button',name='Behold foreløbig')).to_be_visible();expect(d.locator('[data-asset-trade=BUY]')).to_have_count(0)
+   expect(d.locator('.signal-action-bar .signal-help')).to_have_count(0)
    assert page.evaluate("getComputedStyle(document.documentElement).overflowY")=='hidden'
    background=page.evaluate('window.scrollY');page.mouse.move(2,2);page.mouse.wheel(0,900);page.wait_for_timeout(150);assert page.evaluate('window.scrollY')==background
    shot=os.environ.get('ESCAPE_SCREENSHOTS');
