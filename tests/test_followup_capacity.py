@@ -103,7 +103,7 @@ class FollowupIntegration(unittest.TestCase):
    sample['context']['cost_price']='120'
    result,state=calculate(sample,metrics,BASELINE,risk,state,at)
   self.assertEqual(result['signal'],'SELL');self.assertFalse(result['critical_override'])
-  self.assertIn('ikke afkast siden køb',result['human_readable_explanation'])
+  self.assertIn('EXIT_RULES',result['reason_codes']);self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
   sample['context']['position']='none'
   result,_=calculate(sample,metrics,BASELINE,risk,state,at)
   self.assertNotIn(result['signal'],('SELL','REDUCE'))
@@ -113,9 +113,9 @@ class FollowupIntegration(unittest.TestCase):
   for i in range(3):
    at=self.now+timedelta(seconds=i*10)
    result,state=calculate(tick(at,held=True),metrics,BASELINE,risk,state,at)
-  self.assertEqual(result['signal'],'SELL')
-  self.assertNotIn('WARMUP',result['reason_codes']);self.assertIn('TRAILING_EXIT',result['reason_codes'])
-  self.assertIn('toppen i det analyserede kursvindue',result['human_readable_explanation'])
+  self.assertEqual(result['signal'],'WAIT')
+  self.assertNotIn('TRAILING_EXIT',result['reason_codes'])
+  self.assertEqual(result['position_trailing']['status'],'WAITING_FOR_VERIFIED_POSITION_HISTORY')
  def test_smaller_report_preserves_archived_candidate_sources_and_session(self):
   original=self.fixture.r;compact=copy.deepcopy(original)
   compact.update(report_id='synthetic-compact-history',candidates=[],journal=[])

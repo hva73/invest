@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   signal-journey:
-    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue-13-signal-experience'
+    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue-13-signal-experience' || github.event.pull_request.head.ref == 'codex/issue13-signal-correctness')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -23,10 +23,12 @@ jobs:
         env:
           PYTHONPATH: .:tests
         run: |
-          python3 -m unittest tests.test_web_push tests.test_review_signal_fixes tests.test_market_data tests.test_hotwatch_engine tests.test_signal_readiness
+          python3 -m unittest tests.test_issue13_entry_basis tests.test_web_push tests.test_review_signal_fixes tests.test_market_data tests.test_hotwatch_engine tests.test_signal_readiness
           node tests/test_dashboard_data.js
           node tests/test_dashboard_attention.js
           node tests/test_signal_notice.js
+          node tests/test_signal_explanation.js
+          node tests/test_notification_ui.cjs
           node tests/test_push_service_worker.js
       - name: Test mobile push journey
         env:

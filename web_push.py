@@ -174,11 +174,16 @@ def _exit_rearmed(c,watch_id,event_key):
     """Only a fresh, verified calculation with no exit trigger ends an episode."""
     event=c.execute('SELECT created FROM hw_events WHERE watch_row_id=? AND event_id=?',(watch_id,event_key)).fetchone()
     if not event:return False
+    first=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? AND calculated=? ORDER BY id DESC LIMIT 1',(watch_id,event['created'])).fetchone()
+    try:prior_basis=(json.loads(first['payload']).get('position_trailing') or {}).get('basis') if first else None
+    except (ValueError,TypeError,AttributeError):prior_basis=None
     rows=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? AND calculated>? ORDER BY id',(watch_id,event['created'])).fetchall()
     for row in rows:
         try:
             result=json.loads(row['payload']);codes=set(result.get('reason_codes',[]))
             if result.get('signal')=='WAIT' and codes=={'NO_TRIGGER'} and result.get('new_market_observation') is True and result.get('position_context',{}).get('position')=='held' and result.get('risk_level')=='normal':return True
+            trailing=result.get('position_trailing') or {}
+            if result.get('new_market_observation') is True and trailing.get('status')=='VERIFIED' and trailing.get('basis') and trailing['basis']!=prior_basis:return True
         except (ValueError,TypeError,AttributeError):continue
     return False
 

@@ -229,6 +229,17 @@ class Push(unittest.TestCase):
   recovery={'signal':'WAIT','reason_codes':['NO_TRIGGER'],'new_market_observation':True,'position_context':{'position':'held'},'risk_level':'normal','risk_parameters':{'stop_price':'10'}}
   with app.connect() as c:c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],(self.now+timedelta(seconds=1)).isoformat(),json.dumps(recovery),'x'))
   critical(2);self.assertEqual(len(sent),2)
+ def test_new_verified_position_basis_rearms_exit_without_duplicate_pushes(self):
+  with app.connect() as c:
+   engine.event(c,self.watch,'SELL_SIGNAL',self.now,'first cycle')
+   event=c.execute("SELECT event_id FROM hw_events WHERE watch_row_id=? AND event_type='SELL_SIGNAL' ORDER BY id DESC LIMIT 1",(self.watch['id'],)).fetchone()['event_id']
+   def calc(at,basis):
+    result={'signal':'WAIT','reason_codes':['CONFIRMATION_PENDING'],'new_market_observation':True,'position_trailing':{'status':'VERIFIED','basis':basis}}
+    c.execute('INSERT INTO hw_calculations(watch_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?)',(self.watch['id'],at.isoformat(),json.dumps(result),'x'))
+   calc(self.now,'cycle-one');calc(self.now+timedelta(seconds=1),'cycle-one')
+   self.assertFalse(web_push._exit_rearmed(c,self.watch['id'],event))
+   calc(self.now+timedelta(seconds=2),'cycle-two')
+   self.assertTrue(web_push._exit_rearmed(c,self.watch['id'],event))
  def test_critical_stop_is_reported_when_data_is_temporarily_unavailable(self):
   self.subscribe();sent=[];self.event('SELL_SIGNAL')
   with patch('web_push._actionable',return_value='SELL'):web_push.dispatch_one(app.connect,self.now,lambda s,p,t:sent.append(p))

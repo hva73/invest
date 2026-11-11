@@ -129,9 +129,9 @@ def quiet_market_interval(c,request,profile,now,interval,sample=None):
  if seconds<=300:return interval
  return max(interval,min(120,int(seconds-300)))
 
-def observation_poll_interval(c,request,profile,now,sample):
+def observation_poll_interval(c,request,profile,now,sample,baseline=None):
  """Recheck aging live trades at the existing ACTIVE cadence, within budget."""
- interval=effective_poll_interval(c,request,profile)
+ interval=effective_poll_interval(c,request,profile) if baseline is None else baseline
  if sample and request['provider']=='eodhd' and sample.get('price_time_kind')=='trade' and sample.get('market_status') in ('REGULAR','PRE','AFTER'):
   age=min(request['risk']['max_quote_age_s'],GLOBAL_RISK['max_quote_age_s'])
   deadlines=[stamp(sample['event_time']).timestamp()+age]
@@ -143,7 +143,7 @@ def observation_poll_interval(c,request,profile,now,sample):
    deadlines.extend([stamp(sample['bar_history'][-1]['bar_open_at']).timestamp()+60+age,stamp(sample['bar_evidence']['schedule_received_at']).timestamp()+age])
   remaining=min(deadlines)-now.timestamp()
   if remaining<=interval:
-   interval=min(interval,effective_poll_interval(c,request,'ACTIVE'))
+   interval=min(interval,interval if profile=='ACTIVE' else effective_poll_interval(c,request,'ACTIVE'))
  return quiet_market_interval(c,request,profile,now,interval,sample)
 
 def init(c):
@@ -548,6 +548,20 @@ def view(c,row,now=None):
  if row['last_error']:display_reasons.append(row['last_error'])
  if stale and row['last_data']:display_reasons.append('DATA_STALE')
  effective='NO_DATA' if stale and state.get('signal') not in ['PAUSE','NO_DATA'] else state.get('signal','NO_DATA')
+ # Legacy calculations used the market-window high. Never present or dispatch
+ # that historical trailing signal as a currently verified position exit.
+ if effective in ('SELL','REDUCE') and last:
+  old_calculation=json.loads(last['payload']);old_reasons=set(old_calculation.get('reason_codes',[]))
+  if 'TRAILING_EXIT' in old_reasons and old_calculation.get('signal_basis') not in ('verified_position_high','price_context') and not old_reasons.intersection({'STOP_BREACHED','EXIT_DEADLINE'}):
+   effective='NO_DATA';display_reasons.append('POSITION_TRAILING_EVIDENCE_REQUIRED')
+  elif old_calculation.get('signal_basis')=='verified_position_high':
+   from hotwatch_strategy import position_trailing
+   check_risk=dict(request['risk']);portfolio_ids=request.get('portfolio_ids',[])
+   if len(portfolio_ids)==1:check_risk['_position_scope']=checksum({'asset_id':request['asset_id'],'portfolio_id':portfolio_ids[0],'watch_id':row['watch_id'],'trade_cycle_id':request.get('trade_cycle_id')})
+   check_sample=dict(json.loads(sample['payload']),context=context) if sample and context else None
+   proof,_=position_trailing(check_sample,check_risk,state,now,False) if check_sample else (None,None)
+   if not proof or not proof.get('high') or proof['high']!=(old_calculation.get('position_trailing') or {}).get('high'):
+    effective='NO_DATA';display_reasons.append('POSITION_TRAILING_EVIDENCE_REQUIRED')
  if effective not in ('NO_DATA','PAUSE') and (not context or context.get('status')!='verified' or not context.get('as_of') or not 0<=(now-stamp(context['as_of'])).total_seconds()<=300):effective='NO_DATA';display_reasons.append('POSITION_CONTEXT_UNKNOWN')
  if sample and effective not in ('NO_DATA','PAUSE'):
   latest_sample=json.loads(sample['payload']);max_age=request['risk']['max_quote_age_s']
@@ -555,7 +569,7 @@ def view(c,row,now=None):
    fields=['status_at']+(['bid_at','ask_at'] if effective=='BUY' else [])
    if any(not latest_sample.get(k) or not 0<=(now-stamp(latest_sample[k])).total_seconds()<=max_age for k in fields):effective='NO_DATA';display_reasons.append('MARKET_EVIDENCE_STALE')
    computed=json.loads(last['payload']) if last else {}
-   price_exit=effective in ('SELL','REDUCE') and (computed.get('signal_basis') in ('price_context','live_price_window') or set(computed.get('reason_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE'})
+   price_exit=effective in ('SELL','REDUCE') and (computed.get('signal_basis') in ('price_context','verified_position_high') or set(computed.get('reason_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE'})
    if latest_sample.get('bar_history') and computed.get('analysis_uses_bars',True) and not price_exit:
     from datetime import timedelta
     try:
@@ -1145,6 +1159,11 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
    cur=c.execute('INSERT INTO hw_samples(watch_row_id,source,sample_id,event_epoch,received,payload,digest) VALUES(?,?,?,?,?,?,?)',(row['id'],sample['source'],sample['sample_id'],stamp(sample['event_time']).timestamp(),now.isoformat(),canonical(sample),checksum(sample)))
    sample_row_id=cur.lastrowid
   strategy_data=json.loads(row['strategy']);state=json.loads(row['state'])
+  previous_calculation=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone() if state.get('signal')=='SELL' or state.get('pending')=='SELL' else None
+  if previous_calculation:
+   prior=json.loads(previous_calculation['payload']);codes=set(prior.get('reason_codes',[]))
+   if 'TRAILING_EXIT' in codes and prior.get('signal_basis') not in ('verified_position_high','price_context') and not codes.intersection({'STOP_BREACHED','EXIT_DEADLINE'}):
+    state.update(signal='NO_DATA',pending=None,confirmations=0,pending_since=None)
   if same_history:
    bar_samples,samples,metrics=prepared_bars,prepared_samples,prepared_metrics
   else:
@@ -1174,6 +1193,9 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   from intel_workflows import candidate_currentness
   currentness={'status':'CURRENT'} if request.get('report_id')=='manual-pluto' else candidate_currentness(c,uid,mode,row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery') if request.get('report_id')!='automatic-holdings' else {'status':'UNKNOWN'}
   risk=dict(request['risk'],entry_allowed=request.get('watch_mode','both')!='exit' and currentness['status'] in ('CURRENT','REVIEW_DUE') and (not decision or decision[1]['status']!='FRAVÆLG'),exit_allowed=request.get('watch_mode','both')!='entry')
+  # Never aggregate high-water marks across depots or trade cycles.
+  if len(request.get('portfolio_ids',[]))==1:
+   risk['_position_scope']=checksum({'asset_id':request['asset_id'],'portfolio_id':request['portfolio_ids'][0],'watch_id':wid,'trade_cycle_id':request.get('trade_cycle_id')})
   import hotwatch_buy_plan
   risk_sample,risk,buy_plan=hotwatch_buy_plan.apply(c,row,request,sample,risk,now)
   result,nextstate=calculate(risk_sample,metrics,strategy_data,risk,state,now,new_market_event=new_market_event)
@@ -1249,10 +1271,10 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   adaptive='CRITICAL' if result['risk_level']=='critical' else 'ACTIVE' if metrics.get('breakout') or nextstate.get('volume_spike') else 'IDLE' if sample['market_status'] in ['CLOSED','HALTED'] else request['profile']
   nextstate['adaptive_profile']=adaptive
   nextstate['provider_floor_s']=provider_floor(request['provider'])
-  interval=observation_poll_interval(c,request,adaptive,now,sample)
+  baseline=effective_poll_interval(c,request,adaptive)
+  interval=observation_poll_interval(c,request,adaptive,now,sample,baseline=baseline)
   if sample['market_status'] in ['CLOSED','HALTED']:interval=max(interval,300)
   nextstate['scheduled_interval_s']=interval
-  baseline=effective_poll_interval(c,request,adaptive)
   nextstate['quiet_market_poll']=interval>baseline
   nextstate['quiet_baseline_s']=baseline if interval>baseline else None
   c.execute('UPDATE hw_sessions SET status=?,state=?,updated=?,last_data=?,last_calculation=?,next_due=?,failures=0,last_error=NULL,lease_owner=NULL,lease_until=0 WHERE id=?',(new_status,canonical(nextstate),now.isoformat(),sample['event_time'],now.isoformat(),now.timestamp()+interval,row['id']))
@@ -1322,6 +1344,9 @@ def observe_context(connect,uid,wid,mode,context,now=None,lease=None,broker_sour
   cycle=request.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':wid})[:24]
   candidate_lifecycle.observe_pluto(c,uid,mode,request['candidate_id'],context,now.isoformat(),wid,cycle,'NO_DATA',synthetic=request['provider']=='synthetic')
   material=lambda value:{k:v for k,v in value.items() if k!='as_of'}
+  if not previous or material(old)!=material(context):
+   state=json.loads(row['state'])
+   if state.pop('position_trailing',None) is not None:c.execute('UPDATE hw_sessions SET state=? WHERE id=?',(canonical(state),row['id']))
   if not previous or material(old)!=material(context):event(c,row,'BROKER_CONTEXT_UPDATED',now,'Verified broker context without usable market timestamp; no market signal calculated',data_time=context['as_of'])
   return {'ok':True,'duplicate':False}
 
@@ -1358,7 +1383,9 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   if request['provider']=='eodhd' and code in ('EODHD_RATE_LIMIT','PROVIDER_RATE_BUDGET') and retry_after_s is not None:interval=max(1,retry_after_s)
   elif retry_after_s is not None:interval=max(interval,max(0,retry_after_s))
   state['scheduled_interval_s']=interval
-  baseline=effective_poll_interval(c,request,state.get('adaptive_profile',request['profile']))
+  # Only stale-data scheduling uses the quiet-market baseline. Other errors
+  # do not need a full shared-session budget lookup while holding the writer.
+  baseline=effective_poll_interval(c,request,state.get('adaptive_profile',request['profile'])) if code=='DATA_STALE' else None
   state['quiet_market_poll']=code=='DATA_STALE' and interval>baseline
   state['quiet_baseline_s']=baseline if state['quiet_market_poll'] else None
   if row['last_error']!=code:
@@ -1405,8 +1432,9 @@ def release(connect,job,now=None,sample=None,pending_feed=False):
    c.execute('UPDATE hw_sessions SET lease_owner=NULL,lease_until=0 WHERE id=? AND lease_owner=?',(job['id'],job['lease_owner']))
    return
   profile=json.loads(job.get('state') or '{}').get('adaptive_profile') or request['profile']
-  interval=observation_poll_interval(c,request,profile,now,sample)
-  baseline=effective_poll_interval(c,request,profile);reduced=interval>baseline
+  baseline=effective_poll_interval(c,request,profile)
+  interval=observation_poll_interval(c,request,profile,now,sample,baseline=baseline)
+  reduced=interval>baseline
   c.execute("UPDATE hw_sessions SET next_due=?,state=json_set(state,'$.scheduled_interval_s',?,'$.quiet_market_poll',json(?),'$.quiet_baseline_s',?),lease_owner=NULL,lease_until=0 WHERE id=? AND lease_owner=?",(now.timestamp()+interval,interval,'true' if reduced else 'false',baseline if reduced else None,job['id'],job['lease_owner']))
 
 

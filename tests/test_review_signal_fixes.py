@@ -63,22 +63,41 @@ class ReviewFixes(unittest.TestCase):
   s=self.sample(offset=91);r=self.ingest(s,self.at+timedelta(seconds=91))['calculation']
   self.assertEqual(r['signal'],'SELL');self.assertEqual(r['supporting_metrics']['bar_history_status'],'INVALID_OR_STALE')
   with app.connect() as c:self.assertEqual(len(json.loads(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=(SELECT id FROM hw_sessions WHERE watch_id=?)',(self.req['watch_id'],)).fetchone()[0])['bar_history']),40)
+ def test_legacy_trailing_is_not_current_and_recalculates_independent_exit(self):
+  with app.connect() as c:
+   req=copy.deepcopy(self.req);req['risk']['stop_price']=None;c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
+  self.ingest(self.sample('94',0))
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True);state=json.loads(row['state']);state['signal']='SELL';c.execute('UPDATE hw_sessions SET state=? WHERE id=?',(json.dumps(state),row['id']))
+   calc=c.execute('SELECT id,payload FROM hw_calculations WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone();payload=json.loads(calc['payload']);payload.update(signal='SELL',reason_codes=['TRAILING_EXIT'],signal_basis='live_price_window');c.execute('UPDATE hw_calculations SET payload=? WHERE id=?',(json.dumps(payload),calc['id']))
+   engine.event(c,row,'SELL_SIGNAL',self.at,'Historical trailing signal',data_time=self.at.isoformat())
+  view=self.view(0);self.assertEqual(view['signal'],'NO_DATA');self.assertIn('POSITION_TRAILING_EVIDENCE_REQUIRED',view['display_reason_codes']);self.assertNotEqual(view['last_action_signal']['state'],'ACTIVE')
+  import web_push
+  with app.connect() as c:self.assertIsNone(web_push._actionable(c,engine.row_for(c,1,self.req['watch_id'],True),self.at))
+  r=self.ingest(self.sample('94',10),self.at+timedelta(seconds=10))['calculation']
+  self.assertNotIn('TRAILING_EXIT',r['reason_codes']);self.assertNotEqual(r['signal'],'SELL')
  def test_trailing_uses_live_price_and_does_not_latch_after_rebound(self):
   with app.connect() as c:
-   req=copy.deepcopy(self.req);req['risk']['stop_price']=None;c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
-  for offset,expected in [(0,'WAIT'),(10,'WAIT'),(20,'SELL')]:
-   r=self.ingest(self.sample(offset=offset),self.at+timedelta(seconds=offset))['calculation'];self.assertEqual(r['signal'],expected);self.assertEqual(r['supporting_metrics']['distance_high_pct'],'-6.00')
-  r=self.ingest(self.sample('100',30),self.at+timedelta(seconds=30))['calculation'];self.assertEqual(r['signal'],'WAIT')
-  a=self.view(30)['last_action_signal'];self.assertEqual(a['state'],'WITHDRAWN');self.assertIn('Kursen',a['reason']);self.assertIsNone(a['acknowledged_at'])
+   req=copy.deepcopy(self.req);req['risk']['stop_price']=None;req['portfolio_ids']=[1];c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
+  for offset,price,expected in [(0,'100','WAIT'),(10,'100','WAIT'),(20,'94','WAIT'),(30,'94','WAIT'),(40,'94','SELL')]:
+   sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True)
+   r=self.ingest(sample,self.at+timedelta(seconds=offset))['calculation'];self.assertEqual(r['signal'],expected)
+  self.assertEqual(self.view(40)['signal'],'SELL')
+  sample=self.sample('100',50);sample['context'].update(orders_complete=True,position_history_complete=True)
+  r=self.ingest(sample,self.at+timedelta(seconds=50))['calculation'];self.assertEqual(r['signal'],'WAIT')
+  a=self.view(50)['last_action_signal'];self.assertEqual(a['state'],'WITHDRAWN');self.assertIn('Kursen',a['reason']);self.assertIsNone(a['acknowledged_at'])
  def test_real_event_generation_ignores_small_ticks_but_emits_trailing_worsening(self):
   with app.connect() as c:
-   req=copy.deepcopy(self.req);req['risk']['stop_price']=None;c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
-  for offset in (0,10,20):self.ingest(self.sample('94',offset),self.at+timedelta(seconds=offset))
-  for offset,price in ((30,'93.999'),(40,'93.998'),(50,'93.997')):self.ingest(self.sample(price,offset),self.at+timedelta(seconds=offset))
+   req=copy.deepcopy(self.req);req['risk']['stop_price']=None;req['portfolio_ids']=[1];c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
+  def put(price,offset):
+   sample=self.sample(price,offset);sample['context'].update(orders_complete=True,position_history_complete=True)
+   return self.ingest(sample,self.at+timedelta(seconds=offset))
+  for offset,price in ((0,'100'),(10,'100'),(20,'94'),(30,'94'),(40,'94')):put(price,offset)
+  for offset,price in ((50,'93.999'),(60,'93.998'),(70,'93.997')):put(price,offset)
   with app.connect() as c:
    row=engine.row_for(c,1,self.req['watch_id'],True)
    self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE watch_row_id=? AND event_type='TRAILING_EXIT_WORSENED'",(row['id'],)).fetchone()[0],0)
-  self.ingest(self.sample('92.12',60),self.at+timedelta(seconds=60))
+  put('92.12',80)
   with app.connect() as c:self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE watch_row_id=? AND event_type='TRAILING_EXIT_WORSENED'",(row['id'],)).fetchone()[0],1)
  def test_stop_can_recur_after_unknown_context_without_verified_recovery(self):
   self.ingest(self.sample('94',0),self.at)
