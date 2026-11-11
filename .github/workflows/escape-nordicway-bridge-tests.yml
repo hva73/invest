@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   offline-tests:
-    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue16-readonly-activation'
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue-16-nordicway-bridge'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Test requests, host verification, redaction and bounded transport
-        run: python -m unittest tests.test_nordicway_request tests.test_nordicway_hostkey tests.test_nordicway_readonly_diagnostics tests.test_nordicway_readonly_client tests.test_nordicway_release_preflight tests.test_nordicway_server_guard
+        run: python -m unittest tests.test_nordicway_request tests.test_nordicway_hostkey tests.test_nordicway_readonly_diagnostics tests.test_nordicway_readonly_client tests.test_nordicway_release_preflight tests.test_nordicway_server_guard tests.test_nordicway_provision_readonly tests.test_nordicway_release_stage tests.test_nordicway_release_service tests.test_nordicway_release_backup tests.test_updater.Updater.test_backup_restore_after_simulated_migration tests.test_updater.Updater.test_database_snapshot_occurs_with_worker_and_supervisor_quiesced tests.test_updater.Updater.test_snapshot_failure_preserves_code_and_releases_worker_locks tests.test_updater.Updater.test_busy_worker_does_not_create_incomplete_backup tests.test_updater.Updater.test_wal_mode_is_rejected_before_code_is_changed tests.test_updater.Updater.test_snapshot_copy_failure_releases_database_and_keeps_old_code
       - name: Test encrypted synthetic key with ephemeral SSH agent
         run: |
           set -eu

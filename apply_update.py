@@ -1,7 +1,7 @@
 """Run this file from an extracted ZIP under escape_app/opdatering.
 Stop the application first. The motor starts when Passenger starts the app.
 """
-import os,shutil,sqlite3,tempfile,fcntl,time
+import os,shutil,sqlite3,tempfile,fcntl,time,subprocess,sys
 from contextlib import contextmanager
 from datetime import datetime,timezone
 from pathlib import Path
@@ -33,6 +33,48 @@ def quiesce_hotwatch(target,timeout=30):
         for fd in reversed(locks):os.close(fd)
         if created:disabled.unlink(missing_ok=True)
 
+@contextmanager
+def locked_database_snapshot(database, destination):
+    """Keep SQLite writers blocked across snapshot and code replacement.
+
+    Copy in a child process: closing another descriptor for the same SQLite
+    file in this process can release POSIX advisory locks unexpectedly.
+    """
+    if database.parent.is_symlink() or database.is_symlink():raise ValueError('Uventet databasesti')
+    if any(Path(str(database)+suffix).exists() or Path(str(database)+suffix).is_symlink() for suffix in ('-wal','-journal','-shm')):
+        raise RuntimeError('Databasen er ikke klar til en låst backup')
+    original=None;copy=None
+    try:
+        original=sqlite3.connect(str(database),timeout=3,isolation_level=None)
+        original.execute('BEGIN EXCLUSIVE')
+        if original.execute('PRAGMA journal_mode').fetchone()!=('delete',):
+            raise RuntimeError('Uunderstøttet databasejournal; ingen kodefiler er ændret')
+        if any(Path(str(database)+suffix).exists() or Path(str(database)+suffix).is_symlink() for suffix in ('-wal','-journal','-shm')):
+            raise RuntimeError('Databasen er ikke klar til en låst backup')
+        identity=database.stat()
+        copy_script=("import os,shutil,sys\n"
+                     "fd=os.open(sys.argv[2],os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_NOFOLLOW',0),0o600)\n"
+                     "with open(sys.argv[1],'rb') as source,os.fdopen(fd,'wb') as target:\n"
+                     " shutil.copyfileobj(source,target,1024*1024);target.flush();os.fsync(target.fileno())\n")
+        subprocess.run([sys.executable,'-I','-S','-c',copy_script,str(database),str(destination)],
+                       check=True,timeout=300,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        current=database.stat()
+        if database.is_symlink() or (identity.st_dev,identity.st_ino)!=(current.st_dev,current.st_ino):
+            raise RuntimeError('Databasestien blev ændret under backup')
+        os.chmod(destination,0o600)
+        directory_fd=os.open(destination.parent,os.O_RDONLY|getattr(os,'O_DIRECTORY',0))
+        try:os.fsync(directory_fd)
+        finally:os.close(directory_fd)
+        copy=sqlite3.connect(f'file:{destination}?mode=ro',uri=True)
+        if copy.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RuntimeError('Databasebackup kunne ikke valideres')
+        copy.close();copy=None
+        yield
+    finally:
+        if copy is not None:copy.close()
+        if original is not None:
+            if original.in_transaction:original.rollback()
+            original.close()
+
 def apply(source,target):
     source=Path(source).resolve();target=Path(target).resolve()
     if source==target or target not in source.parents or 'opdatering' not in source.relative_to(target).parts:
@@ -44,39 +86,39 @@ def apply(source,target):
         if not file.is_file() or file.is_symlink() or source not in file.resolve().parents:raise ValueError('Opdateringen mangler en forventet kodefil')
         destination=target/name
         if destination.is_symlink() or target not in destination.resolve().parents:raise ValueError('Uventet destination')
-    backup_root=target.parent/'.escape_backups';backup_root.mkdir(mode=0o700,exist_ok=True);os.chmod(backup_root,0o700)
-    backup=Path(tempfile.mkdtemp(prefix=datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-'),dir=backup_root));os.chmod(backup,0o700)
-    with sqlite3.connect(f'file:{database}?mode=ro',uri=True) as original,sqlite3.connect(backup/'escape.db') as copy:
-        original.backup(copy)
-        if copy.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RuntimeError('Databasebackup kunne ikke valideres')
-    os.chmod(backup/'escape.db',0o600)
-    key=target/'var/keys/token.key'
-    if key.exists():
-        if key.is_symlink():raise ValueError('Uventet nøglesti')
-        shutil.copyfile(key,backup/'token.key');os.chmod(backup/'token.key',0o600)
-    push_key=target/'var/keys/push_vapid.pem'
-    if push_key.exists():
-        if push_key.is_symlink():raise ValueError('Uventet notifikationsnøgle')
-        shutil.copyfile(push_key,backup/'push_vapid.pem');os.chmod(backup/'push_vapid.pem',0o600)
-    existed=[]
-    for name in FILES:
-        destination=target/name
-        if destination.exists():
-            saved=backup/'code'/name;saved.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(destination,saved);existed.append(name)
-    # Stage everything before replacing the first code file.
-    with quiesce_hotwatch(target), tempfile.TemporaryDirectory(prefix='.update-stage-',dir=target) as stage:
-        stage=Path(stage)
-        for name in FILES:
-            file=stage/name;file.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source/name,file);os.chmod(file,0o644)
-        replaced=[]
-        try:
+    # Keep both motor locks across snapshot and code replacement. The caller
+    # must separately stop and verify Passenger before calling this function.
+    with quiesce_hotwatch(target):
+        backup_root=target.parent/'.escape_backups';backup_root.mkdir(mode=0o700,exist_ok=True);os.chmod(backup_root,0o700)
+        backup=Path(tempfile.mkdtemp(prefix=datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-'),dir=backup_root));os.chmod(backup,0o700)
+        with locked_database_snapshot(database, backup/'escape.db'):
+            key=target/'var/keys/token.key'
+            if key.exists():
+                if key.is_symlink():raise ValueError('Uventet nøglesti')
+                shutil.copyfile(key,backup/'token.key');os.chmod(backup/'token.key',0o600)
+            push_key=target/'var/keys/push_vapid.pem'
+            if push_key.exists():
+                if push_key.is_symlink():raise ValueError('Uventet notifikationsnøgle')
+                shutil.copyfile(push_key,backup/'push_vapid.pem');os.chmod(backup/'push_vapid.pem',0o600)
+            existed=[]
             for name in FILES:
-                destination=target/name;destination.parent.mkdir(parents=True,exist_ok=True);os.replace(stage/name,destination);replaced.append(name)
-        except Exception:
-            for name in reversed(replaced):
-                if name in existed:shutil.copy2(backup/'code'/name,target/name)
-                else:(target/name).unlink(missing_ok=True)
-            raise
+                destination=target/name
+                if destination.exists():
+                    saved=backup/'code'/name;saved.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(destination,saved);existed.append(name)
+            # Stage everything before replacing the first code file.
+            with tempfile.TemporaryDirectory(prefix='.update-stage-',dir=target) as stage:
+                stage=Path(stage)
+                for name in FILES:
+                    file=stage/name;file.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source/name,file);os.chmod(file,0o644)
+                replaced=[]
+                try:
+                    for name in FILES:
+                        destination=target/name;destination.parent.mkdir(parents=True,exist_ok=True);os.replace(stage/name,destination);replaced.append(name)
+                except Exception:
+                    for name in reversed(replaced):
+                        if name in existed:shutil.copy2(backup/'code'/name,target/name)
+                        else:(target/name).unlink(missing_ok=True)
+                    raise
     disabled=target/'var/hotwatch-autostart.disabled'
     enabled=target/'var/hotwatch-autostart.enabled'
     if not disabled.exists():
