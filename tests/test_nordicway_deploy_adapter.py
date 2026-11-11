@@ -80,10 +80,25 @@ class AdapterIntegration(unittest.TestCase):
              patch.object(adapter, 'verify_backup', side_effect=ValueError('invalid_backup')):
             release = nordicway_release_stage.stage(self.checkout, self.app, self.sha,
                                                     approved_sha=self.sha)
-            with self.assertRaisesRegex(ValueError, 'invalid_backup'):
+            with self.assertRaisesRegex(sequence.BackupVerificationFailure, 'backup_unverified'):
                 adapter.backup_and_apply(release)
         self.assertEqual((self.app / 'app.py').read_text(), 'old')
         self.assertEqual((self.app / 'BUILD_COMMIT').read_text().strip(), '0' * 40)
+
+    def test_failed_prewrite_backup_restarts_unchanged_service(self):
+        adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
+                                   lambda: True, lambda sha: True, self.service,
+                                   quota_reader=lambda path, required: {
+                                       'required_bytes': required,
+                                       'account_free_lower_bytes': required + 1,
+                                       'filesystem_free_bytes': required + 1})
+        with patch.object(apply_update, 'FILES', ('app.py', 'BUILD_COMMIT')), \
+             patch.object(adapter, 'verify_backup', side_effect=ValueError('invalid_backup')):
+            result = sequence.deploy(adapter, self.sha)
+        self.assertEqual((result.status, result.stage), ('failed', 'backup_and_apply'))
+        self.assertTrue(result.service_restored)
+        self.assertEqual(self.service.state, 'started')
+        self.assertEqual((self.app / 'app.py').read_text(), 'old')
 
     def test_interrupted_file_replacement_restores_original_code_and_database(self):
         adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
