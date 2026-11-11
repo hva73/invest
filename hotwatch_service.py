@@ -1011,7 +1011,7 @@ def admin_diagnostics(connect,uid,now=None):
   if row['last_error'] and re.fullmatch(r'[A-Za-z0-9_]{1,100}',row['last_error']):errors[row['last_error']]+=1
   if row['status']!='PAUSED' and row['next_due']<=epoch and row['lease_until']<=epoch:overdue.append({'ticker':watches[ref],'late_s':round(epoch-row['next_due'],1)})
  records=[];files_read=0
- numeric=('queue_ms','claim_ms','provider_ms','ingest_compute_ms','adapter_to_journal_ms','warmup_ms','worker_busy_ms','pluto_context_ms','eodhd_http_ms','websocket_capture_ms','begin_wait_ms','occupied_workers','due_sessions','quiet_avoided_estimate')
+ numeric=('queue_ms','claim_ms','provider_ms','ingest_compute_ms','adapter_to_journal_ms','warmup_ms','worker_busy_ms','pluto_context_ms','eodhd_http_ms','websocket_capture_ms','begin_wait_ms','scope_entry_wait_ms','sqlite_begin_ms','occupied_workers','due_sessions','quiet_avoided_estimate')
  for item in (path,Path(str(path)+'.1'),Path(str(path)+'.2'),Path(str(path)+'.3')):
   try:
    with item.open('rb') as f:f.seek(0,2);f.seek(max(0,f.tell()-1048576));lines=f.read().decode('utf-8',errors='replace').splitlines()
@@ -1181,7 +1181,7 @@ class Runner:
    journaled_at=engine.utc();ingest_done=time.perf_counter()
    job['scan_timing']['ingest_finished_at']=journaled_at.isoformat()
    timings={**job['scan_timing'],'websocket':getattr(adapter,'capture_metrics',[]),'provider_ms':round((provider_done-poll_started)*1000,3),'adapter_to_journal_ms':round((journaled_at-adapter_received).total_seconds()*1000,3),'ingest_compute_ms':round((ingest_done-provider_done)*1000,3),'event_to_adapter_receive_ms':round(adapter_latency_ms,3) if adapter_latency_ms is not None else None,'market_time_known':bool(sample.get('event_time')),'signal':result.get('calculation',{}).get('signal')}
-   timings.update({k:v for k,v in (result.get('sqlite_timing') or {}).items() if k in ('begin_wait_ms','work_before_commit_ms') and isinstance(v,(int,float))})
+   timings.update({k:v for k,v in (result.get('sqlite_timing') or {}).items() if k in ('begin_wait_ms','scope_entry_wait_ms','sqlite_begin_ms','work_before_commit_ms') and isinstance(v,(int,float))})
    telemetry=getattr(adapter,'last_telemetry',None)
    if isinstance(telemetry,dict):timings.update({k:telemetry[k] for k in ['eodhd_http_ms','pluto_context_ms','event_to_http_receive_ms','websocket_capture_ms','event_to_websocket_receive_ms'] if k in telemetry})
    diagnostics=getattr(adapter,'last_feed_diagnostics',None)

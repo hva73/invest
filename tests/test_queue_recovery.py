@@ -130,8 +130,10 @@ class QueueRecovery(unittest.TestCase):
   runner=Runner(app.connect);adapter=Mock();adapter.poll.return_value=fixture.tick(self.now);adapter.capture_metrics=[];adapter.last_partial_observations=[];adapter.last_telemetry={};adapter.last_feed_diagnostics={}
   runner.adapters[(1,'eodhd')]=adapter;runner.health=Mock();runner.log=Mock()
   def refresh(*args):time.sleep(.04)
-  with patch.object(engine,'claim',return_value=job),patch.object(engine,'ingest',return_value={'calculation':{'signal':'NO_DATA'}}),patch('hotwatch_warmup.refresh',side_effect=refresh):self.assertTrue(runner.once(self.now))
+  timing={'begin_wait_ms':3,'scope_entry_wait_ms':1,'sqlite_begin_ms':2,'work_before_commit_ms':4}
+  with patch.object(engine,'claim',return_value=job),patch.object(engine,'ingest',return_value={'calculation':{'signal':'NO_DATA'},'sqlite_timing':timing}),patch('hotwatch_warmup.refresh',side_effect=refresh):self.assertTrue(runner.once(self.now))
   args=runner.log.call_args.args;self.assertEqual(args[1],'processed');self.assertGreaterEqual(args[3]['warmup_ms'],35);self.assertGreaterEqual(args[3]['worker_busy_ms'],args[3]['warmup_ms'])
+  for key,value in timing.items():self.assertEqual(args[3][key],value)
  def test_stale_watch_defers_auxiliary_history_only_while_queue_is_overdue(self):
   from unittest.mock import Mock
   from hotwatch_service import Runner
