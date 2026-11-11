@@ -173,6 +173,17 @@ class FeedReuse(unittest.TestCase):
   metrics=self.adapter.capture_metrics[-1]
   self.assertEqual(metrics['source_age_s'],300);self.assertEqual(metrics['messages'],1)
   self.assertEqual(metrics['connections_opened'],1);self.assertEqual(metrics['subscriptions_sent'],2)
+ def test_batch_limit_metrics_survive_symbol_split_and_cache_reuse(self):
+  capacity_fixture.LiveCapacity.add(self,'OTHER.US',1,due=self.now.timestamp())
+  client=Mock();client.capture.return_value={'status':'OK','messages':[{'symbol':'OTHER','event_time':self.now.isoformat(),'received_at':self.now.isoformat(),'price':'200'}],'batch_valid_count':250,'batch_partial_count':0,'batch_limit_reached':True}
+  with patch('hotwatch_engine.verified_automatic_feed',return_value=True):
+   result=self.adapter.capture(client,'us_trades','MERC',self.job)
+   self.assertEqual(result['status'],'NO_MESSAGES')
+   self.assertTrue(self.adapter.capture_metrics[-1]['batch_limit_reached'])
+   self.assertEqual(self.adapter.capture_metrics[-1]['batch_valid_count'],250)
+   self.adapter.capture(client,'us_trades','MERC',self.job)
+  self.assertTrue(self.adapter.capture_metrics[-1]['cache_hit'])
+  self.assertTrue(self.adapter.capture_metrics[-1]['batch_limit_reached'])
  def test_cached_stale_trade_and_fresh_quotes_cannot_become_actionable(self):
   from decimal import Decimal
   from hotwatch_strategy import BASELINE,calculate

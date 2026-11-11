@@ -243,7 +243,9 @@ class EODHDFeeds:
      else:
       status=row.get('h');reason=row.get('r')
       messages.append({'symbol':actual,'event_time':at,'received_at':received_at,'trading_status':status if isinstance(status,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',status) else None,'reason':reason if isinstance(reason,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',reason) else None})
-   return measured('OK' if messages else 'NO_MESSAGES',path,messages=messages,message_count=len(messages),partial_messages=partial_messages)
+   # Counts describe the whole batch, before the adapter splits it by symbol.
+   # Reaching the bound does not prove that an unread message exists.
+   return measured('OK' if messages else 'NO_MESSAGES',path,messages=messages,message_count=len(messages),partial_messages=partial_messages,batch_valid_count=len(messages),batch_partial_count=len(partial_messages),batch_limit_reached=len(messages)>=max_messages or len(partial_messages)>=max_messages)
   except Exception as error:
    code=getattr(getattr(error,'response',None),'status_code',None)
    if code in (401,402,403):return measured('ENTITLEMENT_UNVERIFIED',path,http_status=code)
