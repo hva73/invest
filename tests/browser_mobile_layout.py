@@ -20,6 +20,8 @@ with sync_playwright() as p:
             before=nav.bounding_box();page.evaluate('window.scrollTo(0,700)');after=nav.bounding_box()
             assert abs(before['y']-after['y'])<1,(width,before,after)
             assert before['x']>=0 and before['x']+before['width']<=width+1,(width,before)
+            assert before['y']+before['height']<=height-8,(width,before)
+            assert page.locator('main').evaluate("n=>parseFloat(getComputedStyle(n).paddingBottom)")>=100
             assert page.locator('#mobile-more').is_visible()
             assert not page.locator('#admin-nav').is_visible()
             assert not page.locator('#mobile-more-panel').is_visible()
