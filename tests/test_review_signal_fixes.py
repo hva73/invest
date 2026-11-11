@@ -93,6 +93,25 @@ class ReviewFixes(unittest.TestCase):
   view=self.view(35);self.assertEqual(view['signal'],'NO_DATA');self.assertIn('POSITION_CONTEXT_CHANGED',view['display_reason_codes']);self.assertEqual(view['last_action_signal']['state'],'DATA_MISSING')
   with app.connect() as c:
    row=engine.row_for(c,1,self.req['watch_id'],True);state=json.loads(row['state']);self.assertIsNone(state['pending']);self.assertIsNone(web_push._actionable(c,row,now))
+ def test_legacy_sell_uses_saved_context_to_detect_position_change(self):
+  from test_hotwatch_engine import good_metrics
+  with app.connect() as c:
+   req=copy.deepcopy(self.req);req['risk']['stop_price']=None;req['portfolio_ids']=[1];c.execute('UPDATE hw_sessions SET request=? WHERE watch_id=?',(json.dumps(req),req['watch_id']))
+  metrics=good_metrics();metrics.update(return_3_pct='-3',breakdown=True)
+  with patch('hotwatch_engine.features',side_effect=lambda *args:copy.deepcopy(metrics)):
+   for offset in (0,10,20):result=self.ingest(self.sample('100',offset),self.at+timedelta(seconds=offset))['calculation']
+  self.assertEqual(result['signal'],'SELL')
+  # Simulate a calculation and state created before exit_context_key existed.
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True);state=json.loads(row['state']);state.pop('exit_context_key',None);c.execute('UPDATE hw_sessions SET state=? WHERE id=?',(json.dumps(state),row['id']))
+   calc=c.execute('SELECT id,payload FROM hw_calculations WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone();payload=json.loads(calc['payload']);payload.pop('exit_context_key',None);c.execute('UPDATE hw_calculations SET payload=? WHERE id=?',(json.dumps(payload),calc['id']))
+  now=self.at+timedelta(seconds=25);context=copy.deepcopy(self.sample('100',20)['context']);context.update(as_of=now.isoformat(),quantity='9')
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True);inserted=c.execute('INSERT INTO hw_context_events(watch_row_id,observed,payload) VALUES(?,?,?)',(row['id'],now.isoformat(),json.dumps(context))).lastrowid
+  self.assertEqual(self.view(25)['signal'],'NO_DATA') # readback works before state migration
+  with app.connect() as c:c.execute('DELETE FROM hw_context_events WHERE id=?',(inserted,))
+  engine.observe_context(app.connect,1,self.req['watch_id'],True,context,now,broker_source='pluto')
+  self.assertEqual(self.view(25)['signal'],'NO_DATA');self.assertEqual(self.view(25)['last_action_signal']['state'],'DATA_MISSING')
  def test_freshly_closed_position_withdraws_stop_but_held_quantity_change_does_not(self):
   sample=self.sample('94',0);self.ingest(sample)
   now=self.at+timedelta(seconds=10);context=copy.deepcopy(sample['context']);context.update(as_of=now.isoformat(),quantity='9')

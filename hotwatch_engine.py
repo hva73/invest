@@ -553,10 +553,11 @@ def view(c,row,now=None):
   effective='NO_DATA';display_reasons.append('POSITION_CONTEXT_CHANGED')
  if effective in ('SELL','REDUCE') and last:
   calculation=json.loads(last['payload']);reasons=set(calculation.get('reason_codes',[]))
-  if calculation.get('exit_context_key') and not reasons.intersection({'STOP_BREACHED','EXIT_DEADLINE'}):
+  if not reasons.intersection({'STOP_BREACHED','EXIT_DEADLINE'}):
    from hotwatch_strategy import exit_context_key
    ids=request.get('portfolio_ids',[]);scope=checksum({'asset_id':request['asset_id'],'portfolio_id':ids[0],'watch_id':row['watch_id'],'trade_cycle_id':request.get('trade_cycle_id')}) if len(ids)==1 else None
-   if not context or exit_context_key(context,scope)!=calculation['exit_context_key']:
+   prior_key=calculation.get('exit_context_key') or exit_context_key(calculation.get('position_context') or {},scope)
+   if prior_key and (not context or exit_context_key(context,scope)!=prior_key):
     effective='NO_DATA';display_reasons.append('POSITION_CONTEXT_CHANGED')
  if effective not in ('NO_DATA','PAUSE') and (not context or context.get('status')!='verified' or not context.get('as_of') or not 0<=(now-stamp(context['as_of'])).total_seconds()<=300):effective='NO_DATA';display_reasons.append('POSITION_CONTEXT_UNKNOWN')
  if sample and effective not in ('NO_DATA','PAUSE'):
@@ -1340,9 +1341,9 @@ def observe_context(connect,uid,wid,mode,context,now=None,lease=None,broker_sour
   state=json.loads(row['state'])
   from hotwatch_strategy import exit_context_key
   ids=request.get('portfolio_ids',[]);scope=checksum({'asset_id':request['asset_id'],'portfolio_id':ids[0],'watch_id':wid,'trade_cycle_id':request.get('trade_cycle_id')}) if len(ids)==1 else None
-  old_key=state.get('exit_context_key');new_key=exit_context_key(context,scope)
   latest=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
   sample_context=json.loads(latest['payload']).get('context',{}) if latest else {}
+  old_key=state.get('exit_context_key') or exit_context_key(sample_context,scope);new_key=exit_context_key(context,scope)
   current=not sample_context.get('as_of') or stamp(context['as_of'])>=stamp(sample_context['as_of'])
   if current:
    changed=bool(old_key and old_key!=new_key);closed=context.get('status')=='verified' and context.get('position')=='none'
