@@ -17,6 +17,7 @@ class Outcome:
     service_restored: bool
     backup: str | None = None
     backup_cleanup: str = 'not_run'
+    reason: str | None = None
 
 
 def deploy(adapter, sha):
@@ -90,7 +91,12 @@ def deploy(adapter, sha):
                         restored = True
                     except Exception:
                         pass
-                return Outcome('failed', stage, restored, str(backup) if backup else None)
+                reason = None
+                if stage == 'service_state':
+                    allowed = ('selector_failed', 'application_state_unknown',
+                               'service_status_unknown', 'state_record_failed')
+                    reason = str(exc) if isinstance(exc, ValueError) and str(exc) in allowed else 'service_state_unavailable'
+                return Outcome('failed', stage, restored, str(backup) if backup else None, reason=reason)
     except Exception:
         # Includes failure to acquire the deployment lock.
         return Outcome('failed', stage, False, None)

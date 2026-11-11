@@ -73,6 +73,14 @@ class AdapterIntegration(unittest.TestCase):
         with sqlite3.connect(str(Path(result.backup) / 'escape.db')) as db:
             self.assertEqual(db.execute('SELECT x FROM positions').fetchone(), ('kept',))
 
+    def test_status_observer_failure_has_fixed_category(self):
+        adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000, None, None, self.service)
+        def fail(state):
+            raise OSError('private path or sensitive details')
+        adapter.state_observer = fail
+        with self.assertRaisesRegex(ValueError, '^state_record_failed$'):
+            adapter.service_status()
+
     def test_restricted_runner_reaches_real_backup_and_update(self):
         import nordicway_deploy_guard
         import nordicway_deploy_runner

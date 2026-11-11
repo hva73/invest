@@ -182,9 +182,12 @@ def run(sha, token, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
             marker.unlink()
             _sync_dir(bridge)
         # Paths, tokens and exception details are deliberately not returned.
-        return {'operation': 'deploy', 'status': result.status, 'stage': result.stage,
+        reply = {'operation': 'deploy', 'status': result.status, 'stage': result.stage,
                 'service_restored': result.service_restored,
                 'recovery_required': marker.exists(), 'backup_cleanup': result.backup_cleanup}
+        if result.reason is not None:
+            reply['reason'] = result.reason
+        return reply
     except Exception:
         # Uncertainty is not proof that no production change occurred.
         if not sequence_started:

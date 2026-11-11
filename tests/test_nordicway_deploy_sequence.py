@@ -101,6 +101,18 @@ class SequenceTests(unittest.TestCase):
         self.assertEqual(seq.deploy(a, 'a' * 40).status, 'failed')
         self.assertNotIn('backup_and_apply', a.events)
 
+    def test_service_state_diagnostic_is_fixed_and_redacted(self):
+        for error, expected in ((ValueError('selector_failed'), 'selector_failed'),
+                                (ValueError('state_record_failed'), 'state_record_failed'),
+                                (ValueError('secret server content'), 'service_state_unavailable'),
+                                (OSError('secret file path'), 'service_state_unavailable')):
+            a = Adapter()
+            a.service_status = Mock(side_effect=error)
+            result = seq.deploy(a, 'a' * 40)
+            self.assertEqual((result.stage, result.reason), ('service_state', expected))
+            self.assertNotIn('secret', repr(result))
+            self.assertNotIn('stop', a.events)
+
 
 if __name__ == '__main__':
     unittest.main()

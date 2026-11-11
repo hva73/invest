@@ -127,7 +127,10 @@ class Adapter:
     def service_status(self):
         status = self.service.status()
         if self.state_observer is not None and status in ('started', 'stopped'):
-            self.state_observer(status)
+            try:
+                self.state_observer(status)
+            except Exception:
+                raise ValueError('state_record_failed') from None
         return status
 
     def stop_service(self):

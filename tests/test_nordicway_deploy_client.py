@@ -121,3 +121,14 @@ class ClientTests(unittest.TestCase):
                 result = client.run(self.env, transport)
             self.assertEqual(result['status'], 'unknown')
             self.assertTrue(result['recovery_required'])
+
+    def test_only_fixed_service_state_reasons_are_accepted(self):
+        reply = dict(self.reply, status='failed', stage='service_state',
+                     service_restored=False, backup_cleanup='not_run', reason='selector_failed')
+        send = Mock(return_value=SimpleNamespace(returncode=1, stdout=json.dumps(reply).encode()))
+        with patch.object(client, 'verify', return_value='host key\n'):
+            self.assertEqual(client.run(self.env, send)['reason'], 'selector_failed')
+            for value in ('secret content', 'other'):
+                reply['reason'] = value
+                send.return_value.stdout = json.dumps(reply).encode()
+                self.assertEqual(client.run(self.env, send)['status'], 'unknown')

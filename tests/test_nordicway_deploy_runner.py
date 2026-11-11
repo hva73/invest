@@ -74,6 +74,11 @@ class RunnerTests(unittest.TestCase):
                 self.assertFalse((self.bridge / 'deployment-incomplete.json').exists())
         self.assertEqual(self.run_deploy(Outcome('ok', 'complete', True))['status'], 'ok')
 
+    def test_service_state_reason_is_forwarded_without_recovery_marker(self):
+        result = self.run_deploy(Outcome('failed', 'service_state', False, reason='state_record_failed'))
+        self.assertEqual(result['reason'], 'state_record_failed')
+        self.assertFalse(result['recovery_required'])
+
     def test_stop_failure_still_requires_recovery(self):
         result = self.run_deploy(Outcome('failed', 'stop', False))
         self.assertTrue(result['recovery_required'])
