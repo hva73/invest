@@ -161,12 +161,12 @@ def prepare(repo, bridge, app, *, verify_runtime=_verify_runtime, verify_files=_
                 or type(record.get('motor_enabled')) is not bool or type(record.get('motor_disabled')) is not bool:
             raise ValueError('unexpected_recovery')
         _verify_bridge_modules(repo, bridge)
+        # Keep the recovery marker while closing the remote gate for all checks.
+        (bridge / 'deploy-enabled').unlink()
+        _sync(bridge)
         verify_files(repo, app)
         verify_runtime(app, bridge)
 
-        # Close the remote gate but retain the recovery marker throughout install.
-        (bridge / 'deploy-enabled').unlink()
-        _sync(bridge)
         if install is None:
             data = _git(repo, 'show', BUNDLE + ':tools/nordicway_install_bridge.py')
             expected = _git(repo, 'rev-parse', BUNDLE + ':tools/nordicway_install_bridge.py').strip()
@@ -201,10 +201,10 @@ def prepare(repo, bridge, app, *, verify_runtime=_verify_runtime, verify_files=_
         if _private_file(Path(archive_name), 1024) != original:
             raise ValueError('archive_failed')
         _sync(bridge)
-        _create(bridge / 'deploy-enabled', b'1\n')
         try:
             marker.unlink()
             _sync(bridge)
+            _create(bridge / 'deploy-enabled', b'1\n')
         except Exception:
             (bridge / 'deploy-enabled').unlink(missing_ok=True)
             if not os.path.lexists(marker):

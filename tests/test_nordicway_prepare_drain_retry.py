@@ -88,6 +88,18 @@ class PrepareRetryTests(unittest.TestCase):
                 self.assertTrue(self.marker.exists())
                 self.assertFalse((self.bridge / 'deploy-enabled').exists())
 
+    def test_first_verification_failure_leaves_gate_closed_and_marker_intact(self):
+        original = self.marker.read_bytes()
+        def check_files(repo, app):
+            self.assertFalse((self.bridge / 'deploy-enabled').exists())
+            raise ValueError('installed_file_mismatch')
+        self.files.side_effect = check_files
+        with self.assertRaisesRegex(ValueError, 'installed_file_mismatch'):
+            self.run_prepare()
+        self.assertEqual(self.marker.read_bytes(), original)
+        self.assertFalse((self.bridge / 'deploy-enabled').exists())
+        self.install.assert_not_called()
+
     def test_concurrent_marker_change_never_clears_recovery(self):
         def install(repo, bridge, bundle):
             self.marker.write_text('changed')
