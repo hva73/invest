@@ -44,6 +44,22 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn('/private/backup', str(result))
         self.assertFalse((self.bridge / 'deployment-incomplete.json').exists())
 
+    def test_complete_update_of_intentionally_stopped_app_clears_claim(self):
+        result = self.run_deploy(Outcome('updated_stopped', 'complete', False,
+                                        '/private/backup'))
+        self.assertEqual(result['status'], 'updated_stopped')
+        self.assertFalse(result['service_restored'])
+        self.assertFalse(result['recovery_required'])
+        self.assertFalse((self.bridge / 'deployment-incomplete.json').exists())
+        # No stale recovery marker should block the next independent release.
+        again = self.run_deploy(Outcome('updated_stopped', 'complete', False))
+        self.assertFalse(again['recovery_required'])
+
+    def test_stopped_release_with_failed_stage_stays_blocked(self):
+        result = self.run_deploy(Outcome('updated_stopped', 'verify_install', False))
+        self.assertTrue(result['recovery_required'])
+        self.assertTrue((self.bridge / 'deployment-incomplete.json').exists())
+
     def test_failure_blocks_a_second_attempt(self):
         result = self.run_deploy(Outcome('failed', 'backup_and_apply', False))
         self.assertTrue(result['recovery_required'])
