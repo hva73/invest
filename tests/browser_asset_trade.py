@@ -22,6 +22,7 @@ try:
   row=page.locator('.dash-row').filter(has=page.locator('.dash-instrument strong',has_text='TSLA'));row.locator('[data-dashboard-open]').first.click();dialog=page.locator('#dashboard-detail');expect(dialog).to_be_visible()
   
   graph=dialog.locator('.market-slot');expect(graph.locator('.market-line')).to_be_visible();graph.locator('[data-market-period=week]').click();expect(graph.locator('.market-line')).to_be_visible()
+  boxes=[graph.locator(f'[data-market-period={p}]').bounding_box() for p in ('day','week','month','year')];assert max(b['y'] for b in boxes)-min(b['y'] for b in boxes)<2,boxes
   screenshot_dir=os.environ.get('ESCAPE_SCREENSHOTS')
   if screenshot_dir:
    Path(screenshot_dir).mkdir(parents=True,exist_ok=True);page.screenshot(path=str(Path(screenshot_dir)/'holding-390.png'))
