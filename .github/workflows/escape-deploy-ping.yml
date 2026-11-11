@@ -1,0 +1,171 @@
+name: ESCAPE deploy SSH ping
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Ping, write-probe, deploy, or resume an approved release'
+        type: choice
+        options: [ping, write-probe, deploy, resume]
+        default: ping
+        required: true
+      release_sha:
+        description: 'Full server-approved commit SHA for deploy'
+        type: string
+        required: false
+  pull_request:
+    branches: [codex/issue-16-nordicway-bridge, codex/issue16-deploy-guard]
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+jobs:
+  tests:
+    if: github.event_name == 'pull_request' && github.repository == 'hva73/invest'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m unittest tests.test_nordicway_prepare_drain_retry tests.test_nordicway_deploy_request tests.test_nordicway_upgrade_probe_guard tests.test_nordicway_install_bridge tests.test_nordicway_deploy_guard tests.test_nordicway_deploy_runner tests.test_nordicway_deploy_client tests.test_nordicway_provision_deploy tests.test_nordicway_deploy_ping tests.test_nordicway_quota tests.test_nordicway_autostart tests.test_nordicway_deploy_sequence tests.test_nordicway_deploy_adapter tests.test_nordicway_release_backup tests.test_nordicway_release_stage tests.test_nordicway_release_service tests.test_nordicway_quiescence tests.test_nordicway_deploy_health tests.test_nordicway_writer_check tests.test_nordicway_uapi_probe tests.test_nordicway_uapi_quota
+  ping:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'ping' &&
+      github.repository == 'hva73/invest' &&
+      github.actor_id == '351122234' &&
+      github.triggering_actor == 'hva73' &&
+      github.ref == 'refs/heads/codex/escape-development'
+    runs-on: ubuntu-latest
+    environment: ESCAPE_NORDICWAY_DEPLOY
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Ping dedicated restricted identity
+        env:
+          NORDICWAY_DEPLOY_PING_AUTHORIZED: ${{ vars.ESCAPE_NORDICWAY_DEPLOY_PING_AUTHORIZED }}
+          NORDICWAY_KNOWN_HOST: ${{ secrets.ESCAPE_NORDICWAY_KNOWN_HOST }}
+          NORDICWAY_VERIFIED_FINGERPRINT: ${{ secrets.ESCAPE_NORDICWAY_VERIFIED_FINGERPRINT }}
+          NORDICWAY_PRIVATE_KEY: ${{ secrets.ESCAPE_NORDICWAY_DEPLOY_PRIVATE_KEY }}
+          NORDICWAY_KEY_PASSPHRASE: ${{ secrets.ESCAPE_NORDICWAY_DEPLOY_PASSPHRASE }}
+        run: |
+          set -eu
+          umask 077
+          if [ "$NORDICWAY_DEPLOY_PING_AUTHORIZED" != '1' ] || [ -z "$NORDICWAY_PRIVATE_KEY" ]; then
+            printf '%s\n' 'Dedicated deploy ping is not configured.'
+            exit 1
+          fi
+          python tools/nordicway_hostkey.py
+          eval "$(ssh-agent -s)" >/dev/null
+          askpass="$RUNNER_TEMP/escape-deploy-ssh-askpass"
+          trap 'ssh-agent -k >/dev/null 2>&1 || true; rm -f "$askpass"' EXIT
+          cat > "$askpass" <<'ASKPASS'
+          #!/bin/sh
+          printf '%s\n' "$NORDICWAY_KEY_PASSPHRASE"
+          ASKPASS
+          chmod 700 "$askpass"
+          export SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0
+          if ! printf '%s\n' "$NORDICWAY_PRIVATE_KEY" | ssh-add - >/dev/null 2>&1; then
+            printf '%s\n' 'The dedicated SSH credential could not be loaded.'
+            exit 1
+          fi
+          unset NORDICWAY_PRIVATE_KEY NORDICWAY_KEY_PASSPHRASE
+          python tools/nordicway_deploy_ping.py
+
+  quota_probe:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'ping' &&
+      github.repository == 'hva73/invest' &&
+      github.actor_id == '351122234' &&
+      github.triggering_actor == 'hva73' &&
+      github.ref == 'refs/heads/codex/escape-development'
+    runs-on: ubuntu-latest
+    environment: ESCAPE_NORDICWAY_DEPLOY
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check UAPI response shape
+        env:
+          ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
+        run: python tools/nordicway_uapi_probe.py
+
+  deploy:
+    if: >-
+      ((github.event_name == 'workflow_dispatch' &&
+        (inputs.operation == 'write-probe' || inputs.operation == 'deploy' || inputs.operation == 'resume')) ||
+       (github.event_name == 'issue_comment' && github.event.issue.number == 16 &&
+        startsWith(github.event.comment.body, 'ESCAPE_DEPLOY_V1 '))) &&
+      github.repository == 'hva73/invest' &&
+      github.actor_id == '351122234' &&
+      github.triggering_actor == 'hva73' &&
+      github.ref == 'refs/heads/codex/escape-development'
+    runs-on: ubuntu-latest
+    environment: ESCAPE_NORDICWAY_DEPLOY
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Validate fixed deployment request
+        id: release_request
+        run: python tools/nordicway_deploy_request.py
+      - name: Install approved release
+        env:
+          ESCAPE_RELEASE_SHA: ${{ steps.release_request.outputs.sha }}
+          ESCAPE_DEPLOY_OPERATION: ${{ steps.release_request.outputs.operation }}
+          ESCAPE_DEPLOY_AUTHORIZED: ${{ vars.ESCAPE_DEPLOY_AUTHORIZED }}
+          ESCAPE_WRITE_PROBE_AUTHORIZED: ${{ vars.ESCAPE_WRITE_PROBE_AUTHORIZED }}
+          ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
+          NORDICWAY_VERIFIED_FINGERPRINT: 'SHA256:U8MQZwyzMoDmDyRnBIqFqN14BVifmGKNSi+7B8OACDI'
+          NORDICWAY_PRIVATE_KEY: ${{ secrets.ESCAPE_NORDICWAY_DEPLOY_PRIVATE_KEY }}
+          NORDICWAY_KEY_PASSPHRASE: ${{ secrets.ESCAPE_NORDICWAY_DEPLOY_PASSPHRASE }}
+        run: |
+          set -eu
+          umask 077
+          if [ -z "$NORDICWAY_PRIVATE_KEY" ]; then
+            printf '%s\n' 'Restricted SSH identity is not configured.'
+            exit 1
+          fi
+          if [ "$ESCAPE_DEPLOY_OPERATION" = "write-probe" ]; then
+            [ "$ESCAPE_WRITE_PROBE_AUTHORIZED" = "1" ] || { printf '%s\n' 'Write probe is not authorized.'; exit 1; }
+          else
+            [ "$ESCAPE_DEPLOY_AUTHORIZED" = "1" ] || { printf '%s\n' 'Deployment is not authorized.'; exit 1; }
+          fi
+          NORDICWAY_KNOWN_HOST="$(ssh-keyscan -T 10 -t ed25519 -p 33 cp14.nordicway.dk 2>/dev/null)"
+          NORDICWAY_KNOWN_HOST="$(printf '%s\n' "$NORDICWAY_KNOWN_HOST" | awk '$1 == "[cp14.nordicway.dk]:33"')"
+          export NORDICWAY_KNOWN_HOST
+          python -c 'import os,sys; sys.path.insert(0,"tools"); import nordicway_hostkey as h
+          try: h.verify(os.environ.get("NORDICWAY_KNOWN_HOST", ""), os.environ.get("NORDICWAY_VERIFIED_FINGERPRINT", ""))
+          except ValueError as e:
+              lines=os.environ.get("NORDICWAY_KNOWN_HOST", "").splitlines(); print("Host key shape:", [(len(x.split()), x.split()[0] == h.HOST if x.split() else False) for x in lines])
+              print("Host key check failed:", str(e) if str(e) in ("invalid_host_key", "invalid_fingerprint", "host_key_mismatch") else "invalid_host_key"); sys.exit(1)
+          print("Host key verified.")'
+          eval "$(ssh-agent -s)" >/dev/null
+          askpass="$RUNNER_TEMP/escape-deploy-ssh-askpass"
+          trap 'ssh-agent -k >/dev/null 2>&1 || true; rm -f "$askpass"' EXIT
+          cat > "$askpass" <<'ASKPASS'
+          #!/bin/sh
+          printf '%s\n' "$NORDICWAY_KEY_PASSPHRASE"
+          ASKPASS
+          chmod 700 "$askpass"
+          export SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0
+          if ! printf '%s\n' "$NORDICWAY_PRIVATE_KEY" | ssh-add - >/dev/null 2>&1; then
+            printf '%s\n' 'The dedicated SSH credential could not be loaded.'
+            exit 1
+          fi
+          unset NORDICWAY_PRIVATE_KEY NORDICWAY_KEY_PASSPHRASE
+          python tools/nordicway_deploy_client.py

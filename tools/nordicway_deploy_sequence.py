@@ -1,0 +1,112 @@
+"""Coordinate a verified deployment. Not exposed by the SSH guard.
+
+The production adapter is not implemented yet; this module does not itself
+connect to the server or decide which releases are authorized.
+"""
+from dataclasses import dataclass
+
+
+class BackupVerificationFailure(Exception):
+    """Backup verification failed before any code replacement began."""
+
+
+@dataclass(frozen=True)
+class Outcome:
+    status: str
+    stage: str
+    service_restored: bool
+    backup: str | None = None
+    backup_cleanup: str = 'not_run'
+    reason: str | None = None
+
+
+def deploy(adapter, sha):
+    """Sequence a release with fixed operations supplied by a trusted adapter.
+
+    The adapter must implement real authorization, current quota, exclusive
+    deployment lock, service drain, verified backup and runtime checks. Never
+    wire unreviewed adapters to production. Database restore is not attempted.
+    """
+    stage = 'authorization'
+    was_running = False
+    stop_attempted = False
+    mutation_started = False
+    backup = None
+    try:
+        with adapter.lock():
+            try:
+                adapter.authorize(sha)
+                stage = 'preflight'
+                adapter.preflight(sha)
+                stage = 'quota'
+                adapter.check_quota()
+                stage = 'stage'
+                release = adapter.stage(sha)
+                stage = 'service_state'
+                state = adapter.service_status()
+                if state not in ('started', 'stopped'):
+                    raise ValueError('service_status_unknown')
+                was_running = state == 'started'
+                if was_running:
+                    stage = 'stop'
+                    stop_attempted = True
+                    adapter.stop_service()
+                stage = 'drain'
+                with adapter.quiescence():
+                    stage = 'backup_and_apply'
+                    # The existing updater checks its fresh backup before replacing
+                    # files. It may fail after a partial replacement, so never
+                    # assume the old code remains usable after entering this call.
+                    mutation_started = True
+                    backup = adapter.backup_and_apply(release)
+                    stage = 'verify_backup'
+                    if adapter.verify_backup(backup) is not True:
+                        raise ValueError('backup_unverified')
+                    stage = 'verify_install'
+                    adapter.verify_installed(sha)
+                if was_running:
+                    stage = 'start'
+                    adapter.start_service()
+                    stage = 'health'
+                    adapter.verify_health(sha)
+                # Keep the earlier backup through verified restart. Retention
+                # is outside the SQLite lock and cannot turn a successful
+                # release into a misleading deploy failure.
+                cleanup = 'not_run'
+                if was_running:
+                    try:
+                        adapter.cleanup_backup(backup)
+                        cleanup = 'ok'
+                    except Exception:
+                        cleanup = 'failed'
+                return Outcome('ok' if was_running else 'updated_stopped', 'complete',
+                               was_running, str(backup), cleanup)
+            except Exception as exc:
+                # Keep the deployment lock held until recovery finishes.
+                restored = False
+                safe_to_restart = not mutation_started or isinstance(exc, BackupVerificationFailure)
+                if was_running and stop_attempted and safe_to_restart:
+                    try:
+                        adapter.start_service()
+                        adapter.verify_recovery_health()
+                        restored = True
+                    except Exception:
+                        pass
+                reason = None
+                if stage == 'service_state':
+                    allowed = ('selector_failed', 'selector_exec_unavailable',
+                               'selector_exit_nonzero', 'selector_response_too_large',
+                               'selector_invalid_json', 'selector_result_failed', 'application_state_unknown',
+                               'service_status_unknown', 'state_record_failed')
+                    reason = str(exc) if isinstance(exc, ValueError) and str(exc) in allowed else 'service_state_unavailable'
+                elif stage == 'drain':
+                    allowed = ('cron_unverified', 'database_unavailable', 'passenger_active',
+                               'database_in_use', 'process_inspection_unavailable', 'quiescence_unverified')
+                    if isinstance(exc, TimeoutError):
+                        reason = 'motor_stop_timeout'
+                    else:
+                        reason = str(exc) if isinstance(exc, ValueError) and str(exc) in allowed else 'drain_unavailable'
+                return Outcome('failed', stage, restored, str(backup) if backup else None, reason=reason)
+    except Exception:
+        # Includes failure to acquire the deployment lock.
+        return Outcome('failed', stage, False, None)

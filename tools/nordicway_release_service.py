@@ -4,6 +4,7 @@ Selector status is not proof of drained Passenger processes. The caller must
 independently verify process quiescence before taking or restoring a snapshot.
 """
 import json
+import os
 import subprocess
 
 PROXY = '/bin/cagefs_enter.proxied'
@@ -16,15 +17,26 @@ def _invoke(operation, runner):
     args = [PROXY, SELECTOR, operation, '--json', '--interpreter', 'python']
     if operation != 'get':
         args += ['--app-root', APP_ROOT]
-    result = runner(args, capture_output=True, text=True, timeout=30, check=False)
-    if result.returncode != 0 or len(result.stdout) > 1_000_000:
-        raise ValueError('selector_failed')
+    # cagefs_enter.proxied may interpret SSH session metadata as its own
+    # command context. The selector is a fixed local operation, so it must not
+    # inherit the remote request or connection metadata.
+    env = os.environ.copy()
+    env.pop('SSH_ORIGINAL_COMMAND', None)
+    env.pop('SSH_CONNECTION', None)
+    try:
+        result = runner(args, capture_output=True, text=True, timeout=30, check=False, env=env)
+    except (OSError, subprocess.SubprocessError):
+        raise ValueError('selector_exec_unavailable') from None
+    if result.returncode != 0:
+        raise ValueError('selector_exit_nonzero')
+    if len(result.stdout) > 1_000_000:
+        raise ValueError('selector_response_too_large')
     try:
         data = json.loads(result.stdout)
     except (ValueError, TypeError):
-        raise ValueError('selector_failed') from None
+        raise ValueError('selector_invalid_json') from None
     if not isinstance(data, dict) or data.get('result') != 'success':
-        raise ValueError('selector_failed')
+        raise ValueError('selector_result_failed')
     return data
 
 
