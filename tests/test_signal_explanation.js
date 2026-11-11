@@ -14,7 +14,11 @@ vm.createContext(ctx);vm.runInContext(source.slice(source.indexOf('const signalR
  await ctx.explainSignal({dataset:{explainWatch:'synthetic-watch'},isConnected:true,hasAttribute:()=>false});
  assert.match(dialog.innerHTML,/Aktuel status: DATA FOR GAMLE/);
  assert.match(dialog.innerHTML,/Den seneste beregning er ikke det aktuelle signal/);
- assert.equal(calls.length,3);
+ current={...current,display_status:'AFVENTER SIGNALDATA',display_reason_codes:['POSITION_CONTEXT_CHANGED']};
+ await ctx.explainSignal({dataset:{explainWatch:'synthetic-watch'},isConnected:true,hasAttribute:()=>false});
+ assert.match(dialog.innerHTML,/Beholdningen er ændret/);
+ assert.match(dialog.innerHTML,/Den seneste beregning er ikke det aktuelle signal/);
+ assert.equal(calls.length,4);
  assert.ok(calls.every(p=>p==='v1/hotwatch/sessions/synthetic-watch?is_test=false'));
  console.log('PASS: both help buttons fetch current session; stale SELL is explicitly historical; no trade request');
 })().catch(e=>{console.error(e);process.exitCode=1});

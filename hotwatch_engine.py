@@ -548,6 +548,17 @@ def view(c,row,now=None):
  if row['last_error']:display_reasons.append(row['last_error'])
  if stale and row['last_data']:display_reasons.append('DATA_STALE')
  effective='NO_DATA' if stale and state.get('signal') not in ['PAUSE','NO_DATA'] else state.get('signal','NO_DATA')
+ if effective=='NO_DATA' and state.get('exit_context_changed'):display_reasons.append('POSITION_CONTEXT_CHANGED')
+ if effective in ('SELL','REDUCE') and context and context.get('status')=='verified' and context.get('position')=='none':
+  effective='NO_DATA';display_reasons.append('POSITION_CONTEXT_CHANGED')
+ if effective in ('SELL','REDUCE') and last:
+  calculation=json.loads(last['payload']);reasons=set(calculation.get('reason_codes',[]))
+  if not reasons.intersection({'STOP_BREACHED','EXIT_DEADLINE'}):
+   from hotwatch_strategy import exit_context_key
+   ids=request.get('portfolio_ids',[]);scope=checksum({'asset_id':request['asset_id'],'portfolio_id':ids[0],'watch_id':row['watch_id'],'trade_cycle_id':request.get('trade_cycle_id')}) if len(ids)==1 else None
+   prior_key=calculation.get('exit_context_key') or exit_context_key(calculation.get('position_context') or {},scope)
+   if prior_key and (not context or exit_context_key(context,scope)!=prior_key):
+    effective='NO_DATA';display_reasons.append('POSITION_CONTEXT_CHANGED')
  if effective not in ('NO_DATA','PAUSE') and (not context or context.get('status')!='verified' or not context.get('as_of') or not 0<=(now-stamp(context['as_of'])).total_seconds()<=300):effective='NO_DATA';display_reasons.append('POSITION_CONTEXT_UNKNOWN')
  if sample and effective not in ('NO_DATA','PAUSE'):
   latest_sample=json.loads(sample['payload']);max_age=request['risk']['max_quote_age_s']
@@ -1177,6 +1188,8 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   from intel_workflows import candidate_currentness
   currentness={'status':'CURRENT'} if request.get('report_id')=='manual-pluto' else candidate_currentness(c,uid,mode,row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery') if request.get('report_id')!='automatic-holdings' else {'status':'UNKNOWN'}
   risk=dict(request['risk'],entry_allowed=request.get('watch_mode','both')!='exit' and currentness['status'] in ('CURRENT','REVIEW_DUE') and (not decision or decision[1]['status']!='FRAVÆLG'),exit_allowed=request.get('watch_mode','both')!='entry')
+  if len(request.get('portfolio_ids',[]))==1:
+   risk['_position_scope']=checksum({'asset_id':request['asset_id'],'portfolio_id':request['portfolio_ids'][0],'watch_id':wid,'trade_cycle_id':request.get('trade_cycle_id')})
   import hotwatch_buy_plan
   risk_sample,risk,buy_plan=hotwatch_buy_plan.apply(c,row,request,sample,risk,now)
   result,nextstate=calculate(risk_sample,metrics,strategy_data,risk,state,now,new_market_event=new_market_event)
@@ -1325,6 +1338,26 @@ def observe_context(connect,uid,wid,mode,context,now=None,lease=None,broker_sour
   cycle=request.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':wid})[:24]
   candidate_lifecycle.observe_pluto(c,uid,mode,request['candidate_id'],context,now.isoformat(),wid,cycle,'NO_DATA',synthetic=request['provider']=='synthetic')
   material=lambda value:{k:v for k,v in value.items() if k!='as_of'}
+  state=json.loads(row['state'])
+  from hotwatch_strategy import exit_context_key
+  ids=request.get('portfolio_ids',[]);scope=checksum({'asset_id':request['asset_id'],'portfolio_id':ids[0],'watch_id':wid,'trade_cycle_id':request.get('trade_cycle_id')}) if len(ids)==1 else None
+  latest=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
+  sample_context=json.loads(latest['payload']).get('context',{}) if latest else {}
+  old_key=state.get('exit_context_key') or exit_context_key(sample_context,scope);new_key=exit_context_key(context,scope)
+  current=not sample_context.get('as_of') or stamp(context['as_of'])>=stamp(sample_context['as_of'])
+  if current:
+   changed=bool(old_key and old_key!=new_key);closed=context.get('status')=='verified' and context.get('position')=='none'
+   if (changed or closed) and state.get('pending') in ('SELL','REDUCE'):state.update(pending=None,confirmations=0,pending_since=None)
+   if changed or closed:
+    last_calc=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
+    reasons=set(json.loads(last_calc['payload']).get('reason_codes',[])) if last_calc else set()
+    if state.get('signal') in ('SELL','REDUCE') and (closed or not reasons.intersection({'STOP_BREACHED','EXIT_DEADLINE'})):state.update(signal='NO_DATA',exit_context_changed=True)
+   if closed:
+    state['alert_codes']=[code for code in state.get('alert_codes',[]) if code not in ('STOP_BREACHED','EXIT_DEADLINE')]
+    state.pop('push_critical_anchors',None);state.pop('push_trailing_anchor',None)
+   if new_key is None:state.pop('exit_context_key',None)
+   else:state['exit_context_key']=new_key
+   if old_key!=new_key or closed:c.execute('UPDATE hw_sessions SET state=? WHERE id=?',(canonical(state),row['id']))
   if not previous or material(old)!=material(context):event(c,row,'BROKER_CONTEXT_UPDATED',now,'Verified broker context without usable market timestamp; no market signal calculated',data_time=context['as_of'])
   return {'ok':True,'duplicate':False}
 
