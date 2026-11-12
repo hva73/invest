@@ -109,6 +109,29 @@ class ReleaseApprovalTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'release_in_progress'):
             a.prepare(self.connect,'b'*40,'Ny',7,now=103)
 
+    def test_stage_notification_owner_approval_and_one_runner_call(self):
+        calls=[]
+        def notify(uid):
+            item=a.pending(self.connect,uid,now=101)
+            a.approve(self.connect,item['id'],item['sha'],uid,now=102)
+        def deploy(sha):
+            calls.append(sha)
+            return {'operation':'deploy','status':'ok','stage':'complete',
+                    'recovery_required':False,'service_restored':True}
+        times=iter([100,103,103])
+        result=a.stage_and_wait(self.connect,'a'*40,'Test',7,notify,deploy,
+                                lifetime=60,clock=lambda:next(times),sleep=lambda _:None)
+        self.assertEqual(result['status'],'completed');self.assertEqual(calls,['a'*40])
+
+    def test_push_failure_keeps_admin_path_and_timeout_never_deploys(self):
+        times=iter([100,101,102,160]);calls=[]
+        result=a.stage_and_wait(self.connect,'a'*40,'Test',7,
+            lambda _:(_ for _ in ()).throw(OSError()),lambda sha:calls.append(sha),
+            lifetime=60,clock=lambda:next(times),sleep=lambda _:None)
+        self.assertEqual(result['status'],'expired');self.assertEqual(calls,[])
+        with self.assertRaisesRegex(ValueError,'approval_unavailable'):
+            a.approve(self.connect,result['id'],result['sha'],7,now=160)
+
 
 if __name__ == '__main__':
     unittest.main()

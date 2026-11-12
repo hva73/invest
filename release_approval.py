@@ -112,3 +112,27 @@ def start_approved(connect, candidate_id, sha, deploy, *, now=None):
     except Exception:
         verified = False
     return finish(connect, candidate_id, sha, verified=verified)
+
+
+def stage_and_wait(connect, sha, summary, owner_id, notify, deploy, *,
+                   lifetime=600, clock=time.time, sleep=time.sleep, poll_seconds=2):
+    """Stage a candidate, notify the owner and run only after their approval.
+
+    The calling transport owns the runner and credentials.  Notification
+    failure is nonfatal: the owner can still use the administrator entry.
+    """
+    candidate = prepare(connect, sha, summary, owner_id, now=clock(), lifetime=lifetime)
+    try:
+        notify(owner_id)
+    except Exception:
+        pass
+    while clock() < candidate['expires']:
+        with connect() as c:
+            row = c.execute('SELECT status FROM release_approvals WHERE id=? AND sha=?',
+                            (candidate['id'], sha)).fetchone()
+        if not row or row[0] != 'pending':
+            if row and row[0] == 'approved':
+                return start_approved(connect, candidate['id'], sha, deploy, now=clock())
+            return {'id':candidate['id'], 'sha':sha, 'status':'unavailable'}
+        sleep(poll_seconds)
+    return {'id':candidate['id'], 'sha':sha, 'status':'expired'}
