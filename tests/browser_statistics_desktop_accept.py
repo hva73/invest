@@ -26,7 +26,7 @@ try:
    # Only sold quantities are part of the screen; absence of fill time must never be fabricated.
    trade=page.locator('.statistics-trade').filter(has_text='DELSALG');expect(trade).to_have_count(1);trade.locator('summary').click();detail=trade.locator('.statistics-detail');expect(detail).to_be_visible();expect(detail).to_contain_text('4');expect(detail).to_contain_text('10');expect(detail).to_contain_text('12');expect(detail).to_contain_text('omkostning',ignore_case=True);expect(detail).to_contain_text('Ikke afklaret');assert detail.inner_text().count('Ikke afklaret')==2
    if os.environ.get('ESCAPE_SCREENSHOTS'):
-    page.evaluate("document.body.insertAdjacentHTML('afterbegin','<div style=\"position:fixed;z-index:9999;top:4px;left:230px;background:#6d531a;color:white;padding:6px\">FIKTIVE TESTDATA</div>')")
+    page.evaluate("""() => {const n=document.createElement('div');n.textContent='FIKTIVE TESTDATA';Object.assign(n.style,{position:'fixed',zIndex:'9999',top:'4px',left:'230px',background:'#6d531a',color:'white',padding:'6px'});document.body.append(n)}""")
     page.screenshot(path=str(Path(os.environ['ESCAPE_SCREENSHOTS'])/f'desktop-handel-detalje-{width}.png'))
    page.locator('[data-statistics-currency]').select_option('USD');expect(view).to_contain_text('USD_ONLY');expect(view).not_to_contain_text('DELSALG')
    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),width
