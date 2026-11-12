@@ -149,6 +149,11 @@ class BuyPlan(unittest.TestCase):
   self.assertIn('POSITION_SIZE_LIMIT',result['reason_codes'])
   risk['max_loss_dkk']='30';result,_=calculate(valid,metrics,BASELINE,risk,{},self.now)
   self.assertIn('LOSS_BUDGET_LIMIT',result['reason_codes'])
+ def test_broker_rounding_uplift_counts_in_size_and_max_loss(self):
+  sample=tick(self.now,price='100');sample['context'].update(fx_to_dkk='7',fees_dkk='0',portfolio_equity_dkk='10000',exposure_dkk='0')
+  risk=dict(self.req['risk'],entry_allowed=True,exit_allowed=False,proposed_quantity='1',stop_price='99',entry_price='100',entry_limit='100',entry_account_notional_dkk='700.04',max_notional_dkk='700.02',max_loss_dkk='7.02')
+  decision,_=calculate(sample,good_metrics(),BASELINE,risk,{},self.now)
+  self.assertIn('POSITION_SIZE_LIMIT',decision['reason_codes']);self.assertIn('LOSS_BUDGET_LIMIT',decision['reason_codes']);self.assertNotEqual(decision['signal'],'BUY')
  def test_limit_exceeded_and_missing_data_can_coexist_with_weak_signal(self):
   self.prepare()
   with app.connect() as c:

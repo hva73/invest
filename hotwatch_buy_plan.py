@@ -150,7 +150,7 @@ def apply(c,row,request,sample,risk,now):
  match=plan['fresh'] and request['portfolio_ids']==[plan['portfolio_id']] and request['risk']['proposed_quantity']==plan['quantity'] and request['risk']['stop_price']==plan['stop_price']
  if match:
   context.update(fx_to_dkk=plan['fx_to_dkk'],fees_dkk=plan['fees_dkk'])
-  risk.update(entry_price=plan['limit_price'],entry_limit=plan['limit_price'])
+  risk.update(entry_price=plan['limit_price'],entry_limit=plan['limit_price'],entry_account_notional_dkk=plan['account_notional_dkk'])
  return sample,risk,plan
 
 def check_proposal(connect,uid,wid,payload,portfolio_id,raw=None):

@@ -167,7 +167,12 @@ def _risk_gate(sample,metrics,risk,now,raw,require_macd=True):
   q=Decimal(qty);conversion=Decimal(fx);costs=Decimal(fees);capital=Decimal(equity);current=Decimal(exposure);limit=Decimal(stop)
   if q<=0 or conversion<=0 or capital<=0 or costs<0 or current<0 or limit<=0 or limit>=price:codes.append('RISK_INPUTS_INVALID')
   else:
-   notional=q*price*conversion+costs;loss=q*(price-limit)*conversion+costs
+   # The broker may round asset-currency notional before conversion. The
+   # validated plan supplies a conservative account amount; never use less
+   # than either that amount or the unrounded limit-price exposure.
+   planned=risk.get('entry_account_notional_dkk')
+   account_cost=max(q*price*conversion,Decimal(planned)) if planned is not None else q*price*conversion
+   notional=account_cost+costs;loss=account_cost-q*limit*conversion+costs
    if notional>min(Decimal(risk['max_notional_dkk']),Decimal(GLOBAL_RISK['max_notional_dkk'])):codes.append('POSITION_SIZE_LIMIT')
    if loss>min(Decimal(risk['max_loss_dkk']),Decimal(GLOBAL_RISK['max_loss_dkk'])):codes.append('LOSS_BUDGET_LIMIT')
    if (current+notional)/capital*100>min(Decimal(risk['max_position_fraction_pct']),Decimal(GLOBAL_RISK['max_position_fraction_pct'])):codes.append('EXPOSURE_LIMIT')
