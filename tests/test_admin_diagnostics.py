@@ -16,7 +16,7 @@ class AdminDiagnostics(unittest.TestCase):
   path=Path(app.DB).parent/'hotwatch-scans.jsonl'
   first=record(5,'processed',1000);first['metrics'].update(scope_entry_wait_ms=12,sqlite_begin_ms=2);first['metrics']['market_conflict']={'fields':['price'],'previous':{'price':'143.7536','secret':'DO_NOT_EXPOSE'},'incoming':{'price':'143.95'},'observations':{'previous':{'source':'eodhd','price_time_kind':'trade','event_time':self.now.isoformat(),'sample_ref':'0123456789abcdef','secret':'DO_NOT_EXPOSE'},'incoming':{'source':'eodhd','event_time':self.now.isoformat(),'sample_ref':'invalid-secret'}},'ingest_attempt_at':self.now.isoformat()}
   first['metrics']['websocket'][0].update(batch_valid_count=250,batch_partial_count=0,batch_limit_reached=True)
-  first['metrics']['websocket'].append({'batch_valid_count':'PRIVATE_FEED_PAYLOAD','batch_partial_count':251,'batch_limit_reached':'PRIVATE_FEED_PAYLOAD'})
+  first['metrics']['websocket'].append({'wait_ms':0,'batch_valid_count':'PRIVATE_FEED_PAYLOAD','batch_partial_count':251,'batch_limit_reached':'PRIVATE_FEED_PAYLOAD'})
   path.write_text('\n'.join(json.dumps(x) for x in [first,record(6,'deferred',9000),record(7,'processed',2000,2)]))
   Path(str(path)+'.1').write_text(json.dumps(record(400,'degraded',3000)))
   result=hotwatch_service.admin_diagnostics(app.connect,1,self.now)
@@ -25,7 +25,7 @@ class AdminDiagnostics(unittest.TestCase):
   self.assertIn('worker_utilization',result);self.assertIn('readiness_by_market',result);self.assertIn('market_sleep',result);self.assertEqual(result['market_sleep']['estimated_avoided_scans'],0);self.assertEqual(result['recent'][0]['metrics']['websocket_ms'],500);self.assertEqual(result['recent'][0]['metrics']['market_conflict']['incoming']['price'],'143.95');self.assertNotIn('DO_NOT_EXPOSE',json.dumps(result));self.assertEqual(result['session_count'],1)
   self.assertEqual(result['recent'][0]['metrics']['scope_entry_wait_ms'],12);self.assertEqual(result['recent'][0]['metrics']['sqlite_begin_ms'],2)
   ws=result['recent'][0]['metrics']['websocket'][0];self.assertEqual(ws['batch_valid_count'],250);self.assertEqual(ws['batch_partial_count'],0);self.assertIs(ws['batch_limit_reached'],True)
-  self.assertEqual(result['recent'][0]['metrics']['websocket'][1],{});self.assertNotIn('PRIVATE_FEED_PAYLOAD',json.dumps(result))
+  self.assertEqual(result['recent'][0]['metrics']['websocket'][1],{'wait_ms':0});self.assertNotIn('PRIVATE_FEED_PAYLOAD',json.dumps(result))
   diagnostic=result['recent'][0]['metrics']['market_conflict'];self.assertEqual(diagnostic['observations']['previous']['sample_ref'],'0123456789abcdef');self.assertNotIn('sample_ref',diagnostic['observations']['incoming']);self.assertNotIn('invalid-secret',json.dumps(result))
   with app.connect() as c:c.execute("UPDATE hw_sessions SET status='EXPIRED' WHERE watch_id=?",(self.f.req['watch_id'],))
   result=hotwatch_service.admin_diagnostics(app.connect,1,self.now);self.assertEqual(result['session_count'],0);self.assertEqual(result['windows']['1h']['completed'],2)
@@ -47,6 +47,28 @@ class AdminDiagnostics(unittest.TestCase):
   result=hotwatch_service.admin_diagnostics(app.connect,1,self.now)
   self.assertEqual(result['log_files_read'],0);self.assertEqual(result['recent'],[]);self.assertIsNone(result['windows']['5m']['queue'])
   with app.connect() as c:self.assertEqual(c.total_changes,before)
+ def test_missing_websocket_observations_are_not_counted_as_zero_wait(self):
+  ref=hashlib.sha256(self.f.req['watch_id'].encode()).hexdigest()[:16]
+  def record(seconds,metrics):return {'service':'hotwatch','user_id':1,'is_test':False,'utc':(self.now-timedelta(seconds=seconds)).isoformat(),'watch_ref':ref,'source':'eodhd','status':'processed','metrics':metrics}
+  path=Path(app.DB).parent/'hotwatch-scans.jsonl'
+  path.write_text('\n'.join(json.dumps(x) for x in [record(1,{}),record(2,{'websocket':[]}),record(3,{'websocket':[{'wait_ms':500}]}),record(4,{'websocket':None}),record(5,{'websocket':'invalid'})]))
+  result=hotwatch_service.admin_diagnostics(app.connect,1,self.now)
+  self.assertNotIn('websocket_ms',result['recent'][0]['metrics'])
+  self.assertEqual(result['recent'][1]['metrics']['websocket_ms'],0)
+  self.assertNotIn('websocket_ms',result['recent'][3]['metrics'])
+  self.assertNotIn('websocket_ms',result['recent'][4]['metrics'])
+  self.assertEqual(result['windows']['5m']['websocket'],{'count':2,'p50_ms':0,'p90_ms':500,'max_ms':500})
+  self.assertEqual(result['queue_factors']['5m']['websocket_wait']['count'],2)
+ def test_incomplete_websocket_lists_do_not_understate_wait(self):
+  ref=hashlib.sha256(self.f.req['watch_id'].encode()).hexdigest()[:16]
+  def rec(seconds,ws):return {'service':'hotwatch','user_id':1,'is_test':False,'utc':(self.now-timedelta(seconds=seconds)).isoformat(),'watch_ref':ref,'source':'eodhd','status':'processed','metrics':{'websocket':ws}}
+  values=[[{'status':'OK'}],[{'wait_ms':'invalid'}],[{'wait_ms':500},{'status':'OK'}],[{'wait_ms':True}],[{'wait_ms':float('nan')}],[],[{'wait_ms':200},{'wait_ms':300}]]
+  path=Path(app.DB).parent/'hotwatch-scans.jsonl';path.write_text('\n'.join(json.dumps(rec(i+1,ws)) for i,ws in enumerate(values)))
+  result=hotwatch_service.admin_diagnostics(app.connect,1,self.now)
+  for rec in result['recent'][:5]:self.assertNotIn('websocket_ms',rec['metrics'])
+  self.assertEqual([x['metrics']['websocket_ms'] for x in result['recent'][5:7]],[0,500])
+  self.assertEqual(result['windows']['5m']['websocket']['count'],2)
+  self.assertEqual(result['queue_factors']['5m']['websocket_wait']['count'],2)
  def test_push_and_cron_counts_do_not_include_device_details(self):
   with app.connect() as c:
    c.execute("INSERT INTO push_devices(user_id,endpoint_hash,payload,created,updated) VALUES(1,'synthetic-private-endpoint',?, ?, ?)",(b'private-device',self.now.timestamp(),self.now.timestamp()))
