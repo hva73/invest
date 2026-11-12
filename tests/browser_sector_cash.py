@@ -28,7 +28,7 @@ payload = {
     'snapshot_at':stamp,'value':cash(1200),'unrealized':cash(120),'cost_basis':cash(1080),
     'sector_intelligence':{'sector':'Teknologi'}},
    {'asset_id':'child','ticker':'TESTB','name':'Fiktiv aktie B','portfolio_id':2,
-    'snapshot_at':older,'value':cash(800),'unrealized':cash(-80),'cost_basis':cash(880),
+    'snapshot_at':older,'value':cash(800),'unrealized':cash(80),'cost_basis':cash(720),
     'sector_intelligence':{'sector':'Sundhed'}}],
   'snapshot_at':stamp,'warnings':[], 'portfolio_value_history':{}},
  'markets':[],'history':[],'regions':['USA','Europa','Asien','Globalt'],
