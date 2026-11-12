@@ -107,10 +107,14 @@ def quota_summary(token, reader=None):
         return {'status': 'unavailable'}
 
 
+def exit_status(result):
+    return 0 if result.get('status') == 'ok' and result.get('account_quota', {}).get('status') == 'ok' else 1
+
+
 if __name__ == '__main__':
     token = os.environ.get('ESCAPE_CPANEL_API_TOKEN', '')
     result = probe(token)
     if result['status'] == 'ok':
         result['account_quota'] = quota_summary(token)
     print(json.dumps(result, sort_keys=True))
-    sys.exit(0 if result['status'] == 'ok' and result.get('account_quota', {}).get('status') == 'ok' else 1)
+    sys.exit(exit_status(result))
