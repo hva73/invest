@@ -137,7 +137,7 @@ try:
                     expect(page.locator('.dash-hero-intro > p:not(.dash-warning)')).to_be_hidden()
                     # Exercise desktop styling for an empty, active and unknown
                     # section without altering the real incomplete-source warning.
-                    page.locator('.dashboard-v1').evaluate("e => e.insertAdjacentHTML('beforeend', '<section id=synthetic-attention class=\"panel dash-attention\"></section>')")
+                    page.locator('.dashboard-v1').evaluate("e => e.insertAdjacentHTML('beforeend', '<section id=synthetic-attention class=\"panel dash-attention\"><p class=\"muted\">Ingen aktuelle handlinger</p></section>')")
                     empty_alert = page.locator('#synthetic-attention')
                     expect(empty_alert).to_be_hidden()
                     empty_alert.evaluate("e => e.insertAdjacentHTML('beforeend', '<div class=\"dash-table-wrap\">Aktivt signal</div>')")
