@@ -5,3 +5,19 @@ main:has(#content > #statistics-content) > header #title{position:absolute;width
 .statistics-heading > div{min-width:0;flex:1 1 auto}
 .statistics-heading > button{flex:0 0 auto}
 @media(max-width:700px){.statistics-heading > button{font-size:.75rem;padding:8px 10px}}
+
+/* Result categories act as disclosure controls; the list starts hidden. */
+.statistics-totals{display:flex;gap:20px;flex-wrap:wrap}
+.statistics-totals button{display:grid;gap:6px;text-align:left;border:0;background:transparent;padding:8px;cursor:pointer;color:inherit}
+.statistics-totals button span{font-size:.78rem}
+.statistics-totals button strong{font-size:1.1rem}
+.statistics-totals button:focus-visible{outline:2px solid #8de7c0;outline-offset:2px}
+.statistics-distribution{margin-top:16px;padding:18px;border:1px solid #294840;border-radius:14px;background:#102832}
+.statistics-distribution>div:first-child{display:flex;justify-content:space-between;gap:12px}
+.statistics-distribution>div:first-child span{color:#75dfad}
+.statistics-bar{display:flex;gap:3px;height:10px;margin:16px 0 12px}
+.statistics-bar i,.statistics-bar b{min-width:0;border-radius:6px}
+.statistics-bar i{background:#67cda0}.statistics-bar b{background:#ed8185}
+.statistics-list h3{padding:0 18px;font-size:1rem}
+.statistics-detail{display:grid}
+@media(max-width:700px){.statistics-totals{width:100%;justify-content:space-between;gap:4px}.statistics-totals button{padding:8px 2px}.statistics-distribution{padding:16px}}
