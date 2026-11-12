@@ -60,7 +60,7 @@ try:
    expect(root).to_be_enabled();expect(child).to_be_enabled()
    details=root.locator('.si-desktop-position')
    if width >= 901:
-    expect(details).to_be_visible();expect(details).to_contain_text('5 stk.');expect(details).to_contain_text('270,30');expect(details).to_contain_text('247,80');expect(details).to_contain_text('+31,50');expect(details).to_contain_text('estimat')
+    expect(details).to_be_visible();expect(details).to_contain_text('Gns. køb');expect(details).not_to_contain_text('stk.');expect(details).to_contain_text('270,30');expect(details).to_contain_text('247,80');expect(details).to_contain_text('+31,50');expect(details).to_contain_text('estimat')
     expect(journey.locator('.si-desktop-columns')).to_be_visible()
    else: expect(details).to_be_hidden()
    expect(root).to_contain_text('I dag · kurs pr. stk.')
