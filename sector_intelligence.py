@@ -609,6 +609,7 @@ def read(connect,uid):
   value=(snapshot.get('data') or {}).get('value') or {}
   account['reported_result']=value.get('reported_result')
   data=snapshot.get('data') or {}
+  account['positions_status']='available' if data.get('positions_complete') is True and not snapshot.get('last_error') else 'unavailable'
   errors=data.get('errors')
   cash=data.get('accounts')
   cash_ok=(bool(snapshot) and not snapshot.get('last_error') and isinstance(cash,list)

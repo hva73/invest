@@ -1,11 +1,11 @@
 """Standalone read-only HOT WATCH service. Never scheduled by legacy worker.py."""
 from eodhd_capacity import Capacity
-import json,signal,threading,logging,hashlib,time,os,re,secrets,sqlite3,sys
+import json,signal,threading,logging,hashlib,time,os,re,secrets,sqlite3,sys,math
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor,wait,FIRST_COMPLETED
 from contextlib import contextmanager
 import app,hotwatch_engine as engine
-from hotwatch_adapters import PlutoAdapter,EODHDAdapter,InboxAdapter,DataUnavailable
+from hotwatch_adapters import PlutoAdapter,EODHDAdapter,InboxAdapter,DataUnavailable,local_budget_error
 from hotwatch_contract import EngineError,stamp
 from cxe_reference import ReferenceUnavailable as CXEReferenceUnavailable
 from eodhd_us_reference import ReferenceUnavailable as USReferenceUnavailable
@@ -473,7 +473,7 @@ def cxe_verified_match(instrument,choices,now=None,connect=None,uid=None):
   from hotwatch_adapters import reserve
   feed=EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),capacity=Capacity(connect))
   quote=feed.snapshot(crypto['symbol'])
-  if quote['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+  if quote['status']=='LOCAL_BUDGET_EXHAUSTED':raise local_budget_error(quote)
   if quote['status']=='RATE_LIMIT':raise DataUnavailable('EODHD_RATE_LIMIT',429)
   if quote['status']!='OK':raise DataUnavailable('EODHD_CRYPTO_QUOTE_UNAVAILABLE')
   return {'status':'VERIFIED','basis':'user_authorized_btc_monitoring','symbol':crypto['symbol'],'isin':'','currency':crypto['currency'],'currency_basis':'explicit_BTC_USD_pair','type_note':'Brugerbekræftet BTC-kursmapping; uafhængig dokumentation for netværk mangler.','pluto':{k:instrument.get(k) for k in ('asset_id','ticker','name','exchange','currency','type')}}
@@ -531,11 +531,12 @@ def recover_automatic_feeds(connect,now=None):
    if not known and not lookup_attempted:
     with connect() as c:retry=c.execute('SELECT next_attempt FROM hw_feed_recovery WHERE watch_row_id=?',(row['id'],)).fetchone()
     if retry and retry['next_attempt']>now.timestamp():continue
-    lookup_attempted=True;status='IDENTITY_UNVERIFIED'
+    lookup_attempted=True;status='IDENTITY_UNVERIFIED';budget_provider='pluto';retry_after=None
     try:
      if row['purpose']=='automatic holding watch':instrument=holding_instrument(connect,row['user_id'],holding)
      else:instrument=verified_discovery_instrument(connect,row['user_id'],holding)
      if instrument and instrument.get('asset_id')==holding['asset_id'] and str(instrument.get('ticker','')).casefold()==holding['ticker'].casefold() and instrument.get('currency')==holding['currency']:
+      budget_provider='eodhd'
       crypto=crypto_reference(instrument) if row['purpose']=='automatic holding watch' else None
       if crypto and crypto['approved']:
        evidence=cxe_verified_match(instrument,[],now,connect,row['user_id'])
@@ -575,9 +576,16 @@ def recover_automatic_feeds(connect,now=None):
         else:status='EODHD_IDENTITY_UNCERTAIN'
        else:status='EODHD_IDENTITY_UNCERTAIN'
      else:status='PLUTO_IDENTITY_UNVERIFIED'
-    except Exception as error:status=reference_error_code(error)
-    delay=60 if status=='PROVIDER_RATE_BUDGET' else 43200 if status=='CRYPTO_IDENTITY_UNVERIFIED' else 300
-    with connect() as c:c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?) ON CONFLICT(watch_row_id) DO UPDATE SET next_attempt=excluded.next_attempt,status=excluded.status,updated=excluded.updated',(row['id'],now.timestamp()+delay,status,now.isoformat()))
+    except Exception as error:
+     status=reference_error_code(error)
+     if status=='PROVIDER_RATE_BUDGET':status=budget_provider.upper()+'_RATE_BUDGET'
+     requested=getattr(error,'retry_after_s',None)
+     if type(requested) in (int,float) and math.isfinite(requested) and requested>0:retry_after=requested
+    delay=60 if status in ('PROVIDER_RATE_BUDGET','PLUTO_RATE_BUDGET','EODHD_RATE_BUDGET') else 43200 if status=='CRYPTO_IDENTITY_UNVERIFIED' else 300
+    if retry_after is not None:delay=max(delay,retry_after)
+    # Keep unusually large provider delays conservative and representable in readback.
+    next_attempt=min(now.timestamp()+delay,engine.MAX_RECOVERY_TIMESTAMP)
+    with connect() as c:c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?) ON CONFLICT(watch_row_id) DO UPDATE SET next_attempt=excluded.next_attempt,status=excluded.status,updated=excluded.updated',(row['id'],next_attempt,status,now.isoformat()))
    if not known:continue
    updated=dict(req,provider='eodhd',provider_symbol=known['provider_symbol'])
    with connect() as c:

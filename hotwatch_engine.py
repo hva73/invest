@@ -9,6 +9,13 @@ from hotwatch_strategy import BASELINE,EARLY_CATALYST,EARLY_CATALYST_V1,validate
 
 def utc():return datetime.now(timezone.utc)
 
+# Last whole UTC day representable by Python's datetime, safely below year 10000.
+MAX_RECOVERY_TIMESTAMP=253402214400.0
+
+def recovery_timestamp(value):
+ try:return datetime.fromtimestamp(value,timezone.utc).isoformat()
+ except (ValueError,TypeError,OverflowError,OSError):return None
+
 def trailing_notification_worsened(price,anchor,trailing_pct):
  """Escalate each further decline of one configured trailing distance."""
  return Decimal(str(price))<=Decimal(str(anchor))*(Decimal('1')-Decimal(str(trailing_pct))/Decimal('100'))
@@ -869,8 +876,11 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
   sessions=[]
   for r in opened[:session_limit]:
    req=json.loads(r['request']);purpose=req.get('purpose','');source='holding' if req.get('watch_mode')=='exit' or req.get('report_id')=='automatic-holdings' or purpose in ('automatic holding watch',) or purpose.startswith('retained exit ') else 'manual' if req.get('report_id')=='manual-pluto' else 'candidate'
+   recovery=c.execute('SELECT status,next_attempt FROM hw_feed_recovery WHERE watch_row_id=?',(r['id'],)).fetchone()
+   recovery_status=recovery['status'] if recovery else None
+   recovery_provider={'PLUTO_RATE_BUDGET':'pluto','EODHD_RATE_BUDGET':'eodhd','EODHD_DAILY_BUDGET':'eodhd','EODHD_RATE_LIMIT':'eodhd'}.get(recovery_status)
+   if recovery_status in ('PLUTO_RATE_BUDGET','EODHD_RATE_BUDGET'):recovery_status='PROVIDER_RATE_BUDGET'
    if summary_only:
-    recovery=c.execute('SELECT status,next_attempt FROM hw_feed_recovery WHERE watch_row_id=?',(r['id'],)).fetchone()
     provisional=c.execute('SELECT symbol FROM hw_provisional_feed_links WHERE watch_row_id=?',(r['id'],)).fetchone()
     unverified=bool(provisional and req.get('provider')=='eodhd')
     sample=c.execute("SELECT json_extract(payload,'$.verification') AS verification FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 1",(r['id'],)).fetchone()
@@ -906,8 +916,8 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
      except (ValueError,TypeError):pass
     context_diagnostic=(detail.get('latest_context') or {}).get('diagnostic')
     if not isinstance(context_diagnostic,str) or not re.fullmatch(r'[A-Z0-9_]{1,100}',context_diagnostic):context_diagnostic=None
-    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'last_calculation_at':r['last_calculation'],'last_computed_signal':detail['last_computed_signal'],'signal':detail['signal'],'display_status':detail['display_status'],'last_action_signal':detail['last_action_signal'],'context_diagnostic':context_diagnostic,'last_calculation_reason_codes':reasons,'display_reason_codes':detail['display_reason_codes'],'next_due_at':detail['next_due_at'],'effective_min_interval_s':detail['effective_min_interval_s'],'interval_basis':detail['interval_basis'],'provider_feed_diagnostics':provider_diagnostics,'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'price_status':data_status.get('price_status'),'bid_ask_status':data_status.get('quote_status'),'bar_blocking_detail':data_status.get('bar_blocking_detail'),'next_market_session':data_status.get('next_market_session'),'feed_recovery_status':recovery['status'] if recovery else None,'next_feed_recovery_at':datetime.fromtimestamp(recovery['next_attempt'],timezone.utc).isoformat() if recovery else None})
-   else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both')})
+    sessions.append({'watch_id':r['watch_id'],'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'status':r['status'],'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'candidate_review':review,'updated_at':r['updated'],'last_data_at':r['last_data'],'last_calculation_at':r['last_calculation'],'last_computed_signal':detail['last_computed_signal'],'signal':detail['signal'],'display_status':detail['display_status'],'last_action_signal':detail['last_action_signal'],'context_diagnostic':context_diagnostic,'last_calculation_reason_codes':reasons,'display_reason_codes':detail['display_reason_codes'],'next_due_at':detail['next_due_at'],'effective_min_interval_s':detail['effective_min_interval_s'],'interval_basis':detail['interval_basis'],'provider_feed_diagnostics':provider_diagnostics,'provider':req.get('provider'),'last_error':r['last_error'],'identity_verification':'unverified' if unverified else sample['verification'] if sample else None,'holding_verified':data_status['holding_verified'],'instrument_match_verified':data_status['instrument_match_verified'],'instrument_match_evidence':data_status['instrument_match_evidence'],'reference_candidate':data_status.get('reference_candidate'),'quote_feed_verified':data_status['quote_feed_verified'],'quote_freshness':data_status['quote_freshness'],'price_status':data_status.get('price_status'),'bid_ask_status':data_status.get('quote_status'),'bar_blocking_detail':data_status.get('bar_blocking_detail'),'next_market_session':data_status.get('next_market_session'),'feed_recovery_status':recovery_status,'feed_recovery_provider':recovery_provider,'next_feed_recovery_at':recovery_timestamp(recovery['next_attempt']) if recovery else None})
+   else:sessions.append({**view(c,r,now),'candidate_id':r['candidate_id'],'ticker':req.get('ticker'),'purpose':purpose,'watch_kind':source,'watch_mode':req.get('watch_mode','both'),'feed_recovery_status':recovery_status,'feed_recovery_provider':recovery_provider,'next_feed_recovery_at':recovery_timestamp(recovery['next_attempt']) if recovery else None})
   more=len(opened)>session_limit
   from eodhd_capacity import snapshot as capacity_snapshot
   return {'installation':installed_revision(),'worker_scan_log':recent_scan_log(uid,mode,[r['watch_id'] for r in opened[:session_limit]]),'provider_capacity':capacity_snapshot(c,now.timestamp()),'as_of':now.isoformat(),'is_test':mode,'open_sessions':sessions,'open_sessions_complete':sessions_after==0 and not more,'next_sessions_cursor':opened[session_limit-1]['id'] if more else None,'sessions_have_more':more,'worker':worker,'worker_heartbeat_fresh':worker_fresh,'supervisor':supervisor,'supervisor_events':supervisor_events,'application_error_fallback':application_errors,'events':items,'next_cursor':items[-1]['sequence'] if items else after,'has_more':len(events)>limit,'detail_level':'status' if summary_only else 'full'}
