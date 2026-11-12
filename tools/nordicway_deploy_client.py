@@ -1,5 +1,10 @@
 """Fixed SSH transport for the restricted runner; no arbitrary commands."""
 import json
+import hashlib
+import hmac
+import secrets
+import time
+import nordicway_owner_approval
 import os
 import re
 import subprocess
@@ -26,13 +31,15 @@ def run(env=None, transport=_run_limited):
     env = os.environ if env is None else env
     sha, token = env.get('ESCAPE_RELEASE_SHA', ''), env.get('ESCAPE_CPANEL_API_TOKEN', '')
     operation = env.get('ESCAPE_DEPLOY_OPERATION', 'deploy')
+    approval_key = env.get('ESCAPE_OWNER_APPROVAL_KEY', '')
     access = (env.get('ESCAPE_WRITE_PROBE_AUTHORIZED') == '1' if operation == 'write-probe'
               else env.get('ESCAPE_DEPLOY_AUTHORIZED') == '1')
     if (not access or not env.get('SSH_AUTH_SOCK')
             or operation not in ('deploy', 'resume', 'write-probe')
             or (operation in ('deploy', 'resume') and not re.fullmatch(r'[0-9a-f]{40}', sha))
             or (operation == 'write-probe' and bool(sha))
-            or (operation == 'deploy' and not re.fullmatch(r'[A-Za-z0-9_-]{10,256}', token))):
+            or (operation == 'deploy' and (not re.fullmatch(r'[A-Za-z0-9_-]{10,256}', token)
+                or not re.fullmatch(r'[0-9a-f]{64}', approval_key)))):
         return {'status': 'blocked', 'reason': 'configuration_unavailable'}
     try:
         known = verify(env.get('NORDICWAY_KNOWN_HOST', ''), env.get('NORDICWAY_VERIFIED_FINGERPRINT', ''))
@@ -47,7 +54,11 @@ def run(env=None, transport=_run_limited):
                        '-o', 'ClearAllForwardings=yes', '-o', 'ConnectTimeout=10',
                        HOST, 'escape-deploy-v1 ' + operation + ((' ' + sha) if sha else '')]
             # Token is sent only over SSH stdin, never in command arguments or logs.
-            payload = json.dumps({'cpanel_token': token}, separators=(',', ':')).encode() if operation == 'deploy' else b''
+            payload = b''
+            if operation == 'deploy':
+                nonce, expires = secrets.token_hex(16), int(time.time()) + 180
+                mac = hmac.new(bytes.fromhex(approval_key), nordicway_owner_approval.message(sha, nonce, expires), hashlib.sha256).hexdigest()
+                payload = json.dumps({'cpanel_token': token, 'approval': {'nonce': nonce, 'expires': expires, 'mac': mac}}, separators=(',', ':')).encode()
             result = transport(command, input=payload, capture_output=True, timeout=900, env=env)
         if len(result.stdout) > 1024:
             raise ValueError('invalid_reply')
