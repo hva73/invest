@@ -22,9 +22,11 @@ jobs:
               page=b.new_page(viewport={'width':1440,'height':1050},device_scale_factor=1)
               page.goto(Path('development/previews/issue114-desktop.html').resolve().as_uri())
               page.screenshot(path='desktop-statistik-fiktiv.png',full_page=True)
+              page.set_viewport_size({'width':390,'height':844})
+              page.screenshot(path='mobil-statistik-fiktiv.png',full_page=True)
               b.close()
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: desktop-statistik-fiktiv
-          path: desktop-statistik-fiktiv.png
+          path: '*-statistik-fiktiv.png'
