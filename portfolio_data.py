@@ -4,6 +4,7 @@ from datetime import datetime,timezone
 from decimal import Decimal,InvalidOperation
 import oauth
 from mcp_client import MCP,decode_result,PortfolioFormatError,shape
+from hotwatch_contract import EngineError
 
 READ_TOOLS={'get_accounts':'portfolioId','get_positions':'portfolioId','get_portfolio_value':'portfolioId','get_collection':'collectionId'}
 
@@ -294,6 +295,9 @@ def read(connect,user_id,portfolio_id,client_factory=None,strict_positions=False
                     payload['positions_collection_ids']=collection_ids
             successful+=1
         except PortfolioFormatError as error:payload['errors'].append('positions: '+str(error))
+        except EngineError as error:
+            if strict_positions and error.code=='PROVIDER_RATE_BUDGET':raise
+            payload['errors'].append('positions: Pluto-opslaget fejlede eller kunne ikke fuldføres')
         except Exception:payload['errors'].append('positions: Pluto-opslaget fejlede eller kunne ikke fuldføres')
         if not successful:raise PortfolioFormatError('Ingen datasektion kunne læses. '+'; '.join(payload['errors']))
         for account in payload['accounts']:
