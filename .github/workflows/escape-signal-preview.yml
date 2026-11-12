@@ -27,6 +27,9 @@ jobs:
           PYTHONPATH: .:tests
         run: |
           mkdir -p "$ESCAPE_SCREENSHOTS"
+          node tests/test_sector_ui.js
+          node tests/test_dashboard_data.js
+          node tests/test_notification_ui.cjs
           python tests/browser_signal_push_detail.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
