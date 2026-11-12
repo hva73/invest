@@ -97,7 +97,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 08773d0782284493d3ff83e8963d9d64da51335c
+          ref: 499d7622ceaa7e191cc78b57711b0ec46c16b462
           path: demo-source
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -111,17 +111,18 @@ jobs:
       - name: Review desktop layout with demo branch
         env:
           ESCAPE_SCREENSHOTS: /tmp/escape-demo-desktop
-          ESCAPE_DESKTOP_EXTERNAL_REVIEW: '1'
           PYTHONPATH: .:tests
         run: |
           mkdir -p "$ESCAPE_SCREENSHOTS"
           cp desktop-source/static/desktop-experience.css demo-source/static/desktop-experience.css
           cp desktop-source/tests/desktop_fixture.py demo-source/tests/desktop_fixture.py
           cp desktop-source/tests/browser_desktop_experience.py demo-source/tests/browser_desktop_experience.py
-          cp desktop-source/tests/review_demo_desktop.py demo-source/tests/review_demo_desktop.py
+          cp desktop-source/tests/integrate_desktop_for_review.py demo-source/tests/integrate_desktop_for_review.py
           cd demo-source
+          python tests/integrate_desktop_for_review.py
+          python -m unittest discover -s tests -p test_updater.py
           python tests/browser_desktop_experience.py
-          python tests/review_demo_desktop.py
+          python tests/browser_anonymous_demo.py
       - name: Upload synthetic screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
