@@ -54,3 +54,23 @@ jobs:
           pathlib.Path('tests/_synthetic_proposals_managed.py').write_text(source)
           PY
           python tests/_synthetic_proposals_managed.py
+  synthetic-exit-to-server:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue114-statistics'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: proofs
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 7da2dc9747090812ab9bf6343d7ce2cfbff5db5b
+          path: integration
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt playwright==1.56.0
+        working-directory: integration
+      - run: python -m playwright install --with-deps chromium
+      - run: python ../proofs/tests/browser_signal_sell_server.py
+        working-directory: integration
