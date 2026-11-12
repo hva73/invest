@@ -221,12 +221,23 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
   if radar_reset and c.execute('SELECT 1 FROM report_candidate_links WHERE user_id=? AND is_test=0 AND candidate_id=? AND report_row_id<=? LIMIT 1',(uid,cid,radar_reset['report_cutoff'])).fetchone():
    from intel_workflows import radar_reassessed_after_reset
    if not radar_reassessed_after_reset(c,uid,cid,radar_reset):return {'status':'NOT_NEW'}
-  terminal=c.execute("SELECT s.id,EXISTS(SELECT 1 FROM hw_events e WHERE e.watch_row_id=s.id AND e.event_type='WATCH_RESET') AS reset_event,EXISTS(SELECT 1 FROM hw_events e WHERE e.watch_row_id=s.id AND e.event_type='CAPACITY_RELEASED') AS capacity_release FROM hw_sessions s WHERE s.user_id=? AND s.is_test=? AND s.candidate_id=? AND s.status IN ('COMPLETED','EXPIRED','ERROR') AND COALESCE(json_extract(s.request,'$.watch_mode'),'both')!='exit'",(uid,int(mode),cid)).fetchall()
-  if any(not row['capacity_release'] and (not reset or not row['reset_event']) for row in terminal):return {'status':'NOT_NEW'}
-  release_generation=max((row['id'] for row in terminal if row['capacity_release']),default=0)
+  terminal=c.execute("SELECT s.id,EXISTS(SELECT 1 FROM hw_events e WHERE e.watch_row_id=s.id AND e.event_type='WATCH_RESET') AS reset_event FROM hw_sessions s WHERE s.user_id=? AND s.is_test=? AND s.candidate_id=? AND s.status IN ('COMPLETED','EXPIRED','ERROR') AND COALESCE(json_extract(s.request,'$.watch_mode'),'both')!='exit'",(uid,int(mode),cid)).fetchall()
   from intel_workflows import candidate_currentness
   current=candidate_currentness(c,uid,mode,cid,report_fallback=True)
   if current['status'] not in ('CURRENT','REPORT_ONLY'):return {'status':'NOT_NEW'}
+  # A fresh, explicit assessment may start a new entry watch after automatic
+  # candidate expiry. Never revive manual stops or report-only observations.
+  reassessed=[];released=[]
+  for ended in terminal:
+   last=c.execute('SELECT event_type,created FROM hw_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(ended['id'],)).fetchone()
+   if not last:return {'status':'NOT_NEW'}
+   if last['event_type']=='CAPACITY_RELEASED':released.append(ended['id']);continue
+   if reset and ended['reset_event']:continue
+   if last['event_type']!='CANDIDATE_WATCH_EXPIRED' or current['status']!='CURRENT' or not current.get('assessed_at') or stamp(current['assessed_at'])<=stamp(last['created']):return {'status':'NOT_NEW'}
+   reassessed.append(ended['id'])
+  reassess_generation=max(reassessed,default=0)
+  latest_release=max(released,default=0)
+  release_generation=latest_release if latest_release>reassess_generation else 0
   if current['status']=='REPORT_ONLY' and (engine.utc()-stamp(current['report_seen_at'])).total_seconds()>86400:return {'status':'NOT_NEW'}
   if reset and (not current.get('assessed_at') or stamp(current['assessed_at'])<=stamp(reset['reset_at']) or stamp(report['generated_at'])<=stamp(reset['reset_at'])):return {'status':'NOT_NEW'}
   if reset:
@@ -287,7 +298,7 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
   # perform independent matching after creation when no proof is cached.
   cached=verified_existing_feed(connect,uid,instrument) if not mode else None
   provider='eodhd' if cached else 'pluto';symbol=cached['provider_symbol'] if cached else None
-  watch='hw-auto-'+hashlib.sha256((str(uid)+'|'+str(int(mode))+'|'+cid+('|'+reset['generation'] if reset else '')+('|capacity:'+str(release_generation) if release_generation else '')).encode()).hexdigest()[:28]
+  watch='hw-auto-'+hashlib.sha256((str(uid)+'|'+str(int(mode))+'|'+cid+('|'+reset['generation'] if reset else '')+('|capacity:'+str(release_generation) if release_generation else '')+('|reassessment:'+str(reassess_generation) if reassess_generation else '')).encode()).hexdigest()[:28]
   risk={'max_notional_dkk':'1000','max_loss_dkk':'100','max_spread_pct':'1','max_quote_age_s':120,'max_position_fraction_pct':'20','proposed_quantity':None,'stop_price':None,'exit_deadline':None}
   with connect() as c:portfolios=[dict(p) for p in c.execute("SELECT id,external_id,parent_external_id FROM portfolios WHERE user_id=? AND active=1 AND source='pluto' ORDER BY id",(uid,))]
   overlapping=any(a['external_id']==b.get('parent_external_id') for a in portfolios for b in portfolios)
@@ -296,6 +307,7 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
   import strategy_center
   selected={'strategy_id':proposal['strategy_id'],'version':proposal['version'],'reason':'Strategiforslag fra rapport: '+proposal['reason']} if proposal else strategy_center.resolve(connect,uid)
   req.update(strategy_id=selected['strategy_id'],strategy_version=selected['version'],activation_reason=(req['activation_reason']+' · '+selected['reason'])[:4000])
+  if reassess_generation:req['reactivation_reason']='Ny tidsstemplet kandidatvurdering efter automatisk udløb'
   if existing_cycle:req['trade_cycle_id']=existing_cycle
   result=engine.create(connect,uid,req);return {'status':result['session']['status'] if not result['duplicate'] else 'ALREADY_ACTIVE','watch_id':watch}
  except EngineError as error:return {'status':error.code}
@@ -1522,3 +1534,5 @@ if __name__=='__main__':
  except Exception as error:
   record_worker_exception(error)
   raise
+
+
