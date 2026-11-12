@@ -86,7 +86,7 @@ try:
    page.locator('[data-sector-scope="2"]').click()
    expect(page.locator('.si-allocation')).not_to_contain_text('mangler data om positioner og kontanter')
    payload['dashboard']['accounts'].pop()
-   print('OVERFLOW',width,page.evaluate("""()=>[...document.querySelectorAll('body *')].map(e=>({tag:e.tagName,cls:e.className?.baseVal??e.className,right:e.getBoundingClientRect().right,width:e.getBoundingClientRect().width})).filter(o=>o.right>innerWidth+1).slice(0,15)"""))
+   print('OVERFLOW',width,page.evaluate("""()=>({vw:innerWidth,scrollX:scrollX,doc:document.documentElement.scrollWidth,body:document.body.scrollWidth,els:[...document.querySelectorAll('body *')].map(e=>({tag:e.tagName,cls:e.className?.baseVal??e.className,left:e.getBoundingClientRect().left,right:e.getBoundingClientRect().right,sw:e.scrollWidth,cw:e.clientWidth,overflow:getComputedStyle(e).overflowX})).filter(o=>o.left < -1 || o.right>innerWidth+1).slice(0,25)})"""))
    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),width
    assert not errors,(width,errors)
    page.close()
