@@ -117,4 +117,17 @@ class DiscoveryQuery(unittest.TestCase):
             self.assertEqual(c.execute('SELECT status FROM hw_heartbeat WHERE id=1').fetchone()[0],'running')
             self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
 
+    def test_discovery_reuses_report_parsed_before_serialized_scope(self):
+        with app.connect() as c:
+            report_id=self.insert(c,['A','B','C'],10,padding=3500)
+            payload=c.execute('SELECT payload FROM ingested_reports WHERE id=?',(report_id,)).fetchone()[0]
+        runner=service.Runner(app.connect)
+        loads=json.loads
+        with patch.dict(os.environ,{'ESCAPE_HW_AUTOSTART_ENABLED':'1','ESCAPE_HW_AUTOSTART_AFTER':'2026-11-09T00:00:00Z'}), \
+             patch.object(service.json,'loads',wraps=loads) as decode, \
+             patch.object(service,'auto_activate_candidate',return_value={'status':'ALREADY_ACTIVE'}) as activate:
+            service.auto_discover(runner.connect,0)
+        self.assertEqual(sum(call.args[0]==payload for call in decode.call_args_list),1)
+        self.assertEqual(activate.call_args.args[4]['candidate_id'],'A')
+
 if __name__=='__main__':unittest.main()
