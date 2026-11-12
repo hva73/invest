@@ -1,0 +1,33 @@
+name: Statistik design preview
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  screenshots:
+    if: github.event.pull_request.head.ref == 'codex/statistik-nyt-design-review'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: pip install playwright==1.56.0 && python -m playwright install --with-deps chromium
+      - name: Render design previews
+        run: |
+          python - <<'PY'
+          from playwright.sync_api import sync_playwright
+          from pathlib import Path
+          with sync_playwright() as p:
+              browser=p.chromium.launch()
+              for name,width,height in [('mobil',390,844),('mobil-detalje',390,844),('desktop',1440,1050)]:
+                  page=browser.new_page(viewport={'width':width,'height':height},device_scale_factor=1)
+                  page.goto(Path('design-review/'+name+'.html').resolve().as_uri())
+                  assert page.evaluate('document.documentElement.scrollWidth') <= width
+                  page.screenshot(path='design-review/'+name+'.png',full_page=(name != 'mobil-detalje'))
+                  page.close()
+              browser.close()
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: statistik-design-preview
+          path: design-review/*.png
