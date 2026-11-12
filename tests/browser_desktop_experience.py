@@ -112,13 +112,13 @@ try:
                         expect(page.locator('.engine-list-row:visible')).to_have_count(1)
                         page.locator('[data-engine-filter=all]').click()
                         expect(page.locator('.engine-list-row:visible')).to_have_count(2)
-                    if width == 1440 and view in ('portfolios', 'hot-watch', 'sectors'):
+                    if width in (1024, 1280, 1440, 1920) and view in ('portfolios', 'hot-watch', 'sectors'):
                         page.screenshot(path=str(screens / f'{view}-{width}.png'), full_page=True)
                 page.locator('nav [data-view=overview]').focus()
                 page.keyboard.press('Tab')
                 assert page.evaluate('document.activeElement.matches(":focus-visible")')
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), width
-            if width in (320, 390, 768, 1280, 1920):
+            if width in (320, 390, 768, 1024, 1280, 1440, 1920):
                 page.screenshot(path=str(screens / f'overview-after-{width}.png'), full_page=True)
             assert not errors, (width, errors)
             page.close()
