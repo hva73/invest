@@ -51,7 +51,9 @@ class AppReleaseBridgeTests(unittest.TestCase):
         self.assertEqual(bridge.resume_app(self.connect,item['sha'],resume=lambda _:failed)['status'],'failed')
         self.assertEqual(release_approval.current(self.connect,7,now=103)['status'],'recovery')
         ok={'operation':'resume','status':'ok','recovery_required':False,'backup_cleanup':'ok'}
-        self.assertEqual(bridge.resume_app(self.connect,'b'*40,resume=lambda _:ok)['status'],'failed')
+        wrong_calls=[]
+        self.assertEqual(bridge.resume_app(self.connect,'b'*40,resume=lambda sha:wrong_calls.append(sha) or ok)['status'],'failed')
+        self.assertEqual(wrong_calls,[])
         self.assertEqual(release_approval.current(self.connect,7,now=103)['status'],'recovery')
         self.assertEqual(bridge.resume_app(self.connect,item['sha'],resume=lambda _:ok)['status'],'ok')
         self.assertEqual(release_approval.current(self.connect,7,now=103)['status'],'completed')

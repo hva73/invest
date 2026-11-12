@@ -82,6 +82,12 @@ def run_request(sha, stream, connect, bridge, *, runner, create_proof, notify,
 
 def resume_app(connect, sha, *, resume):
     """Reconcile app status only after the existing runner verifies recovery."""
+    if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-f]{40}', sha):
+        return {'operation':'resume','status':'failed','recovery_required':True,'backup_cleanup':'not_run'}
+    with connect() as c:
+        rows = c.execute("SELECT id FROM release_approvals WHERE sha=? AND status IN ('claimed','recovery')", (sha,)).fetchall()
+    if len(rows) != 1:
+        return {'operation':'resume','status':'failed','recovery_required':True,'backup_cleanup':'not_run'}
     result = resume(sha)
     if (not isinstance(result, dict) or result.get('operation') != 'resume'
             or result.get('status') != 'ok' or result.get('recovery_required') is not False):
