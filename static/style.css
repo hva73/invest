@@ -663,3 +663,9 @@ body > aside nav .nav-sector-mobile{display:none}
  .signal-overview .market-controls [data-market-refresh]:hover,
  .signal-overview .market-controls [data-market-refresh]:focus-visible{background:#24443f;color:#d6f3e8}
 }
+
+/* Observed point tooltip for all shared market charts. */
+.market-plot .market-hover{z-index:4;top:38px;transform:translateX(-50%);display:grid;gap:3px;min-width:102px;padding:8px 10px;border:1px solid #41636a;border-radius:10px;background:#102a34f5;box-shadow:0 8px 22px #0007;color:#e2f1ef;font-size:11px;line-height:1.3;white-space:nowrap;pointer-events:none}
+.market-plot .market-hover[hidden]{display:none}
+.market-plot .market-hover small{font-size:10px;letter-spacing:0;color:#a9c2c6}
+.market-plot .market-hover strong{font-size:12px;font-variant-numeric:tabular-nums}
