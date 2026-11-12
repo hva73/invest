@@ -23,7 +23,7 @@ jobs:
                   page=browser.new_page(viewport={'width':width,'height':height},device_scale_factor=1)
                   page.goto(Path('design-review/'+name+'.html').resolve().as_uri())
                   assert page.evaluate('document.documentElement.scrollWidth') <= width
-                  page.screenshot(path='design-review/'+name+'.png',full_page=True)
+                  page.screenshot(path='design-review/'+name+'.png',full_page=(name != 'mobil-detalje'))
                   page.close()
               browser.close()
           PY
