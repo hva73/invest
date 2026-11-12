@@ -102,6 +102,9 @@ try:
                     tip=page.locator('.dash-hero .dash-chart-tooltip')
                     expect(tip).to_be_visible();expect(tip.locator('[data-chart-date]')).to_have_text(re.compile(r'^\d{2}\.\d{2}$'))
                     expect(tip.locator('[data-chart-value]')).not_to_have_text('—');expect(tip.locator('[data-chart-result]')).not_to_have_text('—')
+                    expect(tip.locator('[data-chart-share]')).to_contain_text('% af depotværdi')
+                    assert tip.get_attribute('data-chart-tone') in ('positive','negative','neutral')
+                    if tip.get_attribute('data-chart-tone') in ('positive','negative'): expect(tip.locator('[data-chart-result]')).to_contain_text(re.compile('[↑↓]'))
                     page.locator('[data-dashboard-range="week"]').click()
                     svg=page.locator('.dash-hero .dash-chart-svg');box=svg.bounding_box()
                     page.mouse.move(box['x'] + box['width'] * .6, box['y'] + box['height'] * .5)
@@ -212,5 +215,4 @@ finally:
     server.shutdown()
     server.server_close()
     case.tearDown()
-
 
