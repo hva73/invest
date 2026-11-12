@@ -4,7 +4,7 @@ Status: under samlet test og uafhængigt review. Produktionsinstallation kræver
 
 ## Indhold siden v2.4
 
-- Mobil og signalflow: tydeligere overblik, entydigt depot ved handelsgennemgang, manuel depotvej for blokerede eller historiske salgssignaler og klarere kandidatfilter (#80, #84).
+- Mobil og signalflow: tydeligere overblik, entydigt depot ved handelsgennemgang, manuel depotvej for blokerede eller historiske salgssignaler og klarere kandidatfilter (#80, #84). Dagens udvikling vises med grundlaget siden første måling (#96); teksten er endnu ikke klikbar.
 - Beholdninger og Collection: undgår at tælle Collection-referencer som direkte beholdninger og foretrækker opdateret positionsbevis (#59).
 - HOT WATCH: genvurdering af kandidater, verificeret US-feedmatch og korrekt særskilt exit-status (#82, #83, #85).
 - Sector Intelligence: ensartet valuta- og kostgrundlag, kontanter og manglende scope/positioner, tidsgrundlag og markering af delvise eller estimerede tal (#79, #86, #88, #89, #91, #93, #95).
