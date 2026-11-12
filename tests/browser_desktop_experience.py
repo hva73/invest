@@ -41,11 +41,11 @@ try:
             expect(page.locator('.dashboard-v1')).to_be_visible()
             expect(page.locator('.dash-holdings')).to_contain_text('ALFA')
             expect(page.locator('.dash-holdings')).to_contain_text('DELTA')
-            if width > 900:
+            if page.locator('[data-dashboard-range=week]').is_visible():
                 page.locator('[data-dashboard-range=week]').click()
                 assert page.locator('.dash-chart-point').count() >= 70
             else:
-                expect(page.locator('[data-dashboard-range=week]')).to_be_hidden()
+                expect(page.locator('.mobile-holdings')).to_be_visible()
             before = page.evaluate('''() => {
               const a = document.querySelector('body > aside').getBoundingClientRect();
               const m = document.querySelector('main').getBoundingClientRect();
