@@ -225,6 +225,24 @@ def observation_view(d,previous=None):
         if d['decision'] and previous['decision'] and d['decision']['status']!=previous['decision']['status']:changes['decision']={'from':previous['decision']['status'],'to':d['decision']['status'],'reason':d['decision']['reason']}
     return {'data':d,'changes':changes}
 
+def review_queue(registry):
+    """Prioritise missing/overdue analyses without inventing a reassessment."""
+    result=[]
+    for row in registry:
+        current=row['currentness'];status=current['status']
+        decision=row.get('decision') or {};lifecycle=row.get('lifecycle') or {}
+        if decision.get('status')=='FRAVÆLG' or lifecycle.get('status') in ('ARCHIVED','CLOSED'):continue
+        # COLD with an assessment deadline is timeout, while lifecycle-based
+        # closure has no deadline. Do not key control flow on display text.
+        if status=='COLD' and not current.get('deadline'):continue
+        if status not in ('COLD','REVIEW_DUE','UNKNOWN','REPORT_ONLY'):continue
+        candidate=row['candidate']
+        result.append({'candidate_id':candidate['candidate_id'],'ticker':candidate['ticker'],
+                       'status':status,'reason':current.get('reason'),'deadline':current.get('deadline'),
+                       'assessed_at':current.get('assessed_at'),'report_id':row.get('report_id')})
+    result.sort(key=lambda r:(0 if r['status'] in ('COLD','REVIEW_DUE') else 1,stamp(r['deadline']).timestamp() if r['deadline'] else float('-inf'),r['candidate_id']))
+    return result
+
 def watch(connect,uid,is_test=False,candidate_id=None):
     with connect() as c:
         args=[uid,int(is_test)];where=''
@@ -253,7 +271,7 @@ def watch(connect,uid,is_test=False,candidate_id=None):
         if not is_test and candidate_id is None and c.execute('SELECT 1 FROM radar_resets WHERE user_id=?',(uid,)).fetchone():
             allowed={r['candidate']['candidate_id'] for r in registry}
             groups={cid:group for cid,group in groups.items() if cid in allowed}
-        return {'waiting_candidates':[r for r in registry if r.get('display_group')=='waiting'],'active_candidates':[r for r in registry if r.get('display_group') in ['active','buy','exit']],'candidate_status_note':'Kandidatstatus og observationsgrupper bekræfter ikke, at en motorsession findes eller kører. Brug sync_hot_watch med reports:read eller hotwatch:read og kontrollér watch_id, status og motorens heartbeat. En beholdningssession og en kandidatsession er særskilte.','engine_sessions_checked':False,'groups':sorted(groups.values(),key=lambda x:stamp(x['observations'][0]['data']['observed_at']).timestamp(),reverse=True),'is_test':is_test,'history_truncated':len(rows)>500}
+        return {'waiting_candidates':[r for r in registry if r.get('display_group')=='waiting'],'active_candidates':[r for r in registry if r.get('display_group') in ['active','buy','exit']],'review_queue':review_queue(registry),'candidate_status_note':'Kandidatstatus og observationsgrupper bekræfter ikke, at en motorsession findes eller kører. Brug sync_hot_watch med reports:read eller hotwatch:read og kontrollér watch_id, status og motorens heartbeat. En beholdningssession og en kandidatsession er særskilte.','engine_sessions_checked':False,'groups':sorted(groups.values(),key=lambda x:stamp(x['observations'][0]['data']['observed_at']).timestamp(),reverse=True),'is_test':is_test,'history_truncated':len(rows)>500}
 
 def radar_reassessed_after_reset(c,uid,cid,reset):
     """An old identity returns only on an explicit, newly dated main-report assessment."""

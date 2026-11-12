@@ -70,6 +70,10 @@ Hvis ChatGPTs forbindelse fejler, registrér status/fejltekst uden tokens. `503`
 
 ## Værktøjerne
 
+### `get_hot_watch`: kandidater til revurdering
+
+`review_queue` er en læseliste over forfaldne eller manglende kandidatvurderinger. Forfaldne frister kommer først i faktisk tidsorden på tværs af tidszoner; ens tidspunkter sorteres på kandidat-ID. Manglende frist kommer efter kandidater med en forfalden frist. Listen udelader eksplicit fravalgte, lukkede og arkiverede kandidater. En udløbet vurdering eller manglende data er ikke i sig selv en negativ vurdering eller et købssignal. Køen skaber ingen vurderinger, sessioner, ordrer eller ændringer i historik; radaren skal kontrollere kilderne og indsende en faktisk ny, tidsstemplet vurdering via den eksisterende rapportvej. Brug `sync_hot_watch` til at kontrollere faktiske motorsessioner og særskilt exit-overvågning.
+
 ### `send_report`
 
 Argumenterne er **direkte et JSON v1- eller v2-rapportobjekt**, ingen ekstra `report`-wrapper. Se [REPORT_INGEST.md](REPORT_INGEST.md) og `examples/report-ingest-test.json` for alle felter og grænser. `schema_version`, `report_id`, `generated_at`, `source`, `is_test`, `portfolio_values`, `candidates`, `assessments`, `orders` er obligatoriske. Ukendte felter afvises; skrivning kræver `reports:write`.
