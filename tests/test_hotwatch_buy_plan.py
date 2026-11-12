@@ -1,7 +1,7 @@
 """Disposable database; all broker estimates mocked. Never creates real orders."""
 import copy,json,unittest
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal,ROUND_HALF_UP
 from unittest.mock import patch
 import app,report_ingest,hotwatch_engine as engine,hotwatch_buy_plan as plan,trade_service
 from hotwatch_strategy import calculate,BASELINE
@@ -47,6 +47,44 @@ class BuyPlan(unittest.TestCase):
   values=plan.quote(raw,{**self.req,'quote_currency':'DKK'},order);self.assertEqual(values['fx_to_dkk'],'1')
   raw['estimate']['asset']['currency']='USD'
   with self.assertRaises(EngineError):plan.quote(raw,self.req,order)
+ def test_pluto_cent_rounding_preserves_conservative_limit_cost(self):
+  order={'shares':'0.06826703','limitPrice':'21.62'}
+  raw={'estimate':{'side':'BUY','type':'LIMIT','asset':{'ticker':'MERC','currency':'USD'},'limitPrice':'21.62','quantity':'0.06826703','commission':'0','commissionCurrency':'DKK','filledAccountNotional':'10.03','filledAccountNotionalCurrency':'DKK','assetBankFx':{'base':'USD','quote':'DKK','rate':'6.775203'}}}
+  values=plan.quote(raw,self.req,order);self.assertEqual(Decimal(values['account_notional_dkk']),Decimal('10.03'))
+  with self.assertRaises(EngineError):plan.bounded({'budget_dkk':'10'},values)
+  order={'shares':'0.05','limitPrice':'21.69'};raw['estimate'].update(quantity='0.05',limitPrice='21.69',filledAccountNotional='7.32',assetBankFx={'base':'USD','quote':'DKK','rate':'6.775384'})
+  values=plan.quote(raw,self.req,order);self.assertGreaterEqual(Decimal(values['account_notional_dkk']),Decimal('0.05')*Decimal('21.69')*Decimal('6.775384'))
+  raw['estimate']['filledAccountNotional']='7.00'
+  with self.assertRaises(EngineError):plan.quote(raw,self.req,order)
+ def test_rounding_over_budget_reduces_quantity_and_reestimates_without_orders(self):
+  self.data.update(budget_dkk='10',limit_price='21.62',stop_price='20')
+  def rounded(*args,**kwargs):
+   result,asset=self.estimate(*args,**kwargs);e=result['quote']['estimate'];order=args[3]['orders'][0]
+   e.update(limitPrice='21.62',commission='0',assetBankFx={'base':'USD','quote':'DKK','rate':'6.775203'})
+   if order.get('shares'):
+    notional=(Decimal(order['shares'])*Decimal('21.62')).quantize(Decimal('.01'),rounding=ROUND_HALF_UP)
+    e['filledAccountNotional']=str((notional*Decimal('6.775203')).quantize(Decimal('.01'),rounding=ROUND_HALF_UP))
+   else:e['filledAccountNotional']='10'
+   return result,asset
+  with patch('trade_service.read_estimate',side_effect=rounded):result=plan.prepare(app.connect,1,self.req['watch_id'],self.data)
+  self.assertEqual(len(self.calls),3);self.assertLess(Decimal(result['plan']['quantity']),Decimal(self.calls[1]['orders'][0]['shares']))
+  self.assertLessEqual(Decimal(result['plan']['account_notional_dkk']),Decimal('10'))
+  self.assertEqual(result['plan']['stop_price'],'20');self.assertFalse(self.fixture.writes())
+ def test_retry_still_over_budget_never_stores_a_plan(self):
+  self.data.update(budget_dkk='10',limit_price='21.62',stop_price='20')
+  def changed(*args,**kwargs):
+   result,asset=self.estimate(*args,**kwargs);e=result['quote']['estimate'];order=args[3]['orders'][0]
+   e.update(limitPrice='21.62',commission='0',assetBankFx={'base':'USD','quote':'DKK','rate':'6.775203'})
+   if order.get('shares'):
+    notional=(Decimal(order['shares'])*Decimal('21.62')).quantize(Decimal('.01'),rounding=ROUND_HALF_UP)
+    e['filledAccountNotional']=str((notional*Decimal('6.775203')).quantize(Decimal('.01'),rounding=ROUND_HALF_UP))
+    if len(self.calls)==3:e['commission']='5'
+   else:e['filledAccountNotional']='10'
+   return result,asset
+  with patch('trade_service.read_estimate',side_effect=changed),self.assertRaises(EngineError) as err:plan.prepare(app.connect,1,self.req['watch_id'],self.data)
+  self.assertEqual(err.exception.code,'BUY_PLAN_BUDGET_EXCEEDED');self.assertEqual(len(self.calls),3)
+  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM hw_buy_plans').fetchone()[0],0)
+  self.assertFalse(self.fixture.writes())
  def test_whole_shares_are_rounded_down_not_invented(self):
   self.data['budget_dkk']='900'
   def whole(*args):
