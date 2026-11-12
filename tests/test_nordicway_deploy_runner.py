@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import nordicway_deploy_runner as runner
+import nordicway_owner_approval as owner
 from nordicway_deploy_sequence import Outcome
 
 SHA = 'a' * 40
@@ -16,8 +17,14 @@ TOKEN = 'test_token_12345'
 def crash_during_deploy(bridge):
     def die(adapter, sha):
         os._exit(23)
-    runner.run(SHA, TOKEN, bridge=Path(bridge), adapter_factory=Mock(), deploy=die,
+    runner.run(SHA, TOKEN, bridge=Path(bridge), authorization_lock=Path(bridge)/'test-lock', adapter_factory=Mock(), deploy=die,
                prepare=lambda checkout, sha: None)
+
+
+def hold_authorization_lock(lock, ready, release):
+    with owner.deployment_lock(lock):
+        ready.set()
+        release.wait(5)
 
 
 class RunnerTests(unittest.TestCase):
@@ -26,13 +33,14 @@ class RunnerTests(unittest.TestCase):
         self.bridge = Path(self.temp.name)
         (self.bridge / 'approved-sha').write_text(SHA + '\n')
         (self.bridge / 'approved-sha').chmod(0o600)
+        (self.bridge / 'test-lock').touch(mode=0o600)
 
     def tearDown(self):
         self.temp.cleanup()
 
     def run_deploy(self, result):
         factory = Mock()
-        response = runner.run(SHA, TOKEN, bridge=self.bridge, adapter_factory=factory,
+        response = runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=factory,
                               deploy=lambda adapter, sha: result, prepare=lambda checkout, sha: None)
         self.assertEqual(factory.call_args.kwargs['cpanel_token'], TOKEN)
         self.assertNotIn(TOKEN, str(response))
@@ -87,7 +95,7 @@ class RunnerTests(unittest.TestCase):
         def failed_checkout(checkout, sha):
             raise ValueError('checkout_not_clean')
         factory = Mock()
-        result = runner.run(SHA, TOKEN, bridge=self.bridge, adapter_factory=factory,
+        result = runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=factory,
                             prepare=failed_checkout)
         self.assertEqual(result['status'], 'failed')
         self.assertFalse(result['recovery_required'])
@@ -108,12 +116,30 @@ class RunnerTests(unittest.TestCase):
         for approval in ('b' * 40, 'HEAD', SHA + ';id'):
             (self.bridge / 'approved-sha').write_text(approval)
             with self.assertRaises(ValueError):
-                runner.run(SHA, TOKEN, bridge=self.bridge, adapter_factory=factory)
+                runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=factory)
         self.assertFalse(factory.called)
         (self.bridge / 'approved-sha').write_text(SHA)
         (self.bridge / 'approved-sha').chmod(0o644)
         with self.assertRaises(ValueError):
-            runner.run(SHA, TOKEN, bridge=self.bridge, adapter_factory=factory)
+            runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=factory)
+
+    def test_concurrent_authorization_lock_blocks_runner_before_claim(self):
+        ctx = multiprocessing.get_context('fork')
+        ready, release = ctx.Event(), ctx.Event()
+        child = ctx.Process(target=hold_authorization_lock,
+                            args=(self.bridge/'test-lock', ready, release))
+        child.start()
+        try:
+            self.assertTrue(ready.wait(5))
+            with self.assertRaises(BlockingIOError):
+                self.run_deploy(Outcome('ok', 'complete', True))
+            self.assertFalse((self.bridge/'deployment-incomplete.json').exists())
+        finally:
+            release.set()
+            child.join(5)
+            if child.is_alive(): child.terminate(); child.join()
+        self.assertEqual(child.exitcode, 0)
+        self.assertEqual(self.run_deploy(Outcome('ok', 'complete', True))['status'], 'ok')
 
     def test_request_is_bounded_and_has_only_token(self):
         with patch.object(runner, 'run', return_value={'status': 'ok'}) as call:
