@@ -46,7 +46,12 @@
   .engine-list-status .dash-action-badge { font-size: 12px; font-weight: 700; min-height: 36px; }
 
   /* A shorter results chart brings the allocation into view without changing focus order. */
-  .si-results .si-bars { min-height: 180px; }
+  .si-results .si-bars { min-height: 205px; }
+  .si-results .si-bar-column { grid-template-rows: 20px 140px auto; }
+  .si-results .si-bar-plot { height: 140px; min-height: 140px; }
+  .si-results .si-bar.up { bottom: 70px; transform: translateX(-50%) scaleY(.78); transform-origin: center bottom; }
+  .si-results .si-bar.down { top: 70px; transform: translateX(-50%) scaleY(.78); transform-origin: center top; }
+  .si-results .si-zero-line { top: 112px; }
   .si-results { padding: 18px 24px; }
   .si-hero { padding: 20px 24px 0; }
   .si-hero h2 { font-size: clamp(27px, 2.5vw, 34px); margin: 8px 0; }

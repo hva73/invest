@@ -121,6 +121,14 @@ try:
                         result_chart = page.locator('.si-results .si-bars')
                         if result_chart.count():
                             assert result_chart.evaluate('e => e.getBoundingClientRect().height') <= 220, width
+                            zero_y = page.locator('.si-results .si-zero-line').bounding_box()['y']
+                            up_bar = page.locator('.si-results .si-bar.up').first
+                            if up_bar.count():
+                                rect = up_bar.bounding_box()
+                                assert abs((rect['y'] + rect['height']) - zero_y) <= 2, (width, rect, zero_y)
+                            down_bar = page.locator('.si-results .si-bar.down').first
+                            if down_bar.count():
+                                assert abs(down_bar.bounding_box()['y'] - zero_y) <= 2, width
                     if view == 'portfolios' and width >= 1100:
                         card = page.locator('.portfolio-card-root').first
                         name = card.locator(':scope > h2').bounding_box()
