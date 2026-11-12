@@ -39,8 +39,8 @@ screens.mkdir(parents=True,exist_ok=True)
 try:
  with patch('mcp_client.MCP.request',side_effect=AssertionError('No broker calls')), sync_playwright() as p:
   browser = p.chromium.launch(headless=True)
-  for width in (320,390,1440):
-   page=browser.new_page(viewport={'width':width,'height':900})
+  for width in (320,390,667,1440):
+   page=browser.new_page(viewport={'width':width,'height':375 if width==667 else 900})
    errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
    page.route('**/api/sector-intelligence',lambda route:route.fulfill(json=payload))
    page.goto(f'http://127.0.0.1:{server.server_port}')
