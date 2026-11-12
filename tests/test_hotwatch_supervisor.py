@@ -263,7 +263,7 @@ class WatchdogTests(unittest.TestCase):
             env = supervisor.environment()
             self.assertEqual(env['ESCAPE_HW_EODHD_WS_TRADES_ENABLED'], '0')
             self.assertEqual(env['ESCAPE_HW_EODHD_REST_ENABLED'], '1')
-            self.assertEqual(env['ESCAPE_HW_EODHD_WS_EU_EXCHANGES'], 'CO,XETRA,AS')
+            self.assertEqual(env['ESCAPE_HW_EODHD_WS_EU_EXCHANGES'], 'CO,XETRA,AS,ST,OL')
         with patch.dict(os.environ, {'ESCAPE_HW_EODHD_WS_EU_EXCHANGES': 'CO'}, clear=True):
             self.assertEqual(supervisor.environment()['ESCAPE_HW_EODHD_WS_EU_EXCHANGES'], 'CO')
 
