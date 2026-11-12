@@ -1535,6 +1535,8 @@ class HotWatch(unittest.TestCase):
    with app.connect() as c:
     row=c.execute('SELECT * FROM hw_sessions WHERE watch_id=?',(first['watch_id'],)).fetchone()
     c.execute("UPDATE hw_sessions SET status='EXPIRED' WHERE id=?",(row['id'],))
+    engine.event(c,row,'CAPACITY_RELEASED',start,'older capacity event')
+    engine.event(c,row,'CAPACITY_RESTORED',start,'older restore event')
     engine.event(c,row,'CANDIDATE_WATCH_EXPIRED',expired,'synthetic expiry')
    self.assertEqual(auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:self.fail('old assessment cannot reactivate'))['status'],'NOT_NEW')
   new={'status':'CURRENT','assessed_at':(expired+timedelta(seconds=1)).isoformat()}
