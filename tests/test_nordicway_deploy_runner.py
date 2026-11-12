@@ -1,4 +1,6 @@
 import io
+import json
+import time
 import multiprocessing
 import os
 import tempfile
@@ -21,6 +23,16 @@ def crash_during_deploy(bridge):
                prepare=lambda checkout, sha: None)
 
 
+def crash_after_marker_before_ticket_consumption(bridge):
+    original = Path.unlink
+    def die(path, *args, **kwargs):
+        if path.name == 'approval-ticket.json': os._exit(24)
+        return original(path, *args, **kwargs)
+    with patch.object(Path, 'unlink', die):
+        runner.run(SHA, TOKEN, bridge=Path(bridge), authorization_lock=Path(bridge)/'test-lock',
+                   adapter_factory=Mock(), prepare=lambda *_: None)
+
+
 def hold_authorization_lock(lock, ready, release):
     with owner.deployment_lock(lock):
         ready.set()
@@ -34,11 +46,18 @@ class RunnerTests(unittest.TestCase):
         (self.bridge / 'approved-sha').write_text(SHA + '\n')
         (self.bridge / 'approved-sha').chmod(0o600)
         (self.bridge / 'test-lock').touch(mode=0o600)
+        self.ticket()
 
     def tearDown(self):
         self.temp.cleanup()
 
+    def ticket(self, sha=SHA):
+        path = self.bridge / 'approval-ticket.json'
+        path.write_text(json.dumps({'sha':sha,'nonce':'1'*32,'expires':int(time.time())+60}))
+        path.chmod(0o600)
+
     def run_deploy(self, result):
+        if not (self.bridge / 'approval-ticket.json').exists(): self.ticket()
         factory = Mock()
         response = runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=factory,
                               deploy=lambda adapter, sha: result, prepare=lambda checkout, sha: None)
@@ -140,6 +159,31 @@ class RunnerTests(unittest.TestCase):
             if child.is_alive(): child.terminate(); child.join()
         self.assertEqual(child.exitcode, 0)
         self.assertEqual(self.run_deploy(Outcome('ok', 'complete', True))['status'], 'ok')
+
+    def test_crash_after_claim_blocks_replay(self):
+        child = multiprocessing.get_context('fork').Process(
+            target=crash_after_marker_before_ticket_consumption, args=(str(self.bridge),))
+        child.start(); child.join(5)
+        self.assertEqual(child.exitcode, 24)
+        self.assertTrue((self.bridge/'deployment-incomplete.json').exists())
+        self.assertTrue((self.bridge/'approval-ticket.json').exists())
+        with self.assertRaises(FileExistsError):
+            runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=Mock())
+
+    def test_ticket_consumed_and_cannot_replay(self):
+        result = runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock',
+                            adapter_factory=Mock(), deploy=lambda *_: Outcome('ok', 'complete', True),
+                            prepare=lambda *_: None)
+        self.assertEqual(result['status'], 'ok')
+        self.assertFalse((self.bridge/'approval-ticket.json').exists())
+        with self.assertRaises(FileNotFoundError):
+            runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=Mock())
+
+    def test_ticket_for_other_sha_is_rejected_before_claim(self):
+        self.ticket('b'*40)
+        with self.assertRaisesRegex(ValueError, 'invalid_approval_ticket'):
+            runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=Mock())
+        self.assertFalse((self.bridge/'deployment-incomplete.json').exists())
 
     def test_request_is_bounded_and_has_only_token(self):
         with patch.object(runner, 'run', return_value={'status': 'ok'}) as call:
