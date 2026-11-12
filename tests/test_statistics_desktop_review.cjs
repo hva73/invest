@@ -2,6 +2,6 @@
 const assert=require('node:assert/strict');const {render}=require('../static/statistics-ui.js');
 const item=(ticker,gross,percent,currency='DKK')=>({ticker,name:'Fiktiv',currency,gross,gross_percent:percent,quantity:'4',buy_price:'10',sell_price:'12',buy_origin:'unknown',sell_origin:'unknown'});
 const data={portfolios:[{portfolio_id:1,name:'Depot',omitted:1,items:[item('GAIN','8','20'),item('LOSS','-4','-20'),item('FLAT','0','0'),item('US','100','10','USD')]}]};
-const d=render(data,{portfolio:1,currency:'DKK'});for(const expected of ['33,33 %','↑ +4,00 DKK','↑ +8,00 DKK','↓ −4,00 DKK','1 uændret','1 salg kan endnu ikke beregnes','Solgt antal 4','Køb: Ikke afklaret','Salg: Ikke afklaret'])assert.ok(d.includes(expected),expected);assert.ok(!d.includes('US<small>'));
+const d=render(data,{portfolio:1,currency:'DKK'});for(const expected of ['33,33 %','↑ +4,00 kr.','↑ +8,00 kr.','↓ −4,00 kr.','1 uændret','1 salg kan endnu ikke beregnes','Solgt antal 4','Køb: Ikke afklaret','Salg: Ikke afklaret'])assert.ok(d.includes(expected),expected);assert.ok(!d.includes('US<small>'));
 const u=render(data,{portfolio:1,currency:'USD'});assert.ok(u.includes('↑ +100,00 USD'));assert.ok(!u.includes('GAIN<small>'));
 assert.ok(render({portfolios:[]}).includes('Ingen handler'));console.log('PASS: sold-share totals, outcomes, unknown origins and currency isolation');
