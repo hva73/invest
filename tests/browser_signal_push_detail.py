@@ -37,7 +37,13 @@ def main():
    background=page.evaluate('window.scrollY');page.mouse.move(2,2);page.mouse.wheel(0,900);page.wait_for_timeout(150);assert page.evaluate('window.scrollY')==background
    shot=os.environ.get('ESCAPE_SCREENSHOTS');
    expect(d.locator('.market-slot .market-price')).to_be_visible()
-   if shot:page.screenshot(path=f'{shot}/signal-sell-390.png')
+   if shot:
+    page.wait_for_timeout(600)
+    import json
+    diag=page.evaluate("""() => Object.fromEntries(['.market-plot-canvas','.market-peak-label','.market-entry-label'].map(s=>{let e=document.querySelector(s),r=e.getBoundingClientRect(),c=getComputedStyle(e);return [s,{x:r.x,y:r.y,width:r.width,height:r.height,position:c.position,top:c.top,left:c.left,transform:c.transform}]}))""")
+    Path(f'{shot}/diagnostic.json').write_text(json.dumps(diag))
+    page.screenshot(path=f'{shot}/signal-sell-390.png')
+    d.evaluate('(e)=>e.scrollTop=650');page.screenshot(path=f'{shot}/signal-sell-details.png');d.evaluate('(e)=>e.scrollTop=0')
    page.evaluate('state.dashboard.positions=[]')
    d.get_by_role('button',name='Sælg').click()
    quick=page.locator('#quick-trade-dialog');expect(quick).to_contain_text('Sælg · TSM');expect(quick.locator('[name=portfolio_id]')).to_have_value(str(case.root));expect(quick.locator('[name=asset_id]')).to_have_value('synthetic-asset')
@@ -83,7 +89,9 @@ def main():
    d.get_by_role('button',name='Køb').click();expect(quick).to_contain_text('Køb · TSM');expect(quick.locator('[name=portfolio_id]')).to_have_value(str(case.root));expect(quick.locator('[name=asset_id]')).to_have_value('synthetic-asset');quick.locator('[data-quick-close]').click()
    account['dashboard']['positions']=[];session['latest_context']['position']='none';session['request']['report_id']='synthetic-report';session['request']['candidate_id']='synthetic-candidate'
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('.market-slot .market-price')).to_be_visible();expect(d.locator('.market-marker-entry')).to_have_count(0);expect(d.locator('.market-entry-label')).to_have_count(0);expect(d.locator('.market-marker-signal')).to_have_count(0);expect(d.locator('.market-peak-label')).to_have_text('Top 3,41 USD');expect(d.get_by_role('button',name='Køb')).to_be_visible()
-   if shot:page.screenshot(path=f'{shot}/signal-buy-390.png')
+   if shot:
+    page.screenshot(path=f'{shot}/signal-buy-390.png')
+    d.evaluate('(e)=>e.scrollTop=650');page.screenshot(path=f'{shot}/signal-buy-details.png');d.evaluate('(e)=>e.scrollTop=0')
    d.get_by_role('button',name='Ignorér og luk signalet').click();expect(d).not_to_be_visible()
    account['dashboard']['positions']=[holding];session['latest_context']['position']='held';session['request'].pop('report_id');session['request'].pop('candidate_id')
    session.update(status='DEGRADED',signal='NO_DATA',display_status='DATA FOR GAMLE',data_stale=True);session['last_action_signal'].update(event_type='SELL_SIGNAL',state='DATA_MISSING');page.evaluate("window.EngineUI.openNotification('synthetic-push')");d.get_by_role('button',name='Åbn depot for manuelt salg →').click();page.wait_for_function("() => view==='portfolio-detail'");assert page.evaluate('selectedPortfolio')==case.root;assert page.evaluate("state.dashboard.positions[0].asset_id")=='synthetic-asset'
