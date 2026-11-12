@@ -43,6 +43,25 @@ def main():
    d=page.locator('#engine-dialog');expect(d.locator('h2')).to_have_text('TSM');expect(d.locator('h2')).not_to_contain_text('SÆLGSSIGNAL');expect(d).to_contain_text('siden køb');expect(d).to_contain_text('ikke sendt en ordre')
    expect(d).to_contain_text('Data brugt til signalet');expect(d).to_contain_text('Seneste modtagne data');expect(d).to_contain_text('Kursændring i dag');expect(d).to_contain_text('Min position');expect(d.get_by_role('button',name='Sælg')).to_be_visible();expect(d.get_by_role('button',name='Ignorér og luk signalet')).to_be_visible();expect(d.locator('[data-asset-trade=BUY]')).to_have_count(0)
    expect(d.locator('.signal-action-bar .signal-help')).to_have_count(0)
+   # Each actual change receives direction and colour; missing values stay neutral.
+   expect(d.locator('.signal-kpis > div:nth-child(1) strong .signed-negative')).to_contain_text('↓')
+   expect(d.locator('.signal-kpis > div:nth-child(2) strong .signed-negative')).to_contain_text('↓')
+   expect(d.locator('.signal-chart-peak strong.signed-negative')).to_contain_text('↓')
+   red=d.locator('.signal-kpis > div:nth-child(1) strong span').evaluate('(e)=>getComputedStyle(e).color')
+   holding['unrealized']={'amount':'12','currency':'DKK'};holding['unrealized_percent']='10'
+   holding['daily']={'amount':'0.1','percent':'3','currency':'USD'}
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')")
+   expect(d.locator('.signal-kpis > div:nth-child(1) strong .signed-positive')).to_contain_text('↑')
+   expect(d.locator('.signal-kpis > div:nth-child(2) strong .signed-positive')).to_contain_text('↑')
+   green=d.locator('.signal-kpis > div:nth-child(1) strong span').evaluate('(e)=>getComputedStyle(e).color')
+   assert red!=green,(red,green)
+   neutral=page.evaluate("window.DashboardUI.profit({amount:'0',currency:'DKK'},0)")
+   missing=page.evaluate("window.DashboardUI.profit(null,null)")
+   assert '→' in neutral and 'neutral' in neutral and '↑' not in missing and '↓' not in missing
+   holding['unrealized']={'amount':'-6.3','currency':'DKK'};holding['unrealized_percent']='-12.68'
+   holding['daily']={'amount':'-0.1','percent':'-3','currency':'USD'}
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')")
+
    ignored=[];page.on('request',lambda r:ignored.append(r.url) if '/ack-signal' in r.url else None)
    d.get_by_role('button',name='Ignorér og luk signalet').click();expect(d).not_to_be_visible();assert not orders and not ignored
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_be_visible()
