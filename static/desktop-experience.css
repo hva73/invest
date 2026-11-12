@@ -137,3 +137,10 @@
   .dash-hero-top #dashboard-value-chart { flex-basis: 62%; }
   .dash-chart-svg { height: 125px; }
 }
+
+/* Keep the desktop overview quiet when nothing needs the owner's attention. */
+@media (min-width: 901px) {
+  .dashboard-v1 .dash-hero-intro > p:not(.dash-warning) { display:none; }
+  .dashboard-v1 > .dash-signals, .dashboard-v1 > .dash-quality { display:none; }
+  .dashboard-v1 .dash-attention:not(.dash-attention-unknown):has(> p.muted:not(.mobile-attention-list)):not(:has(> .dash-table-wrap, > .dash-approval, > .dash-action-badge)) { display:none; }
+}
