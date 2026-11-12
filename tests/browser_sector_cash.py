@@ -33,7 +33,7 @@ payload = {
   'snapshot_at':stamp,'warnings':[], 'portfolio_value_history':{}},
  'markets':[],'history':[],'regions':['USA','Europa','Asien','Globalt'],
  'benchmark_holdings':[],'holding_prices':[],'fx_quotes':[],'fx':None}
-payload['dashboard']['positions'][0].update(key='holding-one',portfolio_name='Hoved',quantity='1',verification='broker_snapshot',conflicts=[],missing={},raw={})
+payload['dashboard']['positions'][0].update(key='holding-one',portfolio_name='Hoved',quantity='2',verification='broker_snapshot',conflicts=[],missing={},raw={},unrealized=cash(-60),unrealized_percent='-4.76',price=cash(600),price_freshness={'state':'fresh'},daily={'amount':'-6','percent':'-1','currency':'DKK','to':stamp})
 screens = Path(os.environ.get('ESCAPE_SCREENSHOTS','/tmp/escape-sector-cash'))
 screens.mkdir(parents=True,exist_ok=True)
 try:
@@ -64,6 +64,9 @@ try:
     page.locator('.sector-row').filter(has_text='Teknologi').click()
     mobile=page.locator('.sector-mobile-holdings [data-dashboard-member="holding-one"]')
     expect(mobile).to_be_visible()
+    expect(page.locator('.si-detail-metrics .signed-negative')).to_contain_text('↓')
+    expect(mobile.locator('.mobile-holding-daily .signed-negative')).to_have_count(2)
+    expect(mobile.locator('.dash-change.negative')).to_contain_text('↓')
     page.screenshot(path=str(screens / f'sector-position-{width}.png'),full_page=True)
     page.locator('.si-detail').screenshot(path=str(screens / f'sector-detail-{width}.png'))
     mobile.click()
