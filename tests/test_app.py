@@ -77,6 +77,9 @@ class Workflow(unittest.TestCase):
   status,result=self.request('admin/release-approval',{'id':candidate['id'],'sha':candidate['sha']})
   self.assertEqual(status,200);self.assertEqual(result['status'],'approved');self.assertFalse(result['deployment_started'])
   self.assertEqual(self.request('admin/release-approval',{'id':candidate['id'],'sha':candidate['sha']})[0],409)
+  self.assertEqual(release_approval.claim(app.connect,candidate['id'],candidate['sha'])['status'],'claimed')
+  with self.assertRaisesRegex(ValueError,'approval_unavailable'):
+   release_approval.claim(app.connect,candidate['id'],candidate['sha'])
  def test_invalid_values_and_persistence(self):
   self.login();p={'portfolio_id':1,'ticker':'TEST','quantity':1,'price':100,'stop':110,'target':120,'costs':0,'fx':1}
   self.assertEqual(self.request('proposals',p)[0],400);p['stop']=90;p['price']=float('nan');self.assertEqual(self.request('proposals',p)[0],400)
