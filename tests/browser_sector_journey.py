@@ -1,0 +1,75 @@
+"""Sector navigation using real frontend and explicitly synthetic portfolio snapshots."""
+import json, os, sys, threading
+from datetime import datetime, timezone
+from pathlib import Path
+from unittest.mock import patch
+sys.path[:0] = ['.', 'tests']
+import app, portfolios, portfolio_data, dashboard_projection
+from playwright.sync_api import expect, sync_playwright
+from test_portfolio_value_chart import PortfolioValueChart
+
+case=PortfolioValueChart();case.setUp()
+case.save(case.root,'5357.70',case.now,result='141.30')
+case.save(case.child,'540.60',case.now,result='45')
+at=case.now.isoformat()
+root_rows=[
+ {'assetId':'synthetic-novo','ticker':'NOVO-B','name':'Novo Nordisk B','quantity':'5','price':'270.30','currency':'DKK','value':'1351.50','unrealisedPnL':'112.50','priceAsOf':at},
+ {'assetId':'synthetic-zealand','ticker':'ZEAL','name':'Zealand Pharma','quantity':'4','price':'411.40','currency':'DKK','value':'1645.60','unrealisedPnL':'-96.20','priceAsOf':at},
+ {'assetId':'synthetic-tech','ticker':'MSFT','name':'Microsoft','quantity':'2','price':'910','currency':'DKK','value':'1820','unrealisedPnL':'80','priceAsOf':at}]
+child_rows=[{'assetId':'synthetic-novo','ticker':'NOVO-B','name':'Novo Nordisk B','quantity':'2','price':'270.30','currency':'DKK','value':'540.60','unrealisedPnL':'45','priceAsOf':at}]
+with app.connect() as c:
+ for pid,rows in ((case.root,root_rows),(case.child,child_rows)):
+  existing=json.loads(c.execute('SELECT payload FROM portfolio_snapshots WHERE portfolio_id=?',(pid,)).fetchone()['payload'])
+  existing.update(positions=portfolio_data.normalize_positions(rows),positions_complete=True,accounts=[],pending_orders=[],errors=[],complete=True)
+  portfolio_data.save(c,1,pid,existing)
+ owned=portfolios.list_owned(c,1); snapshots=portfolio_data.snapshots(c,1)
+dashboard=dashboard_projection.build(app.connect,1,owned,snapshots)
+for row in dashboard['positions']:
+ row['sector_intelligence']={'sector':'Teknologi' if row['ticker']=='MSFT' else 'Sundhed'}
+dashboard['positions'].append({'key':'synthetic-missing','portfolio_id':case.child,'portfolio_name':'AI','asset_id':'synthetic-missing','ticker':'AFVENTER','name':'Fiktiv position','value':None,'unrealized':None,'sector_intelligence':{'sector':'Sundhed'}})
+for account in dashboard['accounts']:
+ portfolio=next(p for p in owned if p['id']==account['id'])
+ account.update(external_id=portfolio.get('external_id'),cash_status='available',cash_accounts=[],positions_status='available')
+payload={'dashboard':dashboard,'markets':[],'history':[],'regions':['USA','Europa','Asien','Globalt'],'benchmark_holdings':[],'holding_prices':[],'fx_quotes':[],'fx':None}
+screens=Path(os.environ.get('ESCAPE_SCREENSHOTS','/tmp/escape-sector-journey'));screens.mkdir(parents=True,exist_ok=True)
+server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
+try:
+ with patch('mcp_client.MCP.request',side_effect=AssertionError('No broker calls')),sync_playwright() as p:
+  browser=p.chromium.launch(headless=True)
+  for width,height in ((390,844),(844,390),(1440,900)):
+   page=browser.new_page(viewport={'width':width,'height':height});errors=[];writes=[]
+   page.on('pageerror',lambda e:errors.append(str(e)))
+   page.on('request',lambda r:writes.append(r.url) if '/api/trade/send' in r.url else None)
+   page.route('**/api/sector-intelligence',lambda route:route.fulfill(json=payload))
+   page.goto(f'http://127.0.0.1:{server.server_port}/')
+   page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click()
+   page.evaluate("""() => {const x=document.createElement('div');x.textContent='FIKTIVE TESTDATA';Object.assign(x.style,{position:'fixed',bottom:'4px',left:'4px',zIndex:'99999',background:'#0a2229',color:'#b6ddd1',padding:'4px 8px',fontSize:'10px'});document.body.append(x)}""")
+   page.locator('nav [data-view=sectors]').click()
+   expect(page.locator('.sector-row').filter(has_text='Sundhed')).to_be_visible()
+   page.screenshot(path=str(screens/f'sektor-oversigt-{width}.png'),full_page=True)
+   page.locator('.sector-row').filter(has_text='Sundhed').click()
+   journey=page.locator('#sector-journey');expect(journey).to_be_visible()
+   expect(journey.locator('h2')).to_have_text('Sundhed')
+   expect(journey.locator('[data-sector-position]')).to_have_count(4)
+   expect(journey).to_contain_text('Root');expect(journey).to_contain_text('AI')
+   expect(journey).not_to_contain_text('Kontantbeholdning')
+   expect(journey.locator('[data-sector-position]').filter(has_text='AFVENTER')).to_be_disabled()
+   page.screenshot(path=str(screens/f'sektor-positioner-{width}.png'))
+   root=journey.locator('[data-sector-position]').filter(has_text='Root').filter(has_text='NOVO-B')
+   child=journey.locator('[data-sector-position]').filter(has_text='AI').filter(has_text='NOVO-B')
+   expect(root).to_be_enabled();expect(child).to_be_enabled()
+   child.click();detail=page.locator('#dashboard-detail');expect(detail).to_be_visible()
+   expect(detail.locator('h2')).to_contain_text('NOVO-B');expect(detail.locator('h2')).to_contain_text('AI')
+   page.screenshot(path=str(screens/f'sektor-positionsdetalje-{width}.png'))
+   detail.locator('[data-dashboard-close]').click();expect(journey).to_be_visible()
+   root.click();expect(detail).to_be_visible();expect(detail.locator('h2')).to_contain_text('Root')
+   detail.locator('[data-dashboard-close]').click();journey.locator('[data-sector-journey-close]').first.click()
+   expect(journey).not_to_be_visible();expect(page.locator('.sector-row').filter(has_text='Sundhed')).to_be_visible()
+   assert not writes,writes
+   assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),width
+   assert not errors,(width,errors)
+   page.close()
+  browser.close()
+ print('PASS: sector to exact portfolio position and back on mobile, landscape and desktop')
+finally:
+ server.shutdown();server.server_close();case.tearDown()

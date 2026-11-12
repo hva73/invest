@@ -33,6 +33,7 @@ jobs:
           node tests/test_demo_boundary.cjs
           python -m unittest discover -s tests -p test_sector_intelligence.py
           python tests/browser_sector_cash.py
+          python tests/browser_sector_journey.py
           python -m unittest discover -s tests -p test_updater.py
           python tests/browser_desktop_experience.py
           python tests/browser_desktop_trade.py

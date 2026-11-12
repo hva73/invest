@@ -1,6 +1,6 @@
 /* Sector analytics are display-only. Quotes and classifications retain their source. */
 window.SectorUI=(()=>{
- let api,esc,refresh,data=null,owner=null,loading=false,loadedAt=0,error='',scope='all',period='30',region='USA',selected='',chartMetric='amount',rotationMode='market',holdingsLimit=20,holdingsRequests={},holdingsTimer=null,holdingsOpen=false;
+ let api,esc,refresh,data=null,owner=null,loading=false,loadedAt=0,error='',scope='all',period='30',region='USA',selected='',chartMetric='amount',rotationMode='market',holdingsLimit=20,holdingsRequests={},holdingsTimer=null,holdingsOpen=false,currentState=null;
  const txt=v=>esc(v==null?'—':String(v));
  const amount=v=>v==null?'—':new Intl.NumberFormat('da-DK',{style:'currency',currency:'DKK'}).format(v);
  const pct=v=>v==null?'—':(v>0?'+':'')+new Intl.NumberFormat('da-DK',{minimumFractionDigits:2,maximumFractionDigits:2}).format(v)+' %';
@@ -130,6 +130,7 @@ window.SectorUI=(()=>{
   return `<div class="si-detail-empty"><span>◈</span><h2>Udforsk din portefølje</h2><p>Vælg en sektor for at se positioner, resultat og markedsreference samlet ét sted.</p><small>← VÆLG EN SEKTOR</small></div>`
  }
  function render(s){
+  currentState=s;
   load(s.user.username,s.dashboard?.snapshot_at);
   if(!data)return `<div class="panel si-loading"><span>◈</span><h2>Sector Intelligence</h2><p>${txt(error||'Henter dine sektordata…')}</p>${error?'<button data-sector-retry="yes">Prøv igen</button>':''}</div>`;
   const gs=groups(),total=gs.reduce((n,g)=>n+g.value,0),nv=gs.reduce((n,g)=>n+g.nv,0),nr=gs.reduce((n,g)=>n+g.rows.length,0),pnl=gs.reduce((n,g)=>n+g.pnl,0),np=gs.reduce((n,g)=>n+g.np,0),cost=gs.reduce((n,g)=>n+g.cost,0),nc=gs.reduce((n,g)=>n+g.nc,0),sorted=gs.filter(g=>g.name!=='Ikke klassificeret'&&!g.name.endsWith('(aktivklasse)')&&g.percent).sort((a,b)=>b.percent.value-a.percent.value),accounts=data.dashboard.accounts||[],unclassified=gs.find(g=>g.name==='Ikke klassificeret'),classified=nr-(unclassified?.rows.length||0);
@@ -150,10 +151,36 @@ window.SectorUI=(()=>{
   }else{
    title=key==='best'?'Bedste sektor':'Svageste sektor';body=group?`<p>${txt(group.name)} · <strong class="${sign(group.percent.value)}">${pct(group.percent.value)}</strong>${group.percent.estimated?' · estimat':''}</p><p>Rangeringen bygger på sektorernes urealiserede positionsresultater siden køb. Kun sektorer med beregneligt resultat indgår.</p><div class="si-detail">${details(group,null,[])}</div>`:'<p>Der er endnu ikke nok data til at beregne sektorernes resultater.</p>';
   }
-  let dialog=document.getElementById('si-summary-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='si-summary-dialog';dialog.className='si-summary-dialog';document.body.append(dialog)}
+  let dialog=document.getElementById('si-summary-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='si-summary-dialog';dialog.className='si-summary-dialog';(document.getElementById('content')||document.body).append(dialog)}
   dialog.innerHTML=`<div class="si-summary-head"><div><small class="si-eyebrow">DIT INVESTERINGSOVERBLIK</small><h2 id="si-summary-title">${txt(title)}</h2></div><form method="dialog"><button aria-label="Luk vindue">✕</button></form></div><div class="si-summary-body">${body}</div>`;dialog.setAttribute('aria-labelledby','si-summary-title');if(!dialog.open)dialog.showModal();dialog.querySelector('button')?.focus();
  }
  function radar(user){load(user);if(!data)return ''; const rows=comparable(data.markets.filter(x=>x.region==='USA').map(x=>({...x,change:changes(x)})).filter(x=>x.change&&Date.now()-Date.parse(x.change.to+'T00:00Z')<7*864e5)).sort((a,b)=>b.change.value-a.change.value);return rows.length>1?`<section class="panel"><small>SECTOR INTELLIGENCE · ETF-PROXIES</small><h2>Relativ sektorstyrke</h2><p>${txt(rows[0].sector)} ${pct(rows[0].change.value)} · ${txt(rows.at(-1).sector)} ${pct(rows.at(-1).change.value)}. Historisk kursudvikling, ingen handelsordre.</p><button data-view="sectors">Åbn sektoroverblik →</button></section>`:''}
+ function matchLivePosition(row){
+  if(!row?.key||row.portfolio_id==null||!row.asset_id)return null;
+  const matches=(currentState?.dashboard?.positions||[]).filter(p=>p.key===row.key&&String(p.portfolio_id)===String(row.portfolio_id)&&p.asset_id===row.asset_id);
+  return matches.length===1?matches[0]:null;
+ }
+ function openSectorJourney(name){
+  const group=groups().find(g=>g.name===name);
+  if(!group||!group.rows.length||!document.createElement||!document.body)return;
+  let dialog=document.getElementById('sector-journey');
+  if(!dialog){dialog=document.createElement('dialog');dialog.id='sector-journey';dialog.className='si-journey';document.body.append(dialog)}
+  const items=group.rows.map((r,i)=>{
+   const live=matchLivePosition(r),value=converted(r.value),pnl=converted(r.unrealized),portfolio=r.portfolio_name||'Depot ikke oplyst';
+   return `<li><button type="button" class="si-position-link" data-sector-position="${i}" ${live?'':'disabled'} aria-label="Åbn ${txt(r.ticker||r.name||'position')} i ${txt(portfolio)}"><span class="si-position-name"><strong>${txt(r.ticker||r.name||'Ukendt position')}</strong><small>${txt(r.name||'')} · ${txt(portfolio)}</small></span><span class="si-position-amount"><strong>${value===null?'—':amount(value)}${isCurrencyEstimate(r.value)?' · estimat':''}</strong><small class="${sign(pnl)}">${pnl===null?'Resultat ikke oplyst':amount(pnl)}${r.unrealized_estimated||isCurrencyEstimate(r.unrealized)?' · estimat':''}</small></span><span aria-hidden="true">›</span></button>${live?'':'<small class="si-position-unavailable">Opdatér depotet for at åbne positionen.</small>'}</li>`
+  }).join('');
+  dialog._sectorRows=group.rows.slice();
+  dialog.innerHTML=`<div class="si-journey-head"><div><small>SEKTOR · ${group.rows.length} ${group.rows.length===1?'POSITION':'POSITIONER'}</small><h2 tabindex="-1">${txt(name)}</h2><p>Vælg en position for at se kurs og detaljer.</p></div><button type="button" data-sector-journey-close aria-label="Tilbage til sektorfordelingen">✕</button></div><ul class="si-journey-list">${items}</ul><button type="button" class="si-journey-back" data-sector-journey-close>← Tilbage til sektorfordelingen</button>`;
+  if(!dialog.open)dialog.showModal();
+  dialog.querySelector('h2')?.focus();
+ }
+ function openJourneyPosition(button){
+  const dialog=document.getElementById('sector-journey'),index=Number(button.dataset.sectorPosition);
+  if(!Number.isInteger(index)||index<0||!dialog?._sectorRows)return;
+  const row=dialog._sectorRows[index],live=matchLivePosition(row);
+  if(!live){openSectorJourney(selected);return}
+  window.DashboardUI?.click({dataset:{dashboardMember:live.key}});
+ }
  function highlightDonutSector(target,active){
   const item=target?.closest?.('[data-sector-donut], .si-bar-column[data-sector-select], .sector-row[data-sector-select]');if(!item)return;
   const shell=item.closest('.sector-shell');if(!shell)return;
@@ -164,7 +191,7 @@ window.SectorUI=(()=>{
  document.addEventListener('pointerout',e=>highlightDonutSector(e.target,false));
  document.addEventListener('focusin',e=>highlightDonutSector(e.target,true));
  document.addEventListener('focusout',e=>highlightDonutSector(e.target,false));
- document.addEventListener('click',e=>{const b=e.target.closest('button, [data-sector-donut]');if(!b)return;if(b.dataset.sectorSummary!==undefined){openSummary(b.dataset.sectorSummary);return}for(const [key,fn] of [['sectorHoldingsClose',()=>{holdingsOpen=false;if(holdingsTimer)clearTimeout(holdingsTimer)}],['sectorHoldingsLimit',v=>{const n=Number(v);if([20,30,50].includes(n)){holdingsLimit=n;if(holdingsOpen&&selected)queueHoldings(selected)}}],['sectorRotation',v=>rotationMode=v],['sectorDonut',v=>selected=v],['sectorMetric',v=>chartMetric=v],['sectorRetry',()=>{error='';data=null}],['sectorScope',v=>scope=v],['sectorPeriod',v=>period=v],['sectorRegion',v=>{region=v;holdingsOpen=false}],['sectorSelect',v=>selected=v],['sectorMarket',v=>{selected=v;holdingsLimit=20;holdingsOpen=true;queueHoldings(v)}]])if(b.dataset[key]!==undefined){fn(b.dataset[key]);refresh();if(key==='sectorSelect'&&b.matches?.('.si-bar-column'))requestAnimationFrame(()=>document.querySelector('.sector-layout .si-detail')?.scrollIntoView({behavior:'smooth',block:'nearest'}));break}});
- document.addEventListener('keydown',e=>{if(e.key==='Escape'&&holdingsOpen){holdingsOpen=false;if(holdingsTimer)clearTimeout(holdingsTimer);refresh();return}if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-sector-donut]')){e.preventDefault();selected=e.target.dataset.sectorDonut;refresh()}});
+ document.addEventListener('click',e=>{const b=e.target.closest('button, [data-sector-donut]');if(!b)return;if(b.dataset.sectorJourneyClose!==undefined){document.getElementById('sector-journey')?.close();return}if(b.dataset.sectorPosition!==undefined){openJourneyPosition(b);return}if(b.dataset.sectorSummary!==undefined){openSummary(b.dataset.sectorSummary);return}for(const [key,fn] of [['sectorHoldingsClose',()=>{holdingsOpen=false;if(holdingsTimer)clearTimeout(holdingsTimer)}],['sectorHoldingsLimit',v=>{const n=Number(v);if([20,30,50].includes(n)){holdingsLimit=n;if(holdingsOpen&&selected)queueHoldings(selected)}}],['sectorRotation',v=>rotationMode=v],['sectorDonut',v=>selected=v],['sectorMetric',v=>chartMetric=v],['sectorRetry',()=>{error='';data=null}],['sectorScope',v=>scope=v],['sectorPeriod',v=>period=v],['sectorRegion',v=>{region=v;holdingsOpen=false}],['sectorSelect',v=>selected=v],['sectorMarket',v=>{selected=v;holdingsLimit=20;holdingsOpen=true;queueHoldings(v)}]])if(b.dataset[key]!==undefined){fn(b.dataset[key]);refresh();if(key==='sectorSelect'||key==='sectorDonut')openSectorJourney(b.dataset[key]);break}});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&holdingsOpen){holdingsOpen=false;if(holdingsTimer)clearTimeout(holdingsTimer);refresh();return}if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-sector-donut]')){e.preventDefault();selected=e.target.dataset.sectorDonut;refresh();openSectorJourney(selected)}});
  return {setup(x){({api,escape:esc,refresh}=x)},render,radar};
 })();
