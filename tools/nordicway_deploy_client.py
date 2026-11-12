@@ -67,7 +67,7 @@ def run(env=None, transport=_run_limited):
         if operation == 'app-deploy':
             if (not isinstance(reply,dict) or set(reply)!={'operation','status','sha'}
                     or reply['operation']!='app-deploy' or reply['sha']!=sha
-                    or reply['status'] not in ('completed','expired','unavailable','recovery')
+                    or reply['status'] not in ('completed','expired','unavailable','recovery','failed')
                     or (reply['status']=='completed' and result.returncode!=0)):
                 raise ValueError('invalid_reply')
             return {'operation':'app-deploy','status':'ok' if reply['status']=='completed' else reply['status'],'sha':sha}
