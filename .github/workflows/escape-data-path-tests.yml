@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   data-path:
-    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue-4-quote-time-collision' || github.event.pull_request.head.ref == 'codex/issue14-performance-reliability' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue14-scan-latency' || github.event.pull_request.head.ref == 'codex/issue14-ws-cap-telemetry' || github.event.pull_request.head.ref == 'codex/issue14-discovery-gate' || github.event.pull_request.head.ref == 'codex/issue4-batch-incomplete' || github.event.pull_request.head.ref == 'codex/issue4-trade-ties' || github.event.pull_request.head.ref == 'codex/issue4-us-recovery' || github.event.pull_request.head.ref == 'codex/issue3-position-scope' || github.event.pull_request.head.ref == 'codex/issue8-candidate-reassessment' || github.event.pull_request.head.ref == 'codex/issue13-exit-review-status' || github.event.pull_request.head.ref == 'codex/issue7-provider-diagnosis' || github.event.pull_request.head.ref == 'codex/issue14-missing-ws-metrics' || github.event.pull_request.head.ref == 'codex/issue8-action-currentness' || github.event.pull_request.head.ref == 'codex/issue54-quote-future-time' || github.event.pull_request.head.ref == 'codex/issue8-review-priority' || github.event.pull_request.head.ref == 'codex/issue3-context-budget-diagnostic' || github.event.pull_request.head.ref == 'codex/issue8-buy-rounding' || github.event.pull_request.head.ref == 'codex/issue14-nordic-identity' || github.event.pull_request.head.ref == 'codex/issue8-tradability-diagnostic')
+    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue-4-quote-time-collision' || github.event.pull_request.head.ref == 'codex/issue14-performance-reliability' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue14-scan-latency' || github.event.pull_request.head.ref == 'codex/issue14-ws-cap-telemetry' || github.event.pull_request.head.ref == 'codex/issue14-discovery-gate' || github.event.pull_request.head.ref == 'codex/issue4-batch-incomplete' || github.event.pull_request.head.ref == 'codex/issue4-trade-ties' || github.event.pull_request.head.ref == 'codex/issue4-us-recovery' || github.event.pull_request.head.ref == 'codex/issue3-position-scope' || github.event.pull_request.head.ref == 'codex/issue8-candidate-reassessment' || github.event.pull_request.head.ref == 'codex/issue13-exit-review-status' || github.event.pull_request.head.ref == 'codex/issue7-provider-diagnosis' || github.event.pull_request.head.ref == 'codex/issue14-missing-ws-metrics' || github.event.pull_request.head.ref == 'codex/issue8-action-currentness' || github.event.pull_request.head.ref == 'codex/issue54-quote-future-time' || github.event.pull_request.head.ref == 'codex/issue8-review-priority' || github.event.pull_request.head.ref == 'codex/issue3-context-budget-diagnostic' || github.event.pull_request.head.ref == 'codex/issue8-buy-rounding' || github.event.pull_request.head.ref == 'codex/issue14-nordic-identity' || github.event.pull_request.head.ref == 'codex/issue8-tradability-diagnostic' || github.event.pull_request.head.ref == 'codex/issue14-nordic-live-feeds')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -88,3 +88,26 @@ jobs:
         env:
           PYTHONPATH: .:tests
         run: '"$RUNNER_TEMP/escape-data-venv/bin/python" -m unittest tests.test_tradability_diagnostics tests.test_hotwatch_engine tests.test_signal_readiness tests.test_instrument_resolver tests.test_hotwatch_holdings_auto tests.test_hotwatch_agreement'
+
+      - name: Verify Nordic live data paths
+        if: github.event.pull_request.head.ref == 'codex/issue14-nordic-live-feeds'
+        env:
+          PYTHONPATH: .:tests
+        run: '"$RUNNER_TEMP/escape-data-venv/bin/python" -m unittest tests.test_eodhd_feeds tests.test_hotwatch_engine tests.test_hotwatch_supervisor tests.test_post_install_capacity tests.test_hotwatch_holdings_auto tests.test_instrument_resolver'
+
+      - name: Inspect public Cboe reference for requested instruments
+        if: github.event.pull_request.head.ref == 'codex/issue14-nordic-live-feeds'
+        run: |
+          "$RUNNER_TEMP/escape-data-venv/bin/python" - <<'PY'
+          import json
+          from cxe_reference import get_reference, ReferenceUnavailable
+          try:
+              ref=get_reference()
+          except ReferenceUnavailable as error:
+              print('CBOE_REFERENCE_STATUS='+str(error))
+          else:
+              print('CBOE_REFERENCE_CREATED='+ref['created_at'])
+              for ticker,isin in [('HNSA','SE0002148817'),('NORBT','NO0010856511')]:
+                  rows=[row for row in ref['rows'] if row['primary_ticker'].upper()==ticker or row['isin']==isin]
+                  print('CBOE_'+ticker+'='+json.dumps(rows,sort_keys=True,ensure_ascii=True))
+          PY

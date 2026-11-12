@@ -285,6 +285,32 @@ class FeedTests(unittest.TestCase):
   env={'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}
   with patch.dict(os.environ,env,clear=True),patch.object(adapter,'feeds',return_value=Feeds()),patch.object(adapter.pluto,'safe_context',return_value=tick(now)['context']),patch('hotwatch_adapters.utc',return_value=now):sample=adapter.poll({'request_data':req})
   self.assertIn(('eu_trades','ASML.AS'),calls);self.assertEqual(sample['event_time'],trade_at);self.assertEqual(sample['market_status'],'REGULAR');self.assertIsNone(sample['bid'])
+ def test_swedish_and_norwegian_streams_preserve_independent_source_times(self):
+  from test_hotwatch_engine import request,tick
+  now=datetime(2026,11,10,9,45,tzinfo=timezone.utc);trade_at=(now-timedelta(seconds=4)).isoformat();quote_at=(now-timedelta(seconds=2)).isoformat()
+  for exchange,currency in [('ST','SEK'),('OL','NOK')]:
+   with self.subTest(exchange=exchange):
+    req=request();req.update(ticker='SYN',exchange='CHIX',asset_id='synthetic-SYN',quote_currency=currency,provider='eodhd',provider_symbol='SYN.'+exchange)
+    adapter=EODHDAdapter(None,1,Opener({}));calls=[]
+    class Feeds:
+     def capture(self,feed,symbol,**kwargs):
+      calls.append((feed,symbol))
+      if feed=='eu_trades':return {'status':'OK','messages':[{'event_time':trade_at,'received_at':now.isoformat(),'price':'100','market_session':'open'}]}
+      if feed=='eu_quotes':return {'status':'OK','messages':[{'event_time':quote_at,'received_at':now.isoformat(),'bid':'99','ask':'101'}]}
+      return {'status':'NO_MESSAGES','messages':[]}
+    env={'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}
+    with patch.dict(os.environ,env,clear=True),patch.object(adapter,'feeds',return_value=Feeds()),patch.object(adapter.pluto,'safe_context',return_value=tick(now)['context']),patch('hotwatch_adapters.utc',return_value=now):sample=adapter.poll({'request_data':req})
+    self.assertIn(('eu_trades','SYN.'+exchange),calls);self.assertIn(('eu_quotes','SYN.'+exchange),calls)
+    self.assertEqual((sample['event_time'],sample['bid_at'],sample['ask_at'],sample['currency']),(trade_at,quote_at,quote_at,currency))
+ def test_explicit_eu_stream_override_excludes_new_markets(self):
+  from test_hotwatch_engine import request,tick
+  now=datetime(2026,11,10,9,45,tzinfo=timezone.utc)
+  for exchange,currency in [('ST','SEK'),('OL','NOK')]:
+   with self.subTest(exchange=exchange):
+    req=request();req.update(ticker='SYN',exchange='CHIX',asset_id='synthetic-SYN',quote_currency=currency,provider='eodhd',provider_symbol='SYN.'+exchange)
+    adapter=EODHDAdapter(None,1,Opener({}));env={'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1','ESCAPE_HW_EODHD_FUSE_ENABLED':'1','ESCAPE_HW_EODHD_BARS_ENABLED':'0','ESCAPE_HW_EODHD_WS_EU_EXCHANGES':'CO'}
+    with patch.dict(os.environ,env,clear=True),patch.object(adapter,'capture',side_effect=AssertionError('excluded market must not open stream')),patch('eodhd_capacity.Capacity.open',return_value=Response({'code':'SYN.'+exchange,'timestamp':int(now.timestamp()),'close':'100','currency':currency})),patch.object(adapter.pluto,'safe_context',return_value=tick(now)['context']),patch('hotwatch_adapters.utc',return_value=now):sample=adapter.poll({'request_data':req})
+    self.assertEqual(adapter.last_feed_diagnostics['websocket_trade_status'],'MARKET_MAPPING_UNVERIFIED');self.assertEqual(sample['event_time'],now.isoformat());self.assertIsNone(sample['bid'])
  def test_xetra_raw_websocket_events_keep_source_time(self):
   epoch=int(datetime(2026,11,10,9,45,tzinfo=timezone.utc).timestamp()*1000)
   ws=WS([{'s':'LHA.XETRA','p':8.844,'v':705,'ms':'open','t':epoch}]);result=EODHDFeeds(SECRET,ws_factory=lambda *a,**k:ws).capture('eu_trades','LHA.XETRA',1)

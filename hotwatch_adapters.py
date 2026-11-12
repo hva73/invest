@@ -447,7 +447,7 @@ class EODHDAdapter:
    # Fill the existing batch with due watches that lack a reusable response.
    # Do not spend its ten slots repeatedly subscribing to already cached data.
    market='us' if feed.startswith('us_') else 'eu';symbols=[symbol]
-   allowed_eu={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','CO,XETRA,AS').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}
+   allowed_eu={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','CO,XETRA,AS,ST,OL').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}
    from hotwatch_engine import verified_automatic_feed,capacity
    with self.connect() as c:
     rows=c.execute("SELECT s.request,s.state FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND s.next_due<=? AND json_extract(s.request,'$.provider')='eodhd' ORDER BY s.next_due,CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,s.id LIMIT ?",(self.uid,utc().timestamp()+15,capacity())).fetchall()
@@ -562,7 +562,7 @@ class EODHDAdapter:
   # Explicit opt-in: one bounded live trade capture. If unavailable, use the
   # unchanged REST adapter. No inferred venue/session or fabricated bid/ask.
   exchange=symbol.rsplit('.',1)[1].upper() if '.' in symbol else ''
-  eu_exchanges={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','CO,XETRA,AS').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}
+  eu_exchanges={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','CO,XETRA,AS,ST,OL').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}
   # CC is EODHD's virtual crypto market, not a supported EU equity stream.
   eu_exchanges.discard('CC')
   if os.environ.get('ESCAPE_HW_EODHD_WS_TRADES_ENABLED')=='1' and exchange and exchange!='US' and exchange not in eu_exchanges:self.last_feed_diagnostics={'websocket_trade_status':'MARKET_MAPPING_UNVERIFIED'}
