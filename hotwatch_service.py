@@ -531,11 +531,12 @@ def recover_automatic_feeds(connect,now=None):
    if not known and not lookup_attempted:
     with connect() as c:retry=c.execute('SELECT next_attempt FROM hw_feed_recovery WHERE watch_row_id=?',(row['id'],)).fetchone()
     if retry and retry['next_attempt']>now.timestamp():continue
-    lookup_attempted=True;status='IDENTITY_UNVERIFIED'
+    lookup_attempted=True;status='IDENTITY_UNVERIFIED';budget_provider='pluto'
     try:
      if row['purpose']=='automatic holding watch':instrument=holding_instrument(connect,row['user_id'],holding)
      else:instrument=verified_discovery_instrument(connect,row['user_id'],holding)
      if instrument and instrument.get('asset_id')==holding['asset_id'] and str(instrument.get('ticker','')).casefold()==holding['ticker'].casefold() and instrument.get('currency')==holding['currency']:
+      budget_provider='eodhd'
       crypto=crypto_reference(instrument) if row['purpose']=='automatic holding watch' else None
       if crypto and crypto['approved']:
        evidence=cxe_verified_match(instrument,[],now,connect,row['user_id'])
@@ -575,8 +576,10 @@ def recover_automatic_feeds(connect,now=None):
         else:status='EODHD_IDENTITY_UNCERTAIN'
        else:status='EODHD_IDENTITY_UNCERTAIN'
      else:status='PLUTO_IDENTITY_UNVERIFIED'
-    except Exception as error:status=reference_error_code(error)
-    delay=60 if status=='PROVIDER_RATE_BUDGET' else 43200 if status=='CRYPTO_IDENTITY_UNVERIFIED' else 300
+    except Exception as error:
+     status=reference_error_code(error)
+     if status=='PROVIDER_RATE_BUDGET':status=budget_provider.upper()+'_RATE_BUDGET'
+    delay=60 if status in ('PROVIDER_RATE_BUDGET','PLUTO_RATE_BUDGET','EODHD_RATE_BUDGET') else 43200 if status=='CRYPTO_IDENTITY_UNVERIFIED' else 300
     with connect() as c:c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?) ON CONFLICT(watch_row_id) DO UPDATE SET next_attempt=excluded.next_attempt,status=excluded.status,updated=excluded.updated',(row['id'],now.timestamp()+delay,status,now.isoformat()))
    if not known:continue
    updated=dict(req,provider='eodhd',provider_symbol=known['provider_symbol'])
