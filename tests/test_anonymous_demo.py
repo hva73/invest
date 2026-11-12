@@ -35,6 +35,8 @@ class AnonymousDemo(unittest.TestCase):
         self.assertIn("const supported=false&&'serviceWorker'in navigator",script)
         self.assertIn('Simulér afsendelse',script)
         self.assertIn('Fiktiv kurs og graf',script)
+        self.assertIn('Fiktiv kursserie',script)
+        self.assertNotIn('Observeret Pluto-serie',script)
         self.assertIn('Ingen ordre er sendt.',script)
         self.assertNotIn('Forslaget er sendt til Pluto.',script)
         self.assertNotIn('Forslaget udfører ikke en handel. Endelig godkendelse sker hos Pluto.',script)
