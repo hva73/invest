@@ -26,6 +26,10 @@ try:
    if width<=900:
     more=page.locator('#mobile-more');expect(more).to_be_visible()
     assert nav.locator(':scope > button[data-view]').evaluate_all('xs => xs.map(x => x.dataset.view)')==['overview','portfolios','hot-watch','sectors']
+    expect(nav.locator('[data-view=sectors] .nav-sector-mobile')).to_have_text('Sektorer');expect(nav.locator('[data-view=sectors] .nav-sector-mobile')).to_be_visible();expect(nav.locator('[data-view=sectors] .nav-sector-desktop')).to_be_hidden()
+    if width<=700:
+     expect(page.locator('.dash-hero-description')).to_be_hidden();expect(page.locator('.dash-value-time')).to_be_hidden();expect(page.locator('.dash-updated-mobile')).to_be_visible();expect(page.locator('.dash-chart-dates')).to_be_hidden()
+     tabs=page.locator('.dash-chart-periods button');assert tabs.all_text_contents()==['I dag','Uge','Måned','År']; widths=tabs.evaluate_all('xs=>xs.map(x=>x.getBoundingClientRect().width)');assert max(widths)-min(widths)<1,(width,widths)
     for target in ('portfolios','hot-watch','sectors','overview'):
      nav.locator(f':scope > [data-view="{target}"]').click()
      expect(nav.locator(f':scope > [data-view="{target}"]')).to_have_class('active')
