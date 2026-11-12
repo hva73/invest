@@ -613,3 +613,23 @@ body:has(#login:not([hidden])) > aside nav{display:none}
  .position-daily-value.positive,.position-daily-percent.positive{color:var(--dash-positive)}
  .position-daily-value.negative,.position-daily-percent.negative{color:var(--dash-negative)}
 }
+
+/* Short mobile labels and one truthful snapshot time. */
+.nav-sector-mobile,.dash-updated-mobile{display:none}
+@media(max-width:900px){.nav-sector-desktop{display:none}.nav-sector-mobile{display:inline}}
+@media(max-width:700px){
+ .dash-hero-intro .dash-hero-description,.dash-hero-intro .dash-value-time,.dash-hero .dash-chart-dates,.dash-hero .dash-chart-scale{display:none}
+ .dash-hero-intro .dash-updated-mobile{display:block;margin-top:4px;color:#a6b9c2;font-size:11px;letter-spacing:0}
+ .dash-hero .dash-chart-periods{display:flex;justify-content:stretch;gap:0;width:100%;flex-wrap:nowrap}
+ .dash-hero .dash-chart-periods button{flex:1 1 0;text-align:center;min-width:0}
+}
+
+@media(max-width:700px){
+ #dashboard-detail > .position-actions-mobile[data-signal-side="SELL"] [data-asset-trade="BUY"],
+ #dashboard-detail > .position-actions-mobile[data-signal-side="BUY"] .asset-sell{display:none}
+ #dashboard-detail > .position-actions-mobile[data-signal-side="SELL"],
+ #dashboard-detail > .position-actions-mobile[data-signal-side="BUY"]{justify-content:center}
+ #dashboard-detail > .position-actions-mobile[data-signal-side="SELL"] button,
+ #dashboard-detail > .position-actions-mobile[data-signal-side="BUY"] button{flex:0 1 70%}
+}
+@media(max-width:700px){#dashboard-detail > .position-actions-mobile[data-signal-side="BUY"] small{display:none}}
