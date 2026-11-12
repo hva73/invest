@@ -119,6 +119,18 @@ def main():
    account['dashboard']['positions']=[holding];session['latest_context']['position']='held';session['request'].pop('report_id');session['request'].pop('candidate_id')
    session.update(status='DEGRADED',signal='NO_DATA',display_status='DATA FOR GAMLE',data_stale=True);session['last_action_signal'].update(event_type='SELL_SIGNAL',state='DATA_MISSING');page.evaluate("window.EngineUI.openNotification('synthetic-push')");d.get_by_role('button',name='Åbn depot for manuelt salg →').click();page.wait_for_function("() => view==='portfolio-detail'");assert page.evaluate('selectedPortfolio')==case.root;assert page.evaluate("state.dashboard.positions[0].asset_id")=='synthetic-asset'
    assert not errors,errors;assert not orders,orders
+   # Landscape phone: sticky action remains reachable while scrolling.
+   page.set_viewport_size({'width':667,'height':375})
+   session.update(status='ACTIVE',signal='SELL',display_status='SÆLGSSIGNAL',data_stale=False,latest_context={'status':'verified','position':'held','tradability':'unknown','as_of':stamp,'orders':[]})
+   session['last_action_signal'].update(state='ACTIVE',event_type='SELL_SIGNAL')
+   session['data_status']={'price':'3.1','price_status':'FRESH','market_status':'OPEN','identity_verification':'verified'}
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')")
+   expect(d.get_by_role('button',name='Sælg')).to_be_visible()
+   for offset in (0,300,800):
+    d.evaluate('(e,y)=>e.scrollTop=y',offset);rect=d.locator('.signal-action-bar').bounding_box()
+    assert rect and rect['y']>=0 and rect['y']+rect['height']<=376,rect
+   assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+   d.locator('[data-engine-close]').first.click()
    desktop=browser.new_page(viewport={'width':1280,'height':800});desktop.on('request',lambda r:orders.append(r.url) if '/api/trade/' in r.url else None)
    desktop.goto(f'http://127.0.0.1:{server.server_port}');desktop.locator('#login-form [name=password]').fill('test-password-long-enough');desktop.locator('#login-form button').click();desktop.locator('.dashboard-v1').wait_for()
    session.update(status='ACTIVE',signal='SELL',display_status='SÆLGSSIGNAL',data_stale=False,latest_context={'status':'verified','position':'held','tradability':'available','as_of':stamp,'orders':[]});session['last_action_signal'].update(state='ACTIVE',event_type='SELL_SIGNAL');session['data_status']={'price':'3.1','price_status':'FRESH','market_status':'OPEN','identity_verification':'verified'}
