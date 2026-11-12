@@ -92,3 +92,8 @@ class CandidateStatus(unittest.TestCase):
   self.assertTrue(model.position_proof(db,1,candidate,now)['stale'])
   put(2,[dict(ref,kind='holding',quantity='2')],now-timedelta(seconds=301))
   self.assertTrue(model.position_proof(db,1,candidate,now)['stale'])
+  for observed in (now+timedelta(seconds=1),now-timedelta(seconds=301)):
+   put(1,[dict(ref,kind='holding',quantity='1')],observed)
+   put(2,[dict(ref,kind='holding',quantity='2')],now)
+   proof=model.position_proof(db,1,candidate,now)
+   self.assertEqual((proof['portfolio_id'],proof['quantity'],proof['stale']),(2,'2',False))
