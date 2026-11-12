@@ -113,6 +113,23 @@ class ReleaseApprovalTests(unittest.TestCase):
             a.start_approved(self.connect,item['id'],item['sha'],deploy,now=104)
         self.assertEqual(calls,[item['sha']])
 
+    def test_recovery_requires_exact_sha_and_verified_resume(self):
+        item=self.candidate();a.approve(self.connect,item['id'],item['sha'],7,now=101)
+        a.claim(self.connect,item['id'],item['sha'],now=102)
+        a.finish(self.connect,item['id'],item['sha'],verified=False)
+        for result in ({'operation':'resume','status':'failed','recovery_required':True},
+                       {'operation':'resume','status':'ok','recovery_required':True},
+                       {'operation':'deploy','status':'ok','recovery_required':False}):
+            with self.assertRaisesRegex(ValueError,'recovery_unverified'):
+                a.reconcile_recovery(self.connect,item['sha'],result)
+        ok={'operation':'resume','status':'ok','recovery_required':False}
+        with self.assertRaisesRegex(ValueError,'recovery_unavailable'):
+            a.reconcile_recovery(self.connect,'b'*40,ok)
+        self.assertEqual(a.reconcile_recovery(self.connect,item['sha'],ok)['status'],'completed')
+        self.assertIsNotNone(a.prepare(self.connect,'c'*40,'Ny',7,now=104))
+        with self.assertRaisesRegex(ValueError,'recovery_unavailable'):
+            a.reconcile_recovery(self.connect,item['sha'],ok)
+
     def test_confirmed_preflight_failure_does_not_block_new_candidate(self):
         item=self.candidate();a.approve(self.connect,item['id'],item['sha'],7,now=101)
         result=a.start_approved(self.connect,item['id'],item['sha'],lambda sha:{

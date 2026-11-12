@@ -111,6 +111,27 @@ def finish(connect, candidate_id, sha, *, verified):
     return {'id': candidate_id, 'sha': sha, 'status': status}
 
 
+def reconcile_recovery(connect, sha, result):
+    """Clear an app claim only after the existing runner verifies resumption.
+
+    This is a server-side bridge function, not an HTTP endpoint. A failed or
+    uncertain resume leaves the previous claim blocked for operator review.
+    """
+    if (not isinstance(sha, str) or not SHA.fullmatch(sha)
+            or not isinstance(result, dict) or result.get('operation') != 'resume'
+            or result.get('status') != 'ok' or result.get('recovery_required') is not False):
+        raise ValueError('recovery_unverified')
+    with connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        rows = c.execute("SELECT id FROM release_approvals WHERE sha=? AND status IN ('claimed','recovery')", (sha,)).fetchall()
+        if len(rows) != 1:
+            raise ValueError('recovery_unavailable')
+        changed = c.execute("UPDATE release_approvals SET status='completed' WHERE id=? AND sha=? AND status IN ('claimed','recovery')", (rows[0][0], sha)).rowcount
+        if changed != 1:
+            raise ValueError('recovery_unavailable')
+    return {'id': rows[0][0], 'sha': sha, 'status': 'completed'}
+
+
 def start_approved(connect, candidate_id, sha, deploy, *, now=None):
     """Claim once before invoking a supplied deployment runner.
 
