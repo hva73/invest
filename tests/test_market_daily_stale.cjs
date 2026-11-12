@@ -6,7 +6,7 @@ const document={hidden:false,querySelectorAll:s=>s==='.market-slot'?[node]:[],ad
 let mode='good';const requests=[];const now=Date.now();
 const ctx={window:{},document,Intl,Date,Number,String,JSON,Map,Math,Boolean,console,innerHeight:800,setInterval(){},setTimeout};
 vm.runInNewContext(fs.readFileSync('static/market-ui.js','utf8'),ctx);
-ctx.window.MarketUI.setup({owner:()=>1,connected:()=>true,now:()=>now,age:(price,fetched,error)=>({tone:error||mode==='stale'?'stale':'fresh',minutes:0}),escape:String,formatAmount:x=>`${x.amount} ${x.currency}`,formatTime:String,api:async(path,params)=>{requests.push(params);if(mode==='error')throw Error('offline');return {price:'100',currency:'EUR',ticker:'TEST',name:'Test',daily_change_percent:mode==='invalid'?'NaN':'2',daily_change:'1.5',daily_note:null,fetched_at:new Date(now+(mode==='future'?10000:mode==='old'?-301000:0)).toISOString(),series:[]}}});
+ctx.window.MarketUI.setup({owner:()=>1,connected:()=>true,now:()=>now,age:(price,fetched,error)=>({tone:error||mode==='stale'?'stale':'fresh',minutes:0}),escape:String,formatAmount:x=>`${x.amount} ${x.currency}`,formatTime:String,api:async(path,params)=>{requests.push(params);if(mode==='error')throw Error('offline');return {price:'100',currency:'EUR',ticker:'TEST',name:'Test',price_time:mode==='sourcefuture'?new Date(now+7200000).toISOString():mode==='sourcebad'?'invalid':null,daily_change_percent:mode==='invalid'?'NaN':'2',daily_change:'1.5',daily_note:null,fetched_at:mode==='fetchbad'?'invalid':new Date(now+(mode==='future'?10000:mode==='old'?-301000:0)).toISOString(),series:[]}}});
 (async()=>{
  await ctx.window.MarketUI.refreshVisible();assert.match(daily.innerHTML,/\+3 EUR<\/span>.*\+2 %<\/span>/);assert.equal(requests[0].holding_portfolio_id,7);assert.equal(requests[0].holding_asset_id,'held-asset');
  mode='error';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.textContent,'— · — %');assert.equal(daily.dataset.marketOverride,undefined);
@@ -18,5 +18,11 @@ ctx.window.MarketUI.setup({owner:()=>1,connected:()=>true,now:()=>now,age:(price
  mode='old';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.dataset.marketOverride,undefined);assert.equal(daily.textContent,'— · — %');
  mode='good';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.dataset.marketOverride,'true');
  mode='stale';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.dataset.marketOverride,undefined);assert.equal(daily.textContent,'— · — %');
+ mode='good';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.dataset.marketOverride,'true');assert.match(daily.innerHTML,/kurstid ukendt/);
+ mode='sourcefuture';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.dataset.marketOverride,undefined);assert.equal(daily.textContent,'— · — %');assert.match(node.innerHTML,/Kurstid er ugyldig eller ligger i fremtiden/);
+ mode='good';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.dataset.marketOverride,'true');
+ mode='sourcebad';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.dataset.marketOverride,undefined);assert.equal(daily.textContent,'— · — %');
+ mode='good';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.dataset.marketOverride,'true');
+ mode='fetchbad';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.dataset.marketOverride,undefined);assert.equal(daily.textContent,'— · — %');assert.match(node.innerHTML,/Hentetid er ugyldig eller ligger i fremtiden/);
  console.log('PASS: actual quote refresh clears daily amount on failed, invalid and future responses');
 })().catch(e=>{console.error(e);process.exitCode=1});
