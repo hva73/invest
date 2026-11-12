@@ -1,5 +1,6 @@
 """Verify a short-lived release approval from a separately protected secret."""
 import fcntl
+from contextlib import contextmanager
 import hashlib
 import hmac
 import json
@@ -18,6 +19,20 @@ MAC = re.compile(r'[0-9a-f]{64}\Z')
 
 def message(sha, nonce, expires):
     return f'escape-owner-approval-v1\n{sha}\n{nonce}\n{expires}\n'.encode('ascii')
+
+
+@contextmanager
+def deployment_lock(lock_path):
+    """Serialize approval and the runner's approval check/marker claim."""
+    fd = os.open(lock_path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+            raise ValueError('unsafe_lock')
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield
+    finally:
+        os.close(fd)
 
 
 def approve(bridge, lock_path, sha, request, now=None):
@@ -48,12 +63,7 @@ def approve(bridge, lock_path, sha, request, now=None):
         os.close(fd)
     if len(key) != 32 or not hmac.compare_digest(hmac.new(key, message(sha, nonce, expires), hashlib.sha256).hexdigest(), mac):
         raise ValueError('invalid_signature')
-    lock = os.open(lock_path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
-    try:
-        info = os.fstat(lock)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
-            raise ValueError('unsafe_lock')
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with deployment_lock(lock_path):
         if os.path.lexists(bridge / 'deployment-incomplete.json'):
             raise ValueError('recovery_required')
         approval = bridge / 'approved-sha'
@@ -89,6 +99,4 @@ def approve(bridge, lock_path, sha, request, now=None):
         finally:
             if os.path.exists(name):
                 os.unlink(name)
-    finally:
-        os.close(lock)
     return {'status': 'ok', 'operation': 'approve', 'sha': sha}
