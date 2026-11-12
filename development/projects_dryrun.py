@@ -10,7 +10,7 @@ import urllib.error
 OWNER_ID = 351122234
 APP_ID = 1144995
 PREFIX = 'ESCAPE_PROJECTS_DRYRUN_V1 '
-ALLOWED_ISSUES = frozenset({1, *range(3, 17)})
+ALLOWED_ISSUES = frozenset({1, *range(3, 1000)})
 QUERY = '''query($cursor:String){user(login:"hva73"){login projectV2(number:1){id number closed
  fields(first:100){pageInfo{hasNextPage} nodes{... on ProjectV2SingleSelectField{name options{name}}}}
  items(first:100,after:$cursor,archivedStates:[ARCHIVED,NOT_ARCHIVED]){pageInfo{hasNextPage endCursor} nodes{id isArchived

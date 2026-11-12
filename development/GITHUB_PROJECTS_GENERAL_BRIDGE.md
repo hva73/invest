@@ -1,6 +1,6 @@
 # ESCAPE Projects: fælles statusbro
 
-Broen behandler statusanmodninger på eksisterende Issues #1 og #3–#16 i `hva73/invest` for Project `hva73/1`. Den opretter ikke Issues eller Project-items og lukker ikke Issues.
+Broen behandler statusanmodninger på eksisterende Issues #1 og #3–#999 i `hva73/invest` for Project `hva73/1`. Den opretter ikke Issues eller Project-items og lukker ikke Issues. Inventaret viser alle repository-Issues på tavlen, herunder nyere kort; statusbroen accepterer kun entydige eksisterende, aktive kort.
 
 ## Brug
 

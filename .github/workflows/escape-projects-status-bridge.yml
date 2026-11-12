@@ -20,7 +20,7 @@ jobs:
       github.run_attempt == '1' &&
       github.event.issue.pull_request == null &&
       (github.event.issue.number == 1 ||
-       (github.event.issue.number >= 3 && github.event.issue.number <= 16)) &&
+       (github.event.issue.number >= 3 && github.event.issue.number <= 999)) &&
       startsWith(github.event.comment.body, 'ESCAPE_PROJECTS_WRITE_V1 ')
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -31,7 +31,7 @@ jobs:
       - name: Check out reviewed status bridge
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 0fbf24b4d87db08b660a803271cacab2335240f8
+          ref: 1fdd2f0672577019184bbfe20f5a31226e2cf22b
           persist-credentials: false
       - name: Process project status request
         env:
@@ -58,7 +58,7 @@ jobs:
       - name: Check out reviewed failure reporter
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 0fbf24b4d87db08b660a803271cacab2335240f8
+          ref: 1fdd2f0672577019184bbfe20f5a31226e2cf22b
           persist-credentials: false
       - name: Report uncertain result
         env:

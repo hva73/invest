@@ -93,15 +93,15 @@ jobs:
                   for item in page['nodes']:
                       content = item.get('content') or {}
                       number = content.get('number')
-                      if number in wanted and (content.get('repository') or {}).get('nameWithOwner') == 'hva73/invest':
-                          matches[number].append(item)
+                      if isinstance(number, int) and (content.get('repository') or {}).get('nameWithOwner') == 'hva73/invest':
+                          matches.setdefault(number, []).append(item)
                   if not page['pageInfo']['hasNextPage']:
                       break
                   cursor = page['pageInfo']['endCursor']
                   if not cursor or cursor in seen:
                       fail('Projektlisten er ufuldstændig.')
                   seen.add(cursor)
-              for number in sorted(wanted):
+              for number in sorted(matches):
                   rows = matches[number]
                   if not rows:
                       print('ISSUE ' + str(number) + ': MISSING_FROM_VISIBLE_ITEMS')
