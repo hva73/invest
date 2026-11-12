@@ -45,15 +45,9 @@
   .engine-list-row[data-engine-category="SELL"] { border-left: 3px solid #ed8998; }
   .engine-list-status .dash-action-badge { font-size: 12px; font-weight: 700; min-height: 36px; }
 
-  /* Bring sector distribution forward; the existing shared graph remains available. */
-  .sector-shell > .si-hero { order: 0; }
-  .sector-shell > .si-filter-bar { order: 1; }
-  .sector-shell > .si-data-notice { order: 2; }
-  .sector-shell > .sector-layout { order: 3; }
-  .sector-shell > .si-results { order: 4; }
-  .sector-shell > .si-market { order: 5; }
-  .sector-shell > .si-rotation { order: 6; }
-  .sector-shell > .sector-note { order: 7; }
+  /* A shorter results chart brings the allocation into view without changing focus order. */
+  .si-results .si-bars { min-height: 180px; }
+  .si-results { padding: 18px 24px; }
   .si-hero { padding: 20px 24px 0; }
   .si-hero h2 { font-size: clamp(27px, 2.5vw, 34px); margin: 8px 0; }
   .si-metrics { margin-top: 14px; }

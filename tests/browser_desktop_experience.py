@@ -117,9 +117,10 @@ try:
                         assert page.locator('.portfolio-catalog-heading').evaluate('e => e.getBoundingClientRect().height') < 180, width
                     if view == 'sectors':
                         expect(page.locator('.si-hero-chart #dashboard-value-chart')).to_be_visible()
-                        allocation_y = page.locator('.sector-layout').bounding_box()['y']
-                        results_y = page.locator('.si-results').bounding_box()['y']
-                        assert allocation_y < results_y, (width, allocation_y, results_y)
+                        expect(page.locator('.sector-layout')).to_be_visible()
+                        result_chart = page.locator('.si-results .si-bars')
+                        if result_chart.count():
+                            assert result_chart.evaluate('e => e.getBoundingClientRect().height') <= 220, width
                     if view == 'portfolios' and width >= 1100:
                         card = page.locator('.portfolio-card-root').first
                         name = card.locator(':scope > h2').bounding_box()
