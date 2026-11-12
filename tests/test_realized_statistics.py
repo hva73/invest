@@ -14,6 +14,14 @@ class StatisticsTest(unittest.TestCase):
         result=project([self.buy,self.sell]);row=result['items'][0]
         self.assertEqual(row['gross'],'4');self.assertEqual(row['quality'],'indicative')
         self.assertIsNone(row['sell_time']);self.assertFalse(result['history_complete'])
+    def test_small_values_use_fixed_decimal_notation(self):
+        for buy_price,sell_price,expected in [('0.1','0.2','0.000000001'),('0.2','0.1','-0.000000001'),('0.1','0.1','0.000000000')]:
+            buy=order('BUY','0.00000001',buy_price,'2026-01-01T00:00:00Z','b')
+            sell=order('SELL','0.00000001',sell_price,'2026-01-02T00:00:00Z','s')
+            row=project([buy,sell])['items'][0]
+            self.assertEqual(row['gross'],expected)
+            for key in ['quantity','gross','gross_percent','buy_price','sell_price']:
+                self.assertNotIn('E',row[key].upper())
     def test_partial_lots_fifo_collection(self):
         b2=order('BUY','2','14','2026-01-02T00:00:00Z','b2')
         sale=order('SELL','3','15','2026-01-03T00:00:00Z','s')

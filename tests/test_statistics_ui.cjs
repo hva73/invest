@@ -9,4 +9,5 @@ html=render(data,{portfolio:2});assert.match(html,/Ingen handler med tilstrække
 html=render({portfolios:[{portfolio_id:1,name:'<img src=x>',items:[{...items[0],ticker:'<script>',name:'"bad"'}]}],errors:['error']});assert.doesNotMatch(html,/<script>|<img/);assert.match(html,/&lt;script&gt;/);assert.match(html,/Nogle depoter kunne ikke læses/);
 html=render({portfolios:[{portfolio_id:1,items:[{...items[0],gross:'NaN'}]}]});assert.match(html,/Ingen handler/);
 html=render({portfolios:[{portfolio_id:1,items:[{...items[0],gross:'0.104'},{...items[0],gross:'0.101'}]}]});assert.match(html,/\+0,21 USD/);
+html=render({portfolios:[{portfolio_id:1,items:[{...items[0],gross:'0.000000001',gross_percent:'-0.00001'},{...items[1],gross:'-0.000000001',gross_percent:'0.00001'}]}]});assert.doesNotMatch(html,/Ingen handler/);assert.match(html,/\+0,000000001 USD/);assert.match(html,/−0,000000001 USD/);assert.match(html,/class="negative">↓ −0,00001 %/);assert.match(html,/class="positive">↑ \+0,00001 %/);assert.match(html,/→ 0,00 USD/);
 console.log('PASS: bounded currency scope, signed results, empty state and escaped content');

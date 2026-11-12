@@ -8,8 +8,15 @@
     const n = Number(value);
     return Number.isFinite(n) && Math.abs(n) < 1e15 ? n : null;
   };
-  const format = n => new Intl.NumberFormat('da-DK', {minimumFractionDigits:2, maximumFractionDigits:2}).format(n);
-  const signed = n => `${n > 0 ? '+' : n < 0 ? '−' : ''}${format(Math.abs(n))}`;
+  function signed(value) {
+    const n=number(value), sign=n>0?'+':n<0?'−':'';
+    if (n !== 0 && Math.abs(n) < 0.01) {
+      const fraction=value.replace(/^-/, '').split('.')[1] || '';
+      const short=fraction.slice(0,12).replace(/0+$/, '');
+      return short ? `${sign}0,${short}` : `${sign}<0,000000000001`;
+    }
+    return sign+new Intl.NumberFormat('da-DK', {minimumFractionDigits:2, maximumFractionDigits:2}).format(Math.abs(n));
+  }
   function totalGross(rows) {
     const parts = rows.map(item => {
       const value = item.gross, negative = value.startsWith('-');
@@ -22,11 +29,14 @@
       const magnitude = BigInt(part.whole + part.fraction.padEnd(scale, '0'));
       return sum + (part.negative ? -magnitude : magnitude);
     }, 0n);
-    const unit = 10n ** BigInt(scale - 2), magnitude = total < 0n ? -total : total;
-    const cents = (magnitude + unit / 2n) / unit;
-    const decimal = (cents % 100n).toString().padStart(2,'0');
-    const whole = new Intl.NumberFormat('da-DK').format(cents / 100n);
-    return {sign: total > 0n ? 1 : total < 0n ? -1 : 0, text: `${total > 0n ? '+' : total < 0n ? '−' : ''}${whole},${decimal}`};
+    const magnitude = total < 0n ? -total : total;
+    const digits=magnitude.toString().padStart(scale+1,'0');
+    const raw=(total<0n?'-':'')+digits.slice(0,-scale)+'.'+digits.slice(-scale);
+    const sign=total>0n?1:total<0n?-1:0;
+    if (magnitude < 10n ** BigInt(scale-2)) return {sign, text:signed(raw)};
+    const unit=10n ** BigInt(scale-2), cents=(magnitude+unit/2n)/unit;
+    const whole=new Intl.NumberFormat('da-DK').format(cents/100n), fraction=(cents%100n).toString().padStart(2,'0');
+    return {sign,text:`${sign>0?'+':sign<0?'−':''}${whole},${fraction}`};
   }
   const direction = n => n > 0 ? 'positive' : n < 0 ? 'negative' : 'neutral';
   const arrow = n => n > 0 ? '↑' : n < 0 ? '↓' : '→';
@@ -47,7 +57,7 @@
     const currencyOptions = currencies.map(c => `<option value="${esc(c)}"${c === currency ? ' selected' : ''}>${esc(c)}</option>`).join('');
     const list = rows.map(item => {
       const gross=number(item.gross), percent=number(item.gross_percent), cls=direction(gross), time=item.sell_time ? `<span>Udført ${esc(new Date(item.sell_time).toLocaleString('da-DK'))}</span>` : '<span>Fyldtid ikke oplyst</span>';
-      return `<details class="statistics-trade"><summary><span class="statistics-ticker">${esc(item.ticker)}<small>${esc(item.name)}</small></span><span class="statistics-result ${cls}">${arrow(gross)} ${signed(gross)} ${esc(currency)}<small>${signed(percent)} %</small></span></summary><div class="statistics-detail"><span>Antal ${esc(item.quantity)}</span><span>Købskurs ${esc(item.buy_price)} ${esc(currency)}</span><span>Salgskurs ${esc(item.sell_price)} ${esc(currency)}</span>${time}<span>${esc(item.note)}</span></div></details>`;
+      return `<details class="statistics-trade"><summary><span class="statistics-ticker">${esc(item.ticker)}<small>${esc(item.name)}</small></span><span class="statistics-result ${cls}">${arrow(gross)} ${signed(item.gross)} ${esc(currency)}<small class="${direction(percent)}">${arrow(percent)} ${signed(item.gross_percent)} %</small></span></summary><div class="statistics-detail"><span>Antal ${esc(item.quantity)}</span><span>Købskurs ${esc(item.buy_price)} ${esc(currency)}</span><span>Salgskurs ${esc(item.sell_price)} ${esc(currency)}</span>${time}<span>${esc(item.note)}</span></div></details>`;
     }).join('');
     const options = portfolios.length ? `<div class="statistics-filters"><label>Depot<select data-statistics-portfolio>${portfolioOptions}</select></label>${currency ? `<label>Valuta<select data-statistics-currency>${currencyOptions}</select></label>` : ''}</div>` : '';
     const result = rows.length && total ? `<div class="statistics-summary"><div><small>FORELØBIG KURSFORSKEL</small><strong class="${direction(total.sign)}">${arrow(total.sign)} ${total.text} ${esc(currency)}</strong><span>Før omkostninger · ${rows.length} observerede salg</span></div><div class="statistics-counts"><span class="positive">↑ ${wins} med gevinst</span><span class="negative">↓ ${losses} med tab</span></div></div><div class="statistics-list">${list}</div>` : '<p class="statistics-empty">Ingen handler med tilstrækkelige oplysninger i dette depot endnu.</p>';

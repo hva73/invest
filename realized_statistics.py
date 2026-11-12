@@ -13,7 +13,7 @@ def _decimal(value):
     if value is None or isinstance(value, bool): return None
     try:
         value = Decimal(str(value))
-        return value if value.is_finite() and 0 < value < Decimal('1e30') else None
+        return value if value.is_finite() and 0 < value < Decimal('1e30') and value.adjusted() >= -90 else None
     except (InvalidOperation, ValueError): return None
 
 
@@ -45,8 +45,8 @@ def _result(buy, sell, quantity, basis, provisional):
     proceeds = quantity * sell['price']
     profit = proceeds - basis
     return {'ticker': sell['ticker'], 'name': sell['name'], 'scope': sell['scope'], 'currency': sell['currency'],
-            'quantity': str(quantity), 'gross': str(profit), 'gross_percent': str(profit / basis * 100),
-            'buy_price': str(buy['price']), 'sell_price': str(sell['price']),
+            'quantity': format(quantity, 'f'), 'gross': format(profit, 'f'), 'gross_percent': format(profit / basis * 100, 'f'),
+            'buy_price': format(buy['price'], 'f'), 'sell_price': format(sell['price'], 'f'),
             'sell_time': None if provisional else sell['time'].isoformat(),
             'order_created_at': sell['time'].isoformat() if provisional else None,
             'quality': 'indicative',
@@ -141,7 +141,7 @@ def project(direct_orders, collection_orders=()):
                 cost += taken * buy['price']; remaining -= taken; lots[0][1] -= taken
                 if not lots[0][1]: lots.popleft()
             result = _result(first, row, row['quantity'], cost, False)
-            result['buy_price'] = str(cost / row['quantity'])
+            result['buy_price'] = format(cost / row['quantity'], 'f')
             results.append(result)
     return {'items': results, 'omitted': omitted, 'history_complete': False,
             'note': 'Kun observerede handler. Historikkens dækning, gebyrer og historisk valutakurs er ikke bekræftet. Direkte handler er foreløbige kursforskelle; oprettelsestid er ikke fyldtid.'}
