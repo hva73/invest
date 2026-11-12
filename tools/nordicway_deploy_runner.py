@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import nordicway_deploy_adapter
+import nordicway_owner_approval
 import nordicway_deploy_sequence
 import nordicway_deploy_health
 import nordicway_release_backup
@@ -153,17 +154,19 @@ def _record_state(bridge, marker, target, sha, state):
 
 def run(sha, token, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
         adapter_factory=nordicway_deploy_adapter.Adapter,
-        deploy=nordicway_deploy_sequence.deploy, prepare=prepare_checkout):
+        deploy=nordicway_deploy_sequence.deploy, prepare=prepare_checkout, authorization_lock=None):
     if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-f]{40}', sha):
         raise ValueError('invalid_request')
     if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{10,256}', token):
         raise ValueError('invalid_request')
     bridge = _private_directory(bridge)
-    if _approved_sha(bridge) != sha:
-        raise ValueError('unapproved_release')
-    # Claim before touching service or database. O_EXCL also prevents concurrent
-    # runs and blocks retries after a process crash until investigated.
-    marker = _claim(bridge, sha)
+    lock_path = authorization_lock or Path(target) / 'var' / 'escape-deploy.lock'
+    # Lock only the approval check and durable claim; release before the
+    # existing Adapter.lock(), which otherwise would deadlock on a second fd.
+    with nordicway_owner_approval.deployment_lock(lock_path):
+        if _approved_sha(bridge) != sha:
+            raise ValueError('unapproved_release')
+        marker = _claim(bridge, sha)
     result = None
     sequence_started = False
     try:
