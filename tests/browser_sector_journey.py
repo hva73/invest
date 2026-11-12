@@ -13,10 +13,10 @@ case.save(case.root,'5357.70',case.now,result='141.30')
 case.save(case.child,'540.60',case.now,result='45')
 at=case.now.isoformat()
 root_rows=[
- {'assetId':'synthetic-novo','ticker':'NOVO-B','name':'Novo Nordisk B','quantity':'5','price':'270.30','currency':'DKK','value':'1351.50','unrealisedPnL':'112.50','costBasis':'1239.00','dailyChange':'6.30','dailyChangePercent':'2.39','priceAsOf':at},
- {'assetId':'synthetic-zealand','ticker':'ZEAL','name':'Zealand Pharma','quantity':'4','price':'411.40','currency':'DKK','value':'1645.60','unrealisedPnL':'-96.20','costBasis':'1741.80','dailyChange':'-3.60','dailyChangePercent':'-0.87','priceAsOf':at},
+ {'assetId':'synthetic-novo','ticker':'NOVO-B','name':'Novo Nordisk B','quantity':'5','price':'270.30','currency':'DKK','value':'1351.50','unrealisedPnL':'112.50','costBasis':'1239.00','averageEntryPrice':'247.80','dailyChange':'6.30','dailyChangePercent':'2.39','priceAsOf':at},
+ {'assetId':'synthetic-zealand','ticker':'ZEAL','name':'Zealand Pharma','quantity':'4','price':'411.40','currency':'DKK','value':'1645.60','unrealisedPnL':'-96.20','costBasis':'1741.80','averageEntryPrice':'435.45','dailyChange':'-3.60','dailyChangePercent':'-0.87','priceAsOf':at},
  {'assetId':'synthetic-tech','ticker':'MSFT','name':'Microsoft','quantity':'2','price':'910','currency':'DKK','value':'1820','unrealisedPnL':'80','priceAsOf':at}]
-child_rows=[{'assetId':'synthetic-novo','ticker':'NOVO-B','name':'Novo Nordisk B','quantity':'2','price':'270.30','currency':'DKK','value':'540.60','unrealisedPnL':'45','costBasis':'495.60','dailyChange':'6.30','dailyChangePercent':'2.39','priceAsOf':at}]
+child_rows=[{'assetId':'synthetic-novo','ticker':'NOVO-B','name':'Novo Nordisk B','quantity':'2','price':'270.30','currency':'DKK','value':'540.60','unrealisedPnL':'45','costBasis':'495.60','averageEntryPrice':'247.80','dailyChange':'6.30','dailyChangePercent':'2.39','priceAsOf':at}]
 with app.connect() as c:
  for pid,rows in ((case.root,root_rows),(case.child,child_rows)):
   existing=json.loads(c.execute('SELECT payload FROM portfolio_snapshots WHERE portfolio_id=?',(pid,)).fetchone()['payload'])
@@ -60,7 +60,7 @@ try:
    expect(root).to_be_enabled();expect(child).to_be_enabled()
    details=root.locator('.si-position-desktop-details')
    if width >= 901:
-    expect(details).to_be_visible();expect(details).to_contain_text('Antal');expect(details).to_contain_text('5');expect(details).to_contain_text('270,30');expect(details).to_contain_text('Gns. købskurs');expect(details).to_contain_text('+31,50');expect(details).to_contain_text('estimat')
+    expect(details).to_be_visible();expect(details).to_contain_text('Antal');expect(details).to_contain_text('5');expect(details).to_contain_text('270,30');expect(details).to_contain_text('Gns. købskurs');expect(details).to_contain_text('247,80');expect(details).to_contain_text('+31,50');expect(details).to_contain_text('estimat')
    else: expect(details).to_be_hidden()
    expect(root).to_contain_text('I dag · kurs pr. stk.')
    expect(root).to_contain_text('+6,30')
@@ -97,4 +97,3 @@ try:
  print('PASS: sector to exact portfolio position and back on mobile, landscape and desktop')
 finally:
  server.shutdown();server.server_close();case.tearDown()
-
