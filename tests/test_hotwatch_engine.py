@@ -118,6 +118,79 @@ class HotWatch(unittest.TestCase):
    quality=observation_status([],pre,120,'NO_DATA','CREATED');quality['market_status']='PREMARKET'
    with patch('hotwatch_engine.utc',return_value=pre),patch('hotwatch_engine.observation_status',return_value=quality):session=engine.view(c,row)
    self.assertEqual(session['signal'],'NO_DATA');self.assertEqual(session['data_status']['next_market_session']['expected_at'],'2026-11-10T14:30:00+00:00')
+ def test_candidate_review_never_masks_fresh_independent_exit(self):
+  import web_push
+  result=self.put(tick(self.now,price='94',held=True))
+  self.assertEqual(result['calculation']['signal'],'SELL')
+  self.assertIn('STOP_BREACHED',result['calculation']['reason_codes'])
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True)
+   for status in ('REVIEW_DUE','REPORT_ONLY'):
+    with self.subTest(status=status),patch('intel_workflows.candidate_currentness',return_value={'status':status}):
+     view=engine.view(c,row,self.now)
+     self.assertEqual(view['candidate_review']['status'],status)
+     self.assertEqual((view['signal'],view['display_status']),('SELL','SÆLGSSIGNAL'))
+     self.assertEqual(web_push._actionable(c,row,self.now),'SELL')
+     old=engine.view(c,row,self.now+timedelta(seconds=121))
+     self.assertEqual(old['signal'],'NO_DATA')
+     self.assertNotEqual(old['display_status'],'SÆLGSSIGNAL')
+     self.assertIsNone(web_push._actionable(c,row,self.now+timedelta(seconds=121)))
+
+ def test_reduce_with_overdue_review_and_unknown_context_or_identity(self):
+  import web_push
+  strategy=copy.deepcopy(BASELINE);strategy['parameters']['allow_reduce']=True
+  with app.connect() as c:c.execute('UPDATE hw_sessions SET strategy=? WHERE watch_id=?',(json.dumps(strategy),self.req['watch_id']))
+  metrics=good_metrics();metrics.update(return_3_pct='-1',breakdown=True,distance_high_pct='0')
+  with patch('hotwatch_engine.features',return_value=metrics):
+   for n,seconds in enumerate((0,8,16)):
+    at=self.now+timedelta(seconds=seconds)
+    result=self.put(tick(at,n,price='100',held=True),at)
+  self.assertEqual(result['calculation']['signal'],'REDUCE')
+  at=self.now+timedelta(seconds=16)
+  with patch('intel_workflows.candidate_currentness',return_value={'status':'REVIEW_DUE'}):
+   with app.connect() as c:
+    row=engine.row_for(c,1,self.req['watch_id'],True);view=engine.view(c,row,at)
+    self.assertEqual((view['signal'],view['display_status']),('REDUCE','EXIT WATCH'))
+    self.assertEqual(web_push._actionable(c,row,at),'REDUCE')
+    # A provisional source must still prevent an actionable notification.
+    request=json.loads(row['request']);request.update(provider='eodhd',provider_symbol='MERC.US')
+    c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps(request),row['id']))
+    c.execute('INSERT INTO hw_provisional_feed_links VALUES(?,?,?,?)',(row['id'],'MERC.US',json.dumps({'basis':'unverified'}),at.isoformat()))
+    row=engine.row_for(c,1,self.req['watch_id'],True)
+    self.assertEqual(engine.view(c,row,at)['display_status'],'KURSKILDE IKKE BEKRÆFTET')
+    self.assertIsNone(web_push._actionable(c,row,at))
+    c.execute('DELETE FROM hw_provisional_feed_links WHERE watch_row_id=?',(row['id'],))
+    request['provider']='synthetic';request['provider_symbol']=None
+    c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps(request),row['id']))
+  unknown=unknown_context();unknown['as_of']=(at+timedelta(seconds=1)).isoformat()
+  engine.observe_context(app.connect,1,self.req['watch_id'],True,unknown,at+timedelta(seconds=1))
+  with patch('intel_workflows.candidate_currentness',return_value={'status':'REVIEW_DUE'}),app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True);view=engine.view(c,row,at+timedelta(seconds=1))
+   self.assertEqual(view['signal'],'NO_DATA')
+   self.assertIsNone(web_push._actionable(c,row,at+timedelta(seconds=1)))
+
+ def test_paused_exit_never_becomes_actionable_with_review_due(self):
+  import web_push
+  self.put(tick(self.now,price='94',held=True))
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',self.now+timedelta(seconds=1))
+  with patch('intel_workflows.candidate_currentness',return_value={'status':'REVIEW_DUE'}),app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True)
+   self.assertEqual(row['status'],'PAUSED')
+   self.assertIsNone(web_push._actionable(c,row,self.now+timedelta(seconds=1)))
+
+ def test_overdue_entry_buy_remains_nonactionable(self):
+  import web_push
+  with patch('hotwatch_engine.features',return_value=good_metrics()):
+   for n,seconds in enumerate((0,8,16)):
+    at=self.now+timedelta(seconds=seconds)
+    result=self.put(tick(at,n,price='100',held=False),at)
+  self.assertEqual(result['calculation']['signal'],'BUY')
+  at=self.now+timedelta(seconds=16)
+  with patch('intel_workflows.candidate_currentness',return_value={'status':'REVIEW_DUE'}),app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True);view=engine.view(c,row,at)
+   self.assertEqual((view['signal'],view['display_status']),('BUY','REVURDERING FORFALDET'))
+   self.assertIsNone(web_push._actionable(c,row,at))
+
  def test_closed_market_without_other_errors_is_a_normal_active_session(self):
   sample=tick(self.now,held=True);sample.update(market_status='CLOSED',session_key='SYNTHETIC-CLOSED')
   result=engine.ingest(app.connect,1,self.req['watch_id'],True,sample,self.now)
@@ -1762,5 +1835,6 @@ class EngineHTTP(unittest.TestCase):
   read=self.http.call(access,'get_hot_watch_engine',{'is_test':True})[1]['result'];self.assertEqual(len(read['structuredContent']['sessions']),1);bad=self.http.call(access,'get_hot_watch_engine',{'limit':101})[1]['result'];self.assertTrue(bad['isError'])
   stopped=self.http.call(access,'control_hot_watch',{'watch_id':self.req['watch_id'],'is_test':True,'action':'stop'})[1]['result'];self.assertFalse(stopped['isError']);self.assertEqual(stopped['structuredContent']['session']['status'],'COMPLETED')
   d=copy.deepcopy(BASELINE);d['version']='1.2.0';self.assertEqual(self.http.request('/api/v1/hotwatch/strategies',d,{'Authorization':'Bearer '+access})[0],403)
+
 
 
