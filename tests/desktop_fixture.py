@@ -32,6 +32,9 @@ def seed(case):
     rows = [{'assetId': 'synthetic-' + ticker, 'ticker': ticker,
              'name': 'Fiktiv ' + ticker, 'quantity': qty, 'price': price,
              'currency': 'DKK', 'value': value, 'unrealisedPnL': pnl,
+             'costBasis': str(Decimal(value) - Decimal(pnl)),
+             'averageEntryPrice': str((Decimal(value) - Decimal(pnl)) / Decimal(qty)),
+             'dailyChange': '1.25', 'dailyChangePercent': '0.25',
              'priceAsOf': observed} for ticker, qty, price, value, pnl in specs]
     with app.connect() as c:
         row = c.execute('SELECT payload FROM portfolio_snapshots WHERE portfolio_id=?', (case.root,)).fetchone()

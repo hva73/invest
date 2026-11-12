@@ -588,3 +588,6 @@ body:has(#login:not([hidden])) > aside nav{display:none}
  .si-desktop-position .positive strong,.si-desktop-position .positive small{color:#80ddb3}
  .si-desktop-position .negative strong,.si-desktop-position .negative small{color:#ff9ca9}
 }
+
+/* Desktop-only enhancements leave the mobile renderer unchanged. */
+.dash-day-desktop,.dash-desktop-entry{display:none}
