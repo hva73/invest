@@ -87,8 +87,10 @@ jobs:
         run: |
           git fetch --no-tags origin fc641039fcf5d0b8acd9e8d41cd11bcf12ebe6ba
           git show fc641039fcf5d0b8acd9e8d41cd11bcf12ebe6ba:tools/nordicway_v23_owner_preflight.py > "$RUNNER_TEMP/preflight.py"
+          git fetch --no-tags origin ca06628b46abcfce8a270ee4e7349725c27c8059
+          git show ca06628b46abcfce8a270ee4e7349725c27c8059:tools/nordicway_release_stage.py > "$RUNNER_TEMP/release_stage.py"
           "$RUNNER_TEMP/escape-data-venv/bin/python" -m py_compile "$RUNNER_TEMP/preflight.py"
-          "$RUNNER_TEMP/escape-data-venv/bin/python" - "$RUNNER_TEMP/preflight.py" <<'PY'
+          "$RUNNER_TEMP/escape-data-venv/bin/python" - "$RUNNER_TEMP/preflight.py" "$RUNNER_TEMP/release_stage.py" <<'PY'
           import importlib.util, tempfile, sys, types
           from pathlib import Path
           import nordicway_release_preflight as preflight
@@ -124,5 +126,15 @@ jobs:
               try: module.installed_files_size(root, ('app.py', *sorted(assets)), assets)
               except ValueError as exc: assert str(exc)=='unsafe_file'
               else: raise AssertionError('symlink asset accepted')
+          spec=importlib.util.spec_from_file_location('actual_release_stage', sys.argv[2])
+          stage=importlib.util.module_from_spec(spec);spec.loader.exec_module(stage)
+          with tempfile.TemporaryDirectory() as d:
+              target=Path(d)
+              (target/'var').mkdir()
+              (target/'var/escape.db').touch()
+              (target/'opdatering').mkdir()
+              result=stage.stage(Path('.'), target, module.SHA, approved_sha=module.SHA)
+              assert result['file_count']==73
+              assert (result['path']/'BUILD_COMMIT').read_text().strip()==module.SHA
           print('PREFLIGHT_BASICS_PASS')
           PY
