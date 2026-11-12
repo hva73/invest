@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   desktop-experience:
-    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue67-desktop-experience' || github.event.pull_request.head.ref == 'codex/issue15-sector-local-return' || github.event.pull_request.head.ref == 'codex/issue15-cash-reconciliation')
+    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue67-desktop-experience' || github.event.pull_request.head.ref == 'codex/issue15-sector-local-return' || github.event.pull_request.head.ref == 'codex/issue15-cash-reconciliation' || github.event.pull_request.head.ref == 'codex/issue15-allocation-freshness')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

@@ -1,6 +1,6 @@
 """Exercise real sector UI with synthetic root, collection and cash."""
 import os, sys, threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -14,20 +14,21 @@ case.setUp()
 server = app.ThreadingHTTPServer(('127.0.0.1', 0), app.Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 stamp = datetime.now(timezone.utc).isoformat()
+older = (datetime.now(timezone.utc)-timedelta(days=2)).isoformat()
 cash = lambda amount: {'amount':str(amount), 'currency':'DKK'}
 payload = {
  'dashboard': {
   'accounts':[
    {'id':1,'name':'Hoved','kind':'portfolio','external_id':'portfolios:main',
-    'value':cash(2600),'cash_status':'available','cash_accounts':[cash(500)]},
+    'snapshot_at':stamp,'value':cash(2600),'cash_status':'available','cash_accounts':[cash(500)]},
    {'id':2,'name':'AI','kind':'collection','parent_external_id':'portfolios:main',
-    'value':cash(900),'cash_status':'available','cash_accounts':[cash(100)]}],
+    'snapshot_at':older,'value':cash(900),'cash_status':'available','cash_accounts':[cash(100)]}],
   'positions':[
    {'asset_id':'direct','ticker':'TESTA','name':'Fiktiv aktie A','portfolio_id':1,
-    'value':cash(1200),'unrealized':cash(0),'cost_basis':cash(1200),
+    'snapshot_at':stamp,'value':cash(1200),'unrealized':cash(0),'cost_basis':cash(1200),
     'sector_intelligence':{'sector':'Teknologi'}},
    {'asset_id':'child','ticker':'TESTB','name':'Fiktiv aktie B','portfolio_id':2,
-    'value':cash(800),'unrealized':cash(0),'cost_basis':cash(800),
+    'snapshot_at':older,'value':cash(800),'unrealized':cash(0),'cost_basis':cash(800),
     'sector_intelligence':{'sector':'Sundhed'}}],
   'snapshot_at':stamp,'warnings':[], 'portfolio_value_history':{}},
  'markets':[],'history':[],'regions':['USA','Europa','Asien','Globalt'],
@@ -47,10 +48,12 @@ try:
    page.locator('nav [data-view=sectors]').click()
    expect(page.locator('.si-donut strong')).to_contain_text('2.600,00')
    expect(page.locator('.si-donut')).to_contain_text('2 positioner')
+   expect(page.locator('.si-allocation')).to_contain_text('Fordelingens datagrundlag: ældste')
    expect(page.locator('.sector-row').filter(has_text='Kontantbeholdning')).to_contain_text('600,00')
    page.screenshot(path=str(screens / f'sector-cash-{width}.png'),full_page=True)
    page.locator('[data-sector-scope="2"]').click()
    expect(page.locator('.si-donut strong')).to_contain_text('900,00')
+   expect(page.locator('.si-allocation')).to_contain_text('Fordelingens datagrundlag: opdateret')
    expect(page.locator('.sector-row').filter(has_text='Kontantbeholdning')).to_contain_text('100,00')
    page.locator('[data-sector-scope="1"]').click()
    expect(page.locator('.si-donut strong')).to_contain_text('2.600,00')
