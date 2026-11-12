@@ -1,7 +1,7 @@
 name: ESCAPE integration overflow verification
 on:
   pull_request:
-    branches: [codex/issue57-integrated-review]
+    branches: [codex/integration-preview-base]
 permissions:
   contents: read
 jobs:
