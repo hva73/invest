@@ -391,6 +391,28 @@ body.pull-refresh-visible #refresh-status{display:none}
 .market-observation{display:block;color:#9bdac6;font-size:.8rem;margin-top:.25rem}
 
 /* Issue #13: the signal dialog keeps actions visible while its body scrolls. */
+html:has(#engine-dialog[open]),body:has(#engine-dialog[open]){overflow:hidden;overscroll-behavior:none}
+#engine-dialog[open]{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-gutter:stable}
+.engine-administration{margin:12px 0}.engine-administration summary{cursor:pointer}
+.mobile-holdings,.mobile-attention-list,.attention-count-mobile{display:none}
+@media(max-width:700px){
+ .dashboard-v1{display:flex;flex-direction:column}
+ .dashboard-v1>.dash-attention{order:0}.dashboard-v1>.dash-hero{order:1}.dashboard-v1>.dash-holdings{order:2}.dashboard-v1>.dash-signals{order:3}.dashboard-v1>.dash-quality{order:4}
+ .dashboard-v1 .dash-hero-top #dashboard-value-chart{display:none}
+ .dashboard-v1 .dash-holdings:not([data-dashboard-portfolio])>.dash-table-wrap,.dashboard-v1 .dash-attention>.dash-table-wrap,.dashboard-v1 .dash-holdings:not([data-dashboard-portfolio]) .dash-data-summary,.dashboard-v1 .dash-holdings:not([data-dashboard-portfolio]) .dash-sort{display:none}
+ .mobile-holdings,.mobile-attention-list{display:block}.attention-count-mobile{display:inline}.attention-count-desktop{display:none}
+ .mobile-holdings-filters{display:flex;gap:6px;overflow-x:auto;padding:0 0 10px}
+ .mobile-holdings-filters button{flex:0 0 auto;min-height:44px;font-size:12px;padding:8px 10px}
+ .mobile-holdings-filters button[aria-pressed=true]{border-color:#73d8c3;color:#baf2e3;background:#19453e}
+ .mobile-holding,.mobile-attention-row{scroll-margin-bottom:120px;display:flex;width:100%;min-height:64px;align-items:center;justify-content:space-between;gap:12px;text-align:left;border:0;border-top:1px solid #304653;border-radius:0;background:transparent;padding:10px 2px}
+ .mobile-holding-name,.mobile-holding-value,.mobile-attention-row span{display:grid;gap:2px;min-width:0}
+ .mobile-holding-name{flex:1}.mobile-holding-name small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mobile-holding-value{text-align:right}.mobile-holding-value strong,.mobile-holding-value .dash-change{font-variant-numeric:tabular-nums;white-space:nowrap}
+ .mobile-holding-status.action{color:#f2c27d}.mobile-holding-status.closed{color:#bacad0}.mobile-holding-status.other{color:#aec5c6}
+ .mobile-holdings-more{width:100%;margin-top:8px;min-height:44px}.mobile-attention-row small{display:block;color:#aac3c3}.mobile-attention-row>span:last-child{text-align:right;color:#d7e9df}
+ body:has(.dashboard-v1) main{padding-bottom:calc(140px + env(safe-area-inset-bottom,0px))}
+ html:has(#dashboard-detail[open]),body:has(#dashboard-detail[open]){overflow:hidden;overscroll-behavior:none}
+ #dashboard-detail[open]{overscroll-behavior:contain}
+}
 .signal-overview{display:grid;gap:12px;min-width:0}.signal-overview h3{margin:4px 0}.signal-head{display:grid;gap:5px}.signal-head>strong{font-size:1.55rem}.signal-head.signal-red>strong{color:#ff9aa9}.signal-head.signal-green>strong{color:#8ce4b4}.signal-head.signal-yellow>strong{color:#f3db86}.signal-head small,.signal-kpis small{display:block;color:#b5c9d0}.signal-kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.signal-kpis>div{min-width:0;background:#193641;border:1px solid #315360;border-radius:10px;padding:12px;overflow-wrap:anywhere}.signal-kpis strong{display:block;font-size:1.15rem;margin:5px 0}.signal-overview ul{margin:0;padding-left:20px}.signal-overview .signal-action-bar{display:flex;flex-wrap:nowrap;gap:6px}.signal-action-bar button{flex:1;min-width:0;min-height:48px}.signal-chart-empty{padding:20px;background:#193641;border-radius:10px}.signal-overview-dialog .market-slot{min-width:0}
 @media(max-width:700px){.signal-overview-dialog{max-height:94dvh}.signal-overview-dialog .signal-action-bar{position:sticky;bottom:-1px;z-index:5;background:#102632;padding:10px 4px calc(10px + env(safe-area-inset-bottom));box-shadow:0 -12px 20px #102632dd}.signal-action-bar button{font-size:12px;padding-inline:5px}}
 .signal-chart-peak{display:grid;gap:3px;margin:10px 0;padding:10px 12px;border:1px solid #315360;border-radius:10px;background:#193641}.signal-chart-peak small{color:#b5c9d0}.signal-chart-peak strong{font-size:1.15rem}
@@ -459,9 +481,9 @@ body.pull-refresh-visible #refresh-status{display:none}
  .dash-hero-intro{order:0}
  .dash-hero-intro h2{font-size:23px;line-height:1.15;margin:5px 0}
  .dash-hero-intro p{font-size:11px;line-height:1.4;margin:0 0 5px}
- .dash-hero-metrics{order:1;margin:0;gap:0}
- .dash-hero-metrics > div{padding:12px 8px 4px}
- .dash-hero-metrics > div:first-child{padding-left:0}
+ .dash-hero-metrics{order:1;margin:0;gap:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+ .dash-hero-metrics > div{padding:12px 8px 4px;min-width:0}
+ .dash-hero-metrics > div:first-child{grid-column:1 / -1;padding-left:0;border-right:0;border-bottom:1px solid #74b09b33}
  .dash-hero-top #dashboard-value-chart{order:2;width:100%}
  .dash-hero-top .dash-chart{border-top:1px solid #74b09b33;padding-top:12px}
  #dashboard-detail[open],.market-chart-dialog[open]{display:grid;grid-template-rows:auto minmax(0,1fr) auto;overflow:hidden;max-height:calc(100dvh - 20px)}
@@ -470,3 +492,18 @@ body.pull-refresh-visible #refresh-status{display:none}
  #dashboard-detail > .asset-trade-bar button,.market-chart-dialog > .asset-trade-bar button{min-height:44px;min-width:0;border-radius:999px;font-weight:650}
  #dashboard-detail > .asset-trade-bar small,.market-chart-dialog > .asset-trade-bar small{font-size:10px;line-height:1.3}
 }
+
+/* Anonymous, isolated demo entry and persistent context. */
+.demo-entry{display:inline-flex;align-items:center;gap:8px;margin:12px 0 0;padding:8px 0;min-height:44px;border:0;border-radius:4px;color:#a4cfc4;background:transparent;text-decoration:none;font-size:14px;font-weight:600}
+.demo-entry:hover{color:#d0eee5;text-decoration:underline}
+.demo-entry:focus-visible{outline:2px solid #a4f2de;outline-offset:3px}
+.demo-entry-note{display:block;margin:0 0 18px;letter-spacing:0;color:#afc9c5}
+.demo-banner{position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 14px;color:#08231e;background:#9ce7d2;font-size:12px;font-weight:700}
+.demo-banner a{color:#08231e;text-decoration:underline;white-space:nowrap}
+.demo-mode #profile-open,.demo-mode #refresh-current,.demo-mode #logout{display:none!important}
+@media(max-width:700px){.demo-banner{font-size:11px;padding:8px 10px}.demo-entry{font-size:14px}}
+.demo-mode dialog[open]{padding-top:36px}
+.demo-mode dialog[open]::before{content:'DEMO · ingen rigtige handler';position:absolute;top:8px;left:16px;color:#9ce7d2;font-size:10px;font-weight:700;letter-spacing:.04em}
+/* Navigation becomes available only after entering the app or demo. */
+body:has(#login:not([hidden])) > aside nav{display:none}
+@media(max-width:900px){body:has(#login:not([hidden])) main > header{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);margin:0;padding:0}body:has(#login:not([hidden])) main{padding-top:12px;padding-bottom:24px}}

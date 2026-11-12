@@ -25,10 +25,16 @@ try:
    nav=page.locator('body > aside nav')
    if width<=900:
     more=page.locator('#mobile-more');expect(more).to_be_visible()
-    for target in ('portfolios','radar','hot-watch','overview'):
+    assert nav.locator(':scope > button[data-view]').evaluate_all('xs => xs.map(x => x.dataset.view)')==['overview','portfolios','hot-watch','sectors']
+    for target in ('portfolios','hot-watch','sectors','overview'):
      nav.locator(f':scope > [data-view="{target}"]').click()
      expect(nav.locator(f':scope > [data-view="{target}"]')).to_have_class('active')
      assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1'),(width,target)
+    more.click();expect(page.locator('#mobile-more-panel')).to_be_visible()
+    expect(page.locator('#mobile-more-panel [data-view=radar]')).to_be_visible()
+    page.locator('#mobile-more-panel [data-view=radar]').click()
+    expect(page.locator('#mobile-more-panel')).to_be_hidden()
+    expect(page.locator('#mobile-more-panel [data-view=radar]')).to_have_class('active')
     more.click();expect(page.locator('#mobile-more-panel')).to_be_visible()
     for action in ('profile-open','refresh-current','logout'):
      assert page.locator(f'#mobile-more-panel #{action}').count()==1,(width,action)
