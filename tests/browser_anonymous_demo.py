@@ -23,7 +23,10 @@ try:
    shot=os.environ.get('ESCAPE_SCREENSHOTS')
    if shot and width in (320,390):page.screenshot(path=f'{shot}/demo-welcome-{width}.png')
    page.get_by_role('link',name='Prøv ESCAPE med demodata').click();expect(page.locator('.demo-banner')).to_be_visible()
-   expect(page.locator('.dashboard-v1')).to_be_visible();expect(page.locator('aside nav')).to_be_visible();expect(page.locator('.dash-chart-svg')).to_be_visible()
+   expect(page.locator('.dashboard-v1')).to_be_visible();expect(page.locator('aside nav')).to_be_visible()
+   compact=width<=700 and page.locator('.mobile-holdings').count()>0
+   if compact:expect(page.locator('.dash-chart-svg')).to_be_hidden()
+   else:expect(page.locator('.dash-chart-svg')).to_be_visible()
    expect(page.locator('.dash-attention')).to_contain_text('KØBSSIGNAL');expect(page.locator('.dash-attention')).to_contain_text('SÆLGSSIGNAL')
    expect(page.locator('.dash-hero-metrics')).to_contain_text('52.080,00');requests.clear()
    boxes=page.locator('.dash-hero-metrics > div').evaluate_all('nodes => nodes.map(n => {const r=n.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,scroll:n.scrollWidth,width:n.clientWidth}})')
@@ -39,7 +42,13 @@ try:
     expect(chart).to_have_attribute('aria-label',re.compile(r'\b(?:1\d\d|2\d\d|3[0-6]\d) observerede punkter'))
     if shot:page.screenshot(path=f'{shot}/demo-chart-{width}-{period}.png')
    if shot and width==390:page.screenshot(path=f'{shot}/demo-position-390.png')
-   dialog.locator('[data-asset-trade=BUY]').click();quick=page.locator('#quick-trade-dialog');expect(quick).to_contain_text('Køb · TSLA')
+   trade_ticker='TSLA'
+   if dialog.locator('[data-dashboard-decision=demo-TSLA]').count():
+    expect(dialog.locator('[data-asset-trade=BUY]')).to_have_count(0)
+    dialog.locator('[data-dashboard-close]').click();neutral=page.get_by_role('button',name='Åbn position FCX i Demodepot')
+    if not neutral.is_visible():page.locator('[data-mobile-more]').click()
+    neutral.click();expect(dialog).to_be_visible();trade_ticker='FCX'
+   dialog.locator('[data-asset-trade=BUY]').click();quick=page.locator('#quick-trade-dialog');expect(quick).to_contain_text('Køb · '+trade_ticker)
    quick.locator('[name=size]').fill('50');quick.locator('button[type=submit]').click();expect(quick).to_contain_text('Gennemgå købet')
    assert not any('/api/' in url for url in requests),requests
    quick.locator('#quick-trade-confirm').check();quick.locator('[data-quick-send]').click();expect(quick).to_contain_text(re.compile('simuleret',re.I))
@@ -50,8 +59,9 @@ try:
    page.locator('[data-engine-detail=demo-TSLA]').first.click();engine=page.locator('#engine-dialog');expect(engine.locator('.engine-chart')).to_be_visible()
    if shot:engine.locator('.engine-chart').screenshot(path=f'{shot}/demo-hotwatch-chart-{width}.png')
    engine.get_by_role('button',name='Luk motordetaljer').click()
-   if width<=900:page.locator('#mobile-more').click()
-   page.locator('nav [data-view=sectors]').click();expect(page.locator('.sector-shell')).to_be_visible()
+   sector=page.locator('nav [data-view=sectors]')
+   if width<=900 and not sector.is_visible():page.locator('#mobile-more').click()
+   sector.click();expect(page.locator('.sector-shell')).to_be_visible()
    expect(page.locator('.sector-shell')).to_contain_text('Teknologi')
    before_posts=len(received_posts)
    blocked=page.evaluate('''() => new Promise(resolve => {const x=new XMLHttpRequest();x.open('POST','/api/trade/send');x.onload=()=>resolve(false);x.onerror=()=>resolve(true);try{x.send('{}')}catch(e){resolve(true)}})''')
