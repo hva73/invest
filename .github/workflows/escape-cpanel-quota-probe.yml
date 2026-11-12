@@ -18,7 +18,7 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
-      - run: python -m unittest tests.test_nordicway_uapi_probe
+      - run: python -m unittest tests.test_nordicway_uapi_probe tests.test_nordicway_uapi_quota
   probe:
     if: >-
       github.event_name == 'issue_comment' &&
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
-      - name: Inspect quota response shape
+      - name: Inspect account quota
         env:
           ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
         run: python tools/nordicway_uapi_probe.py

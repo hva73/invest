@@ -92,7 +92,29 @@ def probe(token, opener=None):
         return {'status': 'invalid_response'}
 
 
+def quota_summary(token, reader=None):
+    """Report only conservative numeric bounds; never expose the API response."""
+    if reader is None:
+        from nordicway_uapi_quota import read
+        reader = read
+    try:
+        values = reader(token)
+        fields = ('used_upper_bytes', 'limit_lower_bytes', 'free_lower_bytes')
+        if not isinstance(values, dict) or any(type(values.get(k)) is not int or values[k] < 0 for k in fields):
+            raise ValueError('quota_unavailable')
+        return {'status': 'ok', **{k: values[k] for k in fields}}
+    except (ValueError, OSError):
+        return {'status': 'unavailable'}
+
+
+def exit_status(result):
+    return 0 if result.get('status') == 'ok' and result.get('account_quota', {}).get('status') == 'ok' else 1
+
+
 if __name__ == '__main__':
-    result = probe(os.environ.get('ESCAPE_CPANEL_API_TOKEN', ''))
+    token = os.environ.get('ESCAPE_CPANEL_API_TOKEN', '')
+    result = probe(token)
+    if result['status'] == 'ok':
+        result['account_quota'] = quota_summary(token)
     print(json.dumps(result, sort_keys=True))
-    sys.exit(0 if result['status'] == 'ok' else 1)
+    sys.exit(exit_status(result))
