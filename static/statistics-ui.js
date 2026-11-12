@@ -13,7 +13,7 @@
     if (n !== 0 && Math.abs(n) < 0.01) {
       const fraction=value.replace(/^-/, '').split('.')[1] || '';
       const short=fraction.slice(0,12).replace(/0+$/, '');
-      return short ? `${sign}0,${short}` : `${sign}<0,000000000001`;
+      return short ? `${sign}0,${short}` : `${sign}&lt;0,000000000001`;
     }
     return sign+new Intl.NumberFormat('da-DK', {minimumFractionDigits:2, maximumFractionDigits:2}).format(Math.abs(n));
   }
@@ -24,7 +24,9 @@
       return {negative, whole, fraction};
     });
     const scale = Math.max(2, ...parts.map(part => part.fraction.length));
-    if (scale > 100) return null;
+    // Quantities and prices can each have up to 90 leading fractional zeros;
+    // their product can therefore need roughly twice as many decimal places.
+    if (scale > 220) return null;
     const total = parts.reduce((sum, part) => {
       const magnitude = BigInt(part.whole + part.fraction.padEnd(scale, '0'));
       return sum + (part.negative ? -magnitude : magnitude);
