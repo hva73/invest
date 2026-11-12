@@ -128,6 +128,17 @@ class InstrumentResolver(unittest.TestCase):
   choices=[{'symbol':'EXMP.XETRA','exchange':'XETRA','currency':'EUR','isin':row['isin']},{'symbol':'EXMP.F','exchange':'F','currency':'EUR','isin':row['isin']}]
   self.assertEqual(resolve_cxe(pluto,choices,[row])['symbol'],'EXMP.XETRA')
   self.assertEqual(resolve_cxe(pluto,choices,[dict(row,mic='UNKNOWN')])['status'],'UNVERIFIED')
+ def test_cxe_stockholm_and_oslo_require_their_primary_listings(self):
+  for mic,exchange,code in [('XSTO','ST','SEK'),('XOSL','OL','NOK')]:
+   with self.subTest(mic=mic):
+    pluto={'asset_id':'synthetic','ticker':'EXMP','name':'Example AB','currency':code,'exchange':'CHIX','type':'CS'}
+    row={'symbol':'EXMPx','primary_ticker':'EXMP','name':'Example AB','isin':'SE0000000001','currency':code,'instrument_type':'EQTY','mic':mic}
+    feed={'symbol':'EXMP.'+exchange,'exchange':exchange,'currency':code,'isin':row['isin']}
+    self.assertEqual(resolve_cxe(pluto,[feed],[row])['symbol'],feed['symbol'])
+    self.assertEqual(resolve_cxe(pluto,[dict(feed,exchange='F',symbol='EXMP.F')],[row])['status'],'UNVERIFIED')
+    self.assertEqual(resolve_cxe(pluto,[dict(feed,isin='SE0000000002')],[row])['status'],'UNVERIFIED')
+    self.assertEqual(resolve_cxe(pluto,[dict(feed,currency='USD')],[row])['status'],'UNVERIFIED')
+    self.assertEqual(resolve_cxe(pluto,[feed],[row,dict(row)])['status'],'AMBIGUOUS')
  def test_cxe_parser_checks_production_schema_and_freshness(self):
   now=datetime(2026,11,6,18,30,tzinfo=timezone.utc)
   content=('environment=PROD,created=2026-11-06,time=18:25Z,warning=\n'
