@@ -41,6 +41,13 @@ class StatisticsTest(unittest.TestCase):
         euro_buy=order('BUY','1','10','2026-01-01T00:00:00Z','eb',asset={'ticker':'EUR','name':'Euro','currency':'EUR'})
         euro_sell=order('SELL','1','12','2026-01-02T00:00:00Z','es',asset={'ticker':'EUR','name':'Euro','currency':'EUR'})
         result=project([self.buy,self.sell,euro_buy,euro_sell]);self.assertEqual(set(result['summary_by_currency']),{'USD','EUR'});self.assertNotIn('DKK',result['summary_by_currency'])
+        self.assertTrue(all(row['gross_dkk'] is None and row['net_dkk'] is None and row['fees_status']=='unknown' for row in result['items']))
+    def test_dkk_trade_shows_gross_but_not_guessed_net(self):
+        asset={'ticker':'DK','name':'Danish company','currency':'DKK'}
+        buy=order('BUY','1','10','2026-01-01T00:00:00Z','b',asset=asset)
+        sell=order('SELL','1','12','2026-01-02T00:00:00Z','s',asset=asset)
+        row=project([buy,sell])['items'][0]
+        self.assertEqual(row['gross_dkk'],'2');self.assertIsNone(row['net_dkk']);self.assertEqual(row['fees_status'],'unknown')
     def test_small_values_use_fixed_decimal_notation(self):
         for buy_price,sell_price,expected in [('0.1','0.2','0.000000001'),('0.2','0.1','-0.000000001'),('0.1','0.1','0.000000000')]:
             buy=order('BUY','0.00000001',buy_price,'2026-01-01T00:00:00Z','b')

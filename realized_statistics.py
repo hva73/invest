@@ -46,6 +46,8 @@ def _result(buy, sell, quantity, basis, provisional):
     profit = proceeds - basis
     return {'ticker': sell['ticker'], 'name': sell['name'], 'scope': sell['scope'], 'currency': sell['currency'],
             'quantity': format(quantity, 'f'), 'gross': format(profit, 'f'), 'gross_percent': format(profit / basis * 100, 'f'),
+            'gross_dkk': format(profit, 'f') if sell['currency']=='DKK' else None,
+            'net_dkk': None, 'fees_status': 'unknown',
             'buy_price': format(buy['price'], 'f'), 'sell_price': format(sell['price'], 'f'),
             'sell_time': None if provisional else sell['time'].isoformat(),
             'order_created_at': sell['time'].isoformat() if provisional else None,
