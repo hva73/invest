@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 8113c372c8905528a997e334eda2361379a30b77
+          ref: 55b97e2fa012349e73704c830c7eeade9a312b67
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
@@ -47,6 +47,10 @@ jobs:
           source=pathlib.Path('tests/browser_trade_proposals.py').read_text()
           old="p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])"
           if source.count(old)!=1: raise RuntimeError('browser launch hook changed')
-          pathlib.Path('tests/_synthetic_proposals_managed.py').write_text(source.replace(old,'p.chromium.launch(headless=True)'))
+          source=source.replace(old,'p.chromium.launch(headless=True)')
+          old_nav="page.locator('nav [data-view=journal]').click()"
+          if source.count(old_nav)!=1: raise RuntimeError('journal navigation hook changed')
+          source=source.replace(old_nav,"page.locator('#content [data-view=journal]').first.click()")
+          pathlib.Path('tests/_synthetic_proposals_managed.py').write_text(source)
           PY
           python tests/_synthetic_proposals_managed.py
