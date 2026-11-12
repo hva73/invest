@@ -89,11 +89,13 @@ jobs:
           git show fc641039fcf5d0b8acd9e8d41cd11bcf12ebe6ba:tools/nordicway_v23_owner_preflight.py > "$RUNNER_TEMP/preflight.py"
           git fetch --no-tags origin ca06628b46abcfce8a270ee4e7349725c27c8059
           git show ca06628b46abcfce8a270ee4e7349725c27c8059:tools/nordicway_release_stage.py > "$RUNNER_TEMP/release_stage.py"
+          git show ca06628b46abcfce8a270ee4e7349725c27c8059:tools/nordicway_release_preflight.py > "$RUNNER_TEMP/bridge_preflight.py"
           "$RUNNER_TEMP/escape-data-venv/bin/python" -m py_compile "$RUNNER_TEMP/preflight.py"
-          "$RUNNER_TEMP/escape-data-venv/bin/python" - "$RUNNER_TEMP/preflight.py" "$RUNNER_TEMP/release_stage.py" <<'PY'
+          "$RUNNER_TEMP/escape-data-venv/bin/python" - "$RUNNER_TEMP/preflight.py" "$RUNNER_TEMP/release_stage.py" "$RUNNER_TEMP/bridge_preflight.py" <<'PY'
           import importlib.util, tempfile, sys, types
           from pathlib import Path
-          import nordicway_release_preflight as preflight
+          preflight_spec=importlib.util.spec_from_file_location('nordicway_release_preflight', sys.argv[3])
+          preflight=importlib.util.module_from_spec(preflight_spec);sys.modules['nordicway_release_preflight']=preflight;preflight_spec.loader.exec_module(preflight)
           for name in ('nordicway_deploy_runner', 'nordicway_release_stage', 'nordicway_release_backup', 'nordicway_uapi_quota', 'nordicway_release_service', 'nordicway_deploy_health'):
               sys.modules[name] = types.ModuleType(name)
           spec=importlib.util.spec_from_file_location('owner_preflight_test', __import__('sys').argv[1])
