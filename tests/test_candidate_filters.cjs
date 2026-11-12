@@ -1,0 +1,14 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const empty={hidden:false,textContent:'',setAttribute(){}};
+const ctx={window:{},document:{createElement:()=>empty},console};
+vm.runInNewContext(fs.readFileSync('static/candidate-ui.js','utf8'),ctx);
+const ui=ctx.window.CandidateUI;ui.setup({escape:String,formatTime:String,owner:()=> 'synthetic'});
+const row=(active,status,decision,position=false)=>({dataset:{candidateActive:String(active),candidateLifecycle:status,candidateDecision:decision,candidatePosition:String(position),attention:'yellow'},hidden:false});
+const rows=[row(true,'WAITING_TRIGGER','WAIT'),row(true,'DISCOVERED','WAIT'),row(false,'WAITING_TRIGGER','WAIT'),row(false,'CLOSED','WAIT'),row(true,'WAITING_TRIGGER','WAIT',true),row(true,'DISCOVERED','BUY')];
+const scope={dataset:{candidateFilter:'waiting',candidateOwn:'false'},querySelectorAll:s=>s==='.desk-candidate'?rows:[],querySelector:s=>s==='.lifecycle-empty'?empty:null,append(){}};
+ui.applyFilters(scope);assert.deepEqual(rows.map(r=>r.hidden),[false,false,true,true,true,true]);
+scope.dataset.candidateFilter='all';ui.applyFilters(scope);assert.deepEqual(rows.map(r=>r.hidden),[false,false,false,false,true,false]);
+scope.dataset.candidateFilter='position';ui.applyFilters(scope);assert.deepEqual(rows.map(r=>r.hidden),[true,true,true,true,false,true]);
+scope.dataset.candidateFilter='waiting';scope.dataset.candidateOwn='true';ui.applyFilters(scope);assert.deepEqual(rows.map(r=>r.hidden),[false,false,true,true,false,true]);
+const confirmed={has_confirmed_position:true,lifecycle:{},candidate:{}};assert.match(ui.state({...confirmed,position_proof:{stale:false}}),/Egen position er særskilt bekræftet/);assert.match(ui.state({...confirmed,position_proof:{stale:true}}),/Tidligere bekræftet position · aktuel status ukendt/);assert.match(ui.state(confirmed),/Tidligere bekræftet position · aktuel status ukendt/);
+console.log('PASS: waiting shows active candidates; history and owned-position filters are preserved');
