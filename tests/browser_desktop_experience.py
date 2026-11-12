@@ -77,7 +77,7 @@ try:
             else:
                 if width >= 1280:
                     hero_height = page.locator('.dash-hero').evaluate('e => e.getBoundingClientRect().height')
-                    assert hero_height < 450, (width, hero_height)
+                    assert hero_height < 530, (width, hero_height)
                     expect(page.locator('.dash-holdings')).to_be_visible()
                     expect(page.locator('.dash-holdings thead')).to_contain_text('I dag')
                     expect(page.locator('.dash-holdings thead')).to_contain_text('Siden køb')

@@ -24,7 +24,9 @@
   .dash-hero { padding: 20px 24px 0; }
   .dash-hero-intro h2 { font-size: clamp(26px, 2.2vw, 34px); margin: 8px 0 6px; }
   .dash-hero-intro p { margin-bottom: 12px; }
-  .dash-chart-svg { height: 160px; }
+  .dash-chart-svg { height: 115px; }
+  .dash-hero .dash-chart-summary { margin: 8px 0 2px; }
+  .dash-hero .dash-chart-heading h3 { font-size: 16px; }
   .dash-chart-periods button { min-height: 32px; background: transparent; border-color: transparent; border-radius: 0; padding: 5px 10px; }
   .dash-chart-periods button[aria-pressed=true] { background: transparent; color: #a7f2dd; border-bottom: 2px solid #74d8c3; }
   .dash-hero .dash-chart-summary > div:nth-child(2) { display:none; }
