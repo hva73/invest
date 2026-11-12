@@ -207,7 +207,7 @@ try:
                 page.locator('nav [data-view=overview]').focus()
                 page.keyboard.press('Tab')
                 assert page.evaluate('document.activeElement.matches(":focus-visible")')
-            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), width
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), (width,page.evaluate("() => ({width:innerWidth,scroll:document.documentElement.scrollWidth,elements:[...document.querySelectorAll('body *')].map(e=>({tag:e.tagName,cls:typeof e.className==='string'?e.className:'',rect:e.getBoundingClientRect()})).filter(e=>e.rect.right>innerWidth+1||e.rect.left< -1).slice(0,20).map(e=>({tag:e.tag,cls:e.cls,left:e.rect.left,right:e.rect.right}))})"))
             if width in (320, 390, 768, 1024, 1280, 1440, 1920):
                 page.screenshot(path=str(screens / f'overview-after-{width}.png'), full_page=True)
             assert not errors, (width, errors)
