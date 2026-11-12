@@ -19,7 +19,7 @@ jobs:
           from pathlib import Path
           with sync_playwright() as p:
               browser=p.chromium.launch()
-              for name,width,height in [('mobil',390,844),('desktop',1440,1050)]:
+              for name,width,height in [('mobil',390,844),('mobil-detalje',390,844),('desktop',1440,1050)]:
                   page=browser.new_page(viewport={'width':width,'height':height},device_scale_factor=1)
                   page.goto(Path('design-review/'+name+'.html').resolve().as_uri())
                   assert page.evaluate('document.documentElement.scrollWidth') <= width
