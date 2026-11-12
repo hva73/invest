@@ -55,6 +55,7 @@ vm.runInNewContext(fs.readFileSync('static/demo-data.js','utf8'),ctx);
  for(const [ticker,holidays] of Object.entries(closed)){const p=positions.find(x=>x.ticker===ticker),zone=ticker==='TSLA'?'America/New_York':ticker==='NOVOB'?'Europe/Copenhagen':'Europe/Amsterdam',formatter=new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});for(const x of window.ESCAPE_DEMO_HISTORY.history(p)){const date=Object.fromEntries(formatter.formatToParts(new Date(x.timestamp)).map(v=>[v.type,v.value])),day=`${date.year}-${date.month}-${date.day}`,minute=Number(date.hour)*60+Number(date.minute);assert(!holidays.includes(day),`${ticker} traded on ${day}`);if(ticker==='TSLA'&&['2025-11-28','2025-12-24'].includes(day))assert(minute<=780);if(ticker==='ASML'&&['2025-12-24','2025-12-31'].includes(day))assert(minute<=845);}}
  const sectors=await (await window.fetch('/api/sector-intelligence')).json();
  assert(sectors.dashboard.positions.some(p=>p.sector_intelligence.sector==='Teknologi'));
+ assert(sectors.dashboard.accounts.every(a=>a.cash_status==='available'&&a.cash_accounts.length===0));
  assert.equal((await window.fetch('https://other.invalid/api/state')).status,403);
  assert.equal((await window.fetch('/api/user/profile')).status,403);
  const order=await (await window.fetch('/api/trade/send',{method:'POST',body:'{}'})).json();

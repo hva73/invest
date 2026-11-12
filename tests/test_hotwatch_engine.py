@@ -1837,3 +1837,4 @@ class EngineHTTP(unittest.TestCase):
   d=copy.deepcopy(BASELINE);d['version']='1.2.0';self.assertEqual(self.http.request('/api/v1/hotwatch/strategies',d,{'Authorization':'Bearer '+access})[0],403)
 
 
+

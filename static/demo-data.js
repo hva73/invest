@@ -132,6 +132,7 @@ window.ESCAPE_DEMO_HISTORY=(()=>{
   if(route==='sector-intelligence'){
    const sectors=['Teknologi','Sundhed','Finans','Industri'];
    const dashboard=JSON.parse(JSON.stringify(demo.state.dashboard));
+   dashboard.accounts.forEach(a=>{a.cash_status='available';a.cash_accounts=[]});
    dashboard.positions.forEach((p,i)=>p.sector_intelligence={sector:sectors[i%sectors.length],source:'Fiktive demodata'});
    const markets=sectors.map((sector,i)=>({sector,region:'USA',symbol:'DEMO'+i,price_basis:'fiktiv',series:Array.from({length:13},(_,j)=>({date:new Date(Date.now()-(12-j)*31*864e5).toISOString().slice(0,10),close:100+i*5+j*(i%2?-.3:.8)}))}));
    return ok({dashboard,regions:['USA'],markets,history:[],fx_quotes:[]});
