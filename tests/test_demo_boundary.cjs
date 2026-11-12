@@ -40,6 +40,8 @@ vm.runInNewContext(fs.readFileSync('static/demo-data.js','utf8'),ctx);
   const common=new Map(series[0].map(x=>[x.epoch,x.price]));
   for(const rows of series.slice(1))for(const x of rows)if(common.has(x.epoch))assert.equal(x.price,common.get(x.epoch));
  }
+ const tsla=positions.find(p=>p.ticker==='TSLA');
+ for(const pct of [50,100]){const body=JSON.stringify({asset_id:tsla.asset_id,portfolio_id:tsla.portfolio_id,size_mode:'percent',size:String(pct),currency:'DKK'});const estimate=await (await window.fetch('/api/trade/estimate',{method:'POST',body})).json();assert.equal(Number(estimate.proposal.sell_basis.quantity),Number(tsla.quantity));assert.equal(Number(estimate.proposal.sell_basis.shares),Number(tsla.quantity)*pct/100);assert.equal(Number(estimate.proposal.payload.orders[0].shares),Number(tsla.quantity)*pct/100)}
  const points=state.dashboard.portfolio_value_history.periods.day;
  assert(points.length>=20);assert(new Set(points.map(p=>p.reported_result)).size>10);
  const deltas=points.slice(1).map((p,i)=>Number(p.reported_result)-Number(points[i].reported_result));

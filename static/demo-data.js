@@ -142,9 +142,9 @@ window.ESCAPE_DEMO_HISTORY=(()=>{
   if(route==='trade/preview')return ok({read_only:true,estimate:{quote:{message:'Simuleret estimat'},buying_power_checked:true,accounts:[]},asset:{},payload:{orders:[]}});
   if(route==='trade/search')return ok({assets:demo.state.dashboard.positions.map(p=>({asset_id:p.asset_id,name:p.name,ticker:p.ticker,currency:p.price?.currency||'DKK',isin:'TEST'}))});
   if(route==='trade/estimate'){
-   const sell=payload.size_mode==='percent',p=position(payload.asset_id),portfolio=Number(payload.portfolio_id)||1,currency=payload.currency||'DKK';
-   const order={assetId:payload.asset_id||'synthetic-asset-TSLA',side:sell?'SELL':'BUY',currency,orderType:payload.order_type||'MARKET',timeInForce:'DAY',...(sell?{shares:'1'}:payload.size_mode==='shares'?{shares:String(payload.size)}:{amount:String(payload.size)}),...(payload.limit_price?{limitPrice:String(payload.limit_price)}:{})};
-   return ok({proposal:{id:++serial,status:'estimated',review_token:'demo-only',portfolio_id:portfolio,kind:'direct',payload:{orders:[order]},asset:{asset:{name:p?.name||'Testaktie',isin:'TEST',currency}},estimate:{quote:{besked:'Fiktivt estimat – ingen ordre',omkostninger:'Ikke beregnet'},active_orders:[],buying_power_checked:true},sell_basis:sell?{quantity:'2',percentage:String(payload.size),shares:'1'}:null}});
+   const sell=payload.size_mode==='percent',p=position(payload.asset_id),portfolio=Number(payload.portfolio_id)||1,currency=payload.currency||'DKK',shares=sell?String(Number(p?.quantity||0)*Number(payload.size||0)/100):null;
+   const order={assetId:payload.asset_id||'synthetic-asset-TSLA',side:sell?'SELL':'BUY',currency,orderType:payload.order_type||'MARKET',timeInForce:'DAY',...(sell?{shares}:payload.size_mode==='shares'?{shares:String(payload.size)}:{amount:String(payload.size)}),...(payload.limit_price?{limitPrice:String(payload.limit_price)}:{})};
+   return ok({proposal:{id:++serial,status:'estimated',review_token:'demo-only',portfolio_id:portfolio,kind:'direct',payload:{orders:[order]},asset:{asset:{name:p?.name||'Testaktie',isin:'TEST',currency}},estimate:{quote:{besked:'Fiktivt estimat – ingen ordre',omkostninger:'Ikke beregnet'},active_orders:[],buying_power_checked:true},sell_basis:sell?{quantity:String(p?.quantity||0),percentage:String(payload.size),shares}:null}});
   }
   if(route==='trade/send')return ok({proposal:{status:'sent',response:{status:'SIMULERET'}}});
   if(route==='trade/history')return ok({proposals:[]});
