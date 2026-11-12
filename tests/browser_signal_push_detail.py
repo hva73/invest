@@ -43,7 +43,7 @@ def main():
    quick=page.locator('#quick-trade-dialog');expect(quick).to_contain_text('Sælg · TSM');expect(quick.locator('[name=portfolio_id]')).to_have_value(str(case.root));expect(quick.locator('[name=asset_id]')).to_have_value('synthetic-asset')
    quick.locator('[data-quick-close]').click();page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_be_visible()
    slot=d.locator('.market-slot');expect(slot.locator('.market-price')).to_be_visible();expect(slot.locator('[data-market-period=day]')).to_have_attribute('aria-pressed','true')
-   expect(slot.locator('.signal-chart-peak')).to_contain_text('højeste viste punkt');expect(slot.locator('.market-marker-entry')).to_have_count(1);expect(slot.locator('.market-marker-signal')).to_have_count(1);assert 5<=float(slot.locator('.market-marker-entry').get_attribute('y1'))<=57;expect(slot.locator('.market-marker-legend')).to_contain_text('anskaffelse 3.55 USD')
+   expect(slot.locator('.signal-chart-peak')).to_contain_text('højeste viste punkt');expect(slot.locator('.market-marker-entry')).to_have_count(1);expect(slot.locator('.market-marker-signal')).to_have_count(0);assert 5<=float(slot.locator('.market-marker-entry').get_attribute('y1'))<=57;expect(slot.locator('.market-entry-label')).to_have_text('Gns. købskurs 3,55 USD');expect(slot.locator('.market-peak-label')).to_have_text('Top 3,41 USD')
    for name in ['week','month','year','day']:
     slot.locator('[data-market-period='+name+']').click();expect(slot.locator('[data-market-period='+name+']')).to_have_attribute('aria-pressed','true');page.wait_for_timeout(300)
    assert 'ONE_MONTH' in periods and 'ONE_YEAR' in periods,periods
@@ -82,7 +82,7 @@ def main():
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.get_by_role('button',name='Køb')).to_be_visible();expect(d.locator('[data-trade-watch]')).to_have_attribute('data-trade-signal','BUY');expect(d.locator('.market-slot .market-price')).to_be_visible()
    d.get_by_role('button',name='Køb').click();expect(quick).to_contain_text('Køb · TSM');expect(quick.locator('[name=portfolio_id]')).to_have_value(str(case.root));expect(quick.locator('[name=asset_id]')).to_have_value('synthetic-asset');quick.locator('[data-quick-close]').click()
    account['dashboard']['positions']=[];session['latest_context']['position']='none';session['request']['report_id']='synthetic-report';session['request']['candidate_id']='synthetic-candidate'
-   page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('.market-slot .market-price')).to_be_visible();expect(d.locator('.market-marker-entry')).to_have_count(0);expect(d.get_by_role('button',name='Køb')).to_be_visible()
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('.market-slot .market-price')).to_be_visible();expect(d.locator('.market-marker-entry')).to_have_count(0);expect(d.locator('.market-entry-label')).to_have_count(0);expect(d.locator('.market-marker-signal')).to_have_count(0);expect(d.locator('.market-peak-label')).to_have_text('Top 3,41 USD');expect(d.get_by_role('button',name='Køb')).to_be_visible()
    if shot:page.screenshot(path=f'{shot}/signal-buy-390.png')
    d.get_by_role('button',name='Ignorér og luk signalet').click();expect(d).not_to_be_visible()
    account['dashboard']['positions']=[holding];session['latest_context']['position']='held';session['request'].pop('report_id');session['request'].pop('candidate_id')
