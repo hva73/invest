@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 import nordicway_deploy_runner as runner
 import nordicway_owner_approval as owner
 import nordicway_deploy_client as client
+import nordicway_deploy_request as request_parser
 from types import SimpleNamespace
 from nordicway_deploy_sequence import Outcome
 
@@ -196,8 +197,15 @@ class RunnerTests(unittest.TestCase):
         key = bytes.fromhex('ab'*32)
         keyfile = self.bridge/'owner-approval-key'
         keyfile.write_bytes(key); keyfile.chmod(0o600)
+        proof = owner.create_proof(SHA, key)
+        event = {'action':'created','sender':{'id':request_parser.OWNER},
+                 'issue':{'number':16},'comment':{'user':{'id':request_parser.OWNER},
+                 'author_association':'OWNER', 'body':request_parser.PREFIX +
+                 json.dumps({'operation':'deploy','sha':SHA,'approval':proof})}}
+        parsed = request_parser.parse(event, 'issue_comment', request_parser.BRANCH, str(request_parser.OWNER))
+        self.assertEqual(parsed['approval'], proof)
         env = {'ESCAPE_RELEASE_SHA': SHA, 'ESCAPE_CPANEL_API_TOKEN': TOKEN,
-               'ESCAPE_DEPLOY_AUTHORIZED':'1', 'ESCAPE_OWNER_APPROVAL_KEY':'ab'*32,
+               'ESCAPE_DEPLOY_AUTHORIZED':'1', 'ESCAPE_OWNER_APPROVAL_PROOF':json.dumps(parsed['approval']),
                'SSH_AUTH_SOCK':'/tmp/agent', 'NORDICWAY_KNOWN_HOST':'hostkey',
                'NORDICWAY_VERIFIED_FINGERPRINT':'fingerprint'}
         real_run = runner.run
