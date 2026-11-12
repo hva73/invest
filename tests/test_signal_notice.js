@@ -15,7 +15,7 @@ const iconOf=html=>({dataset:{engineNotice:decode(html.match(/data-engine-notice
 (async()=>{
  for(const [signal,label,phase] of [['SELL','SÆLGSSIGNAL','ACTIVE'],['WAIT','AFVENT','WITHDRAWN'],['NO_DATA','DATA FOR GAMLE','DATA_MISSING']]){
   s.signal=signal;s.display_status=label;s.status=signal==='NO_DATA'?'DEGRADED':'ACTIVE';s.last_action_signal.state=phase;
-  const html=ctx.window.DashboardUI.render(state),attention=html.match(/<section class="panel dash-attention">[\s\S]*?<\/section>/)[0];
+  const html=ctx.window.DashboardUI.render(state),attention=(html.match(/<section class="panel dash-attention[^"]*">[\s\S]*?<\/section>/)||[''])[0];
   assert.doesNotMatch(html,/<aside class="signal-notice"|signal-notice-details|data-engine-ack/);
   const source=phase==='ACTIVE'?attention:html;
   if(phase!=='ACTIVE')assert.doesNotMatch(attention,/signal-alert--unread/);
