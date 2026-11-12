@@ -118,6 +118,24 @@ class HotWatch(unittest.TestCase):
    quality=observation_status([],pre,120,'NO_DATA','CREATED');quality['market_status']='PREMARKET'
    with patch('hotwatch_engine.utc',return_value=pre),patch('hotwatch_engine.observation_status',return_value=quality):session=engine.view(c,row)
    self.assertEqual(session['signal'],'NO_DATA');self.assertEqual(session['data_status']['next_market_session']['expected_at'],'2026-11-10T14:30:00+00:00')
+ def test_candidate_review_never_masks_fresh_independent_exit(self):
+  import web_push
+  result=self.put(tick(self.now,price='94',held=True))
+  self.assertEqual(result['calculation']['signal'],'SELL')
+  self.assertIn('STOP_BREACHED',result['calculation']['reason_codes'])
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True)
+   for status in ('REVIEW_DUE','REPORT_ONLY'):
+    with self.subTest(status=status),patch('intel_workflows.candidate_currentness',return_value={'status':status}):
+     view=engine.view(c,row,self.now)
+     self.assertEqual(view['candidate_review']['status'],status)
+     self.assertEqual((view['signal'],view['display_status']),('SELL','SÆLGSSIGNAL'))
+     self.assertEqual(web_push._actionable(c,row,self.now),'SELL')
+     old=engine.view(c,row,self.now+timedelta(seconds=121))
+     self.assertEqual(old['signal'],'NO_DATA')
+     self.assertNotEqual(old['display_status'],'SÆLGSSIGNAL')
+     self.assertIsNone(web_push._actionable(c,row,self.now+timedelta(seconds=121)))
+
  def test_closed_market_without_other_errors_is_a_normal_active_session(self):
   sample=tick(self.now,held=True);sample.update(market_status='CLOSED',session_key='SYNTHETIC-CLOSED')
   result=engine.ingest(app.connect,1,self.req['watch_id'],True,sample,self.now)
