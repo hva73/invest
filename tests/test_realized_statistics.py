@@ -13,6 +13,7 @@ class StatisticsTest(unittest.TestCase):
     def test_direct_pair_is_indicative_not_a_dated_fill(self):
         result=project([self.buy,self.sell]);row=result['items'][0]
         self.assertEqual(row['gross'],'4');self.assertEqual(row['quality'],'indicative')
+        self.assertEqual((row['buy_origin'],row['sell_origin']),('unknown','unknown'))
         self.assertIsNone(row['sell_time']);self.assertFalse(result['history_complete'])
     def test_direct_partial_sales_count_only_sold_quantity(self):
         first=order('SELL','0.5','12','2026-01-02T00:00:00Z','s1')
