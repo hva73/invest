@@ -79,6 +79,22 @@ class EngineContract(unittest.TestCase):
   with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
  def test_H02_source_error_is_not_candidate_reject(self):
   engine.fault(app.connect,1,self.req['watch_id'],True,'SYNTHETIC_SOURCE_ERROR',self.base);s=self.session();self.assertEqual(s['status'],'DEGRADED');self.assertEqual(s['signal'],'NO_DATA');r=self.call('get_hot_watch',{'candidate_id':self.req['candidate_id'],'is_test':True});self.assertEqual(r['candidate']['normalized_decision'],'WAIT');self.assertNotEqual(r['candidate']['lifecycle']['status'],'ARCHIVED')
+ def test_radar_review_queue_roundtrip_requires_a_new_decision(self):
+  now=datetime.now(timezone.utc);cid=self.report['candidates'][0]['candidate_id']
+  overdue=copy.deepcopy(self.report);overdue.update(report_id='synthetic-review-overdue',generated_at=(now-timedelta(minutes=2)).isoformat())
+  overdue['candidates'][0].pop('lifecycle',None)
+  d=overdue['candidates'][0]['decision'];d.update(decided_at=(now-timedelta(days=3)).isoformat(),deadline=(now-timedelta(days=2)).isoformat())
+  self.call('send_report',overdue)
+  engine.fault(app.connect,1,self.req['watch_id'],True,'SYNTHETIC_SOURCE_ERROR',now)
+  queue=self.call('get_hot_watch',{'is_test':True})['review_queue'];entry=next(x for x in queue if x['candidate_id']==cid)
+  self.assertEqual(entry['status'],'COLD');self.assertEqual(entry['assessed_at'],d['decided_at'])
+  with app.connect() as c:before=c.execute('SELECT count(*) FROM candidate_decision_events WHERE candidate_id=?',(cid,)).fetchone()[0]
+  self.call('get_hot_watch',{'is_test':True})
+  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM candidate_decision_events WHERE candidate_id=?',(cid,)).fetchone()[0],before)
+  fresh=copy.deepcopy(overdue);fresh.update(report_id='synthetic-review-fresh',generated_at=(now-timedelta(seconds=1)).isoformat());new=fresh['candidates'][0]['decision'];new.update(decided_at=fresh['generated_at'],deadline=(now+timedelta(hours=1)).isoformat(),reason='Syntetisk faktisk revurdering med kildereference')
+  self.call('send_report',fresh)
+  read=self.call('get_hot_watch',{'candidate_id':cid,'is_test':True});self.assertEqual(read['candidate']['currentness']['status'],'CURRENT');self.assertEqual(read['candidate']['decision']['decided_at'],new['decided_at']);self.assertNotIn(cid,[x['candidate_id'] for x in read['review_queue']]);self.assertNotEqual(read['candidate']['lifecycle']['status'],'ARCHIVED')
+  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
  def test_H03_explicit_pause_resume_stop_control_resource_claims(self):
   self.call('control_hot_watch',{'watch_id':self.req['watch_id'],'is_test':True,'action':'pause'});self.assertIsNone(engine.claim(app.connect,self.base+timedelta(days=1)))
   self.call('control_hot_watch',{'watch_id':self.req['watch_id'],'is_test':True,'action':'resume'});job=engine.claim(app.connect,self.base+timedelta(days=1));self.assertIsNotNone(job)
