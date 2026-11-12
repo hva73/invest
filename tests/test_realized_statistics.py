@@ -27,6 +27,14 @@ class StatisticsTest(unittest.TestCase):
     def test_cancelled_without_fill_ignored(self):
         canceled=dict(self.sell,status='CANCELED',filledQuantity='0')
         self.assertEqual(project([self.buy,canceled])['items'],[])
+    def test_cancelled_with_positive_filled_quantity_can_be_compared(self):
+        partial=dict(self.sell,status='CANCELED')
+        self.assertEqual(project([self.buy,partial])['items'][0]['gross'],'4')
+    def test_collection_same_timestamp_does_not_guess_order(self):
+        simultaneous=dict(self.sell,filledAt=self.buy['filledAt'])
+        self.assertEqual(project([], [('c',self.buy),('c',simultaneous)])['items'],[])
+    def test_missing_price_does_not_create_result(self):
+        self.assertEqual(project([self.buy,dict(self.sell,filledAveragePrice=None)])['items'],[])
     def test_ambiguous_direct_does_not_invent_fill_order(self):
         extra=order('BUY','1','8','2026-01-01T01:00:00Z','x')
         self.assertEqual(project([self.buy,extra,self.sell])['items'],[])
