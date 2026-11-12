@@ -172,7 +172,7 @@ def _approval_ticket(bridge, sha):
 
 def run(sha, token, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
         adapter_factory=nordicway_deploy_adapter.Adapter,
-        deploy=nordicway_deploy_sequence.deploy, prepare=prepare_checkout, authorization_lock=None):
+        deploy=nordicway_deploy_sequence.deploy, prepare=prepare_checkout, authorization_lock=None, owner_request=None):
     if not isinstance(sha, str) or not re.fullmatch(r'[0-9a-f]{40}', sha):
         raise ValueError('invalid_request')
     if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_-]{10,256}', token):
@@ -182,6 +182,8 @@ def run(sha, token, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
     # Lock only the approval check and durable claim; release before the
     # existing Adapter.lock(), which otherwise would deadlock on a second fd.
     with nordicway_owner_approval.deployment_lock(lock_path):
+        if owner_request is not None:
+            nordicway_owner_approval.approve(bridge, lock_path, sha, owner_request, already_locked=True)
         if _approved_sha(bridge) != sha:
             raise ValueError('unapproved_release')
         _approval_ticket(bridge, sha)
@@ -233,9 +235,9 @@ def run_request(sha, stream):
         request = json.loads(raw)
     except (UnicodeError, ValueError):
         raise ValueError('invalid_request') from None
-    if not isinstance(request, dict) or set(request) != {'cpanel_token'}:
+    if not isinstance(request, dict) or set(request) != {'cpanel_token', 'approval'}:
         raise ValueError('invalid_request')
-    return run(sha, request['cpanel_token'])
+    return run(sha, request['cpanel_token'], owner_request=request['approval'])
 
 
 def resume(sha, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
