@@ -27,6 +27,11 @@ window.MarketUI=(()=>{
  function sync(k){document.querySelectorAll('.market-slot').forEach(node=>{if(key(node)===k)paint(node,record(node))})}
  function paint(node,r){
   if(!node.isConnected)return;
+  // Replace a previous quote-derived value only while its own quote remains
+  // usable. Never leave it looking current after an error or expired refresh.
+  const dailyBox=node.closest('#dashboard-detail')?.querySelector('[data-position-daily] dd');
+  if(dailyBox?.dataset.marketOverride==='true'){dailyBox.textContent='— · — %';delete dailyBox.dataset.marketOverride} 
+
   if(!connected()){node.innerHTML='<div class="market-placeholder"><span>Kurs og dagsændring kræver Pluto-login</span><button type="button" data-view="settings">Se forbindelse</button></div>';return}
   if(r.choices){node.innerHTML=`<div class="market-selection"><label>Vælg det korrekte Pluto-aktiv<select data-market-asset><option value="">Vælg aktiv og børs</option>${r.choices.map(a=>`<option value="${esc(a.asset_id)}">${esc([a.name,a.ticker,a.exchange,a.currency,a.isin].filter(Boolean).join(' · '))}</option>`).join('')}</select></label><button type="button" data-market-select ${r.busy?'disabled':''}>${r.busy?'Henter…':'Vis kursgraf'}</button>${r.data?'<button type="button" data-market-cancel>Tilbage til graf</button>':''}${r.error?`<small>${esc(r.error)}</small>`:''}</div>`;return}
   const activeKey=periodKey(r.period),d=r.byPeriod[activeKey]||(r.data?{...r.data,series:[],series_error:r.busy?'Henter valgt periode…':'Historik for perioden er ikke modtaget.'}:null);
@@ -37,11 +42,11 @@ window.MarketUI=(()=>{
   const warning=r.error||d.last_error,quality=age(d.price_time,d.fetched_at,Boolean(warning));node.classList.toggle('market-stale',quality.tone==='stale');
   // The holding quote is scoped by exact depot and Pluto asset identity. Use
   // its separately labelled daily figure in the matching open detail only.
-  const dailyBox=node.closest('#dashboard-detail')?.querySelector('[data-position-daily] dd'),fetched=Date.parse(d.fetched_at),fetchAge=now()-fetched;
+  const fetched=Date.parse(d.fetched_at),fetchAge=now()-fetched;
   if(dailyBox&&node.dataset.marketHoldingPortfolio&&node.dataset.marketHoldingAsset&&dayComparison&&Number.isFinite(Number(dayComparison.percent))&&!warning&&quality.tone!=='stale'&&Number.isFinite(fetched)&&fetchAge>=0&&fetchAge<=300000&&dateKey(fetched)===today){
    const qty=Number(dailyBox.closest('[data-position-daily]')?.dataset.positionQuantity),pct=Number(dayComparison.percent),unit=dayComparison.amount!==null&&dayComparison.amount!==undefined&&dayComparison.amount!==''?Number(dayComparison.amount):NaN,price=Number(d.price),estimated=!Number.isFinite(unit),delta=estimated&&Number.isFinite(price)&&price>0&&pct>-100?price*pct/(100+pct):unit;
    const value=Number.isFinite(qty)&&qty>0&&Number.isFinite(delta)&&d.currency?(estimated?'≈ ':'')+(delta*qty>0?'+':'')+money({amount:String(delta*qty),currency:d.currency}):'—';
-   dailyBox.innerHTML=value+' · '+percent(pct)+'<small class="position-daily-source">Kursændring × antal · Pluto · hentet '+clock(d.fetched_at)+(d.price_time?'':' · kurstid ukendt')+'</small>';
+   dailyBox.innerHTML=value+' · '+percent(pct)+'<small class="position-daily-source">Kursændring × antal · Pluto · hentet '+clock(d.fetched_at)+(d.price_time?'':' · kurstid ukendt')+'</small>';dailyBox.dataset.marketOverride='true';
   }
 
   if(node.dataset.marketLayout==='quote'){
