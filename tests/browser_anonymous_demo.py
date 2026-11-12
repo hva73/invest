@@ -41,6 +41,10 @@ try:
     assert page.locator('.mobile-holding-daily.positive').count()>0
     assert page.locator('.mobile-holding-daily.negative').first.evaluate('(e) => getComputedStyle(e).color') != page.locator('.mobile-holding-daily.positive').first.evaluate('(e) => getComputedStyle(e).color')
     page.screenshot(path=f'{shot}/owner-overview-no-alerts-390.png',full_page=True)
+    if page.locator('.dash-day-duplicate').count():
+     expect(page.locator('.dash-day-total')).to_be_hidden()
+     page.locator('[data-dashboard-range=week]').click();expect(page.locator('.dash-day-total')).to_be_visible()
+     page.locator('[data-dashboard-range=day]').click();expect(page.locator('.dash-day-total')).to_be_hidden()
     page.evaluate("() => {state.dashboard=window.savedDashboard;render()}")
    row=page.get_by_role('button',name='Åbn position TSLA i Demodepot');row.click()
    dialog=page.locator('#dashboard-detail');expect(dialog).to_be_visible()
