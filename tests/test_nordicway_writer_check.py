@@ -29,6 +29,9 @@ class WriterTests(unittest.TestCase):
             make(1234, 1, cmd)
             make(1235, 99, cmd)
             make(1236, 1, b'/other/passenger_wsgi.py')
+            make(1237, 1, os.fsencode(str(app) + '_other/passenger_wsgi.py'))
+            make(1238, 1, os.fsencode(str(app)) + b'\0/other/passenger_wsgi.py')
+            make(1239, 1, b'--app=' + cmd)
             service = Mock()
             service.status.return_value = 'stopped'
             with patch.object(os, 'pidfd_open', return_value=51) as opened, \
@@ -59,6 +62,29 @@ class WriterTests(unittest.TestCase):
                  patch.object(signal, 'pidfd_send_signal') as sent:
                 with self.assertRaisesRegex(ValueError, 'service_not_stopped'):
                     check.stop_orphaned_lswsgi(app, service, root / 'proc')
+            sent.assert_not_called()
+
+    def test_changed_argv_after_pidfd_open_never_signals(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            app = root / 'escape_app'
+            app.mkdir()
+            process = root / 'proc/1234'
+            process.mkdir(parents=True)
+            exe = root / 'lswsgi'
+            exe.touch()
+            cmd = process / 'cmdline'
+            cmd.write_bytes(os.fsencode(str(app / 'passenger_wsgi.py')))
+            (process / 'cwd').symlink_to(app)
+            (process / 'exe').symlink_to(exe)
+            (process / 'stat').write_text('1234 (lswsgi) S 1 ' + '0 ' * 17 + '12345 0')
+            def changed(pid, flags):
+                cmd.write_bytes(os.fsencode(str(app) + '_other/passenger_wsgi.py'))
+                return 51
+            with patch.object(os, 'pidfd_open', side_effect=changed), \
+                 patch.object(os, 'close'), \
+                 patch.object(signal, 'pidfd_send_signal') as sent:
+                self.assertEqual(check.stop_orphaned_lswsgi(app, Mock(), root / 'proc'), 0)
             sent.assert_not_called()
     def test_cron_detection(self):
         def run(text, code=0, err=''):

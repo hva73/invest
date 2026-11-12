@@ -115,7 +115,7 @@ def stop_orphaned_lswsgi(app, service, proc=Path('/proc')):
             if process.stat().st_uid != os.getuid():
                 continue
             cmd = (process / 'cmdline').read_bytes()
-            if b'passenger_wsgi.py' not in cmd or os.fsencode(str(app)) not in cmd:
+            if os.fsencode(str(app / 'passenger_wsgi.py')) not in cmd.split(b'\0'):
                 continue
             if (process / 'cwd').resolve(strict=True) != app:
                 continue
