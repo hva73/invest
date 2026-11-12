@@ -40,7 +40,9 @@ try:
     if os.environ.get('ESCAPE_SCREENSHOTS'):page.screenshot(path=str(Path(os.environ['ESCAPE_SCREENSHOTS'])/f'decision-overview-{width}.png'))
    else:
     expect(page.locator('.mobile-holdings')).to_be_hidden();expect(page.locator('.dash-holdings .dash-table')).to_be_visible()
-   assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),width
+   overflow=page.evaluate('''() => ({width:innerWidth,scroll:document.documentElement.scrollWidth,
+     elements:[...document.querySelectorAll('body *')].map(e=>({tag:e.tagName,cls:typeof e.className==='string'?e.className:'',rect:e.getBoundingClientRect()})).filter(e=>e.rect.right>innerWidth+1||e.rect.left< -1).slice(0,20).map(e=>({tag:e.tag,cls:e.cls,left:e.rect.left,right:e.rect.right}))})''')
+   assert overflow['scroll']<=overflow['width']+1,(width,overflow)
    page.close()
   browser.close()
  print('PASS: compact overview, filters, 18 rows, navigation and modal at mobile/desktop widths')
