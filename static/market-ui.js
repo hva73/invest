@@ -46,7 +46,7 @@ window.MarketUI=(()=>{
   if(dailyBox&&node.dataset.marketHoldingPortfolio&&node.dataset.marketHoldingAsset&&dayComparison&&Number.isFinite(Number(dayComparison.percent))&&!warning&&quality.tone!=='stale'&&Number.isFinite(fetched)&&fetchAge>=0&&fetchAge<=300000&&dateKey(fetched)===today){
    const qty=Number(dailyBox.closest('[data-position-daily]')?.dataset.positionQuantity),pct=Number(dayComparison.percent),unit=dayComparison.amount!==null&&dayComparison.amount!==undefined&&dayComparison.amount!==''?Number(dayComparison.amount):NaN,price=Number(d.price),estimated=!Number.isFinite(unit),delta=estimated&&Number.isFinite(price)&&price>0&&pct>-100?price*pct/(100+pct):unit;
    const value=Number.isFinite(qty)&&qty>0&&Number.isFinite(delta)&&d.currency?(estimated?'≈ ':'')+(delta*qty>0?'+':'')+money({amount:String(delta*qty),currency:d.currency}):'—';
-   dailyBox.innerHTML=value+' · '+percent(pct)+'<small class="position-daily-source">Kursændring × antal · Pluto · hentet '+clock(d.fetched_at)+(d.price_time?'':' · kurstid ukendt')+'</small>';dailyBox.dataset.marketOverride='true';
+   dailyBox.innerHTML='<span class="position-daily-value '+tone(pct)+'">'+value+'</span> <span class="position-daily-percent '+tone(pct)+'">'+percent(pct)+'</span><small class="position-daily-source">Kursændring × antal · '+(window.ESCAPE_DEMO?'Demo':'Pluto')+' · hentet '+clock(d.fetched_at)+(d.price_time?'':' · kurstid ukendt')+'</small>';dailyBox.dataset.marketOverride='true';
   }
 
   if(node.dataset.marketLayout==='quote'){
