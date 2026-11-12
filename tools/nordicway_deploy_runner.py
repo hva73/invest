@@ -10,6 +10,7 @@ import re
 import stat
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -152,6 +153,23 @@ def _record_state(bridge, marker, target, sha, state):
     _update_marker(bridge, marker, sha, state=state, motor_enabled=enabled, motor_disabled=disabled)
 
 
+def _approval_ticket(bridge, sha):
+    fd = os.open(bridge / 'approval-ticket.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_mode & 0o077 or info.st_nlink != 1 or info.st_size > 512):
+            raise ValueError('invalid_approval_ticket')
+        data = json.loads(os.read(fd, 513))
+        if (not isinstance(data, dict) or set(data) != {'sha','nonce','expires'}
+                or data['sha'] != sha or type(data['expires']) is not int
+                or data['expires'] < int(time.time()) or not isinstance(data['nonce'], str)
+                or not re.fullmatch(r'[0-9a-f]{32}', data['nonce'])):
+            raise ValueError('invalid_approval_ticket')
+    finally:
+        os.close(fd)
+
+
 def run(sha, token, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
         adapter_factory=nordicway_deploy_adapter.Adapter,
         deploy=nordicway_deploy_sequence.deploy, prepare=prepare_checkout, authorization_lock=None):
@@ -166,7 +184,10 @@ def run(sha, token, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
     with nordicway_owner_approval.deployment_lock(lock_path):
         if _approved_sha(bridge) != sha:
             raise ValueError('unapproved_release')
+        _approval_ticket(bridge, sha)
         marker = _claim(bridge, sha)
+        (bridge / 'approval-ticket.json').unlink()
+        _sync_dir(bridge)
     result = None
     sequence_started = False
     try:
@@ -281,6 +302,7 @@ def resume(sha, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
                 cleanup = 'ok'
             except Exception:
                 cleanup = 'failed'
+            (bridge / 'approval-ticket.json').unlink(missing_ok=True)
             marker.unlink()
             _sync_dir(bridge)
         return {'operation': 'resume', 'status': 'ok', 'recovery_required': False, 'backup_cleanup': cleanup}
