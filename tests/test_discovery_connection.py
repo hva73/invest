@@ -16,6 +16,10 @@ class DiscoveryConnection(unittest.TestCase):
   self.assertTrue(report_ingest.save(app.connect,1,self.report)[1]['ok'])
  def tearDown(self):self.fixture.tearDown()
  def test_budget_retry_reuses_catalog_but_rechecks_identity(self):
+  # Real radar candidates such as CSCO do not carry a Pluto asset_id; the
+  # handoff must perform its own search before the separate identity check.
+  self.candidate.pop('asset_id',None);self.report['report_id']='synthetic-discovery-no-asset-id'
+  self.assertTrue(report_ingest.save(app.connect,1,self.report)[1]['ok'])
   calls=[];first=[True]
   def request(client,method,params=None,notification=False):
    name=(params or {}).get('name');calls.append((method,name))
@@ -39,7 +43,7 @@ class DiscoveryConnection(unittest.TestCase):
    row=c.execute('SELECT status,watch_id FROM hw_discovery_attempts WHERE candidate_id=?',(self.candidate['candidate_id'],)).fetchone()
    self.assertEqual(row['status'],'CREATED');self.assertIsNotNone(row['watch_id'])
   self.assertEqual(calls.count(('initialize',None)),1);self.assertEqual(calls.count(('tools/list',None)),1)
-  self.assertEqual(calls.count(('tools/call','search_assets')),2);self.assertEqual(calls.count(('tools/call','get_asset')),2)
+  self.assertEqual(calls.count(('tools/call','search_assets')),4);self.assertEqual(calls.count(('tools/call','get_asset')),2)
   self.assertFalse(self.fixture.writes())
   session=engine.item(app.connect,1,row['watch_id'],False)['session']
   self.assertIsNone(session['last_data_at']);self.assertNotEqual(session['signal'],'BUY')
