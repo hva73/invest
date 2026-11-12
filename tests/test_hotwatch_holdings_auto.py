@@ -331,6 +331,13 @@ class HoldingAutowatch(unittest.TestCase):
   with app.connect() as c:
    self.assertEqual(json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()['request'])['provider'],'pluto')
    self.assertEqual(c.execute('SELECT count(*) FROM hw_verified_feed_links').fetchone()[0],0)
+ def test_btc_reference_preserves_eodhd_budget_reason_and_retry(self):
+  instrument={'asset_id':'54368e0b-2d53-401e-bf68-1033a5b84b08','ticker':'BTC','name':'Bitcoin','type':'CRYPTO','exchange':'WINTERMUTE','currency':'USD','isin':None}
+  for reason,expected in [('EODHD_DAILY_BUDGET','EODHD_DAILY_BUDGET'),('PROVIDER_RATE_BUDGET','PROVIDER_RATE_BUDGET'),('unknown','PROVIDER_RATE_BUDGET')]:
+   with self.subTest(reason=reason),patch('eodhd_feeds.EODHDFeeds.snapshot',return_value={'status':'LOCAL_BUDGET_EXHAUSTED','budget_reason':reason,'retry_after_s':123}):
+    with self.assertRaises(DataUnavailable) as caught:service.cxe_verified_match(instrument,[],self.now,app.connect,1)
+    self.assertEqual(caught.exception.code,expected)
+    self.assertEqual(caught.exception.retry_after_s,123)
  def test_owner_approved_btc_mapping_preserves_two_depots_and_existing_history(self):
   from test_hotwatch_engine import tick
   from hotwatch_adapters import EODHDAdapter
