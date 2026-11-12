@@ -38,6 +38,12 @@ def crash_after_marker_before_ticket_consumption(bridge):
                    adapter_factory=Mock(), prepare=lambda *_: None)
 
 
+def crash_before_marker(bridge, signed):
+    with patch.object(runner, '_claim', side_effect=lambda *_: os._exit(25)):
+        runner.run(SHA, TOKEN, bridge=Path(bridge), authorization_lock=Path(bridge)/'test-lock',
+                   owner_request=signed, adapter_factory=Mock(), prepare=lambda *_: None)
+
+
 def hold_authorization_lock(lock, ready, release):
     with owner.deployment_lock(lock):
         ready.set()
@@ -221,6 +227,25 @@ class RunnerTests(unittest.TestCase):
         with patch.object(client, 'verify', return_value='host key\n'):
             self.assertEqual(client.run(env, transport)['status'], 'ok')
         self.assertFalse((self.bridge/'approval-ticket.json').exists())
+
+    def test_crash_after_authorization_before_marker_requires_new_proof(self):
+        key = b'k'*32
+        keyfile = self.bridge/'owner-approval-key'
+        keyfile.write_bytes(key); keyfile.chmod(0o600)
+        signed = owner.create_proof(SHA, key)
+        child = multiprocessing.get_context('fork').Process(target=crash_before_marker,
+                    args=(str(self.bridge), signed))
+        child.start(); child.join(5)
+        self.assertEqual(child.exitcode, 25)
+        self.assertFalse((self.bridge/'deployment-incomplete.json').exists())
+        with self.assertRaises(FileExistsError):
+            runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock',
+                       owner_request=signed, adapter_factory=Mock())
+        fresh = owner.create_proof(SHA, key)
+        result = runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock',
+                            owner_request=fresh, adapter_factory=Mock(),
+                            deploy=lambda *_: Outcome('ok','complete',True), prepare=lambda *_: None)
+        self.assertEqual(result['status'], 'ok')
 
     def test_ticket_consumed_and_cannot_replay(self):
         result = runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock',
