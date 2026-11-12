@@ -36,3 +36,48 @@ jobs:
         env:
           PYTHONPATH: .:tests
         run: '"$RUNNER_TEMP/escape-data-venv/bin/python" -m unittest tests.test_app tests.test_updater'
+      - name: Verify new assets backup and rollback
+        env:
+          PYTHONPATH: .:tests
+        run: |
+          "$RUNNER_TEMP/escape-data-venv/bin/python" - <<'PY'
+          import json, sqlite3, tempfile
+          from pathlib import Path
+          from unittest.mock import patch
+          import apply_update
+          from tests.test_updater import Updater
+
+          names = ('static/demo-data.js', 'static/desktop-experience.css')
+          with tempfile.TemporaryDirectory() as d:
+              source, target = Updater().fixture(Path(d))
+              backup = apply_update.apply(source, target)
+              records = json.loads((backup / 'manifest.json').read_text())
+              assert all(records['files'][name] is None for name in names)
+              assert all((target / name).is_file() for name in names)
+              with sqlite3.connect(backup / 'escape.db') as c:
+                  assert c.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'
+                  assert c.execute('SELECT value FROM preserved').fetchone()[0] == 'private-data'
+
+          with tempfile.TemporaryDirectory() as d:
+              source, target = Updater().fixture(Path(d))
+              original = apply_update.os.replace
+              def fail_at_desktop(src, dst):
+                  if Path(dst) == target / names[1]:
+                      raise OSError('synthetic replacement failure')
+                  return original(src, dst)
+              with patch('apply_update.os.replace', side_effect=fail_at_desktop):
+                  try:
+                      apply_update.apply(source, target)
+                  except OSError as exc:
+                      assert str(exc) == 'synthetic replacement failure'
+                  else:
+                      raise AssertionError('failure was not triggered')
+              assert (target / 'app.py').read_text() == 'old code'
+              assert all(not (target / name).exists() for name in names)
+              with sqlite3.connect(target / 'var/escape.db') as c:
+                  assert c.execute('SELECT value FROM preserved').fetchone()[0] == 'private-data'
+              backup = next((target.parent / '.escape_backups').iterdir())
+              records = json.loads((backup / 'manifest.json').read_text())
+              assert all(records['files'][name] is None for name in names)
+          print('NEW_ASSETS_BACKUP_AND_ROLLBACK_PASS')
+          PY
