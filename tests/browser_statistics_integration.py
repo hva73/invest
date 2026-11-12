@@ -21,14 +21,14 @@ try:
    page.locator('nav [data-view=statistics]').click()
    expect(page.locator('#statistics-title')).to_have_text('Hvordan står det til?')
    assert page.locator('[data-statistics-reload]').evaluate('(e) => e.scrollWidth <= e.clientWidth'), width
-   expect(page.locator('.statistics-summary strong')).to_contain_text('+8,25 USD')
-   expect(page.locator('.statistics-note')).to_contain_text('Gebyrer')
+   expect(page.locator('.statistics-summary>div:first-child>strong')).to_contain_text('+8,25 USD')
+   expect(page.locator('.statistics-summary')).to_contain_text('omkostninger')
    page.locator('.statistics-trade').first.locator('summary').click();expect(page.locator('.statistics-detail').first).to_be_visible();page.locator('.statistics-trade').first.locator('summary').click()
    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1'),width
    if width<=900:
     page.locator('.statistics-trade').last.locator('summary').click()
     page.evaluate('window.scrollTo(0,document.documentElement.scrollHeight)')
-    last=page.locator('.statistics-note').bounding_box()
+    last=page.locator('.statistics-trade').last.locator('.statistics-detail').bounding_box()
     detail=page.locator('.statistics-trade').last.locator('.statistics-detail').bounding_box()
     nav=page.locator('body > aside nav').bounding_box()
     assert last['y']+last['height']<=nav['y'] or last['y']>=nav['y']+nav['height'],(width,last,nav)
