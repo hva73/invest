@@ -49,8 +49,8 @@ def position_proof(c,uid,candidate,now=None):
   data=json.loads(row['payload'])
   if not data.get('positions_complete'):continue
   for p in data.get('positions',[]):
-   if p.get('asset_id')==aid and (not p.get('ticker') or p['ticker'].casefold()==candidate['ticker'].casefold()) and p.get('quantity') is not None and Decimal(p['quantity'])>0:
-    return {'asset_id':aid,'portfolio_id':row['id'],'quantity':p['quantity'],'as_of':data['observed'],'stale':(now-stamp(data['observed'])).total_seconds()>300,'source':'authenticated Pluto snapshot'}
+   if p.get('kind','holding')=='holding' and p.get('asset_id')==aid and (not p.get('ticker') or p['ticker'].casefold()==candidate['ticker'].casefold()) and p.get('quantity') is not None and Decimal(p['quantity'])>0:
+    return {'asset_id':aid,'portfolio_id':row['id'],'quantity':p['quantity'],'as_of':data['observed'],'stale':not 0<=(now-stamp(data['observed'])).total_seconds()<=300,'source':'authenticated Pluto snapshot'}
  return None
 
 def index_report(c,uid,data,migration=False):

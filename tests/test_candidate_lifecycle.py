@@ -70,3 +70,25 @@ class CandidateStatus(unittest.TestCase):
   d=self.report('ORDER_PENDING',0);d['orders'][0]['trade_cycle_id']='synthetic-cycle-1';report_ingest.save(app.connect,1,d);bad=copy.deepcopy(d);bad.update(report_id='bad-cycle',generated_at='2026-11-03T11:00:00Z');bad['orders'][0]['trade_cycle_id']='missing';errors=report_ingest.validation(app.connect,1,bad)['errors'];self.assertIn('orders[0].trade_cycle_id',{e['path'] for e in errors});self.assertEqual(model.history(app.connect,2,self.cid,True)['events'],[]);self.assertEqual(model.history(app.connect,1,self.cid,False)['events'],[])
  def test_status_timestamp_conflicts_and_unknown_enum_have_exact_paths(self):
   report_ingest.save(app.connect,1,self.report('HOT_WATCH',0));bad=self.report('ANALYZING',0);bad['report_id']='conflicting-state';self.assertIn('lifecycle_time_conflict',{e['code'] for e in report_ingest.validation(app.connect,1,bad)['errors']});bad=self.report('WRONG',1);self.assertIn('candidates[0].lifecycle.status',{e['path'] for e in report_ingest.validation(app.connect,1,bad)['errors']})
+
+ def test_position_proof_requires_holding_and_nonfuture_timestamp(self):
+  import sqlite3
+  db=sqlite3.connect(':memory:');self.addCleanup(db.close);db.row_factory=sqlite3.Row
+  db.execute('CREATE TABLE portfolios(id INTEGER,user_id INTEGER,source TEXT,active INTEGER)')
+  db.execute('CREATE TABLE portfolio_snapshots(user_id INTEGER,portfolio_id INTEGER,last_error TEXT,payload TEXT)')
+  db.execute("INSERT INTO portfolios VALUES(1,1,'pluto',1)")
+  now=datetime.now(timezone.utc);candidate={'asset_id':'asset','ticker':'TSM'}
+  ref={'kind':'collection','asset_id':'asset','ticker':'TSM','quantity':'3'}
+  def put(pid,positions,when):
+   payload={'observed':when.isoformat(),'positions_complete':True,'positions':positions}
+   db.execute('DELETE FROM portfolio_snapshots WHERE portfolio_id=?',(pid,))
+   db.execute('INSERT INTO portfolio_snapshots VALUES(1,?,NULL,?)',(pid,json.dumps(payload)))
+  put(1,[ref],now)
+  self.assertIsNone(model.position_proof(db,1,candidate,now))
+  db.execute("INSERT INTO portfolios VALUES(2,1,'pluto',1)")
+  put(2,[dict(ref,kind='holding',quantity='2')],now)
+  proof=model.position_proof(db,1,candidate,now);self.assertEqual((proof['portfolio_id'],proof['quantity'],proof['stale']),(2,'2',False))
+  put(2,[dict(ref,kind='holding',quantity='2')],now+timedelta(seconds=1))
+  self.assertTrue(model.position_proof(db,1,candidate,now)['stale'])
+  put(2,[dict(ref,kind='holding',quantity='2')],now-timedelta(seconds=301))
+  self.assertTrue(model.position_proof(db,1,candidate,now)['stale'])
