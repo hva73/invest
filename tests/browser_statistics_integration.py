@@ -26,10 +26,12 @@ try:
    page.locator('.statistics-trade').first.locator('summary').click();expect(page.locator('.statistics-detail').first).to_be_visible();page.locator('.statistics-trade').first.locator('summary').click()
    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1'),width
    if width<=900:
+    page.locator('.statistics-trade').last.locator('summary').click()
     page.evaluate('window.scrollTo(0,document.documentElement.scrollHeight)')
-    last=page.locator('.statistics-trade').last.locator('summary').bounding_box()
+    last=page.locator('.statistics-note').bounding_box()
     nav=page.locator('body > aside nav').bounding_box()
     assert last['y']+last['height']<=nav['y'] or last['y']>=nav['y']+nav['height'],(width,last,nav)
+    page.locator('.statistics-trade').last.locator('summary').click()
     page.evaluate('window.scrollTo(0,0)')
    screenshots=os.environ.get('ESCAPE_SCREENSHOTS')
    if screenshots:
