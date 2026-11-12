@@ -91,6 +91,18 @@ def approve(bridge, lock_path, sha, request, now=None):
                 out.flush()
                 os.fsync(out.fileno())
             os.replace(name, approval)
+            # Ticket is consumed only after the deploy marker is durable.
+            ticket_fd, ticket_name = tempfile.mkstemp(prefix='.ticket-', dir=bridge)
+            try:
+                with os.fdopen(ticket_fd, 'w', encoding='ascii') as ticket:
+                    os.fchmod(ticket.fileno(), 0o600)
+                    json.dump({'sha': sha, 'nonce': nonce, 'expires': expires}, ticket, separators=(',', ':'))
+                    ticket.flush()
+                    os.fsync(ticket.fileno())
+                os.replace(ticket_name, bridge / 'approval-ticket.json')
+            finally:
+                if os.path.exists(ticket_name):
+                    os.unlink(ticket_name)
             directory = os.open(bridge, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             try:
                 os.fsync(directory)
