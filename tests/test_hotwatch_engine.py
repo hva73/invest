@@ -1631,6 +1631,35 @@ class HotWatch(unittest.TestCase):
   engine.control(app.connect,1,second['watch_id'],False,'stop')
   self.assertEqual(auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:self.fail('manual stop must be respected'))['status'],'NOT_NEW')
 
+ def test_review_queue_expiry_new_report_and_reactivation_end_to_end(self):
+  from hotwatch_service import auto_activate_candidate
+  import intel_workflows
+  now=engine.utc();initial=now-timedelta(days=3);expired=now-timedelta(hours=1)
+  report=merc_report(False);report.update(report_id='synthetic-full-review-chain',generated_at=initial.isoformat())
+  candidate=report['candidates'][0];candidate.update(asset_id='synthetic-MERC',exchange='NASDAQ')
+  candidate['decision'].update(decided_at=initial.isoformat(),deadline=(now-timedelta(days=2)).isoformat())
+  report_ingest.save(app.connect,1,report)
+  verified={'asset_id':'synthetic-MERC','ticker':'MERC','exchange':'NASDAQ','currency':'USD','isin':'US1234567890'}
+  original=intel_workflows.candidate_currentness
+  def at_initial(c,uid,mode,cid,at=None,**kw):return original(c,uid,mode,cid,at=initial+timedelta(minutes=1),**kw)
+  with patch('intel_workflows.candidate_currentness',side_effect=at_initial),patch('hotwatch_engine.utc',return_value=initial+timedelta(minutes=1)):
+   first=auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:verified)
+  self.assertEqual(first['status'],'CREATED')
+  engine.reconcile_candidates(app.connect,expired)
+  self.assertEqual(engine.item(app.connect,1,first['watch_id'],False)['session']['status'],'EXPIRED')
+  queue=intel_workflows.watch(app.connect,1)['review_queue'];self.assertIn(candidate['candidate_id'],[r['candidate_id'] for r in queue])
+  self.assertEqual(auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:self.fail('old assessment cannot reactivate'))['status'],'NOT_NEW')
+  with app.connect() as c:before=c.execute('SELECT count(*) FROM candidate_decision_events WHERE candidate_id=?',(candidate['candidate_id'],)).fetchone()[0]
+  fresh=copy.deepcopy(report);fresh.update(report_id='synthetic-full-review-fresh',generated_at=(now-timedelta(seconds=1)).isoformat())
+  new=fresh['candidates'][0];new['decision'].update(decided_at=fresh['generated_at'],deadline=(now+timedelta(hours=1)).isoformat(),reason='Syntetisk kildebaseret revurdering')
+  report_ingest.save(app.connect,1,fresh)
+  second=auto_activate_candidate(app.connect,1,False,fresh,new,lambda *_:verified)
+  self.assertEqual(second['status'],'CREATED');self.assertNotEqual(first['watch_id'],second['watch_id'])
+  self.assertNotIn(candidate['candidate_id'],[r['candidate_id'] for r in intel_workflows.watch(app.connect,1)['review_queue']])
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM candidate_decision_events WHERE candidate_id=?',(candidate['candidate_id'],)).fetchone()[0],before+1)
+   self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
+
  def test_capacity_released_candidate_can_restart_when_space_returns(self):
   from hotwatch_service import auto_activate_candidate
   report=merc_report(False);report['report_id']='capacity-return-fixture';candidate=report['candidates'][0];candidate['asset_id']='synthetic-MERC';candidate['exchange']='NASDAQ';report_ingest.save(app.connect,1,report)
