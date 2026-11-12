@@ -61,21 +61,12 @@ try:
     page.locator('.sector-heading h2').first.hover();expect(rtip).to_be_hidden()
    page.screenshot(path=str(screens/f'sektor-oversigt-{width}.png'),full_page=True)
    page.locator('.sector-row').filter(has_text='Sundhed').click()
-   if width < 700:
-    # Mobile uses its approved inline sector detail and exact portfolio row.
-    mobile=page.locator('.sector-mobile-holdings [data-dashboard-member]')
-    expect(mobile.first).to_be_visible()
-    expect(page.locator('#sector-journey')).to_have_count(0)
-    assert not writes,writes
-    assert not errors,(width,errors)
-    page.close()
-    continue
    journey=page.locator('#sector-journey');expect(journey).to_be_visible()
    expect(journey.locator('h2')).to_have_text('Sundhed')
    expect(journey.locator('[data-sector-position]')).to_have_count(4)
    expect(journey).to_contain_text('Root');expect(journey).to_contain_text('AI')
    expect(journey).not_to_contain_text('Kontantbeholdning')
-   expect(journey.locator('[data-sector-position]').filter(has_text='AFVENTER')).to_be_disabled()
+   expect(journey.locator('[data-sector-position]').filter(has=page.get_by_text('AFVENTER',exact=True))).to_be_disabled()
    page.screenshot(path=str(screens/f'sektor-positioner-{width}.png'))
    root=journey.locator('[data-sector-position]').filter(has_text='Root').filter(has_text='NOVO-B')
    child=journey.locator('[data-sector-position]').filter(has_text='AI').filter(has_text='NOVO-B')
@@ -84,15 +75,18 @@ try:
    if width >= 901:
     expect(details).to_be_visible();expect(details).to_contain_text('Gns. køb');expect(details).not_to_contain_text('stk.');expect(details).to_contain_text('270,30');expect(details).to_contain_text('247,80');expect(details).to_contain_text('+31,50');expect(details).to_contain_text('estimat')
     expect(journey.locator('.si-desktop-columns')).to_be_visible()
-   else: expect(details).to_be_hidden()
-   expect(root).to_contain_text('I dag · kurs pr. stk.')
-   expect(root).to_contain_text('+6,30')
+    expect(root).to_contain_text('I dag · kurs pr. stk.')
+    expect(root).to_contain_text('+6,30')
+   else:
+    expect(root).to_have_class('mobile-holding')
+    expect(root).to_contain_text('I dag')
+    expect(root).to_contain_text('+31,50')
    expect(root).to_contain_text('+2,39 %')
    expect(root).to_contain_text('Siden køb')
    expect(root).to_contain_text('+112,50')
    expect(root).to_contain_text('+9,08 %')
-   missing=journey.locator('[data-sector-position]').filter(has_text='AFVENTER')
-   expect(missing).to_contain_text('— · —')
+   missing=journey.locator('[data-sector-position]').filter(has=page.get_by_text('AFVENTER',exact=True))
+   expect(missing).to_contain_text('—')
    child.click();detail=page.locator('#dashboard-detail');expect(detail).to_be_visible()
    expect(detail.locator('h2')).to_contain_text('NOVO-B');expect(detail.locator('h2')).to_contain_text('AI')
    page.screenshot(path=str(screens/f'sektor-positionsdetalje-{width}.png'))
@@ -109,7 +103,8 @@ try:
    page.reload();page.locator('nav [data-view=sectors]').click()
    page.locator('.sector-row').filter(has_text='Sundhed').click()
    stale=page.locator('#sector-journey [data-sector-position]').filter(has_text='AI').filter(has_text='NOVO-B')
-   expect(stale.locator('.si-position-metrics small').first).to_contain_text('— · —')
+   if width >= 901: expect(stale.locator('.si-position-metrics small').first).to_contain_text('— · —')
+   else: expect(stale.locator('.mobile-holding-daily')).to_contain_text('I dag —')
    expect(stale).to_contain_text('+45,00')
    child_row['price_freshness']=original_freshness
    if width >= 901:
