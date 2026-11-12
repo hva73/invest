@@ -65,6 +65,9 @@ try:
    root.click();expect(detail).to_be_visible();expect(detail.locator('h2')).to_contain_text('Root')
    detail.locator('[data-dashboard-close]').click();journey.locator('[data-sector-journey-close]').first.click()
    expect(journey).not_to_be_visible();expect(page.locator('.sector-row').filter(has_text='Sundhed')).to_be_visible()
+   arc=page.locator('[data-sector-donut="Sundhed"]');arc.focus();page.keyboard.press('Enter')
+   expect(journey).to_be_visible();page.keyboard.press('Escape');expect(journey).not_to_be_visible()
+   expect(page.locator('.sector-row').filter(has_text='Sundhed')).to_be_focused()
    assert not writes,writes
    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),width
    assert not errors,(width,errors)
