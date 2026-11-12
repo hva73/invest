@@ -1,0 +1,43 @@
+name: ESCAPE desktop experience checks
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [codex/escape-development]
+permissions:
+  contents: read
+jobs:
+  desktop-experience:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue67-desktop-experience'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Install browser dependencies
+        run: |
+          python -m pip install -r requirements.txt playwright==1.56.0
+          python -m playwright install --with-deps chromium
+      - name: Test installed app and integrated journeys
+        env:
+          ESCAPE_SCREENSHOTS: /tmp/escape-integrated-desktop
+          ESCAPE_PLAYWRIGHT_MANAGED: '1'
+          PYTHONPATH: .:tests
+        run: |
+          mkdir -p "$ESCAPE_SCREENSHOTS"
+          python -m unittest discover -s tests -p test_updater.py
+          python tests/browser_desktop_experience.py
+          python tests/browser_desktop_trade.py
+          python tests/review_integrated_decision.py
+      - name: Upload integrated synthetic screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: escape-integrated-desktop
+          path: /tmp/escape-integrated-desktop/
+          if-no-files-found: ignore
+          retention-days: 7
