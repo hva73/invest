@@ -669,3 +669,9 @@ body > aside nav .nav-sector-mobile{display:none}
 .market-plot .market-hover[hidden]{display:none}
 .market-plot .market-hover small{font-size:10px;letter-spacing:0;color:#a9c2c6}
 .market-plot .market-hover strong{font-size:12px;font-variant-numeric:tabular-nums}
+
+@media(max-width:700px){
+ .si-detail .sector-position-desktop{display:none}
+ .si-detail .sector-mobile-holdings{margin-top:8px}
+ .si-detail .sector-mobile-holdings .mobile-holding:disabled{opacity:.65}
+}
