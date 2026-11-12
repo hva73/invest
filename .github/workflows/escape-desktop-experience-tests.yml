@@ -96,7 +96,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 7e585de72f5a76bb7382c6c0ec6d3000faa6812c
+          ref: c852315526a7961813b5b5c690ad40f54925505f
           path: demo-source
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -116,8 +116,10 @@ jobs:
           cp desktop-source/static/desktop-experience.css demo-source/static/desktop-experience.css
           cp desktop-source/tests/desktop_fixture.py demo-source/tests/desktop_fixture.py
           cp desktop-source/tests/browser_desktop_experience.py demo-source/tests/browser_desktop_experience.py
+          cp desktop-source/tests/review_demo_desktop.py demo-source/tests/review_demo_desktop.py
           cd demo-source
           python tests/browser_desktop_experience.py
+          python tests/review_demo_desktop.py
       - name: Upload synthetic screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
