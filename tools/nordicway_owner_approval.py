@@ -21,6 +21,20 @@ def message(sha, nonce, expires):
     return f'escape-owner-approval-v1\n{sha}\n{nonce}\n{expires}\n'.encode('ascii')
 
 
+def create_proof(sha, key, *, now=None, nonce=None):
+    """Create proof locally; pass the private 32-byte key via a secure channel."""
+    import secrets
+    now = int(time.time()) if now is None else now
+    nonce = secrets.token_hex(16) if nonce is None else nonce
+    if (not isinstance(sha, str) or not SHA.fullmatch(sha) or not isinstance(key, bytes)
+            or len(key) != 32 or type(now) is not int or not isinstance(nonce, str)
+            or not NONCE.fullmatch(nonce)):
+        raise ValueError('invalid_request')
+    expires = now + 180
+    mac = hmac.new(key, message(sha, nonce, expires), hashlib.sha256).hexdigest()
+    return {'nonce':nonce, 'expires':expires, 'mac':mac}
+
+
 @contextmanager
 def deployment_lock(lock_path):
     """Serialize approval and the runner's approval check/marker claim."""
