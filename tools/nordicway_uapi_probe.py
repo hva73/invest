@@ -113,4 +113,4 @@ if __name__ == '__main__':
     if result['status'] == 'ok':
         result['account_quota'] = quota_summary(token)
     print(json.dumps(result, sort_keys=True))
-    sys.exit(0 if result['status'] == 'ok' else 1)
+    sys.exit(0 if result['status'] == 'ok' and result.get('account_quota', {}).get('status') == 'ok' else 1)
