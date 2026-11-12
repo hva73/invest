@@ -34,7 +34,7 @@ def seed(case):
              'currency': 'DKK', 'value': value, 'unrealisedPnL': pnl,
              'costBasis': str(Decimal(value) - Decimal(pnl)),
              'averageEntryPrice': str((Decimal(value) - Decimal(pnl)) / Decimal(qty)),
-             'dailyChange': '1.25', 'dailyChangePercent': '0.25',
+             'dailyChange': '1.25', 'dailyChangePercent': str((Decimal('1.25') / (Decimal(price) - Decimal('1.25')) * 100).quantize(Decimal('.01'))),
              'priceAsOf': observed} for ticker, qty, price, value, pnl in specs]
     with app.connect() as c:
         row = c.execute('SELECT payload FROM portfolio_snapshots WHERE portfolio_id=?', (case.root,)).fetchone()
