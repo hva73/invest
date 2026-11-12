@@ -601,6 +601,13 @@ def read(connect,uid):
   snapshot=snapshots.get(str(account['id'])) or {}
   value=(snapshot.get('data') or {}).get('value') or {}
   account['reported_result']=value.get('reported_result')
+  data=snapshot.get('data') or {}
+  errors=data.get('errors')
+  cash=data.get('accounts')
+  cash_ok=(bool(snapshot) and not snapshot.get('last_error') and isinstance(cash,list)
+           and isinstance(errors,list) and not any(isinstance(e,str) and (e.startswith('accounts:') or e.startswith('Collection-kontanter:')) for e in errors))
+  account['cash_accounts']=[row.get('balance') for row in cash if isinstance(row,dict)] if cash_ok else []
+  account['cash_status']='available' if cash_ok and len(account['cash_accounts'])==len(cash) else 'unavailable'
  for row in dashboard['positions']:
   aid=row.get('asset_id');instrument=instruments.get(aid,{});mismatch=any(row.get(k) and instrument.get(k) and str(row[k]).casefold()!=str(instrument[k]).casefold() for k in ('ticker','currency'));a=assets.get(aid,{}) if instrument.get('status')=='OK' and not mismatch else {};fund=funds.get(aid);link=links.get(aid,{})
   if mismatch:a={'status':'IDENTITY_EXPIRED'}
