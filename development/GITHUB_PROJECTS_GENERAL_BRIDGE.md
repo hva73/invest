@@ -4,6 +4,8 @@ Broen behandler statusanmodninger på eksisterende Issues #1 og #3–#999 i `hva
 
 ## Brug
 
+For et aktuelt overblik: skriv `ESCAPE_PROJECTS_INVENTORY_V1` som ny kommentar på [Issue #11](https://github.com/hva73/invest/issues/11). Find den tilhørende Actions-kørsel `ESCAPE Projects backlog inventory`, og læs jobloggen for issuekort og status. Inventaret dækker `hva73/invest`-issues på projektet, ikke udkast eller kort fra andre repositories.
+
 En godkendt agent skriver en ny kommentar på det pågældende Issue:
 
 ```text
@@ -26,7 +28,7 @@ De to agenters forbindelser optræder med samme GitHub-bruger/App-identitet. Adg
 
 Udviklingsgrenen og journalgrenen er beskyttet af separate GitHub-regler. Projects-tokenet ligger i det eksisterende Actions-secret; workflowets `GITHUB_TOKEN` har repository-bred `contents: write` og `issues: write` i writer-jobbet. Broen må ikke bruges til handel, deployment-godkendelser, handelsmandater eller automatisk issue-lukning.
 
-Issue #4 er efter ejerens særskilte godkendelse flyttet tilbage fra Backlog til In progress og derefter læst igen i en separat Actions-kørsel. Den generelle kode er testet med simulerede svar for alle tilladte Issue-numre, audit, forkert status og usikkert udfald. Både Codex og ChatGPT har efterfølgende dokumenteret en faktisk anmodning gennem den generelle writer; se testresultaterne nedenfor og Issue #11.
+Issue #4 er efter ejerens særskilte godkendelse flyttet tilbage fra Backlog til In progress og derefter læst igen i en separat Actions-kørsel. Den generelle kode er testet med simulerede svar for repræsentative tilladte Issue-numre og grænsetilfælde, audit, forkert status og usikkert udfald. Både Codex og ChatGPT har efterfølgende dokumenteret en faktisk anmodning gennem den generelle writer; se testresultaterne nedenfor og Issue #11.
 
 ## Verificeret status 10. november 2026
 
