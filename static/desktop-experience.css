@@ -33,6 +33,31 @@
   .portfolio-card .portfolio-metric-label { margin-top: 12px; }
   .dash-holdings .dash-table th, .dash-attention .dash-table th { padding-top: 12px; padding-bottom: 12px; }
   .dash-holdings .dash-table tbody tr:hover, .dash-attention .dash-table tbody tr:hover { background: #ffffff08; }
+  /* Compact desktop introductions while keeping connection and detail controls. */
+  .portfolio-catalog-heading { padding: 18px 24px; }
+  .portfolio-catalog-heading h2 { font-size: clamp(26px, 2.4vw, 34px); margin: 8px 0 6px; }
+  .portfolio-catalog-heading .section-heading { margin-bottom: 8px; }
+  .portfolio-card .portfolio-value-link { padding: 10px 14px; }
+  .portfolio-card .portfolio-preview > p { margin: 8px 0; }
+
+  /* Signal styling follows the existing, already-qualified UI category. */
+  .engine-list-row[data-engine-category="BUY"] { border-left: 3px solid #68cba3; }
+  .engine-list-row[data-engine-category="SELL"] { border-left: 3px solid #ed8998; }
+  .engine-list-status .dash-action-badge { font-size: 12px; font-weight: 700; min-height: 36px; }
+
+  /* Bring sector distribution forward; the existing shared graph remains available. */
+  .sector-shell > .si-hero { order: 0; }
+  .sector-shell > .si-filter-bar { order: 1; }
+  .sector-shell > .si-data-notice { order: 2; }
+  .sector-shell > .sector-layout { order: 3; }
+  .sector-shell > .si-results { order: 4; }
+  .sector-shell > .si-market { order: 5; }
+  .sector-shell > .si-rotation { order: 6; }
+  .sector-shell > .sector-note { order: 7; }
+  .si-hero { padding: 20px 24px 0; }
+  .si-hero h2 { font-size: clamp(27px, 2.5vw, 34px); margin: 8px 0; }
+  .si-metrics { margin-top: 14px; }
+  .si-metrics > button { padding-top: 12px; padding-bottom: 14px; }
   .engine-overview, .sector-panel, .portfolio-card { min-width: 0; }
   .engine-hero { padding: 18px 22px; }
   .engine-hero h2 { font-size: clamp(25px, 2.2vw, 32px); margin: 7px 0 5px; }

@@ -113,6 +113,13 @@ try:
                     page.locator(f'nav [data-view="{view}"]').click()
                     expect(page.locator(target)).to_be_visible()
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), (width, view)
+                    if view == 'portfolios' and width >= 1280:
+                        assert page.locator('.portfolio-catalog-heading').evaluate('e => e.getBoundingClientRect().height') < 180, width
+                    if view == 'sectors':
+                        expect(page.locator('.si-hero-chart #dashboard-value-chart')).to_be_visible()
+                        allocation_y = page.locator('.sector-layout').bounding_box()['y']
+                        results_y = page.locator('.si-results').bounding_box()['y']
+                        assert allocation_y < results_y, (width, allocation_y, results_y)
                     if view == 'portfolios' and width >= 1100:
                         card = page.locator('.portfolio-card-root').first
                         name = card.locator(':scope > h2').bounding_box()
@@ -123,6 +130,12 @@ try:
                         assert card.locator('[data-open-portfolio]').first.is_visible()
                     if view == 'hot-watch':
                         expect(page.locator('.engine-list-row')).to_have_count(2)
+                        buy_row = page.locator('.engine-list-row[data-engine-category="BUY"]')
+                        sell_row = page.locator('.engine-list-row[data-engine-category="SELL"]')
+                        expect(buy_row.locator('.dash-action-badge')).to_be_visible()
+                        expect(sell_row.locator('.dash-action-badge')).to_be_visible()
+                        assert buy_row.evaluate('e => getComputedStyle(e).borderLeftWidth') == '3px'
+                        assert sell_row.evaluate('e => getComputedStyle(e).borderLeftWidth') == '3px'
                         expect(page.locator('.engine-list-row').first).to_contain_text('KØBSSIGNAL')
                         expect(page.locator('.engine-list-row').last).to_contain_text('SÆLGSSIGNAL')
                         page.locator('[data-engine-filter=BUY]').click()
