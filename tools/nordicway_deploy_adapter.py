@@ -6,6 +6,7 @@ verified quota requirement, a real quiescence check and runtime health check.
 import fcntl
 import os
 import re
+import stat
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +30,16 @@ def estimate_required_bytes(checkout, target):
     database = target / 'var' / 'escape.db'
     if database.is_symlink() or not database.is_file():
         raise ValueError('database_unavailable')
+    sidecar_total = 0
+    for suffix in ('-wal', '-journal'):
+        path = Path(str(database) + suffix)
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError('database_unavailable')
+        sidecar_total += info.st_size
     names = nordicway_release_preflight.manifest(checkout)
     source_total = 0
     existing_total = 0
@@ -42,7 +53,7 @@ def estimate_required_bytes(checkout, target):
             if not installed.is_file():
                 raise ValueError('unsafe_manifest_file')
             existing_total += installed.stat().st_size
-    base = database.stat().st_size * 2 + source_total * 2 + existing_total
+    base = (database.stat().st_size + sidecar_total) * 2 + source_total * 2 + existing_total
     return base + max(256 * 1024 * 1024, (base + 9) // 10)
 
 
