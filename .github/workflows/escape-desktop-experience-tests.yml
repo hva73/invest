@@ -54,7 +54,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 14e547796c2512ee6a3c3e293e5e8e8aeed0dfbf
+          ref: 771f780c4b026ae33633ac9f50a2fd7d88d8583f
           path: decision-source
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
