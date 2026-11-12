@@ -39,6 +39,7 @@ jobs:
           python tests/browser_release_approval.py
           python tests/browser_mobile_decision_overview.py
           python tests/browser_signal_push_detail.py
+          python tests/browser_signal_sell_server.py
           python tests/browser_desktop_experience.py
           python tests/browser_sector_cash.py
           python tests/browser_sector_journey.py
