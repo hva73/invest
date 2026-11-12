@@ -48,11 +48,34 @@ class BridgeInstallerTests(unittest.TestCase):
         backup = next((self.bridge / 'bridge-backups').iterdir())
         self.assertEqual((backup / 'nordicway_deploy_guard.py').read_bytes(), b'old guard')
 
+    def test_private_owner_key_created_once_and_preserved(self):
+        self._run()
+        key = self.bridge / 'owner-approval-key'
+        original = key.read_bytes()
+        self.assertEqual(len(original), 32)
+        self.assertEqual(stat.S_IMODE(key.stat().st_mode), 0o600)
+        self._run()
+        self.assertEqual(key.read_bytes(), original)
+
+    def test_unsafe_owner_key_blocks_install(self):
+        key = self.bridge / 'owner-approval-key'
+        key.symlink_to(self.guard)
+        with self.assertRaises((ValueError, OSError)):
+            self._run()
+        self.assertEqual(self.guard.read_bytes(), b'old guard')
+
     def test_does_not_touch_anything_when_deploy_enabled(self):
         (self.bridge / 'deploy-enabled').write_text('1\n')
         with self.assertRaisesRegex(ValueError, 'deployment_must_be_disabled'):
             self._run()
         self.assertEqual(self.guard.read_bytes(), b'old guard')
+
+    def test_existing_reviewed_deploy_guard_is_accepted(self):
+        with patch.object(bridge_installer, '_sources', return_value=self.files), \
+                patch.object(bridge_installer, 'DEPLOY_GUARD_SHA256',
+                             hashlib.sha256(b'old guard').hexdigest()):
+            result = bridge_installer.install(self.root, self.bridge, self.sha)
+        self.assertEqual(result['status'], 'installed_disabled')
 
     def test_unknown_installed_guard_is_rejected(self):
         with patch.object(bridge_installer, '_sources', return_value=self.files):
