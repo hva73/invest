@@ -1,7 +1,7 @@
 """Contract-shaped synthetic quotes. No provider requests or production seeding."""
 import copy,json,unittest
 from unittest.mock import patch
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from pathlib import Path
 import test_trade_service as fixtures
 import app,market_data,report_ingest,trade_service
@@ -72,6 +72,11 @@ class Quotes(unittest.TestCase):
   raw=copy.deepcopy(self.raw);raw['asset']['isin']='US1234567890';self.assertEqual(market_data.normalized(raw,'synthetic-chart-asset',self.fixed)['isin'],'US1234567890')
   today=[p for p in q['series'] if p['date']=='2026-11-02'];self.assertEqual(len(today),2);self.assertGreater(float(today[0]['price']),float(today[1]['price']))
   self.assertEqual(today[0]['timestamp'],'2026-11-02T09:00:00.000Z');self.assertEqual(today[0]['source_timestamp'],'2026-11-02T09:00:00.000000000Z')
+ def test_future_quote_time_is_rejected_but_missing_and_current_are_allowed(self):
+  raw=copy.deepcopy(self.raw);raw['price']['timestamp']=(self.fixed+timedelta(seconds=1)).isoformat()
+  with self.assertRaisesRegex(market_data.MarketError,'fremtid'):market_data.normalized(raw,'synthetic-chart-asset',self.fixed)
+  raw['price']['timestamp']=self.fixed.isoformat();self.assertEqual(market_data.normalized(raw,'synthetic-chart-asset',self.fixed)['price_time'],self.fixed.isoformat(timespec='milliseconds'))
+  del raw['price']['timestamp'];self.assertIsNone(market_data.normalized(raw,'synthetic-chart-asset',self.fixed)['price_time'])
  def test_cache_preserves_fetch_time_and_reads_only_once(self):
   one=market_data.quote(app.connect,1,self.request,self.factory);two=market_data.quote(app.connect,1,self.request,self.factory)
   self.assertEqual(one['fetched_at'],two['fetched_at']);self.assertTrue(two['cached']);self.assertEqual([c['name'] for c in self.calls],['search_assets','get_asset'])
@@ -85,6 +90,12 @@ class Quotes(unittest.TestCase):
   one=market_data.quote(app.connect,1,self.request,self.factory);self.fail=True
   with app.connect() as c:c.execute('UPDATE market_asset_cache SET attempted=0')
   old=market_data.quote(app.connect,1,self.request,self.factory);self.assertEqual(old['fetched_at'],one['fetched_at']);self.assertIn('fejlede',old['last_error'])
+ def test_future_quote_does_not_overwrite_last_known_cache(self):
+  one=market_data.quote(app.connect,1,self.request,self.factory)
+  self.raw['price']['timestamp']='2099-01-01T00:00:00Z'
+  with app.connect() as c:c.execute('UPDATE market_asset_cache SET attempted=0')
+  old=market_data.quote(app.connect,1,self.request,self.factory)
+  self.assertEqual(old['fetched_at'],one['fetched_at']);self.assertEqual(old['price'],one['price']);self.assertIn('fejlede',old['last_error'])
  def test_owner_and_test_partition_before_network(self):
   for user,data in [(2,self.request),(1,dict(self.request,is_test=True)),(1,dict(self.request,candidate_id='unknown'))]:
    with self.assertRaises((market_data.MarketError,ValueError,KeyError)):market_data.quote(app.connect,user,data,self.factory)
