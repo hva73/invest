@@ -1648,6 +1648,11 @@ class HotWatch(unittest.TestCase):
    result=adapter.context(self.req,'USD')
    self.assertEqual((result['status'],result['position'],result['quantity']),('verified','none','0'))
    self.assertEqual(result['portfolio_equity_dkk'],'1000')
+   # A collection reference must never count as the direct holding.
+   with app.connect() as c:
+    saved=c.execute('SELECT payload FROM portfolio_snapshots WHERE portfolio_id=?',(root,)).fetchone();data=json.loads(saved['payload']);data['positions']=[{'kind':'collection','asset_id':self.req['asset_id'],'ticker':'MERC','quantity':'9'}];c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(data),root))
+   result=adapter.context(self.req,'USD')
+   self.assertEqual((result['status'],result['position'],result['quantity']),('verified','none','0'))
    with patch.object(adapter,'tradability',side_effect=AssertionError('exit-only monitoring needs no buy permission')):
     exit_context=adapter.context(dict(self.req,watch_mode='exit'),'USD')
    self.assertEqual((exit_context['status'],exit_context['tradability']),('verified','unknown'))
@@ -1757,4 +1762,5 @@ class EngineHTTP(unittest.TestCase):
   read=self.http.call(access,'get_hot_watch_engine',{'is_test':True})[1]['result'];self.assertEqual(len(read['structuredContent']['sessions']),1);bad=self.http.call(access,'get_hot_watch_engine',{'limit':101})[1]['result'];self.assertTrue(bad['isError'])
   stopped=self.http.call(access,'control_hot_watch',{'watch_id':self.req['watch_id'],'is_test':True,'action':'stop'})[1]['result'];self.assertFalse(stopped['isError']);self.assertEqual(stopped['structuredContent']['session']['status'],'COMPLETED')
   d=copy.deepcopy(BASELINE);d['version']='1.2.0';self.assertEqual(self.http.request('/api/v1/hotwatch/strategies',d,{'Authorization':'Bearer '+access})[0],403)
+
 
