@@ -10,4 +10,5 @@ ui.applyFilters(scope);assert.deepEqual(rows.map(r=>r.hidden),[false,false,true,
 scope.dataset.candidateFilter='all';ui.applyFilters(scope);assert.deepEqual(rows.map(r=>r.hidden),[false,false,false,false,true,false]);
 scope.dataset.candidateFilter='position';ui.applyFilters(scope);assert.deepEqual(rows.map(r=>r.hidden),[true,true,true,true,false,true]);
 scope.dataset.candidateFilter='waiting';scope.dataset.candidateOwn='true';ui.applyFilters(scope);assert.deepEqual(rows.map(r=>r.hidden),[false,false,true,true,false,true]);
+const confirmed={has_confirmed_position:true,lifecycle:{},candidate:{}};assert.match(ui.state({...confirmed,position_proof:{stale:false}}),/Egen position er særskilt bekræftet/);assert.match(ui.state({...confirmed,position_proof:{stale:true}}),/Tidligere bekræftet position · aktuel status ukendt/);assert.match(ui.state(confirmed),/Tidligere bekræftet position · aktuel status ukendt/);
 console.log('PASS: waiting shows active candidates; history and owned-position filters are preserved');
