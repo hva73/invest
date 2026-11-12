@@ -586,10 +586,12 @@ def recover_automatic_feeds(connect,now=None,identity_cache=None):
        else:status='EODHD_IDENTITY_UNCERTAIN'
      else:status='PLUTO_IDENTITY_UNVERIFIED'
     except Exception as error:
-     # Discard a broken broker connection. Budget denial is not a transport
-     # failure and preserving the established catalog avoids another handshake.
-     if identity_cache is not None and budget_provider=='pluto' and not (isinstance(error,EngineError) and error.code=='PROVIDER_RATE_BUDGET'):
-      identity_cache.pop(row['user_id'],None)
+     # Keep only a fully established catalog after budget denial; an
+     # interrupted handshake may have left an unusable partial MCP session.
+     if identity_cache is not None and row['purpose']=='automatic discovery' and budget_provider=='pluto':
+      entry=identity_cache.get(row['user_id']);gateway=getattr(entry[1],'gateway',None) if entry else None
+      established=getattr(gateway,'catalog',None) is not None
+      if not established or not (isinstance(error,EngineError) and error.code=='PROVIDER_RATE_BUDGET'):identity_cache.pop(row['user_id'],None)
      status=reference_error_code(error)
      if status=='PROVIDER_RATE_BUDGET':status=budget_provider.upper()+'_RATE_BUDGET'
      requested=getattr(error,'retry_after_s',None)

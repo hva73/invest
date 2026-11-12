@@ -691,6 +691,28 @@ class HoldingAutowatch(unittest.TestCase):
    with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM hw_feed_recovery').fetchone()[0],'PLUTO_RATE_BUDGET')
    self.assertEqual(service.recover_automatic_feeds(app.connect,self.now+timedelta(seconds=61),identity_cache=cache),0)
   self.assertEqual(calls.count(('initialize',None)),1);self.assertEqual(calls.count(('tools/call','search_assets')),2);self.assertEqual(calls.count(('tools/call','get_asset')),1)
+ def test_budget_during_handshake_discards_partial_connection(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);req.update(purpose='automatic discovery',watch_mode='entry')
+   c.execute("UPDATE hw_sessions SET purpose='automatic discovery',request=? WHERE id=?",(json.dumps(req),row['id']))
+  def request(client,method,params=None,notification=False):
+   if method=='initialize':return {'protocolVersion':'2025-06-18'}
+   if method=='notifications/initialized':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+   raise AssertionError(method)
+  cache={}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('mcp_client.MCP.request',request),patch('hotwatch_adapters.reserve'):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now,identity_cache=cache),0)
+  self.assertEqual(cache,{})
+  with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM hw_feed_recovery').fetchone()[0],'PLUTO_RATE_BUDGET')
+ def test_holding_connection_failure_does_not_discard_candidate_cache(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  adapter=object();cache={1:(1,adapter)}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',side_effect=ConnectionError('synthetic')):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now,identity_cache=cache),0)
+  self.assertIs(cache[1][1],adapter)
  def test_candidate_recovery_replaces_expired_connection(self):
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
    self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
