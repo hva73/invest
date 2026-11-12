@@ -52,7 +52,11 @@ try:
     quick.locator('[name=size]').fill('50');quick.locator('button[type=submit]').click();expect(quick).to_contain_text('Gennemgå salget');expect(quick).to_contain_text('2 stk.');quick.locator('[data-quick-close]').click()
     buy=page.get_by_role('button',name='Åbn position NOVOB i Demo · AI-portefølje')
     if not buy.is_visible():page.locator('[data-mobile-more]').click()
-    buy.click();expect(dialog).to_be_visible();expect(dialog.locator('.position-actions-mobile [data-asset-trade=SELL]')).to_be_visible() if compact else expect(dialog.locator('[data-asset-trade=SELL]:visible')).to_have_count(0);dialog.locator('[data-dashboard-decision=demo-NOVOB]:visible').click();expect(decision).to_be_visible();expect(decision).to_contain_text('Afvent')
+    buy.click();expect(dialog).to_be_visible()
+    if compact:
+     expect(dialog.locator('.position-actions-mobile .asset-sell')).to_be_visible();expect(dialog.locator('.position-actions-mobile .asset-sell')).to_be_disabled()
+    else:expect(dialog.locator('[data-asset-trade=SELL]:visible')).to_have_count(0)
+    dialog.locator('[data-dashboard-decision=demo-NOVOB]:visible').click();expect(decision).to_be_visible();expect(decision).to_contain_text('Afvent')
     if shot and width==390:page.screenshot(path=f'{shot}/demo-buy-decision-390.png')
     decision.locator('[data-trade-watch=demo-NOVOB]').click();expect(quick).to_contain_text('Køb · NOVOB');quick.locator('button[type=submit]').click();expect(quick).to_contain_text('Gennemgå købet');quick.locator('[data-quick-close]').click()
     neutral=page.get_by_role('button',name='Åbn position FCX i Demodepot')
