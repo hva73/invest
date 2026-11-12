@@ -87,19 +87,19 @@
   /* Kompakt overblik: metrics stay beside the chart and preserve their controls. */
   .dashboard-v1 > .dash-hero {
     display: grid;
-    grid-template-columns: minmax(260px, .8fr) minmax(0, 1.2fr);
-    grid-template-rows: auto 1fr;
+    grid-template-columns: minmax(230px, .85fr) minmax(0, 1.15fr);
+    grid-template-rows: auto auto;
     column-gap: clamp(20px, 2.5vw, 36px);
     align-items: start;
     padding-bottom: 18px;
   }
   .dashboard-v1 .dash-hero-top { display: contents; }
   .dashboard-v1 .dash-hero-intro { grid-column: 1; grid-row: 1; }
-  .dashboard-v1 .dash-hero-top #dashboard-value-chart { grid-column: 2; grid-row: 1 / span 2; width: 100%; }
+  .dashboard-v1 .dash-hero-top #dashboard-value-chart { grid-column: 1 / -1; grid-row: 2; width: 100%; margin-top: 18px; }
   .dashboard-v1 .dash-hero-metrics {
-    grid-column: 1; grid-row: 2;
-    display: grid; grid-template-columns: 1fr;
-    align-self: end; gap: 0 12px; margin-top: 12px;
+    grid-column: 2; grid-row: 1;
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-self: end; gap: 0 24px; margin-top: 0;
   }
   .dashboard-v1 .dash-hero-metrics > div { min-width: 0; padding: 7px 0 0; border-right: 0; }
   .dashboard-v1 .dash-hero-metrics strong, .dashboard-v1 .dash-total { font-size: 22px; }

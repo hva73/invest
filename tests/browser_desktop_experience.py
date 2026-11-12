@@ -88,9 +88,9 @@ try:
                     intro = page.locator('.dash-hero-intro').bounding_box()
                     chart = page.locator('.dash-hero-top #dashboard-value-chart').bounding_box()
                     metrics = page.locator('.dash-hero-metrics').bounding_box()
-                    assert intro['x'] + intro['width'] <= chart['x'] + 1, (width, intro, chart)
-                    assert metrics['x'] + metrics['width'] <= chart['x'] + 1, (width, metrics, chart)
-                    assert metrics['y'] >= intro['y'], (width, metrics, intro)
+                    assert intro['x'] + intro['width'] <= metrics['x'] + 1, (width, intro, metrics)
+                    assert chart['y'] >= max(intro['y'] + intro['height'], metrics['y'] + metrics['height']) - 1, (width, intro, metrics, chart)
+                    assert chart['width'] > metrics['width'], (width, chart, metrics)
                     empty_alert = page.locator('.dash-attention')
                     expect(empty_alert).to_contain_text('Ingen aktuelle')
                     assert empty_alert.evaluate('e => e.getBoundingClientRect().height') < 120, width
