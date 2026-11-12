@@ -331,6 +331,13 @@ class HoldingAutowatch(unittest.TestCase):
   with app.connect() as c:
    self.assertEqual(json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()['request'])['provider'],'pluto')
    self.assertEqual(c.execute('SELECT count(*) FROM hw_verified_feed_links').fetchone()[0],0)
+ def test_btc_reference_preserves_eodhd_budget_reason_and_retry(self):
+  instrument={'asset_id':'54368e0b-2d53-401e-bf68-1033a5b84b08','ticker':'BTC','name':'Bitcoin','type':'CRYPTO','exchange':'WINTERMUTE','currency':'USD','isin':None}
+  for reason,expected in [('EODHD_DAILY_BUDGET','EODHD_DAILY_BUDGET'),('PROVIDER_RATE_BUDGET','PROVIDER_RATE_BUDGET'),('unknown','PROVIDER_RATE_BUDGET')]:
+   with self.subTest(reason=reason),patch('eodhd_feeds.EODHDFeeds.snapshot',return_value={'status':'LOCAL_BUDGET_EXHAUSTED','budget_reason':reason,'retry_after_s':123}):
+    with self.assertRaises(DataUnavailable) as caught:service.cxe_verified_match(instrument,[],self.now,app.connect,1)
+    self.assertEqual(caught.exception.code,expected)
+    self.assertEqual(caught.exception.retry_after_s,123)
  def test_owner_approved_btc_mapping_preserves_two_depots_and_existing_history(self):
   from test_hotwatch_engine import tick
   from hotwatch_adapters import EODHDAdapter
@@ -561,6 +568,66 @@ class HoldingAutowatch(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',side_effect=check):
    self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
   self.assertEqual(seen,['SECOND'])
+ def test_feed_recovery_identifies_budget_provider_without_changing_public_status_or_retry(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}):
+   for source in ('pluto','eodhd'):
+    with self.subTest(source=source):
+     with app.connect() as c:c.execute('DELETE FROM hw_feed_recovery')
+     pluto=DataUnavailable('PROVIDER_RATE_BUDGET',429) if source=='pluto' else self.instrument
+     eodhd=DataUnavailable('PROVIDER_RATE_BUDGET',429) if source=='eodhd' else AssertionError('EODHD must not be called')
+     with patch('hotwatch_service.holding_instrument',side_effect=pluto if isinstance(pluto,Exception) else None,return_value=pluto),patch('hotwatch_adapters.search_eodhd_symbols',side_effect=eodhd):
+      self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+     with app.connect() as c:
+      raw=c.execute('SELECT status,next_attempt FROM hw_feed_recovery').fetchone()
+      self.assertEqual(raw['status'],source.upper()+'_RATE_BUDGET')
+      self.assertEqual(raw['next_attempt'],self.now.timestamp()+60)
+     session=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=True)['open_sessions'][0]
+     self.assertEqual((session['feed_recovery_status'],session['feed_recovery_provider']),('PROVIDER_RATE_BUDGET',source))
+     detail=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=False)['open_sessions'][0]
+     self.assertEqual((detail['feed_recovery_status'],detail['feed_recovery_provider']),('PROVIDER_RATE_BUDGET',source))
+   with app.connect() as c:c.execute("UPDATE hw_feed_recovery SET status='PROVIDER_RATE_BUDGET'")
+   session=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=True)['open_sessions'][0]
+   self.assertEqual((session['feed_recovery_status'],session['feed_recovery_provider']),('PROVIDER_RATE_BUDGET',None))
+   with app.connect() as c:c.execute('DELETE FROM hw_feed_recovery')
+   with patch('hotwatch_service.holding_instrument',return_value=self.instrument),patch('hotwatch_adapters.search_eodhd_symbols',side_effect=DataUnavailable('EODHD_DAILY_BUDGET',429)):
+    self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+   session=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=True)['open_sessions'][0]
+   self.assertEqual((session['feed_recovery_status'],session['feed_recovery_provider']),('EODHD_DAILY_BUDGET','eodhd'))
+   for requested,delay in ((123,123),(float('nan'),60)):
+    with app.connect() as c:c.execute('DELETE FROM hw_feed_recovery')
+    error=DataUnavailable('PROVIDER_RATE_BUDGET',429);error.retry_after_s=requested
+    with patch('hotwatch_service.holding_instrument',return_value=self.instrument),patch('hotwatch_adapters.search_eodhd_symbols',side_effect=error):
+     self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+    with app.connect() as c:self.assertEqual(c.execute('SELECT next_attempt FROM hw_feed_recovery').fetchone()['next_attempt'],self.now.timestamp()+delay)
+ def test_extreme_recovery_retry_remains_readable_in_both_sync_modes(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  error=DataUnavailable('PROVIDER_RATE_BUDGET',429);error.retry_after_s=1e308
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=self.instrument),patch('hotwatch_adapters.search_eodhd_symbols',side_effect=error):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+  with app.connect() as c:next_attempt=c.execute('SELECT next_attempt FROM hw_feed_recovery').fetchone()['next_attempt']
+  self.assertGreater(next_attempt,self.now.timestamp()+86400)
+  self.assertLessEqual(next_attempt,253402214400)
+  for summary in (True,False):
+   session=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=summary)['open_sessions'][0]
+   self.assertEqual(session['next_feed_recovery_at'],'9999-12-31T00:00:00+00:00')
+   self.assertEqual(session['feed_recovery_provider'],'eodhd')
+  with app.connect() as c:c.execute('UPDATE hw_feed_recovery SET next_attempt=?',(1e308,))
+  for summary in (True,False):
+   session=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=summary)['open_sessions'][0]
+   self.assertIsNone(session['next_feed_recovery_at'])
+ def test_candidate_recovery_reports_pluto_budget_without_claiming_eodhd_failure(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);req.update(purpose='automatic discovery',watch_mode='entry',report_id='synthetic-report')
+   c.execute("UPDATE hw_sessions SET purpose='automatic discovery',request=? WHERE id=?",(json.dumps(req),row['id']))
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.verified_discovery_instrument',side_effect=DataUnavailable('PROVIDER_RATE_BUDGET',429)):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+  session=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=True)['open_sessions'][0]
+  self.assertEqual((session['watch_kind'],session['feed_recovery_status'],session['feed_recovery_provider']),('candidate','PROVIDER_RATE_BUDGET','pluto'))
  def test_recovery_matches_isin_and_currency_without_prior_observation(self):
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
    self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')

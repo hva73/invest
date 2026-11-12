@@ -2,6 +2,8 @@
 
 Kontrakt 1.0.0, 3. november 2026. Supplerer END_TO_END_DATA_CONTRACT.md og HOTWATCH_ENGINE.md. Beskriver faktisk implementeret motor, ikke ønsket fremtidig realtidsarkitektur. Visuelt redesign må ikke ændre reglerne nedenfor.
 
+**Recovery-diagnose:** `sync_hot_watch` bevarer `feed_recovery_status=PROVIDER_RATE_BUDGET` og kan angive `feed_recovery_provider` som `pluto` eller `eodhd`, når kilden er kendt fra det aktuelle recoveryforsøg. Ældre, generiske registreringer giver `null`: kilden må ikke gættes. Feltet beskriver recoveryforsøget, ikke en handel eller en livegaranti.
+
 ## Arkitektur og overdragelse
 
 Trading Radar/ChatGPT producerer rapportkandidater, anbefaling og rapporteret lifecycle. Rapportmodtagelsen validerer og gemmer kandidatidentitet/journal. HOT_WATCH-lifecycle eller åbning af en side starter ikke i sig selv en service eller session. Foruden eksplicit autoriseret start kan en kørende service oprette en kvalificeret kandidat- eller beholdningssession efter sine særskilte gates; se [aktuel kodeafstemning](ESCAPE_MASTER_CONTRACT.md). Backend-servicen hotwatch_service.py er en separat proces og kræver ingen aktiv ChatGPT-chat.
