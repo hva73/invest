@@ -160,14 +160,24 @@ window.SectorUI=(()=>{
   const matches=(currentState?.dashboard?.positions||[]).filter(p=>p.key===row.key&&String(p.portfolio_id)===String(row.portfolio_id)&&p.asset_id===row.asset_id);
   return matches.length===1?matches[0]:null;
  }
+ function positionDay(row){
+  const day=row?.daily,at=Date.parse(day?.to||''),localDay=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Copenhagen'});
+  if(row?.verification!=='broker_snapshot'||!['fresh','session_close'].includes(row?.price_freshness?.state)||!Number.isFinite(at)||at>Date.now()||localDay.format(new Date(at))!==localDay.format(new Date()))return {amount:null,percent:null,currency:null};
+  const code=typeof day?.currency==='string'&&/^[A-Z]{3}$/.test(day.currency)?day.currency:null;
+  return {amount:code?number(day.amount):null,percent:number(day.percent),currency:code};
+ }
+ function signedCurrency(value,currency){
+  if(value===null||!currency)return '—';
+  try{return (value>0?'+':'')+new Intl.NumberFormat('da-DK',{style:'currency',currency}).format(value)}catch{return '—'}
+ }
  function openSectorJourney(name){
   const group=groups().find(g=>g.name===name);
   if(!group||!group.rows.length||!document.createElement||!document.body)return;
   let dialog=document.getElementById('sector-journey');
   if(!dialog){dialog=document.createElement('dialog');dialog.id='sector-journey';dialog.className='si-journey';(document.getElementById('content')||document.body).append(dialog);dialog.addEventListener('close',()=>{const source=[...document.querySelectorAll('.sector-row[data-sector-select]')].find(el=>el.dataset.sectorSelect===selected);source?.focus({preventScroll:true})})}
   const items=group.rows.map((r,i)=>{
-   const live=matchLivePosition(r),value=converted(r.value),pnl=converted(r.unrealized),portfolio=r.portfolio_name||'Depot ikke oplyst';
-   return `<li><button type="button" class="si-position-link" data-sector-position="${i}" ${live?'':'disabled'} aria-label="Åbn ${txt(r.ticker||r.name||'position')} i ${txt(portfolio)}"><span class="si-position-name"><strong>${txt(r.ticker||r.name||'Ukendt position')}</strong><small>${txt(r.name||'')} · ${txt(portfolio)}</small></span><span class="si-position-amount"><strong>${value===null?'—':amount(value)}${isCurrencyEstimate(r.value)?' · estimat':''}</strong><small class="${sign(pnl)}">${pnl===null?'Resultat ikke oplyst':amount(pnl)}${r.unrealized_estimated||isCurrencyEstimate(r.unrealized)?' · estimat':''}</small></span><span aria-hidden="true">›</span></button>${live?'':'<small class="si-position-unavailable">Opdatér depotet for at åbne positionen.</small>'}</li>`
+   const live=matchLivePosition(r),value=converted(r.value),pnl=converted(r.unrealized),portfolio=r.portfolio_name||'Depot ikke oplyst',day=positionDay(r),sincePercent=number(r.unrealized_percent),estimated=r.unrealized_estimated||isCurrencyEstimate(r.unrealized);
+   return `<li><button type="button" class="si-position-link" data-sector-position="${i}" ${live?'':'disabled'} aria-label="Åbn ${txt(r.ticker||r.name||'position')} i ${txt(portfolio)}"><span class="si-position-name"><strong>${txt(r.ticker||r.name||'Ukendt position')}</strong><small>${txt(r.name||'')} · ${txt(portfolio)}</small></span><span class="si-position-amount"><strong>${value===null?'—':amount(value)}${isCurrencyEstimate(r.value)?' · estimat':''}</strong></span><span aria-hidden="true">›</span><span class="si-position-metrics"><small>I dag · kurs pr. stk.<b class="${sign(day.percent??day.amount)}">${signedCurrency(day.amount,day.currency)} · ${pct(day.percent)}</b></small><small>Siden køb<b class="${sign(pnl??sincePercent)}">${pnl===null?'—':(pnl>0?'+':'')+amount(pnl)} · ${pct(sincePercent)}${estimated?' · estimat':''}</b></small></span></button>${live?'':'<small class="si-position-unavailable">Opdatér depotet for at åbne positionen.</small>'}</li>`
   }).join('');
   dialog._sectorRows=group.rows.slice();
   dialog.innerHTML=`<div class="si-journey-head"><div><small>SEKTOR · ${group.rows.length} ${group.rows.length===1?'POSITION':'POSITIONER'}</small><h2 tabindex="-1">${txt(name)}</h2><p>Vælg en position for at se kurs og detaljer.</p></div><button type="button" data-sector-journey-close aria-label="Tilbage til sektorfordelingen">✕</button></div><ul class="si-journey-list">${items}</ul><button type="button" class="si-journey-back" data-sector-journey-close>← Tilbage til sektorfordelingen</button>`;

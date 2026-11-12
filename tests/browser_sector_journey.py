@@ -13,10 +13,10 @@ case.save(case.root,'5357.70',case.now,result='141.30')
 case.save(case.child,'540.60',case.now,result='45')
 at=case.now.isoformat()
 root_rows=[
- {'assetId':'synthetic-novo','ticker':'NOVO-B','name':'Novo Nordisk B','quantity':'5','price':'270.30','currency':'DKK','value':'1351.50','unrealisedPnL':'112.50','priceAsOf':at},
- {'assetId':'synthetic-zealand','ticker':'ZEAL','name':'Zealand Pharma','quantity':'4','price':'411.40','currency':'DKK','value':'1645.60','unrealisedPnL':'-96.20','priceAsOf':at},
+ {'assetId':'synthetic-novo','ticker':'NOVO-B','name':'Novo Nordisk B','quantity':'5','price':'270.30','currency':'DKK','value':'1351.50','unrealisedPnL':'112.50','costBasis':'1239.00','dailyChange':'6.30','dailyChangePercent':'2.39','priceAsOf':at},
+ {'assetId':'synthetic-zealand','ticker':'ZEAL','name':'Zealand Pharma','quantity':'4','price':'411.40','currency':'DKK','value':'1645.60','unrealisedPnL':'-96.20','costBasis':'1741.80','dailyChange':'-3.60','dailyChangePercent':'-0.87','priceAsOf':at},
  {'assetId':'synthetic-tech','ticker':'MSFT','name':'Microsoft','quantity':'2','price':'910','currency':'DKK','value':'1820','unrealisedPnL':'80','priceAsOf':at}]
-child_rows=[{'assetId':'synthetic-novo','ticker':'NOVO-B','name':'Novo Nordisk B','quantity':'2','price':'270.30','currency':'DKK','value':'540.60','unrealisedPnL':'45','priceAsOf':at}]
+child_rows=[{'assetId':'synthetic-novo','ticker':'NOVO-B','name':'Novo Nordisk B','quantity':'2','price':'270.30','currency':'DKK','value':'540.60','unrealisedPnL':'45','costBasis':'495.60','dailyChange':'6.30','dailyChangePercent':'2.39','priceAsOf':at}]
 with app.connect() as c:
  for pid,rows in ((case.root,root_rows),(case.child,child_rows)):
   existing=json.loads(c.execute('SELECT payload FROM portfolio_snapshots WHERE portfolio_id=?',(pid,)).fetchone()['payload'])
@@ -58,6 +58,14 @@ try:
    root=journey.locator('[data-sector-position]').filter(has_text='Root').filter(has_text='NOVO-B')
    child=journey.locator('[data-sector-position]').filter(has_text='AI').filter(has_text='NOVO-B')
    expect(root).to_be_enabled();expect(child).to_be_enabled()
+   expect(root).to_contain_text('I dag · kurs pr. stk.')
+   expect(root).to_contain_text('+6,30')
+   expect(root).to_contain_text('+2,39 %')
+   expect(root).to_contain_text('Siden køb')
+   expect(root).to_contain_text('+112,50')
+   expect(root).to_contain_text('+9,08 %')
+   missing=journey.locator('[data-sector-position]').filter(has_text='AFVENTER')
+   expect(missing).to_contain_text('— · —')
    child.click();detail=page.locator('#dashboard-detail');expect(detail).to_be_visible()
    expect(detail.locator('h2')).to_contain_text('NOVO-B');expect(detail.locator('h2')).to_contain_text('AI')
    page.screenshot(path=str(screens/f'sektor-positionsdetalje-{width}.png'))
@@ -68,6 +76,15 @@ try:
    arc=page.locator('[data-sector-donut="Sundhed"]');arc.focus();page.keyboard.press('Enter')
    expect(journey).to_be_visible();page.keyboard.press('Escape');expect(journey).not_to_be_visible()
    expect(page.locator('.sector-row').filter(has_text='Sundhed')).to_be_focused()
+   child_row=next(r for r in payload['dashboard']['positions'] if r.get('asset_id')=='synthetic-novo' and r.get('portfolio_id')==case.child)
+   original_freshness=child_row['price_freshness']
+   child_row['price_freshness']={'state':'stale'}
+   page.reload();page.locator('nav [data-view=sectors]').click()
+   page.locator('.sector-row').filter(has_text='Sundhed').click()
+   stale=page.locator('#sector-journey [data-sector-position]').filter(has_text='AI').filter(has_text='NOVO-B')
+   expect(stale.locator('.si-position-metrics small').first).to_contain_text('— · —')
+   expect(stale).to_contain_text('+45,00')
+   child_row['price_freshness']=original_freshness
    assert not writes,writes
    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),width
    assert not errors,(width,errors)
