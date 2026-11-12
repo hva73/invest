@@ -19,6 +19,7 @@ class DesktopTestHandler(app.Handler):
         return super()._get()
 
 
+external_review = os.environ.get('ESCAPE_DESKTOP_EXTERNAL_REVIEW') == '1'
 case = PortfolioValueChart()
 case.setUp()
 seed(case)
@@ -47,14 +48,18 @@ try:
               const m = document.querySelector('main').getBoundingClientRect();
               return {aside: a.width, main: m.x, nav: getComputedStyle(document.querySelector('nav')).position};
             }''')
-            if width in (1280, 1920):
-                page.screenshot(path=str(screens / f'overview-before-{width}.png'), full_page=True)
-            page.evaluate('''() => new Promise((resolve, reject) => {
-              const link = document.createElement('link');
-              link.rel = 'stylesheet'; link.href = '/desktop-experience.css';
-              link.onload = resolve; link.onerror = () => reject(new Error('Desktop stylesheet failed to load'));
-              document.head.append(link);
-            })''')
+            if external_review:
+                if width in (1280, 1920):
+                    page.screenshot(path=str(screens / f'overview-before-{width}.png'), full_page=True)
+                page.evaluate('''() => new Promise((resolve, reject) => {
+                  const link = document.createElement('link');
+                  link.rel = 'stylesheet'; link.href = '/desktop-experience.css';
+                  link.onload = resolve; link.onerror = () => reject(new Error('Desktop stylesheet failed to load'));
+                  document.head.append(link);
+                })''')
+            else:
+                response = page.request.get(f'http://127.0.0.1:{server.server_port}/style.css')
+                assert response.ok and Path('static/desktop-experience.css').read_text() in response.text()
             if width <= 900:
                 after = page.evaluate('''() => {
                   const a = document.querySelector('body > aside').getBoundingClientRect();

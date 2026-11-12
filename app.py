@@ -389,6 +389,7 @@ class Handler(BaseHTTPRequestHandler):
         if not path:return self.send(404,{'error':'Ikke fundet'})
         kind={'.html':'text/html; charset=utf-8','.js':'application/javascript','.css':'text/css','.json':'application/manifest+json','.svg':'image/svg+xml'}[Path(path).suffix]
         body=(ROOT/'static'/path).read_bytes()
+        if path=='style.css':body+=b'\n'+(ROOT/'static/desktop-experience.css').read_bytes()
         if path=='app.js':body=(ROOT/'static/sector-ui.js').read_bytes()+b'\n'+(ROOT/'static/journal-ui.js').read_bytes()+b'\n'+(ROOT/'static/dashboard-ui.js').read_bytes()+b'\n'+(ROOT/'static/candidate-ui.js').read_bytes()+b'\n'+(ROOT/'static/engine-ui.js').read_bytes()+b'\n'+(ROOT/'static/intel-ui.js').read_bytes()+b'\n'+(ROOT/'static/position-ui.js').read_bytes()+b'\n'+(ROOT/'static/overview-ui.js').read_bytes()+b'\n'+(ROOT/'static/market-ui.js').read_bytes()+b'\n'+(ROOT/'static/report-ui.js').read_bytes()+b'\n'+(ROOT/'static/trade-ui.js').read_bytes()+b'\n'+body
         self.send(200,body,kind)
     def do_POST(self):

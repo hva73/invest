@@ -27,6 +27,7 @@ jobs:
           ESCAPE_SCREENSHOTS: /tmp/escape-desktop-screens
           PYTHONPATH: .:tests
         run: |
+          python -m unittest discover -s tests -p test_updater.py
           node tests/test_dashboard_data.js
           node tests/test_dashboard_attention.js
           node tests/test_signal_notice.js
@@ -110,6 +111,7 @@ jobs:
       - name: Review desktop layout with demo branch
         env:
           ESCAPE_SCREENSHOTS: /tmp/escape-demo-desktop
+          ESCAPE_DESKTOP_EXTERNAL_REVIEW: '1'
           PYTHONPATH: .:tests
         run: |
           mkdir -p "$ESCAPE_SCREENSHOTS"
