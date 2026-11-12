@@ -623,3 +623,31 @@ body > aside nav .nav-sector-mobile{display:none}
  .signal-overview-dialog .signal-explanation p,.signal-overview-dialog .signal-overview>p{font-size:12px;line-height:1.45;margin:2px 0}
  .signal-overview .signal-action-bar{margin:3px 3px calc(2px + env(safe-area-inset-bottom,0px));padding:6px}
 }
+
+/* Calm, integrated mobile signal presentation. */
+@media(max-width:700px){
+ .signal-overview-dialog{background:#0e202b;border:1px solid #2d4a58;padding:16px 18px}
+ .signal-overview-dialog .overview-detail-header{margin-bottom:6px}
+ .signal-overview-dialog .overview-detail-header h2{font-size:19px;letter-spacing:.02em}
+ .signal-overview-dialog .overview-detail-header>button{border:1px solid #314d5a;background:#152d38;color:#bcd2d8}
+ .signal-overview .market-quote{align-items:center;padding-top:2px}
+ .signal-overview .market-price{font-size:30px!important;font-weight:600;letter-spacing:-.03em}
+ .signal-overview .market-change{font-size:12px}
+ .signal-overview .market-origin,.signal-overview .market-fetch{font-size:9px!important;color:#8da6af}
+ .signal-overview .market-plot svg{height:clamp(112px,32vw,145px)}
+ .signal-overview .market-sample-change,.signal-overview .market-scale{font-size:9px}
+ .signal-overview .market-period-buttons{gap:2px}
+ .signal-overview .market-period-buttons button{background:transparent;border:0;border-radius:8px;color:#99b0ba;flex:1;min-width:0}
+ .signal-overview .market-period-buttons button[aria-pressed=true]{background:#24443f;color:#b9e9d8}
+ .signal-overview .market-controls{margin:5px 0 2px}
+ .signal-overview .signal-chart-peak{border-top:1px solid #29414a;padding-top:7px;margin-top:7px}
+ .signal-overview .signal-kpis{gap:0;border-top:1px solid #29414a;border-bottom:1px solid #29414a}
+ .signal-overview .signal-kpis>div{border:0;border-radius:0;background:transparent;padding:10px 8px 10px 2px}
+ .signal-overview .signal-kpis>div:nth-child(even){border-left:1px solid #29414a;padding-left:14px}
+ .signal-overview .signal-kpis>div:nth-child(n+3){border-top:1px solid #29414a}
+ .signal-overview .signal-kpis strong{font-size:17px;color:#e4f1f1;font-weight:600}
+ .signal-overview .signal-kpis small{color:#9bb1b9}
+ .signal-overview .signal-explanation{padding:3px 0}
+ .signal-overview .signal-explanation h3{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#8faab1}
+ .signal-overview .signal-action-bar{background:#142d36;border-color:#34545a;border-radius:18px;box-shadow:0 8px 22px #0008}
+}
