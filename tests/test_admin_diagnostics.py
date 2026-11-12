@@ -47,6 +47,16 @@ class AdminDiagnostics(unittest.TestCase):
   result=hotwatch_service.admin_diagnostics(app.connect,1,self.now)
   self.assertEqual(result['log_files_read'],0);self.assertEqual(result['recent'],[]);self.assertIsNone(result['windows']['5m']['queue'])
   with app.connect() as c:self.assertEqual(c.total_changes,before)
+ def test_missing_websocket_observations_are_not_counted_as_zero_wait(self):
+  ref=hashlib.sha256(self.f.req['watch_id'].encode()).hexdigest()[:16]
+  def record(seconds,metrics):return {'service':'hotwatch','user_id':1,'is_test':False,'utc':(self.now-timedelta(seconds=seconds)).isoformat(),'watch_ref':ref,'source':'eodhd','status':'processed','metrics':metrics}
+  path=Path(app.DB).parent/'hotwatch-scans.jsonl'
+  path.write_text('\n'.join(json.dumps(x) for x in [record(1,{}),record(2,{'websocket':[]}),record(3,{'websocket':[{'wait_ms':500}]})]))
+  result=hotwatch_service.admin_diagnostics(app.connect,1,self.now)
+  self.assertNotIn('websocket_ms',result['recent'][0]['metrics'])
+  self.assertEqual(result['recent'][1]['metrics']['websocket_ms'],0)
+  self.assertEqual(result['windows']['5m']['websocket'],{'count':2,'p50_ms':0,'p90_ms':500,'max_ms':500})
+  self.assertEqual(result['queue_factors']['5m']['websocket_wait']['count'],2)
  def test_push_and_cron_counts_do_not_include_device_details(self):
   with app.connect() as c:
    c.execute("INSERT INTO push_devices(user_id,endpoint_hash,payload,created,updated) VALUES(1,'synthetic-private-endpoint',?, ?, ?)",(b'private-device',self.now.timestamp(),self.now.timestamp()))
