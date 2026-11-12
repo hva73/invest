@@ -20,6 +20,10 @@ body=b''.join(passenger_wsgi.application({'PATH_INFO':'/api/health','REQUEST_MET
 assert status==['200 OK'],status
 assert json.loads(body)['database'] is True
 assert Path(eodhd_capacity.__file__).parent==Path(sys.argv[1])
+status.clear()
+css=b''.join(passenger_wsgi.application({'PATH_INFO':'/style.css','REQUEST_METHOD':'GET','REMOTE_ADDR':'test','wsgi.input':io.BytesIO(b'')},lambda s,h:status.append(s)))
+assert status==['200 OK'],status
+assert (Path(sys.argv[1])/'static/desktop-experience.css').read_bytes() in css
 print('INSTALLED_RELEASE_HEALTH_PASS')
 '''
    result=subprocess.run([sys.executable,'-I','-c',probe,str(target)],cwd=target,env=env,capture_output=True,text=True,timeout=30)

@@ -395,7 +395,10 @@ class EODHDAdapter:
    messages=value.get('messages',[]);latest=max(messages,key=lambda m:stamp(m['event_time'])) if messages else {}
    age=(utc()-stamp(latest['event_time'])).total_seconds() if latest.get('event_time') else None
    received_age=(utc()-stamp(latest['received_at'])).total_seconds() if latest.get('received_at') else None
-   self.capture_metrics.append({'source_age_s':round(age,3) if age is not None else None,'received_age_s':round(received_age,3) if received_age is not None else None,'feed':feed,'subscriptions_sent':0 if reused else value.get('subscriptions_sent'),'connections_opened':0 if reused else value.get('connections_opened'),'batch_symbols':symbols,'capture_attempts':0 if reused else 1,'cache_hit':reused and value.get('status')!='COLLECTING','status':value.get('status'),'wait_ms':round((time.monotonic()-capture_started)*1000,3),'messages':len(value.get('messages',[]))})
+   metric={'source_age_s':round(age,3) if age is not None else None,'received_age_s':round(received_age,3) if received_age is not None else None,'feed':feed,'subscriptions_sent':0 if reused else value.get('subscriptions_sent'),'connections_opened':0 if reused else value.get('connections_opened'),'batch_symbols':symbols,'capture_attempts':0 if reused else 1,'cache_hit':reused and value.get('status')!='COLLECTING','status':value.get('status'),'wait_ms':round((time.monotonic()-capture_started)*1000,3),'messages':len(value.get('messages',[]))}
+   for field in ('batch_valid_count','batch_partial_count','batch_limit_reached'):
+    if field in value:metric[field]=value[field]
+   self.capture_metrics.append(metric)
    return value
   if not self._shared_quotes or self.connect is None or session.get('id') is None or req.get('is_test'):
    return record(client.capture(feed,symbol,duration=2),1,False)
@@ -454,7 +457,7 @@ class EODHDAdapter:
    if result.get('status') not in ('OK','NO_MESSAGES'):return record(result,len(symbols),False)
    with _ws_batch_lock:
     if len(_ws_batch_cache)>=512:_ws_batch_cache.clear()
-    saved=time.monotonic();captured_at=utc().isoformat()
+    saved=time.monotonic();captured_at=utc().isoformat();requested=None
     for item in symbols:
      messages=[m for m in result.get('messages',[]) if m.get('symbol')==item]
      # A quiet capture must not erase a more recent, still-valid observation
@@ -467,7 +470,7 @@ class EODHDAdapter:
        latest=max(retained,key=lambda m:stamp(m['event_time']))
        prior_time=stamp(latest['event_time']);new_time=max((stamp(m['event_time']) for m in messages),default=None)
        if not new_time or prior_time>new_time:
-        messages=[m for m in retained if stamp(m['event_time'])==prior_time] if feed.endswith('_quotes') else [latest]
+        messages=[m for m in retained if stamp(m['event_time'])==prior_time] if feed.endswith(('_quotes','_trades')) else [latest]
        elif feed.endswith('_quotes') and prior_time==new_time:
         # Equal source times cannot order different quotes, even when they
         # arrived in separate batches. Retain distinct quotes at that instant
@@ -480,12 +483,30 @@ class EODHDAdapter:
          if quote not in seen:messages.append(candidate);seen.add(quote)
          if len(messages)==2:break
         if not messages:messages=candidates[-1:]
+       elif feed.endswith('_trades') and prior_time==new_time:
+        # Equal timestamps cannot order distinct execution prices across
+        # captures. Preserve at most two different prices as ambiguity proof.
+        candidates=[m for m in retained+messages if stamp(m['event_time'])==new_time];seen=set();messages=[]
+        for candidate in candidates:
+         try:price=Decimal(str(candidate.get('price')))
+         except (InvalidOperation,TypeError,ValueError):continue
+         if not price.is_finite() or price<=0:continue
+         if price not in seen:messages.append(candidate);seen.add(price)
+         if len(messages)==2:break
+        if not messages:messages=candidates[-1:]
      partial=[m for m in result.get('partial_messages',[]) if m.get('symbol')==item]
-     value={**result,'status':'OK' if messages else 'NO_MESSAGES','messages':messages,'message_count':len(messages),'partial_messages':partial,'captured_at':captured_at}
-     _ws_batch_cache[(self.uid,credential,feed,item)]=(saved,copy.deepcopy(value))
+     # A saturated batch cannot establish that a missing symbol was quiet.
+     # Preserve any still-fresh prior evidence; never negative-cache an
+     # incomplete result. The ordinary next scan remains budgeted as before.
+     incomplete=not messages and result.get('batch_limit_reached') is True
+     value={**result,'status':'OK' if messages else 'INCOMPLETE' if incomplete else 'NO_MESSAGES','messages':messages,'message_count':len(messages),'partial_messages':partial,'captured_at':captured_at}
+     item_key=(self.uid,credential,feed,item)
+     if incomplete:_ws_batch_cache.pop(item_key,None)
+     else:_ws_batch_cache[item_key]=(saved,copy.deepcopy(value))
+     if item==symbol:requested=value
     # Diagnose the requested symbol, not the newest unrelated trade in its
     # batch. Connection/subscription counts still describe the actual call.
-    return record(copy.deepcopy(_ws_batch_cache[key][1]),len(symbols),False)
+    return record(copy.deepcopy(requested),len(symbols),False)
   finally:
    with _ws_batch_lock:
     _ws_batch_inflight.pop(group,None)
@@ -551,7 +572,7 @@ class EODHDAdapter:
    if feed['status']=='RATE_LIMIT':
     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=feed.get('retry_after_s') or retry_seconds(None);raise failure
    valid=[x for x in feed.get('messages',[]) if stamp(x['event_time'])<=utc() and (utc()-stamp(x['event_time'])).total_seconds()<=r['risk']['max_quote_age_s']] if feed['status']=='OK' else []
-   if feed['status'] in ('OK','NO_MESSAGES') and not valid and os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
+   if feed['status'] in ('OK','NO_MESSAGES','INCOMPLETE') and not valid and os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
     standalone=self.capture(client,market+'_quotes',stream_symbol,session)
     self.last_feed_diagnostics['websocket_quote_status']=standalone.get('status')
     if standalone.get('status')=='COLLECTING':
@@ -568,6 +589,10 @@ class EODHDAdapter:
     if not valid:self.last_feed_diagnostics['websocket_trade_status']='STALE_OR_FUTURE'
     if valid:
      trade=max(valid,key=lambda x:stamp(x['event_time']));at=stamp(trade['event_time']);currency=r.get('quote_currency')
+     same_time=[x for x in valid if stamp(x['event_time'])==at]
+     if len({Decimal(str(x['price'])) for x in same_time})>1:
+      self.last_feed_diagnostics['websocket_trade_status']='AMBIGUOUS_SAME_TIMESTAMP'
+      failure=DataUnavailable('EODHD_AMBIGUOUS_TRADE');failure.position_context=context;raise failure
      if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):raise DataUnavailable('EODHD_CURRENCY_UNCONFIRMED')
      self.last_telemetry={'websocket_capture_ms':round(stream_ms,3),'pluto_context_ms':round(context_ms,3),'event_to_websocket_receive_ms':round((stamp(trade['received_at'])-at).total_seconds()*1000,3) if trade.get('received_at') else None}
      state=json.loads(session.get('state') or '{}');profile=state.get('adaptive_profile') or r['profile']

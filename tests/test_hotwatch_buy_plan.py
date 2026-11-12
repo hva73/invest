@@ -103,7 +103,7 @@ class BuyPlan(unittest.TestCase):
    for n,now in enumerate([first,first+timedelta(seconds=16),second]):
     sample=tick(now,n);sample['source']='pluto'
     engine.ingest(app.connect,1,self.req['watch_id'],False,sample,now)
-  data={'report_id':'@hotwatch','candidate_id':self.req['watch_id'],'portfolio_id':self.fixture.root,'kind':'direct','asset_id':self.req['asset_id'],'size_mode':'shares','size':p['quantity'],'currency':'DKK','order_type':'LIMIT','time_in_force':'DAY','limit_price':p['limit_price']}
+  data={'report_id':'@hotwatch','expected_side':'BUY','candidate_id':self.req['watch_id'],'portfolio_id':self.fixture.root,'kind':'direct','asset_id':self.req['asset_id'],'size_mode':'shares','size':p['quantity'],'currency':'DKK','order_type':'LIMIT','time_in_force':'DAY','limit_price':p['limit_price']}
   with patch('hotwatch_engine.utc',return_value=second+timedelta(seconds=1)),patch('trade_service.read_estimate',side_effect=self.estimate):
    proposal=trade_service.estimate(app.connect,1,data,self.fixture.factory)['proposal']
    self.assertFalse(self.fixture.writes())

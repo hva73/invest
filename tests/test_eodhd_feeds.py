@@ -24,6 +24,18 @@ class WS:
   return json.dumps(self.messages.pop(0))
 
 class FeedTests(unittest.TestCase):
+ def test_batch_limit_diagnostics_cover_valid_partial_and_quiet_streams(self):
+  now=int(datetime.now(timezone.utc).timestamp()*1000)
+  for rows,valid,partial,limited in [
+   ([{'s':'FAST','t':now+i,'p':10} for i in range(3)]+[{'s':'SLOW','t':now,'p':20}],3,0,True),
+   ([{'s':'FAST','p':10} for _ in range(3)]+[{'s':'SLOW','t':now,'p':20}],0,3,True),
+   ([{'s':'FAST','t':now,'p':10}],1,0,False),
+   ([],0,0,False),
+  ]:
+   with self.subTest(valid=valid,partial=partial,limited=limited):
+    ws=WS(rows);result=EODHDFeeds(SECRET,ws_factory=lambda *a,**kw:ws).capture('us_trades',['FAST','SLOW'],duration=2,max_messages=3)
+    self.assertEqual((result['batch_valid_count'],result['batch_partial_count'],result['batch_limit_reached']),(valid,partial,limited))
+    if limited:self.assertEqual(len(ws.messages),1)
  def test_adapter_shared_quotes_deduplicate_only_same_symbol_and_credentials(self):
   import hotwatch_adapters as adapter
   adapter._quote_cache.clear();calls=[]

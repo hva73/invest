@@ -1621,8 +1621,7 @@ class HotWatch(unittest.TestCase):
    result=adapter.context(self.req,'USD')
    self.assertEqual((result['status'],result['position'],result['quantity']),('verified','none','0'))
    self.assertEqual(result['portfolio_equity_dkk'],'1000')
-   # A Collection reference is not a holding, even when an identifier happens
-   # to match an instrument ID. Its contents are read from the child snapshot.
+   # A collection reference must never count as the direct holding.
    with app.connect() as c:
     saved=c.execute('SELECT payload FROM portfolio_snapshots WHERE portfolio_id=?',(root,)).fetchone();data=json.loads(saved['payload']);data['positions']=[{'kind':'collection','asset_id':self.req['asset_id'],'ticker':'MERC','quantity':'9'}];c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(data),root))
    result=adapter.context(self.req,'USD')

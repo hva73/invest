@@ -47,7 +47,7 @@ class GeneralBridgeTest(unittest.TestCase):
         self.assertIn('/issues/5/comments?', calls[3].args[0].full_url)
 
     def test_all_allowed_issues_match_actual_issue_before_mutation(self):
-        for issue_number in [1, *range(3, 17)]:
+        for issue_number in [1, *range(3, 17), 54, 57, 63, 67, 999]:
             context = copy.deepcopy(CONTEXT)
             context['issue_number'] = issue_number
             state = board()
@@ -59,7 +59,7 @@ class GeneralBridgeTest(unittest.TestCase):
                 self.assertEqual(writer.execute(context, Mock(return_value=context), Mock(return_value='CLAIMED'), graph), 'VERIFIED')
 
     def test_unlisted_or_mismatched_issues_never_write(self):
-        for issue_number in [0, 2, 17, 4.0, True]:
+        for issue_number in [0, 2, 1000, 4.0, True]:
             context = {**CONTEXT, 'issue_number': issue_number}
             graph = Mock()
             with self.subTest(issue=issue_number), patch.object(writer, 'LIVE_WRITE_ENABLED', True), self.assertRaises(writer.Blocked):
