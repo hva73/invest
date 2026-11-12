@@ -3,10 +3,10 @@ const source=fs.readFileSync('static/app.js','utf8');
 const start=source.indexOf('if(b.dataset.tradeWatch){');
 const end=source.indexOf('if(b.dataset.tradeCandidate)',start);
 assert(start>0&&end>start);
-let opened=[],closed=0,session;
-const context={state:{user:{username:'owner'},dashboard:{positions:[]}},api:async()=>({session}),document:{querySelector:()=>({close:()=>closed++})},window:{TradeUI:{openQuick:x=>opened.push(x)}},Error};
+let opened=[],closed=0,session,account={dashboard:{positions:[{asset_id:'asset',quantity:'2',portfolio_kind:'portfolio',portfolio_id:9,verification:'broker_snapshot'}]},portfolios:[{id:9,source:'pluto',active:true,kind:'portfolio',can_trade:true}]};
+const context={state:{user:{username:'owner'},dashboard:{positions:[]}},api:async url=>url==='state'?account:{session},document:{querySelector:()=>({close:()=>closed++})},window:{TradeUI:{openQuick:x=>opened.push(x)}},Error};
 vm.createContext(context);vm.runInContext('async function click(b){'+source.slice(start,end)+'}',context);
-const make=(signal,display)=>({status:'ACTIVE',signal,display_status:display,request:{asset_id:'asset',ticker:'SYN',quote_currency:'USD'}});
+const make=(signal,display)=>({status:'ACTIVE',signal,display_status:display,request:{asset_id:'asset',ticker:'SYN',quote_currency:'USD',portfolio_ids:[9]}});
 (async()=>{
  for(const [shown,actual,display] of [['SELL','BUY','KØBSSIGNAL'],['BUY','SELL','SÆLGSSIGNAL'],['SELL','WAIT','AFVENT'],['SELL','REDUCE','EXIT WATCH']]){
   session=make(actual,display);await assert.rejects(context.click({dataset:{tradeWatch:'w',tradeSignal:shown}}),/ændret/);assert.equal(opened.length,0);assert.equal(closed,0);
@@ -15,7 +15,7 @@ const make=(signal,display)=>({status:'ACTIVE',signal,display_status:display,req
  session=make('SELL','SÆLGSSIGNAL');session.last_action_signal={event_id:'new',state:'ACTIVE'};await assert.rejects(context.click({dataset:{tradeWatch:'w',tradeSignal:'SELL',tradeEvent:'old'}}),/ændret/);assert.equal(opened.length,0);
  session.last_action_signal={event_id:'old',state:'WITHDRAWN'};await assert.rejects(context.click({dataset:{tradeWatch:'w',tradeSignal:'SELL',tradeEvent:'old'}}),/ændret/);assert.equal(opened.length,0);
  session=make('SELL','SÆLGSSIGNAL');session.status='DEGRADED';await assert.rejects(context.click({dataset:{tradeWatch:'w',tradeSignal:'SELL'}}),/ikke længere aktuelt/);
- session=make('SELL','SÆLGSSIGNAL');await context.click({dataset:{tradeWatch:'w',tradeSignal:'SELL'}});assert.equal(opened.length,1);assert.equal(opened[0].signal,'SELL');assert.equal(closed,1);
- session=make('BUY','KØBSSIGNAL');await context.click({dataset:{tradeWatch:'w',tradeSignal:'BUY'}});assert.equal(opened[1].signal,'BUY');
+ session=make('SELL','SÆLGSSIGNAL');await context.click({dataset:{tradeWatch:'w',tradeSignal:'SELL'}});assert.equal(opened.length,1);assert.equal(opened[0].signal,'SELL');assert.equal(opened[0].portfolio_id,'9');assert.equal(closed,1);
+ account.dashboard.positions=[];session=make('SELL','SÆLGSSIGNAL');await assert.rejects(context.click({dataset:{tradeWatch:'w',tradeSignal:'SELL'}}),/Positionen kan ikke entydigt bekræftes/);assert.equal(opened.length,1);session=make('BUY','KØBSSIGNAL');session.buy_plan={fresh:true,portfolio_id:9};await context.click({dataset:{tradeWatch:'w',tradeSignal:'BUY'}});assert.equal(opened[1].signal,'BUY');assert.equal(opened[1].portfolio_id,'9');
  console.log('PASS: displayed direction must match the freshly read active signal; no proposal is sent');
 })().catch(e=>{console.error(e);process.exitCode=1});
