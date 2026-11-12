@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-spec = importlib.util.spec_from_file_location('authorize', Path(__file__).with_name('authorize.py'))
+spec = importlib.util.spec_from_file_location('authorize', Path(__file__).resolve().parents[1] / 'tools/nordicway_v25_authorize.py')
 a = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(a)
 
