@@ -36,6 +36,7 @@ def main():
    assert page.evaluate("getComputedStyle(document.documentElement).overflowY")=='hidden'
    background=page.evaluate('window.scrollY');page.mouse.move(2,2);page.mouse.wheel(0,900);page.wait_for_timeout(150);assert page.evaluate('window.scrollY')==background
    shot=os.environ.get('ESCAPE_SCREENSHOTS');
+   expect(d.locator('.market-slot .market-price')).to_be_visible()
    if shot:page.screenshot(path=f'{shot}/signal-sell-390.png')
    page.evaluate('state.dashboard.positions=[]')
    d.get_by_role('button',name='Sælg').click()
@@ -76,10 +77,11 @@ def main():
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_contain_text('Aktien er i en Collection og kan ikke sælges enkeltvis her');expect(d.get_by_role('button',name='Vælg depot for manuelt salg →')).to_be_visible();expect(d.locator('[data-trade-watch]')).to_have_count(0);d.locator('[data-engine-close]').first.click()
    holding['portfolio_kind']='portfolio';account['portfolios'][0]['kind']='portfolio'
    session.update(signal='BUY',display_status='KØBSSIGNAL');session['last_action_signal'].update(state='ACTIVE',event_type='BUY_SIGNAL');page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_contain_text('muligt køb');expect(d.get_by_role('button',name='Ignorér og luk signalet')).to_be_visible();expect(d.locator('[data-trade-watch]')).to_have_count(0)
-   if shot:page.screenshot(path=f'{shot}/signal-buy-390.png')
    d.locator('[data-engine-close]').first.click()
    session['data_status']['market_status']='OPEN';session['buy_plan']={'fresh':True,'portfolio_id':case.root,'quantity':'2','budget_dkk':'500','limit_price':'20','stop_price':'18'}
-   page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.get_by_role('button',name='Køb')).to_be_visible();expect(d.locator('[data-trade-watch]')).to_have_attribute('data-trade-signal','BUY');d.get_by_role('button',name='Køb').click();expect(quick).to_contain_text('Køb · TSM');expect(quick.locator('[name=portfolio_id]')).to_have_value(str(case.root));expect(quick.locator('[name=asset_id]')).to_have_value('synthetic-asset');quick.locator('[data-quick-close]').click()
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.get_by_role('button',name='Køb')).to_be_visible();expect(d.locator('[data-trade-watch]')).to_have_attribute('data-trade-signal','BUY');expect(d.locator('.market-slot .market-price')).to_be_visible()
+   if shot:page.screenshot(path=f'{shot}/signal-buy-390.png')
+   d.get_by_role('button',name='Køb').click();expect(quick).to_contain_text('Køb · TSM');expect(quick.locator('[name=portfolio_id]')).to_have_value(str(case.root));expect(quick.locator('[name=asset_id]')).to_have_value('synthetic-asset');quick.locator('[data-quick-close]').click()
    account['dashboard']['positions']=[];session['latest_context']['position']='none';session['request']['report_id']='synthetic-report';session['request']['candidate_id']='synthetic-candidate'
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('.market-slot .market-price')).to_be_visible();expect(d.locator('.market-marker-entry')).to_have_count(0);d.get_by_role('button',name='Ignorér og luk signalet').click();expect(d).not_to_be_visible()
    account['dashboard']['positions']=[holding];session['latest_context']['position']='held';session['request'].pop('report_id');session['request'].pop('candidate_id')
