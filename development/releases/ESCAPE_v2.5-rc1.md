@@ -1,6 +1,6 @@
 # ESCAPE Invest v2.5 – releasekandidat
 
-Status: under samlet test og uafhængigt review. Produktionsinstallation kræver særskilt ejergodkendelse af den præcise release-SHA. [Issue #57](https://github.com/hva73/invest/issues/57) er releasejournal.
+Status: installeret 12. november 2026 ca. 15:36 UTC. Ejergodkendt og installeret SHA: `483a4b55ce4381e42ffb828125c9bcc0807cc8ba`. [Issue #57](https://github.com/hva73/invest/issues/57) er releasejournal. En senere dokumentationscommit er ikke den installerede SHA.
 
 ## Indhold siden v2.4
 
@@ -14,10 +14,11 @@ Status: under samlet test og uafhængigt review. Produktionsinstallation kræver
 
 Åbne ændringer #60, #87, #92 og #94 indgår ikke. Nye ændringer kan kun medtages, hvis de er nødvendige for releasen og kandidaten derefter testes og identificeres på ny.
 
-## Afventer
+## Test og drift
 
-- Samlet regression og browserkontrol på den endelige releasekode, samt uafhængigt review.
-- Frisk serverkontrol af præcis baseline, kvote, database/WAL/journal, backup og recovery.
-- Ejerens godkendelse af præcis SHA og efterfølgende faktisk installations- og driftskontrol.
+- [Python 3.11 CI](https://github.com/hva73/invest/actions/runs/43244147126) bestod 411 + 15 tests; [mobil-/desktopbrowser-CI](https://github.com/hva73/invest/actions/runs/43244147736) bestod på identisk filtræ.
+- Serverpreflight viste tilstrækkelig kvote og verificerede den seneste backup. [Deploy](https://github.com/hva73/invest/actions/runs/43249227731) meldte fuldført, service gendannet, backupoprydning OK og ingen recovery nødvendig.
+- [Separat driftskontrol](https://github.com/hva73/invest/actions/runs/43249685514) viste installeret deklareret SHA, database OK, to Passenger-processer samt én worker og supervisor med friske heartbeats. Rapport- og kandidatopslag svarede efter installationen.
+- Data er øjebliksbilleder. En faktisk brokerordre, fysisk mobilafprøvning og signalstyret salg af en enkelt aktie i Collection er ikke verificeret. Dagens udvikling er ikke klikbar.
 
 Eksisterende produktionsdata, handelsmandat og brokerordrer ændres ikke af releaseforberedelsen. Et grønt CI-resultat er ikke liveaccept.
