@@ -130,6 +130,7 @@ class HotWatch(unittest.TestCase):
      view=engine.view(c,row,self.now)
      self.assertEqual(view['candidate_review']['status'],status)
      self.assertEqual((view['signal'],view['display_status']),('SELL','SÆLGSSIGNAL'))
+     self.assertEqual(view['last_action_signal']['state'],'ACTIVE')
      self.assertEqual(web_push._actionable(c,row,self.now),'SELL')
      old=engine.view(c,row,self.now+timedelta(seconds=121))
      self.assertEqual(old['signal'],'NO_DATA')
@@ -189,7 +190,12 @@ class HotWatch(unittest.TestCase):
   with patch('intel_workflows.candidate_currentness',return_value={'status':'REVIEW_DUE'}),app.connect() as c:
    row=engine.row_for(c,1,self.req['watch_id'],True);view=engine.view(c,row,at)
    self.assertEqual((view['signal'],view['display_status']),('BUY','REVURDERING FORFALDET'))
+   self.assertEqual(view['last_action_signal']['state'],'DATA_MISSING')
    self.assertIsNone(web_push._actionable(c,row,at))
+  with patch('intel_workflows.candidate_currentness',return_value={'status':'CURRENT'}),app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True);view=engine.view(c,row,at)
+   self.assertEqual(view['last_action_signal']['state'],'ACTIVE')
+   self.assertEqual(web_push._actionable(c,row,at),'BUY')
 
  def test_closed_market_without_other_errors_is_a_normal_active_session(self):
   sample=tick(self.now,held=True);sample.update(market_status='CLOSED',session_key='SYNTHETIC-CLOSED')
