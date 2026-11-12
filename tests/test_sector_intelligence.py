@@ -373,6 +373,24 @@ class SectorIntelligenceTest(unittest.TestCase):
   self.assertEqual(result['dashboard']['accounts'][0]['reported_result']['amount'],'-166.41')
   self.assertEqual(result['dashboard']['accounts'][0]['external_id'],'portfolios:main')
   self.assertTrue(all(row['portfolio_id']==1 for row in result['history']))
+ def test_read_exposes_cash_only_from_available_account_snapshots(self):
+  dashboard={'accounts':[{'id':1},{'id':2},{'id':3}],'positions':[]}
+  owned=[{'id':1,'external_id':'portfolios:main'},{'id':2,'external_id':'collections:child'},{'id':3,'external_id':'portfolios:bad'}]
+  snapshots={
+   '1':{'data':{'value':{},'accounts':[{'balance':{'amount':'500','currency':'DKK'}},{'balance':{'amount':'10','currency':'USD'}}],'errors':[]},'last_error':None},
+   '2':{'data':{'value':{},'accounts':[{'balance':{'amount':'100','currency':'DKK'}}],'errors':[]},'last_error':None},
+   '3':{'data':{'value':{},'accounts':[],'errors':['accounts: Pluto-opslaget fejlede']},'last_error':None}}
+  with patch('portfolios.list_owned',return_value=owned),patch('portfolio_data.snapshots',return_value=snapshots),patch('dashboard_projection.build',return_value=dashboard):result=sector.read(self.connect,1)
+  main,child,bad=result['dashboard']['accounts']
+  self.assertEqual(main['cash_status'],'available')
+  self.assertEqual(main['cash_accounts'],[{'amount':'500','currency':'DKK'},{'amount':'10','currency':'USD'}])
+  self.assertEqual(child['cash_accounts'],[{'amount':'100','currency':'DKK'}])
+  self.assertEqual(bad['cash_status'],'unavailable')
+  snapshots['2']['last_error']='snapshot failed'
+  with patch('portfolios.list_owned',return_value=owned),patch('portfolio_data.snapshots',return_value=snapshots),patch('dashboard_projection.build',return_value=dashboard):result=sector.read(self.connect,1)
+  self.assertEqual(result['dashboard']['accounts'][1]['cash_status'],'unavailable')
+  self.assertEqual(result['dashboard']['accounts'][1]['cash_accounts'],[])
+
  def test_pluto_fund_and_crypto_are_separate_asset_classes(self):
   for aid,kind,expected in [('fund','ETF','Fonde og ETF (aktivklasse)'),('coin','CRYPTO','Krypto (aktivklasse)')]:
    with self.subTest(kind=kind),patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value={'id':aid,'ticker':'TEST','currency':'USD','type':kind,'sector':'Technology'}):
