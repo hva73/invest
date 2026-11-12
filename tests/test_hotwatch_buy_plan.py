@@ -56,6 +56,21 @@ class BuyPlan(unittest.TestCase):
   values=plan.quote(raw,self.req,order);self.assertGreaterEqual(Decimal(values['account_notional_dkk']),Decimal('0.05')*Decimal('21.69')*Decimal('6.775384'))
   raw['estimate']['filledAccountNotional']='7.00'
   with self.assertRaises(EngineError):plan.quote(raw,self.req,order)
+ def test_rounding_boundaries_and_large_fx_are_bounded(self):
+  order={'shares':'1','limitPrice':'100'}
+  e={'side':'BUY','type':'LIMIT','asset':{'ticker':'MERC','currency':'USD'},'limitPrice':'100','quantity':'1','commission':'0','commissionCurrency':'DKK','filledAccountNotionalCurrency':'DKK','assetBankFx':{'base':'USD','quote':'DKK','rate':'7'}}
+  for cost in ('699.960','700.040'):
+   e['filledAccountNotional']=cost;v=plan.quote({'estimate':e},self.req,order);self.assertGreaterEqual(Decimal(v['account_notional_dkk']),Decimal('700'))
+  for cost in ('699.95999','700.04001'):
+   e['filledAccountNotional']=cost
+   with self.subTest(cost=cost),self.assertRaises(EngineError):plan.quote({'estimate':e},self.req,order)
+  e['assetBankFx']['rate']='1000';e['filledAccountNotional']='100005.005'
+  self.assertEqual(Decimal(plan.quote({'estimate':e},self.req,order)['account_notional_dkk']),Decimal('100005.01'))
+  e['filledAccountNotional']='100005.006'
+  with self.assertRaises(EngineError):plan.quote({'estimate':e},self.req,order)
+  for rate in ('0','-1',None):
+   e['assetBankFx']['rate']=rate
+   with self.subTest(rate=rate),self.assertRaises(EngineError):plan.quote({'estimate':e},self.req,order)
  def test_rounding_over_budget_reduces_quantity_and_reestimates_without_orders(self):
   self.data.update(budget_dkk='10',limit_price='21.62',stop_price='20')
   def rounded(*args,**kwargs):
@@ -70,6 +85,12 @@ class BuyPlan(unittest.TestCase):
   self.assertEqual(len(self.calls),3);self.assertLess(Decimal(result['plan']['quantity']),Decimal(self.calls[1]['orders'][0]['shares']))
   self.assertLessEqual(Decimal(result['plan']['account_notional_dkk']),Decimal('10'))
   self.assertEqual(result['plan']['stop_price'],'20');self.assertFalse(self.fixture.writes())
+  with app.connect() as c:
+   row=self.row(c);req=json.loads(row['request']);sample=tick(engine.utc(),price='21.62')
+   sample,risk,_=plan.apply(c,row,req,sample,req['risk'],engine.utc())
+  risk.update(entry_allowed=True,exit_allowed=False,max_loss_dkk='0.01')
+  decision,_=calculate(sample,good_metrics(),BASELINE,risk,{},engine.utc())
+  self.assertIn('LOSS_BUDGET_LIMIT',decision['reason_codes']);self.assertNotEqual(decision['signal'],'BUY')
  def test_retry_still_over_budget_never_stores_a_plan(self):
   self.data.update(budget_dkk='10',limit_price='21.62',stop_price='20')
   def changed(*args,**kwargs):
