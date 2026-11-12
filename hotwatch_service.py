@@ -1,6 +1,6 @@
 """Standalone read-only HOT WATCH service. Never scheduled by legacy worker.py."""
 from eodhd_capacity import Capacity
-import json,signal,threading,logging,hashlib,time,os,re,secrets,sqlite3,sys
+import json,signal,threading,logging,hashlib,time,os,re,secrets,sqlite3,sys,math
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor,wait,FIRST_COMPLETED
 from contextlib import contextmanager
@@ -531,7 +531,7 @@ def recover_automatic_feeds(connect,now=None):
    if not known and not lookup_attempted:
     with connect() as c:retry=c.execute('SELECT next_attempt FROM hw_feed_recovery WHERE watch_row_id=?',(row['id'],)).fetchone()
     if retry and retry['next_attempt']>now.timestamp():continue
-    lookup_attempted=True;status='IDENTITY_UNVERIFIED';budget_provider='pluto'
+    lookup_attempted=True;status='IDENTITY_UNVERIFIED';budget_provider='pluto';retry_after=None
     try:
      if row['purpose']=='automatic holding watch':instrument=holding_instrument(connect,row['user_id'],holding)
      else:instrument=verified_discovery_instrument(connect,row['user_id'],holding)
@@ -579,7 +579,10 @@ def recover_automatic_feeds(connect,now=None):
     except Exception as error:
      status=reference_error_code(error)
      if status=='PROVIDER_RATE_BUDGET':status=budget_provider.upper()+'_RATE_BUDGET'
+     requested=getattr(error,'retry_after_s',None)
+     if type(requested) in (int,float) and math.isfinite(requested) and requested>0:retry_after=requested
     delay=60 if status in ('PROVIDER_RATE_BUDGET','PLUTO_RATE_BUDGET','EODHD_RATE_BUDGET') else 43200 if status=='CRYPTO_IDENTITY_UNVERIFIED' else 300
+    if retry_after is not None:delay=max(delay,retry_after)
     with connect() as c:c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?) ON CONFLICT(watch_row_id) DO UPDATE SET next_attempt=excluded.next_attempt,status=excluded.status,updated=excluded.updated',(row['id'],now.timestamp()+delay,status,now.isoformat()))
    if not known:continue
    updated=dict(req,provider='eodhd',provider_symbol=known['provider_symbol'])
