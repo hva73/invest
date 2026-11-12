@@ -180,7 +180,7 @@
 @media (min-width: 901px) {
  .si-donut-wrap { width:min(100%,240px); margin:auto; }
  .si-donut-wrap .dash-chart-tooltip { text-align:left; }
- .si-bar-column .dash-chart-tooltip { text-align:left; }
+ .si-bar-column .dash-chart-tooltip { text-align:left; top:8px; bottom:auto; }
  .si-bar-column .dash-chart-tooltip strong { font-size:12px; color:inherit; }
 }
 

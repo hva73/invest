@@ -116,7 +116,7 @@ window.DashboardUI=(()=>{
  function showChartPoint(svg,point){
   if(!svg||!point)return;const plot=svg.closest('.dash-chart-plot'),tip=plot?.querySelector('.dash-chart-tooltip');if(!tip)return;
   const previous=svg.querySelector('.dash-chart-point.is-selected');if(previous&&previous!==point)previous.classList.remove('is-selected');point.classList.add('is-selected');fillChartTooltip(tip,point);
-  const box=svg.viewBox?.baseVal,width=box?.width||600,origin=box?.x||0,matrix=svg.getScreenCTM?.(),plotBox=plot.getBoundingClientRect();const x=Number(point.getAttribute('cx')),y=Number(point.getAttribute('cy'));const fraction=matrix&&plotBox.width?(matrix.a*x+matrix.c*y+matrix.e-plotBox.left)/plotBox.width:(x-origin)/width;tip.style.left=Math.min(88,Math.max(12,fraction*100))+'%';tip.hidden=false;
+  const box=svg.viewBox?.baseVal,width=box?.width||600,origin=box?.x||0,matrix=svg.getScreenCTM?.(),plotBox=plot.getBoundingClientRect();const x=Number(point.getAttribute('cx')),y=Number(point.getAttribute('cy'));const fraction=matrix&&plotBox.width?(matrix.a*x+matrix.c*y+matrix.e-plotBox.left)/plotBox.width:(x-origin)/width;tip.hidden=false;const inset=Math.min(50,((tip.offsetWidth/2)+6)/Math.max(1,plotBox.width)*100);tip.style.left=Math.min(100-inset,Math.max(inset,fraction*100))+'%';
  }
  function showDiscreteChart(point,event){
   const plot=point.closest('.dash-chart-plot'),tip=plot?.querySelector('.dash-chart-tooltip');if(!tip)return;fillChartTooltip(tip,point);
