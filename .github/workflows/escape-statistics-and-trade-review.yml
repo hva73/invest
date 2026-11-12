@@ -1,0 +1,77 @@
+name: ESCAPE statistics preview and synthetic trading journey
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  isolated-statistics-preview:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue114-statistics'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt playwright==1.56.0
+      - run: python -m playwright install --with-deps chromium
+      - run: node tests/test_statistics_ui.cjs && python tests/browser_statistics_preview.py && python tests/browser_statistics_integration.py
+        env:
+          ESCAPE_SCREENSHOTS: ${{ runner.temp }}/statistics-preview
+          PYTHONPATH: .:tests
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: statistics-synthetic-preview
+          path: ${{ runner.temp }}/statistics-preview
+  integrated-trade-journey:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue114-statistics'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 934a5be60b7c07a976ad0413461546734d8e50b2
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt playwright==1.56.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Synthetic quick trade and server proposal journeys
+        env:
+          ESCAPE_PLAYWRIGHT_MANAGED: '1'
+          PYTHONPATH: .:tests
+        run: |
+          python tests/browser_quick_trade.py
+          python - <<'PY'
+          import pathlib
+          source=pathlib.Path('tests/browser_trade_proposals.py').read_text()
+          old="p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])"
+          if source.count(old)!=1: raise RuntimeError('browser launch hook changed')
+          source=source.replace(old,'p.chromium.launch(headless=True)')
+          old_nav="page.locator('nav [data-view=journal]').click()"
+          if source.count(old_nav)!=1: raise RuntimeError('journal navigation hook changed')
+          source=source.replace(old_nav,"page.locator('#content [data-view=journal]').first.click()")
+          pathlib.Path('tests/_synthetic_proposals_managed.py').write_text(source)
+          PY
+          python tests/_synthetic_proposals_managed.py
+  synthetic-exit-to-server:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue114-statistics'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: proofs
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 934a5be60b7c07a976ad0413461546734d8e50b2
+          path: integration
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt playwright==1.56.0
+        working-directory: integration
+      - run: python -m playwright install --with-deps chromium
+      - run: python ../proofs/tests/browser_signal_sell_server.py
+        working-directory: integration
