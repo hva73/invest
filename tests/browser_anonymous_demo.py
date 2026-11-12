@@ -44,6 +44,9 @@ try:
     page.evaluate("() => {state.dashboard=window.savedDashboard;render()}")
    row=page.get_by_role('button',name='Åbn position TSLA i Demodepot');row.click()
    dialog=page.locator('#dashboard-detail');expect(dialog).to_be_visible()
+   if shot and width==390:
+    expect(dialog.locator('.market-chart svg[role=img]')).to_be_visible()
+    page.screenshot(path=f'{shot}/owner-position-summary-390.png')
    for period in ('day','week','month','year'):
     dialog.locator(f'[data-market-period={period}]').click()
     chart=dialog.locator('.market-chart svg[role=img]');expect(chart).to_be_visible()
