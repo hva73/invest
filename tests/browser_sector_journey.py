@@ -61,6 +61,15 @@ try:
     page.locator('.sector-heading h2').first.hover();expect(rtip).to_be_hidden()
    page.screenshot(path=str(screens/f'sektor-oversigt-{width}.png'),full_page=True)
    page.locator('.sector-row').filter(has_text='Sundhed').click()
+   if width < 700:
+    # Mobile uses its approved inline sector detail and exact portfolio row.
+    mobile=page.locator('.sector-mobile-holdings [data-dashboard-member]')
+    expect(mobile.first).to_be_visible()
+    expect(page.locator('#sector-journey')).to_have_count(0)
+    assert not writes,writes
+    assert not errors,(width,errors)
+    page.close()
+    continue
    journey=page.locator('#sector-journey');expect(journey).to_be_visible()
    expect(journey.locator('h2')).to_have_text('Sundhed')
    expect(journey.locator('[data-sector-position]')).to_have_count(4)
