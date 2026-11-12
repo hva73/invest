@@ -127,19 +127,25 @@ try:
                     page.locator('.dash-hero-intro h2').hover();expect(tip).to_be_hidden()
                     page.locator('.dash-hero .dash-chart-point').first.focus();expect(tip).to_be_visible()
                     page.locator('.dash-hero-intro h2').click();expect(tip).to_be_hidden()
-                    empty_alert = page.locator('.dash-attention')
-                    expect(empty_alert).to_be_hidden()
+                    # The fixture has an incomplete source: retain the visible
+                    # warning rather than interpreting missing data as no action.
+                    unknown_alert = page.locator('.dash-attention-unknown')
+                    expect(unknown_alert).to_be_visible()
+                    expect(unknown_alert).to_contain_text('Overblik afventer data')
                     expect(page.locator('.dash-signals')).to_be_hidden()
                     expect(page.locator('.dash-quality')).to_be_hidden()
                     expect(page.locator('.dash-hero-intro > p:not(.dash-warning)')).to_be_hidden()
-                    # A real action and an explicitly unknown data state remain visible.
+                    # Exercise desktop styling for an empty, active and unknown
+                    # section without altering the real incomplete-source warning.
+                    page.locator('.dashboard-v1').evaluate("e => e.insertAdjacentHTML('beforeend', '<section id=synthetic-attention class=\"panel dash-attention\"></section>')")
+                    empty_alert = page.locator('#synthetic-attention')
+                    expect(empty_alert).to_be_hidden()
                     empty_alert.evaluate("e => e.insertAdjacentHTML('beforeend', '<div class=\"dash-table-wrap\">Aktivt signal</div>')")
                     expect(empty_alert).to_be_visible()
                     empty_alert.locator('.dash-table-wrap').last.evaluate('e => e.remove()')
                     empty_alert.evaluate("e => e.classList.add('dash-attention-unknown')")
                     expect(empty_alert).to_be_visible()
-                    empty_alert.evaluate("e => e.classList.remove('dash-attention-unknown')")
-                    expect(empty_alert).to_be_hidden()
+                    empty_alert.evaluate("e => e.remove()")
                 assert page.locator('body > aside').evaluate('e => e.getBoundingClientRect().width') == 224
                 assert page.locator('main').evaluate('e => e.getBoundingClientRect().left') >= 224
                 assert page.locator('nav [data-view=overview]').evaluate('e => e.getBoundingClientRect().height') >= 44
