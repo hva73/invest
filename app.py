@@ -283,7 +283,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path=='/api/admin/release-approval':
                 if s['role']!='admin' or s['username']!='owner':return self.send(403,{'error':'Kun ejeren kan godkende opdateringer'})
                 import release_approval
-                return self.send(200,{'candidate':release_approval.pending(connect,user_id)})
+                return self.send(200,{'candidate':release_approval.pending(connect,user_id),'current':release_approval.current(connect,user_id)})
             if self.path=='/api/push/config':
                 import web_push
                 return self.send(200,web_push.config(connect,user_id))

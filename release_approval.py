@@ -62,6 +62,21 @@ def pending(connect, owner_id, *, now=None):
     return dict(zip(('id', 'sha', 'summary', 'expires'), row))
 
 
+
+def current(connect, owner_id, *, now=None):
+    """Owner-scoped latest candidate and durable observed installation state."""
+    now = time.time() if now is None else now
+    with connect() as c:
+        row = c.execute("""SELECT id,sha,summary,expires,status FROM release_approvals
+            WHERE owner_id=? ORDER BY created DESC, rowid DESC LIMIT 1""", (owner_id,)).fetchone()
+    if row is None:
+        return None
+    result = dict(zip(('id', 'sha', 'summary', 'expires', 'status'), row))
+    if result['status'] in ('pending', 'approved') and result['expires'] <= now:
+        result['status'] = 'expired'
+    return result
+
+
 def claim(connect, candidate_id, sha, *, now=None):
     """Claim a single approved, current candidate before starting installation.
 

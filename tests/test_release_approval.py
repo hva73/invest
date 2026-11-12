@@ -20,6 +20,17 @@ class ReleaseApprovalTests(unittest.TestCase):
     def candidate(self):
         return a.prepare(self.connect, 'a' * 40, 'Mobil og datarettelser', 7, now=100, lifetime=60)
 
+    def test_current_status_is_owner_scoped_and_reports_expiry(self):
+        item=self.candidate()
+        self.assertIsNone(a.current(self.connect,8,now=101))
+        self.assertEqual(a.current(self.connect,7,now=101)['status'],'pending')
+        a.approve(self.connect,item['id'],item['sha'],7,now=102)
+        self.assertEqual(a.current(self.connect,7,now=103)['status'],'approved')
+        self.assertEqual(a.current(self.connect,7,now=161)['status'],'expired')
+        a.claim(self.connect,item['id'],item['sha'],now=104)
+        a.finish(self.connect,item['id'],item['sha'],verified=False)
+        self.assertEqual(a.current(self.connect,7,now=200)['status'],'recovery')
+
     def test_correct_owner_and_version_approves_once(self):
         item = self.candidate()
         self.assertEqual(a.pending(self.connect, 7, now=101)['sha'], item['sha'])
