@@ -574,3 +574,7 @@ body:has(#login:not([hidden])) > aside nav{display:none}
 @media(max-width:700px){
  .dash-hero-metrics .dash-total{font-size:clamp(15px,4vw,20px);white-space:normal;overflow-wrap:anywhere}
 }
+@media(max-width:700px){
+ .mobile-holding-daily.positive{color:var(--dash-positive)}
+ .mobile-holding-daily.negative{color:var(--dash-negative)}
+}
