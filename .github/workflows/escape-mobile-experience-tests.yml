@@ -7,13 +7,13 @@ permissions:
   contents: read
 jobs:
   mobile-experience:
-    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue63-anonymous-demo' || github.event.pull_request.head.ref == 'codex/issue54-signal-decision-ux' || github.event.pull_request.head.ref == 'codex/mobile-experience-2' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue67-desktop-experience')
+    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue63-anonymous-demo' || github.event.pull_request.head.ref == 'codex/issue54-signal-decision-ux' || github.event.pull_request.head.ref == 'codex/issue54-mobile-v24' || github.event.pull_request.head.ref == 'codex/mobile-experience-2' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue67-desktop-experience')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
@@ -28,6 +28,7 @@ jobs:
           ESCAPE_SCREENSHOTS: /tmp/escape-mobile-screens
           PYTHONPATH: .:tests
         run: |
+          node tests/test_sector_ui.js
           node tests/test_dashboard_data.js
           node tests/test_dashboard_attention.js
           node tests/test_signal_notice.js
@@ -50,6 +51,9 @@ jobs:
           python tests/browser_quick_trade.py
           python tests/browser_anonymous_demo.py
           python -m unittest discover -s tests -p test_anonymous_demo.py
+          python tests/browser_desktop_experience.py
+          python tests/browser_desktop_trade.py
+          python tests/review_integrated_decision.py
       - name: Upload synthetic screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

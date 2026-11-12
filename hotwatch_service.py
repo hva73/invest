@@ -314,12 +314,14 @@ JOIN report_candidate_links l ON l.rowid=(
 JOIN ingested_reports r ON r.id=l.report_row_id
 ORDER BY l.generated DESC,r.id DESC"""
 
-def discovery_candidate_order(rows):
+def discovery_candidate_order(rows, report_cache=None):
  """Sort candidates within each report after releasing the database read scope."""
+ if report_cache is None:report_cache={}
  cache={}
  def position(row):
   if row['id'] not in cache:
-   candidates=json.loads(row['payload']).get('candidates',[])
+   if row['id'] not in report_cache:report_cache[row['id']]=json.loads(row['payload'])
+   candidates=report_cache[row['id']].get('candidates',[])
    positions={}
    for i,item in enumerate(candidates):
     if isinstance(item,dict):positions.setdefault(item.get('candidate_id'),i)
@@ -349,13 +351,12 @@ def auto_discover(connect,cursor=0):
    cleared={r[0] for r in c.execute('SELECT DISTINCT candidate_id FROM report_candidate_links WHERE user_id=? AND is_test=0 AND report_row_id<=?',(uid,radar_reset['report_cutoff']))} if radar_reset else set()
    rows=c.execute(DISCOVERY_CANDIDATES_SQL,(uid,uid,now.timestamp())).fetchall()
   if rows:
-   rows=discovery_candidate_order(rows)
-   candidate=None;report=None;report_cache={}
+   report_cache={};rows=discovery_candidate_order(rows,report_cache)
+   candidate=None;report=None
    with connect() as c:
     for offset in range(len(rows)):
      row=rows[(cursor+offset)%len(rows)]
      if after and stamp(row['received'])<=after:continue
-     if row['id'] not in report_cache:report_cache[row['id']]=json.loads(row['payload'])
      current=report_cache[row['id']];cid=row['candidate_id']
      if cid in cleared:
       from intel_workflows import radar_reassessed_after_reset

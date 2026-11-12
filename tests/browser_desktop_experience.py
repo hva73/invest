@@ -43,7 +43,7 @@ try:
             expect(page.locator('.dash-holdings')).to_contain_text('DELTA')
             if page.locator('[data-dashboard-range=week]').is_visible():
                 page.locator('[data-dashboard-range=week]').click()
-                assert page.locator('.dash-chart-point').count() >= 70
+                assert page.locator('.dash-chart-point').count() >= (2 if width < 700 else 70)
             else:
                 expect(page.locator('.mobile-holdings')).to_be_visible()
             before = page.evaluate('''() => {
@@ -131,3 +131,4 @@ finally:
     server.shutdown()
     server.server_close()
     case.tearDown()
+

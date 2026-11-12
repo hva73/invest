@@ -29,6 +29,12 @@ try:
     for target in ('portfolios','hot-watch','sectors','overview'):
      nav.locator(f':scope > [data-view="{target}"]').click()
      expect(nav.locator(f':scope > [data-view="{target}"]')).to_have_class('active')
+     if width<=700 and target=='portfolios':
+      expect(page.locator('.portfolio-catalog-heading .section-heading>div')).to_be_hidden();expect(page.locator('.portfolio-catalog-heading button')).to_be_visible()
+      if screenshot_dir:page.screenshot(path=str(Path(screenshot_dir)/f'clean-portfolios-{width}.png'))
+     if width<=700 and target=='hot-watch':
+      expect(page.locator('.engine-overview')).to_be_visible();expect(page.locator('.engine-hero>div')).to_be_hidden();expect(page.locator('[data-engine-new]')).to_be_visible();expect(page.locator('[data-watch-refresh]')).to_be_visible()
+      if screenshot_dir:page.screenshot(path=str(Path(screenshot_dir)/f'clean-hotwatch-{width}.png'))
      assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1'),(width,target)
     more.click();expect(page.locator('#mobile-more-panel')).to_be_visible()
     expect(page.locator('#mobile-more-panel [data-view=radar]')).to_be_visible()
