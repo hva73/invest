@@ -89,9 +89,11 @@ jobs:
           git show ed4982f374bd2a2d4d1b6c0c0d9f2e22d4c3b8fd:tools/nordicway_v23_owner_preflight.py > "$RUNNER_TEMP/preflight.py"
           "$RUNNER_TEMP/escape-data-venv/bin/python" -m py_compile "$RUNNER_TEMP/preflight.py"
           "$RUNNER_TEMP/escape-data-venv/bin/python" - "$RUNNER_TEMP/preflight.py" <<'PY'
-          import importlib.util, tempfile
+          import importlib.util, tempfile, sys, types
           from pathlib import Path
           import nordicway_release_preflight as preflight
+          for name in ('nordicway_deploy_runner', 'nordicway_release_stage', 'nordicway_release_backup', 'nordicway_uapi_quota', 'nordicway_release_service', 'nordicway_deploy_health'):
+              sys.modules[name] = types.ModuleType(name)
           spec=importlib.util.spec_from_file_location('owner_preflight_test', __import__('sys').argv[1])
           module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
           assert module.SHA == '645c293a5c484187a68d121a5cdd96c0a958bc86'
