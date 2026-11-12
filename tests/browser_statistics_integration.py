@@ -22,7 +22,17 @@ try:
    expect(page.locator('#statistics-title')).to_have_text('Hvordan står det til?')
    expect(page.locator('.statistics-summary strong')).to_contain_text('+8,25 USD')
    expect(page.locator('.statistics-note')).to_contain_text('Gebyrer')
-   page.locator('.statistics-trade').first.locator('summary').click();expect(page.locator('.statistics-detail').first).to_be_visible();page.locator('.statistics-trade').first.locator('summary').click()
+   title=page.locator('#statistics-title').bounding_box();refresh=page.locator('[data-statistics-reload]').bounding_box()
+   assert title and refresh and refresh['x']+refresh['width']<=width+1,(width,title,refresh)
+   assert title['x']+title['width']<=refresh['x']+1 or title['y']+title['height']<=refresh['y']+1,(width,title,refresh)
+   page.locator('.statistics-trade').last.locator('summary').click();detail=page.locator('.statistics-detail').last;expect(detail).to_be_visible()
+   if width<=900:
+    page.evaluate('window.scrollTo(0,document.documentElement.scrollHeight)')
+    box=detail.bounding_box();nav=page.locator('body > aside nav').bounding_box()
+    assert box and nav and box['y']+box['height']<=nav['y']+1,(width,box,nav)
+    if os.environ.get('ESCAPE_SCREENSHOTS'):page.screenshot(path=str(Path(os.environ['ESCAPE_SCREENSHOTS'])/f'statistik-mobil-detalje-{width}.png'))
+   page.locator('.statistics-trade').last.locator('summary').click()
+
    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1'),width
    screenshots=os.environ.get('ESCAPE_SCREENSHOTS')
    if screenshots:
