@@ -583,7 +583,9 @@ def recover_automatic_feeds(connect,now=None):
      if type(requested) in (int,float) and math.isfinite(requested) and requested>0:retry_after=requested
     delay=60 if status in ('PROVIDER_RATE_BUDGET','PLUTO_RATE_BUDGET','EODHD_RATE_BUDGET') else 43200 if status=='CRYPTO_IDENTITY_UNVERIFIED' else 300
     if retry_after is not None:delay=max(delay,retry_after)
-    with connect() as c:c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?) ON CONFLICT(watch_row_id) DO UPDATE SET next_attempt=excluded.next_attempt,status=excluded.status,updated=excluded.updated',(row['id'],now.timestamp()+delay,status,now.isoformat()))
+    # Keep unusually large provider delays conservative and representable in readback.
+    next_attempt=min(now.timestamp()+delay,engine.MAX_RECOVERY_TIMESTAMP)
+    with connect() as c:c.execute('INSERT INTO hw_feed_recovery VALUES(?,?,?,?) ON CONFLICT(watch_row_id) DO UPDATE SET next_attempt=excluded.next_attempt,status=excluded.status,updated=excluded.updated',(row['id'],next_attempt,status,now.isoformat()))
    if not known:continue
    updated=dict(req,provider='eodhd',provider_symbol=known['provider_symbol'])
    with connect() as c:

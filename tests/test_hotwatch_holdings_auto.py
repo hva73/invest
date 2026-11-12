@@ -601,6 +601,23 @@ class HoldingAutowatch(unittest.TestCase):
     with patch('hotwatch_service.holding_instrument',return_value=self.instrument),patch('hotwatch_adapters.search_eodhd_symbols',side_effect=error):
      self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
     with app.connect() as c:self.assertEqual(c.execute('SELECT next_attempt FROM hw_feed_recovery').fetchone()['next_attempt'],self.now.timestamp()+delay)
+ def test_extreme_recovery_retry_remains_readable_in_both_sync_modes(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  error=DataUnavailable('PROVIDER_RATE_BUDGET',429);error.retry_after_s=1e308
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=self.instrument),patch('hotwatch_adapters.search_eodhd_symbols',side_effect=error):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+  with app.connect() as c:next_attempt=c.execute('SELECT next_attempt FROM hw_feed_recovery').fetchone()['next_attempt']
+  self.assertGreater(next_attempt,self.now.timestamp()+86400)
+  self.assertLessEqual(next_attempt,253402214400)
+  for summary in (True,False):
+   session=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=summary)['open_sessions'][0]
+   self.assertEqual(session['next_feed_recovery_at'],'9999-12-31T00:00:00+00:00')
+   self.assertEqual(session['feed_recovery_provider'],'eodhd')
+  with app.connect() as c:c.execute('UPDATE hw_feed_recovery SET next_attempt=?',(1e308,))
+  for summary in (True,False):
+   session=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=summary)['open_sessions'][0]
+   self.assertIsNone(session['next_feed_recovery_at'])
  def test_candidate_recovery_reports_pluto_budget_without_claiming_eodhd_failure(self):
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
    self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
