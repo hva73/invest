@@ -675,3 +675,10 @@ body > aside nav .nav-sector-mobile{display:none}
  .si-detail .sector-mobile-holdings{margin-top:8px}
  .si-detail .sector-mobile-holdings .mobile-holding:disabled{opacity:.65}
 }
+
+@media(max-width:700px){
+ .si-allocation .sector-list .sector-row{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%;width:100%;box-sizing:border-box;text-align:left}
+ .si-allocation .sector-list .sector-row>div{min-width:0;overflow-wrap:anywhere}
+ .si-allocation .sector-list .sector-row>div:first-of-type{flex:1 1 auto}
+ .si-allocation .sector-list .sector-row .si-row-value{flex:0 1 auto;text-align:right}
+}
