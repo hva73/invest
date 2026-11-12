@@ -88,3 +88,22 @@ class ReaderTest(unittest.TestCase):
         with patch('oauth.access_token',return_value='test'):
             result=read(connect,1,Client)
         self.assertEqual(result['portfolios'],[]);self.assertTrue(result['errors'])
+
+class HttpTest(unittest.TestCase):
+    def test_endpoint_requires_session_and_uses_authenticated_user(self):
+        import io, json, tempfile
+        from unittest.mock import patch
+        import app, passenger_wsgi, realized_statistics
+        with tempfile.TemporaryDirectory() as directory, patch.object(app,'DB',directory+'/test.sqlite'):
+            app.init();app.create_user('statistics-test-password')
+            def request(path,data=None,cookie=''):
+                body=json.dumps(data).encode() if data else b'';headers=[]
+                response=b''.join(passenger_wsgi.application({'PATH_INFO':path,'REQUEST_METHOD':'POST' if data else 'GET','REMOTE_ADDR':'test','CONTENT_LENGTH':str(len(body)),'wsgi.input':io.BytesIO(body),'HTTP_COOKIE':cookie},lambda status,h:headers.extend([status,h])))
+                return headers,json.loads(response)
+            self.assertTrue(request('/api/realized-statistics')[0][0].startswith('401'))
+            headers,_=request('/api/login',{'password':'statistics-test-password'})
+            cookie=next(v for k,v in headers[1] if k=='Set-Cookie').split(';')[0]
+            with patch.object(realized_statistics,'read',return_value={'portfolios':[],'history_complete':False}) as reader:
+                response,body=request('/api/realized-statistics',cookie=cookie)
+            self.assertTrue(response[0].startswith('200'));self.assertFalse(body['history_complete'])
+            self.assertEqual(reader.call_args.args[1],1)

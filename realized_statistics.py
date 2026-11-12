@@ -121,13 +121,16 @@ def project(direct_orders, collection_orders=()):
 def read(connect, user_id, client_factory=None):
     """Read only active portfolios owned by the session; no broker writes."""
     import oauth
-    from mcp_client import MCP, decode_result
+    from mcp_client import decode_result
     from pending_orders import allowed
     from portfolio_data import list_data
     with connect() as db:
         portfolios = [dict(row) for row in db.execute(
             "SELECT id,name,external_id,kind,parent_external_id FROM portfolios WHERE user_id=? AND source='pluto' AND active=1", (user_id,))]
-    client = (client_factory or MCP)(oauth.access_token(connect, user_id))
+    if client_factory is None:
+        from hotwatch_adapters import PlutoAdapter
+        client_factory = PlutoAdapter(connect, user_id, purpose='statistics').factory
+    client = client_factory(oauth.access_token(connect, user_id))
     tools = client.tools(); output = []; errors = []
     for portfolio in portfolios:
         external = portfolio['external_id'] or ''
