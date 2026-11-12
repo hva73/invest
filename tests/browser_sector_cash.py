@@ -20,9 +20,9 @@ payload = {
  'dashboard': {
   'accounts':[
    {'id':1,'name':'Hoved','kind':'portfolio','external_id':'portfolios:main',
-    'snapshot_at':stamp,'value':cash(2600),'cash_status':'available','cash_accounts':[cash(500)]},
+    'snapshot_at':stamp,'value':cash(2600),'positions_status':'available','cash_status':'available','cash_accounts':[cash(500)]},
    {'id':2,'name':'AI','kind':'collection','parent_external_id':'portfolios:main',
-    'snapshot_at':older,'value':cash(900),'cash_status':'available','cash_accounts':[cash(100)]}],
+    'snapshot_at':older,'value':cash(900),'positions_status':'available','cash_status':'available','cash_accounts':[cash(100)]}],
   'positions':[
    {'asset_id':'direct','ticker':'TESTA','name':'Fiktiv aktie A','portfolio_id':1,
     'snapshot_at':stamp,'value':cash(1200),'unrealized':cash(0),'cost_basis':cash(1200),
@@ -57,6 +57,14 @@ try:
    expect(page.locator('.sector-row').filter(has_text='Kontantbeholdning')).to_contain_text('100,00')
    page.locator('[data-sector-scope="1"]').click()
    expect(page.locator('.si-donut strong')).to_contain_text('2.600,00')
+   payload['dashboard']['accounts'][1]['positions_status']='unavailable'
+   page.reload()
+   page.locator('nav [data-view=sectors]').click()
+   expect(page.locator('.si-donut')).to_contain_text('DELVIS FORDELING')
+   expect(page.locator('.si-allocation')).to_contain_text('Positioner for et eller flere valgte depoter')
+   page.locator('[data-sector-scope="2"]').click()
+   expect(page.locator('.si-allocation')).to_contain_text('Positioner for et eller flere valgte depoter')
+   payload['dashboard']['accounts'][1]['positions_status']='available'
    payload['dashboard']['accounts'].append({'id':3,'name':'Mangler','kind':'collection','parent_external_id':'portfolios:main',
     'external_id':'collections:missing','value':None,'cash_status':'unavailable','cash_accounts':[],'snapshot_missing':True})
    page.reload()

@@ -408,6 +408,20 @@ class SectorIntelligenceTest(unittest.TestCase):
   self.assertIsNone(accounts[2]['value'])
   self.assertTrue(accounts[2]['failed'])
 
+ def test_read_marks_incomplete_or_failed_positions_separately_from_cash(self):
+  dashboard={'accounts':[{'id':1},{'id':2},{'id':3}],'positions':[]}
+  owned=[{'id':1},{'id':2},{'id':3}]
+  snapshots={'1':{'data':{'positions_complete':True,'accounts':[],'errors':[]},'last_error':None},
+             '2':{'data':{'positions_complete':False,'accounts':[],'errors':[]},'last_error':None},
+             '3':{'data':{'positions_complete':True,'accounts':[],'errors':[]},'last_error':'offline'}}
+  with patch('portfolios.list_owned',return_value=owned),patch('portfolio_data.snapshots',return_value=snapshots),patch('dashboard_projection.build',return_value=dashboard):
+   result=sector.read(self.connect,1)
+  a,b,c=result['dashboard']['accounts']
+  self.assertEqual(a['positions_status'],'available')
+  self.assertEqual(b['positions_status'],'unavailable')
+  self.assertEqual(b['cash_status'],'available')
+  self.assertEqual(c['positions_status'],'unavailable')
+
  def test_pluto_fund_and_crypto_are_separate_asset_classes(self):
   for aid,kind,expected in [('fund','ETF','Fonde og ETF (aktivklasse)'),('coin','CRYPTO','Krypto (aktivklasse)')]:
    with self.subTest(kind=kind),patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value={'id':aid,'ticker':'TEST','currency':'USD','type':kind,'sector':'Technology'}):
