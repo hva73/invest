@@ -507,3 +507,42 @@ html:has(#engine-dialog[open]),body:has(#engine-dialog[open]){overflow:hidden;ov
 /* Navigation becomes available only after entering the app or demo. */
 body:has(#login:not([hidden])) > aside nav{display:none}
 @media(max-width:900px){body:has(#login:not([hidden])) main > header{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);margin:0;padding:0}body:has(#login:not([hidden])) main{padding-top:12px;padding-bottom:24px}}
+
+/* Mobile: show the useful overview, keep diagnostics and desktop detail separate. */
+.position-mobile-summary,#dashboard-detail > .position-actions-mobile{display:none}
+@media(max-width:700px){
+ .dashboard-v1 .dash-hero-top #dashboard-value-chart{display:block}
+ .dashboard-v1 .dash-signals,.dashboard-v1 .dash-quality{display:none}
+ .dash-hero-top .dash-chart{margin:0;padding-top:12px}
+ .dash-chart-heading{gap:8px;flex-wrap:wrap}
+ .dash-chart-heading h3{font-size:16px;margin:4px 0}
+ .dash-chart-periods{display:flex;width:100%;gap:4px}
+ .dash-chart-periods button{flex:1;min-width:0;min-height:40px;padding:6px 3px;font-size:11px}
+ .dash-chart-summary>div:last-child{display:none}
+ .dash-chart-note{font-size:11px;line-height:1.4}
+ #dashboard-detail .position-details-desktop{display:none}
+ #dashboard-detail .position-mobile-summary{display:block}
+ .position-mobile-name{font-weight:600;margin:0 0 10px;color:#cce2dc}
+ .position-mobile-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0}
+ .position-mobile-facts>div{min-width:0;padding:10px;border:1px solid #315360;border-radius:10px;background:#193641}
+ .position-mobile-facts dt{font-size:11px;color:#b5c9d0}
+ .position-mobile-facts dd{margin:5px 0 0;font-size:16px;font-weight:650;overflow-wrap:anywhere}
+ .position-mobile-facts .dash-change{white-space:normal}
+ .position-mobile-status{margin:12px 0 4px}
+ .position-mobile-source{margin:0 0 12px;color:#b3c8c9;font-size:11px;line-height:1.5}
+ #dashboard-detail .position-mobile-signal{width:100%;margin:4px 0 12px;text-align:left}
+ #dashboard-detail > .asset-trade-bar:not(.position-actions-mobile){display:none}
+ #dashboard-detail > .position-actions-mobile{display:flex}
+ #dashboard-detail > .position-actions-mobile button{background:#18362f;border:1px solid #4a8273;color:#d5f4e9}
+ #dashboard-detail > .position-actions-mobile .asset-sell{background:#352a30;border-color:#805f68;color:#ffe1e5}
+ .portfolio-catalog-heading{padding:0;background:none;border:0;border-radius:0}
+ .portfolio-catalog-heading .section-heading{justify-content:flex-end}
+ .portfolio-catalog-heading .section-heading>div,.portfolio-catalog-heading>p{display:none}
+ .portfolio-catalog-heading button{min-height:44px}
+ .hotwatch-toolbar>div:first-child{display:none}
+ .hotwatch-toolbar{margin-bottom:8px}
+ .engine-hero{padding:0;border:0;background:none;align-items:flex-end}
+ .engine-hero>div,.engine-section-heading p,.engine-list-heading p{display:none}
+ .engine-section-heading{margin-top:8px}
+ .engine-list-identity small:not(.engine-list-company){display:none}
+}
