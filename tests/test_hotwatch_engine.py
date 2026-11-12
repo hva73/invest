@@ -1544,7 +1544,7 @@ class HotWatch(unittest.TestCase):
    second=auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:verified)
   self.assertEqual(second['status'],'CREATED');self.assertNotEqual(first['watch_id'],second['watch_id'])
   with app.connect() as c:
-   rows=c.execute('SELECT watch_id,status,request FROM hw_sessions WHERE candidate_id=? ORDER BY id',(candidate['candidate_id'],)).fetchall()
+   rows=c.execute('SELECT watch_id,status,request FROM hw_sessions WHERE candidate_id=? AND watch_id IN (?,?) ORDER BY id',(candidate['candidate_id'],first['watch_id'],second['watch_id'])).fetchall()
    self.assertEqual([(r['watch_id'],r['status']) for r in rows],[(first['watch_id'],'EXPIRED'),(second['watch_id'],'CREATED')])
    risk=json.loads(rows[-1]['request'])['risk'];self.assertIsNone(risk['proposed_quantity']);self.assertIsNone(risk['stop_price'])
    self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
