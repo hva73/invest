@@ -1,4 +1,4 @@
-"""Owner-only, one-incident recovery after the 5ccc34a pre-backup drain failure.
+"""Owner-only recovery for the 39a609 pre-backup drain failure.
 
 This never restores or writes the application database. It requires exact
 installed files and healthy original runtime, archives the recovery marker,
@@ -17,10 +17,10 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 HOME = Path('/home/nordicr4')
-RELEASE = '5ccc34aa26ba3a3e5ace89f3562e3fd0328f6cd9'
-INSTALLED = '8ed0e6d41b24db18b8687729b344133ae5fb28fd'
-BUNDLE = '986ec9a6a7cdc8e931c6deb926b80ac97dfe68fa'
-PREVIOUS_BUNDLE = 'c47d58e4e096248e49eca561329887aca84e4149'
+RELEASE = '39a609ebdc315e818e0ef991764e8defb301f9e2'
+INSTALLED = 'b0fae95aa0d0342ef6de2145452829e2fb47825d'
+BUNDLE = 'cd36ad3ce5559728fc7f96b06d5b2b17c18b5310'
+PREVIOUS_BUNDLE = 'ca06628b46abcfce8a270ee4e7349725c27c8059'
 HEALTH = 'https://escape.nordic-response.dk/api/health'
 
 
@@ -234,3 +234,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
