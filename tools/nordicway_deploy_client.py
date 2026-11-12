@@ -27,14 +27,17 @@ def run(env=None, transport=_run_limited):
     sha, token = env.get('ESCAPE_RELEASE_SHA', ''), env.get('ESCAPE_CPANEL_API_TOKEN', '')
     operation = env.get('ESCAPE_DEPLOY_OPERATION', 'deploy')
     approval_json = env.get('ESCAPE_OWNER_APPROVAL_PROOF', '')
+    summary = env.get('ESCAPE_RELEASE_SUMMARY', '')
     access = (env.get('ESCAPE_WRITE_PROBE_AUTHORIZED') == '1' if operation == 'write-probe'
               else env.get('ESCAPE_DEPLOY_AUTHORIZED') == '1')
     if (not access or not env.get('SSH_AUTH_SOCK')
-            or operation not in ('deploy', 'resume', 'write-probe')
-            or (operation in ('deploy', 'resume') and not re.fullmatch(r'[0-9a-f]{40}', sha))
+            or operation not in ('deploy', 'resume', 'write-probe', 'app-deploy')
+            or (operation in ('deploy', 'resume', 'app-deploy') and not re.fullmatch(r'[0-9a-f]{40}', sha))
             or (operation == 'write-probe' and bool(sha))
             or (operation == 'deploy' and (not re.fullmatch(r'[A-Za-z0-9_-]{10,256}', token)
-                or not approval_json or len(approval_json) > 512))):
+                or not approval_json or len(approval_json) > 512))
+            or (operation == 'app-deploy' and (not re.fullmatch(r'[A-Za-z0-9_-]{10,256}', token)
+                or not 1<=len(summary.strip())<=500 or '\n' in summary or '\r' in summary))):
         return {'status': 'blocked', 'reason': 'configuration_unavailable'}
     try:
         known = verify(env.get('NORDICWAY_KNOWN_HOST', ''), env.get('NORDICWAY_VERIFIED_FINGERPRINT', ''))
@@ -55,10 +58,19 @@ def run(env=None, transport=_run_limited):
                 if not isinstance(approval, dict) or set(approval) != {'nonce', 'expires', 'mac'}:
                     raise ValueError('invalid_approval')
                 payload = json.dumps({'cpanel_token': token, 'approval': approval}, separators=(',', ':')).encode()
-            result = transport(command, input=payload, capture_output=True, timeout=900, env=env)
+            elif operation == 'app-deploy':
+                payload = json.dumps({'cpanel_token': token, 'summary': summary.strip()}, separators=(',', ':')).encode()
+            result = transport(command, input=payload, capture_output=True, timeout=1740 if operation=='app-deploy' else 900, env=env)
         if len(result.stdout) > 1024:
             raise ValueError('invalid_reply')
         reply = json.loads(result.stdout)
+        if operation == 'app-deploy':
+            if (not isinstance(reply,dict) or set(reply)!={'operation','status','sha'}
+                    or reply['operation']!='app-deploy' or reply['sha']!=sha
+                    or reply['status'] not in ('completed','expired','unavailable','recovery')
+                    or (reply['status']=='completed' and result.returncode!=0)):
+                raise ValueError('invalid_reply')
+            return {'operation':'app-deploy','status':'ok' if reply['status']=='completed' else reply['status'],'sha':sha}
         if operation == 'write-probe':
             if result.returncode != 0 or reply != {'status': 'ok', 'operation': 'write_probe'}:
                 raise ValueError('invalid_reply')

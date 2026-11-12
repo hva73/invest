@@ -51,6 +51,14 @@ class DeployRequestTests(unittest.TestCase):
         self.event['comment']['body'] = request.PREFIX + json.dumps({'operation': 'resume', 'sha': self.sha})
         self.assertEqual(self.parse(self.event)['operation'], 'resume')
 
+    def test_app_deploy_requires_single_line_summary_and_sha(self):
+        for summary, valid in [('Mobil og datakilder',True),('',False),('x\nsha=evil',False),('x'*501,False)]:
+            e=copy.deepcopy(self.event)
+            e['comment']['body']=request.PREFIX+json.dumps({'operation':'app-deploy','sha':self.sha,'summary':summary})
+            result=self.parse(e)
+            if valid:self.assertEqual(result,{'operation':'app-deploy','sha':self.sha,'summary':summary})
+            else:self.assertIsNone(result)
+
     def test_event_file_outputs_only_validated_values(self):
         with tempfile.TemporaryDirectory() as tmp:
             event, output = Path(tmp) / 'event', Path(tmp) / 'output'

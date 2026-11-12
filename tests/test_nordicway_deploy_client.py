@@ -27,6 +27,23 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(payload['cpanel_token'], self.env['ESCAPE_CPANEL_API_TOKEN'])
         self.assertEqual(set(payload['approval']), {'nonce','expires','mac'})
 
+    def test_app_deploy_sends_summary_and_token_only_on_stdin(self):
+        self.env.update(ESCAPE_DEPLOY_OPERATION='app-deploy',ESCAPE_RELEASE_SUMMARY='Mobil og data')
+        reply={'operation':'app-deploy','status':'completed','sha':'a'*40}
+        send=Mock(return_value=SimpleNamespace(returncode=0,stdout=json.dumps(reply).encode()))
+        with patch.object(client,'verify',return_value='host key\n'):
+            result=client.run(self.env,send)
+        self.assertEqual(result['status'],'ok')
+        args,kwargs=send.call_args
+        self.assertEqual(args[0][-1],'escape-deploy-v1 app-deploy '+'a'*40)
+        self.assertEqual(json.loads(kwargs['input']),{'cpanel_token':'test_token_12345','summary':'Mobil og data'})
+        self.assertNotIn('test_token_12345',repr(args))
+        self.assertEqual(kwargs['timeout'],1740)
+        for state in ('expired','unavailable','recovery'):
+            reply['status']=state;send.return_value=SimpleNamespace(returncode=1,stdout=json.dumps(reply).encode())
+            with patch.object(client,'verify',return_value='host key\n'):
+                self.assertNotEqual(client.run(self.env,send)['status'],'ok')
+
     def test_cleanup_warning_is_reported_without_mislabeling_release(self):
         self.reply['backup_cleanup'] = 'failed'
         send = Mock(return_value=SimpleNamespace(returncode=0, stdout=json.dumps(self.reply).encode()))

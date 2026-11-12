@@ -27,7 +27,7 @@ def parse(event, event_name, ref, actor_id):
                 or comment['user'].get('id') != OWNER or comment.get('author_association') != 'OWNER'):
             return None
         body = comment.get('body')
-        if not isinstance(body, str) or not body.startswith(PREFIX) or len(body) > 256:
+        if not isinstance(body, str) or not body.startswith(PREFIX) or len(body) > 2048:
             return None
         def unique(pairs):
             data = {}
@@ -40,13 +40,20 @@ def parse(event, event_name, ref, actor_id):
             data = json.loads(body[len(PREFIX):], object_pairs_hook=unique)
         except (ValueError, TypeError):
             return None
-        if not isinstance(data, dict) or set(data) not in ({'operation', 'sha'}, {'operation', 'sha', 'approval'}):
+        if not isinstance(data, dict) or set(data) not in ({'operation', 'sha'}, {'operation', 'sha', 'approval'}, {'operation', 'sha', 'summary'}):
             return None
         operation, sha = data['operation'], data['sha']
-        if operation not in ('deploy', 'resume'):
+        if operation not in ('deploy', 'resume', 'app-deploy'):
             return None
     else:
         return None
+    if operation == 'app-deploy':
+        if (event_name != 'issue_comment' or set(data) != {'operation','sha','summary'}
+                or not isinstance(sha,str) or not re.fullmatch(r'[0-9a-f]{40}',sha)
+                or not isinstance(data['summary'],str) or not 1<=len(data['summary'].strip())<=500
+                or '\n' in data['summary'] or '\r' in data['summary']):
+            return None
+        return {'operation':operation,'sha':sha,'summary':data['summary'].strip()}
     if operation == 'deploy':
         # A signed owner approval is supplied as a bounded public proof, never
         # as the underlying passphrase or key. Server verifies its MAC.
@@ -82,6 +89,8 @@ def main():
             output.write('operation=' + request['operation'] + '\nsha=' + request['sha'] + '\n')
             if 'approval' in request:
                 output.write('approval=' + json.dumps(request['approval'], separators=(',', ':')) + '\n')
+            if 'summary' in request:
+                output.write('summary=' + request['summary'] + '\n')
     except (OSError, KeyError, ValueError, TypeError, AttributeError):
         raise SystemExit('Deployment request rejected.') from None
     print('Fixed deployment request accepted; server authorization remains required.')

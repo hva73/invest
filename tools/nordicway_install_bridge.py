@@ -24,6 +24,8 @@ MODULES = (
     'tools/nordicway_deploy_health.py',
     'tools/nordicway_deploy_runner.py',
     'tools/nordicway_owner_approval.py',
+    'tools/nordicway_app_release.py',
+    'tools/nordicway_app_release_entry.py',
     'tools/nordicway_deploy_sequence.py',
     'tools/nordicway_quiescence.py',
     'tools/nordicway_readonly_diagnostics.py',

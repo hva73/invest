@@ -4,6 +4,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 import unittest
 import os
 import tempfile
+from unittest.mock import patch
 import nordicway_deploy_guard as guard
 
 class GuardTests(unittest.TestCase):
@@ -72,6 +73,25 @@ class GuardTests(unittest.TestCase):
     def test_ping_and_deploy_blocked(self):
         self.assertEqual(guard.dispatch('escape-deploy-v1 ping')['status'], 'ok')
         self.assertEqual(guard.dispatch('escape-deploy-v1 deploy ' + 'a' * 40)['status'], 'blocked')
+
+    def test_app_deploy_uses_only_exact_sha_and_explicit_handler(self):
+        sha='a'*40;seen=[]
+        self.assertEqual(guard.dispatch('escape-deploy-v1 app-deploy '+sha)['status'],'blocked')
+        reply=guard.dispatch('escape-deploy-v1 app-deploy '+sha,app_runner=lambda value:seen.append(value) or {'operation':'app-deploy','status':'completed'})
+        self.assertEqual(guard.exit_code(reply),0);self.assertEqual(seen,[sha])
+        with self.assertRaises(ValueError):guard.dispatch('escape-deploy-v1 app-deploy '+sha+';id')
+
+    def test_app_deploy_enters_fixed_venv_only_when_enabled(self):
+        sha='a'*40
+        with patch.dict(os.environ,{'SSH_ORIGINAL_COMMAND':'escape-deploy-v1 app-deploy '+sha}), \
+             patch.object(guard,'deployment_enabled',return_value=True), \
+             patch.object(guard.os,'execv',side_effect=OSError('synthetic')) as execute:
+            self.assertEqual(guard.main(),1)
+            execute.assert_called_once_with(guard.APP_PYTHON,[guard.APP_PYTHON,'-I',guard.APP_ENTRY,sha])
+        with patch.dict(os.environ,{'SSH_ORIGINAL_COMMAND':'escape-deploy-v1 app-deploy '+sha}), \
+             patch.object(guard,'deployment_enabled',return_value=False), \
+             patch.object(guard.os,'execv') as execute:
+            self.assertEqual(guard.main(),1);execute.assert_not_called()
 
     def test_rejects_arbitrary_commands(self):
         for cmd in ('', 'id', 'escape-deploy-v1 deploy HEAD',

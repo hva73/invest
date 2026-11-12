@@ -230,6 +230,47 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(client.run(env, transport)['status'], 'ok')
         self.assertFalse((self.bridge/'approval-ticket.json').exists())
 
+    def test_app_approval_through_request_client_guard_and_runner(self):
+        import sqlite3
+        import release_approval
+        import nordicway_app_release as app_bridge
+        import nordicway_deploy_guard as guard
+        (self.bridge/'owner-approval-key').write_bytes(b'k'*32)
+        (self.bridge/'owner-approval-key').chmod(0o600)
+        db=self.bridge/'synthetic.db'
+        def connect():return sqlite3.connect(db,timeout=5)
+        with connect() as c:
+            c.execute('CREATE TABLE users(id INTEGER,username TEXT,role TEXT,active INTEGER)')
+            c.execute("INSERT INTO users VALUES(7,'owner','admin',1)")
+            release_approval.init(c)
+        event={'action':'created','sender':{'id':request_parser.OWNER},'issue':{'number':16},
+               'comment':{'user':{'id':request_parser.OWNER},'author_association':'OWNER',
+                          'body':request_parser.PREFIX+json.dumps({'operation':'app-deploy','sha':SHA,'summary':'Mobil og data'})}}
+        parsed=request_parser.parse(event,'issue_comment',request_parser.BRANCH,str(request_parser.OWNER))
+        env={'ESCAPE_RELEASE_SHA':SHA,'ESCAPE_CPANEL_API_TOKEN':TOKEN,'ESCAPE_DEPLOY_OPERATION':'app-deploy',
+             'ESCAPE_RELEASE_SUMMARY':parsed['summary'],'ESCAPE_DEPLOY_AUTHORIZED':'1','SSH_AUTH_SOCK':'/tmp/agent',
+             'NORDICWAY_KNOWN_HOST':'hostkey','NORDICWAY_VERIFIED_FINGERPRINT':'fingerprint'}
+        calls=[]
+        def notify(uid):
+            candidate=release_approval.pending(connect,uid)
+            release_approval.approve(connect,candidate['id'],candidate['sha'],uid)
+        def actual_runner(sha,token,owner_request):
+            calls.append(sha)
+            return runner.run(sha,token,bridge=self.bridge,authorization_lock=self.bridge/'test-lock',
+                              owner_request=owner_request,adapter_factory=Mock(),
+                              deploy=lambda *_:Outcome('ok','complete',True),prepare=lambda *_:None)
+        def transport(command,**kwargs):
+            def app_run(sha):
+                return app_bridge.run_request(sha,io.BytesIO(kwargs['input']),connect,self.bridge,
+                    runner=actual_runner,create_proof=owner.create_proof,notify=notify)
+            result=guard.dispatch(command[-1],app_runner=app_run)
+            return SimpleNamespace(returncode=guard.exit_code(result),stdout=json.dumps(result).encode())
+        with patch.object(client,'verify',return_value='host key\n'):
+            result=client.run(env,transport)
+        self.assertEqual(result,{'operation':'app-deploy','status':'ok','sha':SHA})
+        self.assertEqual(calls,[SHA]);self.assertNotIn(TOKEN,str(result))
+        self.assertFalse((self.bridge/'deployment-incomplete.json').exists())
+
     def test_crash_after_authorization_before_marker_requires_new_proof(self):
         key = b'k'*32
         keyfile = self.bridge/'owner-approval-key'
