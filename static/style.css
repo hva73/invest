@@ -635,3 +635,20 @@ body:has(#login:not([hidden])) > aside nav{display:none}
 @media(max-width:700px){#dashboard-detail > .position-actions-mobile[data-signal-side="BUY"] small{display:none}}
 body > aside nav .nav-sector-mobile{display:none}
 @media(max-width:900px){body > aside nav .nav-sector-desktop{display:none}body > aside nav .nav-sector-mobile{display:inline}}
+@media(max-width:700px){
+ .position-mobile-summary[data-signal-context="true"] .position-mobile-status,
+ .position-mobile-summary[data-signal-context="true"] .position-mobile-source{display:none}
+ #dashboard-detail:has(.position-mobile-summary[data-signal-context="true"]) .market-marker-legend{display:block;font-size:10px}
+ .signal-chart-main .market-slot{border:0;padding:0;background:transparent}
+ .signal-chart-main .market-plot svg{height:clamp(145px,42vw,215px)}
+ .signal-overview .signal-action-bar{position:sticky;bottom:-1px;align-items:center;justify-content:center;gap:8px;border:1px solid #476d72;border-radius:20px;background:#122a34;padding:8px;margin:8px 4px calc(4px + env(safe-area-inset-bottom,0px));box-shadow:0 7px 22px #0008}
+ .signal-overview .signal-action-bar>button:not(.signal-ignore){flex:0 1 66%;border-radius:999px}
+ .signal-overview .signal-action-bar .signal-ignore,
+ #dashboard-detail > .position-actions-mobile .signal-ignore{flex:0 0 auto;min-width:44px;min-height:44px;border:0;background:transparent;box-shadow:none;color:#b7cbd0;font-size:11px;padding:8px 5px}
+ #dashboard-detail > .position-actions-mobile[data-signal-side="SELL"] .signal-ignore,
+ #dashboard-detail > .position-actions-mobile[data-signal-side="BUY"] .signal-ignore{flex:0 0 auto}
+}
+@media(max-width:700px){
+ #dashboard-detail:has(.position-mobile-summary[data-signal-context="true"]) .market-slot{border:0;padding:0;background:transparent}
+ #dashboard-detail:has(.position-mobile-summary[data-signal-context="true"]) .market-plot svg{height:clamp(160px,45vw,220px)}
+}
