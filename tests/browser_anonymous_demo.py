@@ -41,6 +41,7 @@ try:
     chart=dialog.locator('.market-chart svg[role=img]');expect(chart).to_be_visible()
     expect(chart).to_have_attribute('aria-label',re.compile(r'\b(?:1\d\d|2\d\d|3[0-6]\d) observerede punkter'))
     if shot:page.screenshot(path=f'{shot}/demo-chart-{width}-{period}.png')
+   if compact:expect(dialog.locator('.position-mobile-source')).to_contain_text('Fiktive depotoplysninger');expect(dialog.locator('.position-mobile-source')).not_to_contain_text('fra Pluto')
    if shot and width==390:page.screenshot(path=f'{shot}/demo-position-390.png')
    trade_ticker='TSLA'
    if dialog.locator('[data-dashboard-decision=demo-TSLA]:visible').count():
