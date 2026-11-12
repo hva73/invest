@@ -221,7 +221,7 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
   if radar_reset and c.execute('SELECT 1 FROM report_candidate_links WHERE user_id=? AND is_test=0 AND candidate_id=? AND report_row_id<=? LIMIT 1',(uid,cid,radar_reset['report_cutoff'])).fetchone():
    from intel_workflows import radar_reassessed_after_reset
    if not radar_reassessed_after_reset(c,uid,cid,radar_reset):return {'status':'NOT_NEW'}
-  terminal=c.execute("SELECT s.id FROM hw_sessions s WHERE s.user_id=? AND s.is_test=? AND s.candidate_id=? AND s.status IN ('COMPLETED','EXPIRED','ERROR') AND COALESCE(json_extract(s.request,'$.watch_mode'),'both')!='exit'",(uid,int(mode),cid)).fetchall()
+  terminal=c.execute("SELECT s.id,EXISTS(SELECT 1 FROM hw_events e WHERE e.watch_row_id=s.id AND e.event_type='WATCH_RESET') AS reset_event FROM hw_sessions s WHERE s.user_id=? AND s.is_test=? AND s.candidate_id=? AND s.status IN ('COMPLETED','EXPIRED','ERROR') AND COALESCE(json_extract(s.request,'$.watch_mode'),'both')!='exit'",(uid,int(mode),cid)).fetchall()
   from intel_workflows import candidate_currentness
   current=candidate_currentness(c,uid,mode,cid,report_fallback=True)
   if current['status'] not in ('CURRENT','REPORT_ONLY'):return {'status':'NOT_NEW'}
@@ -232,7 +232,7 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
    last=c.execute('SELECT event_type,created FROM hw_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(ended['id'],)).fetchone()
    if not last:return {'status':'NOT_NEW'}
    if last['event_type']=='CAPACITY_RELEASED':released.append(ended['id']);continue
-   if reset and last['event_type']=='WATCH_RESET':continue
+   if reset and ended['reset_event']:continue
    if last['event_type']!='CANDIDATE_WATCH_EXPIRED' or current['status']!='CURRENT' or not current.get('assessed_at') or stamp(current['assessed_at'])<=stamp(last['created']):return {'status':'NOT_NEW'}
    reassessed.append(ended['id'])
   reassess_generation=max(reassessed,default=0)
