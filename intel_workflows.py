@@ -232,7 +232,9 @@ def review_queue(registry):
         current=row['currentness'];status=current['status']
         decision=row.get('decision') or {};lifecycle=row.get('lifecycle') or {}
         if decision.get('status')=='FRAVÆLG' or lifecycle.get('status') in ('ARCHIVED','CLOSED'):continue
-        if status=='COLD' and current.get('reason')!='frist udløbet · revurdering mangler':continue
+        # COLD with an assessment deadline is timeout, while lifecycle-based
+        # closure has no deadline. Do not key control flow on display text.
+        if status=='COLD' and not current.get('deadline'):continue
         if status not in ('COLD','REVIEW_DUE','UNKNOWN','REPORT_ONLY'):continue
         candidate=row['candidate']
         result.append({'candidate_id':candidate['candidate_id'],'ticker':candidate['ticker'],

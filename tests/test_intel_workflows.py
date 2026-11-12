@@ -85,8 +85,9 @@ class Workflows(unittest.TestCase):
  def test_review_queue_excludes_explicit_rejection_and_keeps_missing_data_distinct(self):
   def row(cid,status,reason=None,decision_status='AFVENT',life='WAITING_TRIGGER'):
    return {'candidate':{'candidate_id':cid,'ticker':cid},'currentness':{'status':status,'reason':reason,'deadline':None,'assessed_at':None},'decision':{'status':decision_status},'lifecycle':{'status':life}}
-  registry=[row('missing','REPORT_ONLY','Tidsstemplet vurdering mangler'),row('rejected','COLD','fravalgt','FRAVÆLG'),row('archived','COLD','frist udløbet · revurdering mangler',life='ARCHIVED'),row('current','CURRENT')]
-  self.assertEqual([x['candidate_id'] for x in flow.review_queue(registry)],['missing'])
+  overdue=row('overdue','COLD','Udgået vurdering');overdue['currentness']['deadline']='2026-11-03T11:00:00Z'
+  registry=[row('missing','REPORT_ONLY','Tidsstemplet vurdering mangler'),row('rejected','COLD','fravalgt','FRAVÆLG'),row('archived','COLD','frist udløbet · revurdering mangler',life='ARCHIVED'),row('current','CURRENT'),overdue]
+  self.assertEqual([x['candidate_id'] for x in flow.review_queue(registry)],['overdue','missing'])
  def test_hot_watch_merc_timeline_no_duplicate_candidates_or_mutated_reports(self):
   before=copy.deepcopy(self.r);a=observation(self.r);self.assertEqual(flow.record(app.connect,1,a)[0],201);self.assertTrue(flow.record(app.connect,1,a)[1]['duplicate'])
   b=observation(self.r,'SYNTHETIC-MERC-OBS-2','2026-11-03T10:10:00Z');b['market']['price']['amount']='8';b['market']['spread']['amount']='0.1';b['market']['ask']['amount']='7.5';b['market']['volume']='1400';b['market']['momentum']='accelerating';b['position_action']={'action':'SÆLG','reason':'Syntetisk salgsbeslutning; ikke udført','assessed_at':b['observed_at'],'source_ids':['synthetic-source']};flow.record(app.connect,1,b)
