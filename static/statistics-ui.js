@@ -41,7 +41,7 @@
     return {sign,text:`${sign>0?'+':sign<0?'−':''}${whole},${fraction}`};
   }
   const direction = n => n > 0 ? 'positive' : n < 0 ? 'negative' : 'neutral';
-  const arrow = n => n > 0 ? '↑' : n < 0 ? '↓' : '→';
+  const arrow = n => n > 0 ? '↑' : n < 0 ? '↓' : '';
   function currencyList(portfolio) {
     return [...new Set((portfolio?.items || []).map(item => item.currency).filter(value => typeof value === 'string' && /^[A-Z]{3}$/.test(value)))].sort();
   }
@@ -53,22 +53,29 @@
     const rows = (portfolio?.items || []).filter(item => item.currency === currency && number(item.gross) !== null && number(item.gross_percent) !== null);
     const wins = rows.filter(item => number(item.gross) > 0).length;
     const losses = rows.filter(item => number(item.gross) < 0).length;
+    const flat = rows.length - wins - losses;
     const total = totalGross(rows);
+    const gains = totalGross(rows.filter(item => number(item.gross) > 0));
+    const lost = totalGross(rows.filter(item => number(item.gross) < 0));
+    const rate = rows.length ? new Intl.NumberFormat('da-DK', {maximumFractionDigits:2}).format(wins * 100 / rows.length) : '—';
     const hasErrors = Array.isArray(data?.errors) && data.errors.length > 0;
     const portfolioOptions = portfolios.map(p => `<option value="${esc(p.portfolio_id)}"${p === portfolio ? ' selected' : ''}>${esc(p.name || 'Depot')}</option>`).join('');
     const currencyOptions = currencies.map(c => `<option value="${esc(c)}"${c === currency ? ' selected' : ''}>${esc(c)}</option>`).join('');
-    const list = rows.map(item => {
-      const gross=number(item.gross), percent=number(item.gross_percent), cls=direction(gross), time=item.sell_time ? `<span>Udført ${esc(new Date(item.sell_time).toLocaleString('da-DK'))}</span>` : '<span>Fyldtid ikke oplyst</span>';
-      return `<details class="statistics-trade"><summary><span class="statistics-ticker">${esc(item.ticker)}<small>${esc(item.name)}</small></span><span class="statistics-result ${cls}">${arrow(gross)} ${signed(item.gross)} ${esc(currency)}<small class="${direction(percent)}">${arrow(percent)} ${signed(item.gross_percent)} %</small></span></summary><div class="statistics-detail"><span>Antal ${esc(item.quantity)}</span><span>Købskurs ${esc(item.buy_price)} ${esc(currency)}</span><span>Salgskurs ${esc(item.sell_price)} ${esc(currency)}</span>${time}<span>${esc(item.note)}</span></div></details>`;
-    }).join('');
     const options = portfolios.length ? `<div class="statistics-filters"><label>Depot<select data-statistics-portfolio>${portfolioOptions}</select></label>${currency ? `<label>Valuta<select data-statistics-currency>${currencyOptions}</select></label>` : ''}</div>` : '';
-    const result = rows.length && total ? `<div class="statistics-summary"><div><small>FORELØBIG KURSFORSKEL</small><strong class="${direction(total.sign)}">${arrow(total.sign)} ${total.text} ${esc(currency)}</strong><span>Før omkostninger · ${rows.length} observerede salg</span></div><div class="statistics-counts"><span class="positive">↑ ${wins} med gevinst</span><span class="negative">↓ ${losses} med tab</span></div></div><div class="statistics-list">${list}</div>` : '<p class="statistics-empty">Ingen handler med tilstrækkelige oplysninger i dette depot endnu.</p>';
-    return `<section class="statistics-view" aria-labelledby="statistics-title"><header class="statistics-heading"><div><small>DIT HANDELSOVERBLIK</small><h2 id="statistics-title">Hvordan står det til<span>?</span></h2><p>Se de handler, der kan sammenlignes ud fra Plutos oplysninger.</p></div><button type="button" data-statistics-reload>Opdatér ↻</button></header>${options}${hasErrors ? '<p class="statistics-warning" role="status">Nogle depoter kunne ikke læses. Oversigten er ufuldstændig.</p>' : ''}${result}<p class="statistics-note">Foreløbige bruttoresultater i handelsvaluta. Gebyrer, valutaomregning og hele købshistorikken er ikke bekræftet. Direkte ordrers oprettelsestid er ikke nødvendigvis handelstidspunktet.</p></section>`;
+    const origin = v => ({escape_signal:'ESCAPE-signal',own:'Egen beslutning',manual:'Egen beslutning'}[v] || 'Ikke afklaret');
+    const list = rows.map(item => {
+      const gross=number(item.gross), percent=number(item.gross_percent), time=item.sell_time && Number.isFinite(Date.parse(item.sell_time)) ? `<span>Udført ${esc(new Date(item.sell_time).toLocaleString('da-DK',{timeZone:'Europe/Copenhagen'}))}</span>` : '<span>Handelstid ikke oplyst</span>';
+      return `<details class="statistics-trade"><summary><span class="statistics-ticker">${esc(item.ticker)}<small>${esc(item.name)}</small></span><span class="statistics-result ${direction(gross)}"><span>${arrow(gross)} ${signed(item.gross)} ${esc(currency)}</span><small class="${direction(percent)}">${arrow(percent)} ${signed(item.gross_percent)} %</small></span></summary><div class="statistics-detail"><span>Solgt antal ${esc(item.quantity)}</span><span>Købskurs ${esc(item.buy_price)} ${esc(currency)}</span><span>Salgskurs ${esc(item.sell_price)} ${esc(currency)}</span>${time}<span>Køb: ${origin(item.buy_origin)}</span><span>Salg: ${origin(item.sell_origin)}</span><span>Foreløbigt før ikke-oplyste omkostninger og valutaveksling</span></div></details>`;
+    }).join('');
+    const note = portfolio?.omitted > 0 ? `<p class="statistics-warning" role="status">${Number(portfolio.omitted)} salg kan endnu ikke beregnes og er ikke med i overblikket.</p>` : '';
+    const value = (part, fallback) => part ? part.text : fallback;
+    const result = rows.length && total ? `<div class="statistics-overview"><div class="statistics-summary"><div><small>SAMLET RESULTAT AF SALG</small><strong class="${direction(total.sign)}">${arrow(total.sign)} ${total.text} ${esc(currency)}</strong><span>Foreløbigt · før ikke-oplyste omkostninger</span></div><div class="statistics-breakdown"><div><small>SAMLET GEVINST</small><strong class="positive">↑ ${value(gains, '0,00')} ${esc(currency)}</strong></div><div><small>SAMLET TAB</small><strong class="negative">↓ ${value(lost, '0,00')} ${esc(currency)}</strong></div></div></div><div class="statistics-distribution"><div class="statistics-distribution-head"><div><small>GEVINSTANDEL</small><div class="statistics-win-rate">${rate} %</div></div><span>${rows.length} afsluttede salg</span></div><div class="statistics-distribution-bar" role="img" aria-label="${wins} med gevinst, ${losses} med tab${flat ? ', '+flat+' uden gevinst eller tab' : ''}"><span class="positive" data-statistics-segment="${wins}"></span><span class="negative" data-statistics-segment="${losses}"></span><span class="neutral" data-statistics-segment="${flat}"></span></div><div class="statistics-distribution-legend"><span class="positive">↑ ${wins} med gevinst</span><span class="negative">↓ ${losses} med tab</span>${flat ? `<span class="neutral">${flat} uændret</span>` : ''}</div></div></div>${note}<section class="statistics-list"><div class="statistics-list-heading"><h3>Hvor har vi vundet og tabt?</h3><span>${rows.length} salg</span></div>${list}</section>` : '<p class="statistics-empty">Ingen handler med tilstrækkelige oplysninger i dette depot endnu.</p>';
+    return `<section class="statistics-view" aria-labelledby="statistics-title"><header class="statistics-heading"><div><small>AFSLUTTEDE HANDLER</small><h2 id="statistics-title">Hvordan står det til<span>?</span></h2><p>Et overblik over de andele, du har solgt.</p></div><button type="button" data-statistics-reload>Opdatér ↻</button></header>${options}${hasErrors ? '<p class="statistics-warning" role="status">Nogle depoter kunne ikke læses. Oversigten er ufuldstændig.</p>' : ''}${result}</section>`;
   }
   function mount(container, load) {
     if (!container || typeof load !== 'function') throw new TypeError('statistics mount requires a container and loader');
     let data = null, selected = {};
-    const draw = () => { container.innerHTML = render(data, selected); };
+    const draw = () => { container.innerHTML = render(data, selected); container.querySelectorAll('[data-statistics-segment]').forEach(el => { el.style.flexGrow = el.dataset.statisticsSegment; }); };
     const refresh = async () => {
       container.innerHTML = '<p role="status">Henter handelshistorik…</p>';
       try { data = await load(); draw(); }
