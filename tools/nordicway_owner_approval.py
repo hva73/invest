@@ -83,6 +83,13 @@ def approve(bridge, lock_path, sha, request, now=None):
             os.fsync(claim_fd)
         finally:
             os.close(claim_fd)
+        # Persist the directory entry before any authorization can be exposed;
+        # fsync on the new file alone does not make its name crash-durable.
+        directory = os.open(bridge, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
         tmp_fd, name = tempfile.mkstemp(prefix='.approval-', dir=bridge)
         try:
             with os.fdopen(tmp_fd, 'wb') as out:
