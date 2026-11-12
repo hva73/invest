@@ -1,6 +1,6 @@
 """Verify a short-lived release approval from a separately protected secret."""
 import fcntl
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import hashlib
 import hmac
 import json
@@ -24,7 +24,7 @@ def message(sha, nonce, expires):
 @contextmanager
 def deployment_lock(lock_path):
     """Serialize approval and the runner's approval check/marker claim."""
-    fd = os.open(lock_path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
@@ -35,7 +35,7 @@ def deployment_lock(lock_path):
         os.close(fd)
 
 
-def approve(bridge, lock_path, sha, request, now=None):
+def approve(bridge, lock_path, sha, request, now=None, *, already_locked=False):
     """Atomically approve exactly one SHA. Requires an owner-protected secret."""
     bridge = Path(bridge)
     now = int(time.time()) if now is None else now
@@ -63,7 +63,7 @@ def approve(bridge, lock_path, sha, request, now=None):
         os.close(fd)
     if len(key) != 32 or not hmac.compare_digest(hmac.new(key, message(sha, nonce, expires), hashlib.sha256).hexdigest(), mac):
         raise ValueError('invalid_signature')
-    with deployment_lock(lock_path):
+    with (nullcontext() if already_locked else deployment_lock(lock_path)):
         if os.path.lexists(bridge / 'deployment-incomplete.json'):
             raise ValueError('recovery_required')
         approval = bridge / 'approved-sha'
