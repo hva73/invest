@@ -25,6 +25,13 @@ class StatisticsTest(unittest.TestCase):
     def test_sales_exceeding_one_buy_are_not_falsely_matched(self):
         extra=order('SELL','1','8','2026-01-03T00:00:00Z','s2')
         self.assertEqual(project([self.buy,self.sell,extra])['items'],[])
+    def test_two_partial_sales_leave_remaining_holding_out_of_totals(self):
+        buy=order('BUY','10','10','2026-01-01T00:00:00Z','b')
+        first=order('SELL','4','12','2026-01-02T00:00:00Z','s1')
+        second=order('SELL','2','8','2026-01-03T00:00:00Z','s2')
+        result=project([buy,first,second]);rows=result['items'];summary=result['summary_by_currency']['USD']
+        self.assertEqual([(r['quantity'],r['gross']) for r in rows],[('4','8'),('2','-4')])
+        self.assertEqual((summary['sales'],summary['gains'],summary['losses_total'],summary['gross_total']),(2,'8','-4','4'))
     def test_zero_result_is_in_winner_denominator(self):
         flat=order('SELL','1','10','2026-01-02T00:00:00Z','s1')
         gain=order('SELL','1','12','2026-01-03T00:00:00Z','s2')
