@@ -10,7 +10,7 @@ import nordicway_deploy_client as client
 class ClientTests(unittest.TestCase):
     def setUp(self):
         self.env = {'ESCAPE_RELEASE_SHA': 'a' * 40, 'ESCAPE_CPANEL_API_TOKEN': 'test_token_12345',
-                    'ESCAPE_DEPLOY_AUTHORIZED': '1', 'ESCAPE_OWNER_APPROVAL_KEY': 'ab'*32, 'SSH_AUTH_SOCK': '/tmp/agent',
+                    'ESCAPE_DEPLOY_AUTHORIZED': '1', 'ESCAPE_OWNER_APPROVAL_PROOF': json.dumps({'nonce':'1'*32,'expires':2000,'mac':'a'*64}), 'SSH_AUTH_SOCK': '/tmp/agent',
                     'NORDICWAY_KNOWN_HOST': 'hostkey', 'NORDICWAY_VERIFIED_FINGERPRINT': 'fingerprint'}
         self.reply = {'operation': 'deploy', 'status': 'ok', 'stage': 'complete',
                       'service_restored': True, 'recovery_required': False, 'backup_cleanup': 'ok'}
@@ -26,8 +26,6 @@ class ClientTests(unittest.TestCase):
         payload = json.loads(kwargs['input'])
         self.assertEqual(payload['cpanel_token'], self.env['ESCAPE_CPANEL_API_TOKEN'])
         self.assertEqual(set(payload['approval']), {'nonce','expires','mac'})
-        self.assertNotIn(self.env['ESCAPE_OWNER_APPROVAL_KEY'], repr(args))
-        self.assertNotIn(self.env['ESCAPE_OWNER_APPROVAL_KEY'], kwargs['input'].decode())
 
     def test_cleanup_warning_is_reported_without_mislabeling_release(self):
         self.reply['backup_cleanup'] = 'failed'
