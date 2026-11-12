@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
-      - run: python -m unittest tests.test_nordicway_prepare_drain_retry tests.test_nordicway_deploy_request tests.test_nordicway_upgrade_probe_guard tests.test_nordicway_install_bridge tests.test_nordicway_deploy_guard tests.test_nordicway_deploy_runner tests.test_nordicway_deploy_client tests.test_nordicway_provision_deploy tests.test_nordicway_deploy_ping tests.test_nordicway_quota tests.test_nordicway_autostart tests.test_nordicway_deploy_sequence tests.test_nordicway_deploy_adapter tests.test_nordicway_release_backup tests.test_nordicway_release_stage tests.test_nordicway_release_service tests.test_nordicway_quiescence tests.test_nordicway_deploy_health tests.test_nordicway_writer_check tests.test_nordicway_uapi_probe tests.test_nordicway_uapi_quota
+      - run: python -m unittest tests.test_nordicway_prepare_drain_retry tests.test_nordicway_deploy_request tests.test_nordicway_upgrade_probe_guard tests.test_nordicway_install_bridge tests.test_nordicway_deploy_guard tests.test_nordicway_deploy_runner tests.test_nordicway_deploy_client tests.test_nordicway_provision_deploy tests.test_nordicway_deploy_ping tests.test_nordicway_quota tests.test_nordicway_autostart tests.test_nordicway_deploy_sequence tests.test_nordicway_deploy_adapter tests.test_nordicway_release_backup tests.test_nordicway_release_stage tests.test_nordicway_release_service tests.test_nordicway_quiescence tests.test_nordicway_deploy_health tests.test_nordicway_writer_check tests.test_nordicway_uapi_probe tests.test_nordicway_uapi_quota tests.test_nordicway_owner_approval
   ping:
     if: >-
       github.event_name == 'workflow_dispatch' &&
