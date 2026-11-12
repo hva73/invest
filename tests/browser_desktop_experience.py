@@ -85,6 +85,10 @@ try:
                     assert intro['x'] + intro['width'] <= chart['x'] + 1, (width, intro, chart)
                     assert metrics['x'] + metrics['width'] <= chart['x'] + 1, (width, metrics, chart)
                     assert metrics['y'] >= intro['y'], (width, metrics, intro)
+                    empty_alert = page.locator('.dash-attention')
+                    expect(empty_alert).to_contain_text('Ingen aktuelle')
+                    assert empty_alert.evaluate('e => e.getBoundingClientRect().height') < 120, width
+                    expect(empty_alert.locator('[data-view="hot-watch"]')).to_be_visible()
                 assert page.locator('body > aside').evaluate('e => e.getBoundingClientRect().width') == 224
                 assert page.locator('main').evaluate('e => e.getBoundingClientRect().left') >= 224
                 assert page.locator('nav [data-view=overview]').evaluate('e => e.getBoundingClientRect().height') >= 44

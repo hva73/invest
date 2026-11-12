@@ -74,6 +74,16 @@
   .dashboard-v1 .dash-hero-metrics > div { min-width: 0; padding: 7px 0 0; border-right: 0; }
   .dashboard-v1 .dash-hero-metrics strong, .dashboard-v1 .dash-total { font-size: 22px; }
   .dashboard-v1 .dash-total { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 7px; }
+  /* Compact only the empty state; real alerts keep their full table. */
+  .dashboard-v1 .dash-attention:has(> p.muted:not(.mobile-attention-list)):not(:has(> .dash-table-wrap, > .dash-approval, > .dash-action-badge)) {
+    display: grid;
+    grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+  }
+  .dashboard-v1 .dash-attention:has(> p.muted:not(.mobile-attention-list)):not(:has(> .dash-table-wrap, > .dash-approval, > .dash-action-badge)) > .section-heading { margin: 0; }
+  .dashboard-v1 .dash-attention:has(> p.muted:not(.mobile-attention-list)):not(:has(> .dash-table-wrap, > .dash-approval, > .dash-action-badge)) > p.muted { margin: 0; }
+  .dashboard-v1 .dash-attention:has(> p.muted:not(.mobile-attention-list)):not(:has(> .dash-table-wrap, > .dash-approval, > .dash-action-badge)) > button { justify-self: end; }
   .portfolio-card {
     display: grid;
     grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr);
