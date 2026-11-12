@@ -25,6 +25,10 @@ class TradabilityDiagnostics(unittest.TestCase):
   for asset,expected in [(dict(self.asset,asset={'id':'wrong','ticker':'SYN','currency':'USD'}),'TRADABILITY_INSTRUMENT_UNVERIFIED'),(dict(self.asset,buyBy={}),'TRADABILITY_SIZING_UNVERIFIED')]:
    with self.subTest(expected=expected),patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value=asset),patch.object(self.adapter,'inactive_orders',return_value=[]):
     result=self.adapter.safe_context(self.request,'USD');self.assertEqual((result['tradability'],result['diagnostic']),('unknown',expected))
+ def test_budget_in_instrument_and_permission_calls_is_distinguished(self):
+  for stage in ('instrument','permission'):
+   with self.subTest(stage=stage),patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',side_effect=DataUnavailable('PROVIDER_RATE_BUDGET',429) if stage=='instrument' else None,return_value=self.asset),patch('trade_service.fresh_permission',side_effect=DataUnavailable('PROVIDER_RATE_BUDGET',429) if stage=='permission' else None),patch.object(self.adapter,'inactive_orders',return_value=[]):
+    result=self.adapter.safe_context(self.request,'USD');self.assertEqual((result['status'],result['tradability'],result['diagnostic']),('verified','unknown','TRADABILITY_PROVIDER_RATE_BUDGET'))
  def test_success_and_exit_do_not_claim_a_failure(self):
   with patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value=self.asset),patch('trade_service.fresh_permission'),patch.object(self.adapter,'inactive_orders',return_value=[]):
    result=self.adapter.safe_context(self.request,'USD');self.assertEqual(result['tradability'],'available');self.assertNotIn('diagnostic',result)
