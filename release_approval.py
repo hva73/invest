@@ -124,8 +124,23 @@ def start_approved(connect, candidate_id, sha, deploy, *, now=None):
                     and result.get('status') == 'ok' and result.get('stage') == 'complete'
                     and result.get('recovery_required') is False
                     and result.get('service_restored') is True)
+        # The existing runner identifies failures before service stop, with no
+        # mutation and no recovery marker. They may be retried after correction.
+        no_mutation = (isinstance(result, dict) and result.get('operation') == 'deploy'
+                       and result.get('status') == 'failed'
+                       and result.get('stage') in ('authorization', 'preflight', 'quota', 'stage', 'service_state')
+                       and result.get('recovery_required') is False)
     except Exception:
         verified = False
+        no_mutation = False
+    if no_mutation:
+        with connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            changed = c.execute("UPDATE release_approvals SET status='failed' WHERE id=? AND sha=? AND status='claimed'",
+                                (candidate_id, sha)).rowcount
+            if changed != 1:
+                raise ValueError('approval_unavailable')
+        return {'id': candidate_id, 'sha': sha, 'status': 'failed'}
     return finish(connect, candidate_id, sha, verified=verified)
 
 

@@ -113,6 +113,14 @@ class ReleaseApprovalTests(unittest.TestCase):
             a.start_approved(self.connect,item['id'],item['sha'],deploy,now=104)
         self.assertEqual(calls,[item['sha']])
 
+    def test_confirmed_preflight_failure_does_not_block_new_candidate(self):
+        item=self.candidate();a.approve(self.connect,item['id'],item['sha'],7,now=101)
+        result=a.start_approved(self.connect,item['id'],item['sha'],lambda sha:{
+            'operation':'deploy','status':'failed','stage':'quota','recovery_required':False},now=102)
+        self.assertEqual(result['status'],'failed')
+        self.assertEqual(a.current(self.connect,7,now=103)['status'],'failed')
+        self.assertIsNotNone(a.prepare(self.connect,'b'*40,'Ny',7,now=104))
+
     def test_unknown_runner_outcome_requires_recovery(self):
         item=self.candidate();a.approve(self.connect,item['id'],item['sha'],7,now=101)
         result=a.start_approved(self.connect,item['id'],item['sha'],lambda sha: (_ for _ in ()).throw(OSError()),now=102)
