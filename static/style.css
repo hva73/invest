@@ -694,3 +694,12 @@ body > aside nav .nav-sector-mobile{display:none}
  .si-detail .si-detail-metrics small,.si-detail .si-detail-metrics strong{display:block}
  .si-detail .si-detail-metrics small{font-size:10px;letter-spacing:.08em;margin-bottom:3px}
 }
+
+/* Direction is conveyed by both colour and an arrow; neutral values stay neutral. */
+.signed-positive,.dash-change.positive,.dash-profit-percent.positive{color:var(--dash-positive,var(--positive))}
+.signed-negative,.dash-change.negative,.dash-profit-percent.negative{color:var(--dash-negative,var(--negative))}
+.signed-neutral,.dash-change.neutral,.dash-profit-percent.neutral{color:#a8bdc5}
+@media(max-width:700px){
+ .mobile-holding-daily.positive,.position-daily-value.positive,.position-daily-percent.positive{color:var(--dash-positive,var(--positive))}
+ .mobile-holding-daily.negative,.position-daily-value.negative,.position-daily-percent.negative{color:var(--dash-negative,var(--negative))}
+}
