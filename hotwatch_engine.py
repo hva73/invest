@@ -652,8 +652,10 @@ def view(c,row,now=None):
  if request.get('report_id')!='manual-pluto' and request.get('watch_mode','both')!='exit' and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED','PAUSED'):
   from intel_workflows import candidate_currentness
   candidate_review=candidate_currentness(c,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery')
-  if candidate_review['status']=='REVIEW_DUE' and row['status']!='PAUSED':display_status='REVURDERING FORFALDET'
-  if candidate_review['status']=='REPORT_ONLY' and row['status']!='PAUSED':display_status='MANGLER VURDERING'
+  # Candidate assessment gates entry; it must not hide an independent exit.
+  if effective not in ('SELL','REDUCE') and row['status']!='PAUSED':
+   if candidate_review['status']=='REVIEW_DUE':display_status='REVURDERING FORFALDET'
+   if candidate_review['status']=='REPORT_ONLY':display_status='MANGLER VURDERING'
  provisional=c.execute('SELECT symbol,evidence FROM hw_provisional_feed_links WHERE watch_row_id=?',(row['id'],)).fetchone()
  if provisional and request.get('provider')=='pluto':
   try:
