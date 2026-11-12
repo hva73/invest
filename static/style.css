@@ -570,3 +570,7 @@ body:has(#login:not([hidden])) > aside nav{display:none}
 .si-position-metrics b{font-size:12px;font-weight:600;color:#dce9ec;overflow-wrap:anywhere}
 .si-position-metrics b.positive{color:#80ddb3}.si-position-metrics b.negative{color:#ff9ca9}
 .si-position-link{row-gap:9px}
+
+/* More position context on wide screens; mobile list remains agent 2’s domain. */
+.si-position-desktop-details{display:none}
+@media(min-width:901px){.si-journey{width:min(920px,calc(100vw - 48px));max-width:920px}.si-position-desktop-details{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.si-position-desktop-details small{display:grid;gap:4px;font-size:11px;color:#9fb4bd}.si-position-desktop-details b{font-size:13px;color:#dce9ec;font-weight:600}}

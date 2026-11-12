@@ -58,6 +58,10 @@ try:
    root=journey.locator('[data-sector-position]').filter(has_text='Root').filter(has_text='NOVO-B')
    child=journey.locator('[data-sector-position]').filter(has_text='AI').filter(has_text='NOVO-B')
    expect(root).to_be_enabled();expect(child).to_be_enabled()
+   details=root.locator('.si-position-desktop-details')
+   if width >= 901:
+    expect(details).to_be_visible();expect(details).to_contain_text('Antal');expect(details).to_contain_text('5');expect(details).to_contain_text('270,30');expect(details).to_contain_text('Gns. købskurs')
+   else: expect(details).to_be_hidden()
    expect(root).to_contain_text('I dag · kurs pr. stk.')
    expect(root).to_contain_text('+6,30')
    expect(root).to_contain_text('+2,39 %')
