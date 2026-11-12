@@ -68,4 +68,26 @@ class CrossBatchAmbiguity(unittest.TestCase):
    self.assertEqual([x['price'] for x in result['messages']],['56.40'])
   finally:fixture.tearDown()
 
+class AmbiguousTradeRecovery(unittest.TestCase):
+ def test_retry_uses_sustainable_cadence_and_preserves_prior_sample(self):
+  import json, app, hotwatch_engine as engine
+  from test_hotwatch_engine import HotWatch,tick
+  fixture=HotWatch();fixture.setUp()
+  try:
+   wid=fixture.req['watch_id'];original=tick(fixture.now);fixture.put(original)
+   with app.connect() as c:
+    row=c.execute('SELECT * FROM hw_sessions WHERE watch_id=?',(wid,)).fetchone()
+    expected=engine.effective_poll_interval(c,json.loads(row['request']))
+    c.execute('UPDATE hw_sessions SET failures=8 WHERE id=?',(row['id'],))
+   engine.fault(app.connect,1,wid,True,'EODHD_AMBIGUOUS_TRADE',fixture.now)
+   with app.connect() as c:
+    row=c.execute('SELECT * FROM hw_sessions WHERE watch_id=?',(wid,)).fetchone()
+    self.assertAlmostEqual(row['next_due']-fixture.now.timestamp(),expected)
+    self.assertEqual(row['last_data'],original['event_time']);self.assertEqual(json.loads(row['state'])['signal'],'NO_DATA')
+    self.assertEqual(c.execute('SELECT count(*) AS n FROM hw_samples WHERE watch_row_id=?',(row['id'],)).fetchone()['n'],1)
+   later=fixture.now+timedelta(seconds=1);fresh=tick(later,1,price='101')
+   self.assertFalse(fixture.put(fresh,later)['duplicate'])
+   with app.connect() as c:self.assertIsNone(c.execute('SELECT last_error FROM hw_sessions WHERE watch_id=?',(wid,)).fetchone()['last_error'])
+  finally:fixture.tearDown()
+
 if __name__=='__main__': unittest.main(verbosity=2)
