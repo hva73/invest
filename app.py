@@ -94,6 +94,8 @@ def init():
             c.execute(f'CREATE INDEX IF NOT EXISTS {table}_owner ON {table}(user_id)')
             c.execute(f"CREATE TRIGGER IF NOT EXISTS {table}_require_owner BEFORE INSERT ON {table} WHEN NEW.user_id IS NULL BEGIN SELECT RAISE(ABORT, 'Owner required'); END")
         c.execute('CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), csrf TEXT NOT NULL, expires REAL NOT NULL)')
+        import release_approval
+        release_approval.init(c)
         c.execute('CREATE TABLE IF NOT EXISTS login_failures(address TEXT NOT NULL, created REAL NOT NULL)')
         c.execute('CREATE TABLE IF NOT EXISTS invitations(token_hash TEXT PRIMARY KEY, created_by INTEGER NOT NULL REFERENCES users(id), expires REAL NOT NULL, used INTEGER NOT NULL DEFAULT 0)')
         c.execute("CREATE TABLE IF NOT EXISTS connections(user_id INTEGER PRIMARY KEY REFERENCES users(id), provider TEXT NOT NULL DEFAULT 'pluto', status TEXT NOT NULL, requested TEXT NOT NULL)")
@@ -278,6 +280,10 @@ class Handler(BaseHTTPRequestHandler):
             s=self.session()
             if not s: return self.send(401,{'error':'Log ind først'})
             user_id=s['user_id']
+            if self.path=='/api/admin/release-approval':
+                if s['role']!='admin' or s['username']!='owner':return self.send(403,{'error':'Kun ejeren kan godkende opdateringer'})
+                import release_approval
+                return self.send(200,{'candidate':release_approval.pending(connect,user_id)})
             if self.path=='/api/push/config':
                 import web_push
                 return self.send(200,web_push.config(connect,user_id))
@@ -453,6 +459,12 @@ class Handler(BaseHTTPRequestHandler):
             if not s:return self.send(401,{'error':'Log ind først'})
             if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),s['csrf']):return self.send(403,{'error':'Ugyldigt sikkerhedstoken'})
             user_id=s['user_id']
+            if self.path=='/api/admin/release-approval':
+                if s['role']!='admin' or s['username']!='owner':return self.send(403,{'error':'Kun ejeren kan godkende opdateringer'})
+                import release_approval
+                try:result=release_approval.approve(connect,data.get('id'),data.get('sha'),user_id)
+                except ValueError:return self.send(409,{'error':'Opdateringen er udløbet eller ændret. Hent den aktuelle version igen.'})
+                return self.send(200,{**result,'deployment_started':False})
             if self.path=='/api/admin/reset-password':
                 if s['role']!='admin':return self.send(403,{'error':'Kun administratoren kan ændre brugerens adgangskode'})
                 if self.throttled():return self.send(429,{'error':'Prøv igen om fem minutter'})
