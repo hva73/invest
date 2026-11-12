@@ -1525,23 +1525,22 @@ class HotWatch(unittest.TestCase):
   session=engine.item(app.connect,1,wid,False)['session'];self.assertEqual(session['request']['candidate_id'],candidate['candidate_id']);self.assertEqual(session['status'],'CREATED')
  def test_reassessed_candidate_after_automatic_expiry_starts_new_unplanned_watch(self):
   from hotwatch_service import auto_activate_candidate
+  import intel_workflows
   report=merc_report(False);report['report_id']='reassessed-fixture';candidate=report['candidates'][0];candidate.update(asset_id='synthetic-MERC',exchange='NASDAQ');report_ingest.save(app.connect,1,report)
   verified={'asset_id':'synthetic-MERC','ticker':'MERC','exchange':'NASDAQ','currency':'USD','isin':'US1234567890'}
-  start=engine.utc();expired=start+timedelta(seconds=1)
-  old={'status':'CURRENT','assessed_at':start.isoformat()}
-  with patch('intel_workflows.candidate_currentness',return_value=old):
-   first=auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:verified)
-   self.assertEqual(first['status'],'CREATED')
-   with app.connect() as c:
-    row=c.execute('SELECT * FROM hw_sessions WHERE watch_id=?',(first['watch_id'],)).fetchone()
-    c.execute("UPDATE hw_sessions SET status='EXPIRED' WHERE id=?",(row['id'],))
-    engine.event(c,row,'CAPACITY_RELEASED',start,'older capacity event')
-    engine.event(c,row,'CAPACITY_RESTORED',start,'older restore event')
-    engine.event(c,row,'CANDIDATE_WATCH_EXPIRED',expired,'synthetic expiry')
-   self.assertEqual(auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:self.fail('old assessment cannot reactivate'))['status'],'NOT_NEW')
-  new={'status':'CURRENT','assessed_at':(expired+timedelta(seconds=1)).isoformat()}
-  with patch('intel_workflows.candidate_currentness',return_value=new):
-   second=auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:verified)
+  now=engine.utc();expired=now-timedelta(seconds=10)
+  first=auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:verified)
+  self.assertEqual(first['status'],'CREATED')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions WHERE watch_id=?',(first['watch_id'],)).fetchone()
+   c.execute("UPDATE hw_sessions SET status='EXPIRED' WHERE id=?",(row['id'],))
+   engine.event(c,row,'CAPACITY_RELEASED',expired-timedelta(seconds=2),'older capacity event')
+   engine.event(c,row,'CAPACITY_RESTORED',expired-timedelta(seconds=1),'older restore event')
+   engine.event(c,row,'CANDIDATE_WATCH_EXPIRED',expired,'synthetic expiry')
+  self.assertEqual(auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:self.fail('old assessment cannot reactivate'))['status'],'NOT_NEW')
+  reassessment=copy.deepcopy(candidate['decision']);reassessment['decided_at']=(now-timedelta(seconds=1)).isoformat()
+  with app.connect() as c:intel_workflows.index_decision(c,1,False,candidate['candidate_id'],reassessment,'synthetic-new-assessment')
+  second=auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:verified)
   self.assertEqual(second['status'],'CREATED');self.assertNotEqual(first['watch_id'],second['watch_id'])
   with app.connect() as c:
    rows=c.execute('SELECT watch_id,status,request FROM hw_sessions WHERE candidate_id=? AND watch_id IN (?,?) ORDER BY id',(candidate['candidate_id'],first['watch_id'],second['watch_id'])).fetchall()
@@ -1549,8 +1548,7 @@ class HotWatch(unittest.TestCase):
    risk=json.loads(rows[-1]['request'])['risk'];self.assertIsNone(risk['proposed_quantity']);self.assertIsNone(risk['stop_price'])
    self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
   engine.control(app.connect,1,second['watch_id'],False,'stop')
-  with patch('intel_workflows.candidate_currentness',return_value=new):
-   self.assertEqual(auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:self.fail('manual stop must be respected'))['status'],'NOT_NEW')
+  self.assertEqual(auto_activate_candidate(app.connect,1,False,report,candidate,lambda *_:self.fail('manual stop must be respected'))['status'],'NOT_NEW')
 
  def test_capacity_released_candidate_can_restart_when_space_returns(self):
   from hotwatch_service import auto_activate_candidate
