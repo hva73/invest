@@ -5,7 +5,7 @@ from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor,wait,FIRST_COMPLETED
 from contextlib import contextmanager
 import app,hotwatch_engine as engine
-from hotwatch_adapters import PlutoAdapter,EODHDAdapter,InboxAdapter,DataUnavailable
+from hotwatch_adapters import PlutoAdapter,EODHDAdapter,InboxAdapter,DataUnavailable,local_budget_error
 from hotwatch_contract import EngineError,stamp
 from cxe_reference import ReferenceUnavailable as CXEReferenceUnavailable
 from eodhd_us_reference import ReferenceUnavailable as USReferenceUnavailable
@@ -473,7 +473,7 @@ def cxe_verified_match(instrument,choices,now=None,connect=None,uid=None):
   from hotwatch_adapters import reserve
   feed=EODHDFeeds(os.environ.get('ESCAPE_EODHD_API_KEY',''),capacity=Capacity(connect))
   quote=feed.snapshot(crypto['symbol'])
-  if quote['status']=='LOCAL_BUDGET_EXHAUSTED':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+  if quote['status']=='LOCAL_BUDGET_EXHAUSTED':raise local_budget_error(quote)
   if quote['status']=='RATE_LIMIT':raise DataUnavailable('EODHD_RATE_LIMIT',429)
   if quote['status']!='OK':raise DataUnavailable('EODHD_CRYPTO_QUOTE_UNAVAILABLE')
   return {'status':'VERIFIED','basis':'user_authorized_btc_monitoring','symbol':crypto['symbol'],'isin':'','currency':crypto['currency'],'currency_basis':'explicit_BTC_USD_pair','type_note':'Brugerbekræftet BTC-kursmapping; uafhængig dokumentation for netværk mangler.','pluto':{k:instrument.get(k) for k in ('asset_id','ticker','name','exchange','currency','type')}}
