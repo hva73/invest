@@ -59,6 +59,21 @@ class ProbeTests(unittest.TestCase):
         opener = Mock(); opener.open.return_value = Response(json.dumps(payload).encode())
         self.assertEqual(p.probe('a' * 40, opener)['status'], 'ok')
 
+    def test_quota_summary_only_exposes_numeric_bounds(self):
+        values = {'used_upper_bytes': 100, 'limit_lower_bytes': 300,
+                  'free_lower_bytes': 200, 'other': 'secret'}
+        result = p.quota_summary('a' * 40, lambda token: values)
+        self.assertEqual(result, {'status':'ok', 'used_upper_bytes':100,
+                                  'limit_lower_bytes':300, 'free_lower_bytes':200})
+        self.assertNotIn('secret', str(result))
+
+    def test_quota_summary_fails_closed(self):
+        self.assertEqual(p.quota_summary('bad', lambda token: {'free_lower_bytes': 12}),
+                         {'status':'unavailable'})
+        def fail(token):
+            raise ValueError('private response')
+        self.assertEqual(p.quota_summary('bad', fail), {'status':'unavailable'})
+
     def test_non_json_does_not_print_response(self):
         opener = Mock(); opener.open.return_value = Response(b'<html>secret</html>')
         self.assertEqual(p.probe('a' * 40, opener), {'status':'non_json_response'})
