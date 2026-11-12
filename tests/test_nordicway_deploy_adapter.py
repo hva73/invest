@@ -1,4 +1,6 @@
 import os
+import json
+import time
 import sqlite3
 import subprocess
 import tempfile
@@ -49,6 +51,11 @@ class AdapterIntegration(unittest.TestCase):
         (self.app / 'app.py').write_text('old')
         (self.app / 'BUILD_COMMIT').write_text('0' * 40 + '\n')
         self.service = FakeService()
+
+    def ticket(self, bridge):
+        path = bridge / 'approval-ticket.json'
+        path.write_text(json.dumps({'sha':self.sha,'nonce':'1'*32,'expires':int(time.time())+60}))
+        path.chmod(0o600)
 
     def tearDown(self): self.temp.cleanup()
     def git(self, *args):
@@ -103,6 +110,7 @@ class AdapterIntegration(unittest.TestCase):
         approval = bridge / 'approved-sha'
         approval.write_text(self.sha + '\n')
         approval.chmod(0o600)
+        self.ticket(bridge)
         def factory(checkout, target, approved, required, quiescence, health, cpanel_token):
             self.assertEqual(cpanel_token, 'test_token_12345')
             return concrete.Adapter(checkout, target, approved, required,
@@ -144,6 +152,7 @@ class AdapterIntegration(unittest.TestCase):
         approval = bridge / 'approved-sha'
         approval.write_text(self.sha + '\n')
         approval.chmod(0o600)
+        self.ticket(bridge)
         def factory(checkout, target, approved, required, quiescence, health, cpanel_token):
             return concrete.Adapter(checkout, target, approved, required,
                 lambda: True, lambda sha: True, self.service,
@@ -174,6 +183,7 @@ class AdapterIntegration(unittest.TestCase):
         approval = bridge / 'approved-sha'
         approval.write_text(self.sha + '\n')
         approval.chmod(0o600)
+        self.ticket(bridge)
         healthy = [False]
         def factory(checkout, target, approved, required, quiescence, health, cpanel_token=None):
             return concrete.Adapter(checkout, target, approved, required,
@@ -217,6 +227,7 @@ class AdapterIntegration(unittest.TestCase):
         approval = bridge / 'approved-sha'
         approval.write_text(self.sha + '\n')
         approval.chmod(0o600)
+        self.ticket(bridge)
         def factory(checkout, target, approved, required, quiescence, health, cpanel_token=None):
             return concrete.Adapter(checkout, target, approved, required,
                 lambda: True, lambda sha: True, self.service,
@@ -485,6 +496,7 @@ class AdapterIntegration(unittest.TestCase):
         approval = bridge / 'approved-sha'
         approval.write_text(self.sha + '\n')
         approval.chmod(0o600)
+        self.ticket(bridge)
         allowed = [False]
         def factory(checkout, target, approved, required, quiescence, health, cpanel_token):
             def quota(path, amount):
@@ -502,6 +514,7 @@ class AdapterIntegration(unittest.TestCase):
             self.assertFalse(rejected['recovery_required'])
             self.assertEqual(self.service.state, 'started')
             allowed[0] = True
+            self.ticket(bridge)  # a failed preflight requires a fresh approval
             accepted = nordicway_deploy_runner.run(self.sha, 'test_token_12345', bridge=bridge,
                         checkout=self.checkout, target=self.app, adapter_factory=factory)
         self.assertEqual(accepted['status'], 'ok')
