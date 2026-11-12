@@ -21,13 +21,50 @@
   .dashboard-v1 > .dash-holdings { grid-column: 1 / -1; }
   .dashboard-v1 > .dash-signals,
   .dashboard-v1 > .dash-quality { min-width: 0; }
-  .dash-hero { padding: 26px 30px 0; }
-  .dash-hero-intro h2 { font-size: clamp(28px, 2.5vw, 40px); margin: 12px 0 8px; }
+  .dash-hero { padding: 20px 24px 0; }
+  .dash-hero-intro h2 { font-size: clamp(26px, 2.2vw, 34px); margin: 8px 0 6px; }
   .dash-hero-intro p { margin-bottom: 12px; }
-  .dash-hero-metrics { margin-top: 22px; }
-  .dash-hero-metrics > div { padding-top: 16px; padding-bottom: 18px; }
+  .dash-chart-svg { height: 115px; }
+  .dash-hero .dash-chart-summary { margin: 8px 0 2px; }
+  .dash-hero .dash-chart-heading h3 { font-size: 16px; }
+  .dash-chart-periods button { min-height: 32px; background: transparent; border-color: transparent; border-radius: 0; padding: 5px 10px; }
+  .dash-chart-periods button[aria-pressed=true] { background: transparent; color: #a7f2dd; border-color: transparent transparent #74d8c3; border-bottom-width: 2px; }
+  .dash-hero .dash-chart-summary > div:nth-child(2) { display:none; }
+  .dash-day-original { display:none; }
+  .dash-day-desktop { display:block; }
+  .dash-table .dash-price .dash-desktop-entry { display:block; font-size:11px; }
+  .dash-hero-metrics { margin-top: 12px; }
+  .dash-hero-metrics > div { padding-top: 12px; padding-bottom: 12px; }
+  .dash-attention { padding-top: 16px; padding-bottom: 16px; }
+  .portfolio-card { padding: 18px 22px; }
+  .portfolio-card h2 { margin: 8px 0; }
+  .portfolio-card .portfolio-metric-label { margin-top: 12px; }
   .dash-holdings .dash-table th, .dash-attention .dash-table th { padding-top: 12px; padding-bottom: 12px; }
   .dash-holdings .dash-table tbody tr:hover, .dash-attention .dash-table tbody tr:hover { background: #ffffff08; }
+  /* Compact desktop introductions while keeping connection and detail controls. */
+  .portfolio-catalog-heading { padding: 18px 24px; }
+  .portfolio-catalog-heading h2 { font-size: clamp(26px, 2.4vw, 34px); margin: 8px 0 6px; }
+  .portfolio-catalog-heading .section-heading { margin-bottom: 8px; }
+  .portfolio-card .portfolio-value-link { padding: 10px 14px; }
+  .portfolio-card .portfolio-preview > p { margin: 8px 0; }
+
+  /* Signal styling follows the existing, already-qualified UI category. */
+  .engine-list-row[data-engine-category="BUY"] { border-left: 3px solid #68cba3; }
+  .engine-list-row[data-engine-category="SELL"] { border-left: 3px solid #ed8998; }
+  .engine-list-status .dash-action-badge { font-size: 12px; font-weight: 700; min-height: 36px; }
+
+  /* A shorter results chart brings the allocation into view without changing focus order. */
+  .si-results .si-bars { min-height: 205px; }
+  .si-results .si-bar-column { grid-template-rows: 20px 140px auto; }
+  .si-results .si-bar-plot { height: 140px; min-height: 140px; }
+  .si-results .si-bar.up { bottom: 70px; transform: translateX(-50%) scaleY(.78); transform-origin: center bottom; }
+  .si-results .si-bar.down { top: 70px; transform: translateX(-50%) scaleY(.78); transform-origin: center top; }
+  .si-results .si-zero-line { top: 112px; }
+  .si-results { padding: 18px 24px; }
+  .si-hero { padding: 20px 24px 0; }
+  .si-hero h2 { font-size: clamp(27px, 2.5vw, 34px); margin: 8px 0; }
+  .si-metrics { margin-top: 14px; }
+  .si-metrics > button { padding-top: 12px; padding-bottom: 14px; }
   .engine-overview, .sector-panel, .portfolio-card { min-width: 0; }
   .engine-hero { padding: 18px 22px; }
   .engine-hero h2 { font-size: clamp(25px, 2.2vw, 32px); margin: 7px 0 5px; }
@@ -49,6 +86,36 @@
   }
 }
 @media (min-width: 1100px) {
+  /* Kompakt overblik: metrics stay beside the chart and preserve their controls. */
+  .dashboard-v1 > .dash-hero {
+    display: grid;
+    grid-template-columns: minmax(230px, .85fr) minmax(0, 1.15fr);
+    grid-template-rows: auto auto;
+    column-gap: clamp(20px, 2.5vw, 36px);
+    align-items: start;
+    padding-bottom: 18px;
+  }
+  .dashboard-v1 .dash-hero-top { display: contents; }
+  .dashboard-v1 .dash-hero-intro { grid-column: 1; grid-row: 1; }
+  .dashboard-v1 .dash-hero-top #dashboard-value-chart { grid-column: 1 / -1; grid-row: 2; width: 100%; margin-top: 18px; }
+  .dashboard-v1 .dash-hero-metrics {
+    grid-column: 2; grid-row: 1;
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-self: end; gap: 0 24px; margin-top: 0;
+  }
+  .dashboard-v1 .dash-hero-metrics > div { min-width: 0; padding: 7px 0 0; border-right: 0; }
+  .dashboard-v1 .dash-hero-metrics strong, .dashboard-v1 .dash-total { font-size: 22px; }
+  .dashboard-v1 .dash-total { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 7px; }
+  /* Compact only the empty state; real alerts keep their full table. */
+  .dashboard-v1 .dash-attention:has(> p.muted:not(.mobile-attention-list)):not(:has(> .dash-table-wrap, > .dash-approval, > .dash-action-badge)) {
+    display: grid;
+    grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+  }
+  .dashboard-v1 .dash-attention:has(> p.muted:not(.mobile-attention-list)):not(:has(> .dash-table-wrap, > .dash-approval, > .dash-action-badge)) > .section-heading { margin: 0; }
+  .dashboard-v1 .dash-attention:has(> p.muted:not(.mobile-attention-list)):not(:has(> .dash-table-wrap, > .dash-approval, > .dash-action-badge)) > p.muted { margin: 0; }
+  .dashboard-v1 .dash-attention:has(> p.muted:not(.mobile-attention-list)):not(:has(> .dash-table-wrap, > .dash-approval, > .dash-action-badge)) > button { justify-self: end; }
   .portfolio-card {
     display: grid;
     grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr);
@@ -68,5 +135,61 @@
   .dashboard-v1 { gap: 18px; }
   .dash-hero-top { gap: 36px; }
   .dash-hero-top #dashboard-value-chart { flex-basis: 62%; }
-  .dash-chart-svg { height: 180px; }
+  .dash-chart-svg { height: 125px; }
+}
+
+/* Keep the desktop overview quiet when nothing needs the owner's attention. */
+@media (min-width: 901px) {
+  .dashboard-v1 .dash-hero-intro > p:not(.dash-warning) { display:none; }
+  .dashboard-v1 > .dash-signals, .dashboard-v1 > .dash-quality { display:none; }
+  .dashboard-v1 .dash-attention:not(.dash-attention-unknown):has(> p.muted:not(.mobile-attention-list)):not(:has(> .dash-table-wrap, > .dash-approval, > .dash-action-badge)) { display:none; }
+}
+
+@media (min-width: 901px) {
+ .dash-holdings .dash-price-time { display:none; }
+ .dashboard-v1 .dash-total-direction { display:inline; }
+ .dashboard-v1 .dash-total-mobile-arrow { display:none; }
+ .dashboard-v1 .dash-total.positive, .dashboard-v1 .dash-total.positive span { color:#80ddb3; }
+ .dashboard-v1 .dash-total.negative, .dashboard-v1 .dash-total.negative span { color:#ff9ca9; }
+ .dashboard-v1 .dash-total.neutral span { color:#a9c6c1; }
+}
+
+@media (min-width: 901px) {
+ .dash-chart-plot { position:relative; }
+ .dash-chart-plot .dash-chart-svg, .dash-chart-plot .inspect-chart-svg { pointer-events:all; }
+ .dash-chart-plot .dash-chart-point.is-selected { opacity:1; stroke:#e9fff6; stroke-width:1.5; r:4; }
+ .dash-chart-tooltip { position:absolute; z-index:8; bottom:calc(100% + 8px); transform:translateX(-50%); min-width:190px; padding:10px 12px; border:1px solid #477269; border-radius:9px; background:#102b2e; box-shadow:0 10px 24px #0008; color:#e5f1ef; pointer-events:none; }
+ .dash-chart-tooltip [hidden], .dash-chart-tooltip[hidden] { display:none!important; }
+ .dash-chart-tooltip b { font-weight:400; }
+ .dash-chart-tooltip small { display:block; color:#aecac3; font-size:11px; margin-bottom:6px; }
+ .dash-chart-tooltip span { display:flex; justify-content:space-between; gap:16px; font-size:12px; line-height:1.7; }
+ .dash-chart-tooltip strong { font-variant-numeric:tabular-nums; }
+ .dash-chart-tooltip [data-chart-share] { text-align:right; margin:2px 0 0; }
+ .dash-chart-tooltip[data-chart-tone="positive"] :is([data-chart-value],[data-chart-result],[data-chart-share]) { color:#80ddb3; }
+ .dash-chart-tooltip[data-chart-tone="negative"] :is([data-chart-value],[data-chart-result],[data-chart-share]) { color:#ff9ca9; }
+}
+
+@media (min-width: 901px) {
+ main:has(#content > .dashboard-v1) > header #title { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+ .dash-result-share > span { display:none; }
+}
+@media (min-width: 901px) {
+ .dash-chart-plot .inspect-chart-svg[viewBox="0 0 100 100"] .dash-chart-point.is-selected { r:1; stroke-width:1.5; vector-effect:non-scaling-stroke; }
+}
+
+@media (min-width: 901px) {
+ .si-donut-wrap { width:min(100%,240px); margin:auto; }
+ .si-donut-wrap .dash-chart-tooltip { text-align:left; }
+ .si-bar-column .dash-chart-tooltip { text-align:left; top:8px; bottom:auto; }
+ .si-bar-column .dash-chart-tooltip strong { font-size:12px; color:inherit; }
+}
+
+@media (min-width: 901px) {
+ .sector-heat .dash-chart-tooltip { text-align:left; }
+ .sector-heat .dash-chart-tooltip strong { font-size:12px; color:inherit; }
+}
+@media (min-width: 901px) {
+ .dash-chart-plot .inspect-chart-svg .dash-chart-point { opacity:0; }
+ .dash-chart-plot .inspect-chart-svg .dash-chart-point.is-selected,
+ .dash-chart-plot .inspect-chart-svg .dash-chart-point:focus-visible { opacity:1; }
 }

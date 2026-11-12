@@ -1,5 +1,6 @@
 """Exercise the actual app with synthetic data and a separately loaded desktop CSS."""
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -75,6 +76,70 @@ try:
                 page.locator('nav > [data-view=overview]').click()
                 expect(page.locator('.dashboard-v1')).to_be_visible()
             else:
+                if width >= 1280:
+                    hero_height = page.locator('.dash-hero').evaluate('e => e.getBoundingClientRect().height')
+                    assert hero_height < 530, (width, hero_height)
+                    expect(page.locator('.dash-holdings')).to_be_visible()
+                    expect(page.locator('main > header #title')).to_have_css('clip-path','inset(50%)')
+                    for label in page.locator('.dash-hero .dash-result-share > span').all(): expect(label).to_be_hidden()
+                    expect(page.locator('.dash-holdings thead')).to_contain_text('I dag')
+                    expect(page.locator('.dash-holdings thead')).to_contain_text('Siden køb')
+                    alfa=page.locator('.dash-holdings .dash-row').filter(has_text='ALFA')
+                    expect(alfa.locator('.dash-desktop-entry')).to_contain_text('Gns. køb')
+                    expect(alfa.locator('.dash-price-time')).to_be_hidden()
+                    expect(page.locator('.dash-hero')).not_to_contain_text('dansk tid')
+                    expect(page.locator('.dash-total.positive')).to_contain_text('↑')
+                    expect(alfa.locator('.dash-day-desktop')).to_contain_text('estimat')
+                    expect(alfa.locator('.dash-pnl')).to_contain_text('%')
+                    intro = page.locator('.dash-hero-intro').bounding_box()
+                    chart = page.locator('.dash-hero-top #dashboard-value-chart').bounding_box()
+                    metrics = page.locator('.dash-hero-metrics').bounding_box()
+                    assert intro['x'] + intro['width'] <= metrics['x'] + 1, (width, intro, metrics)
+                    assert chart['y'] >= max(intro['y'] + intro['height'], metrics['y'] + metrics['height']) - 1, (width, intro, metrics, chart)
+                    assert chart['width'] > metrics['width'], (width, chart, metrics)
+                    # The plotted values are inspectable by mouse and keyboard.
+                    page.locator('[data-dashboard-range="day"]').click()
+                    svg=page.locator('.dash-hero .dash-chart-svg');box=svg.bounding_box()
+                    page.mouse.move(box['x'] + box['width'] * .55, box['y'] + box['height'] * .5)
+                    tip=page.locator('.dash-hero .dash-chart-tooltip')
+                    expect(tip).to_be_visible();expect(tip.locator('[data-chart-date]')).to_have_text(re.compile(r'^\d{2}\.\d{2}$'))
+                    expect(tip.locator('[data-chart-value]')).not_to_have_text('—');expect(tip.locator('[data-chart-result]')).not_to_have_text('—')
+                    expect(tip.locator('[data-chart-share]')).to_contain_text('%')
+                    expect(tip.locator('[data-chart-share]')).not_to_contain_text('af depotværdi')
+                    assert tip.get_attribute('data-chart-tone') in ('positive','negative','neutral')
+                    if tip.get_attribute('data-chart-tone') in ('positive','negative'): expect(tip.locator('[data-chart-result]')).to_contain_text(re.compile('[↑↓]'))
+                    page.locator('[data-dashboard-range="week"]').click()
+                    svg=page.locator('.dash-hero .dash-chart-svg');box=svg.bounding_box()
+                    page.mouse.move(box['x'] + box['width'] * .6, box['y'] + box['height'] * .5)
+                    tip=page.locator('.dash-hero .dash-chart-tooltip')
+                    expect(tip).to_be_visible();expect(tip.locator('[data-chart-date]')).to_have_text(re.compile(r'^\d{2}\.\d{2}\.\d{2}$'))
+                    for period in ('month','year'):
+                        page.locator(f'[data-dashboard-range=\"{period}\"]').click()
+                        svg=page.locator('.dash-hero .dash-chart-svg');box=svg.bounding_box()
+                        page.mouse.move(box['x'] + box['width'] * .6, box['y'] + box['height'] * .5)
+                        tip=page.locator('.dash-hero .dash-chart-tooltip')
+                        expect(tip).to_be_visible();expect(tip.locator('[data-chart-date]')).to_have_text(re.compile(r'^\d{2}\.\d{2}\.\d{2}$'))
+                    page.locator('[data-dashboard-range="week"]').click()
+                    svg=page.locator('.dash-hero .dash-chart-svg');box=svg.bounding_box()
+                    page.mouse.move(box['x'] + box['width'] * .6, box['y'] + box['height'] * .5)
+                    tip=page.locator('.dash-hero .dash-chart-tooltip')
+                    if width == 1440: page.screenshot(path=str(screens / 'overview-tooltip-1440.png'), full_page=True)
+                    page.locator('.dash-hero-intro h2').hover();expect(tip).to_be_hidden()
+                    page.locator('.dash-hero .dash-chart-point').first.focus();expect(tip).to_be_visible()
+                    page.locator('.dash-hero-intro h2').click();expect(tip).to_be_hidden()
+                    empty_alert = page.locator('.dash-attention')
+                    expect(empty_alert).to_be_hidden()
+                    expect(page.locator('.dash-signals')).to_be_hidden()
+                    expect(page.locator('.dash-quality')).to_be_hidden()
+                    expect(page.locator('.dash-hero-intro > p:not(.dash-warning)')).to_be_hidden()
+                    # A real action and an explicitly unknown data state remain visible.
+                    empty_alert.evaluate("e => e.insertAdjacentHTML('beforeend', '<div class=\"dash-table-wrap\">Aktivt signal</div>')")
+                    expect(empty_alert).to_be_visible()
+                    empty_alert.locator('.dash-table-wrap').last.evaluate('e => e.remove()')
+                    empty_alert.evaluate("e => e.classList.add('dash-attention-unknown')")
+                    expect(empty_alert).to_be_visible()
+                    empty_alert.evaluate("e => e.classList.remove('dash-attention-unknown')")
+                    expect(empty_alert).to_be_hidden()
                 assert page.locator('body > aside').evaluate('e => e.getBoundingClientRect().width') == 224
                 assert page.locator('main').evaluate('e => e.getBoundingClientRect().left') >= 224
                 assert page.locator('nav [data-view=overview]').evaluate('e => e.getBoundingClientRect().height') >= 44
@@ -99,6 +164,22 @@ try:
                     page.locator(f'nav [data-view="{view}"]').click()
                     expect(page.locator(target)).to_be_visible()
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), (width, view)
+                    if view == 'portfolios' and width >= 1280:
+                        assert page.locator('.portfolio-catalog-heading').evaluate('e => e.getBoundingClientRect().height') < 180, width
+                    if view == 'sectors':
+                        expect(page.locator('.si-hero-chart #dashboard-value-chart')).to_be_visible()
+                        expect(page.locator('.sector-layout')).to_be_visible()
+                        result_chart = page.locator('.si-results .si-bars')
+                        if result_chart.count():
+                            assert result_chart.evaluate('e => e.getBoundingClientRect().height') <= 220, width
+                            zero_y = page.locator('.si-results .si-zero-line').bounding_box()['y']
+                            up_bar = page.locator('.si-results .si-bar.up').first
+                            if up_bar.count():
+                                rect = up_bar.bounding_box()
+                                assert abs((rect['y'] + rect['height']) - zero_y) <= 2, (width, rect, zero_y)
+                            down_bar = page.locator('.si-results .si-bar.down').first
+                            if down_bar.count():
+                                assert abs(down_bar.bounding_box()['y'] - zero_y) <= 2, width
                     if view == 'portfolios' and width >= 1100:
                         card = page.locator('.portfolio-card-root').first
                         name = card.locator(':scope > h2').bounding_box()
@@ -109,6 +190,12 @@ try:
                         assert card.locator('[data-open-portfolio]').first.is_visible()
                     if view == 'hot-watch':
                         expect(page.locator('.engine-list-row')).to_have_count(2)
+                        buy_row = page.locator('.engine-list-row[data-engine-category="BUY"]')
+                        sell_row = page.locator('.engine-list-row[data-engine-category="SELL"]')
+                        expect(buy_row.locator('.dash-action-badge')).to_be_visible()
+                        expect(sell_row.locator('.dash-action-badge')).to_be_visible()
+                        assert buy_row.evaluate('e => getComputedStyle(e).borderLeftWidth') == '3px'
+                        assert sell_row.evaluate('e => getComputedStyle(e).borderLeftWidth') == '3px'
                         expect(page.locator('.engine-list-row').first).to_contain_text('KØBSSIGNAL')
                         expect(page.locator('.engine-list-row').last).to_contain_text('SÆLGSSIGNAL')
                         page.locator('[data-engine-filter=BUY]').click()

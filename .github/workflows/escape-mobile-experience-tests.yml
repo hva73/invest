@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   mobile-experience:
-    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue63-anonymous-demo' || github.event.pull_request.head.ref == 'codex/issue54-signal-decision-ux' || github.event.pull_request.head.ref == 'codex/issue54-mobile-v24' || github.event.pull_request.head.ref == 'codex/issue54-candidate-flow' || github.event.pull_request.head.ref == 'codex/issue54-day-progress' || github.event.pull_request.head.ref == 'codex/mobile-experience-2' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue67-desktop-experience')
+    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/mobile-owner-feedback-54' || github.event.pull_request.head.ref == 'codex/issue63-anonymous-demo' || github.event.pull_request.head.ref == 'codex/issue54-signal-decision-ux' || github.event.pull_request.head.ref == 'codex/issue54-mobile-v24' || github.event.pull_request.head.ref == 'codex/issue54-candidate-flow' || github.event.pull_request.head.ref == 'codex/issue54-day-progress' || github.event.pull_request.head.ref == 'codex/mobile-experience-2' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue67-desktop-experience')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -43,6 +43,7 @@ jobs:
           python -m unittest test_trade_service test_hotwatch_buy_plan test_mobile_projection
           node tests/test_market_expansion.cjs
           node tests/test_holding_chart_marker.cjs
+          node tests/test_market_daily_stale.cjs
           python tests/browser_mobile_layout.py
           python tests/browser_mobile_review.py
           python tests/browser_mobile_navigation_app.py

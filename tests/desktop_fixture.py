@@ -32,15 +32,24 @@ def seed(case):
     rows = [{'assetId': 'synthetic-' + ticker, 'ticker': ticker,
              'name': 'Fiktiv ' + ticker, 'quantity': qty, 'price': price,
              'currency': 'DKK', 'value': value, 'unrealisedPnL': pnl,
+             'costBasis': str(Decimal(value) - Decimal(pnl)),
+             'averageEntryPrice': str((Decimal(value) - Decimal(pnl)) / Decimal(qty)),
+             'dailyChange': '1.25', 'dailyChangePercent': str((Decimal('1.25') / (Decimal(price) - Decimal('1.25')) * 100).quantize(Decimal('.01'))),
              'priceAsOf': observed} for ticker, qty, price, value, pnl in specs]
     with app.connect() as c:
         row = c.execute('SELECT payload FROM portfolio_snapshots WHERE portfolio_id=?', (case.root,)).fetchone()
         payload = json.loads(row['payload'])
         payload.update(positions=portfolio_data.normalize_positions(rows), positions_complete=True,
                        accounts=[], pending_orders=[], errors=[], complete=True)
+        previous_at = (case.now - timedelta(minutes=15)).isoformat()
+        previous_rows = [{**r, 'price': str(Decimal(r['price']) - Decimal('.20')),
+                          'priceAsOf': previous_at} for r in rows]
+        dashboard_projection.remember(c, 1, case.root, {'observed': previous_at,
+            'positions_complete': True, 'positions': portfolio_data.normalize_positions(previous_rows)})
         portfolio_data.save(c, 1, case.root, payload)
         owned = portfolios.list_owned(c, 1)
         snapshots = portfolio_data.snapshots(c, 1)
     projected = dashboard_projection.build(app.connect, 1, owned, snapshots)
     assert len(projected['positions']) == len(specs), projected['positions']
+    assert all(row['since_last'] is not None for row in projected['positions'])
     assert {row['ticker'] for row in projected['positions']} == {row[0] for row in specs}
