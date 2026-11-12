@@ -81,3 +81,31 @@ jobs:
               assert all(records['files'][name] is None for name in names)
           print('NEW_ASSETS_BACKUP_AND_ROLLBACK_PASS')
           PY
+      - name: Verify candidate preflight helper basics
+        env:
+          PYTHONPATH: .:tools
+        run: |
+          git fetch --no-tags origin ed4982f374bd2a2d4d1b6c0c0d9f2e22d4c3b8fd
+          git show ed4982f374bd2a2d4d1b6c0c0d9f2e22d4c3b8fd:tools/nordicway_v23_owner_preflight.py > "$RUNNER_TEMP/preflight.py"
+          "$RUNNER_TEMP/escape-data-venv/bin/python" -m py_compile "$RUNNER_TEMP/preflight.py"
+          "$RUNNER_TEMP/escape-data-venv/bin/python" - "$RUNNER_TEMP/preflight.py" <<'PY'
+          import importlib.util, tempfile
+          from pathlib import Path
+          import nordicway_release_preflight as preflight
+          spec=importlib.util.spec_from_file_location('owner_preflight_test', __import__('sys').argv[1])
+          module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+          assert module.SHA == '645c293a5c484187a68d121a5cdd96c0a958bc86'
+          names=preflight.manifest(Path('.'))
+          assert len(names)==73 and 'static/demo-data.js' in names and 'static/desktop-experience.css' in names
+          with tempfile.TemporaryDirectory() as d:
+              path=Path(d)/'missing'
+              assert module.regular_size(path, optional=True)==0
+              try: module.regular_size(path)
+              except ValueError as exc: assert str(exc)=='missing_file'
+              else: raise AssertionError('required missing file accepted')
+              path.mkdir()
+              try: module.regular_size(path, optional=True)
+              except ValueError as exc: assert str(exc)=='unsafe_file'
+              else: raise AssertionError('unsafe directory accepted')
+          print('PREFLIGHT_BASICS_PASS')
+          PY
