@@ -167,3 +167,8 @@
  .dash-chart-tooltip[data-chart-tone="positive"] :is([data-chart-value],[data-chart-result],[data-chart-share]) { color:#80ddb3; }
  .dash-chart-tooltip[data-chart-tone="negative"] :is([data-chart-value],[data-chart-result],[data-chart-share]) { color:#ff9ca9; }
 }
+
+@media (min-width: 901px) {
+ main:has(#content > .dashboard-v1) > header #title { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+ .dash-result-share > span { display:none; }
+}
