@@ -141,7 +141,7 @@ def resolve_cxe(pluto, eodhd_choices, reference_rows):
  row=candidates[0]
  # Match the actual primary market from the reference, not merely an ISIN
  # available on another venue in the same currency.
- primary_markets={'XCSE':'CO','XAMS':'AS','XETR':'XETRA','XFRA':'F','XPAR':'PA','XMIL':'MI'}
+ primary_markets={'XCSE':'CO','XSTO':'ST','XOSL':'OL','XAMS':'AS','XETR':'XETRA','XFRA':'F','XPAR':'PA','XMIL':'MI'}
  market=primary_markets.get(_norm(row.get('mic')))
  if not market:return {'status':'UNVERIFIED','reason':'PRIMARY_MARKET_UNSUPPORTED'}
  matches=[x for x in eodhd_choices if isinstance(x,dict) and x.get('isin')==row['isin'] and (not x.get('currency') or _norm(x.get('currency'))==_norm(pluto['currency'])) and _norm(x.get('exchange'))==market and isinstance(x.get('symbol'),str) and x['symbol'].upper().endswith('.'+market)]
