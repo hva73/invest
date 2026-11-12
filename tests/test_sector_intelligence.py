@@ -391,6 +391,23 @@ class SectorIntelligenceTest(unittest.TestCase):
   self.assertEqual(result['dashboard']['accounts'][1]['cash_status'],'unavailable')
   self.assertEqual(result['dashboard']['accounts'][1]['cash_accounts'],[])
 
+ def test_read_preserves_active_scopes_without_snapshot(self):
+  dashboard={'accounts':[{'id':1,'name':'Hoved','kind':'portfolio'}],'positions':[]}
+  owned=[{'id':1,'name':'Hoved','kind':'portfolio','source':'pluto','active':1,'external_id':'p:1'},
+         {'id':2,'name':'Collection','kind':'collection','source':'pluto','active':1,'external_id':'c:2','parent_external_id':'p:1'},
+         {'id':3,'name':'Mangler','kind':'portfolio','source':'pluto','active':1,'external_id':'p:3'},
+         {'id':4,'name':'Inaktiv','kind':'portfolio','source':'pluto','active':0,'external_id':'p:4'}]
+  snapshots={'1':{'data':{'value':{},'accounts':[],'errors':[]},'last_error':None}}
+  with patch('portfolios.list_owned',return_value=owned),patch('portfolio_data.snapshots',return_value=snapshots),patch('dashboard_projection.build',return_value=dashboard):
+   result=sector.read(self.connect,1)
+  accounts=result['dashboard']['accounts']
+  self.assertEqual([a['id'] for a in accounts],[1,2,3])
+  self.assertEqual(accounts[1]['parent_external_id'],'p:1')
+  self.assertEqual(accounts[1]['cash_status'],'unavailable')
+  self.assertTrue(accounts[1]['snapshot_missing'])
+  self.assertIsNone(accounts[2]['value'])
+  self.assertTrue(accounts[2]['failed'])
+
  def test_pluto_fund_and_crypto_are_separate_asset_classes(self):
   for aid,kind,expected in [('fund','ETF','Fonde og ETF (aktivklasse)'),('coin','CRYPTO','Krypto (aktivklasse)')]:
    with self.subTest(kind=kind),patch('trade_service.client',return_value=(object(),{})),patch('trade_service.call',return_value={'id':aid,'ticker':'TEST','currency':'USD','type':kind,'sector':'Technology'}):
