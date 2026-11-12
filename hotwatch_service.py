@@ -197,7 +197,7 @@ def pending_holding_slots(c,uid,now):
    if not prior or prior['status'] in ('VERIFYING','CAPACITY_LIMIT','PROVIDER_RATE_BUDGET'):pending.add((snapshot['id'],asset))
  return len(pending)
 
-def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup=None):
+def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup=None,identity_adapter=None):
  """Start only a new, uniquely matched candidate; no order or purchase plan."""
  import candidate_lifecycle
  cid=candidate.get('candidate_id');asset=candidate.get('asset_id')
@@ -277,7 +277,7 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
    engine.event(c,row,'CAPACITY_RESTORED',now,'Kandidatovervågning genoptaget med bevaret historik og strategi')
    return {'status':'VALIDATING','watch_id':row['watch_id']}
  try:
-  adapter=PlutoAdapter(connect,uid,purpose='candidate_identity') if verify is None else None
+  adapter=(identity_adapter or PlutoAdapter(connect,uid,purpose='candidate_identity')) if verify is None else None
   if not asset:
    import trade_service
    options=trade_service.search(connect,uid,candidate.get('ticker',''),factory=adapter.factory if adapter else None).get('assets',[])
@@ -310,8 +310,14 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
   if reassess_generation:req['reactivation_reason']='Ny tidsstemplet kandidatvurdering efter automatisk udløb'
   if existing_cycle:req['trade_cycle_id']=existing_cycle
   result=engine.create(connect,uid,req);return {'status':result['session']['status'] if not result['duplicate'] else 'ALREADY_ACTIVE','watch_id':watch}
- except EngineError as error:return {'status':error.code}
- except Exception:return {'status':'DISCOVERY_VERIFICATION_FAILED'}
+ except EngineError as error:
+  if identity_adapter is not None:
+   gateway=getattr(identity_adapter,'gateway',None)
+   if error.code!='PROVIDER_RATE_BUDGET' or getattr(gateway,'catalog',None) is None:identity_adapter.gateway=None
+  return {'status':error.code}
+ except Exception:
+  if identity_adapter is not None:identity_adapter.gateway=None
+  return {'status':'DISCOVERY_VERIFICATION_FAILED'}
 
 # Select the latest eligible link once per distinct candidate. The former
 # anti-join repeated the history search for every historical link, holding a
@@ -345,7 +351,7 @@ def discovery_candidate_order(rows, report_cache=None):
  from itertools import groupby
  return [row for _,group in groupby(rows,key=lambda r:(r['generated'],r['id'])) for row in sorted(group,key=position)]
 
-def auto_discover(connect,cursor=0):
+def auto_discover(connect,cursor=0,identity_cache=None):
  """Optional worker path, bounded by existing capacity and provider budgets."""
  if os.environ.get('ESCAPE_HW_AUTOSTART_ENABLED','1')!='1':return cursor
  configured=os.environ.get('ESCAPE_HW_AUTOSTART_AFTER')
@@ -379,7 +385,15 @@ def auto_discover(connect,cursor=0):
      if not after and started and stamp(row['received'])<stamp(started['started_at']) and (not latest_report or row['id']!=latest_report['id']) and not old:continue
      if not old or old['report_id']!=current['report_id'] or old['next_attempt']<=now.timestamp():candidate=item;report=current;cursor+=offset;break
    if candidate is None:continue
-   result=auto_activate_candidate(connect,uid,False,report,candidate)
+   if identity_cache is None:result=auto_activate_candidate(connect,uid,False,report,candidate)
+   else:
+    # The discovery thread owns this per-user, bounded connection cache.
+    # Actual instrument identity is re-fetched on every activation attempt.
+    at=time.monotonic();cached=identity_cache.get(uid)
+    if not cached or not 0<=at-cached[0]<300:
+     if len(identity_cache)>=32:identity_cache.clear()
+     cached=(at,PlutoAdapter(connect,uid,purpose='candidate_identity'));identity_cache[uid]=cached
+    result=auto_activate_candidate(connect,uid,False,report,candidate,identity_adapter=cached[1])
    with connect() as c:c.execute('INSERT INTO hw_discovery_attempts VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(user_id,is_test,candidate_id) DO UPDATE SET report_id=excluded.report_id,status=excluded.status,updated=excluded.updated,next_attempt=excluded.next_attempt,watch_id=excluded.watch_id',(uid,0,candidate['candidate_id'],report['report_id'],result['status'],engine.utc().isoformat(),engine.utc().timestamp()+(300 if result['status'] in ('ALREADY_ACTIVE','NOT_NEW','CREATED') else 60),result.get('watch_id')))
    if result['status'] not in ('NOT_NEW','ALREADY_ACTIVE'):
     logging.getLogger('escape.hotwatch').info(json.dumps({'service':'hotwatch','event':'discovery','candidate_ref':hashlib.sha256(str(candidate.get('candidate_id','')).encode()).hexdigest()[:16],'status':result['status']}))
@@ -1422,9 +1436,9 @@ class Runner:
     self.stop.wait(5)
   sector_thread=threading.Thread(target=sector_loop,name='sector-data',daemon=True);sector_thread.start()
   def discovery_loop():
-   cursor=0
+   cursor=0;discovery_identities={}
    while not self.stop.is_set():
-    try:cursor=auto_discover(self.connect,cursor)
+    try:cursor=auto_discover(self.connect,cursor,identity_cache=discovery_identities)
     except Exception:logging.getLogger('escape.hotwatch').exception('discovery_error')
     self.stop.wait(2)
   discovery_thread=threading.Thread(target=discovery_loop,name='hotwatch-discovery',daemon=True);discovery_thread.start()
