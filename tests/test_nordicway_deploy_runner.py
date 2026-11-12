@@ -16,6 +16,8 @@ import nordicway_deploy_client as client
 import nordicway_deploy_request as request_parser
 from types import SimpleNamespace
 from nordicway_deploy_sequence import Outcome
+# Base-branch CI already runs this module; include approval tests in that job.
+from tests.test_nordicway_owner_approval import OwnerApprovalTests
 
 SHA = 'a' * 40
 TOKEN = 'test_token_12345'
