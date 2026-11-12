@@ -44,9 +44,9 @@ for(const label of ['RISIKODATA MANGLER','EARLY WATCH','HANDEL STANDSET']){row.h
 // A day's currency amount is a price movement of the current quantity, not a
 // broker-reported cash profit. Never combine a different quote currency.
 row.hot_watch={};row.price={amount:'100',currency:'EUR'};row.quantity='3';row.verification='broker_snapshot';row.price_freshness={state:'fresh'};row.daily={percent:'2',amount:'1.5',currency:'EUR',basis:'pluto_reported_daily_change',to:new Date().toISOString()};row.unrealized={amount:'10',currency:'DKK'};row.unrealized_percent='5';
-html=ui.render(state);assert.match(html,/I dag \+4,50\s*€ · \+2,00 %/);assert.match(html,/Siden køb[\s\S]*?\+10,00\s*kr\.[\s\S]*?\+5,00 %/);
-row.daily.amount=null;html=ui.render(state);assert.match(html,/I dag ≈ \+5,88\s*€ · \+2,00 %/);
-row.daily.currency='USD';html=ui.render(state);assert.match(html,/I dag — · \+2,00 %/);
+html=ui.render(state);assert.match(html,/I dag <span class="signed-positive">↑ \+4,50\s*€<\/span> · <span class="signed-positive">↑ \+2,00 %/);assert.match(html,/Siden køb[\s\S]*?\+10,00\s*kr\.[\s\S]*?\+5,00 %/);
+row.daily.amount=null;html=ui.render(state);assert.match(html,/I dag <span class="signed-positive">↑ ≈ \+5,88\s*€<\/span> · <span class="signed-positive">↑ \+2,00 %/);
+row.daily.currency='USD';html=ui.render(state);assert.match(html,/I dag — · <span class="signed-positive">↑ \+2,00 %/);
 row.verification='last_known';html=ui.render(state);assert.match(html,/I dag — · — %/);
 console.log('PASS: current quantity, quote currency, estimated/missing daily amount and since-purchase percent');
 ui.click({dataset:{dashboardRange:'day'}});state.dashboard.portfolio_value_history.periods.day=[{at:'2026-11-06T10:00:00Z',reported_result:'10',currency:'DKK'},{at:'2026-11-06T11:00:00Z',reported_result:'25',currency:'DKK'}];state.dashboard.daily_result={amount:'15',currency:'DKK'};html=ui.render(state);assert.match(html,/dash-day-total dash-day-duplicate/);state.dashboard.daily_result.amount='16';html=ui.render(state);assert.doesNotMatch(html,/dash-day-duplicate/);state.dashboard.daily_result.amount='15';state.dashboard.daily_result.currency='EUR';html=ui.render(state);assert.doesNotMatch(html,/dash-day-duplicate/);
