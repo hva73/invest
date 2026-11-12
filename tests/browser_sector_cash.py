@@ -33,6 +33,7 @@ payload = {
   'snapshot_at':stamp,'warnings':[], 'portfolio_value_history':{}},
  'markets':[],'history':[],'regions':['USA','Europa','Asien','Globalt'],
  'benchmark_holdings':[],'holding_prices':[],'fx_quotes':[],'fx':None}
+payload['dashboard']['positions'][0].update(key='holding-one',portfolio_name='Hoved',quantity='1',verification='broker_snapshot',conflicts=[],missing={},raw={})
 screens = Path(os.environ.get('ESCAPE_SCREENSHOTS','/tmp/escape-sector-cash'))
 screens.mkdir(parents=True,exist_ok=True)
 try:
@@ -53,7 +54,6 @@ try:
    # Open a sector holding using the same mobile row and exact depot identity.
    if width<700:
     row=payload['dashboard']['positions'][0]
-    row.update(key='holding-one',portfolio_name='Hoved',quantity='1',verification='broker_snapshot',conflicts=[],missing={},raw={})
     page.evaluate("(r)=>{state.dashboard.positions=[r]}",row)
     page.locator('.sector-row').filter(has_text='Teknologi').click()
     mobile=page.locator('.sector-mobile-holdings [data-dashboard-member="holding-one"]')
