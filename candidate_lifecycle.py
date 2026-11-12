@@ -44,14 +44,17 @@ def position_proof(c,uid,candidate,now=None):
    link=c.execute('SELECT asset_id,expected_ticker FROM market_asset_links WHERE user_id=? AND candidate_id=?',(uid,candidate['candidate_id'])).fetchone()
    if link and link['expected_ticker'].casefold()==candidate['ticker'].casefold():aid=link['asset_id']
  if not aid:return None
+ stale_proof=None
  for row in c.execute("SELECT s.payload,s.last_error,p.id FROM portfolio_snapshots s JOIN portfolios p ON p.id=s.portfolio_id WHERE s.user_id=? AND p.user_id=? AND p.source='pluto' AND p.active=1",(uid,uid)):
   if row['last_error']:continue
   data=json.loads(row['payload'])
   if not data.get('positions_complete'):continue
   for p in data.get('positions',[]):
    if p.get('kind','holding')=='holding' and p.get('asset_id')==aid and (not p.get('ticker') or p['ticker'].casefold()==candidate['ticker'].casefold()) and p.get('quantity') is not None and Decimal(p['quantity'])>0:
-    return {'asset_id':aid,'portfolio_id':row['id'],'quantity':p['quantity'],'as_of':data['observed'],'stale':not 0<=(now-stamp(data['observed'])).total_seconds()<=300,'source':'authenticated Pluto snapshot'}
- return None
+    proof={'asset_id':aid,'portfolio_id':row['id'],'quantity':p['quantity'],'as_of':data['observed'],'stale':not 0<=(now-stamp(data['observed'])).total_seconds()<=300,'source':'authenticated Pluto snapshot'}
+    if not proof['stale']:return proof
+    if stale_proof is None:stale_proof=proof
+ return stale_proof
 
 def index_report(c,uid,data,migration=False):
  mode=data['is_test'];at=data['generated_at'];origin=data['report_id']
