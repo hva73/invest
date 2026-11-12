@@ -1385,7 +1385,7 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   # not push the next check half an hour past a new market event. A rejected
   # same-timestamp conflict also needs a new observation, not a 30-minute
   # provider-error backoff; the conflicting observation remains rejected.
-  if code in ('DATA_STALE','sample_id_conflict'):
+  if code in ('DATA_STALE','sample_id_conflict','EODHD_AMBIGUOUS_TRADE'):
    interval=effective_poll_interval(c,request)
    if code=='DATA_STALE' and not set(state.get('alert_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE'}:interval=quiet_market_interval(c,request,state.get('adaptive_profile',request['profile']),now,interval)
   # A transient SQLite contention is not a failed market feed. Do not let
