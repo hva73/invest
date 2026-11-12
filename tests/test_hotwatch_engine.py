@@ -1759,3 +1759,4 @@ class EngineHTTP(unittest.TestCase):
   read=self.http.call(access,'get_hot_watch_engine',{'is_test':True})[1]['result'];self.assertEqual(len(read['structuredContent']['sessions']),1);bad=self.http.call(access,'get_hot_watch_engine',{'limit':101})[1]['result'];self.assertTrue(bad['isError'])
   stopped=self.http.call(access,'control_hot_watch',{'watch_id':self.req['watch_id'],'is_test':True,'action':'stop'})[1]['result'];self.assertFalse(stopped['isError']);self.assertEqual(stopped['structuredContent']['session']['status'],'COMPLETED')
   d=copy.deepcopy(BASELINE);d['version']='1.2.0';self.assertEqual(self.http.request('/api/v1/hotwatch/strategies',d,{'Authorization':'Bearer '+access})[0],403)
+

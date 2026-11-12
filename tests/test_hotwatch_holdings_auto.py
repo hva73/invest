@@ -578,6 +578,49 @@ class HoldingAutowatch(unittest.TestCase):
   with app.connect() as c:
    self.assertEqual(c.execute('SELECT status FROM hw_feed_recovery').fetchone()['status'],'EODHD_IDENTITY_UNCERTAIN')
    self.assertEqual(json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()['request'])['provider'],'pluto')
+ def test_recovery_uses_us_catalog_when_search_omits_isin_and_currency(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  instrument=dict(self.instrument,name='Test Company',type='CS')
+  choices={'choices':[{'symbol':'TEST.US','exchange':'US','isin':None,'currency':None}]}
+  catalog={'received_at':self.now.isoformat(),'rows':[{'Code':'TEST','Name':'Test Company','Exchange':'NASDAQ','Currency':'USD','Country':'USA','Type':'Common Stock','Isin':instrument['isin']}]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices),patch('eodhd_us_reference.get_reference',return_value=catalog):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),1)
+  with app.connect() as c:
+   row=c.execute('SELECT request FROM hw_sessions').fetchone();self.assertEqual(json.loads(row['request'])['provider_symbol'],'TEST.US')
+   evidence=json.loads(c.execute('SELECT payload FROM hw_cxe_feed_evidence').fetchone()['payload'])
+   self.assertEqual((evidence['basis'],evidence['isin']),('pluto_asset_us_listing',instrument['isin']))
+ def test_us_catalog_recovery_rejects_conflicts_and_ambiguity(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  instrument=dict(self.instrument,name='Test Company',type='CS')
+  listing={'Code':'TEST','Name':'Test Company','Exchange':'NASDAQ','Currency':'USD','Country':'USA','Type':'Common Stock','Isin':instrument['isin']}
+  choice={'symbol':'TEST.US','exchange':'US','isin':None,'currency':None}
+  cases=[([dict(listing,Isin='US9999999999')],[choice]),([dict(listing,Name='Different Issuer')],[choice]),([listing,listing],[choice]),([listing],[dict(choice,isin='US9999999999')]),([listing],[dict(choice,currency='EUR')])]
+  for rows,choices in cases:
+   with self.subTest(rows=rows,choices=choices):
+    with app.connect() as c:c.execute('DELETE FROM hw_feed_recovery')
+    catalog={'received_at':self.now.isoformat(),'rows':rows}
+    with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value={'choices':choices}),patch('eodhd_us_reference.get_reference',return_value=catalog):
+     self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+    with app.connect() as c:
+     self.assertEqual(json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()['request'])['provider'],'pluto')
+     self.assertEqual(c.execute('SELECT count(*) FROM hw_verified_feed_links').fetchone()[0],0)
+ def test_candidate_recovery_uses_verified_us_catalog(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);req.update(purpose='automatic discovery',watch_mode='entry')
+   c.execute("UPDATE hw_sessions SET purpose='automatic discovery',request=? WHERE id=?",(json.dumps(req),row['id']))
+  instrument=dict(self.instrument,name='Test Company',type='CS')
+  choices={'choices':[{'symbol':'TEST.US','exchange':'US','isin':None,'currency':None}]}
+  catalog={'received_at':self.now.isoformat(),'rows':[{'Code':'TEST','Name':'Test Company','Exchange':'NASDAQ','Currency':'USD','Country':'USA','Type':'Common Stock','Isin':instrument['isin']}]}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.verified_discovery_instrument',return_value=instrument),patch('hotwatch_adapters.search_eodhd_symbols',return_value=choices),patch('eodhd_us_reference.get_reference',return_value=catalog):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),1)
+  with app.connect() as c:
+   req=json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()['request'])
+   self.assertEqual(req['provider_symbol'],'TEST.US')
+   self.assertTrue(engine.verified_automatic_feed(c,1,req,self.now))
  def test_recovery_reports_missing_isin_without_guessing(self):
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
    self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
