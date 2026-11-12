@@ -45,6 +45,12 @@ class BuyPlan(unittest.TestCase):
   order={'shares':'1','limitPrice':'100'}
   raw={'estimate':{'side':'BUY','type':'LIMIT','asset':{'ticker':'MERC','currency':'DKK'},'limitPrice':'100','quantity':'1','commission':'0','commissionCurrency':'DKK','filledAccountNotional':'100','filledAccountNotionalCurrency':'DKK','assetBankFx':None}}
   values=plan.quote(raw,{**self.req,'quote_currency':'DKK'},order);self.assertEqual(values['fx_to_dkk'],'1')
+  for rate in ('1','0.5','2'):
+   raw['estimate']['assetBankFx']={'base':'DKK','quote':'DKK','rate':rate}
+   if rate=='1':self.assertEqual(plan.quote(raw,{**self.req,'quote_currency':'DKK'},order)['fx_to_dkk'],'1')
+   else:
+    with self.subTest(rate=rate),self.assertRaises(EngineError):plan.quote(raw,{**self.req,'quote_currency':'DKK'},order)
+  raw['estimate']['assetBankFx']=None
   raw['estimate']['asset']['currency']='USD'
   with self.assertRaises(EngineError):plan.quote(raw,self.req,order)
  def test_pluto_cent_rounding_preserves_conservative_limit_cost(self):

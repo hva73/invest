@@ -29,6 +29,7 @@ def quote(raw,request,order):
   else:
    if fx['base']!=currency or fx['quote']!='DKK':raise ValueError()
    rate=number(fx['rate'])
+  if currency=='DKK' and rate!=1:raise ValueError()
   quantity=number(e['quantity']) if e.get('quantity') is not None else None
   if 'shares' in order and quantity!=number(order['shares']):raise ValueError()
   # A shares estimate can round the asset-currency notional to cents before
