@@ -591,3 +591,5 @@ body:has(#login:not([hidden])) > aside nav{display:none}
 
 /* Desktop-only enhancements leave the mobile renderer unchanged. */
 .dash-day-desktop,.dash-desktop-entry{display:none}
+
+.dash-total-direction { display:none; }

@@ -144,3 +144,12 @@
   .dashboard-v1 > .dash-signals, .dashboard-v1 > .dash-quality { display:none; }
   .dashboard-v1 .dash-attention:not(.dash-attention-unknown):has(> p.muted:not(.mobile-attention-list)):not(:has(> .dash-table-wrap, > .dash-approval, > .dash-action-badge)) { display:none; }
 }
+
+@media (min-width: 901px) {
+ .dash-holdings .dash-price-time { display:none; }
+ .dashboard-v1 .dash-total-direction { display:inline; }
+ .dashboard-v1 .dash-total-mobile-arrow { display:none; }
+ .dashboard-v1 .dash-total.positive, .dashboard-v1 .dash-total.positive span { color:#80ddb3; }
+ .dashboard-v1 .dash-total.negative, .dashboard-v1 .dash-total.negative span { color:#ff9ca9; }
+ .dashboard-v1 .dash-total.neutral span { color:#a9c6c1; }
+}
