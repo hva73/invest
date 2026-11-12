@@ -14,6 +14,26 @@ class StatisticsTest(unittest.TestCase):
         result=project([self.buy,self.sell]);row=result['items'][0]
         self.assertEqual(row['gross'],'4');self.assertEqual(row['quality'],'indicative')
         self.assertIsNone(row['sell_time']);self.assertFalse(result['history_complete'])
+    def test_direct_partial_sales_count_only_sold_quantity(self):
+        first=order('SELL','0.5','12','2026-01-02T00:00:00Z','s1')
+        second=order('SELL','1','8','2026-01-03T00:00:00Z','s2')
+        result=project([self.buy,first,second]);self.assertEqual([row['gross'] for row in result['items']],['1.0','-2'])
+        summary=result['summary_by_currency']['USD']
+        self.assertEqual((summary['sales'],summary['wins'],summary['losses'],summary['flat']),(2,1,1,0))
+        self.assertEqual(summary['gains'],'1.0');self.assertEqual(summary['losses_total'],'-2');self.assertEqual(summary['gross_total'],'-1.0');self.assertEqual(summary['win_rate_percent'],'50.0')
+        self.assertTrue(all(row['sell_time'] is None for row in result['items']))
+    def test_sales_exceeding_one_buy_are_not_falsely_matched(self):
+        extra=order('SELL','1','8','2026-01-03T00:00:00Z','s2')
+        self.assertEqual(project([self.buy,self.sell,extra])['items'],[])
+    def test_zero_result_is_in_winner_denominator(self):
+        flat=order('SELL','1','10','2026-01-02T00:00:00Z','s1')
+        gain=order('SELL','1','12','2026-01-03T00:00:00Z','s2')
+        summary=project([self.buy,flat,gain])['summary_by_currency']['USD']
+        self.assertEqual((summary['sales'],summary['wins'],summary['flat']),(2,1,1));self.assertEqual(summary['win_rate_percent'],'50.0')
+    def test_currencies_never_combined_into_dkk(self):
+        euro_buy=order('BUY','1','10','2026-01-01T00:00:00Z','eb',asset={'ticker':'EUR','name':'Euro','currency':'EUR'})
+        euro_sell=order('SELL','1','12','2026-01-02T00:00:00Z','es',asset={'ticker':'EUR','name':'Euro','currency':'EUR'})
+        result=project([self.buy,self.sell,euro_buy,euro_sell]);self.assertEqual(set(result['summary_by_currency']),{'USD','EUR'});self.assertNotIn('DKK',result['summary_by_currency'])
     def test_small_values_use_fixed_decimal_notation(self):
         for buy_price,sell_price,expected in [('0.1','0.2','0.000000001'),('0.2','0.1','-0.000000001'),('0.1','0.1','0.000000000')]:
             buy=order('BUY','0.00000001',buy_price,'2026-01-01T00:00:00Z','b')

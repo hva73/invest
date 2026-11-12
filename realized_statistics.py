@@ -121,12 +121,17 @@ def project(direct_orders, collection_orders=()):
             omitted += 1
             continue
         if scope == 'direct':
-            # createdAt is NOT fill time. Only one buy and one sale of exactly
-            # equal quantities can be compared without inventing FIFO timing.
-            if len(rows) == 2 and rows[0]['side'] == 'BUY' and rows[1]['side'] == 'SELL' and rows[0]['quantity'] == rows[1]['quantity']:
-                buy, sell = rows
-                results.append(_result(buy, sell, sell['quantity'], buy['quantity'] * buy['price'], True))
-            elif any(row['side'] == 'SELL' for row in rows): omitted += 1
+            # createdAt is NOT fill time. One observed purchase can provide one
+            # indicative unit price for partial sales, without assuming an order
+            # among multiple buys or sales. No claim of complete opening history.
+            buys=[row for row in rows if row['side']=='BUY']
+            sells=[row for row in rows if row['side']=='SELL']
+            if (len(buys)==1 and sells and all(sell['time']>buys[0]['time'] for sell in sells)
+                    and sum((sell['quantity'] for sell in sells),Decimal(0))<=buys[0]['quantity']):
+                buy=buys[0]
+                for sell in sells:
+                    results.append(_result(buy,sell,sell['quantity'],sell['quantity']*buy['price'],True))
+            elif sells: omitted += 1
             continue
         lots = deque(); unsafe = False
         for row in rows:
@@ -143,7 +148,20 @@ def project(direct_orders, collection_orders=()):
             result = _result(first, row, row['quantity'], cost, False)
             result['buy_price'] = format(cost / row['quantity'], 'f')
             results.append(result)
-    return {'items': results, 'omitted': omitted, 'history_complete': False,
+    summaries={}
+    for row in results:
+        currency=row['currency']; gross=Decimal(row['gross'])
+        s=summaries.setdefault(currency,{'sales':0,'wins':0,'losses':0,'flat':0,'gains':Decimal(0),'losses_total':Decimal(0)})
+        s['sales']+=1
+        if gross>0: s['wins']+=1;s['gains']+=gross
+        elif gross<0: s['losses']+=1;s['losses_total']+=gross
+        else: s['flat']+=1
+    for s in summaries.values():
+        gains=s['gains'];losses=s['losses_total']
+        s.update(gains=format(gains,'f'),losses_total=format(losses,'f'),gross_total=format(gains+losses,'f'),
+                 win_rate_percent=format(Decimal(s['wins'])/Decimal(s['sales'])*100,'f'))
+    return {'items': results, 'summary_by_currency':summaries, 'omitted': omitted, 'history_complete': False,
+            'count_note':'Én observeret salgsordre tælles én gang; delsalg tælles hver for sig. Vinderandel er antal positive salg divideret med alle viste salg, også nulresultater.',
             'note': 'Kun observerede handler. Historikkens dækning, gebyrer og historisk valutakurs er ikke bekræftet. Direkte handler er foreløbige kursforskelle; oprettelsestid er ikke fyldtid.'}
 
 
