@@ -54,9 +54,8 @@ def main():
                            timeout=120, check=True, env=env)
             runner.prepare_checkout(checkout, SHA)
             names = preflight.manifest(checkout)
-            new_assets = {'static/demo-data.js', 'static/desktop-experience.css'}
-            if (len(names) != 73 or not new_assets.issubset(names)
-                    or tuple(name for name in names if name not in new_assets) != apply_update.FILES):
+            new_assets = set()
+            if len(names) != 73 or tuple(names) != apply_update.FILES:
                 raise ValueError('manifest_mismatch')
             if (checkout / 'requirements.txt').read_bytes() != (APP / 'requirements.txt').read_bytes():
                 raise ValueError('requirements_changed')
