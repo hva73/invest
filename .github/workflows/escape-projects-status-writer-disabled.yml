@@ -6,13 +6,12 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: escape-projects-isolated-item-4-test
-  queue: max
-  cancel-in-progress: false
-
 jobs:
   approved-single-test:
+    concurrency:
+      group: escape-projects-isolated-item-4-test
+      queue: max
+      cancel-in-progress: false
     if: >-
       github.repository == 'hva73/invest' &&
       github.actor_id == '351122234' &&
