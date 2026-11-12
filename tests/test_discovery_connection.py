@@ -55,3 +55,13 @@ class DiscoveryConnection(unittest.TestCase):
   with patch('hotwatch_service.verified_discovery_instrument',side_effect=ConnectionError('synthetic')):
    result=service.auto_activate_candidate(app.connect,1,False,self.report,self.candidate,identity_adapter=adapter)
   self.assertEqual(result['status'],'DISCOVERY_VERIFICATION_FAILED');self.assertIsNone(adapter.gateway)
+ def test_discovery_connections_are_separate_per_user_and_expire(self):
+  with app.connect() as c:c.execute("INSERT INTO users(username,salt,hash) VALUES('other','synthetic','synthetic')")
+  self.assertTrue(report_ingest.save(app.connect,2,self.report)[1]['ok'])
+  expired=object();cache={1:(0,expired)};seen=[]
+  def activate(connect,uid,mode,report,candidate,identity_adapter=None):
+   seen.append((uid,identity_adapter));return {'status':'PROVIDER_RATE_BUDGET'}
+  env={'ESCAPE_HW_AUTOSTART_ENABLED':'1','ESCAPE_HW_AUTOSTART_AFTER':(self.now-timedelta(minutes=1)).isoformat()}
+  with patch.dict(os.environ,env),patch('hotwatch_engine.utc',return_value=self.now),patch('hotwatch_service.time.monotonic',return_value=300),patch('hotwatch_service.auto_activate_candidate',side_effect=activate):
+   service.auto_discover(app.connect,identity_cache=cache)
+  self.assertEqual({uid for uid,_ in seen},{1,2});self.assertIsNot(cache[1][1],expired);self.assertIsNot(cache[1][1],cache[2][1])
