@@ -307,6 +307,7 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
   import strategy_center
   selected={'strategy_id':proposal['strategy_id'],'version':proposal['version'],'reason':'Strategiforslag fra rapport: '+proposal['reason']} if proposal else strategy_center.resolve(connect,uid)
   req.update(strategy_id=selected['strategy_id'],strategy_version=selected['version'],activation_reason=(req['activation_reason']+' · '+selected['reason'])[:4000])
+  if reassess_generation:req['reactivation_reason']='Ny tidsstemplet kandidatvurdering efter automatisk udløb'
   if existing_cycle:req['trade_cycle_id']=existing_cycle
   result=engine.create(connect,uid,req);return {'status':result['session']['status'] if not result['duplicate'] else 'ALREADY_ACTIVE','watch_id':watch}
  except EngineError as error:return {'status':error.code}
