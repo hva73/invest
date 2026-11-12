@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   data-path:
-    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue-4-quote-time-collision' || github.event.pull_request.head.ref == 'codex/issue14-performance-reliability' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue14-scan-latency' || github.event.pull_request.head.ref == 'codex/issue14-ws-cap-telemetry' || github.event.pull_request.head.ref == 'codex/issue14-discovery-gate' || github.event.pull_request.head.ref == 'codex/issue4-batch-incomplete' || github.event.pull_request.head.ref == 'codex/issue4-trade-ties' || github.event.pull_request.head.ref == 'codex/issue4-us-recovery' || github.event.pull_request.head.ref == 'codex/issue3-position-scope' || github.event.pull_request.head.ref == 'codex/issue8-candidate-reassessment' || github.event.pull_request.head.ref == 'codex/issue13-exit-review-status' || github.event.pull_request.head.ref == 'codex/issue7-provider-diagnosis' || github.event.pull_request.head.ref == 'codex/issue14-missing-ws-metrics' || github.event.pull_request.head.ref == 'codex/issue8-action-currentness' || github.event.pull_request.head.ref == 'codex/issue54-quote-future-time' || github.event.pull_request.head.ref == 'codex/issue8-review-priority' || github.event.pull_request.head.ref == 'codex/issue14-nordic-identity')
+    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue-4-quote-time-collision' || github.event.pull_request.head.ref == 'codex/issue14-performance-reliability' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue14-scan-latency' || github.event.pull_request.head.ref == 'codex/issue14-ws-cap-telemetry' || github.event.pull_request.head.ref == 'codex/issue14-discovery-gate' || github.event.pull_request.head.ref == 'codex/issue4-batch-incomplete' || github.event.pull_request.head.ref == 'codex/issue4-trade-ties' || github.event.pull_request.head.ref == 'codex/issue4-us-recovery' || github.event.pull_request.head.ref == 'codex/issue3-position-scope' || github.event.pull_request.head.ref == 'codex/issue8-candidate-reassessment' || github.event.pull_request.head.ref == 'codex/issue13-exit-review-status' || github.event.pull_request.head.ref == 'codex/issue7-provider-diagnosis' || github.event.pull_request.head.ref == 'codex/issue14-missing-ws-metrics' || github.event.pull_request.head.ref == 'codex/issue8-action-currentness' || github.event.pull_request.head.ref == 'codex/issue54-quote-future-time' || github.event.pull_request.head.ref == 'codex/issue8-review-priority' || github.event.pull_request.head.ref == 'codex/issue3-context-budget-diagnostic' || github.event.pull_request.head.ref == 'codex/issue14-nordic-identity')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -64,6 +64,12 @@ jobs:
         env:
           PYTHONPATH: .:tests
         run: '"$RUNNER_TEMP/escape-data-venv/bin/python" -m unittest tests.test_hotwatch_e2e_contract tests.test_intel_workflows tests.test_hotwatch_agreement tests.test_mcp_reports tests.test_market_data tests.test_asset_quotes tests.test_portfolio_data tests.test_dashboard_snapshot_history'
+
+      - name: Verify strict portfolio budget diagnostics
+        if: github.event.pull_request.head.ref == 'codex/issue3-context-budget-diagnostic'
+        env:
+          PYTHONPATH: .:tests
+        run: '"$RUNNER_TEMP/escape-data-venv/bin/python" -m unittest tests.test_portfolio_data'
 
       - name: Verify Nordic instrument recovery
         if: github.event.pull_request.head.ref == 'codex/issue14-nordic-identity'
