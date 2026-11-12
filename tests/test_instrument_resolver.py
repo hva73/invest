@@ -139,6 +139,16 @@ class InstrumentResolver(unittest.TestCase):
     self.assertEqual(resolve_cxe(pluto,[dict(feed,isin='SE0000000002')],[row])['status'],'UNVERIFIED')
     self.assertEqual(resolve_cxe(pluto,[dict(feed,currency='USD')],[row])['status'],'UNVERIFIED')
     self.assertEqual(resolve_cxe(pluto,[feed],[row,dict(row)])['status'],'AMBIGUOUS')
+ def test_observed_nordic_references_resolve_the_expected_primary_listings(self):
+  # Public Cboe PROD reference and read-only Pluto/EODHD metadata, 2026-11-12.
+  for ticker,name,code,isin,mic,symbol,exchange in [
+   ('HNSA','Hansa Biopharma AB','SEK','SE0002148817','XSTO','HNSAs','ST'),
+   ('NORBT','NORBIT ASA','NOK','NO0010856511','XOSL','NORBTo','OL')]:
+   with self.subTest(ticker=ticker):
+    pluto={'asset_id':'synthetic-'+ticker,'ticker':ticker,'name':name,'currency':code,'exchange':'CHIX','type':'CS'}
+    row={'symbol':symbol,'primary_ticker':ticker,'name':name,'isin':isin,'currency':code,'instrument_type':'EQTY','mic':mic}
+    feed={'symbol':ticker+'.'+exchange,'exchange':exchange,'currency':code,'isin':isin}
+    result=resolve_cxe(pluto,[feed],[row]);self.assertEqual((result['status'],result['symbol'],result['primary_mic']),('VERIFIED',ticker+'.'+exchange,mic))
  def test_cxe_parser_checks_production_schema_and_freshness(self):
   now=datetime(2026,11,6,18,30,tzinfo=timezone.utc)
   content=('environment=PROD,created=2026-11-06,time=18:25Z,warning=\n'
