@@ -15,7 +15,7 @@ with sync_playwright() as p:
   page.add_style_tag(path='static/statistics.css');page.add_script_tag(path='static/statistics-ui.js')
   page.evaluate('(data) => document.querySelector("#content").innerHTML = StatisticsUI.render(data, {currency:"USD"})',sample)
   expect(page.locator('#statistics-title')).to_contain_text('Hvordan står det til')
-  expect(page.locator('.statistics-summary strong')).to_contain_text('+8,25 USD')
+  expect(page.locator('.statistics-summary>div:first-child>strong')).to_contain_text('+8,25 USD')
   page.locator('.statistics-trade').first.locator('summary').click();expect(page.locator('.statistics-detail').first).to_be_visible()
   assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1'),width
   page.screenshot(path=str(out/f'statistik-fiktiv-{width}.png'),full_page=True)
