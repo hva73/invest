@@ -20,6 +20,7 @@ try:
    if width<=900:page.locator('#mobile-more').click()
    page.locator('nav [data-view=statistics]').click()
    expect(page.locator('#statistics-title')).to_have_text('Hvordan står det til?')
+   assert page.locator('[data-statistics-reload]').evaluate('(e) => e.scrollWidth <= e.clientWidth'), width
    expect(page.locator('.statistics-summary strong')).to_contain_text('+8,25 USD')
    expect(page.locator('.statistics-note')).to_contain_text('Gebyrer')
    page.locator('.statistics-trade').first.locator('summary').click();expect(page.locator('.statistics-detail').first).to_be_visible();page.locator('.statistics-trade').first.locator('summary').click()
