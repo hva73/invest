@@ -17,6 +17,16 @@ class Push(unittest.TestCase):
    self.watch=c.execute("SELECT * FROM hw_sessions WHERE watch_id='synthetic-watch'").fetchone()
  def tearDown(self):self.env.stop();app.DB=self.old;self.temp.cleanup()
  def subscribe(self):web_push.subscribe(app.connect,1,{'subscription':self.sub,'buy':True,'sell':True})
+ def test_release_notification_only_for_owner_with_current_candidate(self):
+  import release_approval
+  self.subscribe();sent=[]
+  self.assertEqual(web_push.notify_release_ready(app.connect,1,lambda *args:sent.append(args)),{'sent':0,'failed':0})
+  release_approval.prepare(app.connect,'a'*40,'Privat releasebeskrivelse',1)
+  self.assertEqual(web_push.notify_release_ready(app.connect,2,lambda *args:sent.append(args)),{'sent':0,'failed':0})
+  self.assertEqual(web_push.notify_release_ready(app.connect,1,lambda *args:sent.append(args)),{'sent':1,'failed':0})
+  self.assertEqual(sent[0][1]['kind'],'release_approval')
+  self.assertNotIn('Privat releasebeskrivelse',str(sent[0][1]));self.assertNotIn('a'*40,str(sent[0][1]))
+  self.assertEqual(web_push.notify_release_ready(app.connect,1,lambda *args:(_ for _ in ()).throw(OSError())),{'sent':0,'failed':1})
  def event(self,kind):
   with app.connect() as c:engine.event(c,self.watch,kind,self.now,'synthetic')
  def test_subscription_is_encrypted_and_owner_scoped(self):

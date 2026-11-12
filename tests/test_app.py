@@ -59,6 +59,27 @@ class Workflow(unittest.TestCase):
   self.assertEqual(self.request('approve',{'id':1})[0],200);self.assertEqual(self.request('approve',{'id':1})[0],400)
   state=self.request('state')[1];self.assertEqual(len(state['journal']),2);self.assertEqual(state['proposals'][0]['status'],'Godkendt lokalt');self.assertTrue(all(v=='Ikke tilsluttet' for v in state['integrations'].values()))
   self.assertEqual(self.request('logout',{})[0],200);self.assertEqual(self.request('state')[0],401)
+ def test_release_approval_requires_owner_session_csrf_and_exact_version(self):
+  import release_approval
+  self.assertEqual(self.request('admin/release-approval')[0],401)
+  self.login()
+  candidate=release_approval.prepare(app.connect,'a'*40,'Test version',1)
+  self.assertEqual(self.request('admin/release-approval')[1]['candidate']['id'],candidate['id'])
+  with app.connect() as c:
+   c.execute("INSERT INTO users(username,salt,hash,role,active) VALUES('otheradmin',?,?,'admin',1)",('11'*16,app.password_hash('other-password-long-enough','11'*16)))
+  owner_cookie,owner_csrf=self.cookie,self.csrf
+  self.cookie='';self.assertEqual(self.request('login',{'username':'otheradmin','password':'other-password-long-enough'})[0],200);self.csrf=self.request('session')[1]['csrf']
+  self.assertEqual(self.request('admin/release-approval')[0],403)
+  self.assertEqual(self.request('admin/release-approval',{'id':candidate['id'],'sha':candidate['sha']})[0],403)
+  self.cookie,self.csrf=owner_cookie,owner_csrf
+  self.assertEqual(self.request('admin/release-approval',{'id':candidate['id'],'sha':candidate['sha']},False)[0],403)
+  self.assertEqual(self.request('admin/release-approval',{'id':candidate['id'],'sha':'b'*40})[0],409)
+  status,result=self.request('admin/release-approval',{'id':candidate['id'],'sha':candidate['sha']})
+  self.assertEqual(status,200);self.assertEqual(result['status'],'approved');self.assertFalse(result['deployment_started'])
+  self.assertEqual(self.request('admin/release-approval',{'id':candidate['id'],'sha':candidate['sha']})[0],409)
+  self.assertEqual(release_approval.claim(app.connect,candidate['id'],candidate['sha'])['status'],'claimed')
+  with self.assertRaisesRegex(ValueError,'approval_unavailable'):
+   release_approval.claim(app.connect,candidate['id'],candidate['sha'])
  def test_invalid_values_and_persistence(self):
   self.login();p={'portfolio_id':1,'ticker':'TEST','quantity':1,'price':100,'stop':110,'target':120,'costs':0,'fx':1}
   self.assertEqual(self.request('proposals',p)[0],400);p['stop']=90;p['price']=float('nan');self.assertEqual(self.request('proposals',p)[0],400)
