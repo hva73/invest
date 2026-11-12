@@ -595,6 +595,12 @@ class HoldingAutowatch(unittest.TestCase):
     self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
    session=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=True)['open_sessions'][0]
    self.assertEqual((session['feed_recovery_status'],session['feed_recovery_provider']),('EODHD_DAILY_BUDGET','eodhd'))
+   for requested,delay in ((123,123),(float('nan'),60)):
+    with app.connect() as c:c.execute('DELETE FROM hw_feed_recovery')
+    error=DataUnavailable('PROVIDER_RATE_BUDGET',429);error.retry_after_s=requested
+    with patch('hotwatch_service.holding_instrument',return_value=self.instrument),patch('hotwatch_adapters.search_eodhd_symbols',side_effect=error):
+     self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+    with app.connect() as c:self.assertEqual(c.execute('SELECT next_attempt FROM hw_feed_recovery').fetchone()['next_attempt'],self.now.timestamp()+delay)
  def test_candidate_recovery_reports_pluto_budget_without_claiming_eodhd_failure(self):
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
    self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
