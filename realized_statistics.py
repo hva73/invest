@@ -1,8 +1,8 @@
 """Conservative read-only projection of Pluto execution observations.
 
 The order list has no documented complete history or execution times. Consequently
-only an isolated direct buy/sell pair is compared, as an indicative gross price
-comparison, never as a verified cost basis or net profit.
+only sales following a single observed direct purchase are compared as an
+indicative gross price comparison, never as a verified cost basis or net profit.
 """
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
