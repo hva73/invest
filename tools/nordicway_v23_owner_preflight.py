@@ -30,6 +30,10 @@ def regular_size(path, optional=False):
     return info.st_size
 
 
+def installed_files_size(root, names, new_assets):
+    return sum(regular_size(root / name, optional=name in new_assets) for name in names)
+
+
 def main():
     info = BRIDGE.lstat()
     if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
@@ -71,7 +75,7 @@ def main():
             db_size = regular_size(db)
             wal = regular_size(Path(str(db) + '-wal'), optional=True)
             journal = regular_size(Path(str(db) + '-journal'), optional=True)
-            installed_size = sum(regular_size(APP / name, optional=name in new_assets) for name in names)
+            installed_size = installed_files_size(APP, names, new_assets)
             base = 2 * (db_size + wal + journal) + 2 * source + installed_size
             required = base + max(256 * 1024 * 1024, (base + 9) // 10)
             fs = os.statvfs(APP)
