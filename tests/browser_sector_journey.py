@@ -75,15 +75,18 @@ try:
    if width >= 901:
     expect(details).to_be_visible();expect(details).to_contain_text('Gns. køb');expect(details).not_to_contain_text('stk.');expect(details).to_contain_text('270,30');expect(details).to_contain_text('247,80');expect(details).to_contain_text('+31,50');expect(details).to_contain_text('estimat')
     expect(journey.locator('.si-desktop-columns')).to_be_visible()
-   else: expect(details).to_be_hidden()
-   expect(root).to_contain_text('I dag · kurs pr. stk.')
-   expect(root).to_contain_text('+6,30')
+    expect(root).to_contain_text('I dag · kurs pr. stk.')
+    expect(root).to_contain_text('+6,30')
+   else:
+    expect(root).to_have_class('mobile-holding')
+    expect(root).to_contain_text('I dag')
+    expect(root).to_contain_text('+31,50')
    expect(root).to_contain_text('+2,39 %')
    expect(root).to_contain_text('Siden køb')
    expect(root).to_contain_text('+112,50')
    expect(root).to_contain_text('+9,08 %')
    missing=journey.locator('[data-sector-position]').filter(has_text='AFVENTER')
-   expect(missing).to_contain_text('— · —')
+   expect(missing).to_contain_text('—')
    child.click();detail=page.locator('#dashboard-detail');expect(detail).to_be_visible()
    expect(detail.locator('h2')).to_contain_text('NOVO-B');expect(detail.locator('h2')).to_contain_text('AI')
    page.screenshot(path=str(screens/f'sektor-positionsdetalje-{width}.png'))
@@ -100,7 +103,8 @@ try:
    page.reload();page.locator('nav [data-view=sectors]').click()
    page.locator('.sector-row').filter(has_text='Sundhed').click()
    stale=page.locator('#sector-journey [data-sector-position]').filter(has_text='AI').filter(has_text='NOVO-B')
-   expect(stale.locator('.si-position-metrics small').first).to_contain_text('— · —')
+   if width >= 901: expect(stale.locator('.si-position-metrics small').first).to_contain_text('— · —')
+   else: expect(stale.locator('.mobile-holding-daily')).to_contain_text('I dag —')
    expect(stale).to_contain_text('+45,00')
    child_row['price_freshness']=original_freshness
    if width >= 901:
