@@ -7,13 +7,13 @@ permissions:
   contents: read
 jobs:
   data-path:
-    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue-4-quote-time-collision' || github.event.pull_request.head.ref == 'codex/issue14-performance-reliability' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue14-scan-latency' || github.event.pull_request.head.ref == 'codex/issue14-ws-cap-telemetry' || github.event.pull_request.head.ref == 'codex/issue4-batch-incomplete' || github.event.pull_request.head.ref == 'codex/issue4-trade-ties')
+    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue-4-quote-time-collision' || github.event.pull_request.head.ref == 'codex/issue14-performance-reliability' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue14-scan-latency' || github.event.pull_request.head.ref == 'codex/issue14-ws-cap-telemetry' || github.event.pull_request.head.ref == 'codex/issue4-batch-incomplete' || github.event.pull_request.head.ref == 'codex/issue4-trade-ties' || github.event.pull_request.head.ref == 'codex/issue57-integrated-ci-645')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: 645c293a5c484187a68d121a5cdd96c0a958bc86
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
@@ -25,9 +25,9 @@ jobs:
       - name: Verify EODHD, HOT WATCH and push regressions
         env:
           PYTHONPATH: .:tests
-        run: '"$RUNNER_TEMP/escape-data-venv/bin/python" -m unittest tests.test_eodhd_feeds tests.test_feed_reuse tests.test_queue_recovery tests.test_admin_diagnostics tests.test_hotwatch_holdings_auto tests.test_hotwatch_warmup tests.test_signal_readiness tests.test_sparse_feed_recovery tests.test_hotwatch_engine tests.test_review_signal_fixes tests.test_web_push'
+        run: '"$RUNNER_TEMP/escape-data-venv/bin/python" -m unittest tests.test_eodhd_feeds tests.test_feed_reuse tests.test_queue_recovery tests.test_admin_diagnostics tests.test_hotwatch_holdings_auto tests.test_hotwatch_warmup tests.test_signal_readiness tests.test_sparse_feed_recovery tests.test_hotwatch_engine tests.test_review_signal_fixes tests.test_web_push tests.test_trade_service tests.test_hotwatch_buy_plan tests.test_issue13_exit_currentness'
       - name: Verify same-timestamp trade handling
-        if: github.event.pull_request.head.ref == 'codex/issue4-trade-ties'
+        if: github.event.pull_request.head.ref == 'codex/issue4-trade-ties' || github.event.pull_request.head.ref == 'codex/issue57-integrated-ci-645'
         env:
           PYTHONPATH: .:tests
         run: '"$RUNNER_TEMP/escape-data-venv/bin/python" -m unittest tests.test_trade_ties'
