@@ -701,6 +701,23 @@ class HoldingAutowatch(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.time.monotonic',return_value=300),patch('hotwatch_service.verified_discovery_instrument',return_value=None) as verify:
    self.assertEqual(service.recover_automatic_feeds(app.connect,self.now,identity_cache=cache),0)
   self.assertIsNot(verify.call_args.kwargs['adapter'],expired);self.assertIs(cache[1][1],verify.call_args.kwargs['adapter'])
+ def test_candidate_recovery_connections_are_separate_per_user(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with app.connect() as c:
+   c.execute("INSERT INTO users(username,salt,hash) VALUES('other','synthetic','synthetic')")
+   row=dict(c.execute('SELECT * FROM hw_sessions').fetchone());row.pop('id')
+   req=json.loads(row['request']);req.update(purpose='automatic discovery',watch_mode='entry')
+   c.execute("UPDATE hw_sessions SET purpose='automatic discovery',request=?",(json.dumps(req),))
+   req.update(watch_id='other-watch',candidate_id='other-candidate',asset_id='other-asset',ticker='OTHER')
+   row.update(user_id=2,watch_id='other-watch',candidate_id='other-candidate',purpose='automatic discovery',request=json.dumps(req),digest='other-digest')
+   cols=list(row);c.execute('INSERT INTO hw_sessions('+','.join(cols)+') VALUES('+','.join('?' for _ in cols)+')',tuple(row.values()))
+  cache={};seen=[]
+  def verify(connect,uid,holding,adapter=None):seen.append((uid,adapter));return None
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.verified_discovery_instrument',side_effect=verify):
+   service.recover_automatic_feeds(app.connect,self.now,identity_cache=cache)
+   service.recover_automatic_feeds(app.connect,self.now+timedelta(seconds=1),identity_cache=cache)
+  self.assertEqual({uid for uid,_ in seen},{1,2});self.assertEqual(set(cache),{1,2});self.assertIsNot(cache[1][1],cache[2][1])
  def test_recovery_matches_isin_and_currency_without_prior_observation(self):
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
    self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
