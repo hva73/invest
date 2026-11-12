@@ -24,7 +24,7 @@ try:
    view=page.locator('.statistics-view');expect(view).to_contain_text('DELSALG');expect(view).to_contain_text('TAB');expect(view).to_contain_text('NUL');expect(view).not_to_contain_text('USD_ONLY')
    expect(view).to_contain_text('33,33');expect(view).to_contain_text('8,00');expect(view).to_contain_text('4,00');expect(view).to_contain_text('foreløbig',ignore_case=True)
    # Only sold quantities are part of the screen; absence of fill time must never be fabricated.
-   trade=page.locator('.statistics-trade').filter(has_text='DELSALG');expect(trade).to_have_count(1);trade.locator('summary').click();detail=trade.locator('.statistics-detail');expect(detail).to_be_visible();expect(detail).to_contain_text('4');expect(detail).to_contain_text('10');expect(detail).to_contain_text('12');expect(detail).to_contain_text('omkostning',ignore_case=True);expect(detail).to_contain_text('Ikke afklaret');assert detail.get_by_text('Ikke afklaret',exact=True).count()==2
+   trade=page.locator('.statistics-trade').filter(has_text='DELSALG');expect(trade).to_have_count(1);trade.locator('summary').click();detail=trade.locator('.statistics-detail');expect(detail).to_be_visible();expect(detail).to_contain_text('4');expect(detail).to_contain_text('10');expect(detail).to_contain_text('12');expect(detail).to_contain_text('omkostning',ignore_case=True);expect(detail).to_contain_text('Ikke afklaret');assert detail.inner_text().count('Ikke afklaret')==2
    page.locator('[data-statistics-currency]').select_option('USD');expect(view).to_contain_text('USD_ONLY');expect(view).not_to_contain_text('DELSALG')
    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),width
    assert not errors,errors;page.close()
