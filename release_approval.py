@@ -27,7 +27,7 @@ def prepare(connect, sha, summary, owner_id, *, now=None, lifetime=3600):
     candidate_id = secrets.token_hex(16)
     with connect() as c:
         c.execute('BEGIN IMMEDIATE')
-        if c.execute("SELECT 1 FROM release_approvals WHERE status='claimed' LIMIT 1").fetchone():
+        if c.execute("SELECT 1 FROM release_approvals WHERE status IN ('claimed','recovery') LIMIT 1").fetchone():
             raise ValueError('release_in_progress')
         c.execute("UPDATE release_approvals SET status='superseded' WHERE status IN ('pending','approved')")
         c.execute('INSERT INTO release_approvals VALUES(?,?,?,?,?,?,?,NULL)',
@@ -80,3 +80,35 @@ def claim(connect, candidate_id, sha, *, now=None):
         if changed != 1:
             raise ValueError('approval_unavailable')
     return {'id': candidate_id, 'sha': sha, 'status': 'claimed'}
+
+
+def finish(connect, candidate_id, sha, *, verified):
+    """Record a verified deployment or retain an uncertain outcome for recovery."""
+    if type(verified) is not bool:
+        raise ValueError('invalid_result')
+    status = 'completed' if verified else 'recovery'
+    with connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        changed = c.execute("UPDATE release_approvals SET status=? WHERE id=? AND sha=? AND status='claimed'",
+                            (status, candidate_id, sha)).rowcount
+        if changed != 1:
+            raise ValueError('approval_unavailable')
+    return {'id': candidate_id, 'sha': sha, 'status': status}
+
+
+def start_approved(connect, candidate_id, sha, deploy, *, now=None):
+    """Claim once before invoking a supplied deployment runner.
+
+    This function does not locate credentials or start a runner itself. A
+    transport loss or incomplete response is left in recovery, not retried.
+    """
+    claim(connect, candidate_id, sha, now=now)
+    try:
+        result = deploy(sha)
+        verified = (isinstance(result, dict) and result.get('operation') == 'deploy'
+                    and result.get('status') == 'ok' and result.get('stage') == 'complete'
+                    and result.get('recovery_required') is False
+                    and result.get('service_restored') is True)
+    except Exception:
+        verified = False
+    return finish(connect, candidate_id, sha, verified=verified)

@@ -69,6 +69,46 @@ class ReleaseApprovalTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'approval_unavailable'):
             a.claim(self.connect, item['id'], item['sha'], now=103)
 
+    def test_uncertain_outcome_blocks_new_release_but_verified_completion_does_not(self):
+        item = self.candidate()
+        a.approve(self.connect, item['id'], item['sha'], 7, now=101)
+        a.claim(self.connect, item['id'], item['sha'], now=102)
+        with self.assertRaisesRegex(ValueError, 'invalid_result'):
+            a.finish(self.connect, item['id'], item['sha'], verified=1)
+        self.assertEqual(a.finish(self.connect, item['id'], item['sha'], verified=False)['status'], 'recovery')
+        with self.assertRaisesRegex(ValueError, 'release_in_progress'):
+            a.prepare(self.connect, 'b'*40, 'Ny version', 7, now=103)
+        with self.connect() as c:
+            c.execute("UPDATE release_approvals SET status='completed' WHERE id=?",(item['id'],))
+        newer = a.prepare(self.connect, 'b'*40, 'Ny version', 7, now=104)
+        a.approve(self.connect, newer['id'], newer['sha'], 7, now=105)
+        a.claim(self.connect, newer['id'], newer['sha'], now=106)
+        self.assertEqual(a.finish(self.connect, newer['id'], newer['sha'], verified=True)['status'], 'completed')
+        self.assertIsNotNone(a.prepare(self.connect, 'c'*40, 'Næste version', 7, now=107))
+
+    def test_runner_starts_only_after_matching_approval_and_never_retries(self):
+        item=self.candidate(); calls=[]
+        def deploy(sha):
+            calls.append(sha)
+            return {'operation':'deploy','status':'ok','stage':'complete',
+                    'recovery_required':False,'service_restored':True}
+        with self.assertRaisesRegex(ValueError,'approval_unavailable'):
+            a.start_approved(self.connect,item['id'],item['sha'],deploy,now=101)
+        self.assertEqual(calls,[])
+        a.approve(self.connect,item['id'],item['sha'],7,now=102)
+        self.assertEqual(a.start_approved(self.connect,item['id'],item['sha'],deploy,now=103)['status'],'completed')
+        self.assertEqual(calls,[item['sha']])
+        with self.assertRaisesRegex(ValueError,'approval_unavailable'):
+            a.start_approved(self.connect,item['id'],item['sha'],deploy,now=104)
+        self.assertEqual(calls,[item['sha']])
+
+    def test_unknown_runner_outcome_requires_recovery(self):
+        item=self.candidate();a.approve(self.connect,item['id'],item['sha'],7,now=101)
+        result=a.start_approved(self.connect,item['id'],item['sha'],lambda sha: (_ for _ in ()).throw(OSError()),now=102)
+        self.assertEqual(result['status'],'recovery')
+        with self.assertRaisesRegex(ValueError,'release_in_progress'):
+            a.prepare(self.connect,'b'*40,'Ny',7,now=103)
+
 
 if __name__ == '__main__':
     unittest.main()
