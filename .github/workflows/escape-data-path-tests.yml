@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   data-path:
-    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue-4-quote-time-collision' || github.event.pull_request.head.ref == 'codex/issue14-performance-reliability' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue14-scan-latency' || github.event.pull_request.head.ref == 'codex/issue14-ws-cap-telemetry')
+    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue-4-quote-time-collision' || github.event.pull_request.head.ref == 'codex/issue14-performance-reliability' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue14-scan-latency' || github.event.pull_request.head.ref == 'codex/issue14-ws-cap-telemetry' || github.event.pull_request.head.ref == 'codex/issue4-batch-incomplete')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

@@ -457,7 +457,7 @@ class EODHDAdapter:
    if result.get('status') not in ('OK','NO_MESSAGES'):return record(result,len(symbols),False)
    with _ws_batch_lock:
     if len(_ws_batch_cache)>=512:_ws_batch_cache.clear()
-    saved=time.monotonic();captured_at=utc().isoformat()
+    saved=time.monotonic();captured_at=utc().isoformat();requested=None
     for item in symbols:
      messages=[m for m in result.get('messages',[]) if m.get('symbol')==item]
      # A quiet capture must not erase a more recent, still-valid observation
@@ -484,11 +484,18 @@ class EODHDAdapter:
          if len(messages)==2:break
         if not messages:messages=candidates[-1:]
      partial=[m for m in result.get('partial_messages',[]) if m.get('symbol')==item]
-     value={**result,'status':'OK' if messages else 'NO_MESSAGES','messages':messages,'message_count':len(messages),'partial_messages':partial,'captured_at':captured_at}
-     _ws_batch_cache[(self.uid,credential,feed,item)]=(saved,copy.deepcopy(value))
+     # A saturated batch cannot establish that a missing symbol was quiet.
+     # Preserve any still-fresh prior evidence; never negative-cache an
+     # incomplete result. The ordinary next scan remains budgeted as before.
+     incomplete=not messages and result.get('batch_limit_reached') is True
+     value={**result,'status':'OK' if messages else 'INCOMPLETE' if incomplete else 'NO_MESSAGES','messages':messages,'message_count':len(messages),'partial_messages':partial,'captured_at':captured_at}
+     item_key=(self.uid,credential,feed,item)
+     if incomplete:_ws_batch_cache.pop(item_key,None)
+     else:_ws_batch_cache[item_key]=(saved,copy.deepcopy(value))
+     if item==symbol:requested=value
     # Diagnose the requested symbol, not the newest unrelated trade in its
     # batch. Connection/subscription counts still describe the actual call.
-    return record(copy.deepcopy(_ws_batch_cache[key][1]),len(symbols),False)
+    return record(copy.deepcopy(requested),len(symbols),False)
   finally:
    with _ws_batch_lock:
     _ws_batch_inflight.pop(group,None)
@@ -554,7 +561,7 @@ class EODHDAdapter:
    if feed['status']=='RATE_LIMIT':
     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=feed.get('retry_after_s') or retry_seconds(None);raise failure
    valid=[x for x in feed.get('messages',[]) if stamp(x['event_time'])<=utc() and (utc()-stamp(x['event_time'])).total_seconds()<=r['risk']['max_quote_age_s']] if feed['status']=='OK' else []
-   if feed['status'] in ('OK','NO_MESSAGES') and not valid and os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
+   if feed['status'] in ('OK','NO_MESSAGES','INCOMPLETE') and not valid and os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
     standalone=self.capture(client,market+'_quotes',stream_symbol,session)
     self.last_feed_diagnostics['websocket_quote_status']=standalone.get('status')
     if standalone.get('status')=='COLLECTING':
