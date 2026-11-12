@@ -66,6 +66,9 @@ def main():
    d.locator('[data-engine-close]').first.click();expect(d).not_to_be_visible();assert page.evaluate("getComputedStyle(document.documentElement).overflowY")!='hidden'
    session.update(status='ACTIVE',signal='SELL',display_status='SÆLGSSIGNAL',data_stale=False,latest_context={'status':'verified','position':'held','tradability':'available','as_of':stamp,'orders':[]});session['data_status']={'price':'3.1','price_status':'FRESH','market_status':'UNKNOWN','identity_verification':'verified'}
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_contain_text('Handelstid er lukket eller ikke bekræftet');expect(d.locator('[data-trade-watch]')).to_have_count(0);expect(d.get_by_role('button',name='Åbn depot for manuelt salg →')).to_be_visible();d.locator('[data-engine-close]').first.click()
+   holding['portfolio_kind']='collection';account['portfolios'][0]['kind']='collection';session['data_status']['market_status']='OPEN'
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_contain_text('Aktien er i en Collection og kan ikke sælges enkeltvis her');expect(d.get_by_role('button',name='Vælg depot for manuelt salg →')).to_be_visible();expect(d.locator('[data-trade-watch]')).to_have_count(0);d.locator('[data-engine-close]').first.click()
+   holding['portfolio_kind']='portfolio';account['portfolios'][0]['kind']='portfolio'
    session.update(signal='BUY',display_status='KØBSSIGNAL');session['last_action_signal'].update(state='ACTIVE',event_type='BUY_SIGNAL');page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_contain_text('muligt køb');expect(d.get_by_role('button',name='Afvent')).to_be_visible();expect(d.locator('[data-trade-watch]')).to_have_count(0)
    if shot:page.screenshot(path=f'{shot}/signal-buy-390.png')
    d.locator('[data-engine-close]').first.click()
