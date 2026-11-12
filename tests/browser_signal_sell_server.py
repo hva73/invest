@@ -18,7 +18,9 @@ try:
  with patch('hotwatch_engine.item',return_value={'session':session}),patch('portfolio_data.read',return_value=holding),patch('trade_service.MCP',case.factory),sync_playwright() as p:
   browser=p.chromium.launch(headless=True);page=browser.new_page(viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
   page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();page.locator('.dashboard-v1').wait_for()
-  page.evaluate("state.connection.connected=true")
+  page.evaluate("""([pid,at]) => {state.connection.connected=true;
+   state.portfolios=[{id:pid,name:'Syntetisk depot',source:'pluto',active:true,kind:'portfolio',can_trade:true}];
+   state.dashboard.positions=[{key:'synthetic',portfolio_id:pid,portfolio_name:'Syntetisk depot',portfolio_kind:'portfolio',asset_id:'asset-test',ticker:'TEST',name:'Syntetisk aktie',quantity:'8',price:{amount:'3.1',currency:'USD'},value:{amount:'24.8',currency:'USD'},snapshot_at:at,verification:'broker_snapshot',conflicts:[],analysis_freshness:{},hot_watch:{session:{watch_id:'synthetic-push'}}}];} """,[case.root,now])
   page.route('**/api/market/quote',lambda route:route.fulfill(json={'price':'3.1','currency':'USD','ticker':'TEST','asset_id':'asset-test','price_time':now,'fetched_at':now,'series':[]}))
   page.evaluate("window.EngineUI.openNotification('synthetic-push')")
   signal=page.locator('#engine-dialog');expect(signal.get_by_role('button',name='Sælg')).to_be_visible();signal.get_by_role('button',name='Sælg').click()
