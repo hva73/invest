@@ -40,6 +40,7 @@ vm.runInNewContext(fs.readFileSync('static/demo-data.js','utf8'),ctx);
   const common=new Map(series[0].map(x=>[x.epoch,x.price]));
   for(const rows of series.slice(1))for(const x of rows)if(common.has(x.epoch))assert.equal(x.price,common.get(x.epoch));
  }
+ for(const [ticker,side] of [['TSLA','SELL'],['NOVOB','BUY']]){const p=positions.find(p=>p.ticker===ticker),s=p.hot_watch.session;assert.equal(s.last_action_signal.event_type,side+'_SIGNAL');assert.equal(s.last_action_signal.state,'ACTIVE');assert.equal(s.data_status.market_status,'OPEN');assert.equal(s.data_status.price_status,'FRESH');assert.equal(s.latest_context.status,'verified');assert.equal(s.latest_context.tradability,'available');assert.equal(s.request.portfolio_ids.length,1);assert(state.portfolios.some(a=>a.kind==='portfolio'&&String(a.id)===String(s.request.portfolio_ids[0])&&a.can_trade))}
  const tsla=positions.find(p=>p.ticker==='TSLA');
  for(const pct of [50,100]){const body=JSON.stringify({asset_id:tsla.asset_id,portfolio_id:tsla.portfolio_id,size_mode:'percent',size:String(pct),currency:'DKK'});const estimate=await (await window.fetch('/api/trade/estimate',{method:'POST',body})).json();assert.equal(Number(estimate.proposal.sell_basis.quantity),Number(tsla.quantity));assert.equal(Number(estimate.proposal.sell_basis.shares),Number(tsla.quantity)*pct/100);assert.equal(Number(estimate.proposal.payload.orders[0].shares),Number(tsla.quantity)*pct/100)}
  const points=state.dashboard.portfolio_value_history.periods.day;

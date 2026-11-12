@@ -105,7 +105,14 @@ window.ESCAPE_DEMO_HISTORY=(()=>{
  const sessions=[session('NOVOB','synthetic-asset-NOVOB','BUY','KØBSSIGNAL'),session('TSLA','synthetic-asset-TSLA','SELL','SÆLGSSIGNAL'),session('TSM','synthetic-asset-TSM','WAIT','AFVENT')];
  sessions.forEach(s=>{const p=position(s.request.asset_id),rows=window.ESCAPE_DEMO_HISTORY.history(p),last=rows.at(-1),prior=rows.at(-4),ret=(Number(last.price)/Number(prior.price)-1)*100;
   const why=s.signal==='BUY'?'Simuleret køb: kursen stiger i de seneste observationer.':s.signal==='SELL'?'Simuleret salg: kursen falder i de seneste observationer.':'Simuleret afvent: intet køb eller salg i eksemplet.';
-  s.data_status.price=p.price.amount;s.data_status.price_status='DELAYED';s.data_status.market_status='CLOSED';s.last_data_at=p.price_time;s.last_computed_signal=s.signal;s.last_calculation_at=p.price_time;s.request.activation_reason='DEMO · Simuleret forløb, ikke handelsråd.';
+  s.data_status.price=p.price.amount;s.data_status.price_status=s.signal==='WAIT'?'DELAYED':'FRESH';s.data_status.market_status=s.signal==='WAIT'?'CLOSED':'OPEN';s.display_freshness={state:'fresh'};if(s.signal!=='WAIT')s.last_action_signal={event_id:'demo-'+s.signal,state:'ACTIVE',event_type:s.signal+'_SIGNAL'};s.last_data_at=p.price_time;s.last_computed_signal=s.signal;s.last_calculation_at=p.price_time;s.request.activation_reason='DEMO · Simuleret forløb, ikke handelsråd.';
+  const demoAccount=demo.state.portfolios.find(x=>x.kind==='portfolio'&&x.source==='pluto');if(demoAccount)demoAccount.can_trade=true;
+  if(s.signal!=='WAIT'){
+   s.data_status.identity_verification='verified';s.latest_context={status:'verified',position:'held',tradability:'available',as_of:new Date().toISOString(),orders:[]};
+   s.request.portfolio_ids=[s.signal==='SELL'?p.portfolio_id:demoAccount.id];s.request.risk={stop_price:String((Number(p.price.amount)*0.95).toFixed(2))};
+   s.last_action_signal={event_id:'demo-'+s.signal,event_type:s.signal+'_SIGNAL',state:'ACTIVE',created:p.price_time,data_timestamp:p.price_time,reason:why};
+   if(s.signal==='BUY')s.buy_plan={fresh:true,portfolio_id:demoAccount.id,quantity:'2',budget_dkk:'600',limit_price:Number(p.price.amount).toFixed(2),stop_price:s.request.risk.stop_price};
+  }
   s.latest_calculation={signal:s.signal,reason_codes:[why],risk_level:'medium',supporting_metrics:{return_3_pct:ret.toFixed(4)}};
   p.hot_watch.session=s;p.critical=s.signal!=='WAIT';p.action=s.signal==='BUY'?'KØB':s.signal==='SELL'?'SÆLG':'AFVENT';p.assessment={...p.assessment,action:p.action,reason:why,assessed_at:p.price_time,next_action:'Simuleret eksempel – ikke handelsråd.'};
  });
@@ -116,6 +123,7 @@ window.ESCAPE_DEMO_HISTORY=(()=>{
   let u;try{u=new URL(typeof input==='string'?input:input.url,location.href)}catch{return bad()}
   if(u.origin!==location.origin||!u.pathname.startsWith('/api/'))return bad();
   const route=u.pathname.slice(5);let payload={};try{payload=JSON.parse(opts.body||'{}')}catch{return bad()}
+  sessions.forEach(s=>{if(s.latest_context)s.latest_context.as_of=new Date().toISOString()});
   if(route==='session')return ok({authenticated:true,csrf:'test-only',user:demo.state.user});
   if(route==='state'){demo.state.time=now();return ok(demo.state)}
   if(route==='automation')return ok(demo.automation);
