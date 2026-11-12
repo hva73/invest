@@ -1,6 +1,6 @@
 """Sector navigation using real frontend and explicitly synthetic portfolio snapshots."""
 import json, os, sys, threading
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
 sys.path[:0] = ['.', 'tests']
@@ -30,7 +30,10 @@ dashboard['positions'].append({'key':'synthetic-missing','portfolio_id':case.chi
 for account in dashboard['accounts']:
  portfolio=next(p for p in owned if p['id']==account['id'])
  account.update(external_id=portfolio.get('external_id'),cash_status='available',cash_accounts=[],positions_status='available')
-payload={'dashboard':dashboard,'markets':[],'history':[],'regions':['USA','Europa','Asien','Globalt'],'benchmark_holdings':[],'holding_prices':[],'fx_quotes':[],'fx':None}
+dates=[(case.now-timedelta(days=n)).date().isoformat() for n in (40,15,0)]
+markets=[{'symbol':'SYNTH-TECH.US','sector':'Teknologi','region':'USA','benchmark_currency':'USD','price_basis':'close','status':'OK','series':[{'date':date,'close':value} for date,value in zip(dates,[100,105,112])]},
+         {'symbol':'SYNTH-HEALTH.US','sector':'Sundhed','region':'USA','benchmark_currency':'USD','price_basis':'close','status':'OK','series':[{'date':date,'close':value} for date,value in zip(dates,[100,96,93])]}]
+payload={'dashboard':dashboard,'markets':markets,'history':[],'regions':['USA','Europa','Asien','Globalt'],'benchmark_holdings':[],'holding_prices':[],'fx_quotes':[],'fx':None}
 screens=Path(os.environ.get('ESCAPE_SCREENSHOTS','/tmp/escape-sector-journey'));screens.mkdir(parents=True,exist_ok=True)
 server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
 try:
@@ -41,11 +44,19 @@ try:
    page.on('pageerror',lambda e:errors.append(str(e)))
    page.on('request',lambda r:writes.append(r.url) if '/api/trade/send' in r.url else None)
    page.route('**/api/sector-intelligence',lambda route:route.fulfill(json=payload))
+   page.route('**/api/sector-intelligence/holdings',lambda route:route.fulfill(json={'status':'PENDING'}))
    page.goto(f'http://127.0.0.1:{server.server_port}/')
    page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click()
    page.evaluate("""() => {const x=document.createElement('div');x.textContent='FIKTIVE TESTDATA';Object.assign(x.style,{position:'fixed',bottom:'4px',left:'4px',zIndex:'99999',background:'#0a2229',color:'#b6ddd1',padding:'4px 8px',fontSize:'10px'});document.body.append(x)}""")
    page.locator('nav [data-view=sectors]').click()
    expect(page.locator('.sector-row').filter(has_text='Sundhed')).to_be_visible()
+   if width >= 901:
+    bar=page.locator('.si-bar-column[data-sector-select]').first;bar.hover();tip=bar.locator('.dash-chart-tooltip');expect(tip).to_be_visible();expect(tip).to_contain_text('Resultat');expect(tip.locator('[data-chart-value]')).not_to_have_text('—')
+    bar.focus();expect(tip).to_be_visible();page.locator('.sector-heading h2').first.hover();expect(tip).to_be_hidden()
+    arc=page.locator('[data-sector-donut="Sundhed"]');arc.focus();donut=page.locator('.si-donut-wrap .dash-chart-tooltip');expect(donut).to_be_visible();expect(donut).to_contain_text('Andel');page.locator('.sector-heading h2').first.click();expect(donut).to_be_hidden()
+    rotation=page.locator('.si-rotation-chart.inspect-chart-svg');rotation.scroll_into_view_if_needed();box=rotation.bounding_box();page.mouse.move(box['x']+box['width']*.5,box['y']+box['height']*.5);rtip=page.locator('.si-rotation .dash-chart-tooltip');expect(rtip).to_be_visible();expect(rtip).to_contain_text('Kurs');expect(rtip.locator('[data-chart-share]')).to_contain_text('%')
+    page.locator('.si-rotation').screenshot(path=str(screens/'sektor-sammenligning-mouseover.png'))
+    page.locator('.sector-heading h2').first.hover();expect(rtip).to_be_hidden()
    page.screenshot(path=str(screens/f'sektor-oversigt-{width}.png'),full_page=True)
    page.locator('.sector-row').filter(has_text='Sundhed').click()
    journey=page.locator('#sector-journey');expect(journey).to_be_visible()
@@ -90,6 +101,11 @@ try:
    expect(stale.locator('.si-position-metrics small').first).to_contain_text('— · —')
    expect(stale).to_contain_text('+45,00')
    child_row['price_freshness']=original_freshness
+   if width >= 901:
+    page.locator('[data-sector-journey-close]').first.click();page.locator('[data-sector-market="SYNTH-TECH.US"]').first.click()
+    curve=page.locator('.sector-chart.inspect-chart-svg');expect(curve).to_be_visible();curve.scroll_into_view_if_needed();box=curve.bounding_box();page.mouse.move(box['x']+box['width']*.55,box['y']+box['height']*.5)
+    ctip=page.locator('.si-detail .dash-chart-tooltip');expect(ctip).to_be_visible();expect(ctip).to_contain_text('Kurs');expect(ctip.locator('[data-chart-share]')).to_contain_text('%')
+    page.locator('.si-detail').screenshot(path=str(screens/'sektor-kurs-mouseover.png'))
    assert not writes,writes
    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),width
    assert not errors,(width,errors)

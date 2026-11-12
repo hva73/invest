@@ -156,10 +156,11 @@
 
 @media (min-width: 901px) {
  .dash-chart-plot { position:relative; }
- .dash-chart-plot .dash-chart-svg { pointer-events:all; }
+ .dash-chart-plot .dash-chart-svg, .dash-chart-plot .inspect-chart-svg { pointer-events:all; }
  .dash-chart-plot .dash-chart-point.is-selected { opacity:1; stroke:#e9fff6; stroke-width:1.5; r:4; }
  .dash-chart-tooltip { position:absolute; z-index:8; bottom:calc(100% + 8px); transform:translateX(-50%); min-width:190px; padding:10px 12px; border:1px solid #477269; border-radius:9px; background:#102b2e; box-shadow:0 10px 24px #0008; color:#e5f1ef; pointer-events:none; }
- .dash-chart-tooltip[hidden] { display:none; }
+ .dash-chart-tooltip [hidden], .dash-chart-tooltip[hidden] { display:none!important; }
+ .dash-chart-tooltip b { font-weight:400; }
  .dash-chart-tooltip small { display:block; color:#aecac3; font-size:11px; margin-bottom:6px; }
  .dash-chart-tooltip span { display:flex; justify-content:space-between; gap:16px; font-size:12px; line-height:1.7; }
  .dash-chart-tooltip strong { font-variant-numeric:tabular-nums; }
@@ -171,4 +172,19 @@
 @media (min-width: 901px) {
  main:has(#content > .dashboard-v1) > header #title { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
  .dash-result-share > span { display:none; }
+}
+@media (min-width: 901px) {
+ .dash-chart-plot .inspect-chart-svg .dash-chart-point.is-selected { r:1; stroke-width:1.5; vector-effect:non-scaling-stroke; }
+}
+
+@media (min-width: 901px) {
+ .si-donut-wrap { width:min(100%,240px); margin:auto; }
+ .si-donut-wrap .dash-chart-tooltip { text-align:left; }
+ .si-bar-column .dash-chart-tooltip { text-align:left; }
+ .si-bar-column .dash-chart-tooltip strong { font-size:12px; color:inherit; }
+}
+
+@media (min-width: 901px) {
+ .sector-heat .dash-chart-tooltip { text-align:left; }
+ .sector-heat .dash-chart-tooltip strong { font-size:12px; color:inherit; }
 }

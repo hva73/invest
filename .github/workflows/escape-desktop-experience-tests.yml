@@ -32,6 +32,7 @@ jobs:
           node tests/test_sector_ui.js
           node tests/test_dashboard_data.js
           node tests/test_holdings_sort_ui.cjs
+          node tests/test_engine_chart_hover.cjs
           node tests/test_demo_boundary.cjs
           python -m unittest discover -s tests -p test_sector_intelligence.py
           python tests/browser_sector_cash.py
@@ -39,6 +40,7 @@ jobs:
           python -m unittest discover -s tests -p test_updater.py
           python tests/browser_desktop_experience.py
           python tests/browser_desktop_trade.py
+          python tests/browser_hotwatch_engine.py
           python tests/review_integrated_decision.py
       - name: Upload integrated synthetic screenshots
         if: always()
