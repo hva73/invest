@@ -54,6 +54,24 @@
   }
 }
 @media (min-width: 1100px) {
+  /* Kompakt overblik: metrics stay beside the chart and preserve their controls. */
+  .dashboard-v1 > .dash-hero {
+    display: grid;
+    grid-template-columns: minmax(260px, .8fr) minmax(0, 1.2fr);
+    grid-template-rows: auto 1fr;
+    column-gap: clamp(20px, 2.5vw, 36px);
+    align-items: start;
+    padding-bottom: 18px;
+  }
+  .dashboard-v1 .dash-hero-top { display: contents; }
+  .dashboard-v1 .dash-hero-intro { grid-column: 1; grid-row: 1; }
+  .dashboard-v1 .dash-hero-top #dashboard-value-chart { grid-column: 2; grid-row: 1 / span 2; width: 100%; }
+  .dashboard-v1 .dash-hero-metrics {
+    grid-column: 1; grid-row: 2;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    align-self: end; gap: 0 12px; margin-top: 12px;
+  }
+  .dashboard-v1 .dash-hero-metrics > div { min-width: 0; padding: 10px 0 0; border-right: 0; }
   .portfolio-card {
     display: grid;
     grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr);

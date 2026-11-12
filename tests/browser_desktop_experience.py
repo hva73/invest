@@ -79,6 +79,12 @@ try:
                     hero_height = page.locator('.dash-hero').evaluate('e => e.getBoundingClientRect().height')
                     assert hero_height < 450, (width, hero_height)
                     expect(page.locator('.dash-holdings')).to_be_visible()
+                    intro = page.locator('.dash-hero-intro').bounding_box()
+                    chart = page.locator('.dash-hero-top #dashboard-value-chart').bounding_box()
+                    metrics = page.locator('.dash-hero-metrics').bounding_box()
+                    assert intro['x'] + intro['width'] <= chart['x'] + 1, (width, intro, chart)
+                    assert metrics['x'] + metrics['width'] <= chart['x'] + 1, (width, metrics, chart)
+                    assert metrics['y'] >= intro['y'], (width, metrics, intro)
                 assert page.locator('body > aside').evaluate('e => e.getBoundingClientRect().width') == 224
                 assert page.locator('main').evaluate('e => e.getBoundingClientRect().left') >= 224
                 assert page.locator('nav [data-view=overview]').evaluate('e => e.getBoundingClientRect().height') >= 44
