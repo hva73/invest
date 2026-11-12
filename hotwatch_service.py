@@ -1056,9 +1056,10 @@ def admin_diagnostics(connect,uid,now=None):
     for key in ('websocket_trade_status','websocket_quote_status','websocket_status_status','minute_bars_status','bar_history_status','intraday_status'):
      value=metrics.get(key)
      if isinstance(value,str) and re.fullmatch(r'[A-Z0-9_]{1,80}',value):clean[key]=value
-    ws=metrics.get('websocket') or []
-    if not isinstance(ws,list):ws=[]
-    clean['websocket_ms']=round(sum(x.get('wait_ms',0) for x in ws if isinstance(x,dict) and isinstance(x.get('wait_ms'),(int,float)) and not isinstance(x.get('wait_ms'),bool) and math.isfinite(x['wait_ms']) and 0<=x['wait_ms']<=60000),3)
+    ws=metrics.get('websocket')
+    if isinstance(ws,list):
+     if all(isinstance(x,dict) and isinstance(x.get('wait_ms'),(int,float)) and not isinstance(x.get('wait_ms'),bool) and math.isfinite(x['wait_ms']) and 0<=x['wait_ms']<=60000 for x in ws):clean['websocket_ms']=round(sum(x['wait_ms'] for x in ws),3)
+    else:ws=[]
     clean['websocket']=[{**{k:x[k] for k in ('feed','status','wait_ms','source_age_s','received_age_s','connections_opened','subscriptions_sent','cache_hit') if k in x and (isinstance(x[k],bool) or isinstance(x[k],(int,float)) and math.isfinite(x[k]) and abs(x[k])<=86400000 or isinstance(x[k],str) and re.fullmatch(r'[A-Za-z0-9_]{1,40}',x[k]))},**{k:x[k] for k in ('batch_valid_count','batch_partial_count') if type(x.get(k)) is int and 0<=x[k]<=250},**({'batch_limit_reached':x['batch_limit_reached']} if type(x.get('batch_limit_reached')) is bool else {})} for x in ws[:10] if isinstance(x,dict)]
     conflict=metrics.get('market_conflict')
     if isinstance(conflict,dict):
