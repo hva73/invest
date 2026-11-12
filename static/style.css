@@ -633,3 +633,5 @@ body:has(#login:not([hidden])) > aside nav{display:none}
  #dashboard-detail > .position-actions-mobile[data-signal-side="BUY"] button{flex:0 1 70%}
 }
 @media(max-width:700px){#dashboard-detail > .position-actions-mobile[data-signal-side="BUY"] small{display:none}}
+body > aside nav .nav-sector-mobile{display:none}
+@media(max-width:900px){body > aside nav .nav-sector-desktop{display:none}body > aside nav .nav-sector-mobile{display:inline}}
