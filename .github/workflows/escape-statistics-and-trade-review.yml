@@ -31,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 75c6dde1d48dc1af1e12a85d62de199189725333
+          ref: 831825b2a3e41ed016050719c884be210ec46cd1
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
@@ -65,7 +65,7 @@ jobs:
           path: proofs
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 75c6dde1d48dc1af1e12a85d62de199189725333
+          ref: 831825b2a3e41ed016050719c884be210ec46cd1
           path: integration
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
