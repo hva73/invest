@@ -176,6 +176,31 @@ class Trading(unittest.TestCase):
    session['signal']='SELL';session['display_status']='SÆLGSSIGNAL'
    with self.assertRaisesRegex(trade.TradeError,'retning'):self.send(proposal)
   self.assertFalse(self.writes())
+ def test_exit_watch_with_unknown_buy_permission_still_requires_sell_review(self):
+  # Exit watches deliberately do not check buy permission. They may reach a
+  # sell estimate only through a fresh, complete direct holding and permission.
+  session={'status':'ACTIVE','signal':'SELL','display_status':'SÆLGSSIGNAL','request':{'asset_id':'asset-test','ticker':'TEST','portfolio_ids':[self.root]},'latest_context':{'status':'verified','position':'held','tradability':'unknown'}}
+  request=dict(self.request,report_id='@hotwatch',candidate_id='watch-1',expected_side='SELL',size_mode='percent',size='25',order_type='MARKET')
+  holding={'positions_complete':True,'observed':'2026-11-12T20:00:00Z','positions':[{'kind':'holding','asset_id':'asset-test','quantity':'8'}]}
+  with patch('hotwatch_engine.item',return_value={'session':session}),patch('portfolio_data.read',return_value=holding):
+   proposal=self.estimate(request)
+   self.assertEqual(proposal['payload']['orders'][0]['shares'],'2')
+   self.assertEqual(proposal['payload']['orders'][0]['side'],'SELL')
+   self.assertFalse(self.writes())
+   session.update(signal='WAIT',display_status='AFVENT')
+   with self.assertRaises(trade.TradeError):self.send(proposal)
+   self.assertFalse(self.writes())
+ def test_exit_watch_denied_permission_and_collection_do_not_propose(self):
+  session={'status':'ACTIVE','signal':'SELL','display_status':'SÆLGSSIGNAL','request':{'asset_id':'asset-test','ticker':'TEST','portfolio_ids':[self.root]}}
+  request=dict(self.request,report_id='@hotwatch',candidate_id='watch-1',expected_side='SELL',size_mode='percent',size='25',order_type='MARKET')
+  holding={'positions_complete':True,'observed':'2026-11-12T20:00:00Z','positions':[{'kind':'holding','asset_id':'asset-test','quantity':'8'}]}
+  with patch('hotwatch_engine.item',return_value={'session':session}),patch('portfolio_data.read',return_value=holding):
+   self.can_trade=False
+   with self.assertRaisesRegex(trade.TradeError,'handelsadgang'):self.estimate(request)
+   session['request']['portfolio_ids']=[self.child]
+   with self.assertRaises(trade.TradeError):self.estimate(dict(request,portfolio_id=self.child))
+   with self.assertRaises(trade.TradeError):self.estimate(dict(request,portfolio_id=self.child,kind='collection_sell',size_mode='shares'))
+   self.assertFalse(self.writes())
  def test_hotwatch_estimate_binds_direction_before_and_after_position_lookup(self):
   request=dict(self.request,report_id='@hotwatch',candidate_id='watch-1',expected_side='SELL',size_mode='percent',size='25',order_type='MARKET')
   sell={'signal':'SÆLG','asset_id':'asset-test','portfolio_ids':[self.root]};buy={**sell,'signal':'KØB'}
