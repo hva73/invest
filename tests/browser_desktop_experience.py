@@ -1,5 +1,6 @@
 """Exercise the actual app with synthetic data and a separately loaded desktop CSS."""
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -94,6 +95,32 @@ try:
                     assert intro['x'] + intro['width'] <= metrics['x'] + 1, (width, intro, metrics)
                     assert chart['y'] >= max(intro['y'] + intro['height'], metrics['y'] + metrics['height']) - 1, (width, intro, metrics, chart)
                     assert chart['width'] > metrics['width'], (width, chart, metrics)
+                    # The plotted values are inspectable by mouse and keyboard.
+                    page.locator('[data-dashboard-range="day"]').click()
+                    svg=page.locator('.dash-hero .dash-chart-svg');box=svg.bounding_box()
+                    page.mouse.move(box['x'] + box['width'] * .55, box['y'] + box['height'] * .5)
+                    tip=page.locator('.dash-hero .dash-chart-tooltip')
+                    expect(tip).to_be_visible();expect(tip.locator('[data-chart-date]')).to_have_text(re.compile(r'^\d{2}\.\d{2}$'))
+                    expect(tip.locator('[data-chart-value]')).not_to_have_text('—');expect(tip.locator('[data-chart-result]')).not_to_have_text('—')
+                    page.locator('[data-dashboard-range="week"]').click()
+                    svg=page.locator('.dash-hero .dash-chart-svg');box=svg.bounding_box()
+                    page.mouse.move(box['x'] + box['width'] * .6, box['y'] + box['height'] * .5)
+                    tip=page.locator('.dash-hero .dash-chart-tooltip')
+                    expect(tip).to_be_visible();expect(tip.locator('[data-chart-date]')).to_have_text(re.compile(r'^\d{2}\.\d{2}\.\d{2}$'))
+                    for period in ('month','year'):
+                        page.locator(f'[data-dashboard-range=\"{period}\"]').click()
+                        svg=page.locator('.dash-hero .dash-chart-svg');box=svg.bounding_box()
+                        page.mouse.move(box['x'] + box['width'] * .6, box['y'] + box['height'] * .5)
+                        tip=page.locator('.dash-hero .dash-chart-tooltip')
+                        expect(tip).to_be_visible();expect(tip.locator('[data-chart-date]')).to_have_text(re.compile(r'^\d{2}\.\d{2}\.\d{2}$'))
+                    page.locator('[data-dashboard-range="week"]').click()
+                    svg=page.locator('.dash-hero .dash-chart-svg');box=svg.bounding_box()
+                    page.mouse.move(box['x'] + box['width'] * .6, box['y'] + box['height'] * .5)
+                    tip=page.locator('.dash-hero .dash-chart-tooltip')
+                    if width == 1440: page.screenshot(path=str(screens / 'overview-tooltip-1440.png'), full_page=True)
+                    page.locator('.dash-hero-intro h2').hover();expect(tip).to_be_hidden()
+                    page.locator('.dash-hero .dash-chart-point').first.focus();expect(tip).to_be_visible()
+                    page.locator('.dash-hero-intro h2').click();expect(tip).to_be_hidden()
                     empty_alert = page.locator('.dash-attention')
                     expect(empty_alert).to_be_hidden()
                     expect(page.locator('.dash-signals')).to_be_hidden()
