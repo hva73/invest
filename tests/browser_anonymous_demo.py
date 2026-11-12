@@ -34,6 +34,11 @@ try:
    for i,a in enumerate(boxes):
     for b in boxes[i+1:]:assert a['right']<=b['left']+1 or b['right']<=a['left']+1 or a['bottom']<=b['top']+1 or b['bottom']<=a['top']+1,(width,boxes)
    if shot:page.screenshot(path=f'{shot}/demo-overview-{width}.png')
+   if shot and width==390:
+    page.evaluate("""() => {window.savedDashboard=structuredClone(state.dashboard);state.dashboard.orders=[];state.dashboard.warnings=[];for (const account of state.dashboard.accounts||[]) account.failed=false;for (const row of [...state.dashboard.positions,...(state.dashboard.overview_positions||[])]) {if(row.hot_watch?.session){row.hot_watch.session.signal='WAIT';row.hot_watch.session.display_status='AFVENT'}};render()}""")
+    expect(page.locator('.dash-attention')).to_have_count(0)
+    page.screenshot(path=f'{shot}/owner-overview-no-alerts-390.png',full_page=True)
+    page.evaluate("() => {state.dashboard=window.savedDashboard;render()}")
    row=page.get_by_role('button',name='Åbn position TSLA i Demodepot');row.click()
    dialog=page.locator('#dashboard-detail');expect(dialog).to_be_visible()
    for period in ('day','week','month','year'):
