@@ -470,7 +470,7 @@ class EODHDAdapter:
        latest=max(retained,key=lambda m:stamp(m['event_time']))
        prior_time=stamp(latest['event_time']);new_time=max((stamp(m['event_time']) for m in messages),default=None)
        if not new_time or prior_time>new_time:
-        messages=[m for m in retained if stamp(m['event_time'])==prior_time] if feed.endswith('_quotes') else [latest]
+        messages=[m for m in retained if stamp(m['event_time'])==prior_time] if feed.endswith(('_quotes','_trades')) else [latest]
        elif feed.endswith('_quotes') and prior_time==new_time:
         # Equal source times cannot order different quotes, even when they
         # arrived in separate batches. Retain distinct quotes at that instant
@@ -481,6 +481,17 @@ class EODHDAdapter:
          except (InvalidOperation,TypeError,ValueError):continue
          if not all(v.is_finite() for v in quote) or quote[0]<=0 or quote[1]<quote[0]:continue
          if quote not in seen:messages.append(candidate);seen.add(quote)
+         if len(messages)==2:break
+        if not messages:messages=candidates[-1:]
+       elif feed.endswith('_trades') and prior_time==new_time:
+        # Equal timestamps cannot order distinct execution prices across
+        # captures. Preserve at most two different prices as ambiguity proof.
+        candidates=[m for m in retained+messages if stamp(m['event_time'])==new_time];seen=set();messages=[]
+        for candidate in candidates:
+         try:price=Decimal(str(candidate.get('price')))
+         except (InvalidOperation,TypeError,ValueError):continue
+         if not price.is_finite() or price<=0:continue
+         if price not in seen:messages.append(candidate);seen.add(price)
          if len(messages)==2:break
         if not messages:messages=candidates[-1:]
      partial=[m for m in result.get('partial_messages',[]) if m.get('symbol')==item]
@@ -578,6 +589,10 @@ class EODHDAdapter:
     if not valid:self.last_feed_diagnostics['websocket_trade_status']='STALE_OR_FUTURE'
     if valid:
      trade=max(valid,key=lambda x:stamp(x['event_time']));at=stamp(trade['event_time']);currency=r.get('quote_currency')
+     same_time=[x for x in valid if stamp(x['event_time'])==at]
+     if len({Decimal(str(x['price'])) for x in same_time})>1:
+      self.last_feed_diagnostics['websocket_trade_status']='AMBIGUOUS_SAME_TIMESTAMP'
+      failure=DataUnavailable('EODHD_AMBIGUOUS_TRADE');failure.position_context=context;raise failure
      if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):raise DataUnavailable('EODHD_CURRENCY_UNCONFIRMED')
      self.last_telemetry={'websocket_capture_ms':round(stream_ms,3),'pluto_context_ms':round(context_ms,3),'event_to_websocket_receive_ms':round((stamp(trade['received_at'])-at).total_seconds()*1000,3) if trade.get('received_at') else None}
      state=json.loads(session.get('state') or '{}');profile=state.get('adaptive_profile') or r['profile']
