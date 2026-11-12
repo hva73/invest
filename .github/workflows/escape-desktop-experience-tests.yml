@@ -54,7 +54,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: f92113bc2d14c1851a99a56a09a68f60a4839d96
+          ref: 6a4d15346d09463dcc27707159c19d65d2cdc349
           path: decision-source
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -82,5 +82,47 @@ jobs:
         with:
           name: escape-decision-desktop
           path: /tmp/escape-decision-desktop/
+          if-no-files-found: ignore
+          retention-days: 7
+  demo-desktop-review:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue67-desktop-experience'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: desktop-source
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 7e585de72f5a76bb7382c6c0ec6d3000faa6812c
+          path: demo-source
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Install browser dependencies
+        working-directory: demo-source
+        run: |
+          python -m pip install -r requirements.txt playwright==1.56.0
+          python -m playwright install --with-deps chromium
+      - name: Review desktop layout with demo branch
+        env:
+          ESCAPE_SCREENSHOTS: /tmp/escape-demo-desktop
+          PYTHONPATH: .:tests
+        run: |
+          mkdir -p "$ESCAPE_SCREENSHOTS"
+          cp desktop-source/static/desktop-experience.css demo-source/static/desktop-experience.css
+          cp desktop-source/tests/desktop_fixture.py demo-source/tests/desktop_fixture.py
+          cp desktop-source/tests/browser_desktop_experience.py demo-source/tests/browser_desktop_experience.py
+          cd demo-source
+          python tests/browser_desktop_experience.py
+      - name: Upload synthetic screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: escape-demo-desktop
+          path: /tmp/escape-demo-desktop/
           if-no-files-found: ignore
           retention-days: 7
