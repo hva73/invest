@@ -17,7 +17,7 @@ try:
    page=browser.new_page(viewport={'width':width,'height':900},is_mobile=width<700,has_touch=width<700)
    page.route('**/api/realized-statistics',lambda route:route.fulfill(json=sample))
    page.goto(f'http://127.0.0.1:{server.server_port}/');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();expect(page.locator('.dashboard-v1')).to_be_visible()
-   if width<=700:page.locator('#mobile-more').click()
+   if width<=900:page.locator('#mobile-more').click()
    page.locator('nav [data-view=statistics]').click()
    expect(page.locator('#statistics-title')).to_have_text('Hvordan står det til?')
    expect(page.locator('.statistics-summary strong')).to_contain_text('+8,25 USD')
