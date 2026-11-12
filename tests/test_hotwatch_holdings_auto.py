@@ -561,6 +561,43 @@ class HoldingAutowatch(unittest.TestCase):
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',side_effect=check):
    self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
   self.assertEqual(seen,['SECOND'])
+ def test_feed_recovery_identifies_budget_provider_without_changing_public_status_or_retry(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}):
+   for source in ('pluto','eodhd'):
+    with self.subTest(source=source):
+     with app.connect() as c:c.execute('DELETE FROM hw_feed_recovery')
+     pluto=DataUnavailable('PROVIDER_RATE_BUDGET',429) if source=='pluto' else self.instrument
+     eodhd=DataUnavailable('PROVIDER_RATE_BUDGET',429) if source=='eodhd' else AssertionError('EODHD must not be called')
+     with patch('hotwatch_service.holding_instrument',side_effect=pluto if isinstance(pluto,Exception) else None,return_value=pluto),patch('hotwatch_adapters.search_eodhd_symbols',side_effect=eodhd):
+      self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+     with app.connect() as c:
+      raw=c.execute('SELECT status,next_attempt FROM hw_feed_recovery').fetchone()
+      self.assertEqual(raw['status'],source.upper()+'_RATE_BUDGET')
+      self.assertEqual(raw['next_attempt'],self.now.timestamp()+60)
+     session=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=True)['open_sessions'][0]
+     self.assertEqual((session['feed_recovery_status'],session['feed_recovery_provider']),('PROVIDER_RATE_BUDGET',source))
+     detail=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=False)['open_sessions'][0]
+     self.assertEqual((detail['feed_recovery_status'],detail['feed_recovery_provider']),('PROVIDER_RATE_BUDGET',source))
+   with app.connect() as c:c.execute("UPDATE hw_feed_recovery SET status='PROVIDER_RATE_BUDGET'")
+   session=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=True)['open_sessions'][0]
+   self.assertEqual((session['feed_recovery_status'],session['feed_recovery_provider']),('PROVIDER_RATE_BUDGET',None))
+   with app.connect() as c:c.execute('DELETE FROM hw_feed_recovery')
+   with patch('hotwatch_service.holding_instrument',return_value=self.instrument),patch('hotwatch_adapters.search_eodhd_symbols',side_effect=DataUnavailable('EODHD_DAILY_BUDGET',429)):
+    self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+   session=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=True)['open_sessions'][0]
+   self.assertEqual((session['feed_recovery_status'],session['feed_recovery_provider']),('EODHD_DAILY_BUDGET','eodhd'))
+ def test_candidate_recovery_reports_pluto_budget_without_claiming_eodhd_failure(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);req.update(purpose='automatic discovery',watch_mode='entry',report_id='synthetic-report')
+   c.execute("UPDATE hw_sessions SET purpose='automatic discovery',request=? WHERE id=?",(json.dumps(req),row['id']))
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.verified_discovery_instrument',side_effect=DataUnavailable('PROVIDER_RATE_BUDGET',429)):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
+  session=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=True)['open_sessions'][0]
+  self.assertEqual((session['watch_kind'],session['feed_recovery_status'],session['feed_recovery_provider']),('candidate','PROVIDER_RATE_BUDGET','pluto'))
  def test_recovery_matches_isin_and_currency_without_prior_observation(self):
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
    self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
