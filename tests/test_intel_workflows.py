@@ -69,6 +69,24 @@ class Workflows(unittest.TestCase):
  def test_candidate_omitted_from_new_report_remains_active(self):
   new=copy.deepcopy(self.r);new.update(report_id='omitted',generated_at='2026-11-03T10:30:00Z');new['candidates']=[]
   report_ingest.save(app.connect,1,new);self.assertTrue(any(x['candidate']['ticker']=='MERC' for x in report_ingest.desk(app.connect,1)['candidates']))
+ def test_review_queue_exposes_expired_assessments_without_creating_decisions(self):
+  cid=self.r['candidates'][0]['candidate_id'];d=copy.deepcopy(self.r)
+  d['report_id']='synthetic-overdue';d['generated_at']='2026-11-03T10:10:00Z'
+  d['candidates'][0]['decision']=decision(at=d['generated_at']);d['candidates'][0]['decision']['deadline']='2026-11-03T11:00:00Z'
+  report_ingest.save(app.connect,1,d)
+  with app.connect() as c:
+   before=c.execute('SELECT count(*) FROM candidate_decision_events').fetchone()[0]
+  queue=flow.watch(app.connect,1)['review_queue'];item=next(x for x in queue if x['candidate_id']==cid)
+  self.assertEqual(item['status'],'COLD');self.assertEqual(item['assessed_at'],'2026-11-03T10:10:00+00:00')
+  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM candidate_decision_events').fetchone()[0],before)
+  fresh=copy.deepcopy(d);fresh['report_id']='synthetic-new-review';fresh['generated_at']='2026-11-03T10:20:00Z';fresh['candidates'][0]['decision']=decision(at=fresh['generated_at'])
+  report_ingest.save(app.connect,1,fresh)
+  self.assertNotIn(cid,[x['candidate_id'] for x in flow.watch(app.connect,1)['review_queue']])
+ def test_review_queue_excludes_explicit_rejection_and_keeps_missing_data_distinct(self):
+  def row(cid,status,reason=None,decision_status='AFVENT',life='WAITING_TRIGGER'):
+   return {'candidate':{'candidate_id':cid,'ticker':cid},'currentness':{'status':status,'reason':reason,'deadline':None,'assessed_at':None},'decision':{'status':decision_status},'lifecycle':{'status':life}}
+  registry=[row('missing','REPORT_ONLY','Tidsstemplet vurdering mangler'),row('rejected','COLD','fravalgt','FRAVÆLG'),row('archived','COLD','frist udløbet · revurdering mangler',life='ARCHIVED'),row('current','CURRENT')]
+  self.assertEqual([x['candidate_id'] for x in flow.review_queue(registry)],['missing'])
  def test_hot_watch_merc_timeline_no_duplicate_candidates_or_mutated_reports(self):
   before=copy.deepcopy(self.r);a=observation(self.r);self.assertEqual(flow.record(app.connect,1,a)[0],201);self.assertTrue(flow.record(app.connect,1,a)[1]['duplicate'])
   b=observation(self.r,'SYNTHETIC-MERC-OBS-2','2026-11-03T10:10:00Z');b['market']['price']['amount']='8';b['market']['spread']['amount']='0.1';b['market']['ask']['amount']='7.5';b['market']['volume']='1400';b['market']['momentum']='accelerating';b['position_action']={'action':'SÆLG','reason':'Syntetisk salgsbeslutning; ikke udført','assessed_at':b['observed_at'],'source_ids':['synthetic-source']};flow.record(app.connect,1,b)
