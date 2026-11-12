@@ -750,3 +750,8 @@ body > aside nav .nav-sector-mobile{display:none}
 .dash-day-desktop,.dash-desktop-entry{display:none}
 
 .dash-total-direction { display:none; }
+
+/* Keep wide holdings tables within the viewport without dropping columns. */
+@media(min-width:701px){
+ .dashboard-v1 .dash-table-wrap{min-width:0;max-width:100%;overflow-x:auto}
+}
