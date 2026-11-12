@@ -4,6 +4,6 @@ const data={portfolios:[{portfolio_id:'1',name:'Depot',items:[{ticker:'WIN',name
 const closed=ui.render(data), wins=ui.render(data,{group:'wins'}), losses=ui.render(data,{group:'losses'});
 assert(!closed.includes('statistics-trade')); assert(closed.includes('aria-expanded="false"')); assert(closed.includes('↑ +1.200,00 DKK')); assert(closed.includes('↓ −300,00 DKK'));
 assert(wins.includes('WIN') && !wins.includes('LOSS')); assert(wins.includes('15.000') || wins.includes('15000')); assert(wins.includes('16200')); assert(wins.includes('Ikke afklaret'));
-assert(losses.includes('LOSS') && !losses.includes('WIN')); assert(losses.includes('Kostpris for solgte andele Ikke oplyst'));
+assert(losses.includes('LOSS') && !losses.includes('WIN')); assert(losses.includes('Kostpris for solgte andele</span><strong>Ikke oplyst')); assert(losses.includes('Gns. købspris pr. stk.</span><strong>Ikke oplyst'));
 assert(!ui.render({portfolios:[]}).includes('NaN'));
 console.log('PASS: skjult liste, gevinst/tab, delsalgsbeløb og ukendte oplysninger');
