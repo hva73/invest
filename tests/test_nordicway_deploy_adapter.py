@@ -530,6 +530,19 @@ class AdapterIntegration(unittest.TestCase):
         self.assertEqual(self.service.state, 'started')
         self.assertEqual((self.app / 'app.py').read_text(), 'old')
 
+    def test_orphan_retry_rechecks_all_writer_gates(self):
+        adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
+                                   None, lambda sha: True, self.service)
+        from contextlib import nullcontext
+        with patch.object(concrete.nordicway_quiescence, 'stopped_motor', return_value=nullcontext()), \
+             patch.object(nordicway_writer_check, 'wait_for_quiescence',
+                          side_effect=['passenger_active', 'database_in_use']), \
+             patch.object(nordicway_writer_check, 'stop_orphaned_lswsgi', return_value=1) as stop:
+            with self.assertRaisesRegex(ValueError, 'database_in_use'):
+                with adapter.quiescence():
+                    self.fail('must not enter backup')
+        stop.assert_called_once_with(self.app, self.service)
+
     def test_default_writer_check_refuses_release_before_update(self):
         adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
                                    None, lambda sha: True, self.service,
@@ -548,3 +561,4 @@ class AdapterIntegration(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+

@@ -5,6 +5,7 @@ The updater separately takes its exclusive SQLite lock before copying data.
 """
 import os
 import re
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -93,6 +94,62 @@ def verify(database):
     return failure_reason(database) is None
 
 
+def stop_orphaned_lswsgi(app, service, proc=Path('/proc')):
+    """Ask only orphaned, positively identified app lswsgi processes to exit.
+
+    This runs after the service was stopped. A pidfd ties the signal to the
+    process instance even if its PID is reused. Unknown processes still block
+    the independent writer check; no force-kill or database access is used.
+    """
+    app = Path(app)
+    if app.is_symlink() or not app.is_dir():
+        raise ValueError('unsafe_app')
+    app = app.resolve(strict=True)
+    if not hasattr(os, 'pidfd_open') or not hasattr(signal, 'pidfd_send_signal'):
+        return 0
+    signalled = 0
+    for process in proc.iterdir():
+        if not process.name.isdigit() or int(process.name) == os.getpid():
+            continue
+        try:
+            if process.stat().st_uid != os.getuid():
+                continue
+            cmd = (process / 'cmdline').read_bytes()
+            if b'passenger_wsgi.py' not in cmd or os.fsencode(str(app)) not in cmd:
+                continue
+            if (process / 'cwd').resolve(strict=True) != app:
+                continue
+            if (process / 'exe').resolve(strict=True).name != 'lswsgi':
+                continue
+            status = (process / 'stat').read_text()
+            fields = status[status.rfind(')') + 2:].split()
+            if len(fields) < 20 or fields[1] != '1':
+                continue
+            start = fields[19]
+            pidfd = os.pidfd_open(int(process.name), 0)
+            try:
+                again = (process / 'stat').read_text()
+                fields = again[again.rfind(')') + 2:].split()
+                if len(fields) < 20 or fields[1] != '1' or fields[19] != start:
+                    continue
+                if ((process / 'cmdline').read_bytes() != cmd
+                        or (process / 'cwd').resolve(strict=True) != app
+                        or (process / 'exe').resolve(strict=True).name != 'lswsgi'):
+                    continue
+                if service.status() != 'stopped':
+                    raise ValueError('service_not_stopped')
+                signal.pidfd_send_signal(pidfd, signal.SIGTERM)
+                signalled += 1
+            finally:
+                os.close(pidfd)
+        except ProcessLookupError:
+            continue
+        except FileNotFoundError:
+            if process.exists():
+                raise ValueError('process_inspection_unavailable') from None
+    return signalled
+
+
 def wait_for_quiescence(database, timeout=30, *, clock=time.monotonic, sleep=time.sleep):
     """Allow Passenger to finish stopping without relaxing any writer gate."""
     deadline = clock() + timeout
@@ -104,3 +161,4 @@ def wait_for_quiescence(database, timeout=30, *, clock=time.monotonic, sleep=tim
         if remaining <= 0:
             return reason
         sleep(min(0.5, remaining))
+
