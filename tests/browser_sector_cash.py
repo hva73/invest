@@ -50,6 +50,18 @@ try:
    expect(page.locator('.si-donut')).to_contain_text('2 positioner')
    expect(page.locator('.si-allocation')).to_contain_text('Fordelingens datagrundlag: ældste')
    expect(page.locator('.sector-row').filter(has_text='Kontantbeholdning')).to_contain_text('600,00')
+   # Open a sector holding using the same mobile row and exact depot identity.
+   if width<700:
+    row=payload['dashboard']['positions'][0]
+    row.update(key='holding-one',portfolio_name='Hoved',quantity='1',verification='broker_snapshot',conflicts=[],missing={},raw={})
+    page.evaluate("(r)=>{state.dashboard.positions=[r]}",row)
+    page.locator('.sector-row').filter(has_text='Teknologi').click()
+    mobile=page.locator('.sector-mobile-holdings [data-dashboard-member="holding-one"]')
+    expect(mobile).to_be_visible()
+    page.screenshot(path=str(screens / f'sector-position-{width}.png'),full_page=True)
+    mobile.click()
+    expect(page.locator('#dashboard-detail h2')).to_contain_text('TESTA · Hoved')
+    page.locator('#dashboard-detail [data-dashboard-close]').click()
    page.screenshot(path=str(screens / f'sector-cash-{width}.png'),full_page=True)
    page.locator('[data-sector-scope="2"]').click()
    expect(page.locator('.si-donut strong')).to_contain_text('900,00')
