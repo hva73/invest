@@ -1,0 +1,32 @@
+name: Desktop statistics design preview
+on:
+  pull_request:
+    paths:
+      - 'development/previews/issue114-desktop.html'
+      - '.github/workflows/issue114-desktop-design.yml'
+jobs:
+  preview:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: pip install playwright==1.56.0 && python -m playwright install --with-deps chromium
+      - run: |
+          python - <<'PY'
+          from playwright.sync_api import sync_playwright
+          from pathlib import Path
+          with sync_playwright() as p:
+              b=p.chromium.launch()
+              page=b.new_page(viewport={'width':1440,'height':1050},device_scale_factor=1)
+              page.goto(Path('development/previews/issue114-desktop.html').resolve().as_uri())
+              page.screenshot(path='desktop-statistik-fiktiv.png',full_page=True)
+              page.set_viewport_size({'width':390,'height':844})
+              page.screenshot(path='mobil-statistik-fiktiv.png',full_page=False)
+              b.close()
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: desktop-statistik-fiktiv
+          path: '*-statistik-fiktiv.png'
