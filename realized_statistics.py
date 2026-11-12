@@ -126,7 +126,7 @@ def read(connect, user_id, client_factory=None):
     from portfolio_data import list_data
     with connect() as db:
         portfolios = [dict(row) for row in db.execute(
-            "SELECT external_id,kind,parent_external_id FROM portfolios WHERE user_id=? AND source='pluto' AND active=1", (user_id,))]
+            "SELECT id,name,external_id,kind,parent_external_id FROM portfolios WHERE user_id=? AND source='pluto' AND active=1", (user_id,))]
     client = (client_factory or MCP)(oauth.access_token(connect, user_id))
     tools = client.tools(); output = []; errors = []
     for portfolio in portfolios:
@@ -157,7 +157,7 @@ def read(connect, user_id, client_factory=None):
                 else: raise ValueError('Collectionhistorik er ufuldstændig')
                 result=project([],rows)
             else: continue
-            output.append({'portfolio_id':external,'kind':portfolio['kind'],**result})
+            output.append({'portfolio_id':portfolio['id'],'name':portfolio['name'],'kind':portfolio['kind'],**result})
         except Exception:
             errors.append('En historik kunne ikke læses; eventuelle tal dækker ikke alle depoter.')
     return {'portfolios':output,'errors':errors,'observed':datetime.now(timezone.utc).isoformat(),

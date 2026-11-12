@@ -50,8 +50,8 @@ class ReaderTest(unittest.TestCase):
         from unittest.mock import patch
         from realized_statistics import read
         db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row
-        db.execute('CREATE TABLE portfolios(user_id INTEGER,external_id TEXT,kind TEXT,parent_external_id TEXT,source TEXT,active INTEGER)')
-        db.executemany('INSERT INTO portfolios VALUES(?,?,?,?,?,?)', [(1,'portfolios:mine','portfolio',None,'pluto',1),(2,'portfolios:other','portfolio',None,'pluto',1),(1,'collections:col','collection','portfolios:mine','pluto',1)])
+        db.execute('CREATE TABLE portfolios(user_id INTEGER,external_id TEXT,kind TEXT,parent_external_id TEXT,source TEXT,active INTEGER,id INTEGER,name TEXT)')
+        db.executemany('INSERT INTO portfolios VALUES(?,?,?,?,?,?,?,?)', [(1,'portfolios:mine','portfolio',None,'pluto',1,10,'Mine'),(2,'portfolios:other','portfolio',None,'pluto',1,20,'Other'),(1,'collections:col','collection','portfolios:mine','pluto',1,30,'Col')])
         @contextmanager
         def connect(): yield db
         class Client:
@@ -66,6 +66,7 @@ class ReaderTest(unittest.TestCase):
         with patch('oauth.access_token',return_value='test'):
             result=read(connect,1,Client)
         self.assertEqual(len(result['portfolios']),2)
+        self.assertEqual(result['portfolios'][0]['portfolio_id'],10)
         self.assertEqual(result['portfolios'][0]['items'][0]['gross'],'1')
         self.assertEqual({x['name'] for x in clients[0].calls},{'list_orders','get_collection_activity'})
         self.assertEqual(clients[0].calls[0]['arguments']['portfolioId'],'mine')
@@ -76,8 +77,8 @@ class ReaderTest(unittest.TestCase):
         from unittest.mock import patch
         from realized_statistics import read
         db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row
-        db.execute('CREATE TABLE portfolios(user_id INTEGER,external_id TEXT,kind TEXT,parent_external_id TEXT,source TEXT,active INTEGER)')
-        db.execute("INSERT INTO portfolios VALUES(1,'collections:c','collection',NULL,'pluto',1)")
+        db.execute('CREATE TABLE portfolios(user_id INTEGER,external_id TEXT,kind TEXT,parent_external_id TEXT,source TEXT,active INTEGER,id INTEGER,name TEXT)')
+        db.execute("INSERT INTO portfolios VALUES(1,'collections:c','collection',NULL,'pluto',1,30,'Col')")
         @contextmanager
         def connect(): yield db
         class Client:
