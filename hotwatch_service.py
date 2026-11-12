@@ -552,6 +552,14 @@ def recover_automatic_feeds(connect,now=None):
        if len(matches)==1:
         known={'provider_symbol':matches[0]['symbol']};status='MATCHED';reason='EODHD-identitet kontrolleret med samme ISIN og valuta'
         remember_verified_feed(connect,row['user_id'],instrument,matches[0]['symbol'],now)
+       elif not matches and str(instrument.get('exchange','')).upper() in ('NYSE','NASDAQ'):
+        # Search sometimes omits ISIN/currency. Reuse the existing US catalog
+        # verifier, which checks broker ISIN, issuer, listing and share class.
+        evidence=cxe_verified_match(instrument,options.get('choices',[]),now,connect,row['user_id'])
+        if evidence and evidence.get('isin')==instrument['isin']:
+         known={'provider_symbol':evidence['symbol']};status='MATCHED';reason='Pluto-instrumentet er matchet til den verificerede EODHD-notering'
+         remember_verified_feed(connect,row['user_id'],instrument,evidence['symbol'],now,cxe_evidence=evidence)
+        else:status='EODHD_IDENTITY_UNCERTAIN'
        else:status='EODHD_IDENTITY_UNCERTAIN'
      else:status='PLUTO_IDENTITY_UNVERIFIED'
     except Exception as error:status=reference_error_code(error)
