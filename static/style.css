@@ -606,3 +606,10 @@ body:has(#login:not([hidden])) > aside nav{display:none}
  .dash-hero-metrics>.dash-day-duplicate{display:none}
  .mobile-holding-value .dash-profit-percent{display:inline-block!important;white-space:nowrap}
 }
+
+@media(max-width:700px){
+ .position-mobile-facts dd{font-size:14px}
+ .position-daily-value,.position-daily-percent{display:inline-block;white-space:nowrap}
+ .position-daily-value.positive,.position-daily-percent.positive{color:var(--dash-positive)}
+ .position-daily-value.negative,.position-daily-percent.negative{color:var(--dash-negative)}
+}
