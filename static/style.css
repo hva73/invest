@@ -796,3 +796,12 @@ body > aside nav .nav-sector-mobile{display:none}
 .dash-day-desktop,.dash-desktop-entry{display:none}
 
 .dash-total-direction { display:none; }
+
+@media(max-width:900px){
+ .si-journey .mobile-holding{display:flex;width:100%;min-height:64px;align-items:center;justify-content:space-between;gap:12px;text-align:left;border:0;border-top:1px solid #304653;border-radius:0;background:transparent;padding:10px 2px}
+ .si-journey .mobile-holding-name,.si-journey .mobile-holding-value{display:grid;gap:2px;min-width:0}
+ .si-journey .mobile-holding-name{flex:1}
+ .si-journey .mobile-holding-name small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .si-journey .mobile-holding-value{text-align:right;max-width:58%}
+ .si-journey .mobile-holding small{font-size:11px;line-height:1.4;letter-spacing:0}
+}
