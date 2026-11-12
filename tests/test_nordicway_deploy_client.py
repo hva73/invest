@@ -39,10 +39,10 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(json.loads(kwargs['input']),{'cpanel_token':'test_token_12345','summary':'Mobil og data'})
         self.assertNotIn('test_token_12345',repr(args))
         self.assertEqual(kwargs['timeout'],1740)
-        for state in ('expired','unavailable','recovery'):
+        for state in ('expired','unavailable','recovery','failed'):
             reply['status']=state;send.return_value=SimpleNamespace(returncode=1,stdout=json.dumps(reply).encode())
             with patch.object(client,'verify',return_value='host key\n'):
-                self.assertNotEqual(client.run(self.env,send)['status'],'ok')
+                self.assertEqual(client.run(self.env,send)['status'],state)
 
     def test_cleanup_warning_is_reported_without_mislabeling_release(self):
         self.reply['backup_cleanup'] = 'failed'
