@@ -19,7 +19,7 @@ from urllib.request import Request, urlopen
 HOME = Path('/home/nordicr4')
 RELEASE = '39a609ebdc315e818e0ef991764e8defb301f9e2'
 INSTALLED = 'b0fae95aa0d0342ef6de2145452829e2fb47825d'
-BUNDLE = 'cd36ad3ce5559728fc7f96b06d5b2b17c18b5310'
+BUNDLE = 'c1b6db6ca1ded2f3a81601608bdfa455145798f2'
 PREVIOUS_BUNDLE = 'ca06628b46abcfce8a270ee4e7349725c27c8059'
 HEALTH = 'https://escape.nordic-response.dk/api/health'
 
