@@ -62,21 +62,42 @@ def project(direct_orders, collection_orders=()):
     discarded entirely when their observations differ.
     """
     groups = defaultdict(list); ambiguous = set(); seen = {}; omitted = 0
+    unsafe_instruments = set(); unsafe_scopes = set()
+    def taint(row, scope):
+        asset = row.get('asset') if isinstance(row, dict) and isinstance(row.get('asset'), dict) else {}
+        ticker = asset.get('ticker')
+        if isinstance(ticker, str) and ticker.strip(): unsafe_instruments.add((scope, ticker.strip().casefold()))
+        else: unsafe_scopes.add(scope)
     def add(row, scope, timestamp):
         nonlocal omitted
         record = _record(row, scope, timestamp)
         if record is None:
             omitted += 1
+            # Only an explicitly zero-filled final order proves it cannot alter
+            # the cost basis. Any other incomplete observation poisons the
+            # relevant instrument (or the entire scope if identity is missing).
+            quantity = row.get('filledQuantity') if isinstance(row, dict) else None
+            try:
+                zero = not isinstance(quantity, bool) and quantity is not None and Decimal(str(quantity)).is_finite() and Decimal(str(quantity)) == 0
+            except (InvalidOperation, ValueError): zero = False
+            if not (zero and row.get('status') in ('CANCELED','CANCELLED','EXPIRED','REJECTED')): taint(row, scope)
             return
         key = (scope, record['id'])
         if key in seen:
-            if seen[key] != record: ambiguous.add(key)
+            if seen[key] != record:
+                ambiguous.add(key)
+                taint(row, scope)
+                unsafe_instruments.add((scope, seen[key]['ticker'].strip().casefold()))
             return
         seen[key] = record
     for row in direct_orders:
         if isinstance(row, dict) and row.get('scope') in ('ROOT', 'DIRECT') and not row.get('collectionId'):
             add(row, 'direct', 'createdAt')
-        else: omitted += 1
+        elif isinstance(row, dict) and (row.get('scope') == 'COLLECTION' or row.get('collectionId')):
+            omitted += 1
+        else:
+            omitted += 1
+            taint(row, 'direct')
     for collection_id, row in collection_orders:
         if isinstance(collection_id, str) and collection_id: add(row, 'collection:' + collection_id, 'filledAt')
         else: omitted += 1
@@ -86,7 +107,15 @@ def project(direct_orders, collection_orders=()):
             continue
         groups[(row['scope'], row['ticker'], row['name'], row['currency'])].append(row)
     results = []
+    identities = defaultdict(set)
+    for scope, ticker, name, currency in groups:
+        identities[(scope, ticker.strip().casefold())].add((name, currency))
+    for key, names in identities.items():
+        if len(names) > 1: unsafe_instruments.add(key)
     for (scope, _, _, _), rows in groups.items():
+        if scope in unsafe_scopes or (scope, rows[0]['ticker'].strip().casefold()) in unsafe_instruments:
+            omitted += 1
+            continue
         rows.sort(key=lambda x: x['time'])
         if len({row['time'] for row in rows}) != len(rows):
             omitted += 1
@@ -151,9 +180,15 @@ def read(connect, user_id, client_factory=None):
                     data=decode_result(client.request('tools/call', {'name':'get_collection_activity','arguments':args}), 'get_collection_activity')
                     for activity in list_data(data,['activities','activity','items','data']):
                         if not isinstance(activity,dict) or activity.get('collectionId') != identifier: raise ValueError('Collectiontilknytning mangler')
-                        for wrapper in activity.get('orders',[]):
-                            if isinstance(wrapper,dict) and wrapper.get('type')=='ORDER' and isinstance(wrapper.get('data'),dict): rows.append((identifier,wrapper['data']))
+                        wrappers=activity.get('orders',[])
+                        if not isinstance(wrappers,list): raise ValueError('Ugyldige Collectionordrer')
+                        for wrapper in wrappers:
+                            if not isinstance(wrapper,dict) or not isinstance(wrapper.get('type'),str): raise ValueError('Ukendt Collectionordre')
+                            if wrapper['type']=='ORDER':
+                                if not isinstance(wrapper.get('data'),dict): raise ValueError('Ufuldstændig Collectionordre')
+                                rows.append((identifier,wrapper['data']))
                     cursor=data.get('nextToken') if isinstance(data,dict) else None
+                    if isinstance(data,dict) and (data.get('nextCursor') or (data.get('hasMore') is True and not cursor)): raise ValueError('Collectionhistorik er ufuldstændig')
                     if not cursor: break
                     if not isinstance(cursor,str) or cursor in seen: raise ValueError('Collectionhistorik er ufuldstændig')
                     seen.add(cursor)

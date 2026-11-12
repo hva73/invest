@@ -35,6 +35,25 @@ class StatisticsTest(unittest.TestCase):
         self.assertEqual(project([], [('c',self.buy),('c',simultaneous)])['items'],[])
     def test_missing_price_does_not_create_result(self):
         self.assertEqual(project([self.buy,dict(self.sell,filledAveragePrice=None)])['items'],[])
+    def test_missing_fill_price_taints_later_pair_in_both_scopes(self):
+        incomplete=order('BUY','1','7','2025-12-31T00:00:00Z','missing',filledAveragePrice=None)
+        self.assertEqual(project([incomplete,self.buy,self.sell])['items'],[])
+        self.assertEqual(project([], [('c',incomplete),('c',self.buy),('c',self.sell)])['items'],[])
+    def test_conflicting_earlier_duplicate_taints_later_pair(self):
+        earlier=order('BUY','1','7','2025-12-31T00:00:00Z','old')
+        conflict=dict(earlier,filledAveragePrice='8')
+        self.assertEqual(project([earlier,conflict,self.buy,self.sell])['items'],[])
+        self.assertEqual(project([], [('c',earlier),('c',conflict),('c',self.buy),('c',self.sell)])['items'],[])
+    def test_taint_does_not_leak_between_scopes(self):
+        incomplete=order('BUY','1','7','2025-12-31T00:00:00Z','old',filledAveragePrice=None)
+        result=project([incomplete], [('c',self.buy),('c',self.sell)])
+        self.assertEqual(len(result['items']),1)
+    def test_unknown_scope_taints_only_its_instrument(self):
+        unknown=dict(self.buy,id='unknown',scope=None)
+        self.assertEqual(project([unknown,self.buy,self.sell])['items'],[])
+    def test_identity_disagreement_cannot_leave_a_later_pair(self):
+        old=dict(self.buy,id='old',asset={'ticker':'ABC','name':'Other company','currency':'USD'})
+        self.assertEqual(project([old,self.buy,self.sell])['items'],[])
     def test_ambiguous_direct_does_not_invent_fill_order(self):
         extra=order('BUY','1','8','2026-01-01T01:00:00Z','x')
         self.assertEqual(project([self.buy,extra,self.sell])['items'],[])
