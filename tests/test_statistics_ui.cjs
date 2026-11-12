@@ -1,0 +1,12 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {render}=require('../static/statistics-ui.js');
+const items=[{ticker:'GAIN',name:'Gain Co',currency:'USD',gross:'3',gross_percent:'10',quantity:'1',buy_price:'30',sell_price:'33',note:'Foreløbig',sell_time:null},{ticker:'LOSS',name:'Loss Co',currency:'USD',gross:'-1',gross_percent:'-5',quantity:'1',buy_price:'20',sell_price:'19',note:'Foreløbig',sell_time:null},{ticker:'EU',name:'Euro',currency:'EUR',gross:'100',gross_percent:'20',quantity:'1',buy_price:'500',sell_price:'600',note:'Foreløbig'}];
+const data={portfolios:[{portfolio_id:1,name:'Depot',items},{portfolio_id:2,name:'Collection',items:[]}],errors:[]};
+let html=render(data,{portfolio:1,currency:'USD'});
+assert.match(html,/↑ \+2,00 USD/);assert.match(html,/↑ 1 med gevinst/);assert.match(html,/↓ 1 med tab/);assert.doesNotMatch(html,/EU<small>/);assert.match(html,/Fyldtid ikke oplyst/);assert.match(html,/Gebyrer, valutaomregning/);
+html=render(data,{portfolio:2});assert.match(html,/Ingen handler med tilstrækkelige oplysninger/);assert.doesNotMatch(html,/100,00/);
+html=render({portfolios:[{portfolio_id:1,name:'<img src=x>',items:[{...items[0],ticker:'<script>',name:'"bad"'}]}],errors:['error']});assert.doesNotMatch(html,/<script>|<img/);assert.match(html,/&lt;script&gt;/);assert.match(html,/Nogle depoter kunne ikke læses/);
+html=render({portfolios:[{portfolio_id:1,items:[{...items[0],gross:'NaN'}]}]});assert.match(html,/Ingen handler/);
+html=render({portfolios:[{portfolio_id:1,items:[{...items[0],gross:'0.104'},{...items[0],gross:'0.101'}]}]});assert.match(html,/\+0,21 USD/);
+console.log('PASS: bounded currency scope, signed results, empty state and escaped content');
