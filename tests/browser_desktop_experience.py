@@ -75,6 +75,10 @@ try:
                 page.locator('nav > [data-view=overview]').click()
                 expect(page.locator('.dashboard-v1')).to_be_visible()
             else:
+                if width >= 1280:
+                    hero_height = page.locator('.dash-hero').evaluate('e => e.getBoundingClientRect().height')
+                    assert hero_height < 450, (width, hero_height)
+                    expect(page.locator('.dash-holdings')).to_be_visible()
                 assert page.locator('body > aside').evaluate('e => e.getBoundingClientRect().width') == 224
                 assert page.locator('main').evaluate('e => e.getBoundingClientRect().left') >= 224
                 assert page.locator('nav [data-view=overview]').evaluate('e => e.getBoundingClientRect().height') >= 44

@@ -21,11 +21,16 @@
   .dashboard-v1 > .dash-holdings { grid-column: 1 / -1; }
   .dashboard-v1 > .dash-signals,
   .dashboard-v1 > .dash-quality { min-width: 0; }
-  .dash-hero { padding: 26px 30px 0; }
-  .dash-hero-intro h2 { font-size: clamp(28px, 2.5vw, 40px); margin: 12px 0 8px; }
+  .dash-hero { padding: 20px 24px 0; }
+  .dash-hero-intro h2 { font-size: clamp(26px, 2.2vw, 34px); margin: 8px 0 6px; }
   .dash-hero-intro p { margin-bottom: 12px; }
-  .dash-hero-metrics { margin-top: 22px; }
-  .dash-hero-metrics > div { padding-top: 16px; padding-bottom: 18px; }
+  .dash-chart-svg { height: 112px; }
+  .dash-hero-metrics { margin-top: 12px; }
+  .dash-hero-metrics > div { padding-top: 12px; padding-bottom: 12px; }
+  .dash-attention { padding-top: 16px; padding-bottom: 16px; }
+  .portfolio-card { padding: 18px 22px; }
+  .portfolio-card h2 { margin: 8px 0; }
+  .portfolio-card .portfolio-metric-label { margin-top: 12px; }
   .dash-holdings .dash-table th, .dash-attention .dash-table th { padding-top: 12px; padding-bottom: 12px; }
   .dash-holdings .dash-table tbody tr:hover, .dash-attention .dash-table tbody tr:hover { background: #ffffff08; }
   .engine-overview, .sector-panel, .portfolio-card { min-width: 0; }
@@ -68,5 +73,5 @@
   .dashboard-v1 { gap: 18px; }
   .dash-hero-top { gap: 36px; }
   .dash-hero-top #dashboard-value-chart { flex-basis: 62%; }
-  .dash-chart-svg { height: 180px; }
+  .dash-chart-svg { height: 125px; }
 }
