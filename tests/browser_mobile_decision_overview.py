@@ -17,6 +17,7 @@ try:
    if width<=700:
     section=page.locator('.mobile-holdings');expect(section).to_be_visible();expect(section.locator('.mobile-holding')).to_have_count(6)
     expect(section.locator('.mobile-holding').first).to_contain_text('SÆLGSSIGNAL');expect(page.locator('#dashboard-value-chart')).to_be_hidden()
+    section.locator('.mobile-holding').first.click();signal_detail=page.locator('#dashboard-detail');expect(signal_detail).to_be_visible();expect(signal_detail.locator('[data-asset-trade=BUY]')).to_have_count(0);expect(signal_detail.locator('[data-dashboard-watch=watch-0]')).to_be_visible();signal_detail.get_by_role('button',name='Luk position').click()
     section.get_by_role('button',name='Kræver handling').click();expect(section.locator('.mobile-holding')).to_have_count(1)
     section.get_by_role('button',name='Marked lukket').click();expect(section.locator('.mobile-holding')).to_have_count(1)
     section.get_by_role('button',name='Alle',exact=True).click();section.get_by_role('button',name='Se alle 18 beholdninger').click();expect(section.locator('.mobile-holding')).to_have_count(18)
