@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   data-path:
-    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue-4-quote-time-collision' || github.event.pull_request.head.ref == 'codex/issue14-performance-reliability' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue14-scan-latency' || github.event.pull_request.head.ref == 'codex/issue14-ws-cap-telemetry' || github.event.pull_request.head.ref == 'codex/issue14-discovery-gate' || github.event.pull_request.head.ref == 'codex/issue4-batch-incomplete' || github.event.pull_request.head.ref == 'codex/issue4-trade-ties' || github.event.pull_request.head.ref == 'codex/issue4-us-recovery' || github.event.pull_request.head.ref == 'codex/issue3-position-scope' || github.event.pull_request.head.ref == 'codex/issue8-candidate-reassessment')
+    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue-4-quote-time-collision' || github.event.pull_request.head.ref == 'codex/issue14-performance-reliability' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue14-scan-latency' || github.event.pull_request.head.ref == 'codex/issue14-ws-cap-telemetry' || github.event.pull_request.head.ref == 'codex/issue14-discovery-gate' || github.event.pull_request.head.ref == 'codex/issue4-batch-incomplete' || github.event.pull_request.head.ref == 'codex/issue4-trade-ties' || github.event.pull_request.head.ref == 'codex/issue4-us-recovery' || github.event.pull_request.head.ref == 'codex/issue3-position-scope' || github.event.pull_request.head.ref == 'codex/issue8-candidate-reassessment' || github.event.pull_request.head.ref == 'codex/issue13-exit-review-status')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -51,3 +51,4 @@ jobs:
         env:
           PYTHONPATH: .:tests
         run: '"$RUNNER_TEMP/escape-data-venv/bin/python" -m unittest tests.test_app tests.test_updater'
+
