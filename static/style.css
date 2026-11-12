@@ -601,3 +601,8 @@ body:has(#login:not([hidden])) > aside nav{display:none}
  .mobile-holding-value .dash-profit-percent{margin-left:3px}
  .mobile-holding-daily{overflow-wrap:anywhere}
 }
+
+@media(max-width:700px){
+ .dash-hero-metrics>.dash-day-duplicate{display:none}
+ .mobile-holding-value .dash-profit-percent{display:inline-block!important;white-space:nowrap}
+}
