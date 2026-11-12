@@ -31,8 +31,8 @@ def run(env=None, transport=_run_limited):
     access = (env.get('ESCAPE_WRITE_PROBE_AUTHORIZED') == '1' if operation == 'write-probe'
               else env.get('ESCAPE_DEPLOY_AUTHORIZED') == '1')
     if (not access or not env.get('SSH_AUTH_SOCK')
-            or operation not in ('deploy', 'resume', 'write-probe', 'app-deploy')
-            or (operation in ('deploy', 'resume', 'app-deploy') and not re.fullmatch(r'[0-9a-f]{40}', sha))
+            or operation not in ('deploy', 'resume', 'write-probe', 'app-deploy', 'app-resume')
+            or (operation in ('deploy', 'resume', 'app-deploy', 'app-resume') and not re.fullmatch(r'[0-9a-f]{40}', sha))
             or (operation == 'write-probe' and bool(sha))
             or (operation == 'deploy' and (not re.fullmatch(r'[A-Za-z0-9_-]{10,256}', token)
                 or not approval_json or len(approval_json) > 512))
@@ -75,7 +75,7 @@ def run(env=None, transport=_run_limited):
             if result.returncode != 0 or reply != {'status': 'ok', 'operation': 'write_probe'}:
                 raise ValueError('invalid_reply')
             return reply
-        if operation == 'resume':
+        if operation in ('resume', 'app-resume'):
             if (not isinstance(reply, dict) or set(reply) not in ({'operation', 'status', 'recovery_required'},
                     {'operation', 'status', 'recovery_required', 'backup_cleanup'})
                     or reply['operation'] != 'resume' or reply['status'] not in ('ok', 'failed')

@@ -106,6 +106,16 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(args[0][-1], 'escape-deploy-v1 resume ' + 'a' * 40)
         self.assertEqual(kwargs['input'], b'')
 
+    def test_app_resume_is_fixed_and_sends_no_token(self):
+        self.env['ESCAPE_DEPLOY_OPERATION']='app-resume'
+        reply={'operation':'resume','status':'ok','recovery_required':False,'backup_cleanup':'ok'}
+        send=Mock(return_value=SimpleNamespace(returncode=0,stdout=json.dumps(reply).encode()))
+        with patch.object(client,'verify',return_value='host key\n'):
+            self.assertEqual(client.run(self.env,send),reply)
+        args,kwargs=send.call_args
+        self.assertEqual(args[0][-1],'escape-deploy-v1 app-resume '+'a'*40)
+        self.assertEqual(kwargs['input'],b'')
+
     def test_write_probe_is_fixed_and_needs_no_release_or_token(self):
         self.env['ESCAPE_DEPLOY_OPERATION'] = 'write-probe'
         self.env['ESCAPE_WRITE_PROBE_AUTHORIZED'] = '1'

@@ -93,6 +93,17 @@ class GuardTests(unittest.TestCase):
              patch.object(guard.os,'execv') as execute:
             self.assertEqual(guard.main(),1);execute.assert_not_called()
 
+    def test_app_resume_enters_fixed_venv_only_when_enabled(self):
+        sha='a'*40
+        with patch.dict(os.environ,{'SSH_ORIGINAL_COMMAND':'escape-deploy-v1 app-resume '+sha}), \
+             patch.object(guard,'deployment_enabled',return_value=True), \
+             patch.object(guard.os,'execv',side_effect=OSError('synthetic')) as execute:
+            self.assertEqual(guard.main(),1)
+            execute.assert_called_once_with(guard.APP_PYTHON,[guard.APP_PYTHON,'-I',guard.APP_ENTRY,sha,'resume'])
+        with patch.dict(os.environ,{'SSH_ORIGINAL_COMMAND':'escape-deploy-v1 app-resume '+sha}), \
+             patch.object(guard,'deployment_enabled',return_value=False), patch.object(guard.os,'execv') as execute:
+            self.assertEqual(guard.main(),1);execute.assert_not_called()
+
     def test_rejects_arbitrary_commands(self):
         for cmd in ('', 'id', 'escape-deploy-v1 deploy HEAD',
                     'escape-deploy-v1 deploy ' + 'a' * 40 + ';id',

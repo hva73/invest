@@ -78,3 +78,16 @@ def run_request(sha, stream, connect, bridge, *, runner, create_proof, notify,
                runner=runner,create_proof=create_proof,notify=notify,
                lifetime=lifetime,clock=clock,sleep=sleep)
     return {'operation':'app-deploy','status':result['status'],'sha':sha}
+
+
+def resume_app(connect, sha, *, resume):
+    """Reconcile app status only after the existing runner verifies recovery."""
+    result = resume(sha)
+    if (not isinstance(result, dict) or result.get('operation') != 'resume'
+            or result.get('status') != 'ok' or result.get('recovery_required') is not False):
+        return {'operation':'resume','status':'failed','recovery_required':True,'backup_cleanup':'not_run'}
+    try:
+        release_approval.reconcile_recovery(connect, sha, result)
+    except Exception:
+        return {'operation':'resume','status':'failed','recovery_required':True,'backup_cleanup':'not_run'}
+    return result

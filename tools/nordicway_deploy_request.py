@@ -43,7 +43,7 @@ def parse(event, event_name, ref, actor_id):
         if not isinstance(data, dict) or set(data) not in ({'operation', 'sha'}, {'operation', 'sha', 'approval'}, {'operation', 'sha', 'summary'}):
             return None
         operation, sha = data['operation'], data['sha']
-        if operation not in ('deploy', 'resume', 'app-deploy'):
+        if operation not in ('deploy', 'resume', 'app-deploy', 'app-resume'):
             return None
     else:
         return None
@@ -71,7 +71,7 @@ def parse(event, event_name, ref, actor_id):
         return None
     if event_name == 'workflow_dispatch' and operation == 'write-probe' and sha == '':
         return {'operation': operation, 'sha': ''}
-    if operation in ('deploy', 'resume') and isinstance(sha, str) and re.fullmatch(r'[0-9a-f]{40}', sha):
+    if operation in ('deploy', 'resume', 'app-resume') and isinstance(sha, str) and re.fullmatch(r'[0-9a-f]{40}', sha):
         return {'operation': operation, 'sha': sha}
     return None
 

@@ -50,6 +50,8 @@ class DeployRequestTests(unittest.TestCase):
         self.assertIsNone(request.parse(e, 'workflow_dispatch', request.BRANCH, str(request.OWNER)))
         self.event['comment']['body'] = request.PREFIX + json.dumps({'operation': 'resume', 'sha': self.sha})
         self.assertEqual(self.parse(self.event)['operation'], 'resume')
+        self.event['comment']['body'] = request.PREFIX + json.dumps({'operation': 'app-resume', 'sha': self.sha})
+        self.assertEqual(self.parse(self.event)['operation'], 'app-resume')
 
     def test_app_deploy_requires_single_line_summary_and_sha(self):
         for summary, valid in [('Mobil og datakilder',True),('',False),('x\nsha=evil',False),('x'*501,False)]:

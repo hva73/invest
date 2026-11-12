@@ -62,6 +62,21 @@ def pending(connect, owner_id, *, now=None):
     return dict(zip(('id', 'sha', 'summary', 'expires'), row))
 
 
+
+def current(connect, owner_id, *, now=None):
+    """Owner-scoped latest candidate and durable observed installation state."""
+    now = time.time() if now is None else now
+    with connect() as c:
+        row = c.execute("""SELECT id,sha,summary,expires,status FROM release_approvals
+            WHERE owner_id=? ORDER BY created DESC, rowid DESC LIMIT 1""", (owner_id,)).fetchone()
+    if row is None:
+        return None
+    result = dict(zip(('id', 'sha', 'summary', 'expires', 'status'), row))
+    if result['status'] in ('pending', 'approved') and result['expires'] <= now:
+        result['status'] = 'expired'
+    return result
+
+
 def claim(connect, candidate_id, sha, *, now=None):
     """Claim a single approved, current candidate before starting installation.
 
@@ -96,6 +111,27 @@ def finish(connect, candidate_id, sha, *, verified):
     return {'id': candidate_id, 'sha': sha, 'status': status}
 
 
+def reconcile_recovery(connect, sha, result):
+    """Clear an app claim only after the existing runner verifies resumption.
+
+    This is a server-side bridge function, not an HTTP endpoint. A failed or
+    uncertain resume leaves the previous claim blocked for operator review.
+    """
+    if (not isinstance(sha, str) or not SHA.fullmatch(sha)
+            or not isinstance(result, dict) or result.get('operation') != 'resume'
+            or result.get('status') != 'ok' or result.get('recovery_required') is not False):
+        raise ValueError('recovery_unverified')
+    with connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        rows = c.execute("SELECT id FROM release_approvals WHERE sha=? AND status IN ('claimed','recovery')", (sha,)).fetchall()
+        if len(rows) != 1:
+            raise ValueError('recovery_unavailable')
+        changed = c.execute("UPDATE release_approvals SET status='completed' WHERE id=? AND sha=? AND status IN ('claimed','recovery')", (rows[0][0], sha)).rowcount
+        if changed != 1:
+            raise ValueError('recovery_unavailable')
+    return {'id': rows[0][0], 'sha': sha, 'status': 'completed'}
+
+
 def start_approved(connect, candidate_id, sha, deploy, *, now=None):
     """Claim once before invoking a supplied deployment runner.
 
@@ -109,8 +145,23 @@ def start_approved(connect, candidate_id, sha, deploy, *, now=None):
                     and result.get('status') == 'ok' and result.get('stage') == 'complete'
                     and result.get('recovery_required') is False
                     and result.get('service_restored') is True)
+        # The existing runner identifies failures before service stop, with no
+        # mutation and no recovery marker. They may be retried after correction.
+        no_mutation = (isinstance(result, dict) and result.get('operation') == 'deploy'
+                       and result.get('status') == 'failed'
+                       and result.get('stage') in ('authorization', 'preflight', 'quota', 'stage', 'service_state')
+                       and result.get('recovery_required') is False)
     except Exception:
         verified = False
+        no_mutation = False
+    if no_mutation:
+        with connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            changed = c.execute("UPDATE release_approvals SET status='failed' WHERE id=? AND sha=? AND status='claimed'",
+                                (candidate_id, sha)).rowcount
+            if changed != 1:
+                raise ValueError('approval_unavailable')
+        return {'id': candidate_id, 'sha': sha, 'status': 'failed'}
     return finish(connect, candidate_id, sha, verified=verified)
 
 

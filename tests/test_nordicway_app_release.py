@@ -42,6 +42,20 @@ class AppReleaseBridgeTests(unittest.TestCase):
                           create_proof=lambda *a:{},notify=notify,clock=lambda:next(times),sleep=lambda _:None)
         self.assertEqual(result['status'],'recovery');self.assertEqual(calls,[])
 
+    def test_verified_resume_reconciles_only_matching_recovery(self):
+        item=release_approval.prepare(self.connect,'a'*40,'Test',7,now=100,lifetime=60)
+        release_approval.approve(self.connect,item['id'],item['sha'],7,now=101)
+        release_approval.claim(self.connect,item['id'],item['sha'],now=102)
+        release_approval.finish(self.connect,item['id'],item['sha'],verified=False)
+        failed={'operation':'resume','status':'failed','recovery_required':True,'backup_cleanup':'not_run'}
+        self.assertEqual(bridge.resume_app(self.connect,item['sha'],resume=lambda _:failed)['status'],'failed')
+        self.assertEqual(release_approval.current(self.connect,7,now=103)['status'],'recovery')
+        ok={'operation':'resume','status':'ok','recovery_required':False,'backup_cleanup':'ok'}
+        self.assertEqual(bridge.resume_app(self.connect,'b'*40,resume=lambda _:ok)['status'],'failed')
+        self.assertEqual(release_approval.current(self.connect,7,now=103)['status'],'recovery')
+        self.assertEqual(bridge.resume_app(self.connect,item['sha'],resume=lambda _:ok)['status'],'ok')
+        self.assertEqual(release_approval.current(self.connect,7,now=103)['status'],'completed')
+
     def test_unknown_owner_rejected_before_staging(self):
         with self.connect() as c:c.execute('UPDATE users SET active=0')
         with self.assertRaisesRegex(ValueError,'owner_unavailable'):

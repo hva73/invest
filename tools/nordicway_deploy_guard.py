@@ -92,15 +92,15 @@ def main():
         runner = None
         recovery = None
         app_runner = None
-        if re.fullmatch(PROTOCOL + r' (deploy|resume|app-deploy) [0-9a-f]{40}', command):
+        if re.fullmatch(PROTOCOL + r' (deploy|resume|app-deploy|app-resume) [0-9a-f]{40}', command):
             if not deployment_enabled():
                 print(json.dumps({'status': 'blocked', 'reason': 'deployment_not_ready'}, separators=(',', ':')))
                 return 1
-            if ' app-deploy ' in command:
+            if ' app-deploy ' in command or ' app-resume ' in command:
                 sha=command.rsplit(' ',1)[1]
                 # The forced-command guard runs with -I -S. The installed
                 # application's own venv is required for its push dependencies.
-                os.execv(APP_PYTHON,[APP_PYTHON,'-I',APP_ENTRY,sha])
+                os.execv(APP_PYTHON,[APP_PYTHON,'-I',APP_ENTRY,sha]+(['resume'] if ' app-resume ' in command else []))
             # A reviewed copy of the runner and its dependencies must be installed
             # alongside this guard. The currently installed ping guard lacks it.
             sys.path.insert(0, '/home/nordicr4/.escape_deploy_bridge')
