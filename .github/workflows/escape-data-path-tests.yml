@@ -57,4 +57,4 @@ jobs:
         if: github.event.pull_request.head.ref == 'codex/issue8-review-priority'
         env:
           PYTHONPATH: .:tests
-        run: '"$RUNNER_TEMP/escape-data-venv/bin/python" -m unittest tests.test_hotwatch_e2e_contract tests.test_intel_workflows tests.test_hotwatch_agreement'
+        run: '"$RUNNER_TEMP/escape-data-venv/bin/python" -m unittest tests.test_hotwatch_e2e_contract tests.test_intel_workflows tests.test_hotwatch_agreement tests.test_mcp_reports'

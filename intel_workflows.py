@@ -240,7 +240,7 @@ def review_queue(registry):
         result.append({'candidate_id':candidate['candidate_id'],'ticker':candidate['ticker'],
                        'status':status,'reason':current.get('reason'),'deadline':current.get('deadline'),
                        'assessed_at':current.get('assessed_at'),'report_id':row.get('report_id')})
-    result.sort(key=lambda r:(0 if r['status'] in ('COLD','REVIEW_DUE') else 1,r['deadline'] or '',r['candidate_id']))
+    result.sort(key=lambda r:(0 if r['status'] in ('COLD','REVIEW_DUE') else 1,stamp(r['deadline']).timestamp() if r['deadline'] else float('-inf'),r['candidate_id']))
     return result
 
 def watch(connect,uid,is_test=False,candidate_id=None):

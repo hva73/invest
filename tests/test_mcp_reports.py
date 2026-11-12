@@ -88,6 +88,8 @@ class McpReports(unittest.TestCase):
   status,result,_=self.request('/mcp',{'jsonrpc':'2.0','id':2,'method':'tools/list'},auth)
   self.assertEqual({x['name'] for x in result['result']['tools']},{'send_report','validate_report','get_latest_report','record_hot_watch','get_hot_watch','sync_hot_watch','get_strategy_catalog'})
   self.assertTrue(next(x for x in result['result']['tools'] if x['name']=='sync_hot_watch')['annotations']['readOnlyHint'])
+  review_tool=next(x for x in result['result']['tools'] if x['name']=='get_hot_watch')
+  self.assertIn('review_queue',review_tool['description']);self.assertTrue(review_tool['annotations']['readOnlyHint'])
   status,result,_=self.call(tokens['access_token'],'send_report',self.sample);self.assertFalse(result['result']['isError'])
   self.assertTrue(self.call(tokens['access_token'],'send_report',self.sample)[1]['result']['structuredContent']['duplicate'])
   self.assertIsNone(self.call(tokens['access_token'],'get_latest_report',{})[1]['result']['structuredContent']['report'])
