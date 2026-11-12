@@ -5,7 +5,7 @@ HOME = Path('/home/nordicr4')
 APP = HOME / 'escape_app'
 BRIDGE = HOME / '.escape_deploy_bridge'
 REPO = HOME / 'escape_deploy/invest'
-SHA = '645c293a5c484187a68d121a5cdd96c0a958bc86'
+SHA = '39a609ebdc315e818e0ef991764e8defb301f9e2'
 sys.path.insert(0, str(BRIDGE))
 
 import apply_update
@@ -50,7 +50,9 @@ def main():
                            timeout=120, check=True, env=env)
             runner.prepare_checkout(checkout, SHA)
             names = preflight.manifest(checkout)
-            if len(names) != 73 or 'static/demo-data.js' not in names or 'static/desktop-experience.css' not in names:
+            new_assets = {'static/demo-data.js', 'static/desktop-experience.css'}
+            if (len(names) != 73 or not new_assets.issubset(names)
+                    or tuple(name for name in names if name not in new_assets) != apply_update.FILES):
                 raise ValueError('manifest_mismatch')
             if (checkout / 'requirements.txt').read_bytes() != (APP / 'requirements.txt').read_bytes():
                 raise ValueError('requirements_changed')
@@ -69,7 +71,7 @@ def main():
             db_size = regular_size(db)
             wal = regular_size(Path(str(db) + '-wal'), optional=True)
             journal = regular_size(Path(str(db) + '-journal'), optional=True)
-            installed_size = sum(regular_size(APP / name, optional=True) for name in names)
+            installed_size = sum(regular_size(APP / name, optional=name in new_assets) for name in names)
             base = 2 * (db_size + wal + journal) + 2 * source + installed_size
             required = base + max(256 * 1024 * 1024, (base + 9) // 10)
             fs = os.statvfs(APP)
