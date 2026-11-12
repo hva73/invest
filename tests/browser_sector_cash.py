@@ -33,13 +33,14 @@ payload = {
   'snapshot_at':stamp,'warnings':[], 'portfolio_value_history':{}},
  'markets':[],'history':[],'regions':['USA','Europa','Asien','Globalt'],
  'benchmark_holdings':[],'holding_prices':[],'fx_quotes':[],'fx':None}
+payload['dashboard']['positions'][0].update(key='holding-one',portfolio_name='Hoved',quantity='2',verification='broker_snapshot',conflicts=[],missing={},raw={},unrealized=cash(-60),unrealized_percent='-4.76',price=cash(600),price_freshness={'state':'fresh'},daily={'amount':'-6','percent':'-1','currency':'DKK','to':stamp})
 screens = Path(os.environ.get('ESCAPE_SCREENSHOTS','/tmp/escape-sector-cash'))
 screens.mkdir(parents=True,exist_ok=True)
 try:
  with patch('mcp_client.MCP.request',side_effect=AssertionError('No broker calls')), sync_playwright() as p:
   browser = p.chromium.launch(headless=True)
-  for width in (320,390,1440):
-   page=browser.new_page(viewport={'width':width,'height':900})
+  for width in (320,390,667,1440):
+   page=browser.new_page(viewport={'width':width,'height':375 if width==667 else 900})
    errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
    page.route('**/api/sector-intelligence',lambda route:route.fulfill(json=payload))
    page.goto(f'http://127.0.0.1:{server.server_port}')
@@ -50,6 +51,22 @@ try:
    expect(page.locator('.si-donut')).to_contain_text('2 positioner')
    expect(page.locator('.si-allocation')).to_contain_text('Fordelingens datagrundlag: ældste')
    expect(page.locator('.sector-row').filter(has_text='Kontantbeholdning')).to_contain_text('600,00')
+   # Open a sector holding using the same mobile row and exact depot identity.
+   if width<700:
+    row=payload['dashboard']['positions'][0]
+    page.evaluate("(r)=>{state.dashboard.positions=[r]}",row)
+    page.locator('.sector-row').filter(has_text='Teknologi').click()
+    mobile=page.locator('.sector-mobile-holdings [data-dashboard-member="holding-one"]')
+    expect(mobile).to_be_visible()
+    expect(page.locator('.si-detail-metrics .signed-negative')).to_contain_text('↓')
+    expect(mobile.locator('.mobile-holding-daily .signed-negative')).to_have_count(2)
+    expect(mobile.locator('.dash-change.negative')).to_contain_text('↓')
+
+    page.screenshot(path=str(screens / f'sector-position-{width}.png'),full_page=True)
+    page.locator('.si-detail').screenshot(path=str(screens / f'sector-detail-{width}.png'))
+    mobile.click()
+    expect(page.locator('#dashboard-detail h2')).to_contain_text('TESTA · Hoved')
+    page.locator('#dashboard-detail [data-dashboard-close]').click()
    page.screenshot(path=str(screens / f'sector-cash-{width}.png'),full_page=True)
    page.locator('[data-sector-scope="2"]').click()
    expect(page.locator('.si-donut strong')).to_contain_text('900,00')

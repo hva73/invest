@@ -593,3 +593,113 @@ body > aside nav .nav-sector-mobile{display:none}
 
 /* Annotations are tied to the observed points and verified entry on signal charts. */
 .market-plot-canvas{position:relative;overflow:hidden}.market-peak-label,.market-entry-label{position:absolute;z-index:1;pointer-events:none;white-space:nowrap;font-size:10px;line-height:1.25;padding:1px 3px;border-radius:3px;background:#102632dd}.market-peak-label{color:#d8e9ed;transform:translate(-50%,-110%)}.market-peak-label.market-label-below{transform:translate(-50%,20%)}.market-entry-label{right:2%;color:#a8e5d5;transform:translateY(-110%)}
+
+/* Compact signal decision view; applies only inside the notification dialog. */
+@media (max-width:700px){
+ .signal-overview-dialog{padding:14px 15px;max-height:96dvh;border-color:#385964;border-radius:20px}
+ .signal-overview-dialog .overview-detail-header{align-items:center;margin-bottom:3px}
+ .signal-overview-dialog .overview-detail-header h2{font-size:21px;letter-spacing:-.3px}
+ .signal-overview-dialog .overview-detail-header>button{border-radius:14px}
+ .signal-overview{gap:8px}
+ .signal-overview .market-quote{display:grid;grid-template-columns:1fr auto;align-items:end;column-gap:10px}
+ .signal-overview .market-price{font-size:25px!important;line-height:1.2}
+ .signal-overview .market-change{grid-column:2;grid-row:1;text-align:right;margin:0}
+ .signal-overview .market-origin,.signal-overview .market-fetch{grid-column:1/-1;line-height:1.35}
+ .signal-overview .market-chart{margin-top:5px}
+ .signal-overview .market-plot svg{height:clamp(100px,30vw,145px)}
+ .signal-overview .signal-chart-peak{display:flex;align-items:baseline;gap:7px;margin:5px 0 2px;padding:0;background:transparent;border:0}
+ .signal-overview .signal-chart-peak strong{font-size:12px;white-space:nowrap}
+ .signal-overview .signal-chart-peak small{font-size:9px;letter-spacing:0}
+ .signal-overview .signal-chart-peak small:last-child{display:none}
+ .signal-overview .market-session{margin-top:2px;letter-spacing:0!important}
+ .signal-overview .market-controls{margin-top:4px;gap:3px}
+ .signal-overview .market-controls button,.signal-overview .market-about>summary{min-height:36px}
+ .signal-overview .signal-kpis{gap:6px}
+ .signal-overview .signal-kpis>div{padding:9px 10px;border-radius:12px;background:#18313c;border-color:#294854}
+ .signal-overview .signal-kpis small{font-size:10px;letter-spacing:0;line-height:1.3}
+ .signal-overview .signal-kpis strong{font-size:16px;line-height:1.25;margin:3px 0}
+ .signal-overview .signal-explanation{padding:3px 1px}
+ .signal-overview .signal-explanation h3{font-size:12px;margin:7px 0 1px}
+ .signal-overview-dialog .signal-explanation p,.signal-overview-dialog .signal-overview>p{font-size:12px;line-height:1.45;margin:2px 0}
+ .signal-overview .signal-action-bar{margin:3px 3px calc(2px + env(safe-area-inset-bottom,0px));padding:6px}
+}
+
+/* Calm, integrated mobile signal presentation. */
+@media(max-width:700px){
+ .signal-overview-dialog{background:#0e202b;border:1px solid #2d4a58;padding:16px 18px}
+ .signal-overview-dialog .overview-detail-header{margin-bottom:6px}
+ .signal-overview-dialog .overview-detail-header h2{font-size:19px;letter-spacing:.02em}
+ .signal-overview-dialog .overview-detail-header>button{border:1px solid #314d5a;background:#152d38;color:#bcd2d8}
+ .signal-overview .market-quote{align-items:center;padding-top:2px}
+ .signal-overview .market-price{font-size:30px!important;font-weight:600;letter-spacing:-.03em}
+ .signal-overview .market-change{font-size:12px}
+ .signal-overview .market-origin,.signal-overview .market-fetch{font-size:9px!important;color:#8da6af}
+ .signal-overview .market-plot svg{height:clamp(112px,32vw,145px)}
+ .signal-overview .market-sample-change,.signal-overview .market-scale{font-size:9px}
+ .signal-overview .market-period-buttons{gap:2px}
+ .signal-overview .market-period-buttons button{background:transparent;border:0;border-radius:8px;color:#99b0ba;flex:1;min-width:0}
+ .signal-overview .market-period-buttons button[aria-pressed=true]{background:#24443f;color:#b9e9d8}
+ .signal-overview .market-controls{margin:5px 0 2px}
+ .signal-overview .signal-chart-peak{border-top:1px solid #29414a;padding-top:7px;margin-top:7px}
+ .signal-overview .signal-kpis{gap:0;border-top:1px solid #29414a;border-bottom:1px solid #29414a}
+ .signal-overview .signal-kpis>div{border:0;border-radius:0;background:transparent;padding:10px 8px 10px 2px}
+ .signal-overview .signal-kpis>div:nth-child(even){border-left:1px solid #29414a;padding-left:14px}
+ .signal-overview .signal-kpis>div:nth-child(n+3){border-top:1px solid #29414a}
+ .signal-overview .signal-kpis strong{font-size:17px;color:#e4f1f1;font-weight:600}
+ .signal-overview .signal-kpis small{color:#9bb1b9}
+ .signal-overview .signal-explanation{padding:3px 0}
+ .signal-overview .signal-explanation h3{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#8faab1}
+ .signal-overview .signal-action-bar{background:#142d36;border-color:#34545a;border-radius:18px;box-shadow:0 8px 22px #0008}
+}
+
+/* Keep signal-chart controls focused on the period and refresh action. */
+.signal-overview .market-about{display:none}
+@media(max-width:700px){
+ .signal-overview .market-controls{display:flex;align-items:center;gap:4px}
+ .signal-overview .market-period-buttons{min-width:0;flex:1 1 auto}
+ .signal-overview .market-period-buttons button,
+ .signal-overview .market-controls [data-market-refresh]{height:40px;min-height:40px}
+ .signal-overview .market-controls [data-market-refresh]{flex:0 0 44px;min-width:44px;padding:0;border:0;border-radius:8px;background:transparent;color:#a7c1c5;font-size:16px}
+ .signal-overview .market-controls [data-market-refresh]:hover,
+ .signal-overview .market-controls [data-market-refresh]:focus-visible{background:#24443f;color:#d6f3e8}
+}
+
+/* Observed point tooltip for all shared market charts. */
+.market-plot .market-hover{z-index:4;top:38px;transform:translateX(-50%);display:grid;gap:3px;min-width:102px;padding:8px 10px;border:1px solid #41636a;border-radius:10px;background:#102a34f5;box-shadow:0 8px 22px #0007;color:#e2f1ef;font-size:11px;line-height:1.3;white-space:nowrap;pointer-events:none}
+.market-plot .market-hover[hidden]{display:none}
+.market-plot .market-hover small{font-size:10px;letter-spacing:0;color:#a9c2c6}
+.market-plot .market-hover strong{font-size:12px;font-variant-numeric:tabular-nums}
+
+@media(max-width:700px){
+ .si-detail .sector-position-desktop{display:none}
+ .si-detail .sector-mobile-holdings{margin-top:8px}
+ .si-detail .sector-mobile-holdings .mobile-holding:disabled{opacity:.65}
+}
+
+@media(max-width:700px){
+ .si-allocation .sector-list .sector-row{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%;width:100%;box-sizing:border-box;text-align:left}
+ .si-allocation .sector-list .sector-row>div{min-width:0;overflow-wrap:anywhere}
+ .si-allocation .sector-list .sector-row>div:first-of-type{flex:1 1 auto}
+ .si-allocation .sector-list .sector-row .si-row-value{flex:0 1 auto;text-align:right}
+}
+
+@media(max-width:700px){
+ .sector-mobile-holdings .mobile-holding-name small,
+ .sector-mobile-holdings .mobile-holding-value small{font-size:11px;letter-spacing:0;line-height:1.4}
+}
+
+@media(max-width:700px){
+ .si-detail .si-detail-metrics{display:flex;gap:24px;flex-wrap:wrap;margin:12px 0}
+ .si-detail .si-detail-metrics>div{min-width:0}
+ .si-detail .si-detail-metrics small,.si-detail .si-detail-metrics strong{display:block}
+ .si-detail .si-detail-metrics small{font-size:10px;letter-spacing:.08em;margin-bottom:3px}
+}
+
+/* Direction is conveyed by both colour and an arrow; neutral values stay neutral. */
+.signed-positive,.dash-change.positive,.dash-profit-percent.positive{color:var(--dash-positive,var(--positive))}
+.signed-negative,.dash-change.negative,.dash-profit-percent.negative{color:var(--dash-negative,var(--negative))}
+.signed-neutral,.dash-change.neutral,.dash-profit-percent.neutral{color:#a8bdc5}
+@media(max-width:700px){
+ .mobile-holding-daily.positive,.position-daily-value.positive,.position-daily-percent.positive{color:var(--dash-positive,var(--positive))}
+ .mobile-holding-daily.negative,.position-daily-value.negative,.position-daily-percent.negative{color:var(--dash-negative,var(--negative))}
+}
