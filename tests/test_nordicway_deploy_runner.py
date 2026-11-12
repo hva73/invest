@@ -1,4 +1,6 @@
 import io
+import hashlib
+import hmac
 import json
 import time
 import multiprocessing
@@ -168,6 +170,24 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue((self.bridge/'deployment-incomplete.json').exists())
         self.assertTrue((self.bridge/'approval-ticket.json').exists())
         with self.assertRaises(FileExistsError):
+            runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=Mock())
+
+    def test_signed_approval_to_claim_to_complete(self):
+        key = b'k'*32
+        keyfile = self.bridge/'owner-approval-key'
+        keyfile.write_bytes(key); keyfile.chmod(0o600)
+        nonce, expires = '2'*32, int(time.time())+60
+        request = {'nonce':nonce, 'expires':expires,
+                   'mac':hmac.new(key, owner.message(SHA,nonce,expires), hashlib.sha256).hexdigest()}
+        owner.approve(self.bridge, self.bridge/'test-lock', SHA, request)
+        result = runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock',
+                            adapter_factory=Mock(), deploy=lambda *_: Outcome('ok','complete',True),
+                            prepare=lambda *_: None)
+        self.assertEqual(result['status'], 'ok')
+        self.assertFalse((self.bridge/'approval-ticket.json').exists())
+        with self.assertRaises(FileExistsError):
+            owner.approve(self.bridge, self.bridge/'test-lock', SHA, request)
+        with self.assertRaises(FileNotFoundError):
             runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=Mock())
 
     def test_ticket_consumed_and_cannot_replay(self):
