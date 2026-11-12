@@ -21,6 +21,7 @@
   .dashboard-v1 > .dash-holdings { grid-column: 1 / -1; }
   .dashboard-v1 > .dash-signals,
   .dashboard-v1 > .dash-quality { min-width: 0; }
+  .dashboard-v1 .dash-table-wrap { min-width: 0; max-width: 100%; overflow-x: auto; }
   .dash-hero { padding: 20px 24px 0; }
   .dash-hero-intro h2 { font-size: clamp(26px, 2.2vw, 34px); margin: 8px 0 6px; }
   .dash-hero-intro p { margin-bottom: 12px; }
