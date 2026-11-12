@@ -37,6 +37,7 @@ def normalized(raw,asset_id,now=None,expected_period='ONE_WEEK'):
     asset=raw['asset']
     if asset.get('id')!=asset_id:raise MarketError('Kursopslaget returnerede et andet aktiv.')
     quote=parse_quote(raw,asset_id)
+    if quote['price_time'] and stamp(quote['price_time'])>now:raise MarketError('Plutos kurstid ligger i fremtiden.')
     price=raw.get('price',{})
     if not isinstance(price,dict):raise MarketError('Ukendt Pluto-kursformat.')
     change=decimal(price.get('dailyChange'));pct=decimal(price.get('dailyChangePercent'));change_note=None
