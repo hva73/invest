@@ -10,4 +10,10 @@ payload.dashboard.accounts[0].value={amount:'2700',currency:'DKK'};html=ui.rende
 click({sectorScope:'2'});html=ui.render(state);assert.match(html,/Fordelingens datagrundlag: opdateret 10\.11\.2026, 11\.00\.00/);assert.doesNotMatch(html,/seneste 12\.11\.2026/);
 click({sectorScope:'all'});delete payload.dashboard.positions[1].snapshot_at;html=ui.render(state);assert.match(html,/tidspunkt mangler for dele af fordelingen/);
 delete payload.dashboard.accounts[0].snapshot_at;delete payload.dashboard.accounts[1].snapshot_at;delete payload.dashboard.positions[0].snapshot_at;html=ui.render(state);assert.match(html,/Tidspunktet for fordelingen er ukendt/);
+payload.dashboard.accounts.push({id:3,name:'Mangler',kind:'portfolio',external_id:'portfolios:missing',value:null,cash_status:'unavailable',cash_accounts:[],snapshot_missing:true});
+click({sectorScope:'all'});html=ui.render(state);assert.match(html,/DELVIS FORDELING/);assert.match(html,/Et eller flere valgte depoter mangler data om positioner og kontanter/);
+click({sectorScope:'1'});html=ui.render(state);assert.doesNotMatch(html,/Et eller flere valgte depoter mangler data om positioner og kontanter/);
+payload.dashboard.accounts[2].kind='collection';payload.dashboard.accounts[2].parent_external_id='portfolios:main';
+html=ui.render(state);assert.match(html,/Et eller flere valgte depoter mangler data om positioner og kontanter/);
+click({sectorScope:'2'});html=ui.render(state);assert.doesNotMatch(html,/Et eller flere valgte depoter mangler data om positioner og kontanter/);
 console.log('PASS: collection holdings included in total and parent scope; chart, drilldown and percentages work')})().catch(e=>{console.error(e);process.exit(1)});

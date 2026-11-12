@@ -595,6 +595,13 @@ def read(connect,uid):
    if symbol not in known:
     markets.append({'symbol':symbol,'region':region,'sector':sector,'payload':None,'status':'PENDING','benchmark_status':None,'benchmark_updated':None,'benchmark_source':None,'benchmark_name':None,'benchmark_currency':None,'benchmark_exchange':None})
  dashboard=dashboard_projection.build(connect,uid,owned,snapshots)
+ # Preserve active Pluto scopes without a snapshot so allocation cannot appear complete.
+ present={a['id'] for a in dashboard['accounts']}
+ for p in owned:
+  if p.get('source')=='pluto' and p.get('active') and p['id'] not in present:
+   dashboard['accounts'].append({'id':p['id'],'name':p.get('name') or 'Depot','kind':p.get('kind'),
+    'parent_external_id':p.get('parent_external_id'),'value':None,'as_of':None,'snapshot_at':None,
+    'failed':True,'snapshot_missing':True})
  for account in dashboard['accounts']:
   portfolio=next((p for p in owned if p['id']==account['id']),{})
   account['external_id']=portfolio.get('external_id')

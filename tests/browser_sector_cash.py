@@ -57,6 +57,15 @@ try:
    expect(page.locator('.sector-row').filter(has_text='Kontantbeholdning')).to_contain_text('100,00')
    page.locator('[data-sector-scope="1"]').click()
    expect(page.locator('.si-donut strong')).to_contain_text('2.600,00')
+   payload['dashboard']['accounts'].append({'id':3,'name':'Mangler','kind':'collection','parent_external_id':'portfolios:main',
+    'external_id':'collections:missing','value':None,'cash_status':'unavailable','cash_accounts':[],'snapshot_missing':True})
+   page.reload()
+   page.locator('nav [data-view=sectors]').click()
+   expect(page.locator('.si-donut')).to_contain_text('DELVIS FORDELING')
+   expect(page.locator('.si-allocation')).to_contain_text('mangler data om positioner og kontanter')
+   page.locator('[data-sector-scope="2"]').click()
+   expect(page.locator('.si-allocation')).not_to_contain_text('mangler data om positioner og kontanter')
+   payload['dashboard']['accounts'].pop()
    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),width
    assert not errors,(width,errors)
    page.close()
