@@ -12,6 +12,8 @@ from unittest.mock import Mock, patch
 
 import nordicway_deploy_runner as runner
 import nordicway_owner_approval as owner
+import nordicway_deploy_client as client
+from types import SimpleNamespace
 from nordicway_deploy_sequence import Outcome
 
 SHA = 'a' * 40
@@ -190,6 +192,28 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=Mock())
 
+    def test_client_payload_to_runner_is_sha_bound_end_to_end(self):
+        key = bytes.fromhex('ab'*32)
+        keyfile = self.bridge/'owner-approval-key'
+        keyfile.write_bytes(key); keyfile.chmod(0o600)
+        env = {'ESCAPE_RELEASE_SHA': SHA, 'ESCAPE_CPANEL_API_TOKEN': TOKEN,
+               'ESCAPE_DEPLOY_AUTHORIZED':'1', 'ESCAPE_OWNER_APPROVAL_KEY':'ab'*32,
+               'SSH_AUTH_SOCK':'/tmp/agent', 'NORDICWAY_KNOWN_HOST':'hostkey',
+               'NORDICWAY_VERIFIED_FINGERPRINT':'fingerprint'}
+        real_run = runner.run
+        def run_in_test(sha, token, owner_request):
+            return real_run(sha, token, bridge=self.bridge, authorization_lock=self.bridge/'test-lock',
+                            owner_request=owner_request, adapter_factory=Mock(),
+                            deploy=lambda *_: Outcome('ok','complete',True), prepare=lambda *_: None)
+        def transport(command, **kwargs):
+            self.assertEqual(command[-1], 'escape-deploy-v1 deploy '+SHA)
+            with patch.object(runner, 'run', side_effect=run_in_test):
+                result = runner.run_request(SHA, io.BytesIO(kwargs['input']))
+            return SimpleNamespace(returncode=0, stdout=json.dumps(result).encode())
+        with patch.object(client, 'verify', return_value='host key\n'):
+            self.assertEqual(client.run(env, transport)['status'], 'ok')
+        self.assertFalse((self.bridge/'approval-ticket.json').exists())
+
     def test_ticket_consumed_and_cannot_replay(self):
         result = runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock',
                             adapter_factory=Mock(), deploy=lambda *_: Outcome('ok', 'complete', True),
@@ -207,8 +231,8 @@ class RunnerTests(unittest.TestCase):
 
     def test_request_is_bounded_and_has_only_token(self):
         with patch.object(runner, 'run', return_value={'status': 'ok'}) as call:
-            self.assertEqual(runner.run_request(SHA, io.BytesIO(b'{"cpanel_token":"test_token_12345"}'))['status'], 'ok')
-            call.assert_called_once_with(SHA, TOKEN)
+            self.assertEqual(runner.run_request(SHA, io.BytesIO(b'{"cpanel_token":"test_token_12345","approval":{}}'))['status'], 'ok')
+            call.assert_called_once_with(SHA, TOKEN, owner_request={})
         for data in (b'{}', b'{"cpanel_token":"x", "cmd":"id"}', b'x' * 4097):
             with self.assertRaises(ValueError):
                 runner.run_request(SHA, io.BytesIO(data))
