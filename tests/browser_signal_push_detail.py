@@ -23,6 +23,19 @@ def main():
    page.route('**/api/v1/hotwatch/sessions/synthetic-push?is_test=false',lambda route:route.fulfill(json={'session':session}))
    account=page.evaluate('structuredClone(state)');account['dashboard']['positions']=[holding];account['portfolios']=[{'id':case.root,'name':'Test depot','source':'pluto','active':True,'kind':'portfolio','can_trade':True}]
    page.route('**/api/state',lambda route:route.fulfill(json=account))
+   # Same mobile row is reused for sector holdings, with exact depot identity.
+   rows=page.evaluate("""(h) => {const old=state.dashboard.positions;
+    const first={...h,key:'one',portfolio_id:1},second={...h,key:'two',portfolio_id:2};
+    state.dashboard.positions=[first,second];
+    const ok=window.DashboardUI.mobilePositionRow(second,true);
+    const mismatch=window.DashboardUI.mobilePositionRow({...second,portfolio_id:1},true);
+    state.dashboard.positions=[first,{...second},second];
+    const duplicate=window.DashboardUI.mobilePositionRow(second,true);
+    state.dashboard.positions=old;return {ok,mismatch,duplicate};}""",holding)
+   assert 'data-dashboard-member="two"' in rows['ok']
+   assert 'disabled' in rows['mismatch'] and 'data-dashboard-member' not in rows['mismatch']
+   assert 'disabled' in rows['duplicate'] and 'data-dashboard-member' not in rows['duplicate']
+
    def market(route):
     periods.append(route.request.post_data_json.get('period'));route.fulfill(json=quote)
    page.route('**/api/market/quote',market)
