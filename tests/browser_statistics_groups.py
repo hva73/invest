@@ -16,8 +16,15 @@ with sync_playwright() as p:
   assert page.locator('.statistics-trade').count()==0
   page.locator('[data-statistics-group=wins]').click()
   assert page.locator('.statistics-trade').count()==1 and 'WIN' in page.locator('.statistics-list').inner_text()
-  page.locator('.statistics-trade summary').click()
-  assert '15000' in page.locator('.statistics-detail').inner_text()
+  page.locator('.statistics-trade-button').click()
+  assert page.locator('dialog:modal').count()==1
+  assert '15000' in page.locator('dialog:modal .statistics-detail').inner_text()
+  page.keyboard.press('Escape')
+  assert page.locator('dialog:modal').count()==0
+  assert page.locator('.statistics-trade-button').evaluate('(el) => document.activeElement === el')
+  page.locator('.statistics-trade-button').click()
+  page.locator('dialog button[aria-label="Luk"]').click()
+  assert page.locator('dialog:modal').count()==0
   page.locator('[data-statistics-group=losses]').click()
   assert page.locator('.statistics-trade').count()==1 and 'LOSS' in page.locator('.statistics-list').inner_text()
   page.locator('[data-statistics-group=losses]').click()
