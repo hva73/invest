@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import os
+import multiprocessing
 import sys
 import tempfile
 import unittest
@@ -9,6 +10,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import nordicway_owner_approval as a
 
 SHA='a'*40
+
+def concurrent_approve(bridge, lock, request, start, queue):
+ start.wait(5)
+ try:
+  a.approve(bridge,lock,SHA,request,now=1000)
+  queue.put('ok')
+ except (FileExistsError,BlockingIOError): queue.put('blocked')
+
 class OwnerApprovalTests(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
@@ -22,6 +31,16 @@ class OwnerApprovalTests(unittest.TestCase):
   req=self.req(); self.assertEqual(a.approve(self.bridge,self.lock,SHA,req,now=1000)['sha'],SHA)
   self.assertEqual((self.bridge/'approved-sha').read_text(),SHA+'\n')
   with self.assertRaises(FileExistsError): a.approve(self.bridge,self.lock,SHA,req,now=1000)
+ def test_concurrent_requests_only_one_can_succeed(self):
+  ctx=multiprocessing.get_context('fork'); start=ctx.Event(); q=ctx.Queue(); req=self.req()
+  children=[ctx.Process(target=concurrent_approve,args=(self.bridge,self.lock,req,start,q)) for _ in range(2)]
+  for child in children: child.start()
+  start.set()
+  for child in children:
+   child.join(5)
+   self.assertEqual(child.exitcode,0)
+  self.assertEqual(sorted([q.get(timeout=1),q.get(timeout=1)]),['blocked','ok'])
+
  def test_sha_tamper_and_expired_rejected(self):
   for sha,req in [('b'*40,self.req()),(SHA,self.req(expiry=999)),(SHA,self.req(expiry=1301))]:
    with self.assertRaises(ValueError):a.approve(self.bridge,self.lock,sha,req,now=1000)
