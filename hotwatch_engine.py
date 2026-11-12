@@ -749,8 +749,11 @@ def view(c,row,now=None):
  action=None
  if last_action:
   event_data=json.loads(last_action['payload']);side=last_action['event_type'].removesuffix('_SIGNAL')
-  active=row['status']=='ACTIVE' and effective==side
-  missing=row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED') and effective=='NO_DATA'
+  # Match the actionable display gate used by push and trading. A calculated
+  # BUY/SELL can remain in history while its data or assessment is blocked.
+  action_label={'BUY':'KØBSSIGNAL','SELL':'SÆLGSSIGNAL','REDUCE':'EXIT WATCH'}.get(side)
+  active=row['status']=='ACTIVE' and effective==side and display_status==action_label
+  missing=row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED') and (effective=='NO_DATA' or effective==side and display_status!=action_label)
   acknowledged=c.execute("SELECT created FROM hw_events WHERE watch_row_id=? AND event_type='SIGNAL_ACKNOWLEDGED' AND json_extract(payload,'$.supporting_metrics.action_event_id')=? ORDER BY id DESC LIMIT 1",(row['id'],last_action['event_id'])).fetchone()
   action={k:last_action[k] for k in ('event_id','event_type','created','data_timestamp')}
   action.update(signal=side,reason=event_data.get('reason'),state='ACTIVE' if active else 'DATA_MISSING' if missing else 'WITHDRAWN',acknowledged_at=acknowledged['created'] if acknowledged else None,current_reason_codes=list(dict.fromkeys(display_reasons or calculation.get('reason_codes',[]))))
