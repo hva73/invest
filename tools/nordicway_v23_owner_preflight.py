@@ -5,7 +5,7 @@ HOME = Path('/home/nordicr4')
 APP = HOME / 'escape_app'
 BRIDGE = HOME / '.escape_deploy_bridge'
 REPO = HOME / 'escape_deploy/invest'
-SHA = '8b66d8db9decf1cd87b05484587f5fa3fd783419'
+SHA = '483a4b55ce4381e42ffb828125c9bcc0807cc8ba'
 sys.path.insert(0, str(BRIDGE))
 
 import apply_update
