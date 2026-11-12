@@ -158,7 +158,9 @@ class HotWatch(unittest.TestCase):
     c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps(request),row['id']))
     c.execute('INSERT INTO hw_provisional_feed_links VALUES(?,?,?,?)',(row['id'],'MERC.US',json.dumps({'basis':'unverified'}),at.isoformat()))
     row=engine.row_for(c,1,self.req['watch_id'],True)
-    self.assertEqual(engine.view(c,row,at)['display_status'],'KURSKILDE IKKE BEKRÆFTET')
+    unverified=engine.view(c,row,at)
+    self.assertEqual(unverified['display_status'],'KURSKILDE IKKE BEKRÆFTET')
+    self.assertEqual(unverified['last_action_signal']['state'],'DATA_MISSING')
     self.assertIsNone(web_push._actionable(c,row,at))
     c.execute('DELETE FROM hw_provisional_feed_links WHERE watch_row_id=?',(row['id'],))
     request['provider']='synthetic';request['provider_symbol']=None
