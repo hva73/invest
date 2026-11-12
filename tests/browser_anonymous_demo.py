@@ -35,7 +35,7 @@ try:
     for b in boxes[i+1:]:assert a['right']<=b['left']+1 or b['right']<=a['left']+1 or a['bottom']<=b['top']+1 or b['bottom']<=a['top']+1,(width,boxes)
    if shot:page.screenshot(path=f'{shot}/demo-overview-{width}.png')
    if shot and width==390:
-    page.evaluate("""() => {window.savedDashboard=structuredClone(state.dashboard);state.dashboard.orders=[];state.dashboard.warnings=[];for (const account of state.dashboard.accounts||[]) account.failed=false;for (const [i,row] of [...state.dashboard.positions,...(state.dashboard.overview_positions||[])].entries()) {if(row.hot_watch?.session){row.hot_watch.session.signal='WAIT';row.hot_watch.session.display_status='AFVENT'};row.price_freshness={state:'fresh'};row.verification='broker_snapshot';row.daily=i%4===3?null:{percent:['1.23','-0.68','0.42'][i%3],amount:String(Number(row.price?.amount||0)*Number(['1.23','-0.68','0.42'][i%3])/100),currency:row.price?.currency,to:new Date().toISOString(),basis:'pluto_reported_daily_change'}};render()}""")
+    page.evaluate("""() => {window.savedDashboard=structuredClone(state.dashboard);state.dashboard.orders=[];state.dashboard.warnings=[];for (const account of state.dashboard.accounts||[]) {account.failed=false;account.snapshot_at=new Date().toISOString()}for (const [i,row] of [...state.dashboard.positions,...(state.dashboard.overview_positions||[])].entries()) {if(row.hot_watch?.session){row.hot_watch.session.signal='WAIT';row.hot_watch.session.display_status='AFVENT'};row.price_freshness={state:'fresh'};row.verification='broker_snapshot';row.daily=i%4===3?null:{percent:['1.23','-0.68','0.42'][i%3],amount:String(Number(row.price?.amount||0)*Number(['1.23','-0.68','0.42'][i%3])/100),currency:row.price?.currency,to:new Date().toISOString(),basis:'pluto_reported_daily_change'}};render()}""")
     expect(page.locator('.dash-attention')).to_have_count(0)
     assert page.locator('.mobile-holding-daily.negative').count()>0
     assert page.locator('.mobile-holding-daily.positive').count()>0
@@ -60,7 +60,7 @@ try:
    if shot and width==390:page.screenshot(path=f'{shot}/demo-position-390.png')
    trade_ticker='TSLA'
    if dialog.locator('[data-dashboard-decision=demo-TSLA]:visible').count():
-    if compact:expect(dialog.locator('.position-actions-mobile [data-asset-trade=BUY]')).to_be_visible()
+    if compact:expect(dialog.locator('.position-actions-mobile [data-asset-trade=BUY]')).to_be_hidden();expect(dialog.locator('.position-actions-mobile [data-asset-trade=SELL]')).to_be_visible()
     else:expect(dialog.locator('[data-asset-trade=BUY]:visible')).to_have_count(0)
     dialog.locator('[data-dashboard-decision=demo-TSLA]:visible').click();decision=page.locator('#engine-dialog');expect(decision).to_be_visible();expect(decision).to_contain_text('Behold foreløbig')
     if shot and width==390:page.screenshot(path=f'{shot}/demo-sell-decision-390.png')
@@ -70,7 +70,8 @@ try:
     if not buy.is_visible():page.locator('[data-mobile-more]').click()
     buy.click();expect(dialog).to_be_visible()
     if compact:
-     expect(dialog.locator('.position-actions-mobile .asset-sell')).to_be_visible();expect(dialog.locator('.position-actions-mobile .asset-sell')).to_be_disabled()
+     expect(dialog.locator('.position-actions-mobile .asset-sell')).to_be_hidden();expect(dialog.locator('.position-actions-mobile .asset-sell')).to_be_disabled();expect(dialog.locator('.position-actions-mobile [data-asset-trade=BUY]')).to_be_visible()
+     if shot and width==390:page.screenshot(path=f'{shot}/owner-buy-position-390.png')
     else:expect(dialog.locator('[data-asset-trade=SELL]:visible')).to_have_count(0)
     dialog.locator('[data-dashboard-decision=demo-NOVOB]:visible').click();expect(decision).to_be_visible();expect(decision).to_contain_text('Afvent')
     if shot and width==390:page.screenshot(path=f'{shot}/demo-buy-decision-390.png')
