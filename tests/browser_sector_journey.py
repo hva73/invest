@@ -52,8 +52,9 @@ try:
    expect(page.locator('.sector-row').filter(has_text='Sundhed')).to_be_visible()
    if width >= 901:
     bar=page.locator('.si-bar-column[data-sector-select]').first;bar.hover();tip=bar.locator('.dash-chart-tooltip');expect(tip).to_be_visible();expect(tip).to_contain_text('Resultat');expect(tip.locator('[data-chart-value]')).not_to_have_text('—')
+    page.locator('.si-results').screenshot(path=str(screens/'sektor-resultat-mouseover.png'))
     bar.focus();expect(tip).to_be_visible();page.locator('.sector-heading h2').first.hover();expect(tip).to_be_hidden()
-    arc=page.locator('[data-sector-donut="Sundhed"]');arc.focus();donut=page.locator('.si-donut-wrap .dash-chart-tooltip');expect(donut).to_be_visible();expect(donut).to_contain_text('Andel');page.locator('.sector-heading h2').first.click();expect(donut).to_be_hidden()
+    arc=page.locator('[data-sector-donut="Sundhed"]');arc.focus();donut=page.locator('.si-donut-wrap .dash-chart-tooltip');expect(donut).to_be_visible();expect(donut).to_contain_text('Andel');page.locator('.si-donut-wrap').screenshot(path=str(screens/'sektor-fordeling-mouseover.png'));page.locator('.sector-heading h2').first.click();expect(donut).to_be_hidden()
     rotation=page.locator('.si-rotation-chart.inspect-chart-svg');rotation.scroll_into_view_if_needed();box=rotation.bounding_box();page.mouse.move(box['x']+box['width']*.5,box['y']+box['height']*.5);rtip=page.locator('.si-rotation .dash-chart-tooltip');expect(rtip).to_be_visible();expect(rtip).to_contain_text('Kurs');expect(rtip.locator('[data-chart-share]')).to_contain_text('%')
     page.locator('.si-rotation').screenshot(path=str(screens/'sektor-sammenligning-mouseover.png'))
     page.locator('.sector-heading h2').first.hover();expect(rtip).to_be_hidden()
@@ -102,7 +103,11 @@ try:
    expect(stale).to_contain_text('+45,00')
    child_row['price_freshness']=original_freshness
    if width >= 901:
-    page.locator('[data-sector-journey-close]').first.click();page.locator('[data-sector-market="SYNTH-TECH.US"]').first.click()
+    page.locator('[data-sector-journey-close]').first.click()
+    heat=page.locator('[data-sector-market="SYNTH-TECH.US"]').first;heat.hover();expect(heat.locator('.dash-chart-tooltip')).to_be_visible()
+    with page.expect_response('**/api/sector-intelligence/holdings'):
+     page.locator('[data-sector-market="SYNTH-TECH.US"]').first.click()
+    overlay=page.locator('[data-sector-holdings-close]');expect(overlay).to_be_visible();overlay.click()
     curve=page.locator('.sector-chart.inspect-chart-svg');expect(curve).to_be_visible();curve.scroll_into_view_if_needed();box=curve.bounding_box();page.mouse.move(box['x']+box['width']*.55,box['y']+box['height']*.5)
     ctip=page.locator('.si-detail .dash-chart-tooltip');expect(ctip).to_be_visible();expect(ctip).to_contain_text('Kurs');expect(ctip.locator('[data-chart-share]')).to_contain_text('%')
     page.locator('.si-detail').screenshot(path=str(screens/'sektor-kurs-mouseover.png'))
@@ -114,4 +119,3 @@ try:
  print('PASS: sector to exact portfolio position and back on mobile, landscape and desktop')
 finally:
  server.shutdown();server.server_close();case.tearDown()
-
