@@ -8,7 +8,7 @@ const ctx={window:{},document,Intl,Date,Number,String,JSON,Map,Math,Boolean,cons
 vm.runInNewContext(fs.readFileSync('static/market-ui.js','utf8'),ctx);
 ctx.window.MarketUI.setup({owner:()=>1,connected:()=>true,now:()=>now,age:(price,fetched,error)=>({tone:error||mode==='stale'?'stale':'fresh',minutes:0}),escape:String,formatAmount:x=>`${x.amount} ${x.currency}`,formatTime:String,api:async(path,params)=>{requests.push(params);if(mode==='error')throw Error('offline');return {price:'100',currency:'EUR',ticker:'TEST',name:'Test',daily_change_percent:mode==='invalid'?'NaN':'2',daily_change:'1.5',daily_note:null,fetched_at:new Date(now+(mode==='future'?10000:mode==='old'?-301000:0)).toISOString(),series:[]}}});
 (async()=>{
- await ctx.window.MarketUI.refreshVisible();assert.match(daily.innerHTML,/\+3 EUR · \+2 %/);assert.equal(requests[0].holding_portfolio_id,7);assert.equal(requests[0].holding_asset_id,'held-asset');
+ await ctx.window.MarketUI.refreshVisible();assert.match(daily.innerHTML,/\+3 EUR<\/span>.*\+2 %<\/span>/);assert.equal(requests[0].holding_portfolio_id,7);assert.equal(requests[0].holding_asset_id,'held-asset');
  mode='error';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.textContent,'— · — %');assert.equal(daily.dataset.marketOverride,undefined);
  mode='good';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.dataset.marketOverride,'true');
  mode='invalid';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.dataset.marketOverride,undefined);assert.equal(daily.textContent,'— · — %');
