@@ -59,6 +59,7 @@ try:
     mobile=page.locator('.sector-mobile-holdings [data-dashboard-member="holding-one"]')
     expect(mobile).to_be_visible()
     page.screenshot(path=str(screens / f'sector-position-{width}.png'),full_page=True)
+    page.locator('.si-detail').screenshot(path=str(screens / f'sector-detail-{width}.png'))
     mobile.click()
     expect(page.locator('#dashboard-detail h2')).to_contain_text('TESTA · Hoved')
     page.locator('#dashboard-detail [data-dashboard-close]').click()
