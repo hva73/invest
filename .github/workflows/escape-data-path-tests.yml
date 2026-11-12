@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   data-path:
-    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue-4-quote-time-collision' || github.event.pull_request.head.ref == 'codex/issue14-performance-reliability' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue14-scan-latency' || github.event.pull_request.head.ref == 'codex/issue14-ws-cap-telemetry' || github.event.pull_request.head.ref == 'codex/issue14-discovery-gate' || github.event.pull_request.head.ref == 'codex/issue4-batch-incomplete' || github.event.pull_request.head.ref == 'codex/issue4-trade-ties' || github.event.pull_request.head.ref == 'codex/issue4-us-recovery')
+    if: github.repository == 'hva73/invest' && (github.event.pull_request.head.ref == 'codex/issue-4-quote-time-collision' || github.event.pull_request.head.ref == 'codex/issue14-performance-reliability' || github.event.pull_request.head.ref == 'codex/issue57-release-management' || github.event.pull_request.head.ref == 'codex/issue14-scan-latency' || github.event.pull_request.head.ref == 'codex/issue14-ws-cap-telemetry' || github.event.pull_request.head.ref == 'codex/issue14-discovery-gate' || github.event.pull_request.head.ref == 'codex/issue4-batch-incomplete' || github.event.pull_request.head.ref == 'codex/issue4-trade-ties' || github.event.pull_request.head.ref == 'codex/issue4-us-recovery' || github.event.pull_request.head.ref == 'codex/issue3-position-scope')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -41,6 +41,11 @@ jobs:
         env:
           PYTHONPATH: .:tests
         run: '"$RUNNER_TEMP/escape-data-venv/bin/python" -m unittest tests.test_instrument_resolver tests.test_eodhd_us_reference tests.test_eodhd_symbol_lookup tests.test_hotwatch_holdings_auto'
+      - name: Verify candidate position evidence
+        if: github.event.pull_request.head.ref == 'codex/issue3-position-scope'
+        env:
+          PYTHONPATH: .:tests
+        run: '"$RUNNER_TEMP/escape-data-venv/bin/python" -m unittest tests.test_candidate_lifecycle'
       - name: Verify release baseline and updater
         if: github.event.pull_request.head.ref == 'codex/issue57-release-management'
         env:
