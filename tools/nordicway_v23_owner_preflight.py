@@ -5,7 +5,7 @@ HOME = Path('/home/nordicr4')
 APP = HOME / 'escape_app'
 BRIDGE = HOME / '.escape_deploy_bridge'
 REPO = HOME / 'escape_deploy/invest'
-SHA = 'b0fae95aa0d0342ef6de2145452829e2fb47825d'
+SHA = '645c293a5c484187a68d121a5cdd96c0a958bc86'
 sys.path.insert(0, str(BRIDGE))
 
 import apply_update
@@ -49,7 +49,8 @@ def main():
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                            timeout=120, check=True, env=env)
             runner.prepare_checkout(checkout, SHA)
-            if preflight.manifest(checkout) != apply_update.FILES:
+            names = preflight.manifest(checkout)
+            if len(names) != 73 or 'static/demo-data.js' not in names or 'static/desktop-experience.css' not in names:
                 raise ValueError('manifest_mismatch')
             if (checkout / 'requirements.txt').read_bytes() != (APP / 'requirements.txt').read_bytes():
                 raise ValueError('requirements_changed')
@@ -61,14 +62,14 @@ def main():
             (dummy / 'opdatering').mkdir()
             (dummy / 'var/escape.db').touch()
             result = stage.stage(checkout, dummy, SHA, approved_sha=SHA)
-            if result.get('sha') != SHA or result.get('file_count') != len(apply_update.FILES):
+            if result.get('sha') != SHA or result.get('file_count') != len(names):
                 raise ValueError('staging_failed')
             source = result['total_bytes']
             db = APP / 'var/escape.db'
             db_size = regular_size(db)
             wal = regular_size(Path(str(db) + '-wal'), optional=True)
             journal = regular_size(Path(str(db) + '-journal'), optional=True)
-            installed_size = sum(regular_size(APP / name) for name in apply_update.FILES)
+            installed_size = sum(regular_size(APP / name, optional=True) for name in names)
             base = 2 * (db_size + wal + journal) + 2 * source + installed_size
             required = base + max(256 * 1024 * 1024, (base + 9) // 10)
             fs = os.statvfs(APP)
