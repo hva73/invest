@@ -37,6 +37,7 @@ def main():
    background=page.evaluate('window.scrollY');page.mouse.move(2,2);page.mouse.wheel(0,900);page.wait_for_timeout(150);assert page.evaluate('window.scrollY')==background
    shot=os.environ.get('ESCAPE_SCREENSHOTS');
    expect(d.locator('.market-slot .market-price')).to_be_visible()
+   expect(d.locator('.market-about')).not_to_be_visible();expect(d.locator('[data-market-refresh]')).to_be_visible()
    if shot:
     page.wait_for_timeout(600)
     import json
