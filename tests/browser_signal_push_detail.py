@@ -29,7 +29,7 @@ def main():
     state.dashboard.positions=[first,second];
     const ok=window.DashboardUI.mobilePositionRow(second,true);
     const mismatch=window.DashboardUI.mobilePositionRow({...second,portfolio_id:1},true);
-    state.dashboard.positions=[first,{...second},second];
+    state.dashboard.positions=[first,{...second,portfolio_id:1},second];
     const duplicate=window.DashboardUI.mobilePositionRow(second,true);
     state.dashboard.positions=old;return {ok,mismatch,duplicate};}""",holding)
    assert 'data-dashboard-member="two"' in rows['ok']
