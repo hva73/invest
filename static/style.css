@@ -687,3 +687,10 @@ body > aside nav .nav-sector-mobile{display:none}
  .sector-mobile-holdings .mobile-holding-name small,
  .sector-mobile-holdings .mobile-holding-value small{font-size:11px;letter-spacing:0;line-height:1.4}
 }
+
+@media(max-width:700px){
+ .si-detail .si-detail-metrics{display:flex;gap:24px;flex-wrap:wrap;margin:12px 0}
+ .si-detail .si-detail-metrics>div{min-width:0}
+ .si-detail .si-detail-metrics small,.si-detail .si-detail-metrics strong{display:block}
+ .si-detail .si-detail-metrics small{font-size:10px;letter-spacing:.08em;margin-bottom:3px}
+}
