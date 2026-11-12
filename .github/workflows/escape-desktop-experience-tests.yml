@@ -97,7 +97,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 50685e7efdba65f50ab45f7f412575b2dbc10eaf
+          ref: 08773d0782284493d3ff83e8963d9d64da51335c
           path: demo-source
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
