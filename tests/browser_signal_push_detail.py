@@ -50,6 +50,14 @@ def main():
    quick.locator('[data-quick-close]').click();page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_be_visible()
    slot=d.locator('.market-slot');expect(slot.locator('.market-price')).to_be_visible();expect(slot.locator('[data-market-period=day]')).to_have_attribute('aria-pressed','true')
    expect(slot.locator('.signal-chart-peak')).to_contain_text('højeste viste punkt');expect(slot.locator('.market-marker-entry')).to_have_count(1);expect(slot.locator('.market-marker-signal')).to_have_count(0);assert 5<=float(slot.locator('.market-marker-entry').get_attribute('y1'))<=57;expect(slot.locator('.market-entry-label')).to_have_text('Gns. købskurs 3,55 USD');expect(slot.locator('.market-peak-label')).to_have_text('Top 3,41 USD')
+   canvas=slot.locator('.market-plot-canvas').bounding_box()
+   peak=slot.locator('.market-peak-label').bounding_box()
+   entry=slot.locator('.market-entry-label').bounding_box()
+   line=slot.locator('.market-marker-entry').bounding_box()
+   assert canvas and peak and entry and line
+   assert peak['x']>=canvas['x'] and peak['x']+peak['width']<=canvas['x']+canvas['width'], (peak,canvas)
+   assert peak['y']>canvas['y'] and peak['y']+peak['height']<canvas['y']+canvas['height']-10, (peak,canvas)
+   assert abs(entry['y']+entry['height']-line['y'])<10, (entry,line)
    for name in ['week','month','year','day']:
     slot.locator('[data-market-period='+name+']').click();expect(slot.locator('[data-market-period='+name+']')).to_have_attribute('aria-pressed','true');page.wait_for_timeout(300)
    assert 'ONE_MONTH' in periods and 'ONE_YEAR' in periods,periods
