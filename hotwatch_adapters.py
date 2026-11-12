@@ -182,19 +182,22 @@ class PlutoAdapter:
   self.gateway=ReadOnlyGateway(token);return self.gateway
  def permission_key(self,request,currency,portfolios):
   return (request['asset_id'],request['ticker'].casefold(),str(request.get('exchange') or '').casefold(),currency,tuple(sorted((p['id'],p.get('external_id'),p.get('parent_external_id'),p.get('kind')) for p in portfolios)),request.get('risk',{}).get('proposed_quantity') is not None)
- def tradability(self,request,currency,portfolios):
+ def tradability(self,request,currency,portfolios,diagnostics=None):
   """Only use current read-only Pluto instrument and account evidence."""
   import trade_service
-  if not portfolios:return 'unknown',None
+  def unknown(code):
+   if diagnostics is not None:diagnostics['code']=code
+   return 'unknown',None
+  if not portfolios:return unknown('TRADABILITY_NO_PORTFOLIOS')
   key=self.permission_key(request,currency,portfolios);now=utc().timestamp();cached=self.permission_cache.get(key)
   if cached and 0<=now-cached['at']<300:return cached['status'],cached['at']
   try:
    client,tools=trade_service.client(self.connect,self.uid,self.factory);raw=trade_service.call(client,tools,'get_asset',{'assetId':request['asset_id']})
    asset=raw.get('asset') if isinstance(raw,dict) else None;buy=raw.get('buyBy') if isinstance(raw,dict) else None
-   if not isinstance(asset,dict) or asset.get('id')!=request['asset_id'] or str(asset.get('ticker','')).casefold()!=request['ticker'].casefold() or asset.get('currency')!=currency:return 'unknown',None
-   if request.get('exchange') and str(asset.get('exchange','')).casefold()!=request['exchange'].casefold():return 'unknown',None
-   if not isinstance(buy,dict) or not (buy.get('shares') is True or buy.get('amount') is True):return 'unknown',None
-   if request.get('risk',{}).get('proposed_quantity') is not None and buy.get('shares') is not True:return 'unknown',None
+   if not isinstance(asset,dict) or asset.get('id')!=request['asset_id'] or str(asset.get('ticker','')).casefold()!=request['ticker'].casefold() or asset.get('currency')!=currency:return unknown('TRADABILITY_INSTRUMENT_UNVERIFIED')
+   if request.get('exchange') and str(asset.get('exchange','')).casefold()!=request['exchange'].casefold():return unknown('TRADABILITY_INSTRUMENT_UNVERIFIED')
+   if not isinstance(buy,dict) or not (buy.get('shares') is True or buy.get('amount') is True):return unknown('TRADABILITY_SIZING_UNVERIFIED')
+   if request.get('risk',{}).get('proposed_quantity') is not None and buy.get('shares') is not True:return unknown('TRADABILITY_SIZING_UNVERIFIED')
    for portfolio in portfolios:trade_service.fresh_permission(client,tools,self.connect,self.uid,portfolio)
    kinds={v.upper() for node in (asset,raw) for field in ('type','assetType') if isinstance((v:=node.get(field)),str) and 1<=len(v)<=100}
    kind=next(iter(kinds)) if len(kinds)==1 else None
@@ -202,10 +205,15 @@ class PlutoAdapter:
    used={'list_portfolios','list_collections'} if any(p.get('kind')=='collection' for p in portfolios) else {'list_portfolios'}
    now=min([now]+[v[0] for k,v in getattr(client,'read_cache',{}).items() if k in used])
    self.permission_cache[key]={'at':now,'status':'available','instrument_type':kind};return 'available',now
-  except Exception:
+  except Exception as error:
    cache=getattr(locals().get('client'),'read_cache',None)
    if isinstance(cache,dict):cache.clear()
-   return 'unknown',None
+   if isinstance(error,DataUnavailable) and error.code=='PROVIDER_RATE_BUDGET':return unknown('TRADABILITY_PROVIDER_RATE_BUDGET')
+   if isinstance(error,sqlite3.Error):return unknown('TRADABILITY_DATABASE_ERROR')
+   if isinstance(error,urllib.error.HTTPError):return unknown('TRADABILITY_PROVIDER_HTTP_ERROR')
+   if isinstance(error,(TimeoutError,ConnectionError,urllib.error.URLError)):return unknown('TRADABILITY_NETWORK_ERROR')
+   if isinstance(error,trade_service.TradeError):return unknown('TRADABILITY_PERMISSION_OR_CONTRACT_ERROR')
+   return unknown('TRADABILITY_READ_UNAVAILABLE')
  def context(self,request,currency):
   # Serialize broker refreshes for this user only, never market-data work or
   # SQLite scopes. The next scan rechecks the shared DB snapshot after waiting.
@@ -259,7 +267,9 @@ class PlutoAdapter:
   # Keep the value unknown rather than claiming a permission was checked.
   tradability_at=None
   if request.get('watch_mode')!='exit':
-   result['tradability'],tradability_at=self.tradability(request,currency,portfolios)
+   tradability_diagnostics={}
+   result['tradability'],tradability_at=self.tradability(request,currency,portfolios,diagnostics=tradability_diagnostics)
+   if result['tradability']=='unknown' and tradability_diagnostics.get('code'):result['diagnostic']=tradability_diagnostics['code']
    proof=self.permission_cache.get(self.permission_key(request,currency,portfolios)) if tradability_at is not None else None
    if proof and proof.get('instrument_type'):
     result['instrument_type']=proof['instrument_type'];result['instrument_type_at']=datetime.fromtimestamp(proof['at'],timezone.utc).isoformat()
