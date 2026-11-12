@@ -37,6 +37,9 @@ try:
    if shot and width==390:
     page.evaluate("""() => {window.savedDashboard=structuredClone(state.dashboard);state.dashboard.orders=[];state.dashboard.warnings=[];for (const account of state.dashboard.accounts||[]) account.failed=false;for (const [i,row] of [...state.dashboard.positions,...(state.dashboard.overview_positions||[])].entries()) {if(row.hot_watch?.session){row.hot_watch.session.signal='WAIT';row.hot_watch.session.display_status='AFVENT'};row.price_freshness={state:'fresh'};row.verification='broker_snapshot';row.daily=i%4===3?null:{percent:['1.23','-0.68','0.42'][i%3],to:new Date().toISOString(),basis:'pluto_reported_daily_change'}};render()}""")
     expect(page.locator('.dash-attention')).to_have_count(0)
+    assert page.locator('.mobile-holding-daily.negative').count()>0
+    assert page.locator('.mobile-holding-daily.positive').count()>0
+    assert page.locator('.mobile-holding-daily.negative').first.evaluate('(e) => getComputedStyle(e).color') != page.locator('.mobile-holding-daily.positive').first.evaluate('(e) => getComputedStyle(e).color')
     page.screenshot(path=f'{shot}/owner-overview-no-alerts-390.png',full_page=True)
     page.evaluate("() => {state.dashboard=window.savedDashboard;render()}")
    row=page.get_by_role('button',name='Åbn position TSLA i Demodepot');row.click()
