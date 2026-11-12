@@ -515,7 +515,7 @@ def provisional_feed_match(instrument,choices):
   if item.get('currency')==currency and ticker(base)==symbol and issuer(item.get('name'))==name:selected.append(item)
  return selected[0] if len(selected)==1 else None
 
-def recover_automatic_feeds(connect,now=None):
+def recover_automatic_feeds(connect,now=None,identity_cache=None):
  """Recover empty automatic sessions, labeling field-only matches as unverified."""
  from instrument_resolver import crypto_reference,CRYPTO_REFERENCES
  if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1' or not os.environ.get('ESCAPE_EODHD_API_KEY','').strip():return 0
@@ -534,7 +534,16 @@ def recover_automatic_feeds(connect,now=None):
     lookup_attempted=True;status='IDENTITY_UNVERIFIED';budget_provider='pluto';retry_after=None
     try:
      if row['purpose']=='automatic holding watch':instrument=holding_instrument(connect,row['user_id'],holding)
-     else:instrument=verified_discovery_instrument(connect,row['user_id'],holding)
+     elif identity_cache is None:instrument=verified_discovery_instrument(connect,row['user_id'],holding)
+     else:
+      # Reuse only the read-only connection/catalog, never an identity result.
+      # The cache is private to this worker and scoped to one user; factory()
+      # still re-reads OAuth and replaces the gateway when the token changes.
+      uid=row['user_id'];age=time.monotonic();cached=identity_cache.get(uid)
+      if not cached or not 0<=age-cached[0]<300:
+       if len(identity_cache)>=32:identity_cache.clear()
+       cached=(age,PlutoAdapter(connect,uid,purpose='candidate_identity'));identity_cache[uid]=cached
+      instrument=verified_discovery_instrument(connect,uid,holding,adapter=cached[1])
      if instrument and instrument.get('asset_id')==holding['asset_id'] and str(instrument.get('ticker','')).casefold()==holding['ticker'].casefold() and instrument.get('currency')==holding['currency']:
       budget_provider='eodhd'
       crypto=crypto_reference(instrument) if row['purpose']=='automatic holding watch' else None
@@ -577,6 +586,12 @@ def recover_automatic_feeds(connect,now=None):
        else:status='EODHD_IDENTITY_UNCERTAIN'
      else:status='PLUTO_IDENTITY_UNVERIFIED'
     except Exception as error:
+     # Keep only a fully established catalog after budget denial; an
+     # interrupted handshake may have left an unusable partial MCP session.
+     if identity_cache is not None and row['purpose']=='automatic discovery' and budget_provider=='pluto':
+      entry=identity_cache.get(row['user_id']);gateway=getattr(entry[1],'gateway',None) if entry else None
+      established=getattr(gateway,'catalog',None) is not None
+      if not established or not (isinstance(error,EngineError) and error.code=='PROVIDER_RATE_BUDGET'):identity_cache.pop(row['user_id'],None)
      status=reference_error_code(error)
      if status=='PROVIDER_RATE_BUDGET':status=budget_provider.upper()+'_RATE_BUDGET'
      requested=getattr(error,'retry_after_s',None)
@@ -1377,6 +1392,7 @@ class Runner:
     self.stop.wait(15)
   candidate_thread=threading.Thread(target=candidate_loop,name='hotwatch-candidates',daemon=True);candidate_thread.start()
   def holdings_loop():
+   recovery_identities={}
    while not self.stop.is_set():
     try:
      from eodhd_capacity import refresh_account
@@ -1387,7 +1403,7 @@ class Runner:
     if self.stop.is_set():break
     try:auto_holdings_tick(self.connect)
     except Exception:logging.getLogger('escape.hotwatch').error(json.dumps({'service':'hotwatch','event':'holdings_autowatch_error'}))
-    try:recover_automatic_feeds(self.connect)
+    try:recover_automatic_feeds(self.connect,identity_cache=recovery_identities)
     except Exception:logging.getLogger('escape.hotwatch').exception('automatic_feed_recovery_error')
     try:queue_unverified_automatic_feeds(self.connect)
     except Exception:logging.getLogger('escape.hotwatch').exception('automatic_feed_recheck_queue_error')

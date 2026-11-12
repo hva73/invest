@@ -628,6 +628,118 @@ class HoldingAutowatch(unittest.TestCase):
    self.assertEqual(service.recover_automatic_feeds(app.connect,self.now),0)
   session=engine.sync(app.connect,1,False,limit=1,session_limit=10,summary_only=True)['open_sessions'][0]
   self.assertEqual((session['watch_kind'],session['feed_recovery_status'],session['feed_recovery_provider']),('candidate','PROVIDER_RATE_BUDGET','pluto'))
+ def test_candidate_recovery_reuses_only_connection_not_identity(self):
+  import trade_service
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);req.update(purpose='automatic discovery',watch_mode='entry')
+   c.execute("UPDATE hw_sessions SET purpose='automatic discovery',request=? WHERE id=?",(json.dumps(req),row['id']))
+  calls=[]
+  def request(client,method,params=None,notification=False):
+   calls.append((method,(params or {}).get('name')))
+   if method=='initialize':return {'protocolVersion':'2025-06-18'}
+   if method=='notifications/initialized':return None
+   if method=='tools/list':return {'tools':[{'name':name,'inputSchema':spec['inputSchema'],'annotations':{'readOnlyHint':spec['readOnlyHint']}} for name,spec in trade_service.CONTRACT.items()]}
+   if params['name']=='search_assets':return {'structuredContent':{'assets':[{'id':'synthetic-asset','ticker':'TEST','name':'Test Company','exchange':'NASDAQ','currency':'USD'}]}}
+   if params['name']=='get_asset':return {'structuredContent':{'asset':{'id':'synthetic-asset','ticker':'TEST','name':'Test Company','exchange':'NASDAQ','currency':'USD','type':'CS'}}}
+   raise AssertionError(params)
+  cache={}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('mcp_client.MCP.request',request),patch('hotwatch_adapters.reserve'),patch('hotwatch_adapters.search_eodhd_symbols',side_effect=DataUnavailable('PROVIDER_RATE_BUDGET',429)):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now,identity_cache=cache),0)
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now+timedelta(seconds=61),identity_cache=cache),0)
+   self.assertEqual(calls.count(('initialize',None)),1);self.assertEqual(calls.count(('tools/list',None)),1)
+   # A rotated access token must create a new gateway and a new handshake.
+   with patch('oauth.access_token',return_value='rotated-synthetic-token'):
+    self.assertEqual(service.recover_automatic_feeds(app.connect,self.now+timedelta(seconds=122),identity_cache=cache),0)
+  self.assertEqual(calls.count(('initialize',None)),2);self.assertEqual(calls.count(('tools/list',None)),2)
+  self.assertEqual(calls.count(('tools/call','search_assets')),3);self.assertEqual(calls.count(('tools/call','get_asset')),3)
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_verified_feed_links').fetchone()[0],0)
+   self.assertEqual(c.execute('SELECT status FROM hw_feed_recovery').fetchone()[0],'EODHD_RATE_BUDGET')
+ def test_failed_cached_broker_connection_is_discarded(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);req.update(purpose='automatic discovery',watch_mode='entry')
+   c.execute("UPDATE hw_sessions SET purpose='automatic discovery',request=? WHERE id=?",(json.dumps(req),row['id']))
+  cache={}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.verified_discovery_instrument',side_effect=ConnectionError('synthetic secret')):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now,identity_cache=cache),0)
+  self.assertEqual(cache,{})
+ def test_pluto_budget_denial_keeps_established_connection_for_retry(self):
+  import trade_service
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);req.update(purpose='automatic discovery',watch_mode='entry')
+   c.execute("UPDATE hw_sessions SET purpose='automatic discovery',request=? WHERE id=?",(json.dumps(req),row['id']))
+  calls=[];blocked=[True]
+  def request(client,method,params=None,notification=False):
+   name=(params or {}).get('name');calls.append((method,name))
+   if method=='initialize':return {'protocolVersion':'2025-06-18'}
+   if method=='notifications/initialized':return None
+   if method=='tools/list':return {'tools':[{'name':name,'inputSchema':spec['inputSchema'],'annotations':{'readOnlyHint':spec['readOnlyHint']}} for name,spec in trade_service.CONTRACT.items()]}
+   if name=='search_assets':
+    if blocked[0]:blocked[0]=False;raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+    return {'structuredContent':{'assets':[{'id':'synthetic-asset','ticker':'TEST','name':'Test Company','exchange':'NASDAQ','currency':'USD'}]}}
+   if name=='get_asset':return {'structuredContent':{'asset':{'id':'synthetic-asset','ticker':'TEST','name':'Test Company','exchange':'NASDAQ','currency':'USD','type':'CS'}}}
+   raise AssertionError(name)
+  cache={}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('mcp_client.MCP.request',request),patch('hotwatch_adapters.reserve'),patch('hotwatch_adapters.search_eodhd_symbols',side_effect=DataUnavailable('PROVIDER_RATE_BUDGET',429)):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now,identity_cache=cache),0);self.assertIn(1,cache)
+   with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM hw_feed_recovery').fetchone()[0],'PLUTO_RATE_BUDGET')
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now+timedelta(seconds=61),identity_cache=cache),0)
+  self.assertEqual(calls.count(('initialize',None)),1);self.assertEqual(calls.count(('tools/call','search_assets')),2);self.assertEqual(calls.count(('tools/call','get_asset')),1)
+ def test_budget_during_handshake_discards_partial_connection(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);req.update(purpose='automatic discovery',watch_mode='entry')
+   c.execute("UPDATE hw_sessions SET purpose='automatic discovery',request=? WHERE id=?",(json.dumps(req),row['id']))
+  def request(client,method,params=None,notification=False):
+   if method=='initialize':return {'protocolVersion':'2025-06-18'}
+   if method=='notifications/initialized':raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+   raise AssertionError(method)
+  cache={}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('mcp_client.MCP.request',request),patch('hotwatch_adapters.reserve'):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now,identity_cache=cache),0)
+  self.assertEqual(cache,{})
+  with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM hw_feed_recovery').fetchone()[0],'PLUTO_RATE_BUDGET')
+ def test_holding_connection_failure_does_not_discard_candidate_cache(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  adapter=object();cache={1:(1,adapter)}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.holding_instrument',side_effect=ConnectionError('synthetic')):
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now,identity_cache=cache),0)
+  self.assertIs(cache[1][1],adapter)
+ def test_candidate_recovery_replaces_expired_connection(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with app.connect() as c:
+   row=c.execute('SELECT * FROM hw_sessions').fetchone();req=json.loads(row['request']);req.update(purpose='automatic discovery',watch_mode='entry')
+   c.execute("UPDATE hw_sessions SET purpose='automatic discovery',request=? WHERE id=?",(json.dumps(req),row['id']))
+  expired=object();cache={1:(0,expired)}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.time.monotonic',return_value=300),patch('hotwatch_service.verified_discovery_instrument',return_value=None) as verify:
+   self.assertEqual(service.recover_automatic_feeds(app.connect,self.now,identity_cache=cache),0)
+  self.assertIsNot(verify.call_args.kwargs['adapter'],expired);self.assertIs(cache[1][1],verify.call_args.kwargs['adapter'])
+ def test_candidate_recovery_connections_are_separate_per_user(self):
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
+  with app.connect() as c:
+   c.execute("INSERT INTO users(username,salt,hash) VALUES('other','synthetic','synthetic')")
+   row=dict(c.execute('SELECT * FROM hw_sessions').fetchone());row.pop('id')
+   req=json.loads(row['request']);req.update(purpose='automatic discovery',watch_mode='entry')
+   c.execute("UPDATE hw_sessions SET purpose='automatic discovery',request=?",(json.dumps(req),))
+   req.update(watch_id='other-watch',candidate_id='other-candidate',asset_id='other-asset',ticker='OTHER')
+   row.update(user_id=2,watch_id='other-watch',candidate_id='other-candidate',purpose='automatic discovery',request=json.dumps(req),digest='other-digest')
+   cols=list(row);c.execute('INSERT INTO hw_sessions('+','.join(cols)+') VALUES('+','.join('?' for _ in cols)+')',tuple(row.values()))
+  cache={};seen=[]
+  def verify(connect,uid,holding,adapter=None):seen.append((uid,adapter));return None
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch('hotwatch_service.verified_discovery_instrument',side_effect=verify):
+   service.recover_automatic_feeds(app.connect,self.now,identity_cache=cache)
+   service.recover_automatic_feeds(app.connect,self.now+timedelta(seconds=1),identity_cache=cache)
+  self.assertEqual({uid for uid,_ in seen},{1,2});self.assertEqual(set(cache),{1,2});self.assertIsNot(cache[1][1],cache[2][1])
  def test_recovery_matches_isin_and_currency_without_prior_observation(self):
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':''}):
    self.assertEqual(service.auto_holdings_tick(app.connect,verify=self.verify,now=self.now),'LINKED')
