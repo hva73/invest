@@ -682,3 +682,8 @@ body > aside nav .nav-sector-mobile{display:none}
  .si-allocation .sector-list .sector-row>div:first-of-type{flex:1 1 auto}
  .si-allocation .sector-list .sector-row .si-row-value{flex:0 1 auto;text-align:right}
 }
+
+@media(max-width:700px){
+ .sector-mobile-holdings .mobile-holding-name small,
+ .sector-mobile-holdings .mobile-holding-value small{font-size:11px;letter-spacing:0;line-height:1.4}
+}
