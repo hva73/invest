@@ -1,0 +1,164 @@
+"""Conservative read-only projection of Pluto execution observations.
+
+The order list has no documented complete history or execution times. Consequently
+only an isolated direct buy/sell pair is compared, as an indicative gross price
+comparison, never as a verified cost basis or net profit.
+"""
+from decimal import Decimal, InvalidOperation
+from datetime import datetime, timezone
+from collections import defaultdict, deque
+
+
+def _decimal(value):
+    if value is None or isinstance(value, bool): return None
+    try:
+        value = Decimal(str(value))
+        return value if value.is_finite() and 0 < value < Decimal('1e30') else None
+    except (InvalidOperation, ValueError): return None
+
+
+def _stamp(value):
+    if not isinstance(value, str): return None
+    try:
+        result = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        return result.astimezone(timezone.utc) if result.tzinfo else None
+    except ValueError: return None
+
+
+def _record(row, scope, event_time):
+    if not isinstance(row, dict) or row.get('side') not in ('BUY', 'SELL'): return None
+    # Final cancelled orders can contain a real partial execution; never accept
+    # a zero-filled or unpriced observation as a transaction.
+    if row.get('status') not in ('FILLED', 'COMPLETED', 'CANCELED', 'CANCELLED', 'EXPIRED'): return None
+    asset = row.get('asset') if isinstance(row.get('asset'), dict) else {}
+    ticker, name, currency = asset.get('ticker'), asset.get('name'), asset.get('currency')
+    if not all(isinstance(x, str) and x.strip() for x in (ticker, name, currency)): return None
+    if len(currency) != 3 or not currency.isascii() or not currency.isalpha(): return None
+    quantity, price = _decimal(row.get('filledQuantity')), _decimal(row.get('filledAveragePrice'))
+    stamp = _stamp(row.get(event_time))
+    order_id = row.get('id')
+    if not quantity or not price or not stamp or not isinstance(order_id, str) or not order_id: return None
+    return dict(id=order_id, side=row['side'], ticker=ticker, name=name, currency=currency.upper(), quantity=quantity, price=price, time=stamp, scope=scope)
+
+
+def _result(buy, sell, quantity, basis, provisional):
+    proceeds = quantity * sell['price']
+    profit = proceeds - basis
+    return {'ticker': sell['ticker'], 'name': sell['name'], 'scope': sell['scope'], 'currency': sell['currency'],
+            'quantity': str(quantity), 'gross': str(profit), 'gross_percent': str(profit / basis * 100),
+            'buy_price': str(buy['price']), 'sell_price': str(sell['price']),
+            'sell_time': None if provisional else sell['time'].isoformat(),
+            'order_created_at': sell['time'].isoformat() if provisional else None,
+            'quality': 'indicative',
+            'note': ('Foreløbig kursforskel: faktisk fyldtid og fuld købshistorik er ikke dokumenteret.' if provisional
+                     else 'Foreløbigt brutto i handelsvaluta; gebyrer, valutaomregning og ældre historik er ikke dokumenteret.')}
+
+
+def project(direct_orders, collection_orders=()):
+    """Return results per sale; inputs must already be isolated to one portfolio.
+
+    Each collection tuple is (collection_id, nested order). Separate scopes are
+    intentionally never merged. Stable order IDs are required and duplicates are
+    discarded entirely when their observations differ.
+    """
+    groups = defaultdict(list); ambiguous = set(); seen = {}; omitted = 0
+    def add(row, scope, timestamp):
+        nonlocal omitted
+        record = _record(row, scope, timestamp)
+        if record is None:
+            omitted += 1
+            return
+        key = (scope, record['id'])
+        if key in seen:
+            if seen[key] != record: ambiguous.add(key)
+            return
+        seen[key] = record
+    for row in direct_orders:
+        if isinstance(row, dict) and row.get('scope') in ('ROOT', 'DIRECT') and not row.get('collectionId'):
+            add(row, 'direct', 'createdAt')
+        else: omitted += 1
+    for collection_id, row in collection_orders:
+        if isinstance(collection_id, str) and collection_id: add(row, 'collection:' + collection_id, 'filledAt')
+        else: omitted += 1
+    for key, row in seen.items():
+        if key in ambiguous:
+            omitted += 1
+            continue
+        groups[(row['scope'], row['ticker'], row['name'], row['currency'])].append(row)
+    results = []
+    for (scope, _, _, _), rows in groups.items():
+        rows.sort(key=lambda x: x['time'])
+        if len({row['time'] for row in rows}) != len(rows):
+            omitted += 1
+            continue
+        if scope == 'direct':
+            # createdAt is NOT fill time. Only one buy and one sale of exactly
+            # equal quantities can be compared without inventing FIFO timing.
+            if len(rows) == 2 and rows[0]['side'] == 'BUY' and rows[1]['side'] == 'SELL' and rows[0]['quantity'] == rows[1]['quantity']:
+                buy, sell = rows
+                results.append(_result(buy, sell, sell['quantity'], buy['quantity'] * buy['price'], True))
+            elif any(row['side'] == 'SELL' for row in rows): omitted += 1
+            continue
+        lots = deque(); unsafe = False
+        for row in rows:
+            if row['side'] == 'BUY': lots.append([row, row['quantity']]); continue
+            if sum((lot[1] for lot in lots), Decimal(0)) < row['quantity']:
+                omitted += 1; unsafe = True; lots.clear(); continue
+            if unsafe:
+                omitted += 1; continue
+            remaining = row['quantity']; cost = Decimal(0); first = lots[0][0]
+            while remaining:
+                buy, available = lots[0]; taken = min(available, remaining)
+                cost += taken * buy['price']; remaining -= taken; lots[0][1] -= taken
+                if not lots[0][1]: lots.popleft()
+            result = _result(first, row, row['quantity'], cost, False)
+            result['buy_price'] = str(cost / row['quantity'])
+            results.append(result)
+    return {'items': results, 'omitted': omitted, 'history_complete': False,
+            'note': 'Kun observerede handler. Historikkens dækning, gebyrer og historisk valutakurs er ikke bekræftet. Direkte handler er foreløbige kursforskelle; oprettelsestid er ikke fyldtid.'}
+
+
+def read(connect, user_id, client_factory=None):
+    """Read only active portfolios owned by the session; no broker writes."""
+    import oauth
+    from mcp_client import MCP, decode_result
+    from pending_orders import allowed
+    from portfolio_data import list_data
+    with connect() as db:
+        portfolios = [dict(row) for row in db.execute(
+            "SELECT external_id,kind,parent_external_id FROM portfolios WHERE user_id=? AND source='pluto' AND active=1", (user_id,))]
+    client = (client_factory or MCP)(oauth.access_token(connect, user_id))
+    tools = client.tools(); output = []; errors = []
+    for portfolio in portfolios:
+        external = portfolio['external_id'] or ''
+        try:
+            namespace, identifier = external.split(':', 1)
+            if portfolio['kind'] == 'portfolio' and namespace == 'portfolios':
+                if not allowed(tools, 'list_orders', 'portfolioId'): raise ValueError('Ordrehistorik er utilgængelig')
+                data = decode_result(client.request('tools/call', {'name':'list_orders', 'arguments':{
+                    'portfolioId':identifier, 'scope':'DIRECT', 'statusGroup':'INACTIVE', 'limit':50}}), 'list_orders')
+                rows = list_data(data, ['orders','items','data'])
+                result = project(rows)
+            elif portfolio['kind'] == 'collection' and namespace == 'collections':
+                if not allowed(tools, 'get_collection_activity', 'collectionId'): raise ValueError('Collectionhistorik er utilgængelig')
+                rows=[]; cursor=None; seen=set()
+                for _ in range(20):
+                    args={'collectionId':identifier,'limit':50}
+                    if cursor: args['nextToken']=cursor
+                    data=decode_result(client.request('tools/call', {'name':'get_collection_activity','arguments':args}), 'get_collection_activity')
+                    for activity in list_data(data,['activities','activity','items','data']):
+                        if not isinstance(activity,dict) or activity.get('collectionId') != identifier: raise ValueError('Collectiontilknytning mangler')
+                        for wrapper in activity.get('orders',[]):
+                            if isinstance(wrapper,dict) and wrapper.get('type')=='ORDER' and isinstance(wrapper.get('data'),dict): rows.append((identifier,wrapper['data']))
+                    cursor=data.get('nextToken') if isinstance(data,dict) else None
+                    if not cursor: break
+                    if not isinstance(cursor,str) or cursor in seen: raise ValueError('Collectionhistorik er ufuldstændig')
+                    seen.add(cursor)
+                else: raise ValueError('Collectionhistorik er ufuldstændig')
+                result=project([],rows)
+            else: continue
+            output.append({'portfolio_id':external,'kind':portfolio['kind'],**result})
+        except Exception:
+            errors.append('En historik kunne ikke læses; eventuelle tal dækker ikke alle depoter.')
+    return {'portfolios':output,'errors':errors,'observed':datetime.now(timezone.utc).isoformat(),
+            'history_complete':False}

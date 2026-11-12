@@ -368,6 +368,9 @@ class Handler(BaseHTTPRequestHandler):
             if self.path=='/api/sector-intelligence':
                 import sector_intelligence
                 return self.send(200,sector_intelligence.read(connect,user_id))
+            if self.path=='/api/realized-statistics':
+                import realized_statistics
+                return self.send(200,realized_statistics.read(connect,user_id))
             if self.path=='/api/state':
                 import portfolios
                 with connect() as c:
