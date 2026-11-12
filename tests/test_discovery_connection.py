@@ -65,3 +65,11 @@ class DiscoveryConnection(unittest.TestCase):
   with patch.dict(os.environ,env),patch('hotwatch_engine.utc',return_value=self.now),patch('hotwatch_service.time.monotonic',return_value=300),patch('hotwatch_service.auto_activate_candidate',side_effect=activate):
    service.auto_discover(app.connect,identity_cache=cache)
   self.assertEqual({uid for uid,_ in seen},{1,2});self.assertIsNot(cache[1][1],expired);self.assertIsNot(cache[1][1],cache[2][1])
+ def test_discovery_cache_does_not_bypass_kill_switch(self):
+  with app.connect() as c:c.execute('UPDATE hw_system_control SET killed=1 WHERE id=1')
+  cache={};env={'ESCAPE_HW_AUTOSTART_ENABLED':'1','ESCAPE_HW_AUTOSTART_AFTER':(self.now-timedelta(minutes=1)).isoformat()}
+  with patch.dict(os.environ,env),patch('hotwatch_engine.utc',return_value=self.now),patch('hotwatch_adapters.PlutoAdapter.factory',side_effect=AssertionError('kill switch must prevent broker access')):
+   service.auto_discover(app.connect,identity_cache=cache)
+  with app.connect() as c:
+   row=c.execute('SELECT status,watch_id FROM hw_discovery_attempts WHERE candidate_id=?',(self.candidate['candidate_id'],)).fetchone()
+  self.assertEqual((row['status'],row['watch_id']),('operator_kill_switch',None));self.assertFalse(self.fixture.writes())
