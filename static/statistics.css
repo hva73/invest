@@ -33,3 +33,9 @@ main:has(#content > #statistics-content) > header #title{position:absolute;width
 .statistics-dialog header button{font-size:1.5rem;line-height:1;border:0;background:transparent;color:#d6eae3;cursor:pointer}
 .statistics-dialog .statistics-detail{padding:18px 0 0;gap:12px}
 @media(max-width:700px){.statistics-trade-button{padding:14px}.statistics-dialog{padding:18px}}
+
+.statistics-calc{display:grid;gap:12px}
+.statistics-calc>div{display:flex;justify-content:space-between;align-items:baseline;gap:14px}
+.statistics-calc strong{text-align:right;color:#e6f4ef;font-weight:650}
+.statistics-calc-result{border-top:1px solid #31534c;margin-top:4px;padding-top:14px}
+.statistics-detail-note{display:grid;gap:6px;margin-top:8px;font-size:.74rem;line-height:1.5}
