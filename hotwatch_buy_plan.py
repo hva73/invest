@@ -1,6 +1,6 @@
 """User-selected, bounded LIMIT buy plans. Broker calls in this module are read-only."""
 import copy,json
-from decimal import Decimal,ROUND_DOWN,localcontext
+from decimal import Decimal,ROUND_DOWN,ROUND_UP,localcontext
 import trade_service as trade
 from hotwatch_contract import EngineError,canonical
 from report_validation import stamp
@@ -29,12 +29,18 @@ def quote(raw,request,order):
   else:
    if fx['base']!=currency or fx['quote']!='DKK':raise ValueError()
    rate=number(fx['rate'])
+  if currency=='DKK' and rate!=1:raise ValueError()
   quantity=number(e['quantity']) if e.get('quantity') is not None else None
   if 'shares' in order and quantity!=number(order['shares']):raise ValueError()
-  # Pluto filledAccountNotional is the estimated settling amount for shares;
-  # accountNotional can be zero for a shares order. Commission is additionally budgeted conservatively. Require consistency with
-  # quantity * limit * FX when quantity is supplied; tolerate currency rounding.
-  if quantity is not None and abs(cost-quantity*number(order['limitPrice'])*rate)>Decimal('.02'):raise ValueError()
+  # A shares estimate can round the asset-currency notional to cents before
+  # FX and then round the settlement amount. Bound both rounding steps; do not
+  # accept arbitrary price/FX discrepancies as merely a rounding difference.
+  if quantity is not None:
+   exact=quantity*number(order['limitPrice'])*rate
+   tolerance=rate*Decimal('.005')+Decimal('.005') if currency in ('USD','EUR','DKK') else Decimal('.02')
+   if abs(cost-exact)>tolerance:raise ValueError()
+   # Never let a rounded-down estimate understate the user's budget exposure.
+   cost=max(cost,exact).quantize(Decimal('.01'),rounding=ROUND_UP)
   return {'fx_to_dkk':str(rate),'fees_dkk':str(fee),'account_notional_dkk':str(cost),'quantity':str(quantity) if quantity is not None else None}
  except (KeyError,TypeError,AttributeError,ArithmeticError,ValueError):
   raise EngineError('BUY_PLAN_ESTIMATE_INCOMPLETE',409) from None
@@ -88,7 +94,23 @@ def prepare(connect,uid,wid,data,factory=None):
   q=q.quantize(Decimal('.00000001') if fractional else Decimal('1'),rounding=ROUND_DOWN)
   if q<=0:raise EngineError('BUY_PLAN_BUDGET_TOO_SMALL',409)
   plan['quantity']=format(q,'f')
- values,_=read_quote(connect,uid,request,p,order_for(request,plan),factory);bounded(plan,values)
+ values,_=read_quote(connect,uid,request,p,order_for(request,plan),factory)
+ try:bounded(plan,values)
+ except EngineError as error:
+  if error.code!='BUY_PLAN_BUDGET_EXCEEDED':raise
+  # Broker rounding or a changed FX quote can put the first estimate over the
+  # selected budget. Shrink once, then require a fresh matching estimate.
+  with localcontext() as ctx:
+   ctx.prec=60
+   quantum=Decimal('.00000001') if fractional else Decimal('1')
+   fx=number(values['fx_to_dkk']);fee=number(values['fees_dkk'],True)
+   buffer=fx*Decimal('.005')+Decimal('.01') if request['quote_currency'] in ('USD','EUR','DKK') else Decimal('.02')
+   available=number(budget)-fee-buffer
+   revised=(available/(number(limit)*fx)).quantize(quantum,rounding=ROUND_DOWN) if available>0 else Decimal('0')
+   q=min(revised,number(plan['quantity'])-quantum)
+   if q<=0:raise EngineError('BUY_PLAN_BUDGET_TOO_SMALL',409)
+   plan['quantity']=format(q.quantize(quantum,rounding=ROUND_DOWN),'f')
+  values,_=read_quote(connect,uid,request,p,order_for(request,plan),factory);bounded(plan,values)
  plan.update(values);now=engine.utc();plan['verified_at']=now.isoformat();plan['selected_at']=now.isoformat()
  with connect() as c:
   c.execute('BEGIN IMMEDIATE');current=engine.row_for(c,uid,wid,False)
@@ -128,7 +150,7 @@ def apply(c,row,request,sample,risk,now):
  match=plan['fresh'] and request['portfolio_ids']==[plan['portfolio_id']] and request['risk']['proposed_quantity']==plan['quantity'] and request['risk']['stop_price']==plan['stop_price']
  if match:
   context.update(fx_to_dkk=plan['fx_to_dkk'],fees_dkk=plan['fees_dkk'])
-  risk.update(entry_price=plan['limit_price'],entry_limit=plan['limit_price'])
+  risk.update(entry_price=plan['limit_price'],entry_limit=plan['limit_price'],entry_account_notional_dkk=plan['account_notional_dkk'])
  return sample,risk,plan
 
 def check_proposal(connect,uid,wid,payload,portfolio_id,raw=None):

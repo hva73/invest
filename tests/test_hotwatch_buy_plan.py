@@ -1,7 +1,7 @@
 """Disposable database; all broker estimates mocked. Never creates real orders."""
 import copy,json,unittest
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal,ROUND_HALF_UP
 from unittest.mock import patch
 import app,report_ingest,hotwatch_engine as engine,hotwatch_buy_plan as plan,trade_service
 from hotwatch_strategy import calculate,BASELINE
@@ -45,8 +45,73 @@ class BuyPlan(unittest.TestCase):
   order={'shares':'1','limitPrice':'100'}
   raw={'estimate':{'side':'BUY','type':'LIMIT','asset':{'ticker':'MERC','currency':'DKK'},'limitPrice':'100','quantity':'1','commission':'0','commissionCurrency':'DKK','filledAccountNotional':'100','filledAccountNotionalCurrency':'DKK','assetBankFx':None}}
   values=plan.quote(raw,{**self.req,'quote_currency':'DKK'},order);self.assertEqual(values['fx_to_dkk'],'1')
+  for rate in ('1','0.5','2'):
+   raw['estimate']['assetBankFx']={'base':'DKK','quote':'DKK','rate':rate}
+   if rate=='1':self.assertEqual(plan.quote(raw,{**self.req,'quote_currency':'DKK'},order)['fx_to_dkk'],'1')
+   else:
+    with self.subTest(rate=rate),self.assertRaises(EngineError):plan.quote(raw,{**self.req,'quote_currency':'DKK'},order)
+  raw['estimate']['assetBankFx']=None
   raw['estimate']['asset']['currency']='USD'
   with self.assertRaises(EngineError):plan.quote(raw,self.req,order)
+ def test_pluto_cent_rounding_preserves_conservative_limit_cost(self):
+  order={'shares':'0.06826703','limitPrice':'21.62'}
+  raw={'estimate':{'side':'BUY','type':'LIMIT','asset':{'ticker':'MERC','currency':'USD'},'limitPrice':'21.62','quantity':'0.06826703','commission':'0','commissionCurrency':'DKK','filledAccountNotional':'10.03','filledAccountNotionalCurrency':'DKK','assetBankFx':{'base':'USD','quote':'DKK','rate':'6.775203'}}}
+  values=plan.quote(raw,self.req,order);self.assertEqual(Decimal(values['account_notional_dkk']),Decimal('10.03'))
+  with self.assertRaises(EngineError):plan.bounded({'budget_dkk':'10'},values)
+  order={'shares':'0.05','limitPrice':'21.69'};raw['estimate'].update(quantity='0.05',limitPrice='21.69',filledAccountNotional='7.32',assetBankFx={'base':'USD','quote':'DKK','rate':'6.775384'})
+  values=plan.quote(raw,self.req,order);self.assertGreaterEqual(Decimal(values['account_notional_dkk']),Decimal('0.05')*Decimal('21.69')*Decimal('6.775384'))
+  raw['estimate']['filledAccountNotional']='7.00'
+  with self.assertRaises(EngineError):plan.quote(raw,self.req,order)
+ def test_rounding_boundaries_and_large_fx_are_bounded(self):
+  order={'shares':'1','limitPrice':'100'}
+  e={'side':'BUY','type':'LIMIT','asset':{'ticker':'MERC','currency':'USD'},'limitPrice':'100','quantity':'1','commission':'0','commissionCurrency':'DKK','filledAccountNotionalCurrency':'DKK','assetBankFx':{'base':'USD','quote':'DKK','rate':'7'}}
+  for cost in ('699.960','700.040'):
+   e['filledAccountNotional']=cost;v=plan.quote({'estimate':e},self.req,order);self.assertGreaterEqual(Decimal(v['account_notional_dkk']),Decimal('700'))
+  for cost in ('699.95999','700.04001'):
+   e['filledAccountNotional']=cost
+   with self.subTest(cost=cost),self.assertRaises(EngineError):plan.quote({'estimate':e},self.req,order)
+  e['assetBankFx']['rate']='1000';e['filledAccountNotional']='100005.005'
+  self.assertEqual(Decimal(plan.quote({'estimate':e},self.req,order)['account_notional_dkk']),Decimal('100005.01'))
+  e['filledAccountNotional']='100005.006'
+  with self.assertRaises(EngineError):plan.quote({'estimate':e},self.req,order)
+  for rate in ('0','-1',None):
+   e['assetBankFx']['rate']=rate
+   with self.subTest(rate=rate),self.assertRaises(EngineError):plan.quote({'estimate':e},self.req,order)
+ def test_rounding_over_budget_reduces_quantity_and_reestimates_without_orders(self):
+  self.data.update(budget_dkk='10',limit_price='21.62',stop_price='20')
+  def rounded(*args,**kwargs):
+   result,asset=self.estimate(*args,**kwargs);e=result['quote']['estimate'];order=args[3]['orders'][0]
+   e.update(limitPrice='21.62',commission='0',assetBankFx={'base':'USD','quote':'DKK','rate':'6.775203'})
+   if order.get('shares'):
+    notional=(Decimal(order['shares'])*Decimal('21.62')).quantize(Decimal('.01'),rounding=ROUND_HALF_UP)
+    e['filledAccountNotional']=str((notional*Decimal('6.775203')).quantize(Decimal('.01'),rounding=ROUND_HALF_UP))
+   else:e['filledAccountNotional']='10'
+   return result,asset
+  with patch('trade_service.read_estimate',side_effect=rounded):result=plan.prepare(app.connect,1,self.req['watch_id'],self.data)
+  self.assertEqual(len(self.calls),3);self.assertLess(Decimal(result['plan']['quantity']),Decimal(self.calls[1]['orders'][0]['shares']))
+  self.assertLessEqual(Decimal(result['plan']['account_notional_dkk']),Decimal('10'))
+  self.assertEqual(result['plan']['stop_price'],'20');self.assertFalse(self.fixture.writes())
+  with app.connect() as c:
+   row=self.row(c);req=json.loads(row['request']);sample=tick(engine.utc(),price='21.62')
+   sample,risk,_=plan.apply(c,row,req,sample,req['risk'],engine.utc())
+  risk.update(entry_allowed=True,exit_allowed=False,max_loss_dkk='0.01')
+  decision,_=calculate(sample,good_metrics(),BASELINE,risk,{},engine.utc())
+  self.assertIn('LOSS_BUDGET_LIMIT',decision['reason_codes']);self.assertNotEqual(decision['signal'],'BUY')
+ def test_retry_still_over_budget_never_stores_a_plan(self):
+  self.data.update(budget_dkk='10',limit_price='21.62',stop_price='20')
+  def changed(*args,**kwargs):
+   result,asset=self.estimate(*args,**kwargs);e=result['quote']['estimate'];order=args[3]['orders'][0]
+   e.update(limitPrice='21.62',commission='0',assetBankFx={'base':'USD','quote':'DKK','rate':'6.775203'})
+   if order.get('shares'):
+    notional=(Decimal(order['shares'])*Decimal('21.62')).quantize(Decimal('.01'),rounding=ROUND_HALF_UP)
+    e['filledAccountNotional']=str((notional*Decimal('6.775203')).quantize(Decimal('.01'),rounding=ROUND_HALF_UP))
+    if len(self.calls)==3:e['commission']='5'
+   else:e['filledAccountNotional']='10'
+   return result,asset
+  with patch('trade_service.read_estimate',side_effect=changed),self.assertRaises(EngineError) as err:plan.prepare(app.connect,1,self.req['watch_id'],self.data)
+  self.assertEqual(err.exception.code,'BUY_PLAN_BUDGET_EXCEEDED');self.assertEqual(len(self.calls),3)
+  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM hw_buy_plans').fetchone()[0],0)
+  self.assertFalse(self.fixture.writes())
  def test_whole_shares_are_rounded_down_not_invented(self):
   self.data['budget_dkk']='900'
   def whole(*args):
@@ -84,6 +149,11 @@ class BuyPlan(unittest.TestCase):
   self.assertIn('POSITION_SIZE_LIMIT',result['reason_codes'])
   risk['max_loss_dkk']='30';result,_=calculate(valid,metrics,BASELINE,risk,{},self.now)
   self.assertIn('LOSS_BUDGET_LIMIT',result['reason_codes'])
+ def test_broker_rounding_uplift_counts_in_size_and_max_loss(self):
+  sample=tick(self.now,price='100');sample['context'].update(fx_to_dkk='7',fees_dkk='0',portfolio_equity_dkk='10000',exposure_dkk='0')
+  risk=dict(self.req['risk'],entry_allowed=True,exit_allowed=False,proposed_quantity='1',stop_price='99',entry_price='100',entry_limit='100',entry_account_notional_dkk='700.04',max_notional_dkk='700.02',max_loss_dkk='7.02')
+  decision,_=calculate(sample,good_metrics(),BASELINE,risk,{},self.now)
+  self.assertIn('POSITION_SIZE_LIMIT',decision['reason_codes']);self.assertIn('LOSS_BUDGET_LIMIT',decision['reason_codes']);self.assertNotEqual(decision['signal'],'BUY')
  def test_limit_exceeded_and_missing_data_can_coexist_with_weak_signal(self):
   self.prepare()
   with app.connect() as c:
