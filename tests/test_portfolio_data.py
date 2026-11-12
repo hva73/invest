@@ -86,6 +86,47 @@ class Data(unittest.TestCase):
     if params['name']=='get_portfolio_value':return {'structuredContent':{'value':'100','currency':'EUR'}}
     return {'isError':True}
   payload=portfolio_data.read(app.connect,1,self.root,Client);self.assertFalse(payload['complete']);self.assertEqual(len(payload['errors']),2);self.assertEqual(payload['value']['value']['amount'],'100')
+ def test_strict_position_budget_denial_reaches_adapter_without_false_context(self):
+  from hotwatch_adapters import PlutoAdapter,DataUnavailable
+  class Client:
+   def __init__(self,token):pass
+   def tools(self):return TOOLS
+   def request(self,method,params):raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+  adapter=PlutoAdapter(app.connect,1);request={'portfolio_ids':[self.root],'asset_id':'synthetic','ticker':'SYN','watch_mode':'exit'}
+  with patch.object(adapter,'factory',side_effect=Client):result=adapter.safe_context(request,'USD')
+  self.assertEqual((result['status'],result['diagnostic']),('unknown','PROVIDER_RATE_BUDGET'))
+  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM portfolio_snapshots').fetchone()[0],0)
+ def test_strict_positions_keeps_budget_denial_distinct_from_independent_data(self):
+  from hotwatch_adapters import DataUnavailable
+  class Client:
+   def __init__(self,token):pass
+   def tools(self):return TOOLS
+   def request(self,method,params):
+    if params['name']=='get_portfolio_value':return {'structuredContent':{'value':'100','currency':'DKK'}}
+    raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+  with self.assertRaisesRegex(DataUnavailable,'PROVIDER_RATE_BUDGET'):portfolio_data.read(app.connect,1,self.root,Client,strict_positions=True)
+  partial=portfolio_data.read(app.connect,1,self.root,Client,strict_positions=False)
+  self.assertFalse(partial['complete']);self.assertEqual(partial['value']['value']['amount'],'100')
+ def test_strict_positions_can_succeed_when_other_sections_hit_budget(self):
+  from hotwatch_adapters import DataUnavailable
+  class Client:
+   def __init__(self,token):pass
+   def tools(self):return TOOLS
+   def request(self,method,params):
+    if params['name']=='get_positions':return {'structuredContent':{'positions':[{'assetId':'asset-one','ticker':'ONE','name':'One','quantity':'2','currency':'USD'}],'collections':[],'totalCount':1}}
+    raise DataUnavailable('PROVIDER_RATE_BUDGET',429)
+  result=portfolio_data.read(app.connect,1,self.root,Client,strict_positions=True)
+  self.assertFalse(result['complete']);self.assertTrue(result['positions_complete']);self.assertTrue(result['positions_strict_verified']);self.assertEqual(result['positions_scope'],'DIRECT')
+ def test_unrelated_provider_error_does_not_become_budget_denial(self):
+  from hotwatch_adapters import DataUnavailable
+  class Client:
+   def __init__(self,token):pass
+   def tools(self):return TOOLS
+   def request(self,method,params):
+    if params['name']=='get_portfolio_value':return {'structuredContent':{'value':'100','currency':'DKK'}}
+    raise DataUnavailable('EODHD_READ_ERROR',503)
+  result=portfolio_data.read(app.connect,1,self.root,Client,strict_positions=True)
+  self.assertFalse(result['complete']);self.assertFalse(result.get('positions_complete',False))
  def test_strict_positions_proof_survives_unrelated_section_failure_but_not_missing_rows(self):
   class Client:
    total=1
