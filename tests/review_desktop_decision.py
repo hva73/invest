@@ -32,6 +32,13 @@ source = replace_once(source,
     "page.goto(f'http://127.0.0.1:{server.server_port}');page.locator",
     "page.goto(f'http://127.0.0.1:{server.server_port}');page.evaluate(\"\"\"() => new Promise((ok,fail)=>{const l=document.createElement('link');l.rel='stylesheet';l.href='/desktop-experience.css';l.onload=ok;l.onerror=fail;document.head.append(l)})\"\"\");page.locator")
 
+source = replace_once(source,
+    "expect(d.locator('.signal-action-bar .signal-help')).to_have_count(0)",
+    "expect(d.locator('.signal-action-bar .signal-help')).to_have_count(0)\n"
+    "   expect(d.locator('h2')).to_be_focused()\n"
+    "   page.keyboard.press('Tab')\n"
+    "   assert page.evaluate(\"!!document.activeElement.closest('#engine-dialog')\")")
+
 failures = []
 generated = Path('tests/_desktop_decision_generated.py')
 try:
