@@ -30,6 +30,8 @@ jobs:
         run: |
           mkdir -p "$ESCAPE_SCREENSHOTS"
           node tests/test_sector_ui.js
+          node tests/test_dashboard_data.js
+          node tests/test_holdings_sort_ui.cjs
           node tests/test_demo_boundary.cjs
           python -m unittest discover -s tests -p test_sector_intelligence.py
           python tests/browser_sector_cash.py

@@ -174,5 +174,3 @@ finally:
     server.server_close()
     case.tearDown()
 
-
-
