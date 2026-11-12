@@ -546,3 +546,28 @@ body:has(#login:not([hidden])) > aside nav{display:none}
  .engine-section-heading{margin-top:8px}
  .engine-list-identity small:not(.engine-list-company){display:none}
 }
+
+/* Mobile owner feedback: one integrated overview, neutral labels and floating actions. */
+@media(max-width:700px){
+ .dash-attention-desktop-only{display:none}
+ .dash-attention-unknown{border-left:3px solid #d0a264}
+ .dash-attention-unknown p{color:#c3cdd2;font-size:12px;margin:6px 0}
+ .dash-hero{background:#102631;border-color:#28434d;gap:6px}
+ .dash-hero-intro small,.dash-hero-intro p{color:#a6b9c2}
+ .dash-hero-metrics{grid-template-columns:1fr 1fr;gap:12px}
+ .dash-hero-metrics>div:first-child{grid-column:auto;border-bottom:0;padding-left:0}
+ .dash-hero-metrics>div{padding:6px 0!important;border-right:0!important}
+ .dash-hero-metrics strong,.dash-hero-metrics .dash-total{font-size:20px}
+ .dash-hero-top .dash-chart{border-top:0;padding-top:4px}
+ .dash-chart-heading>div:first-child{display:none}
+ .dash-chart-summary{margin:8px 0}
+ .dash-chart-svg{max-height:110px}
+ .mobile-holding-name small,.mobile-holding-market,.mobile-holding-daily.neutral,.mobile-holding-value>small:last-child{color:#aebfc6}
+ #dashboard-detail .market-sample-change,#dashboard-detail .market-scale,#dashboard-detail .market-marker-legend,#dashboard-detail .market-session{display:none}
+ #dashboard-detail .market-plot svg{height:clamp(120px,37vw,170px)}
+ #dashboard-detail .market-hover{left:50%;top:6px;transform:translateX(-50%);font-size:11px;white-space:nowrap}
+ #dashboard-detail > .position-actions-mobile{border:1px solid #476d72;border-radius:20px;background:#122a34;box-shadow:0 7px 22px #0008;position:relative;z-index:2;margin:4px 4px calc(4px + env(safe-area-inset-bottom,0px));padding:8px;gap:8px}
+ #dashboard-detail > .position-actions-mobile button{flex:1;min-width:0}
+ #dashboard-detail .dashboard-detail-body{padding-bottom:16px}
+}
+.position-daily-source{display:block;margin-top:4px;color:#aebfc6;font-size:10px;font-weight:400;line-height:1.3}
