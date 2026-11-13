@@ -117,14 +117,17 @@ def holding_candidate(connect,user_id,data):
     if data.get('choose') is True or data.get('asset_id') not in (None,aid):raise MarketError('Kursgrafen skal bruge beholdningens Pluto-aktiv.')
     return {'candidate_id':f'holding:{pid}:{aid}','ticker':matches[0].get('ticker') or '', 'company_name':matches[0].get('name') or '', 'asset_id':aid}
 
-def enrich_intraday(connect,user_id,result,now=None,feed_factory=None):
-    """Add real one-minute bars only for an independently verified feed link."""
+def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='day'):
+    """Add source-labelled, completed EODHD bars for a verified instrument."""
     import os
     now=now or datetime.now(timezone.utc)
+    configs={'day':('1m',86400,60),'week':('1m',7*86400,60),'month':('5m',30*86400,300),'year':('1h',365*86400,3600)}
+    if period not in configs:raise MarketError('Ukendt grafperiode.')
+    interval,window,bar_seconds=configs[period]
     result=dict(result)
     def unavailable(status):
-        result.pop('intraday_series',None);result.pop('intraday_source',None);result.pop('intraday_symbol',None)
-        result['intraday_status']=status;result['intraday_checked_at']=now.timestamp();return result
+        for key in ('intraday_series','intraday_source','intraday_symbol','intraday_cache','intraday_interval'):result.pop(key,None)
+        result['intraday_period']=period;result['intraday_status']=status;result['intraday_checked_at']=now.timestamp();return result
     if not os.environ.get('ESCAPE_EODHD_API_KEY','').strip() or os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':
         return unavailable('EODHD_NOT_ENABLED')
     try:
@@ -135,30 +138,36 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None):
         link=verified_existing_feed(connect,user_id,holding,now)
         if not link or not link.get('provider_symbol'):
             return unavailable('IDENTITY_UNVERIFIED')
-        checked=result.get('intraday_checked_at')
-        if isinstance(checked,(int,float)) and 0<=now.timestamp()-checked<300 and result.get('intraday_symbol')==link['provider_symbol']:return result
-        result.pop('intraday_series',None);result.pop('intraday_source',None)
-        result['intraday_checked_at']=now.timestamp();result['intraday_symbol']=link['provider_symbol']
+        symbol=link['provider_symbol'];cache=dict(result.get('intraday_cache') or {})
+        cached=cache.get(period) or {}
+        checked=cached.get('checked_at')
+        if cached.get('symbol')==symbol and isinstance(checked,(int,float)) and 0<=now.timestamp()-checked<300:
+            for key in ('intraday_series','intraday_source'):result.pop(key,None)
+            result.update(cached['fields']);result['intraday_cache']=cache
+            return result
+        for key in ('intraday_series','intraday_source'):result.pop(key,None)
+        result.update(intraday_period=period,intraday_interval=interval,intraday_checked_at=now.timestamp(),intraday_symbol=symbol)
         if feed_factory is None:
             from hotwatch_adapters import EODHDAdapter
             feed_factory=lambda:EODHDAdapter(connect,user_id).feeds()
-        response=feed_factory().intraday(link['provider_symbol'],interval='1m',start=int(now.timestamp()-86400),end=int(now.timestamp()),max_points=None)
+        response=feed_factory().intraday(symbol,interval=interval,start=int(now.timestamp()-window),end=int(now.timestamp()),max_points=None)
         if response.get('status')!='OK' or not isinstance(response.get('bars'),list):
             result['intraday_status']='SOURCE_UNAVAILABLE';return result
         series=[]
         for row in response['bars']:
             at=stamp(row.get('bar_open_at'));value=decimal(row.get('close'),positive=True)
-            if value is None or at.timestamp()<=now.timestamp()-86400 or at.timestamp()+60>now.timestamp():continue
+            if value is None or at.timestamp()<=now.timestamp()-window or at.timestamp()+bar_seconds>now.timestamp():continue
             series.append({'timestamp':at.isoformat(timespec='milliseconds'),'source_timestamp':row.get('bar_open_at'),'epoch':at.timestamp(),'price':value,'date':at.astimezone(COPENHAGEN).date().isoformat()})
         series.sort(key=lambda p:p['epoch'])
         if len({p['epoch'] for p in series})!=len(series):
             result['intraday_status']='SOURCE_INCONSISTENT';return result
         pluto=result.get('series') or []
-        # Compare point counts within the same actual 24-hour observation window.
-        recent=[p for p in pluto if isinstance(p,dict) and isinstance(p.get('epoch'),(int,float)) and now.timestamp()-86400<p['epoch']<=now.timestamp()]
+        recent=[p for p in pluto if isinstance(p,dict) and isinstance(p.get('epoch'),(int,float)) and now.timestamp()-window<p['epoch']<=now.timestamp()]
         if len(series)>len(recent) and len(series)>1:
-            result['intraday_series']=series;result['intraday_source']='EODHD · 1-minutsbarer';result['intraday_status']='OK'
+            result['intraday_series']=series;result['intraday_source']='EODHD';result['intraday_status']='OK'
         else:result['intraday_status']='PLUTO_AS_DETAILED'
+        fields={k:result[k] for k in ('intraday_period','intraday_interval','intraday_checked_at','intraday_symbol','intraday_status','intraday_series','intraday_source') if k in result}
+        cache[period]={'symbol':symbol,'checked_at':now.timestamp(),'fields':fields};result['intraday_cache']=cache
         return result
     except Exception:
         return unavailable('SOURCE_UNAVAILABLE')
@@ -166,7 +175,7 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None):
 def quote(connect,user_id,data,factory=None):
     requested_period=data.get('period','ONE_WEEK')
     if requested_period not in ('ONE_WEEK','ONE_MONTH','ONE_YEAR'):raise MarketError('Ukendt grafperiode.')
-    c=holding_candidate(connect,user_id,data) if 'holding_portfolio_id' in data else candidate(connect,user_id,data);ticker=c['ticker'].strip().upper();selected=data.get('asset_id')
+    chart_period=data.get('include_intraday',False)\n    if chart_period is True:chart_period='day'\n    if chart_period not in (False,None,'day','week','month','year'):raise MarketError('Ukendt grafperiode.')\n    expected_chart={'day':'ONE_WEEK','week':'ONE_WEEK','month':'ONE_MONTH','year':'ONE_YEAR'}\n    if chart_period and expected_chart[chart_period]!=requested_period:raise MarketError('Uoverensstemmende grafperiode.')\n    c=holding_candidate(connect,user_id,data) if 'holding_portfolio_id' in data else candidate(connect,user_id,data);ticker=c['ticker'].strip().upper();selected=data.get('asset_id')
     if selected is not None and (not isinstance(selected,str) or not 1<=len(selected)<=200):raise MarketError('Vælg et gyldigt aktiv fra Pluto-søgningen.')
     with connect() as db:link=db.execute('SELECT * FROM market_asset_links WHERE user_id=? AND candidate_id=?',(user_id,c['candidate_id'])).fetchone()
     aid=link['asset_id'] if link and link['expected_ticker']==ticker and not selected and data.get('choose') is not True else None
@@ -201,10 +210,10 @@ def quote(connect,user_id,data,factory=None):
         if cached and cached['attempted']>time.time()-wait:
             if cached['payload']:
                 response=json.loads(cached['payload']);response['cached']=True;response['last_error']=cached['last_error'];db.execute('INSERT INTO market_asset_links VALUES(?,?,?,?) ON CONFLICT(user_id,candidate_id) DO UPDATE SET expected_ticker=excluded.expected_ticker,asset_id=excluded.asset_id',(user_id,c['candidate_id'],ticker,aid));db.commit()
-                if requested_period=='ONE_WEEK' and data.get('include_intraday') is True and not data.get('is_test',False):
-                    response=enrich_intraday(connect,user_id,response)
+                if chart_period and not data.get('is_test',False):
+                    response=enrich_intraday(connect,user_id,response,period=chart_period)
                     persisted={k:v for k,v in response.items() if k not in ('cached','last_error')}
-                    db.execute('UPDATE market_asset_cache SET payload=? WHERE user_id=? AND asset_id=? AND fetched IS ? AND attempted=?',(json.dumps(persisted),user_id,aid,cached['fetched'],cached['attempted']))
+                    db.execute('UPDATE '+table+' SET payload=? WHERE '+where+' AND fetched IS ? AND attempted=?',(json.dumps(persisted),*cache_key,cached['fetched'],cached['attempted']))
                 return response
             if not cached['last_error'] and cached['attempted']>time.time()-30:return {'pending':True,'retry_after':2}
             raise MarketError(cached['last_error'] or 'Kursopslaget er allerede i gang. Prøv igen om lidt.')
@@ -214,7 +223,7 @@ def quote(connect,user_id,data,factory=None):
         if cl is None:cl,tools=trade_service.client(connect,user_id,factory)
         raw=trade_service.call(cl,tools,'get_asset',{'assetId':aid,'period':requested_period})
         result=normalized(raw,aid,expected_period=requested_period)
-        if requested_period=='ONE_WEEK' and data.get('include_intraday') is True and not data.get('is_test',False):result=enrich_intraday(connect,user_id,result)
+        if chart_period and not data.get('is_test',False):result=enrich_intraday(connect,user_id,result,period=chart_period)
         with connect() as db:
             db.execute('INSERT INTO market_asset_links VALUES(?,?,?,?) ON CONFLICT(user_id,candidate_id) DO UPDATE SET expected_ticker=excluded.expected_ticker,asset_id=excluded.asset_id',(user_id,c['candidate_id'],ticker,aid))
             db.execute('UPDATE '+table+' SET payload=?,fetched=?,last_error=NULL WHERE '+where,(json.dumps(result),time.time(),*cache_key))
