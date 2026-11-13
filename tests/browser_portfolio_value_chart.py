@@ -29,13 +29,16 @@ def main():
      if(!doc.querySelector('.dash-chart-scale')||!doc.querySelector('.dash-chart-dates').textContent.includes('24.00'))throw Error('Day scale is missing');
      const negative=new DOMParser().parseFromString(window.DashboardUI.resultShare({amount:'-163.94',currency:'DKK'},{amount:'2836.06',currency:'DKK'}),'text/html').body.firstElementChild;if(!negative||!negative.classList.contains('negative')||!negative.textContent.includes('-5,78 %'))throw Error('Negative result share incorrect');if(window.DashboardUI.resultShare({amount:'1',currency:'EUR'},{amount:'100',currency:'DKK'})||window.DashboardUI.resultShare({amount:'1',currency:'DKK'},{amount:'0',currency:'DKK'}))throw Error('Invalid comparison shown');
      const marker=doc.querySelector('.dash-chart-latest-time');if(!marker||!marker.textContent.includes('00.10')||marker.textContent.includes('00.10.00'))throw Error('Last timestamp is not shown in hours and minutes');
-     if(marker.tagName!=='SPAN'||!marker.style.left.includes('clamp')||!marker.style.top.endsWith('%'))throw Error('Last timestamp is not positioned as readable text');
-     const later=chart([points[0],{...points[1],at:'2026-11-08T17:00:00Z'}]);if(later.querySelector('.dash-chart-latest-time').style.left===marker.style.left)throw Error('Time does not follow later chart point');
+     if(marker.tagName!=='SPAN'||!marker.hasAttribute('data-chart-left')||!marker.hasAttribute('data-chart-top'))throw Error('Last timestamp is not positioned as readable text');
+     const later=chart([points[0],{...points[1],at:'2026-11-08T17:00:00Z'}]);if(later.querySelector('.dash-chart-latest-time').dataset.chartLeft===marker.dataset.chartLeft)throw Error('Time does not follow later chart point');
      if(chart(points.slice(0,1)).querySelectorAll('.dash-chart-point').length!==1)throw Error('First daily observation not displayed');
     }''')
     page.evaluate('''() => {
      const points=[{at:'2026-11-08T08:00:00Z',reported_result:'-169',currency:'DKK'},{at:'2026-11-08T14:00:00Z',reported_result:'-168',currency:'DKK'}];
      document.querySelector('#dashboard-value-chart').innerHTML=window.DashboardUI.portfolioChart({portfolio_value_history:{day_start:'2026-11-07T23:00:00Z',day_end:'2026-11-08T23:00:00Z',periods:{day:points}}});
+     ''')
+    page.wait_for_function("document.querySelector('.dash-chart-latest-time').style.left !== ''")
+    page.evaluate('''() => {
      const dot=document.querySelectorAll('.dash-chart-point')[1].getBoundingClientRect(),label=document.querySelector('.dash-chart-latest-time').getBoundingClientRect();
      if(Math.abs((label.left+label.right-dot.left-dot.right)/2)>2||label.bottom>dot.top+3)throw Error('Visible label is not above the latest point');
     }''')
