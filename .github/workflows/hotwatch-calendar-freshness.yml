@@ -1,0 +1,24 @@
+name: HOT WATCH calendar freshness checks
+on:
+  pull_request:
+    branches: [codex/issue57-integrated-review]
+permissions:
+  contents: read
+jobs:
+  calendar:
+    if: github.event.pull_request.head.ref == 'codex/issue14-calendar-freshness-4'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - name: Calendar freshness and existing feed and engine regressions
+        run: |
+          python -m unittest discover -s tests -p test_calendar_refresh.py -v
+          python -m unittest discover -s tests -p test_eodhd_feeds.py
+          python -m unittest discover -s tests -p test_hotwatch_engine.py
