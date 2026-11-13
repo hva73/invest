@@ -73,7 +73,7 @@ def portfolio_history_page(c,uid,period,now,before=None,asof=None,scope=None,lim
  if after is not None:sql+=' AND observed_epoch > ?';params.append(after)
  params.append(limit+1);rows=c.execute(sql+(' ORDER BY observed_epoch ASC LIMIT ?' if after is not None else ' ORDER BY observed_epoch DESC LIMIT ?'),params).fetchall()
  more=len(rows)>limit;rows=rows[:limit];ordered=rows if after is not None else reversed(rows)
- points=[{'at':r['observed'],'amount':r['amount'],'currency':r['currency'],'source_time':r['source_time'],'reported_result':r['reported_result']} for r in ordered]
+ points=[{'at':r['observed'],'epoch':r['observed_epoch'],'amount':r['amount'],'currency':r['currency'],'source_time':r['source_time'],'reported_result':r['reported_result']} for r in ordered]
  return {'points':points,'total':total,'next_before':rows[-1]['observed_epoch'] if more and after is None else None,'next_since':rows[-1]['observed_epoch'] if more and after is not None else None,'scope':current['scope'],'asof':upper,'start':begin}
 
 def portfolio_value_history(c,uid,now):
