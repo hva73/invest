@@ -10,7 +10,7 @@ import nordicway_deploy_client as client
 class ClientTests(unittest.TestCase):
     def setUp(self):
         self.env = {'ESCAPE_RELEASE_SHA': 'a' * 40, 'ESCAPE_CPANEL_API_TOKEN': 'test_token_12345',
-                    'ESCAPE_DEPLOY_AUTHORIZED': '1', 'SSH_AUTH_SOCK': '/tmp/agent',
+                    'ESCAPE_DEPLOY_AUTHORIZED': '1', 'ESCAPE_OWNER_APPROVAL_PROOF': json.dumps({'nonce':'1'*32,'expires':2000,'mac':'a'*64}), 'SSH_AUTH_SOCK': '/tmp/agent',
                     'NORDICWAY_KNOWN_HOST': 'hostkey', 'NORDICWAY_VERIFIED_FINGERPRINT': 'fingerprint'}
         self.reply = {'operation': 'deploy', 'status': 'ok', 'stage': 'complete',
                       'service_restored': True, 'recovery_required': False, 'backup_cleanup': 'ok'}
@@ -23,7 +23,26 @@ class ClientTests(unittest.TestCase):
         args, kwargs = send.call_args
         self.assertEqual(args[0][-1], 'escape-deploy-v1 deploy ' + 'a' * 40)
         self.assertNotIn(self.env['ESCAPE_CPANEL_API_TOKEN'], repr(args))
-        self.assertEqual(json.loads(kwargs['input']), {'cpanel_token': self.env['ESCAPE_CPANEL_API_TOKEN']})
+        payload = json.loads(kwargs['input'])
+        self.assertEqual(payload['cpanel_token'], self.env['ESCAPE_CPANEL_API_TOKEN'])
+        self.assertEqual(set(payload['approval']), {'nonce','expires','mac'})
+
+    def test_app_deploy_sends_summary_and_token_only_on_stdin(self):
+        self.env.update(ESCAPE_DEPLOY_OPERATION='app-deploy',ESCAPE_RELEASE_SUMMARY='Mobil og data')
+        reply={'operation':'app-deploy','status':'completed','sha':'a'*40}
+        send=Mock(return_value=SimpleNamespace(returncode=0,stdout=json.dumps(reply).encode()))
+        with patch.object(client,'verify',return_value='host key\n'):
+            result=client.run(self.env,send)
+        self.assertEqual(result['status'],'ok')
+        args,kwargs=send.call_args
+        self.assertEqual(args[0][-1],'escape-deploy-v1 app-deploy '+'a'*40)
+        self.assertEqual(json.loads(kwargs['input']),{'cpanel_token':'test_token_12345','summary':'Mobil og data'})
+        self.assertNotIn('test_token_12345',repr(args))
+        self.assertEqual(kwargs['timeout'],1740)
+        for state in ('expired','unavailable','recovery','failed'):
+            reply['status']=state;send.return_value=SimpleNamespace(returncode=1,stdout=json.dumps(reply).encode())
+            with patch.object(client,'verify',return_value='host key\n'):
+                self.assertEqual(client.run(self.env,send)['status'],state)
 
     def test_cleanup_warning_is_reported_without_mislabeling_release(self):
         self.reply['backup_cleanup'] = 'failed'
@@ -86,6 +105,16 @@ class ClientTests(unittest.TestCase):
         args, kwargs = send.call_args
         self.assertEqual(args[0][-1], 'escape-deploy-v1 resume ' + 'a' * 40)
         self.assertEqual(kwargs['input'], b'')
+
+    def test_app_resume_is_fixed_and_sends_no_token(self):
+        self.env['ESCAPE_DEPLOY_OPERATION']='app-resume'
+        reply={'operation':'resume','status':'ok','recovery_required':False,'backup_cleanup':'ok'}
+        send=Mock(return_value=SimpleNamespace(returncode=0,stdout=json.dumps(reply).encode()))
+        with patch.object(client,'verify',return_value='host key\n'):
+            self.assertEqual(client.run(self.env,send),reply)
+        args,kwargs=send.call_args
+        self.assertEqual(args[0][-1],'escape-deploy-v1 app-resume '+'a'*40)
+        self.assertEqual(kwargs['input'],b'')
 
     def test_write_probe_is_fixed_and_needs_no_release_or_token(self):
         self.env['ESCAPE_DEPLOY_OPERATION'] = 'write-probe'

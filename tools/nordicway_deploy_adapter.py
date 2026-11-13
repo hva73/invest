@@ -169,6 +169,9 @@ class Adapter:
                     raise ValueError('quiescence_unverified')
             else:
                 reason = nordicway_writer_check.wait_for_quiescence(self.target / 'var' / 'escape.db')
+                if reason == 'passenger_active':
+                    if nordicway_writer_check.stop_orphaned_lswsgi(self.target, self.service):
+                        reason = nordicway_writer_check.wait_for_quiescence(self.target / 'var' / 'escape.db')
                 if reason is not None:
                     raise ValueError(reason)
             yield
@@ -221,3 +224,4 @@ class Adapter:
                 or nordicway_deploy_health.wait_recovery(self.target, self.started_at) is not True
                 or self._motor_state() != self.motor_state):
             raise ValueError('recovery_health_unverified')
+

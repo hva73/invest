@@ -1,4 +1,8 @@
 import io
+import hashlib
+import hmac
+import json
+import time
 import multiprocessing
 import os
 import tempfile
@@ -7,7 +11,13 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import nordicway_deploy_runner as runner
+import nordicway_owner_approval as owner
+import nordicway_deploy_client as client
+import nordicway_deploy_request as request_parser
+from types import SimpleNamespace
 from nordicway_deploy_sequence import Outcome
+# Base-branch CI already runs this module; include approval tests in that job.
+from tests.test_nordicway_owner_approval import OwnerApprovalTests
 
 SHA = 'a' * 40
 TOKEN = 'test_token_12345'
@@ -16,8 +26,30 @@ TOKEN = 'test_token_12345'
 def crash_during_deploy(bridge):
     def die(adapter, sha):
         os._exit(23)
-    runner.run(SHA, TOKEN, bridge=Path(bridge), adapter_factory=Mock(), deploy=die,
+    runner.run(SHA, TOKEN, bridge=Path(bridge), authorization_lock=Path(bridge)/'test-lock', adapter_factory=Mock(), deploy=die,
                prepare=lambda checkout, sha: None)
+
+
+def crash_after_marker_before_ticket_consumption(bridge):
+    original = Path.unlink
+    def die(path, *args, **kwargs):
+        if path.name == 'approval-ticket.json': os._exit(24)
+        return original(path, *args, **kwargs)
+    with patch.object(Path, 'unlink', die):
+        runner.run(SHA, TOKEN, bridge=Path(bridge), authorization_lock=Path(bridge)/'test-lock',
+                   adapter_factory=Mock(), prepare=lambda *_: None)
+
+
+def crash_before_marker(bridge, signed):
+    with patch.object(runner, '_claim', side_effect=lambda *_: os._exit(25)):
+        runner.run(SHA, TOKEN, bridge=Path(bridge), authorization_lock=Path(bridge)/'test-lock',
+                   owner_request=signed, adapter_factory=Mock(), prepare=lambda *_: None)
+
+
+def hold_authorization_lock(lock, ready, release):
+    with owner.deployment_lock(lock):
+        ready.set()
+        release.wait(5)
 
 
 class RunnerTests(unittest.TestCase):
@@ -26,13 +58,21 @@ class RunnerTests(unittest.TestCase):
         self.bridge = Path(self.temp.name)
         (self.bridge / 'approved-sha').write_text(SHA + '\n')
         (self.bridge / 'approved-sha').chmod(0o600)
+        (self.bridge / 'test-lock').touch(mode=0o600)
+        self.ticket()
 
     def tearDown(self):
         self.temp.cleanup()
 
+    def ticket(self, sha=SHA):
+        path = self.bridge / 'approval-ticket.json'
+        path.write_text(json.dumps({'sha':sha,'nonce':'1'*32,'expires':int(time.time())+60}))
+        path.chmod(0o600)
+
     def run_deploy(self, result):
+        if not (self.bridge / 'approval-ticket.json').exists(): self.ticket()
         factory = Mock()
-        response = runner.run(SHA, TOKEN, bridge=self.bridge, adapter_factory=factory,
+        response = runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=factory,
                               deploy=lambda adapter, sha: result, prepare=lambda checkout, sha: None)
         self.assertEqual(factory.call_args.kwargs['cpanel_token'], TOKEN)
         self.assertNotIn(TOKEN, str(response))
@@ -87,7 +127,7 @@ class RunnerTests(unittest.TestCase):
         def failed_checkout(checkout, sha):
             raise ValueError('checkout_not_clean')
         factory = Mock()
-        result = runner.run(SHA, TOKEN, bridge=self.bridge, adapter_factory=factory,
+        result = runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=factory,
                             prepare=failed_checkout)
         self.assertEqual(result['status'], 'failed')
         self.assertFalse(result['recovery_required'])
@@ -108,17 +148,167 @@ class RunnerTests(unittest.TestCase):
         for approval in ('b' * 40, 'HEAD', SHA + ';id'):
             (self.bridge / 'approved-sha').write_text(approval)
             with self.assertRaises(ValueError):
-                runner.run(SHA, TOKEN, bridge=self.bridge, adapter_factory=factory)
+                runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=factory)
         self.assertFalse(factory.called)
         (self.bridge / 'approved-sha').write_text(SHA)
         (self.bridge / 'approved-sha').chmod(0o644)
         with self.assertRaises(ValueError):
-            runner.run(SHA, TOKEN, bridge=self.bridge, adapter_factory=factory)
+            runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=factory)
+
+    def test_concurrent_authorization_lock_blocks_runner_before_claim(self):
+        ctx = multiprocessing.get_context('fork')
+        ready, release = ctx.Event(), ctx.Event()
+        child = ctx.Process(target=hold_authorization_lock,
+                            args=(self.bridge/'test-lock', ready, release))
+        child.start()
+        try:
+            self.assertTrue(ready.wait(5))
+            with self.assertRaises(BlockingIOError):
+                self.run_deploy(Outcome('ok', 'complete', True))
+            self.assertFalse((self.bridge/'deployment-incomplete.json').exists())
+        finally:
+            release.set()
+            child.join(5)
+            if child.is_alive(): child.terminate(); child.join()
+        self.assertEqual(child.exitcode, 0)
+        self.assertEqual(self.run_deploy(Outcome('ok', 'complete', True))['status'], 'ok')
+
+    def test_crash_after_claim_blocks_replay(self):
+        child = multiprocessing.get_context('fork').Process(
+            target=crash_after_marker_before_ticket_consumption, args=(str(self.bridge),))
+        child.start(); child.join(5)
+        self.assertEqual(child.exitcode, 24)
+        self.assertTrue((self.bridge/'deployment-incomplete.json').exists())
+        self.assertTrue((self.bridge/'approval-ticket.json').exists())
+        with self.assertRaises(FileExistsError):
+            runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=Mock())
+
+    def test_signed_approval_to_claim_to_complete(self):
+        key = b'k'*32
+        keyfile = self.bridge/'owner-approval-key'
+        keyfile.write_bytes(key); keyfile.chmod(0o600)
+        nonce, expires = '2'*32, int(time.time())+60
+        request = {'nonce':nonce, 'expires':expires,
+                   'mac':hmac.new(key, owner.message(SHA,nonce,expires), hashlib.sha256).hexdigest()}
+        owner.approve(self.bridge, self.bridge/'test-lock', SHA, request)
+        result = runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock',
+                            adapter_factory=Mock(), deploy=lambda *_: Outcome('ok','complete',True),
+                            prepare=lambda *_: None)
+        self.assertEqual(result['status'], 'ok')
+        self.assertFalse((self.bridge/'approval-ticket.json').exists())
+        with self.assertRaises(FileExistsError):
+            owner.approve(self.bridge, self.bridge/'test-lock', SHA, request)
+        with self.assertRaises(FileNotFoundError):
+            runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=Mock())
+
+    def test_client_payload_to_runner_is_sha_bound_end_to_end(self):
+        key = bytes.fromhex('ab'*32)
+        keyfile = self.bridge/'owner-approval-key'
+        keyfile.write_bytes(key); keyfile.chmod(0o600)
+        proof = owner.create_proof(SHA, key)
+        event = {'action':'created','sender':{'id':request_parser.OWNER},
+                 'issue':{'number':16},'comment':{'user':{'id':request_parser.OWNER},
+                 'author_association':'OWNER', 'body':request_parser.PREFIX +
+                 json.dumps({'operation':'deploy','sha':SHA,'approval':proof})}}
+        parsed = request_parser.parse(event, 'issue_comment', request_parser.BRANCH, str(request_parser.OWNER))
+        self.assertEqual(parsed['approval'], proof)
+        env = {'ESCAPE_RELEASE_SHA': SHA, 'ESCAPE_CPANEL_API_TOKEN': TOKEN,
+               'ESCAPE_DEPLOY_AUTHORIZED':'1', 'ESCAPE_OWNER_APPROVAL_PROOF':json.dumps(parsed['approval']),
+               'SSH_AUTH_SOCK':'/tmp/agent', 'NORDICWAY_KNOWN_HOST':'hostkey',
+               'NORDICWAY_VERIFIED_FINGERPRINT':'fingerprint'}
+        real_run = runner.run
+        def run_in_test(sha, token, owner_request):
+            return real_run(sha, token, bridge=self.bridge, authorization_lock=self.bridge/'test-lock',
+                            owner_request=owner_request, adapter_factory=Mock(),
+                            deploy=lambda *_: Outcome('ok','complete',True), prepare=lambda *_: None)
+        def transport(command, **kwargs):
+            self.assertEqual(command[-1], 'escape-deploy-v1 deploy '+SHA)
+            with patch.object(runner, 'run', side_effect=run_in_test):
+                result = runner.run_request(SHA, io.BytesIO(kwargs['input']))
+            return SimpleNamespace(returncode=0, stdout=json.dumps(result).encode())
+        with patch.object(client, 'verify', return_value='host key\n'):
+            self.assertEqual(client.run(env, transport)['status'], 'ok')
+        self.assertFalse((self.bridge/'approval-ticket.json').exists())
+
+    def test_app_approval_through_request_client_guard_and_runner(self):
+        import sqlite3
+        import release_approval
+        import nordicway_app_release as app_bridge
+        import nordicway_deploy_guard as guard
+        (self.bridge/'owner-approval-key').write_bytes(b'k'*32)
+        (self.bridge/'owner-approval-key').chmod(0o600)
+        db=self.bridge/'synthetic.db'
+        def connect():return sqlite3.connect(db,timeout=5)
+        with connect() as c:
+            c.execute('CREATE TABLE users(id INTEGER,username TEXT,role TEXT,active INTEGER)')
+            c.execute("INSERT INTO users VALUES(7,'owner','admin',1)")
+            release_approval.init(c)
+        event={'action':'created','sender':{'id':request_parser.OWNER},'issue':{'number':16},
+               'comment':{'user':{'id':request_parser.OWNER},'author_association':'OWNER',
+                          'body':request_parser.PREFIX+json.dumps({'operation':'app-deploy','sha':SHA,'summary':'Mobil og data'})}}
+        parsed=request_parser.parse(event,'issue_comment',request_parser.BRANCH,str(request_parser.OWNER))
+        env={'ESCAPE_RELEASE_SHA':SHA,'ESCAPE_CPANEL_API_TOKEN':TOKEN,'ESCAPE_DEPLOY_OPERATION':'app-deploy',
+             'ESCAPE_RELEASE_SUMMARY':parsed['summary'],'ESCAPE_DEPLOY_AUTHORIZED':'1','SSH_AUTH_SOCK':'/tmp/agent',
+             'NORDICWAY_KNOWN_HOST':'hostkey','NORDICWAY_VERIFIED_FINGERPRINT':'fingerprint'}
+        calls=[]
+        def notify(uid):
+            candidate=release_approval.pending(connect,uid)
+            release_approval.approve(connect,candidate['id'],candidate['sha'],uid)
+        def actual_runner(sha,token,owner_request):
+            calls.append(sha)
+            return runner.run(sha,token,bridge=self.bridge,authorization_lock=self.bridge/'test-lock',
+                              owner_request=owner_request,adapter_factory=Mock(),
+                              deploy=lambda *_:Outcome('ok','complete',True),prepare=lambda *_:None)
+        def transport(command,**kwargs):
+            def app_run(sha):
+                return app_bridge.run_request(sha,io.BytesIO(kwargs['input']),connect,self.bridge,
+                    runner=actual_runner,create_proof=owner.create_proof,notify=notify)
+            result=guard.dispatch(command[-1],app_runner=app_run)
+            return SimpleNamespace(returncode=guard.exit_code(result),stdout=json.dumps(result).encode())
+        with patch.object(client,'verify',return_value='host key\n'):
+            result=client.run(env,transport)
+        self.assertEqual(result,{'operation':'app-deploy','status':'ok','sha':SHA})
+        self.assertEqual(calls,[SHA]);self.assertNotIn(TOKEN,str(result))
+        self.assertFalse((self.bridge/'deployment-incomplete.json').exists())
+
+    def test_crash_after_authorization_before_marker_requires_new_proof(self):
+        key = b'k'*32
+        keyfile = self.bridge/'owner-approval-key'
+        keyfile.write_bytes(key); keyfile.chmod(0o600)
+        signed = owner.create_proof(SHA, key)
+        child = multiprocessing.get_context('fork').Process(target=crash_before_marker,
+                    args=(str(self.bridge), signed))
+        child.start(); child.join(5)
+        self.assertEqual(child.exitcode, 25)
+        self.assertFalse((self.bridge/'deployment-incomplete.json').exists())
+        with self.assertRaises(FileExistsError):
+            runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock',
+                       owner_request=signed, adapter_factory=Mock())
+        fresh = owner.create_proof(SHA, key)
+        result = runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock',
+                            owner_request=fresh, adapter_factory=Mock(),
+                            deploy=lambda *_: Outcome('ok','complete',True), prepare=lambda *_: None)
+        self.assertEqual(result['status'], 'ok')
+
+    def test_ticket_consumed_and_cannot_replay(self):
+        result = runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock',
+                            adapter_factory=Mock(), deploy=lambda *_: Outcome('ok', 'complete', True),
+                            prepare=lambda *_: None)
+        self.assertEqual(result['status'], 'ok')
+        self.assertFalse((self.bridge/'approval-ticket.json').exists())
+        with self.assertRaises(FileNotFoundError):
+            runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=Mock())
+
+    def test_ticket_for_other_sha_is_rejected_before_claim(self):
+        self.ticket('b'*40)
+        with self.assertRaisesRegex(ValueError, 'invalid_approval_ticket'):
+            runner.run(SHA, TOKEN, bridge=self.bridge, authorization_lock=self.bridge/'test-lock', adapter_factory=Mock())
+        self.assertFalse((self.bridge/'deployment-incomplete.json').exists())
 
     def test_request_is_bounded_and_has_only_token(self):
         with patch.object(runner, 'run', return_value={'status': 'ok'}) as call:
-            self.assertEqual(runner.run_request(SHA, io.BytesIO(b'{"cpanel_token":"test_token_12345"}'))['status'], 'ok')
-            call.assert_called_once_with(SHA, TOKEN)
+            self.assertEqual(runner.run_request(SHA, io.BytesIO(b'{"cpanel_token":"test_token_12345","approval":{}}'))['status'], 'ok')
+            call.assert_called_once_with(SHA, TOKEN, owner_request={})
         for data in (b'{}', b'{"cpanel_token":"x", "cmd":"id"}', b'x' * 4097):
             with self.assertRaises(ValueError):
                 runner.run_request(SHA, io.BytesIO(data))

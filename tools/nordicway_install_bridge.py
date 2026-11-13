@@ -17,12 +17,17 @@ HOME = Path('/home/nordicr4')
 BRIDGE = HOME / '.escape_deploy_bridge'
 CHECKOUT = HOME / 'escape_deploy/invest'
 OLD_GUARD_SHA256 = '0f60040c9ed3c8fbf9f3f5d29b74ab1f875b8b3373adf106810f7953ad6ea20d'
+# Reviewed guard from the previously installed ca06628/c1b6db6 bridge.
+DEPLOY_GUARD_SHA256 = 'a3b6cec8d562d5a28ae4606c875708842671a9cdb343bbd6cd98fd73c5928ca5'
 MODULES = (
     'tools/nordicway_autostart.py',
     'tools/nordicway_deploy_adapter.py',
     'tools/nordicway_deploy_guard.py',
     'tools/nordicway_deploy_health.py',
     'tools/nordicway_deploy_runner.py',
+    'tools/nordicway_owner_approval.py',
+    'tools/nordicway_app_release.py',
+    'tools/nordicway_app_release_entry.py',
     'tools/nordicway_deploy_sequence.py',
     'tools/nordicway_quiescence.py',
     'tools/nordicway_readonly_diagnostics.py',
@@ -90,6 +95,34 @@ def _safe_file(path):
     return True
 
 
+
+def _ensure_owner_key(bridge):
+    """Create the private bridge key once, retaining an existing safe key."""
+    path = bridge / 'owner-approval-key'
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0)
+    try:
+        fd = os.open(path, flags, 0o600)
+    except FileExistsError:
+        fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0))
+        try:
+            info = os.fstat(fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                    or info.st_mode & 0o077 or info.st_nlink != 1 or info.st_size != 32
+                    or len(os.read(fd, 33)) != 32):
+                raise ValueError('unsafe_owner_key')
+        finally:
+            os.close(fd)
+        return
+    try:
+        with os.fdopen(fd, 'wb') as output:
+            output.write(os.urandom(32))
+            output.flush()
+            os.fsync(output.fileno())
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+
+
 def install(checkout, bridge, sha):
     """Stage all module bytes before touching any installed module.
 
@@ -106,7 +139,7 @@ def install(checkout, bridge, sha):
         raise ValueError('guard_missing')
     current_guard_hash = _digest(guard.read_bytes())
     next_guard_hash = _digest(files['nordicway_deploy_guard.py'])
-    if current_guard_hash not in (OLD_GUARD_SHA256, next_guard_hash):
+    if current_guard_hash not in (OLD_GUARD_SHA256, DEPLOY_GUARD_SHA256, next_guard_hash):
         raise ValueError('unexpected_guard_version')
 
     for name in files:
@@ -123,6 +156,8 @@ def install(checkout, bridge, sha):
                 os.fsync(output.fileno())
             if _digest((staging / name).read_bytes()) != _digest(data):
                 raise ValueError('stage_corrupt')
+
+        _ensure_owner_key(bridge)
 
         # We keep a copy of every previous module for manual recovery, including
         # the guard; nothing belonging to the application is moved or deleted.

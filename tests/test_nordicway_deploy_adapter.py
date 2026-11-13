@@ -1,4 +1,6 @@
 import os
+import json
+import time
 import sqlite3
 import subprocess
 import tempfile
@@ -49,6 +51,11 @@ class AdapterIntegration(unittest.TestCase):
         (self.app / 'app.py').write_text('old')
         (self.app / 'BUILD_COMMIT').write_text('0' * 40 + '\n')
         self.service = FakeService()
+
+    def ticket(self, bridge):
+        path = bridge / 'approval-ticket.json'
+        path.write_text(json.dumps({'sha':self.sha,'nonce':'1'*32,'expires':int(time.time())+60}))
+        path.chmod(0o600)
 
     def tearDown(self): self.temp.cleanup()
     def git(self, *args):
@@ -103,6 +110,7 @@ class AdapterIntegration(unittest.TestCase):
         approval = bridge / 'approved-sha'
         approval.write_text(self.sha + '\n')
         approval.chmod(0o600)
+        self.ticket(bridge)
         def factory(checkout, target, approved, required, quiescence, health, cpanel_token):
             self.assertEqual(cpanel_token, 'test_token_12345')
             return concrete.Adapter(checkout, target, approved, required,
@@ -144,6 +152,7 @@ class AdapterIntegration(unittest.TestCase):
         approval = bridge / 'approved-sha'
         approval.write_text(self.sha + '\n')
         approval.chmod(0o600)
+        self.ticket(bridge)
         def factory(checkout, target, approved, required, quiescence, health, cpanel_token):
             return concrete.Adapter(checkout, target, approved, required,
                 lambda: True, lambda sha: True, self.service,
@@ -174,6 +183,7 @@ class AdapterIntegration(unittest.TestCase):
         approval = bridge / 'approved-sha'
         approval.write_text(self.sha + '\n')
         approval.chmod(0o600)
+        self.ticket(bridge)
         healthy = [False]
         def factory(checkout, target, approved, required, quiescence, health, cpanel_token=None):
             return concrete.Adapter(checkout, target, approved, required,
@@ -217,6 +227,7 @@ class AdapterIntegration(unittest.TestCase):
         approval = bridge / 'approved-sha'
         approval.write_text(self.sha + '\n')
         approval.chmod(0o600)
+        self.ticket(bridge)
         def factory(checkout, target, approved, required, quiescence, health, cpanel_token=None):
             return concrete.Adapter(checkout, target, approved, required,
                 lambda: True, lambda sha: True, self.service,
@@ -485,6 +496,7 @@ class AdapterIntegration(unittest.TestCase):
         approval = bridge / 'approved-sha'
         approval.write_text(self.sha + '\n')
         approval.chmod(0o600)
+        self.ticket(bridge)
         allowed = [False]
         def factory(checkout, target, approved, required, quiescence, health, cpanel_token):
             def quota(path, amount):
@@ -502,6 +514,7 @@ class AdapterIntegration(unittest.TestCase):
             self.assertFalse(rejected['recovery_required'])
             self.assertEqual(self.service.state, 'started')
             allowed[0] = True
+            self.ticket(bridge)  # a failed preflight requires a fresh approval
             accepted = nordicway_deploy_runner.run(self.sha, 'test_token_12345', bridge=bridge,
                         checkout=self.checkout, target=self.app, adapter_factory=factory)
         self.assertEqual(accepted['status'], 'ok')
@@ -530,6 +543,19 @@ class AdapterIntegration(unittest.TestCase):
         self.assertEqual(self.service.state, 'started')
         self.assertEqual((self.app / 'app.py').read_text(), 'old')
 
+    def test_orphan_retry_rechecks_all_writer_gates(self):
+        adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
+                                   None, lambda sha: True, self.service)
+        from contextlib import nullcontext
+        with patch.object(concrete.nordicway_quiescence, 'stopped_motor', return_value=nullcontext()), \
+             patch.object(nordicway_writer_check, 'wait_for_quiescence',
+                          side_effect=['passenger_active', 'database_in_use']), \
+             patch.object(nordicway_writer_check, 'stop_orphaned_lswsgi', return_value=1) as stop:
+            with self.assertRaisesRegex(ValueError, 'database_in_use'):
+                with adapter.quiescence():
+                    self.fail('must not enter backup')
+        stop.assert_called_once_with(self.app, self.service)
+
     def test_default_writer_check_refuses_release_before_update(self):
         adapter = concrete.Adapter(self.checkout, self.app, self.sha, 1000,
                                    None, lambda sha: True, self.service,
@@ -548,3 +574,4 @@ class AdapterIntegration(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
