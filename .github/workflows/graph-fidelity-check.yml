@@ -3,7 +3,7 @@ on:
   push:
     branches: [codex/graph-fidelity-819a]
   pull_request:
-    branches: [codex/escape-development]
+    branches: [codex/escape-development, codex/issue57-integrated-review]
     types: [opened, synchronize, reopened]
 permissions:
   contents: read
