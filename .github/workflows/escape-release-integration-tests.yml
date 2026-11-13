@@ -13,6 +13,12 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+      - name: Check out pinned approval bridge for offline integration test
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: a0fe4ae4c4b44b75f54c0352d2d52d8647cdc936
+          path: _bridge
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
@@ -41,6 +47,7 @@ jobs:
           python tests/browser_statistics_integration.py
           python tests/browser_statistics_desktop_accept.py
           python tests/browser_release_approval.py
+          python tests/browser_release_bridge_end_to_end.py
           python tests/browser_mobile_decision_overview.py
           python tests/browser_signal_push_detail.py
           python tests/browser_signal_sell_server.py
