@@ -35,7 +35,7 @@ def run(env=None, transport=_run_limited):
             or (operation in ('deploy', 'resume', 'app-deploy', 'app-resume') and not re.fullmatch(r'[0-9a-f]{40}', sha))
             or (operation == 'write-probe' and bool(sha))
             or (operation == 'deploy' and (not re.fullmatch(r'[A-Za-z0-9_-]{10,256}', token)
-                or not approval_json or len(approval_json) > 512))
+                or len(approval_json) > 512))
             or (operation == 'app-deploy' and (not re.fullmatch(r'[A-Za-z0-9_-]{10,256}', token)
                 or not 1<=len(summary.strip())<=500 or '\n' in summary or '\r' in summary))):
         return {'status': 'blocked', 'reason': 'configuration_unavailable'}
@@ -54,10 +54,13 @@ def run(env=None, transport=_run_limited):
             # Token is sent only over SSH stdin, never in command arguments or logs.
             payload = b''
             if operation == 'deploy':
-                approval = json.loads(approval_json)
-                if not isinstance(approval, dict) or set(approval) != {'nonce', 'expires', 'mac'}:
-                    raise ValueError('invalid_approval')
-                payload = json.dumps({'cpanel_token': token, 'approval': approval}, separators=(',', ':')).encode()
+                request = {'cpanel_token': token}
+                if approval_json:
+                    approval = json.loads(approval_json)
+                    if not isinstance(approval, dict) or set(approval) != {'nonce', 'expires', 'mac'}:
+                        raise ValueError('invalid_approval')
+                    request['approval'] = approval
+                payload = json.dumps(request, separators=(',', ':')).encode()
             elif operation == 'app-deploy':
                 payload = json.dumps({'cpanel_token': token, 'summary': summary.strip()}, separators=(',', ':')).encode()
             result = transport(command, input=payload, capture_output=True, timeout=1740 if operation=='app-deploy' else 900, env=env)
