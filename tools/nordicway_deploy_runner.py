@@ -235,7 +235,13 @@ def run_request(sha, stream):
         request = json.loads(raw)
     except (UnicodeError, ValueError):
         raise ValueError('invalid_request') from None
-    if not isinstance(request, dict) or set(request) != {'cpanel_token', 'approval'}:
+    if not isinstance(request, dict):
+        raise ValueError('invalid_request')
+    if set(request) == {'cpanel_token'}:
+        # Only an already-created, SHA-bound, expiring local ticket can
+        # authorize this legacy client; run() still consumes it atomically.
+        return run(sha, request['cpanel_token'])
+    if set(request) != {'cpanel_token', 'approval'}:
         raise ValueError('invalid_request')
     return run(sha, request['cpanel_token'], owner_request=request['approval'])
 
@@ -310,3 +316,4 @@ def resume(sha, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
         return {'operation': 'resume', 'status': 'ok', 'recovery_required': False, 'backup_cleanup': cleanup}
     except Exception:
         return {'operation': 'resume', 'status': 'failed', 'recovery_required': True, 'backup_cleanup': 'not_run'}
+
