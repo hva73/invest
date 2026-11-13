@@ -125,6 +125,82 @@ class FirstAppBridge(unittest.TestCase):
     setup.prepare(self.root,SHA,BRIDGE_SHA,base.blob(self.updater),self.updater,self.updater,b'same',self.old,installer,approval,self.root,inspect=lambda _:next(values))
   self.assertEqual((self.bridge/'nordicway_deploy_guard.py').read_bytes(),self.old['nordicway_deploy_guard.py'])
   self.assertFalse((self.bridge/'deploy-enabled').exists());self.assertTrue((self.bridge/'deployment-incomplete.json').exists())
+ def assert_setup_blocks_runner(self):
+  self.assertTrue((self.bridge/'first-release-setup-incomplete.json').exists())
+  real=runner.run
+  def execute(sha,token,**kwargs):
+   return real(sha,token,bridge=self.bridge,authorization_lock=self.app/'var/escape-deploy.lock',adapter_factory=Mock(),deploy=lambda *_:Outcome('ok','complete',True),prepare=lambda *_:None,**kwargs)
+  with patch.object(runner,'run',side_effect=execute):
+   with self.assertRaisesRegex(ValueError,'setup_incomplete'):
+    guard.dispatch('escape-deploy-v1 deploy '+SHA,runner=lambda sha:runner.run_request(sha,io.BytesIO(b'{"cpanel_token":"test_token_12345"}')))
+ def test_failed_setup_marker_unlink_blocks_after_lock_release(self):
+  original=os.unlink
+  def fail(path,*args,**kwargs):
+   if Path(path).name=='first-release-setup-incomplete.json': raise OSError('fail')
+   return original(path,*args,**kwargs)
+  with patch.object(setup.os,'unlink',side_effect=fail):
+   with self.assertRaises(OSError):self.prepare()
+  self.assertTrue((self.bridge/'deploy-enabled').exists())
+  self.assertFalse((self.bridge/'deployment-incomplete.json').exists())
+  self.assertTrue((self.bridge/'approval-ticket.json').exists())
+  self.assert_setup_blocks_runner()
+ def test_failed_deploy_claim_fsync_leaves_setup_block(self):
+  original=setup.sync_dir;triggered=[]
+  def fail_after_claim_removed(path):
+   if ((self.bridge/'deploy-enabled').exists() and (self.bridge/'approval-ticket.json').exists()
+       and (self.bridge/'first-release-setup-incomplete.json').exists()
+       and not (self.bridge/'deployment-incomplete.json').exists() and not triggered):
+    triggered.append(True);raise OSError('fail')
+   return original(path)
+  with patch.object(setup,'sync_dir',side_effect=fail_after_claim_removed):
+   with self.assertRaises(OSError):self.prepare()
+  self.assertTrue(triggered);self.assertTrue((self.bridge/'deploy-enabled').exists())
+  self.assert_setup_blocks_runner()
+ def test_crash_before_gate_open_leaves_both_claims(self):
+  import multiprocessing
+  def crash():
+   original=base.atomic
+   def kill(parent,name,data):
+    if name=='deploy-enabled':os._exit(28)
+    return original(parent,name,data)
+   with patch.object(base,'atomic',side_effect=kill):self.prepare()
+  child=multiprocessing.get_context('fork').Process(target=crash);child.start();child.join(5)
+  self.assertEqual(child.exitcode,28);self.assertFalse((self.bridge/'deploy-enabled').exists())
+  self.assertTrue((self.bridge/'deployment-incomplete.json').exists());self.assert_setup_blocks_runner()
+ def test_failed_final_fsync_recreates_setup_block(self):
+  original=setup.sync_dir; triggered=[]
+  def fail_after_setup_removed(path):
+   if (self.bridge/'deploy-enabled').exists() and (self.bridge/'approval-ticket.json').exists() and not (self.bridge/'first-release-setup-incomplete.json').exists() and not triggered:
+    triggered.append(True);raise OSError('fail')
+   return original(path)
+  with patch.object(setup,'sync_dir',side_effect=fail_after_setup_removed):
+   with self.assertRaises(OSError):self.prepare()
+  self.assertTrue(triggered);self.assertTrue((self.bridge/'deploy-enabled').exists())
+  self.assert_setup_blocks_runner()
+ def test_failed_final_claim_unlink_blocks_after_lock_release(self):
+  original=os.unlink;counter=[]
+  def fail(path,*args,**kwargs):
+   if Path(path).name=='deployment-incomplete.json':
+    counter.append(1)
+    if len(counter)==2:raise OSError('fail')
+   return original(path,*args,**kwargs)
+  with patch.object(setup.os,'unlink',side_effect=fail):
+   with self.assertRaises(OSError):self.prepare()
+  self.assertTrue((self.bridge/'deploy-enabled').exists())
+  self.assertTrue((self.bridge/'deployment-incomplete.json').exists())
+  self.assert_setup_blocks_runner()
+ def test_crash_immediately_after_gate_open_blocks_after_lock_release(self):
+  import multiprocessing
+  def crash():
+   original=base.atomic
+   def kill(parent,name,data):
+    result=original(parent,name,data)
+    if name=='deploy-enabled':os._exit(29)
+    return result
+   with patch.object(base,'atomic',side_effect=kill):self.prepare()
+  child=multiprocessing.get_context('fork').Process(target=crash);child.start();child.join(5)
+  self.assertEqual(child.exitcode,29);self.assertTrue((self.bridge/'deploy-enabled').exists())
+  self.assert_setup_blocks_runner()
  def test_mismatched_updater_does_not_change_bridge(self):
   with patch.object(installer,'_sources',return_value=self.files):
    with self.assertRaisesRegex(ValueError,'candidate_mismatch'):
