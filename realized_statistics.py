@@ -4,7 +4,7 @@ The order list has no documented complete history or execution times. Consequent
 only sales following a single observed direct purchase are compared as an
 indicative gross price comparison, never as a verified cost basis or net profit.
 """
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 from datetime import datetime, timezone
 from collections import defaultdict, deque
 
@@ -41,12 +41,26 @@ def _record(row, scope, event_time):
     return dict(id=order_id, side=row['side'], ticker=ticker, name=name, currency=currency.upper(), quantity=quantity, price=price, time=stamp, scope=scope)
 
 
+def _ratio(numerator, denominator):
+    # Ratios may repeat forever; keep their existing 28 significant digits.
+    # Monetary totals are computed separately with sufficient exact precision.
+    with localcontext() as ctx:
+        ctx.prec = 28
+        return numerator / denominator
+
+
+def _percent(numerator, denominator):
+    with localcontext() as ctx:
+        ctx.prec = 28
+        return numerator / denominator * 100
+
+
 def _result(buy, sell, quantity, basis, provisional):
     proceeds = quantity * sell['price']
     profit = proceeds - basis
     return {'ticker': sell['ticker'], 'name': sell['name'], 'scope': sell['scope'], 'currency': sell['currency'],
             'quantity': format(quantity, 'f'), 'cost_basis': format(basis, 'f'), 'sale_proceeds': format(proceeds, 'f'),
-            'gross': format(profit, 'f'), 'gross_percent': format(profit / basis * 100, 'f'),
+            'gross': format(profit, 'f'), 'gross_percent': format(_percent(profit, basis), 'f'),
             'gross_dkk': format(profit, 'f') if sell['currency']=='DKK' else None,
             'net_dkk': None, 'fees_status': 'unknown',
             'buy_origin': 'unknown', 'sell_origin': 'unknown',
@@ -59,6 +73,29 @@ def _result(buy, sell, quantity, basis, provisional):
 
 
 def project(direct_orders, collection_orders=()):
+    """Project orders using enough precision for exact finite amount arithmetic."""
+    direct_orders = list(direct_orders)
+    collection_orders = list(collection_orders)
+    values = []
+    for row in direct_orders + [row for _, row in collection_orders]:
+        if isinstance(row, dict):
+            values.extend(value for value in (_decimal(row.get('filledQuantity')),
+                                              _decimal(row.get('filledAveragePrice'))) if value is not None)
+    # A quantity/price product can span twice the input's decimal range.
+    # Allow extra digits for summing every observed order and avoid changing
+    # the caller's Decimal context.
+    if values:
+        low = min(0, *(value.as_tuple().exponent for value in values))
+        high = max(0, *(value.adjusted() for value in values))
+        precision = max(28, 2 * (high - low + 2) + len(str(len(values))) + 10)
+    else:
+        precision = 28
+    with localcontext() as ctx:
+        ctx.prec = precision
+        return _project(direct_orders, collection_orders)
+
+
+def _project(direct_orders, collection_orders=()):
     """Return results per sale; inputs must already be isolated to one portfolio.
 
     Each collection tuple is (collection_id, nested order). Separate scopes are
@@ -150,7 +187,7 @@ def project(direct_orders, collection_orders=()):
                 cost += taken * buy['price']; remaining -= taken; lots[0][1] -= taken
                 if not lots[0][1]: lots.popleft()
             result = _result(first, row, row['quantity'], cost, False)
-            result['buy_price'] = format(cost / row['quantity'], 'f')
+            result['buy_price'] = format(_ratio(cost, row['quantity']), 'f')
             results.append(result)
     summaries={}
     for row in results:
@@ -163,7 +200,7 @@ def project(direct_orders, collection_orders=()):
     for s in summaries.values():
         gains=s['gains'];losses=s['losses_total']
         s.update(gains=format(gains,'f'),losses_total=format(losses,'f'),gross_total=format(gains+losses,'f'),
-                 win_rate_percent=format(Decimal(s['wins'])/Decimal(s['sales'])*100,'f'))
+                 win_rate_percent=format(_percent(Decimal(s['wins']), Decimal(s['sales'])),'f'))
     return {'items': results, 'summary_by_currency':summaries, 'omitted': omitted, 'history_complete': False,
             'count_note':'Én observeret salgsordre tælles én gang; delsalg tælles hver for sig. Vinderandel er antal positive salg divideret med alle viste salg, også nulresultater.',
             'note': 'Kun observerede handler. Historikkens dækning, gebyrer og historisk valutakurs er ikke bekræftet. Direkte handler er foreløbige kursforskelle; oprettelsestid er ikke fyldtid.'}
