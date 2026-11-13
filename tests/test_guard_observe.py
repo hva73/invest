@@ -1,6 +1,10 @@
 import contextlib
 import io
+import os
+import subprocess
 import sys
+import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -40,6 +44,19 @@ class Observer(unittest.TestCase):
   result,text=self.execute([BASE,{**LIVE,'guard_count':2}]);self.assertEqual(result,1);self.assertIn('observation_unavailable',text)
  def test_invalid_challenge_rejected(self):
   with contextlib.redirect_stdout(io.StringIO()): self.assertEqual(owner.main('0'*40),1)
+ def test_actual_guard_environ_challenge(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   guard=Path(tmp)/'guard.py';guard.write_text('import sys\nsys.stdin.buffer.read()\n')
+   env={**os.environ,'SSH_ORIGINAL_COMMAND':'escape-deploy-v1 deploy '+('1'*40)}
+   proc=subprocess.Popen([sys.executable,'-I','-S',str(guard)],stdin=subprocess.PIPE,env=env)
+   try:
+    with patch.object(owner,'GUARD',guard):
+     time.sleep(.05)
+     found=owner.inspect('1'*40);wrong=owner.inspect('2'*40)
+     self.assertTrue(found['guard_found']);self.assertTrue(found['challenge_matches'])
+     self.assertFalse(wrong['challenge_matches'])
+   finally:
+    proc.stdin.close();proc.wait(timeout=5)
 
 class Input(io.BytesIO):
  def close(self): self.saved=self.getvalue();super().close()
