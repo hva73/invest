@@ -78,7 +78,7 @@ def prepare(root, release, bridge_sha, updater_blob, release_updater, bridge_upd
         os.unlink(marker);sync_dir(bridge)
         key=base.private_file(bridge/'owner-approval-key',32)
         if len(key)!=32: raise ValueError('unsafe_owner_key')
-        proof=approval.create_proof(release,key)
+        proof=approval.create_proof(release,key,lifetime=approval.MAX_LIFETIME)
         approval.approve(bridge,var/'escape-deploy.lock',release,proof,already_locked=True)
         if base.private_file(bridge/'approved-sha',41).strip()!=release.encode(): raise ValueError('approval_readback_failed')
         data=json.loads(base.private_file(ticket,512))
