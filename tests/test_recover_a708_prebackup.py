@@ -24,16 +24,26 @@ class Recovery(unittest.TestCase):
   self.record['backup']='some-backup';self.put('deployment-incomplete.json',json.dumps(self.record))
   with self.assertRaisesRegex(ValueError,'unexpected_recovery'):self.invoke()
   self.assertTrue(self.mark.exists());self.assertTrue((self.bridge/'deploy-enabled').exists())
- def test_runtime_failure_keeps_marker_and_closes_gate(self):
+ def test_runtime_failure_before_gate_keeps_marker_and_gate(self):
   def fail(*a):raise ValueError('runtime_unavailable')
   with self.assertRaisesRegex(ValueError,'runtime_unavailable'):self.invoke(verify_runtime=fail)
-  self.assertTrue(self.mark.exists());self.assertFalse((self.bridge/'deploy-enabled').exists())
+  self.assertTrue(self.mark.exists());self.assertTrue((self.bridge/'deploy-enabled').exists())
+ def test_file_change_after_gate_closure_stops_and_preserves_marker(self):
+  calls=[]
+  def verify(*args):
+   calls.append(1)
+   if len(calls)==2:raise ValueError('installed_file_mismatch')
+  with self.assertRaisesRegex(ValueError,'installed_file_mismatch'):self.invoke(verify_files=verify)
+  self.assertEqual(len(calls),2);self.assertTrue(self.mark.exists());self.assertFalse((self.bridge/'deploy-enabled').exists())
  def test_ticket_rejected_before_gate_change(self):
   self.put('approval-ticket.json','fixture')
   with self.assertRaisesRegex(ValueError,'unexpected_pending_state'):self.invoke()
   self.assertTrue(self.mark.exists());self.assertTrue((self.bridge/'deploy-enabled').exists())
  def test_changed_marker_is_preserved(self):
-  def change(*a):self.put('deployment-incomplete.json','{}')
+  calls=[]
+  def change(*a):
+   calls.append(1)
+   if len(calls)==2:self.put('deployment-incomplete.json','{}')
   with self.assertRaisesRegex(ValueError,'recovery_changed'):self.invoke(verify_runtime=change)
   self.assertTrue(self.mark.exists());self.assertFalse((self.bridge/'deploy-enabled').exists())
  def test_gate_recreation_failure_recreates_marker(self):
