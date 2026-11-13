@@ -178,7 +178,8 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
         covers=not recent or bool(series) and series[0]['epoch']<=min(p['epoch'] for p in recent)+bar_seconds and series[-1]['epoch']>=max(p['epoch'] for p in recent)-bar_seconds
         if len(series)>len(recent) and len(series)>1 and covers:
             result['intraday_series']=series;result['intraday_source']='EODHD';result['intraday_status']='OK'
-        elif len(series)>len(recent) and len(series)>1:result['intraday_status']='SOURCE_INCOMPLETE'
+        elif len(series)>len(recent) and len(series)>1:
+            result['intraday_series']=series;result['intraday_source']='EODHD';result['intraday_status']='SOURCE_INCOMPLETE'
         else:result['intraday_status']='PLUTO_AS_DETAILED'
         fields={k:result[k] for k in ('intraday_period','intraday_interval','intraday_checked_at','intraday_symbol','intraday_status','intraday_series','intraday_source') if k in result}
         cache[period]={'symbol':symbol,'checked_at':now.timestamp(),'pluto_fetched':result.get('fetched_at'),'fields':fields};result['intraday_cache']=cache
