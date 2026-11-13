@@ -8,6 +8,11 @@ from decimal import Decimal, InvalidOperation, localcontext
 from datetime import datetime, timezone
 from collections import defaultdict, deque
 
+class StatisticsUnavailable(Exception):
+    def __init__(self, category):
+        self.category = category
+        super().__init__(category)
+
 
 def _decimal(value):
     if value is None or isinstance(value, bool): return None
@@ -212,14 +217,25 @@ def read(connect, user_id, client_factory=None):
     from mcp_client import decode_result
     from pending_orders import allowed
     from portfolio_data import list_data
-    with connect() as db:
-        portfolios = [dict(row) for row in db.execute(
-            "SELECT id,name,external_id,kind,parent_external_id FROM portfolios WHERE user_id=? AND source='pluto' AND active=1", (user_id,))]
+    try:
+        with connect() as db:
+            portfolios = [dict(row) for row in db.execute(
+                "SELECT id,name,external_id,kind,parent_external_id FROM portfolios WHERE user_id=? AND source='pluto' AND active=1", (user_id,))]
+    except Exception as error:
+        raise StatisticsUnavailable('DATABASE') from error
     if client_factory is None:
         from hotwatch_adapters import PlutoAdapter
         client_factory = PlutoAdapter(connect, user_id, purpose='statistics').factory
-    client = client_factory(oauth.access_token(connect, user_id))
-    tools = client.tools(); output = []; errors = []
+    try:
+        token = oauth.access_token(connect, user_id)
+    except Exception as error:
+        raise StatisticsUnavailable('CONNECTION') from error
+    try:
+        client = client_factory(token)
+        tools = client.tools()
+    except Exception as error:
+        raise StatisticsUnavailable('BROKER_CATALOG') from error
+    output = []; errors = []
     for portfolio in portfolios:
         external = portfolio['external_id'] or ''
         try:
