@@ -61,3 +61,23 @@ class FirstAppBridge(unittest.TestCase):
    with self.assertRaisesRegex(ValueError,'candidate_mismatch'):
     setup.prepare(self.root,SHA,BRIDGE_SHA,base.blob(self.updater),self.updater,b'wrong',b'same',self.old,installer,approval,self.root,inspect=lambda _:True)
   self.assertEqual((self.bridge/'deploy-enabled').read_bytes(),b'1\n');self.assertFalse((self.bridge/'first-release-setup-incomplete.json').exists())
+
+
+class PublicOrigin(unittest.TestCase):
+ def test_missing_ssh_environment_reuses_existing_health_origin(self):
+  import nordicway_app_release_entry as entry
+  import nordicway_deploy_health as health
+  env={}
+  entry.ensure_public_origin(env,health.HEALTH_URL)
+  self.assertEqual(env['ESCAPE_PUBLIC_URL'],'https://escape.nordic-response.dk')
+ def test_explicit_app_origin_is_preserved(self):
+  import nordicway_app_release_entry as entry
+  env={'ESCAPE_PUBLIC_URL':'https://example.invalid'}
+  entry.ensure_public_origin(env,'https://escape.nordic-response.dk/api/health')
+  self.assertEqual(env['ESCAPE_PUBLIC_URL'],'https://example.invalid')
+ def test_invalid_health_origin_is_rejected(self):
+  import nordicway_app_release_entry as entry
+  for url in ('http://example.invalid/api/health','https://user@example.invalid/api/health',
+              'https://example.invalid/other','https://example.invalid/api/health?x=1'):
+   with self.subTest(url=url):
+    with self.assertRaisesRegex(ValueError,'health_origin_invalid'): entry.ensure_public_origin({},url)
