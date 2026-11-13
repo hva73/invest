@@ -25,6 +25,8 @@ jobs:
       - name: Mobile, desktop and sector unit checks
         run: |
           node tests/test_push_service_worker.js
+          node tests/test_statistics_ui.cjs
+          node tests/test_statistics_desktop_review.cjs
           node tests/test_dashboard_data.js
           node tests/test_dashboard_attention.js
           node tests/test_sector_ui.js
@@ -36,6 +38,8 @@ jobs:
           ESCAPE_PLAYWRIGHT_MANAGED: '1'
           PYTHONPATH: .:tests
         run: |
+          python tests/browser_statistics_integration.py
+          python tests/browser_statistics_desktop_accept.py
           python tests/browser_release_approval.py
           python tests/browser_mobile_decision_overview.py
           python tests/browser_signal_push_detail.py

@@ -1,0 +1,77 @@
+.statistics-view{max-width:1080px;margin:auto;color:#e3f1ec}.statistics-heading{display:flex;align-items:start;justify-content:space-between;gap:18px;margin-bottom:24px}.statistics-heading small,.statistics-summary small{letter-spacing:.13em;color:#94bbb0;font-size:.7rem}.statistics-heading h2{font-size:clamp(1.7rem,4vw,2.5rem);margin:.3em 0}.statistics-heading h2 span{color:#69d8ae}.statistics-heading p,.statistics-note,.statistics-summary span{color:#a5beb7}.statistics-heading p{margin:0}.statistics-filters{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}.statistics-filters label{display:grid;gap:5px;color:#a5beb7;font-size:.8rem}.statistics-filters select{min-width:150px}.statistics-summary{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:22px;border:1px solid #2c544a;border-radius:16px;background:linear-gradient(120deg,#143b32,#10292d)}.statistics-summary>div:first-child{display:grid;gap:8px}.statistics-summary strong{font-size:clamp(1.7rem,4vw,2.5rem);font-weight:650}.statistics-counts{display:flex;gap:16px;flex-wrap:wrap;font-size:.88rem}.statistics-view .positive{color:#75dfad}.statistics-view .negative{color:#ff8d90}.statistics-view .neutral{color:#c3d3ce}.statistics-view .statistics-counts .positive{color:#75dfad}.statistics-view .statistics-counts .negative{color:#ff8d90}.statistics-list{margin-top:16px;border:1px solid #294840;border-radius:14px;overflow:hidden}.statistics-trade{background:#102b2b}.statistics-trade+.statistics-trade{border-top:1px solid #294840}.statistics-trade summary{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:16px 18px;cursor:pointer;list-style:none}.statistics-trade summary::-webkit-details-marker{display:none}.statistics-ticker,.statistics-result{display:grid;gap:5px}.statistics-ticker{font-weight:700}.statistics-ticker small,.statistics-result small{font-weight:400;color:#a5beb7}.statistics-result{text-align:right;white-space:nowrap;font-weight:700}.statistics-result small{color:inherit}.statistics-detail{display:flex;gap:8px 20px;flex-wrap:wrap;padding:0 18px 17px;color:#aec4bd;font-size:.82rem}.statistics-note,.statistics-warning,.statistics-empty{font-size:.82rem;line-height:1.5}.statistics-warning{color:#f3c782}.statistics-empty{padding:24px;border:1px solid #294840;border-radius:14px;color:#a5beb7}@media(max-width:700px){.statistics-heading{align-items:center}.statistics-heading h2{font-size:1.65rem}.statistics-heading p{font-size:.85rem}.statistics-summary{padding:18px;align-items:start;flex-direction:column}.statistics-filters label{flex:1}.statistics-filters select{width:100%;min-width:0}.statistics-trade summary{padding:14px}.statistics-ticker small{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+/* The component supplies the page heading; do not repeat it in the app header. */
+main:has(#content > #statistics-content) > header #title{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.statistics-heading > button{white-space:nowrap;min-width:0;font-size:.83rem;padding:9px 12px}
+.statistics-heading > div{min-width:0;flex:1 1 auto}
+.statistics-heading > button{flex:0 0 auto}
+@media(max-width:700px){.statistics-heading > button{font-size:.75rem;padding:8px 10px}}
+
+/* Desktop: the shared statistics markup keeps mobile ownership intact. */
+@media (min-width:901px){
+ .statistics-view{max-width:none}
+ .statistics-overview{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:16px}
+ .statistics-summary,.statistics-distribution{min-width:0;min-height:195px;padding:22px;border:1px solid #294451;border-radius:14px;background:#122532}
+ .statistics-summary{display:block}
+ .statistics-summary>div:first-child{gap:7px}
+ .statistics-summary strong{font-size:clamp(2rem,3vw,2.5rem)}
+ .statistics-breakdown{display:flex;flex-wrap:wrap;gap:16px 42px;margin-top:20px;padding-top:16px;border-top:1px solid #31504e}
+ .statistics-breakdown>div{display:grid;gap:5px}
+ .statistics-breakdown strong{font-size:1.18rem}
+ .statistics-distribution-head{display:flex;justify-content:space-between;align-items:end;gap:16px}
+ .statistics-win-rate{font-size:2rem;font-weight:700}
+ .statistics-distribution-bar{display:flex;height:13px;overflow:hidden;border-radius:20px;background:#29414a;margin:17px 0 12px}
+ .statistics-distribution-bar .positive{background:#70d9ad}
+ .statistics-distribution-bar .negative{background:#d57580}
+ .statistics-distribution-bar .neutral{background:#849fa4}
+ .statistics-distribution-legend{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+ .statistics-list{border-color:#294451;background:#122532}
+ .statistics-trade{background:transparent}
+ .statistics-trade+.statistics-trade{border-color:#29404b}
+ .statistics-trade summary{min-height:66px;padding:14px 20px}
+ .statistics-result{grid-template-columns:minmax(100px,auto) minmax(85px,auto);align-items:center;column-gap:28px}
+ .statistics-result small{font-size:inherit}
+ .statistics-detail{padding:6px 20px 18px;gap:10px 28px}
+}
+
+.statistics-overview{display:grid;gap:16px}
+.statistics-distribution{min-width:0;padding:22px;border:1px solid #294451;border-radius:14px;background:#122532}
+.statistics-distribution-head{display:flex;justify-content:space-between;align-items:end;gap:16px}.statistics-win-rate{font-size:2rem;font-weight:700}.statistics-distribution-bar{display:flex;height:13px;overflow:hidden;border-radius:20px;background:#29414a;margin:17px 0 12px}.statistics-distribution-bar>span{flex-basis:0;min-width:0}.statistics-distribution-bar .positive{background:#70d9ad}.statistics-distribution-bar .negative{background:#d57580}.statistics-distribution-bar .neutral{background:#849fa4}.statistics-distribution-legend{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.statistics-breakdown{display:flex;gap:20px}.statistics-breakdown>div{display:grid;gap:5px}.statistics-breakdown strong{font-size:1.18rem}.statistics-list-heading{display:flex;justify-content:space-between;align-items:center;padding:18px 20px;border-bottom:1px solid #29404b}.statistics-list-heading h3{margin:0}.statistics-list-heading span{color:#aec4bd;font-size:.8rem}@media(min-width:901px){.statistics-overview{grid-template-columns:minmax(0,1.35fr) minmax(0,1fr)}.statistics-breakdown{margin-top:20px;padding-top:16px;border-top:1px solid #31504e}.statistics-summary{display:block}}
+
+/* Shared dialog and sale controls from #123. */
+ act as disclosure controls; the list starts hidden. */
+.statistics-totals{display:flex;gap:20px;flex-wrap:wrap}
+.statistics-totals button{display:grid;gap:6px;text-align:left;border:0;background:transparent;padding:8px;cursor:pointer;color:inherit}
+.statistics-totals button span{font-size:.78rem}
+.statistics-totals button strong{font-size:1.1rem}
+.statistics-totals button:focus-visible{outline:2px solid #8de7c0;outline-offset:2px}
+.statistics-distribution{margin-top:16px;padding:18px;border:1px solid #294840;border-radius:14px;background:#102832}
+.statistics-distribution>div:first-child{display:flex;justify-content:space-between;gap:12px}
+.statistics-distribution>div:first-child span{color:#75dfad}
+.statistics-bar{display:flex;gap:3px;height:10px;margin:16px 0 12px}
+.statistics-bar i,.statistics-bar b{min-width:0;border-radius:6px}
+.statistics-bar i{background:#67cda0}.statistics-bar b{background:#ed8185}
+.statistics-list h3{padding:0 18px;font-size:1rem}
+.statistics-detail{display:grid}
+@media(max-width:700px){.statistics-totals{width:100%;justify-content:space-between;gap:4px}.statistics-totals button{padding:8px 2px}.statistics-distribution{padding:16px}}
+
+.statistics-trade-button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 18px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
+.statistics-trade-button:focus-visible,.statistics-dialog button:focus-visible{outline:2px solid #8de7c0;outline-offset:2px}
+.statistics-trade-button .statistics-ticker{flex:1}
+.statistics-dialog{width:min(440px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;border:1px solid #345b56;border-radius:18px;background:#102832;color:#e3f1ec;padding:22px;box-shadow:0 24px 80px #0009}
+.statistics-dialog::backdrop{background:#020b10bf}
+.statistics-dialog header{display:flex;justify-content:space-between;gap:16px;align-items:start;border-bottom:1px solid #31534c;padding-bottom:14px}
+.statistics-dialog header small{color:#9dbdb3;font-size:.66rem;letter-spacing:.12em}
+.statistics-dialog header h3{margin:6px 0 0;font-size:1.2rem}
+.statistics-dialog header button{font-size:1.5rem;line-height:1;border:0;background:transparent;color:#d6eae3;cursor:pointer}
+.statistics-dialog .statistics-detail{padding:18px 0 0;gap:12px}
+@media(max-width:700px){.statistics-trade-button{padding:14px}.statistics-dialog{padding:18px}}
+
+.statistics-calc{display:grid;gap:12px}
+.statistics-calc>div{display:flex;justify-content:space-between;align-items:baseline;gap:14px}
+.statistics-calc strong{text-align:right;color:#e6f4ef;font-weight:650}
+.statistics-calc-result{border-top:1px solid #31534c;margin-top:4px;padding-top:14px}
+.statistics-detail-note{display:grid;gap:6px;margin-top:8px;font-size:.74rem;line-height:1.5}
+
+.statistics-breakdown button{display:grid;gap:5px;text-align:left;color:inherit;padding:5px 10px;background:transparent;border:0;cursor:pointer}
+.statistics-breakdown button:focus-visible{outline:2px solid #8de7c0;outline-offset:2px}
+@media(min-width:901px){.statistics-summary{display:block}.statistics-breakdown button{padding:4px 10px}.statistics-trade-button .statistics-result{display:flex;align-items:center;gap:24px}.statistics-dialog{width:min(520px,calc(100vw - 32px))}}

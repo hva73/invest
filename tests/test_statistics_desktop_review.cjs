@@ -1,0 +1,12 @@
+'use strict';
+const assert=require('node:assert/strict');const {render}=require('../static/statistics-ui.js');
+const item=(ticker,gross,percent,currency='DKK')=>({ticker,name:'Fiktiv',currency,gross,gross_percent:percent,quantity:'4',buy_price:'10',sell_price:'12',cost_basis:'40',sale_proceeds:'48',buy_origin:'unknown',sell_origin:'unknown'});
+const data={portfolios:[{portfolio_id:1,name:'Depot',omitted:1,items:[item('GAIN','8','20'),item('LOSS','-4','-20'),item('FLAT','0','0'),item('US','100','10','USD')]}]};
+const closed=render(data,{portfolio:1,currency:'DKK'});for(const x of ['33,33 %','↑ +4,00 kr.','↑ +8,00 kr.','↓ −4,00 kr.','1 uændret','Nogle oplysninger mangler','data-statistics-group="wins"','data-statistics-group="losses"'])assert.ok(closed.includes(x),x);assert.ok(!closed.includes('statistics-trade-button'));
+const wins=render(data,{portfolio:1,currency:'DKK',group:'wins'});for(const x of ['GAIN','40 kr.','48 kr.','Køb: Ikke afklaret','Salg: Ikke afklaret','statistics-dialog'])assert.ok(wins.includes(x),x);assert.ok(!wins.includes('LOSS<small>'));assert.ok(!wins.includes('US<small>'));
+const losses=render(data,{portfolio:1,currency:'DKK',group:'losses'});assert.ok(losses.includes('LOSS'));assert.ok(!losses.includes('GAIN<small>'));
+const dollar=render(data,{portfolio:1,currency:'USD'});assert.ok(dollar.includes('↑ +100,00 USD'));assert.ok(!dollar.includes('GAIN<small>'));
+const empty=render({portfolios:[{portfolio_id:1,items:[],omitted:2}]});assert.ok(empty.includes('Nogle oplysninger mangler'));const flat=render({portfolios:[{portfolio_id:1,items:[item('FLAT','0','0')]}]});assert.ok(!flat.includes('↑ 0 med gevinst'));assert.ok(!flat.includes('↓ 0 med tab'));
+const broken=render({portfolios:[{portfolio_id:1,items:[{...item('<script>','5','1'),cost_basis:null,sale_proceeds:null,buy_price:null}]}]},{group:'wins'});assert.ok(!broken.includes('<script>'));assert.ok(broken.includes('&lt;script&gt;'));assert.ok(broken.includes('Ikke oplyst'));
+const fifo=render({portfolios:[{portfolio_id:1,items:[{...item('FIFO','11','32.35'),quantity:'3',buy_price:'11.33333333333333333333333333',sell_price:'15',cost_basis:'34',sale_proceeds:'45'}]}]},{group:'wins'});assert.ok(fifo.includes('≈ 11,333333 kr.'));assert.ok(fifo.includes('34 kr.'));assert.ok(fifo.includes('45 kr.'));
+console.log('PASS: shared hidden lists, partial-sale popup, currency scope, neutral outcomes');
