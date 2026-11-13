@@ -22,6 +22,7 @@ def main():
  with patch.dict('os.environ',{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}):
   assert hotwatch_service.auto_holdings_tick(app.connect,verify=lambda *_:instrument,lookup=lambda *_:{'choices':[{'symbol':'CHART.US','currency':'USD','isin':'US1234567890'}]})=='LINKED'
  with app.connect() as c:wid=c.execute("SELECT watch_id FROM hw_sessions WHERE purpose='automatic holding watch'").fetchone()['watch_id']
+ now=datetime.now(timezone.utc).isoformat()
  sample=tick(datetime.fromisoformat(now));sample.update(source='eodhd',asset_id='synthetic-chart-asset',ticker='CHART',bid_at=now,ask_at=now,status_at=now,quote_feed='synthetic_quotes',status_feed='synthetic_status')
  hotwatch_engine.ingest(app.connect,1,wid,False,sample,datetime.fromisoformat(now))
  server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
