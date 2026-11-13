@@ -68,12 +68,15 @@ class FakeSSH:
  def kill(self): self.code=-9
 
 class Holder(unittest.TestCase):
+ def test_missing_agent_rejected(self):
+  with self.assertRaisesRegex(ValueError,'restricted_identity_unavailable'):
+   holder.hold({'ESCAPE_OBSERVE_CHALLENGE':'1'*40},timeout=0,popen=lambda *a,**k:None)
  def test_only_invalid_fragment_is_sent(self):
   jobs=[]
   def spawn(*args,**kwargs):
    process=FakeSSH(*args,**kwargs);jobs.append(process);return process
   with patch.object(holder,'verify',return_value='fixture\n'),contextlib.redirect_stdout(io.StringIO()):
-   holder.hold({'NORDICWAY_DEPLOY_PING_AUTHORIZED':'1','SSH_AUTH_SOCK':'fixture','ESCAPE_OBSERVE_CHALLENGE':'1'*40},timeout=0,popen=spawn)
+   holder.hold({'SSH_AUTH_SOCK':'fixture','ESCAPE_OBSERVE_CHALLENGE':'1'*40},timeout=0,popen=spawn)
   self.assertEqual(jobs[0].stdin.saved,b'{')
   self.assertEqual(jobs[0].cmd[-1],'escape-deploy-v1 deploy '+('1'*40))
 

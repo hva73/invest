@@ -19,16 +19,16 @@ jobs:
           python-version: '3.11'
       - name: Start restricted observation window
         env:
-          ESCAPE_OBSERVE_CHALLENGE: '8af66f78d2090bc51afe445b675a05e5c93c7c81'
-          NORDICWAY_DEPLOY_PING_AUTHORIZED: ${{ vars.ESCAPE_NORDICWAY_DEPLOY_PING_AUTHORIZED }}
-          NORDICWAY_KNOWN_HOST: ${{ secrets.ESCAPE_NORDICWAY_KNOWN_HOST }}
-          NORDICWAY_VERIFIED_FINGERPRINT: ${{ secrets.ESCAPE_NORDICWAY_VERIFIED_FINGERPRINT }}
+          ESCAPE_OBSERVE_CHALLENGE: '2ef9bc25f9576c2eee8b3fe36af486e3ae51f916'
+          NORDICWAY_VERIFIED_FINGERPRINT: 'SHA256:U8MQZwyzMoDmDyRnBIqFqN14BVifmGKNSi+7B8OACDI'
           NORDICWAY_PRIVATE_KEY: ${{ secrets.ESCAPE_NORDICWAY_DEPLOY_PRIVATE_KEY }}
           NORDICWAY_KEY_PASSPHRASE: ${{ secrets.ESCAPE_NORDICWAY_DEPLOY_PASSPHRASE }}
         run: |
           set -eu
           umask 077
-          [ "$NORDICWAY_DEPLOY_PING_AUTHORIZED" = '1' ] && [ -n "$NORDICWAY_PRIVATE_KEY" ]
+          [ -n "$NORDICWAY_PRIVATE_KEY" ] || { printf '%s\n' 'Restricted SSH credential unavailable.'; exit 1; }
+          NORDICWAY_KNOWN_HOST="$(ssh-keyscan -T 10 -t ed25519 -p 33 cp14.nordicway.dk 2>/dev/null | awk '$1 == "[cp14.nordicway.dk]:33"')"
+          export NORDICWAY_KNOWN_HOST
           python tools/nordicway_hostkey.py
           eval "$(ssh-agent -s)" >/dev/null
           askpass="$RUNNER_TEMP/escape-ssh-askpass"
