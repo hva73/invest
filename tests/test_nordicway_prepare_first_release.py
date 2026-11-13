@@ -43,6 +43,25 @@ class TestFirstRelease(unittest.TestCase):
  def test_source_tamper_is_rejected(self):
   with self.assertRaisesRegex(ValueError,'candidate_mismatch'):p.prepare(self.root,b'bad',b'reqs',self.old,inspect=lambda _:True)
   self.assertTrue((self.bridge/'deploy-enabled').exists())
+ def test_interrupted_update_leaves_gate_closed_and_marker(self):
+  original=p.atomic
+  def fail_on_approval(parent,name,data):
+   if name=='approved-sha': raise OSError('simulated interruption')
+   return original(parent,name,data)
+  with patch.object(p,'atomic',side_effect=fail_on_approval):
+   with self.assertRaises(OSError): self.run_prepare()
+  self.assertFalse((self.bridge/'deploy-enabled').exists())
+  self.assertTrue((self.bridge/'deployment-incomplete.json').exists())
+  self.assertEqual((self.bridge/'first-release-updater-backup').read_bytes(),self.old['apply_update.py'])
+ def test_busy_deploy_lock_does_not_close_gate(self):
+  import fcntl
+  fd=os.open(self.app/'var'/'escape-deploy.lock',os.O_CREAT|os.O_RDWR,0o600)
+  try:
+   fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+   with self.assertRaises(BlockingIOError):self.run_prepare()
+   self.assertTrue((self.bridge/'deploy-enabled').exists())
+   self.assertFalse((self.bridge/'deployment-incomplete.json').exists())
+  finally:os.close(fd)
  def test_scan_finds_exact_guard_argument(self):
   proc=self.root/'proc';(proc/'123456').mkdir(parents=True)
   (proc/'123456'/'cmdline').write_bytes(b'python\0'+os.fsencode(str(self.bridge/'nordicway_deploy_guard.py'))+b'\0')
