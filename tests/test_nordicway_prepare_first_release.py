@@ -81,6 +81,15 @@ class TestFirstRelease(unittest.TestCase):
    with self.assertRaises(OSError): self.run_prepare()
   self.assertTrue((self.bridge/'deployment-incomplete.json').exists())
   self.assertTrue((self.bridge/'deploy-enabled').exists())
+ def test_bad_gate_readback_keeps_claim(self):
+  original=p.atomic
+  def corrupt_gate(parent,name,data):
+   if name=='deploy-enabled': return original(parent,name,b'0\\n')
+   return original(parent,name,data)
+  with patch.object(p,'atomic',side_effect=corrupt_gate):
+   with self.assertRaisesRegex(ValueError,'gate_readback_failed'):self.run_prepare()
+  self.assertTrue((self.bridge/'deployment-incomplete.json').exists())
+  self.assertEqual((self.bridge/'deploy-enabled').read_bytes(),b'0\\n')
  def test_failure_status_reports_open_gate_and_claim(self):
   (self.bridge/'deployment-incomplete.json').write_text('claim')
   self.assertEqual(p.failure_status(self.root,'open_failed'),{'status':'stopped','reason':'open_failed','gate_present':True,'recovery_present':True})
