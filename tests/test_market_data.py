@@ -170,12 +170,14 @@ class Quotes(unittest.TestCase):
    out=market_data.enrich_intraday(app.connect,1,result,now,lambda:Feed())
    self.assertEqual(out['intraday_status'],'PLUTO_AS_DETAILED');self.assertNotIn('intraday_series',out)
  def test_intraday_unavailable_never_invents_a_series(self):
+  calls=[]
   class Feed:
-   def intraday(self,*args,**kwargs):return {'status':'RATE_LIMIT'}
+   def intraday(self,*args,**kwargs):calls.append(1);return {'status':'RATE_LIMIT'}
   result={'asset_id':'synthetic-chart-asset','ticker':'CHART','exchange':'NASDAQ','currency':'USD','series':[]}
   with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_REST_ENABLED':'1'}),patch('hotwatch_service.verified_existing_feed',return_value={'provider_symbol':'CHART.US'}):
    out=market_data.enrich_intraday(app.connect,1,result,self.fixed,lambda:Feed())
    self.assertEqual(out['intraday_status'],'SOURCE_UNAVAILABLE');self.assertNotIn('intraday_series',out)
+   cached=market_data.enrich_intraday(app.connect,1,out,self.fixed,lambda:Feed());self.assertEqual(cached['intraday_status'],'SOURCE_UNAVAILABLE');self.assertEqual(len(calls),1)
  def test_more_than_ten_thousand_real_source_points_are_not_discarded(self):
   raw=copy.deepcopy(self.raw);end=self.fixed;start=end-timedelta(seconds=10000)
   raw['performance']['from']=start.isoformat();raw['performance']['to']=end.isoformat()
