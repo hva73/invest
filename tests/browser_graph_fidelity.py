@@ -56,7 +56,7 @@ def main():
     svg=page.locator('#dashboard-value-chart .dash-chart-svg');svg.scroll_into_view_if_needed();box=svg.bounding_box();x=box['x']+box['width']*.55;y=box['y']+box['height']*.5
     if touch:page.touchscreen.tap(x,y)
     else:page.mouse.move(x,y)
-    tip=page.locator('#dashboard-value-chart .dash-chart-tooltip');expect(tip).to_be_visible();expect(tip.locator('[data-chart-date]')).to_have_text(re.compile(r'^\d{2}\.\d{2}\.\d{2}.*\d{2}[.:]\d{2});expect(tip.locator('[data-chart-value]')).not_to_have_text('—');expect(tip.locator('[data-chart-result]')).not_to_have_text('—')
+    tip=page.locator('#dashboard-value-chart .dash-chart-tooltip');expect(tip).to_be_visible();expect(tip.locator('[data-chart-date]')).to_have_text(re.compile(r'^\d{2}\.\d{2}\.\d{2}.*\d{2}[.:]\d{2}$'));expect(tip.locator('[data-chart-value]')).not_to_have_text('—');expect(tip.locator('[data-chart-result]')).not_to_have_text('—')
     assert not errors,errors;context.close()
    browser.close()
   print('PASS: authenticated full history compared with rendered points, desktop mouse and mobile touch')
