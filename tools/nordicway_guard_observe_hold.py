@@ -5,6 +5,7 @@ valid JSON request or a token. The owner can observe the remote guard while
 this process keeps the SSH stdin pipe open; EOF causes JSON rejection.
 """
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -17,6 +18,9 @@ def hold(env=None, timeout=120, popen=subprocess.Popen):
     env = os.environ if env is None else env
     if env.get('NORDICWAY_DEPLOY_PING_AUTHORIZED') != '1' or not env.get('SSH_AUTH_SOCK'):
         raise ValueError('restricted_identity_unavailable')
+    challenge=env.get('ESCAPE_OBSERVE_CHALLENGE','')
+    if not re.fullmatch('[0-9a-f]{40}',challenge) or challenge=='0'*40:
+        raise ValueError('invalid_observation_challenge')
     known = verify(env.get('NORDICWAY_KNOWN_HOST', ''), env.get('NORDICWAY_VERIFIED_FINGERPRINT', ''))
     with tempfile.TemporaryDirectory(prefix='escape-observe-hostkey-') as tmp:
         hosts = Path(tmp) / 'known_hosts'
@@ -27,7 +31,7 @@ def hold(env=None, timeout=120, popen=subprocess.Popen):
                '-o', 'GlobalKnownHostsFile=/dev/null', '-o', 'ForwardAgent=no',
                '-o', 'ClearAllForwardings=yes', '-o', 'ConnectTimeout=10',
                'nordicr4@cp14.nordicway.dk',
-               'escape-deploy-v1 deploy 0000000000000000000000000000000000000000']
+               'escape-deploy-v1 deploy '+challenge]
         process = popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL, env=env)
         try:
