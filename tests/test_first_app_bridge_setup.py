@@ -38,8 +38,17 @@ class FirstAppBridge(unittest.TestCase):
   real=runner.run
   def execute(sha,token,**kwargs):
    return real(sha,token,bridge=self.bridge,authorization_lock=self.app/'var/escape-deploy.lock',adapter_factory=Mock(),deploy=lambda *_:Outcome('ok','complete',True),prepare=lambda *_:None,**kwargs)
-  with patch.object(runner,'run',side_effect=execute):
-   result=guard.dispatch('escape-deploy-v1 deploy '+SHA,runner=lambda sha:runner.run_request(sha,io.BytesIO(b'{"cpanel_token":"test_token_12345"}')))
+  import importlib.util
+  spec=importlib.util.spec_from_file_location('existing_client',LEGACY/'tools/nordicway_deploy_client.py')
+  existing_client=importlib.util.module_from_spec(spec);spec.loader.exec_module(existing_client)
+  env={'ESCAPE_RELEASE_SHA':SHA,'ESCAPE_CPANEL_API_TOKEN':'test_token_12345','ESCAPE_DEPLOY_OPERATION':'deploy',
+       'ESCAPE_DEPLOY_AUTHORIZED':'1','SSH_AUTH_SOCK':'/synthetic',
+       'NORDICWAY_KNOWN_HOST':'x','NORDICWAY_VERIFIED_FINGERPRINT':'x'}
+  def transport(command,**kwargs):
+   result=guard.dispatch(command[-1],runner=lambda sha:runner.run_request(sha,io.BytesIO(kwargs['input'])))
+   return SimpleNamespace(returncode=0,stdout=json.dumps(result).encode())
+  with patch.object(runner,'run',side_effect=execute),patch.object(existing_client,'verify',return_value='synthetic-key'):
+   result=existing_client.run(env,transport)
   self.assertEqual(result['status'],'ok');self.assertFalse((self.bridge/'approval-ticket.json').exists())
   self.assertEqual((self.app/'BUILD_COMMIT').read_text().strip(),base.INSTALLED)
  def test_installer_reads_actual_git_objects(self):
@@ -68,6 +77,25 @@ class FirstAppBridge(unittest.TestCase):
   with patch.object(approval,'approve',side_effect=OSError('fail')):
    with self.assertRaises(OSError):self.prepare()
   self.assertFalse((self.bridge/'deploy-enabled').exists());self.assertTrue((self.bridge/'first-release-setup-incomplete.json').exists())
+ def test_interruption_after_ticket_before_second_claim_keeps_gate_closed(self):
+  original=setup.claim; calls=[]
+  def fail_second_deploy_claim(path,release):
+   calls.append(path.name)
+   if calls.count('deployment-incomplete.json')==2: raise OSError('fail')
+   return original(path,release)
+  with patch.object(setup,'claim',side_effect=fail_second_deploy_claim):
+   with self.assertRaises(OSError):self.prepare()
+  self.assertFalse((self.bridge/'deploy-enabled').exists())
+  self.assertTrue((self.bridge/'first-release-setup-incomplete.json').exists())
+  self.assertTrue((self.bridge/'approval-ticket.json').exists())
+ def test_old_guard_reappears_after_installer_leaves_gate_closed(self):
+  values=iter([True,True,False])
+  with patch.object(installer,'_sources',return_value=self.files):
+   with self.assertRaisesRegex(ValueError,'guard_in_flight'):
+    setup.prepare(self.root,SHA,BRIDGE_SHA,base.blob(self.updater),self.updater,self.updater,b'same',self.old,installer,approval,self.root,inspect=lambda _:next(values))
+  self.assertFalse((self.bridge/'deploy-enabled').exists())
+  self.assertTrue((self.bridge/'deployment-incomplete.json').exists())
+  self.assertTrue((self.bridge/'first-release-setup-incomplete.json').exists())
  def test_gate_failure_preserves_claim_and_setup_marker(self):
   original=base.atomic
   def fail_gate(parent,name,data):
