@@ -18,7 +18,7 @@ def main():
     page=browser.new_page(viewport={'width':width,'height':900},has_touch=touch);errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();expect(page.locator('.dashboard-v1')).to_be_visible()
     hero=page.locator('.dash-hero');expect(hero.locator('.dash-overview-updated')).to_be_visible();assert hero.locator('.dash-updated-mobile').count()==0
-    expect(hero).not_to_contain_text('oplyst af Pluto');expect(hero).not_to_contain_text('viste punkter');expect(hero).not_to_contain_text('registreringer')
+    expect(hero).not_to_contain_text('oplyst af Pluto');expect(hero).not_to_contain_text('af depotværdi');expect(hero).not_to_contain_text('af startværdi');expect(hero).not_to_contain_text('viste punkter');expect(hero).not_to_contain_text('registreringer')
     if width==390:
      rows=page.locator('.mobile-holding');expect(rows.first).to_be_visible()
     else:rows=page.locator('.dash-row');expect(rows.first).to_be_visible()
