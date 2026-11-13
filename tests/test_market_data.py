@@ -121,6 +121,24 @@ class Quotes(unittest.TestCase):
     cached=market_data.enrich_intraday(app.connect,1,out,now,lambda:Feed());self.assertEqual(len(calls),1);self.assertEqual(cached['intraday_series'],out['intraday_series'])
    with patch('hotwatch_service.verified_existing_feed',return_value=None):
     revoked=market_data.enrich_intraday(app.connect,1,cached,now,lambda:Feed());self.assertEqual(revoked['intraday_status'],'IDENTITY_UNVERIFIED');self.assertNotIn('intraday_series',revoked)
+ def test_verified_history_periods_are_separate_and_never_replace_quote(self):
+  now=self.fixed;calls=[]
+  class Feed:
+   def intraday(self,symbol,**kwargs):
+    calls.append(kwargs);step={'1m':60,'5m':300,'1h':3600}[kwargs['interval']]
+    return {'status':'OK','bars':[{'bar_open_at':(now-timedelta(seconds=step*i)).isoformat(),'close':'999'} for i in (2,1)]}
+  result={'asset_id':'synthetic-chart-asset','ticker':'CHART','exchange':'NASDAQ','currency':'USD','price':'18','series':[]}
+  with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_REST_ENABLED':'1'}),patch('hotwatch_service.verified_existing_feed',return_value={'provider_symbol':'CHART.US'}):
+   for period,interval in [('day','1m'),('week','1m'),('month','5m'),('year','1h')]:
+    result=market_data.enrich_intraday(app.connect,1,result,now,lambda:Feed(),period=period)
+    self.assertEqual((result['intraday_period'],result['intraday_interval'],result['price']),(period,interval,'18'))
+    self.assertEqual([p['price'] for p in result['intraday_series']],['999','999'])
+   self.assertEqual([c['interval'] for c in calls],['1m','1m','5m','1h'])
+   result=market_data.enrich_intraday(app.connect,1,result,now,lambda:Feed(),period='day')
+   self.assertEqual(result['intraday_period'],'day');self.assertEqual(len(calls),4)
+  with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_REST_ENABLED':'1'}),patch('hotwatch_service.verified_existing_feed',return_value=None):
+   revoked=market_data.enrich_intraday(app.connect,1,result,now,lambda:Feed(),period='week')
+   self.assertEqual(revoked['intraday_status'],'IDENTITY_UNVERIFIED');self.assertNotIn('intraday_series',revoked);self.assertNotIn('intraday_cache',revoked)
  def test_intraday_does_not_replace_a_more_detailed_pluto_series(self):
   now=self.fixed
   class Feed:
