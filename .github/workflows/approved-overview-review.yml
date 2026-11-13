@@ -25,6 +25,7 @@ jobs:
           node tests/test_statistics_ui.cjs
           python tests/browser_approved_overview_restoration.py
           python tests/browser_portfolio_value_chart.py
+          python tests/browser_position_chart_detail.py
           python tests/browser_desktop_experience.py
           python tests/browser_statistics_integration.py
           python tests/browser_statistics_desktop_accept.py
