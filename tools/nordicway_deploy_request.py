@@ -55,6 +55,11 @@ def parse(event, event_name, ref, actor_id):
             return None
         return {'operation':operation,'sha':sha,'summary':data['summary'].strip()}
     if operation == 'deploy':
+        # The installed server accepts this legacy form only with a local,
+        # already-created, SHA-bound ticket. It is the recovery fallback.
+        if (event_name == 'issue_comment' and set(data) == {'operation', 'sha'}
+                and isinstance(sha, str) and re.fullmatch(r'[0-9a-f]{40}', sha)):
+            return {'operation': operation, 'sha': sha}
         # A signed owner approval is supplied as a bounded public proof, never
         # as the underlying passphrase or key. Server verifies its MAC.
         if event_name != 'issue_comment' or set(data) != {'operation','sha','approval'}:
@@ -98,3 +103,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
