@@ -1,15 +1,24 @@
 """Graph point fidelity and pointer interaction using synthetic test data."""
 import os,re,sys,threading
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
 sys.path[:0]=[str(Path(__file__).resolve().parents[1]),str(Path(__file__).resolve().parent)]
-import app
+import app,dashboard_projection
 from desktop_fixture import seed
 from test_portfolio_value_chart import PortfolioValueChart
 from playwright.sync_api import sync_playwright,expect
 
 def main():
  case=PortfolioValueChart();case.setUp();seed(case)
+ # More than one page, with genuinely distinct recorded timestamps.
+ with app.connect() as c:
+  scope=dashboard_projection.portfolio_value_snapshot(c,1)['scope']
+  records=[]
+  for i in range(2050):
+   at=case.now-timedelta(seconds=2050-i+.5)
+   records.append((1,scope,at.timestamp(),at.isoformat(),str(1000+i),'DKK',at.isoformat(),str(i)))
+  c.executemany('INSERT INTO display_portfolio_values VALUES(?,?,?,?,?,?,?,?)',records)
  server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start();base=f'http://127.0.0.1:{server.server_port}'
  try:
   with patch('mcp_client.MCP.request',side_effect=AssertionError('No broker calls')),sync_playwright() as p:
@@ -23,6 +32,12 @@ def main():
     data=response.json();valid=[x for x in data['points'] if x['reported_result'] is not None];assert len(valid)>70
     assert page.locator('#dashboard-value-chart .dash-chart-point').count()==len(valid),(width,len(valid),page.locator('#dashboard-value-chart .dash-chart-point').count())
     assert str(data['total'])+' registreringer' in status.inner_text()
+    assert data['next_before'] is not None and len(valid)==2000
+    more=page.locator('[data-dashboard-history-more]');expect(more).to_be_visible();more.click()
+    older=page.request.get(base+'/api/dashboard/portfolio-history',params={'period':'week','scope':data['scope'],'asof':data['asof'],'before':data['next_before']}).json()
+    all_points=older['points']+data['points'];shown=sum(1 for p in all_points if p['reported_result'] is not None)
+    expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown);assert shown==data['total']
+    assert page.locator('[data-dashboard-history-more]').count()==0
     assert page.request.get(base+'/api/dashboard/portfolio-history?period=week&scope=wrong').status==400
     svg=page.locator('#dashboard-value-chart .dash-chart-svg');svg.scroll_into_view_if_needed();box=svg.bounding_box();x=box['x']+box['width']*.55;y=box['y']+box['height']*.5
     if touch:page.touchscreen.tap(x,y)
