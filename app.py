@@ -385,7 +385,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,sector_intelligence.read(connect,user_id))
             if self.path=='/api/realized-statistics':
                 import realized_statistics
-                return self.send(200,realized_statistics.read(connect,user_id))
+                try:result=realized_statistics.read(connect,user_id)
+                except realized_statistics.StatisticsUnavailable as error:
+                    return self.send(503,{'error':'Handelshistorikken kunne ikke hentes. Prøv igen.','diagnostic':error.category})
+                except Exception:
+                    return self.send(500,{'error':'Handelshistorikken kunne ikke hentes. Prøv igen.','diagnostic':'UNEXPECTED'})
+                return self.send(200,result)
             if self.path=='/api/state':
                 import portfolios
                 with connect() as c:
