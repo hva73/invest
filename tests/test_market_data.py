@@ -148,7 +148,7 @@ class Quotes(unittest.TestCase):
   data={'asset_id':'synthetic-chart-asset','ticker':'CHART','exchange':'NASDAQ','currency':'USD','price':'18','series':original}
   with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_REST_ENABLED':'1'}),patch('hotwatch_service.verified_existing_feed',return_value={'provider_symbol':'CHART.US'}):
    out=market_data.enrich_intraday(app.connect,1,data,now,lambda:Feed(),period='week')
-  self.assertEqual(out['intraday_status'],'SOURCE_INCOMPLETE');self.assertNotIn('intraday_series',out);self.assertEqual(out['series'],original);self.assertEqual(out['price'],'18')
+  self.assertEqual(out['intraday_status'],'SOURCE_INCOMPLETE');self.assertEqual(len(out['intraday_series']),30);self.assertEqual(out['series'],original);self.assertEqual(out['price'],'18')
  def test_month_coverage_includes_all_31_days_of_pluto_series(self):
   now=self.fixed;calls=[]
   class Feed:
@@ -159,7 +159,7 @@ class Quotes(unittest.TestCase):
   data={'asset_id':'synthetic-chart-asset','ticker':'CHART','exchange':'NASDAQ','currency':'USD','price':'18','series':original,'series_from':(now-timedelta(days=31)).isoformat(),'series_to':now.isoformat()}
   with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_REST_ENABLED':'1'}),patch('hotwatch_service.verified_existing_feed',return_value={'provider_symbol':'CHART.US'}):
    out=market_data.enrich_intraday(app.connect,1,data,now,lambda:Feed(),period='month')
-  self.assertEqual(calls[0]['start'],int((now-timedelta(days=31)).timestamp()));self.assertEqual(out['intraday_status'],'SOURCE_INCOMPLETE');self.assertNotIn('intraday_series',out);self.assertEqual(out['series'],original)
+  self.assertEqual(calls[0]['start'],int((now-timedelta(days=31)).timestamp()));self.assertEqual(out['intraday_status'],'SOURCE_INCOMPLETE');self.assertEqual(len(out['intraday_series']),60);self.assertEqual(out['series'],original)
  def test_intraday_does_not_replace_a_more_detailed_pluto_series(self):
   now=self.fixed
   class Feed:
