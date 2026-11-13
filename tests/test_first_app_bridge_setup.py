@@ -42,6 +42,24 @@ class FirstAppBridge(unittest.TestCase):
    result=guard.dispatch('escape-deploy-v1 deploy '+SHA,runner=lambda sha:runner.run_request(sha,io.BytesIO(b'{"cpanel_token":"test_token_12345"}')))
   self.assertEqual(result['status'],'ok');self.assertFalse((self.bridge/'approval-ticket.json').exists())
   self.assertEqual((self.app/'BUILD_COMMIT').read_text().strip(),base.INSTALLED)
+ def test_installer_reads_actual_git_objects(self):
+  import subprocess
+  repo=self.root/'git-source';repo.mkdir()
+  def git(*args):
+   return subprocess.run(['git','-C',str(repo),*args],check=True,capture_output=True,text=True).stdout.strip()
+  git('init','-q')
+  for name in installer.MODULES:
+   dest=repo/name;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_bytes(self.files[Path(name).name])
+  (repo/'tools/nordicway_install_bridge.py').write_bytes((NEW/'tools/nordicway_install_bridge.py').read_bytes())
+  git('add','.')
+  git('-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture')
+  commit=git('rev-parse','HEAD')
+  pinned_installer=setup.load_module('pinned_installer',base.git_file(repo,commit,'tools/nordicway_install_bridge.py'))
+  pinned_approval=setup.load_module('pinned_approval',base.git_file(repo,commit,'tools/nordicway_owner_approval.py'))
+  result=setup.prepare(self.root,SHA,commit,base.blob(self.updater),self.updater,self.updater,b'same',self.old,pinned_installer,pinned_approval,repo,inspect=lambda _:True)
+  self.assertEqual(result['bridge'],commit)
+  self.assertEqual((self.bridge/'apply_update.py').read_bytes(),self.updater)
+  self.assertTrue((self.bridge/'approval-ticket.json').exists())
  def test_installer_failure_keeps_gate_closed_and_both_markers(self):
   with patch.object(installer,'install',side_effect=OSError('fail')):
    with self.assertRaises(OSError):self.prepare()
