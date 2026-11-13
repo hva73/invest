@@ -58,8 +58,7 @@ window.SectorUI=(()=>{
  function inspectDate(value){
   if(/^\d{4}-\d{2}-\d{2}$/.test(String(value))){const [y,m,d]=String(value).split('-');return d+'.'+m+'.'+y.slice(-2)}
   const date=new Date(value);if(!Number.isFinite(date.getTime()))return 'Tidspunkt ukendt';
-  if(period==='1')return new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(date).replace(':','.');
-  const parts=Object.fromEntries(new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',day:'2-digit',month:'2-digit',year:'2-digit'}).formatToParts(date).map(x=>[x.type,x.value]));return parts.day+'.'+parts.month+'.'+parts.year;
+  return new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(date);
  }
  function inspectAmount(value,currency){if(number(value)===null)return '—';if(typeof currency!=='string'||!/^[A-Z]{3}$/.test(currency))return new Intl.NumberFormat('da-DK',{maximumFractionDigits:4}).format(Number(value))+' · valuta ukendt';try{return new Intl.NumberFormat('da-DK',{style:'currency',currency,maximumFractionDigits:Math.abs(Number(value))<.01&&Number(value)!==0?8:4}).format(Number(value))}catch{return '—'}}
  function inspectPoint(x,y,date,value,currency,change,label,name='',focus=false){
