@@ -57,7 +57,7 @@ try:
     page.locator('.si-results').screenshot(path=str(screens/'sektor-resultat-mouseover.png'))
     bar.focus();expect(tip).to_be_visible();page.locator('.sector-heading h2').first.hover();expect(tip).to_be_hidden()
     arc=page.locator('[data-sector-donut="Sundhed"]');arc.focus();donut=page.locator('.si-donut-wrap .dash-chart-tooltip');expect(donut).to_be_visible();expect(donut).to_contain_text('Andel');page.locator('.si-allocation').screenshot(path=str(screens/'sektor-fordeling-mouseover.png'));page.locator('.sector-heading h2').first.click();expect(donut).to_be_hidden()
-    rotation=page.locator('.si-rotation-chart.inspect-chart-svg');rotation.scroll_into_view_if_needed();box=rotation.bounding_box();page.mouse.move(box['x']+box['width']*.5,box['y']+box['height']*.5);rtip=page.locator('.si-rotation .dash-chart-tooltip');expect(rtip).to_be_visible();expect(rtip).to_contain_text('Kurs');expect(rtip.locator('[data-chart-share]')).to_contain_text('%')
+    rotation=page.locator('.si-rotation-chart.inspect-chart-svg');rotation.scroll_into_view_if_needed();page.wait_for_timeout(300);page.mouse.move(0,0);box=rotation.bounding_box();page.mouse.move(box['x']+box['width']*.5,box['y']+box['height']*.5);rtip=page.locator('.si-rotation .dash-chart-tooltip');expect(rtip).to_be_visible();expect(rtip).to_contain_text('Kurs');expect(rtip.locator('[data-chart-share]')).to_contain_text('%')
     page.locator('.si-rotation').screenshot(path=str(screens/'sektor-sammenligning-mouseover.png'))
     page.locator('.sector-heading h2').first.hover();expect(rtip).to_be_hidden()
    page.screenshot(path=str(screens/f'sektor-oversigt-{width}.png'),full_page=True)
