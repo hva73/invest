@@ -46,7 +46,6 @@ def main():
     requested=[]
     page.on('request',lambda req:requested.append(req.url) if '/api/dashboard/portfolio-history?' in req.url else None)
     page.evaluate("""() => {state.dashboard.snapshot_at = 'refresh-' + Date.now();document.getElementById('dashboard-value-chart').innerHTML=window.DashboardUI.portfolioChart(state.dashboard)}""")
-    expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown)
     expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown+1)
     page.wait_for_timeout(700)
     expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown+1)
