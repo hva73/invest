@@ -10,7 +10,7 @@ window.DashboardUI=(()=>{
  function resultShare(result,base,label='af depotværdi'){
   if(!result||!base||!result.currency||result.currency!==base.currency||result.amount===null||result.amount===undefined||result.amount===''||base.amount===null||base.amount===undefined||base.amount==='')return '';
   const n=Number(result.amount),denom=Number(base.amount);if(!Number.isFinite(n)||!Number.isFinite(denom)||denom<=0)return '';
-  return `<span class="dash-result-share ${tone(n)}" aria-label="${percent(n/denom*100)} ${esc(label)}">${percent(n/denom*100)} <span>${esc(label)}</span></span>`;
+  return `<span class="dash-result-share ${tone(n)}" aria-label="${percent(n/denom*100)} ${esc(label)}">${percent(n/denom*100)}</span>`;
  }
  function totalDirection(d,v){
   const history=d.portfolio_value_history||{},result=history.reported_result,current=history.current_value,numeric=x=>x===null||x===undefined||x===''?NaN:Number(x),n=numeric(result?.amount),total=numeric(v?.amount),reference=numeric(current?.amount);
