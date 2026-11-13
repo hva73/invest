@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   tests:
-    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue57-app-deploy-client'
+    if: github.repository == 'hva73/invest' && contains(fromJSON('["codex/issue57-app-deploy-client","codex/phone-client-with-fallback"]'), github.event.pull_request.head.ref)
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
