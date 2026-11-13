@@ -371,6 +371,15 @@ class Handler(BaseHTTPRequestHandler):
                 try:result=journal_projection.read(connect,user_id,days=int(q.get('days',['7'])[0]),source=q.get('source',['all'])[0],kind=q.get('kind',['all'])[0],before=q.get('before',[None])[0],limit=int(q.get('limit',['100'])[0]))
                 except (ValueError,OverflowError):return self.send(400,{'error':'Ugyldigt journalfilter'})
                 return self.send(200,result)
+            if self.path=='/api/dashboard/portfolio-history':
+                import dashboard_projection
+                import datetime as history_datetime
+                q=parse_qs(request.query)
+                if any(len(v)!=1 for v in q.values()) or set(q)-{'period','before','asof','scope'}:return self.send(400,{'error':'Ugyldigt historikvalg'})
+                try:
+                    with connect() as c: result=dashboard_projection.portfolio_history_page(c,user_id,q.get('period',['day'])[0],history_datetime.datetime.now(history_datetime.timezone.utc),before=q.get('before',[None])[0],asof=q.get('asof',[None])[0],scope=q.get('scope',[None])[0])
+                except (ValueError,OverflowError):return self.send(400,{'error':'Ugyldigt historikvalg eller ændret depot'})
+                return self.send(200,result)
             if self.path=='/api/sector-intelligence':
                 import sector_intelligence
                 return self.send(200,sector_intelligence.read(connect,user_id))
