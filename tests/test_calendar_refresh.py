@@ -1,7 +1,7 @@
 import ast,copy,hashlib,json,sqlite3,threading,time,unittest
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock,patch
 
 def extract(path,cls,names,namespace):
  tree=ast.parse(Path(path).read_text())
@@ -45,6 +45,15 @@ class TestCalendar(unittest.TestCase):
  def test_error_is_not_relabelled_fresh(self):
   self.put(110);self.feed._market_status_uncached=lambda exchange:{'status':'LOCAL_BUDGET_EXHAUSTED'}
   r=self.adapter.market_status(self.feed,'US',120);self.assertEqual(r,{'status':'LOCAL_BUDGET_EXHAUSTED'})
+ def test_generic_mock_uses_existing_contract_and_preserves_error(self):
+  self.adapter.connect=None;client=Mock()
+  client.market_status.return_value={'status':'LOCAL_BUDGET_EXHAUSTED'}
+  self.assertEqual(self.adapter.market_status(client,'US',120),{'status':'LOCAL_BUDGET_EXHAUSTED'})
+  client.market_status.assert_called_once_with('US')
+ def test_regular_status_keeps_existing_cache_behavior(self):
+  key=(hashlib.sha256(b'fixture').digest(),'US')
+  fns['_status_cache'][key]=(time.monotonic()-5,{'status':'OK'})
+  self.assertEqual(self.feed.market_status('US'),{'status':'OK'});self.assertEqual(self.calls,[])
  def test_future_db_and_mismatched_records_are_not_reused(self):
   self.put(-2);self.adapter.market_status(self.feed,'US',120);self.assertEqual(self.calls,['US'])
   self.calls.clear();fns['_status_cache'].clear();self.put(10)
