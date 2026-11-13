@@ -27,6 +27,14 @@ class OwnerApprovalTests(unittest.TestCase):
  def req(self,sha=SHA,nonce='1'*32,expiry=1100):
   mac=hmac.new(self.key,a.message(sha,nonce,expiry),hashlib.sha256).hexdigest()
   return {'nonce':nonce,'expires':expiry,'mac':mac}
+ def test_bounded_setup_lifetime_and_default(self):
+  default=a.create_proof(SHA,self.key,now=1000,nonce='2'*32)
+  self.assertEqual(default['expires'],1180)
+  setup=a.create_proof(SHA,self.key,now=1000,nonce='3'*32,lifetime=300)
+  self.assertEqual(setup['expires'],1300)
+  self.assertEqual(a.approve(self.bridge,self.lock,SHA,setup,now=1000)['status'],'ok')
+  for bad in (0,301,True):
+   with self.assertRaises(ValueError):a.create_proof(SHA,self.key,now=1000,lifetime=bad)
  def test_valid_and_replay_rejected(self):
   req=self.req(); self.assertEqual(a.approve(self.bridge,self.lock,SHA,req,now=1000)['sha'],SHA)
   self.assertEqual((self.bridge/'approved-sha').read_text(),SHA+'\n')
@@ -58,3 +66,4 @@ class OwnerApprovalTests(unittest.TestCase):
   path=self.bridge/'approved-sha';path.write_text('old');path.chmod(0o644)
   with self.assertRaisesRegex(ValueError,'unsafe_approval'):a.approve(self.bridge,self.lock,SHA,self.req(),now=1000)
   self.assertEqual(path.read_text(),'old')
+
