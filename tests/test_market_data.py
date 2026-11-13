@@ -119,6 +119,8 @@ class Quotes(unittest.TestCase):
     self.assertEqual(out['intraday_status'],'OK');self.assertEqual([p['price'] for p in out['intraday_series']],['10','11'])
     self.assertEqual(len(calls),1);self.assertIsNone(calls[0][1]['max_points'])
     cached=market_data.enrich_intraday(app.connect,1,out,now,lambda:Feed());self.assertEqual(len(calls),1);self.assertEqual(cached['intraday_series'],out['intraday_series'])
+   with patch('hotwatch_service.verified_existing_feed',return_value=None):
+    revoked=market_data.enrich_intraday(app.connect,1,cached,now,lambda:Feed());self.assertEqual(revoked['intraday_status'],'IDENTITY_UNVERIFIED');self.assertNotIn('intraday_series',revoked)
  def test_intraday_does_not_replace_a_more_detailed_pluto_series(self):
   now=self.fixed
   class Feed:
