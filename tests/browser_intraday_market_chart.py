@@ -16,8 +16,7 @@ def main():
   def intraday(self,symbol,**kwargs):
    calls.append((symbol,kwargs));now=datetime.now(timezone.utc).replace(microsecond=0)
    span=kwargs['end']-kwargs['start']; count=130 if span<2*86400 else 160 if span<8*86400 else 180 if span<40*86400 else 200; step={'1m':60,'5m':300,'1h':3600}[kwargs['interval']]
-   gap=max(step,((span-step*2)//(count-1)//step)*step)
-   return {'status':'OK','bars':[{'bar_open_at':(now-timedelta(seconds=step+(count-1-i)*gap)).isoformat(),'close':str(999+i/1000)} for i in range(count)]}
+   return {'status':'OK','bars':[{'bar_open_at':datetime.fromtimestamp(kwargs['start']+(span-step)*i/(count-1),timezone.utc).isoformat(),'close':str(999+i/1000)} for i in range(count)]}
  class Extended(case.factory):
   def request(self,method,params):
    if params['name']=='get_asset' and params['arguments']['period'] in ('ONE_MONTH','ONE_YEAR'):
