@@ -36,7 +36,7 @@ def main():
     page.evaluate('''() => {
      const points=[{at:'2026-11-08T08:00:00Z',reported_result:'-169',currency:'DKK'},{at:'2026-11-08T14:00:00Z',reported_result:'-168',currency:'DKK'}];
      document.querySelector('#dashboard-value-chart').innerHTML=window.DashboardUI.portfolioChart({portfolio_value_history:{day_start:'2026-11-07T23:00:00Z',day_end:'2026-11-08T23:00:00Z',periods:{day:points}}});
-     ''')
+    }''')
     page.wait_for_function("document.querySelector('.dash-chart-latest-time').style.left !== ''")
     page.evaluate('''() => {
      const dot=document.querySelectorAll('.dash-chart-point')[1].getBoundingClientRect(),label=document.querySelector('.dash-chart-latest-time').getBoundingClientRect();
