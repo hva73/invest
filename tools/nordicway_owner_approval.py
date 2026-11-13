@@ -21,16 +21,16 @@ def message(sha, nonce, expires):
     return f'escape-owner-approval-v1\n{sha}\n{nonce}\n{expires}\n'.encode('ascii')
 
 
-def create_proof(sha, key, *, now=None, nonce=None):
+def create_proof(sha, key, *, now=None, nonce=None, lifetime=180):
     """Create proof locally; pass the private 32-byte key via a secure channel."""
     import secrets
     now = int(time.time()) if now is None else now
     nonce = secrets.token_hex(16) if nonce is None else nonce
     if (not isinstance(sha, str) or not SHA.fullmatch(sha) or not isinstance(key, bytes)
             or len(key) != 32 or type(now) is not int or not isinstance(nonce, str)
-            or not NONCE.fullmatch(nonce)):
+            or not NONCE.fullmatch(nonce) or type(lifetime) is not int or not 1 <= lifetime <= MAX_LIFETIME):
         raise ValueError('invalid_request')
-    expires = now + 180
+    expires = now + lifetime
     mac = hmac.new(key, message(sha, nonce, expires), hashlib.sha256).hexdigest()
     return {'nonce':nonce, 'expires':expires, 'mac':mac}
 
@@ -133,3 +133,4 @@ def approve(bridge, lock_path, sha, request, now=None, *, already_locked=False):
             if os.path.exists(name):
                 os.unlink(name)
     return {'status': 'ok', 'operation': 'approve', 'sha': sha}
+
