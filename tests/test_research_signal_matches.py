@@ -55,6 +55,14 @@ class ResearchMatches(unittest.TestCase):
         for order in cases:
             self.assertEqual(self.run_screen([order])[0]['status'], 'unknown')
 
+    def test_threshold_boundary_and_sensitivity(self):
+        order = dict(self.order, filled_price='10.05')
+        self.assertEqual(screen([order], [self.signal], 900, '0.5')['results'][0]['status'], 'research_candidate')
+        self.assertEqual(screen([order], [self.signal], 900, '0.25')['results'][0]['status'], 'unknown')
+        self.assertEqual(screen([order], [self.signal], 30, '0.5')['results'][0]['status'], 'unknown')
+        order['filled_price'] = '10.05000000000000000000000000001'
+        self.assertEqual(screen([order], [self.signal], 900, '0.5')['results'][0]['status'], 'unknown')
+
     def test_multiple_or_ambiguous_links_are_unknown(self):
         signal2 = dict(self.signal, id='s2')
         self.assertEqual(self.run_screen(signals=[self.signal, signal2])[0]['status'], 'unknown')
