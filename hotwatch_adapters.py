@@ -396,8 +396,8 @@ class EODHDAdapter:
       calendar=json.loads(row['calendar'])
       if isinstance(calendar,dict) and isinstance(row['timezone'],str):return {'status':'OK','exchange':exchange,'exchange_open':bool(row['is_open']),'received_at':row['received'],'timezone':row['timezone'],'calendar':calendar}
     except (ValueError,TypeError,KeyError):pass
-  bounded=getattr(client,'market_status_for_scan',None)
-  return bounded(exchange,max_age/2) if callable(bounded) else client.market_status(exchange)
+  bounded=getattr(type(client),'market_status_for_scan',None)
+  return bounded(client,exchange,max_age/2) if callable(bounded) else client.market_status(exchange)
  def capture(self,client,feed,symbol,session):
   """Share one bounded stream across due, independently verified watches."""
   req=session['request_data'];capture_started=time.monotonic()
