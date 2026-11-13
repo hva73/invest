@@ -56,6 +56,27 @@ class FirstAppBridge(unittest.TestCase):
   with patch.object(base,'atomic',side_effect=fail_gate):
    with self.assertRaises(OSError):self.prepare()
   self.assertTrue((self.bridge/'deployment-incomplete.json').exists());self.assertTrue((self.bridge/'first-release-setup-incomplete.json').exists());self.assertFalse((self.bridge/'deploy-enabled').exists())
+ def test_new_request_while_gate_opens_is_locked_out(self):
+  original=base.atomic;real=runner.run
+  def at_open(parent,name,data):
+   result=original(parent,name,data)
+   if name=='deploy-enabled':
+    def execute(sha,token,**kwargs):
+     return real(sha,token,bridge=self.bridge,authorization_lock=self.app/'var/escape-deploy.lock',adapter_factory=Mock(),prepare=lambda *_:None,**kwargs)
+    with patch.object(runner,'run',side_effect=execute):
+     with self.assertRaises(BlockingIOError):
+      guard.dispatch('escape-deploy-v1 deploy '+SHA,runner=lambda sha:runner.run_request(sha,io.BytesIO(b'{"cpanel_token":"test_token_12345"}')))
+    self.assertTrue((self.bridge/'approval-ticket.json').exists())
+   return result
+  with patch.object(base,'atomic',side_effect=at_open): self.prepare()
+  self.assertFalse((self.bridge/'deployment-incomplete.json').exists())
+ def test_guard_becomes_active_after_precheck_blocks_install(self):
+  values=iter([True,False])
+  with patch.object(installer,'_sources',return_value=self.files):
+   with self.assertRaisesRegex(ValueError,'guard_in_flight'):
+    setup.prepare(self.root,SHA,BRIDGE_SHA,base.blob(self.updater),self.updater,self.updater,b'same',self.old,installer,approval,self.root,inspect=lambda _:next(values))
+  self.assertEqual((self.bridge/'nordicway_deploy_guard.py').read_bytes(),self.old['nordicway_deploy_guard.py'])
+  self.assertFalse((self.bridge/'deploy-enabled').exists());self.assertTrue((self.bridge/'deployment-incomplete.json').exists())
  def test_mismatched_updater_does_not_change_bridge(self):
   with patch.object(installer,'_sources',return_value=self.files):
    with self.assertRaisesRegex(ValueError,'candidate_mismatch'):
@@ -81,3 +102,4 @@ class PublicOrigin(unittest.TestCase):
               'https://example.invalid/other','https://example.invalid/api/health?x=1'):
    with self.subTest(url=url):
     with self.assertRaisesRegex(ValueError,'health_origin_invalid'): entry.ensure_public_origin({},url)
+
