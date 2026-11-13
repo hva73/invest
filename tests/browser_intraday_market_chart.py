@@ -26,6 +26,8 @@ def main():
    except AssertionError:
     print('DIAGNOSTIC slot count',page.locator('.market-slot').count(),'body',page.locator('body').inner_text()[:5000],'calls',calls,'errors',errors)
     raise
+   expect(slot.locator('.market-origin')).to_contain_text('Pluto · kurstid ukendt')
+   expect(slot.locator('.market-price')).to_contain_text('18,636')
    assert slot.locator('.market-line').get_attribute('d').count('L')==129
    plot=slot.locator('.market-plot svg');plot.scroll_into_view_if_needed();box=plot.bounding_box();page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5);expect(slot.locator('.market-hover')).to_be_visible();expect(slot.locator('.market-hover')).to_contain_text('minutbarens start')
    slot.locator('[data-market-period=week]').click();assert slot.locator('.market-line').get_attribute('d').count('L')==81
