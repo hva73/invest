@@ -235,19 +235,25 @@ def read(connect, user_id, client_factory=None):
         tools = client.tools()
     except Exception as error:
         raise StatisticsUnavailable('BROKER_CATALOG') from error
-    output = []; errors = []
+    output = []; errors = []; error_codes = []
     for portfolio in portfolios:
         external = portfolio['external_id'] or ''
+        stage = 'IDENTITY'
         try:
             namespace, identifier = external.split(':', 1)
             if portfolio['kind'] == 'portfolio' and namespace == 'portfolios':
+                stage = 'DIRECT_PERMISSION'
                 if not allowed(tools, 'list_orders', 'portfolioId'): raise ValueError('Ordrehistorik er utilgængelig')
+                stage = 'DIRECT_REQUEST'
                 data = decode_result(client.request('tools/call', {'name':'list_orders', 'arguments':{
                     'portfolioId':identifier, 'scope':'DIRECT', 'statusGroup':'INACTIVE', 'limit':50}}), 'list_orders')
                 rows = list_data(data, ['orders','items','data'])
+                stage = 'DIRECT_PROJECTION'
                 result = project(rows)
             elif portfolio['kind'] == 'collection' and namespace == 'collections':
+                stage = 'COLLECTION_PERMISSION'
                 if not allowed(tools, 'get_collection_activity', 'collectionId'): raise ValueError('Collectionhistorik er utilgængelig')
+                stage = 'COLLECTION_REQUEST'
                 rows=[]; cursor=None; seen=set()
                 for _ in range(20):
                     args={'collectionId':identifier,'limit':50}
@@ -268,11 +274,14 @@ def read(connect, user_id, client_factory=None):
                     if not isinstance(cursor,str) or cursor in seen: raise ValueError('Collectionhistorik er ufuldstændig')
                     seen.add(cursor)
                 else: raise ValueError('Collectionhistorik er ufuldstændig')
+                stage = 'COLLECTION_PROJECTION'
                 result=project([],rows)
             else: continue
             output.append({'portfolio_id':portfolio['id'],'name':portfolio['name'],'kind':portfolio['kind'],**result})
-        except Exception:
+        except Exception as error:
+            if getattr(error, 'code', None) == 'PROVIDER_RATE_BUDGET': stage = 'PROVIDER_RATE_BUDGET'
+            if stage not in error_codes: error_codes.append(stage)
             errors.append('En historik kunne ikke læses; eventuelle tal dækker ikke alle depoter.')
-    return {'portfolios':output,'errors':errors,'observed':datetime.now(timezone.utc).isoformat(),
+    return {'portfolios':output,'errors':errors,'error_codes':error_codes,'observed':datetime.now(timezone.utc).isoformat(),
             'history_complete':False}
 
