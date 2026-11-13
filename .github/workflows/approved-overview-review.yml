@@ -5,7 +5,7 @@ permissions:
   contents: read
 jobs:
   browser:
-    if: github.event.pull_request.head.ref == 'codex/approved-display-restoration'
+    if: contains(fromJSON('["codex/approved-display-restoration","codex/hotfix-combined-snapshot"]'), github.event.pull_request.head.ref)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
