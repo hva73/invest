@@ -30,3 +30,11 @@ jobs:
           python tests/browser_desktop_experience.py
           python tests/browser_statistics_integration.py
           python tests/browser_statistics_desktop_accept.py
+
+      - name: Save synthetic screenshots for visual review
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: approved-design-visual-review
+          path: visual-review/*.png
+          if-no-files-found: warn
