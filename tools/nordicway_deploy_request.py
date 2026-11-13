@@ -27,7 +27,7 @@ def parse(event, event_name, ref, actor_id):
                 or comment['user'].get('id') != OWNER or comment.get('author_association') != 'OWNER'):
             return None
         body = comment.get('body')
-        if not isinstance(body, str) or not body.startswith(PREFIX) or len(body) > 256:
+        if not isinstance(body, str) or not body.startswith(PREFIX) or len(body) > 2048:
             return None
         def unique(pairs):
             data = {}
@@ -40,16 +40,43 @@ def parse(event, event_name, ref, actor_id):
             data = json.loads(body[len(PREFIX):], object_pairs_hook=unique)
         except (ValueError, TypeError):
             return None
-        if not isinstance(data, dict) or set(data) != {'operation', 'sha'}:
+        if not isinstance(data, dict) or set(data) not in ({'operation', 'sha'}, {'operation', 'sha', 'approval'}, {'operation', 'sha', 'summary'}):
             return None
         operation, sha = data['operation'], data['sha']
-        if operation not in ('deploy', 'resume'):
+        if operation not in ('deploy', 'resume', 'app-deploy', 'app-resume'):
             return None
     else:
         return None
+    if operation == 'app-deploy':
+        if (event_name != 'issue_comment' or set(data) != {'operation','sha','summary'}
+                or not isinstance(sha,str) or not re.fullmatch(r'[0-9a-f]{40}',sha)
+                or not isinstance(data['summary'],str) or not 1<=len(data['summary'].strip())<=500
+                or '\n' in data['summary'] or '\r' in data['summary']):
+            return None
+        return {'operation':operation,'sha':sha,'summary':data['summary'].strip()}
+    if operation == 'deploy':
+        # The installed server accepts this legacy form only with a local,
+        # already-created, SHA-bound ticket. It is the recovery fallback.
+        if (event_name == 'issue_comment' and set(data) == {'operation', 'sha'}
+                and isinstance(sha, str) and re.fullmatch(r'[0-9a-f]{40}', sha)):
+            return {'operation': operation, 'sha': sha}
+        # A signed owner approval is supplied as a bounded public proof, never
+        # as the underlying passphrase or key. Server verifies its MAC.
+        if event_name != 'issue_comment' or set(data) != {'operation','sha','approval'}:
+            return None
+        proof = data['approval']
+        if (not isinstance(proof, dict) or set(proof) != {'nonce','expires','mac'}
+                or not isinstance(proof['nonce'], str) or not re.fullmatch(r'[0-9a-f]{32}', proof['nonce'])
+                or type(proof['expires']) is not int or not 0 < proof['expires'] < 10**11
+                or not isinstance(proof['mac'], str) or not re.fullmatch(r'[0-9a-f]{64}', proof['mac'])
+                or not isinstance(sha,str) or not re.fullmatch(r'[0-9a-f]{40}',sha)):
+            return None
+        return {'operation': operation, 'sha': sha, 'approval': proof}
+    if event_name == 'issue_comment' and set(data) != {'operation','sha'}:
+        return None
     if event_name == 'workflow_dispatch' and operation == 'write-probe' and sha == '':
         return {'operation': operation, 'sha': ''}
-    if operation in ('deploy', 'resume') and isinstance(sha, str) and re.fullmatch(r'[0-9a-f]{40}', sha):
+    if operation in ('deploy', 'resume', 'app-resume') and isinstance(sha, str) and re.fullmatch(r'[0-9a-f]{40}', sha):
         return {'operation': operation, 'sha': sha}
     return None
 
@@ -65,6 +92,10 @@ def main():
             raise ValueError('invalid request')
         with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
             output.write('operation=' + request['operation'] + '\nsha=' + request['sha'] + '\n')
+            if 'approval' in request:
+                output.write('approval=' + json.dumps(request['approval'], separators=(',', ':')) + '\n')
+            if 'summary' in request:
+                output.write('summary=' + request['summary'] + '\n')
     except (OSError, KeyError, ValueError, TypeError, AttributeError):
         raise SystemExit('Deployment request rejected.') from None
     print('Fixed deployment request accepted; server authorization remains required.')
@@ -72,3 +103,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
