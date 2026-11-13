@@ -69,6 +69,14 @@ class FirstAppBridge(unittest.TestCase):
   self.assertEqual(result['bridge'],commit)
   self.assertEqual((self.bridge/'apply_update.py').read_bytes(),self.updater)
   self.assertTrue((self.bridge/'approval-ticket.json').exists())
+ def test_checkout_precheck_rejects_untracked_files(self):
+  import subprocess
+  repo=self.root/'checkout';repo.mkdir()
+  subprocess.run(['git','-C',str(repo),'init','-q'],check=True,capture_output=True)
+  setup.verify_checkout(repo)
+  (repo/'untracked').write_text('untouched')
+  with self.assertRaisesRegex(ValueError,'checkout_not_clean'):setup.verify_checkout(repo)
+  self.assertTrue((self.bridge/'deploy-enabled').exists())
  def test_installer_failure_keeps_gate_closed_and_both_markers(self):
   with patch.object(installer,'install',side_effect=OSError('fail')):
    with self.assertRaises(OSError):self.prepare()
