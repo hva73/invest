@@ -34,8 +34,8 @@ try:
     page.locator('.statistics-trade-button').last.scroll_into_view_if_needed()
     box=page.locator('.statistics-trade-button').last.bounding_box();nav=page.locator('body > aside nav').bounding_box()
     assert box['y']+box['height']<=nav['y'] or box['y']>=nav['y']+nav['height'],(width,box,nav)
-   mode['value']='failure';page.locator('[data-statistics-reload]').click();expect(page.locator('#statistics')).to_contain_text('BROKER_CATALOG');expect(page.locator('[data-statistics-reload]')).to_be_visible()
-   mode['value']='partial';page.locator('[data-statistics-reload]').click();expect(page.locator('#statistics')).to_contain_text('DIRECT_REQUEST_TIMEOUT');expect(page.locator('#statistics')).to_contain_text('ufuldstændig')
+   mode['value']='failure';page.locator('[data-statistics-reload]').click();expect(page.locator('#content')).to_contain_text('BROKER_CATALOG');expect(page.locator('[data-statistics-reload]')).to_be_visible()
+   mode['value']='partial';page.locator('[data-statistics-reload]').click();expect(page.locator('#content')).to_contain_text('DIRECT_REQUEST_TIMEOUT');expect(page.locator('#content')).to_contain_text('ufuldstændig')
    mode['value']='normal';page.locator('[data-statistics-reload]').click();expect(page.locator('.statistics-summary>div:first-child>strong')).to_contain_text('+8,25 USD')
    screenshots=os.environ.get('ESCAPE_SCREENSHOTS')
    if screenshots:
