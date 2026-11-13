@@ -175,7 +175,12 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
 def quote(connect,user_id,data,factory=None):
     requested_period=data.get('period','ONE_WEEK')
     if requested_period not in ('ONE_WEEK','ONE_MONTH','ONE_YEAR'):raise MarketError('Ukendt grafperiode.')
-    chart_period=data.get('include_intraday',False)\n    if chart_period is True:chart_period='day'\n    if chart_period not in (False,None,'day','week','month','year'):raise MarketError('Ukendt grafperiode.')\n    expected_chart={'day':'ONE_WEEK','week':'ONE_WEEK','month':'ONE_MONTH','year':'ONE_YEAR'}\n    if chart_period and expected_chart[chart_period]!=requested_period:raise MarketError('Uoverensstemmende grafperiode.')\n    c=holding_candidate(connect,user_id,data) if 'holding_portfolio_id' in data else candidate(connect,user_id,data);ticker=c['ticker'].strip().upper();selected=data.get('asset_id')
+    chart_period=data.get('include_intraday',False)
+    if chart_period is True:chart_period='day'
+    if chart_period not in (False,None,'day','week','month','year'):raise MarketError('Ukendt grafperiode.')
+    expected_chart={'day':'ONE_WEEK','week':'ONE_WEEK','month':'ONE_MONTH','year':'ONE_YEAR'}
+    if chart_period and expected_chart[chart_period]!=requested_period:raise MarketError('Uoverensstemmende grafperiode.')
+    c=holding_candidate(connect,user_id,data) if 'holding_portfolio_id' in data else candidate(connect,user_id,data);ticker=c['ticker'].strip().upper();selected=data.get('asset_id')
     if selected is not None and (not isinstance(selected,str) or not 1<=len(selected)<=200):raise MarketError('Vælg et gyldigt aktiv fra Pluto-søgningen.')
     with connect() as db:link=db.execute('SELECT * FROM market_asset_links WHERE user_id=? AND candidate_id=?',(user_id,c['candidate_id'])).fetchone()
     aid=link['asset_id'] if link and link['expected_ticker']==ticker and not selected and data.get('choose') is not True else None
