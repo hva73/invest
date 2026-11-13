@@ -14,6 +14,14 @@ spec.loader.exec_module(request)
 
 
 class DeployRequestTests(unittest.TestCase):
+    def test_legacy_ticket_request_still_requires_owner_and_exact_sha(self):
+        event = dict(self.event)
+        event['comment'] = dict(self.event['comment'])
+        event['comment']['body'] = request.PREFIX + json.dumps({'operation':'deploy','sha':self.sha})
+        self.assertEqual(self.parse(event), {'operation':'deploy','sha':self.sha})
+        event['sender'] = {'id': 1}
+        self.assertIsNone(self.parse(event))
+
     def setUp(self):
         self.sha = 'a' * 40
         self.proof = {'nonce':'1'*32,'expires':2000,'mac':'b'*64}
@@ -79,3 +87,4 @@ class DeployRequestTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
