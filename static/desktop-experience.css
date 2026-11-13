@@ -215,3 +215,5 @@
 .market-marker{vector-effect:non-scaling-stroke;stroke-width:1.2;stroke-dasharray:4 3}
 .market-choose-link{border:0;background:transparent;color:var(--accent);padding:4px 0;font-size:11px}
 @media(min-width:901px){#dashboard-detail,.market-chart-dialog{width:min(760px,95vw)}#dashboard-detail .market-plot svg,.market-chart-dialog .market-plot svg{height:190px}}
+
+@media(max-width:700px){#dashboard-detail .market-controls,.market-chart-dialog .market-controls{flex-wrap:nowrap}#dashboard-detail .market-period-buttons,.market-chart-dialog .market-period-buttons{flex:1 1 auto;min-width:0;gap:3px}#dashboard-detail .market-controls>button[data-market-refresh],.market-chart-dialog .market-controls>button[data-market-refresh]{min-height:44px;min-width:44px;padding:4px}}
