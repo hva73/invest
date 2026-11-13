@@ -14,7 +14,7 @@ data={'portfolios':[{'portfolio_id':'1','name':'Fiktivt',**result}]}
 with sync_playwright() as p:
  browser=p.chromium.launch()
  page=browser.new_page(viewport={'width':320,'height':760})
- page.set_content('<style>body { margin:0; background:#071721; font:14px Arial }</style><main id="test"></main>')
+ page.set_content('<style>* { box-sizing:border-box } body { margin:0; background:#071721; font:14px Arial }</style><main id="test"></main>')
  page.add_style_tag(path='static/statistics.css')
  page.add_script_tag(path='static/statistics-ui.js')
  page.evaluate('(data) => StatisticsUI.mount(document.querySelector("#test"), async () => data)',data)
@@ -36,5 +36,5 @@ with sync_playwright() as p:
  page.locator('#test').evaluate('(el, html) => el.innerHTML=html',tiny_html)
  shown=page.locator('.statistics-calc > div').nth(1).locator('strong').text_content()
  print('Shown nonzero buy price:',shown,flush=True)
- assert shown not in ('0,00 kr.','≈ 0,00 kr.','0,00 DKK','≈ 0,00 DKK'), 'Ikke-nul købspris vises fejlagtigt som nul'
+ assert shown == '<0,000001 kr.', 'Ikke-nul købspris skal vises under afrundingsgrænsen'
  browser.close()
