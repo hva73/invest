@@ -163,8 +163,12 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
             result['intraday_status']='SOURCE_INCONSISTENT';return result
         pluto=result.get('series') or []
         recent=[p for p in pluto if isinstance(p,dict) and isinstance(p.get('epoch'),(int,float)) and now.timestamp()-window<p['epoch']<=now.timestamp()]
-        if len(series)>len(recent) and len(series)>1:
+        # More bars are useful only if they also cover the actual Pluto observations.
+        # A short, dense fragment must never replace a longer source interval.
+        covers=not recent or bool(series) and series[0]['epoch']<=min(p['epoch'] for p in recent)+bar_seconds and series[-1]['epoch']>=max(p['epoch'] for p in recent)-bar_seconds
+        if len(series)>len(recent) and len(series)>1 and covers:
             result['intraday_series']=series;result['intraday_source']='EODHD';result['intraday_status']='OK'
+        elif len(series)>len(recent) and len(series)>1:result['intraday_status']='SOURCE_INCOMPLETE'
         else:result['intraday_status']='PLUTO_AS_DETAILED'
         fields={k:result[k] for k in ('intraday_period','intraday_interval','intraday_checked_at','intraday_symbol','intraday_status','intraday_series','intraday_source') if k in result}
         cache[period]={'symbol':symbol,'checked_at':now.timestamp(),'fields':fields};result['intraday_cache']=cache
