@@ -88,7 +88,19 @@ def prepare(root, release, bridge_sha, updater_blob, release_updater, bridge_upd
         base.atomic(bridge,'deploy-enabled',b'1\n')
         if base.private_file(bridge/'deploy-enabled',4)!=b'1\n': raise ValueError('gate_readback_failed')
         os.unlink(marker);sync_dir(bridge)
-        os.unlink(setup);sync_dir(bridge)
+        try:
+            os.unlink(setup);sync_dir(bridge)
+        except BaseException:
+            # If unlink succeeded but its durability check failed, recreate
+            # the blocking setup marker before the deploy lock is released.
+            try:
+                if not os.path.lexists(setup): claim(setup,release)
+            except BaseException:
+                # When a marker cannot be restored, close the gate instead.
+                try: os.unlink(bridge/'deploy-enabled')
+                except FileNotFoundError: pass
+                sync_dir(bridge)
+            raise
         return {'status':'prepared','release':release,'bridge':bridge_sha,'expires':proof['expires']}
     finally:
         os.close(lock)
