@@ -84,6 +84,24 @@ class HistoricalAudit(unittest.TestCase):
         Path(str(self.path) + '-journal').touch()
         with self.assertRaisesRegex(ValueError, 'journal'): open_database(self.path)
 
+    def test_against_real_app_schema(self):
+        import app
+        previous = app.DB
+        try:
+            app.DB = str(Path(self.tmp.name) / 'initialized.db')
+            app.init()
+            app.create_user('synthetic-password-long-enough')
+            db = open_database(app.DB)
+            try:
+                user_id = db.execute('SELECT id FROM users WHERE active=1').fetchone()[0]
+                result = inspect(db, [self.order], user_id)
+                self.assertEqual(result['orders'][self.order], {
+                    'execution_observations': [], 'report_observations': [], 'proposal_references': []})
+            finally:
+                db.close()
+        finally:
+            app.DB = previous
+
 
 if __name__ == '__main__':
     unittest.main()
