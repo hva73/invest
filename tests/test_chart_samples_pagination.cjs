@@ -14,7 +14,10 @@ function dialog(){const plot={innerHTML:''},status={textContent:''};return {isCo
 (async()=>{
  let d=dialog();await context.window.EngineUI.testLoadAllSamples(d,'watch',{items:all.slice(0,100),next_cursor:151},'owner',false);
  assert.equal(calls,2);assert.equal((d.plot.innerHTML.match(/class="dash-chart-point"/g)||[]).length,250);assert.match(d.status.textContent,/250 observationer hentet/);
+ calls=0;const newer=make(251);await context.window.EngineUI.testLoadAllSamples(d,'watch',{items:[newer,...all.slice(0,99)],next_cursor:152},'owner',false);
+ assert.equal(calls,0);assert.equal((d.plot.innerHTML.match(/class="dash-chart-point"/g)||[]).length,251);assert.match(d.status.textContent,/251 observationer hentet/);
  calls=0;fail=true;d=dialog();await context.window.EngineUI.testLoadAllSamples(d,'watch',{items:all.slice(0,100),next_cursor:151},'owner',false);
  assert.equal(calls,1);assert.equal((d.plot.innerHTML.match(/class="dash-chart-point"/g)||[]).length,100);assert.match(d.status.textContent,/ældre historik kunne ikke hentes/);
  console.log('PASS: 250 actual samples across three pages; partial fetch explicitly reported');
 })().catch(e=>{console.error(e);process.exitCode=1});
+
