@@ -51,12 +51,12 @@ window.MarketUI=(()=>{
   const today=dateKey(now()),date=end?.date||null,dayLabel=!date?'Dag':date===today?'Seneste døgn · '+dayDate(end.timestamp):'Døgn frem til '+dayDate(end.timestamp);
   const fetched=Date.parse(d.fetched_at),fetchAge=now()-fetched,sourceTime=d.price_time==null||d.price_time===''?null:Date.parse(d.price_time);
   // Missing time remains unknown; invalid or future timestamps are not current.
-  const sourceTimeValid=sourceTime===null||(Number.isFinite(sourceTime)&&sourceTime<=now()),fetchTimeValid=Number.isFinite(fetched)&&fetchAge>=0;
+  const sourceTimeValid=sourceTime===null||(Number.isFinite(sourceTime)&&sourceTime<=now()),fetchTimeValid=Number.isFinite(fetched)&&fetchAge>=-1000;
   const warning=r.error||d.last_error||(!sourceTimeValid||!fetchTimeValid?'Kurs kan ikke bekræftes.':null),quality=age(d.price_time,d.fetched_at,Boolean(warning));node.classList.toggle('market-stale',quality.tone==='stale');
   const dayComparison=sourceTimeValid&&fetchTimeValid?(d.daily_comparison?.basis==='official_close'?d.daily_comparison:d.daily_change_percent!==null&&d.daily_change_percent!==undefined&&!d.daily_note?{percent:d.daily_change_percent,amount:d.daily_change,basis:'pluto_reported_daily_change'}:null):null,dailyTone=tone(dayComparison?.percent),arrow=!dayComparison?'—':dailyTone==='positive'?'↑':dailyTone==='negative'?'↓':'→';
   const fetchLabel=fetchTimeValid?clock(d.fetched_at):'ukendt';
   // The holding quote is scoped by exact depot and Pluto asset identity.
-  if(dailyBox&&node.dataset.marketHoldingPortfolio&&node.dataset.marketHoldingAsset&&dayComparison&&Number.isFinite(Number(dayComparison.percent))&&!warning&&quality.tone!=='stale'&&sourceTimeValid&&Number.isFinite(fetched)&&fetchAge>=0&&fetchAge<=300000&&dateKey(fetched)===today){
+  if(dailyBox&&node.dataset.marketHoldingPortfolio&&node.dataset.marketHoldingAsset&&dayComparison&&Number.isFinite(Number(dayComparison.percent))&&!warning&&quality.tone!=='stale'&&sourceTimeValid&&fetchTimeValid&&fetchAge<=300000&&dateKey(fetched)===today){
    const qty=Number(dailyBox.closest('[data-position-daily]')?.dataset.positionQuantity),pct=Number(dayComparison.percent),unit=dayComparison.amount!==null&&dayComparison.amount!==undefined&&dayComparison.amount!==''?Number(dayComparison.amount):NaN,price=Number(d.price),estimated=!Number.isFinite(unit),delta=estimated&&Number.isFinite(price)&&price>0&&pct>-100?price*pct/(100+pct):unit;
    const value=Number.isFinite(qty)&&qty>0&&Number.isFinite(delta)&&d.currency?(estimated?'≈ ':'')+(delta*qty>0?'+':'')+money({amount:String(delta*qty),currency:d.currency}):'—';
    dailyBox.innerHTML='<span class="position-daily-value '+tone(pct)+'">'+value+'</span> <span class="position-daily-percent '+tone(pct)+'">'+percent(pct)+'</span>';dailyBox.dataset.marketOverride='true';
