@@ -17,7 +17,14 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
+      - name: Check out installed legacy client
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: c1b6db6ca1ded2f3a81601608bdfa455145798f2
+          path: _legacy
+          persist-credentials: false
       - name: Test one-time owner ticket and existing client payload
         env:
           PYTHONPATH: tools:.
+          ESCAPE_TEST_LEGACY_BRIDGE: ${{ github.workspace }}/_legacy
         run: python -m unittest tests.test_legacy_ticket_bootstrap tests.test_nordicway_owner_approval
