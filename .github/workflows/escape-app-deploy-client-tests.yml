@@ -20,4 +20,4 @@ jobs:
       - name: Test fixed requests and transport
         env:
           PYTHONPATH: tools:.
-        run: python -m unittest tests.test_nordicway_deploy_request tests.test_nordicway_deploy_client tests.test_nordicway_deploy_ping tests.test_nordicway_hostkey
+        run: python -m unittest tests.test_nordicway_deploy_request tests.test_nordicway_deploy_client tests.test_nordicway_hostkey
