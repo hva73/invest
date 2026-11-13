@@ -1,0 +1,20 @@
+name: Popup decimal visual QA
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.event.pull_request.head.ref == 'codex/statistik-mobil-qa'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: pip install playwright==1.56.0 && python -m playwright install --with-deps chromium
+      - run: python tests/browser_statistic_long_decimal.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: decimal-mobile-check
+          path: statistics-long-decimal-320.png
