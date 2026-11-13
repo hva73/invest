@@ -13,6 +13,7 @@ class StatisticsTest(unittest.TestCase):
     def test_direct_pair_is_indicative_not_a_dated_fill(self):
         result=project([self.buy,self.sell]);row=result['items'][0]
         self.assertEqual(row['gross'],'4');self.assertEqual(row['quality'],'indicative')
+        self.assertEqual((row['buy_origin'],row['sell_origin']),('unknown','unknown'))
         self.assertIsNone(row['sell_time']);self.assertFalse(result['history_complete'])
     def test_direct_partial_sales_count_only_sold_quantity(self):
         first=order('SELL','0.5','12','2026-01-02T00:00:00Z','s1')
@@ -61,6 +62,19 @@ class StatisticsTest(unittest.TestCase):
         sale=order('SELL','3','15','2026-01-03T00:00:00Z','s')
         result=project([], [('c',self.buy),('c',b2),('c',sale)])['items'][0]
         self.assertEqual(result['gross'],'11');self.assertEqual(result['buy_price'],str(__import__('decimal').Decimal(34)/3))
+    def test_popup_amounts_use_sold_quantity_for_partial_sales(self):
+        buy=order('BUY','10','10','2026-01-01T00:00:00Z','b')
+        first=order('SELL','4','12','2026-01-02T00:00:00Z','s1')
+        second=order('SELL','2','8','2026-01-03T00:00:00Z','s2')
+        rows=project([buy,first,second])['items']
+        self.assertEqual([(r['cost_basis'],r['sale_proceeds'],r['buy_price'],r['gross']) for r in rows],
+                         [('40','48','10','8'),('20','16','10','-4')])
+    def test_popup_collection_weighted_price_and_actual_lot_totals(self):
+        b2=order('BUY','2','14','2026-01-02T00:00:00Z','b2')
+        sale=order('SELL','3','15','2026-01-03T00:00:00Z','s')
+        row=project([], [('c',self.buy),('c',b2),('c',sale)])['items'][0]
+        self.assertEqual((row['cost_basis'],row['sale_proceeds'],row['gross']),('34','45','11'))
+        self.assertEqual(row['buy_price'],str(__import__('decimal').Decimal(34)/3))
     def test_missing_buy_is_not_profit(self):
         self.assertEqual(project([self.sell])['items'],[])
         self.assertEqual(project([], [('c',self.sell)])['items'],[])
@@ -176,3 +190,4 @@ class HttpTest(unittest.TestCase):
                 response,body=request('/api/realized-statistics',cookie=cookie)
             self.assertTrue(response[0].startswith('200'));self.assertFalse(body['history_complete'])
             self.assertEqual(reader.call_args.args[1],1)
+
