@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   observe:
-    if: ${{ false }}
+    if: ${{ github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue57-guard-observation' && github.actor_id == '351122234' }}
     runs-on: ubuntu-latest
     environment: ESCAPE_NORDICWAY_DEPLOY
     timeout-minutes: 4
