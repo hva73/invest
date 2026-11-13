@@ -21,7 +21,7 @@ jobs:
       - name: Data, broker and signal regression
         env:
           PYTHONPATH: .:tests
-        run: python -m unittest tests.test_release_approval tests.test_nordicway_app_release tests.test_app.Workflow.test_release_approval_requires_owner_session_csrf_and_exact_version tests.test_web_push.Push.test_release_notification_only_for_owner_with_current_candidate tests.test_hotwatch_engine tests.test_hotwatch_holdings_auto tests.test_hotwatch_buy_plan tests.test_trade_service tests.test_nordicway_uapi_probe tests.test_nordicway_uapi_quota
+        run: python -m unittest tests.test_realized_statistics tests.test_release_approval tests.test_nordicway_app_release tests.test_app.Workflow.test_release_approval_requires_owner_session_csrf_and_exact_version tests.test_web_push.Push.test_release_notification_only_for_owner_with_current_candidate tests.test_hotwatch_engine tests.test_hotwatch_holdings_auto tests.test_hotwatch_buy_plan tests.test_trade_service tests.test_nordicway_uapi_probe tests.test_nordicway_uapi_quota
       - name: Mobile, desktop and sector unit checks
         run: |
           node tests/test_push_service_worker.js
