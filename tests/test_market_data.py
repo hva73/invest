@@ -109,7 +109,7 @@ class Quotes(unittest.TestCase):
      {'bar_open_at':(now-timedelta(seconds=120)).isoformat(),'close':'10'},
      {'bar_open_at':(now-timedelta(seconds=60)).isoformat(),'close':'11'},
      {'bar_open_at':(now-timedelta(seconds=10)).isoformat(),'close':'12'}]}
-  result={'asset_id':'synthetic-chart-asset','ticker':'CHART','exchange':'NASDAQ','currency':'USD','series':[{'epoch':(now-timedelta(hours=1)).timestamp()}]}
+  result={'asset_id':'synthetic-chart-asset','ticker':'CHART','exchange':'NASDAQ','currency':'USD','series':[{'epoch':(now-timedelta(seconds=120)).timestamp()}]}
   with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_REST_ENABLED':'1'}):
    with patch('hotwatch_service.verified_existing_feed',return_value=None):
     out=market_data.enrich_intraday(app.connect,1,result,now,lambda:Feed())
@@ -139,6 +139,16 @@ class Quotes(unittest.TestCase):
   with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_REST_ENABLED':'1'}),patch('hotwatch_service.verified_existing_feed',return_value=None):
    revoked=market_data.enrich_intraday(app.connect,1,result,now,lambda:Feed(),period='week')
    self.assertEqual(revoked['intraday_status'],'IDENTITY_UNVERIFIED');self.assertNotIn('intraday_series',revoked);self.assertNotIn('intraday_cache',revoked)
+ def test_dense_short_fragment_cannot_erase_older_pluto_history(self):
+  now=self.fixed
+  class Feed:
+   def intraday(self,*args,**kwargs):
+    return {'status':'OK','bars':[{'bar_open_at':(now-timedelta(minutes=i)).isoformat(),'close':'999'} for i in range(31,1,-1)]}
+  original=[{'epoch':(now-timedelta(days=i)).timestamp()} for i in range(7,0,-1)]
+  data={'asset_id':'synthetic-chart-asset','ticker':'CHART','exchange':'NASDAQ','currency':'USD','price':'18','series':original}
+  with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_REST_ENABLED':'1'}),patch('hotwatch_service.verified_existing_feed',return_value={'provider_symbol':'CHART.US'}):
+   out=market_data.enrich_intraday(app.connect,1,data,now,lambda:Feed(),period='week')
+  self.assertEqual(out['intraday_status'],'SOURCE_INCOMPLETE');self.assertNotIn('intraday_series',out);self.assertEqual(out['series'],original);self.assertEqual(out['price'],'18')
  def test_intraday_does_not_replace_a_more_detailed_pluto_series(self):
   now=self.fixed
   class Feed:
