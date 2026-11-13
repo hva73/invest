@@ -19,6 +19,7 @@ jobs:
           python-version: '3.11'
       - name: Start restricted observation window
         env:
+          ESCAPE_OBSERVE_CHALLENGE: '8af66f78d2090bc51afe445b675a05e5c93c7c81'
           NORDICWAY_DEPLOY_PING_AUTHORIZED: ${{ vars.ESCAPE_NORDICWAY_DEPLOY_PING_AUTHORIZED }}
           NORDICWAY_KNOWN_HOST: ${{ secrets.ESCAPE_NORDICWAY_KNOWN_HOST }}
           NORDICWAY_VERIFIED_FINGERPRINT: ${{ secrets.ESCAPE_NORDICWAY_VERIFIED_FINGERPRINT }}
