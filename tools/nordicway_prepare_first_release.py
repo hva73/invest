@@ -179,8 +179,9 @@ def prepare(root, release, updater_blob, release_updater, requirements, old_modu
         finally: os.close(directory)
         return {'status':'prepared','release':release}
     finally:
-        # After any uncertainty the gate remains closed and an owned claim is
-        # deliberately left for investigation; never delete an existing claim.
+        # Before completion, an owned claim remains even if the gate was
+        # reopened. Once the claim is removed, the updater, SHA and gate have
+        # all been verified; directory-fsync failure is reported separately.
         os.close(lock)
 
 
