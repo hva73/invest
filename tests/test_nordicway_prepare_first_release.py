@@ -111,6 +111,18 @@ class TestFirstRelease(unittest.TestCase):
   with self.assertRaisesRegex(ValueError,'invalid_release'):
    p.prepare(self.root,'invalid',self.blob,self.updater,b'reqs',self.old,inspect=lambda _:True)
   self.assertTrue((self.bridge/'deploy-enabled').exists())
+ def test_hidden_proc_mount_is_rejected(self):
+  proc=self.root/'proc';(proc/'self/fdinfo').mkdir(parents=True)
+  (proc/'self/fdinfo/99').write_text('mnt_id:\t99\n')
+  (proc/'self/mountinfo').write_text(f'99 1 0:9 / {proc} rw - proc proc rw,hidepid=2\n')
+  with patch.object(p.os,'open',return_value=99), patch.object(p.os,'close'):
+   with self.assertRaisesRegex(ValueError,'process_visibility_unverified'):p.proc_visibility(proc)
+ def test_unrestricted_proc_mount_accepted(self):
+  proc=self.root/'proc';(proc/'self/fdinfo').mkdir(parents=True)
+  (proc/'self/fdinfo/99').write_text('mnt_id:\t99\n')
+  (proc/'self/mountinfo').write_text(f'99 1 0:9 / {proc} rw - proc proc rw,hidepid=0\n')
+  with patch.object(p.os,'open',return_value=99), patch.object(p.os,'close'):
+   p.proc_visibility(proc)
  def test_scan_finds_exact_guard_argument(self):
   proc=self.root/'proc';(proc/'123456').mkdir(parents=True)
   (proc/'123456'/'status').write_text(f'Name:\tpython\nState:\tS (sleeping)\nUid:\t{os.getuid()}\t{os.getuid()}\t{os.getuid()}\t{os.getuid()}\n')
