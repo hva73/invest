@@ -29,9 +29,9 @@ def main():
     page.goto(base);page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();expect(page.locator('.dashboard-v1')).to_be_visible()
     page.evaluate("""() => {const real=window.fetch;window.fetch=(url,...args)=>String(url).includes('/dashboard/portfolio-history?period=week')?new Promise(resolve=>setTimeout(resolve,1200)).then(()=>real(url,...args)):real(url,...args)}""")
     page.locator('[data-dashboard-range=week]').click()
-    waiting_svg=page.locator('#dashboard-value-chart .dash-chart-svg');waiting_svg.scroll_into_view_if_needed();box=waiting_svg.bounding_box()
-    if touch:page.touchscreen.tap(box['x']+box['width']*.9,box['y']+box['height']*.5)
-    else:page.mouse.move(box['x']+box['width']*.9,box['y']+box['height']*.5)
+    waiting_svg=page.locator('#dashboard-value-chart .dash-chart-svg');waiting_svg.scroll_into_view_if_needed();box=page.locator('#dashboard-value-chart .dash-chart-point').last.bounding_box()
+    if touch:page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5)
+    else:page.mouse.move(box['x']+box['width']*.5,box['y']+box['height']*.5)
     expect(page.locator('#dashboard-value-chart .dash-chart-tooltip')).to_be_visible()
     selected=page.locator('#dashboard-value-chart .dash-chart-point.is-selected').get_attribute('data-chart-at');assert selected
     status=page.locator('.dash-history-status');expect(status).to_be_visible(timeout=10000)
