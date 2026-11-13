@@ -201,6 +201,13 @@ class FirstAppBridge(unittest.TestCase):
   child=multiprocessing.get_context('fork').Process(target=crash);child.start();child.join(5)
   self.assertEqual(child.exitcode,29);self.assertTrue((self.bridge/'deploy-enabled').exists())
   self.assert_setup_blocks_runner()
+ def test_guard_blocks_all_operations_while_setup_incomplete(self):
+  (self.bridge/'first-release-setup-incomplete.json').write_text('pending')
+  for operation in ('deploy','resume','app-deploy','app-resume'):
+   with self.subTest(operation=operation), patch.object(guard,'SETUP_MARKER',str(self.bridge/'first-release-setup-incomplete.json')), patch.object(guard,'deployment_enabled',return_value=True), patch.dict(os.environ,{'SSH_ORIGINAL_COMMAND':'escape-deploy-v1 '+operation+' '+SHA}), patch('sys.stdout',new_callable=io.StringIO) as out, patch.object(guard.os,'execv') as execv:
+    self.assertEqual(guard.main(),1)
+    self.assertEqual(json.loads(out.getvalue())['reason'],'setup_incomplete')
+    execv.assert_not_called()
  def test_mismatched_updater_does_not_change_bridge(self):
   with patch.object(installer,'_sources',return_value=self.files):
    with self.assertRaisesRegex(ValueError,'candidate_mismatch'):
