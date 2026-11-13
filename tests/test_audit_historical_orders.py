@@ -13,15 +13,15 @@ class HistoricalAudit(unittest.TestCase):
         self.path = Path(self.tmp.name) / 'sample.db'
         self.order = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
         with sqlite3.connect(self.path) as db:
-            db.execute('CREATE TABLE candidate_execution_events(id INTEGER PRIMARY KEY, is_test INTEGER, order_id TEXT, status TEXT, occurred_at TEXT, verification TEXT, payload TEXT)')
-            db.execute('CREATE TABLE ingested_reports(id INTEGER PRIMARY KEY, is_test INTEGER, report_id TEXT, received TEXT, payload TEXT)')
-            db.execute('CREATE TABLE broker_proposals(id INTEGER PRIMARY KEY, status TEXT, created REAL, response TEXT)')
+            db.execute('CREATE TABLE candidate_execution_events(id INTEGER PRIMARY KEY, user_id INTEGER, is_test INTEGER, order_id TEXT, status TEXT, occurred_at TEXT, verification TEXT, payload TEXT)')
+            db.execute('CREATE TABLE ingested_reports(id INTEGER PRIMARY KEY, user_id INTEGER, is_test INTEGER, report_id TEXT, received TEXT, payload TEXT)')
+            db.execute('CREATE TABLE broker_proposals(id INTEGER PRIMARY KEY, user_id INTEGER, status TEXT, created REAL, response TEXT)')
             payload = {'status_time': '2026-11-11T20:25:00Z', 'filled_quantity': '2', 'secret': 'do-not-return'}
-            db.execute('INSERT INTO candidate_execution_events VALUES(1,0,?,?,?,?,?)',
+            db.execute('INSERT INTO candidate_execution_events VALUES(1,1,0,?,?,?,?,?)',
                        (self.order, 'FILLED', '2026-11-11T20:30:00Z', 'pluto', json.dumps(payload)))
             order = {'order_id': self.order, 'created_at': '2026-11-11T20:00:00Z',
                      'as_of': '2026-11-11T20:35:00Z', 'execution_source': 'pluto'}
-            db.execute('INSERT INTO ingested_reports VALUES(1,0,?,?,?)', ('r1', '2026-11-11T20:36:00Z', json.dumps({'orders': [order]})))
+            db.execute('INSERT INTO ingested_reports VALUES(1,1,0,?,?,?)', ('r1', '2026-11-11T20:36:00Z', json.dumps({'orders': [order]})))
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -29,7 +29,7 @@ class HistoricalAudit(unittest.TestCase):
     def test_status_and_observation_are_separate_and_sensitive_fields_excluded(self):
         db = open_database(self.path)
         try:
-            result = inspect(db, [self.order]); row = result['orders'][self.order]
+            result = inspect(db, [self.order], 1); row = result['orders'][self.order]
             self.assertEqual(row['execution_observations'][0]['provider_status_time'], '2026-11-11T20:25:00Z')
             self.assertEqual(row['execution_observations'][0]['observed_at'], '2026-11-11T20:30:00Z')
             self.assertEqual(row['report_observations'][0]['reported_created_at'], '2026-11-11T20:00:00Z')
@@ -42,13 +42,13 @@ class HistoricalAudit(unittest.TestCase):
 
     def test_test_data_and_unrelated_orders_excluded(self):
         with sqlite3.connect(self.path) as db:
-            db.execute('INSERT INTO candidate_execution_events VALUES(2,1,?,?,?,?,?)',
+            db.execute('INSERT INTO candidate_execution_events VALUES(2,1,1,?,?,?,?,?)',
                        (self.order, 'FILLED', 'fake', 'synthetic', '{}'))
         db = open_database(self.path)
         try:
-            result = inspect(db, [self.order])
+            result = inspect(db, [self.order], 1)
             self.assertEqual(len(result['orders'][self.order]['execution_observations']), 1)
-            with self.assertRaises(ValueError): inspect(db, ['not-an-order-id'])
+            with self.assertRaises(ValueError): inspect(db, ['not-an-order-id'], 1)
         finally:
             db.close()
 
@@ -56,14 +56,27 @@ class HistoricalAudit(unittest.TestCase):
         response = {'orderIntentId': self.order, 'filledAt': 'not-an-order-fill'}
         matched = {'orders': [{'orderId': self.order, 'source': 'synthetic', 'filledAt': '2026-11-11T20:22:00Z', 'token': 'do-not-return'}]}
         with sqlite3.connect(self.path) as db:
-            db.execute('INSERT INTO broker_proposals VALUES(1,?,?,?)', ('sent', 1, json.dumps(response)))
-            db.execute('INSERT INTO broker_proposals VALUES(2,?,?,?)', ('sent', 2, json.dumps(matched)))
+            db.execute('INSERT INTO broker_proposals VALUES(1,1,?,?,?)', ('sent', 1, json.dumps(response)))
+            db.execute('INSERT INTO broker_proposals VALUES(2,1,?,?,?)', ('sent', 2, json.dumps(matched)))
         db = open_database(self.path)
         try:
-            result = inspect(db, [self.order]); refs = result['orders'][self.order]['proposal_references']
+            result = inspect(db, [self.order], 1); refs = result['orders'][self.order]['proposal_references']
             self.assertEqual(len(refs), 1)
             self.assertEqual(refs[0]['provider_order_fields']['filledAt'], '2026-11-11T20:22:00Z')
             self.assertNotIn('do-not-return', json.dumps(result))
+        finally:
+            db.close()
+
+    def test_other_owner_is_excluded_even_for_same_order_id(self):
+        with sqlite3.connect(self.path) as db:
+            db.execute('INSERT INTO candidate_execution_events VALUES(3,2,0,?,?,?,?,?)',
+                       (self.order, 'FILLED', 'other-user', 'pluto', '{}'))
+            db.execute('INSERT INTO broker_proposals VALUES(3,2,?,?,?)',
+                       ('sent', 3, json.dumps({'orderId': self.order, 'source': 'other-user'})))
+        db = open_database(self.path)
+        try:
+            result = inspect(db, [self.order], 1)
+            self.assertNotIn('other-user', json.dumps(result))
         finally:
             db.close()
 
