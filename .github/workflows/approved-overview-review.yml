@@ -20,6 +20,7 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - name: Approved layout and data checks
         run: |
+          node tests/test_market_daily_stale.cjs
           node tests/test_dashboard_data.js
           node tests/test_dashboard_attention.js
           node tests/test_statistics_ui.cjs
