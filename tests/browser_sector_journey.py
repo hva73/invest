@@ -114,7 +114,7 @@ try:
     with page.expect_response('**/api/sector-intelligence/holdings'):
      page.locator('[data-sector-market="SYNTH-TECH.US"]').first.click()
     overlay=page.locator('[data-sector-holdings-close]');expect(overlay).to_be_visible();overlay.click()
-    curve=page.locator('.sector-chart.inspect-chart-svg');expect(curve).to_be_visible();curve.scroll_into_view_if_needed();box=curve.bounding_box();page.mouse.move(box['x']+box['width']*.55,box['y']+box['height']*.5)
+    curve=page.locator('.sector-chart.inspect-chart-svg');expect(curve).to_be_visible();curve.scroll_into_view_if_needed();page.wait_for_timeout(300);page.mouse.move(0,0);box=curve.bounding_box();page.mouse.move(box['x']+box['width']*.55,box['y']+box['height']*.5)
     ctip=page.locator('.si-detail .dash-chart-tooltip');expect(ctip).to_be_visible();expect(ctip).to_contain_text('Kurs');expect(ctip.locator('[data-chart-share]')).to_contain_text('%')
     assert ctip.evaluate("e => { const t=e.getBoundingClientRect(), p=e.closest('.dash-chart-plot').getBoundingClientRect(); return t.left>=p.left-1 && t.right<=p.right+1 }")
     page.locator('.si-detail').screenshot(path=str(screens/'sektor-kurs-mouseover.png'))
