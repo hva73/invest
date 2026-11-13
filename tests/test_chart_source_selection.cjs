@@ -1,0 +1,12 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+let source=fs.readFileSync('static/market-ui.js','utf8').replace('return {slot,mount,click,refreshVisible,setup(deps)','return {points,plot,slot,mount,click,refreshVisible,setup(deps)');
+assert(source.includes('return {points,plot,'));
+const ctx={window:{},document:{addEventListener(){}},setInterval(){},Intl,Date,Math,Number,String,Map,Set,JSON};vm.runInNewContext(source,ctx);
+ctx.window.MarketUI.setup({escape:v=>String(v??''),formatAmount:o=>String(o.amount)+' '+(o.currency||''),formatTime:v=>String(v),owner:()=>'owner',connected:()=>true,now:()=>Date.now(),age:()=>({tone:'ok'})});
+const point=(i)=>({epoch:Date.parse('2026-11-12T12:00:00Z')/1000+i*60,timestamp:new Date(Date.parse('2026-11-12T12:00:00Z')+i*60000).toISOString(),price:String(100+i)});
+const data={currency:'USD',series:[point(0),point(2)],intraday_status:'OK',intraday_series:[point(0),point(1),point(2)]};
+const ui=ctx.window.MarketUI;assert.equal(ui.points(data,'day').length,3);assert.equal(ui.points(data,'week').length,2);
+const path=ui.plot(data,'day').match(/class="market-line" d="([^"]+)"/)[1];assert.equal((path.match(/[ML]/g)||[]).length,3);
+assert.equal(ui.points({...data,intraday_status:'IDENTITY_UNVERIFIED'},'day').length,2);
+assert.equal(ui.points({...data,intraday_series:undefined},'day').length,2);
+console.log('PASS: verified minute points and unmixed Pluto fallback');

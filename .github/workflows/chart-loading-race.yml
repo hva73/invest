@@ -1,0 +1,25 @@
+name: Chart loading inspection
+on:
+  pull_request:
+    branches: [codex/issue57-integrated-review]
+permissions:
+  contents: read
+jobs:
+  chart-loading:
+    if: github.event.pull_request.head.ref == 'codex/chart-unified-release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: .:tests
+      ESCAPE_PLAYWRIGHT_MANAGED: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt playwright==1.56.0
+      - run: python -m playwright install --with-deps chromium
+      - run: python tests/browser_graph_loading_race.py

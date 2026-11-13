@@ -302,6 +302,27 @@ def _send(subscription,payload,topic):
     return webpush(subscription_info=subscription,data=json.dumps(payload,ensure_ascii=False),vapid_private_key=str(key_path()),vapid_claims={'sub':public_origin()},ttl=90,timeout=8,headers={'Topic':topic},requests_session=NoRedirectSession())
 
 
+def notify_release_ready(connect, uid, sender=None):
+    """Notify the owner's subscribed devices; the app fetches the candidate.
+
+    The push contains no authorization, release details or external URL. A
+    failed push does not affect the admin page or approve a release.
+    """
+    import release_approval
+    with connect() as c:
+        owner=c.execute("SELECT id FROM users WHERE id=? AND username='owner' AND role='admin' AND active=1",(uid,)).fetchone()
+        devices=c.execute('SELECT payload FROM push_devices WHERE user_id=?',(uid,)).fetchall() if owner else []
+    if not owner or not release_approval.pending(connect,uid):return {'sent':0,'failed':0}
+    sender=sender or _send;sent=failed=0
+    for row in devices:
+        try:
+            sender(unseal(uid,row['payload']),{'title':'ESCAPE · Opdatering klar','body':'Åbn ESCAPE for at gennemgå opdateringen.','kind':'release_approval','tag':'escape-release'},'escape-release')
+            sent+=1
+        except Exception:
+            failed+=1
+    return {'sent':sent,'failed':failed}
+
+
 def dispatch_one(connect,now=None,sender=None):
     """Lease one event, verify current signal, and send without holding a DB lock."""
     from datetime import datetime,timezone

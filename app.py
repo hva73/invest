@@ -94,6 +94,8 @@ def init():
             c.execute(f'CREATE INDEX IF NOT EXISTS {table}_owner ON {table}(user_id)')
             c.execute(f"CREATE TRIGGER IF NOT EXISTS {table}_require_owner BEFORE INSERT ON {table} WHEN NEW.user_id IS NULL BEGIN SELECT RAISE(ABORT, 'Owner required'); END")
         c.execute('CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), csrf TEXT NOT NULL, expires REAL NOT NULL)')
+        import release_approval
+        release_approval.init(c)
         c.execute('CREATE TABLE IF NOT EXISTS login_failures(address TEXT NOT NULL, created REAL NOT NULL)')
         c.execute('CREATE TABLE IF NOT EXISTS invitations(token_hash TEXT PRIMARY KEY, created_by INTEGER NOT NULL REFERENCES users(id), expires REAL NOT NULL, used INTEGER NOT NULL DEFAULT 0)')
         c.execute("CREATE TABLE IF NOT EXISTS connections(user_id INTEGER PRIMARY KEY REFERENCES users(id), provider TEXT NOT NULL DEFAULT 'pluto', status TEXT NOT NULL, requested TEXT NOT NULL)")
@@ -278,6 +280,10 @@ class Handler(BaseHTTPRequestHandler):
             s=self.session()
             if not s: return self.send(401,{'error':'Log ind først'})
             user_id=s['user_id']
+            if self.path=='/api/admin/release-approval':
+                if s['role']!='admin' or s['username']!='owner':return self.send(403,{'error':'Kun ejeren kan godkende opdateringer'})
+                import release_approval
+                return self.send(200,{'candidate':release_approval.pending(connect,user_id),'current':release_approval.current(connect,user_id)})
             if self.path=='/api/push/config':
                 import web_push
                 return self.send(200,web_push.config(connect,user_id))
@@ -365,9 +371,21 @@ class Handler(BaseHTTPRequestHandler):
                 try:result=journal_projection.read(connect,user_id,days=int(q.get('days',['7'])[0]),source=q.get('source',['all'])[0],kind=q.get('kind',['all'])[0],before=q.get('before',[None])[0],limit=int(q.get('limit',['100'])[0]))
                 except (ValueError,OverflowError):return self.send(400,{'error':'Ugyldigt journalfilter'})
                 return self.send(200,result)
+            if self.path=='/api/dashboard/portfolio-history':
+                import dashboard_projection
+                import datetime as history_datetime
+                q=parse_qs(request.query)
+                if any(len(v)!=1 for v in q.values()) or set(q)-{'period','before','asof','scope','since'}:return self.send(400,{'error':'Ugyldigt historikvalg'})
+                try:
+                    with connect() as c: result=dashboard_projection.portfolio_history_page(c,user_id,q.get('period',['day'])[0],history_datetime.datetime.now(history_datetime.timezone.utc),before=q.get('before',[None])[0],asof=q.get('asof',[None])[0],scope=q.get('scope',[None])[0],since=q.get('since',[None])[0])
+                except (ValueError,OverflowError):return self.send(400,{'error':'Ugyldigt historikvalg eller ændret depot'})
+                return self.send(200,result)
             if self.path=='/api/sector-intelligence':
                 import sector_intelligence
                 return self.send(200,sector_intelligence.read(connect,user_id))
+            if self.path=='/api/realized-statistics':
+                import realized_statistics
+                return self.send(200,realized_statistics.read(connect,user_id))
             if self.path=='/api/state':
                 import portfolios
                 with connect() as c:
@@ -390,8 +408,8 @@ class Handler(BaseHTTPRequestHandler):
         if not path:return self.send(404,{'error':'Ikke fundet'})
         kind={'.html':'text/html; charset=utf-8','.js':'application/javascript','.css':'text/css','.json':'application/manifest+json','.svg':'image/svg+xml'}[Path(path).suffix]
         body=(ROOT/'static'/path).read_bytes()
-        if path=='style.css':body+=b'\n'+(ROOT/'static/desktop-experience.css').read_bytes()
-        if path=='app.js':body=(ROOT/'static/sector-ui.js').read_bytes()+b'\n'+(ROOT/'static/journal-ui.js').read_bytes()+b'\n'+(ROOT/'static/dashboard-ui.js').read_bytes()+b'\n'+(ROOT/'static/candidate-ui.js').read_bytes()+b'\n'+(ROOT/'static/engine-ui.js').read_bytes()+b'\n'+(ROOT/'static/intel-ui.js').read_bytes()+b'\n'+(ROOT/'static/position-ui.js').read_bytes()+b'\n'+(ROOT/'static/overview-ui.js').read_bytes()+b'\n'+(ROOT/'static/market-ui.js').read_bytes()+b'\n'+(ROOT/'static/report-ui.js').read_bytes()+b'\n'+(ROOT/'static/trade-ui.js').read_bytes()+b'\n'+body
+        if path=='style.css':body+=b'\n'+(ROOT/'static/desktop-experience.css').read_bytes()+b'\n'+(ROOT/'static/statistics.css').read_bytes()
+        if path=='app.js':body=(ROOT/'static/statistics-ui.js').read_bytes()+b'\n'+(ROOT/'static/sector-ui.js').read_bytes()+b'\n'+(ROOT/'static/journal-ui.js').read_bytes()+b'\n'+(ROOT/'static/dashboard-ui.js').read_bytes()+b'\n'+(ROOT/'static/candidate-ui.js').read_bytes()+b'\n'+(ROOT/'static/engine-ui.js').read_bytes()+b'\n'+(ROOT/'static/intel-ui.js').read_bytes()+b'\n'+(ROOT/'static/position-ui.js').read_bytes()+b'\n'+(ROOT/'static/overview-ui.js').read_bytes()+b'\n'+(ROOT/'static/market-ui.js').read_bytes()+b'\n'+(ROOT/'static/report-ui.js').read_bytes()+b'\n'+(ROOT/'static/trade-ui.js').read_bytes()+b'\n'+body
         if self.path=='/demo':
             body=body.replace(b'<body>',b'<body class="demo-mode"><div class="demo-banner" role="status"><span>DEMO \xc2\xb7 Fiktive data</span><a href="/">Afslut demo / Log ind</a></div>',1).replace(b'<link rel="manifest" href="/manifest.json">',b'').replace(b'<script src="/app.js" defer></script>',b'<script src="/demo-data.js"></script><script src="/demo-app.js" defer></script>')
         if self.path=='/demo-app.js':
@@ -453,6 +471,12 @@ class Handler(BaseHTTPRequestHandler):
             if not s:return self.send(401,{'error':'Log ind først'})
             if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),s['csrf']):return self.send(403,{'error':'Ugyldigt sikkerhedstoken'})
             user_id=s['user_id']
+            if self.path=='/api/admin/release-approval':
+                if s['role']!='admin' or s['username']!='owner':return self.send(403,{'error':'Kun ejeren kan godkende opdateringer'})
+                import release_approval
+                try:result=release_approval.approve(connect,data.get('id'),data.get('sha'),user_id)
+                except ValueError:return self.send(409,{'error':'Opdateringen er udløbet eller ændret. Hent den aktuelle version igen.'})
+                return self.send(200,{**result,'deployment_started':False})
             if self.path=='/api/admin/reset-password':
                 if s['role']!='admin':return self.send(403,{'error':'Kun administratoren kan ændre brugerens adgangskode'})
                 if self.throttled():return self.send(429,{'error':'Prøv igen om fem minutter'})

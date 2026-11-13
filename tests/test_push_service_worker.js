@@ -9,5 +9,8 @@ vm.runInNewContext(fs.readFileSync('static/sw.js','utf8'),{self,URL});
  assert(closed);assert.equal(opened[0],'https://escape.example/?watch_id=hw-test-1');
  handlers.push({data:{json:()=>({watch_id:'https://evil.example',tag:'bad'})},waitUntil:p=>pending=p});await pending;
  assert.equal(shown[1].options.data.watch,'');assert.equal(shown[1].options.tag,'escape-signal');
+ handlers.push({data:{json:()=>({kind:'release_approval',watch_id:'hw-test-1',url:'https://evil.example'})},waitUntil:p=>pending=p});await pending;
+ handlers.notificationclick({notification:{data:shown[2].options.data,close:()=>{}},waitUntil:p=>pending=p});await pending;
+ assert.equal(opened[1],'https://escape.example/?release_approval=1');
  console.log('PASS: push notification, replacement tag and same-origin current-status link');
 })().catch(e=>{console.error(e);process.exitCode=1});
