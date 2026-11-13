@@ -1,0 +1,11 @@
+name: Statistics tiny price regression
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  test:
+    if: github.event.pull_request.head.ref == 'codex/statistics-tiny-release-fix'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: node tests/test_statistics_ui.cjs
