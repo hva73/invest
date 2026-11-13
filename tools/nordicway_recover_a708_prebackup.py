@@ -174,6 +174,9 @@ def prepare(repo, bridge, app, *, verify_runtime=_verify_runtime, verify_files=_
                 or type(record.get('motor_enabled')) is not bool or type(record.get('motor_disabled')) is not bool:
             raise ValueError('unexpected_recovery')
         _verify_bridge_modules(repo, bridge)
+        # Reject known discrepancies while the gate is still unchanged.
+        verify_files(repo, app)
+        verify_runtime(app, bridge)
         # Keep the recovery marker while closing the remote gate for all checks.
         (bridge / 'deploy-enabled').unlink()
         _sync(bridge)
