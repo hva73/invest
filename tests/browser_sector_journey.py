@@ -110,7 +110,7 @@ try:
    child_row['price_freshness']=original_freshness
    if width >= 901:
     page.locator('[data-sector-journey-close]').first.click()
-    heat=page.locator('[data-sector-market="SYNTH-TECH.US"]').first;heat.hover();expect(heat.locator('.dash-chart-tooltip')).to_be_visible()
+    heat=page.locator('[data-sector-market="SYNTH-TECH.US"]').first;heat.scroll_into_view_if_needed();page.wait_for_timeout(300);page.mouse.move(0,0);heat.hover();expect(heat.locator('.dash-chart-tooltip')).to_be_visible()
     with page.expect_response('**/api/sector-intelligence/holdings'):
      page.locator('[data-sector-market="SYNTH-TECH.US"]').first.click()
     overlay=page.locator('[data-sector-holdings-close]');expect(overlay).to_be_visible();overlay.click()
