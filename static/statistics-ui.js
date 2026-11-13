@@ -61,7 +61,7 @@
     const lost = totalGross(rows.filter(item => number(item.gross) < 0));
     const rate = rows.length ? new Intl.NumberFormat('da-DK', {maximumFractionDigits:2}).format(wins * 100 / rows.length) : '—';
     const hasErrors = Array.isArray(data?.errors) && data.errors.length > 0;
-    const diagnosticCodes = Array.isArray(data?.error_codes) ? data.error_codes.filter(code => ['IDENTITY','DIRECT_PERMISSION','DIRECT_REQUEST','DIRECT_PROJECTION','COLLECTION_PERMISSION','COLLECTION_REQUEST','COLLECTION_PROJECTION','PROVIDER_RATE_BUDGET'].includes(code)) : [];
+    const diagnosticCodes = Array.isArray(data?.error_codes) ? data.error_codes.filter(code => ['IDENTITY','DIRECT_PERMISSION','DIRECT_REQUEST','DIRECT_PROJECTION','COLLECTION_PERMISSION','COLLECTION_REQUEST','COLLECTION_PROJECTION','PROVIDER_RATE_BUDGET',...['DIRECT_REQUEST','COLLECTION_REQUEST'].flatMap(stage=>['_LOCAL_GUARD','_DENIED','_HTTP','_TIMEOUT','_NETWORK','_RESPONSE'].map(suffix=>stage+suffix))].includes(code)) : [];
     const portfolioOptions = portfolios.map(p => `<option value="${esc(p.portfolio_id)}"${p === portfolio ? ' selected' : ''}>${esc(p.name || 'Depot')}</option>`).join('');
     const currencyOptions = currencies.map(c => `<option value="${esc(c)}"${c === currency ? ' selected' : ''}>${esc(c)}</option>`).join('');
     const options = portfolios.length ? `<div class="statistics-filters"><label>Depot<select data-statistics-portfolio>${portfolioOptions}</select></label>${currency ? `<label>Valuta<select data-statistics-currency>${currencyOptions}</select></label>` : ''}</div>` : '';
