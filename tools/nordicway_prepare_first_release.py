@@ -80,7 +80,11 @@ def proc_visibility(proc):
     options = mounts[0].split(' - ', 1)[0].split()[5:]
     options += mounts[0].split(' - ', 1)[1].split()[2:]
     options = ','.join(options).split(',')
-    if any(option.startswith('hidepid=') and option != 'hidepid=0' for option in options):
+    # Nordicway uses hidepid=invisible; own-user guards were observed via the
+    # restricted SSH identity in the same PID and mount namespaces.  Continue
+    # scanning own processes below; unknown or ambiguous hidepid modes fail closed.
+    hidepid = {option.partition('=')[2] for option in options if option.startswith('hidepid=')}
+    if len(hidepid) > 1 or any(value not in {'0', '2', 'invisible'} for value in hidepid):
         raise ValueError('process_visibility_unverified')
 
 
