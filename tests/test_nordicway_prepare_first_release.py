@@ -28,10 +28,21 @@ class TestFirstRelease(unittest.TestCase):
   with self.assertRaisesRegex(ValueError,'recovery_required'):self.run_prepare()
   self.assertEqual(m.read_text(),'keep');self.assertTrue((self.bridge/'deploy-enabled').exists())
  def test_active_guard_leaves_gate_closed_and_marker(self):
-  with self.assertRaisesRegex(ValueError,'guard_in_flight'):self.run_prepare(lambda _:False)
+  results=iter([True,False])
+  with self.assertRaisesRegex(ValueError,'guard_in_flight'):self.run_prepare(lambda _:next(results))
   self.assertFalse((self.bridge/'deploy-enabled').exists())
   self.assertTrue((self.bridge/'deployment-incomplete.json').exists())
   self.assertEqual((self.bridge/'apply_update.py').read_bytes(),self.old['apply_update.py'])
+ def test_precheck_unavailable_does_not_change_gate(self):
+  def unavailable(_): raise ValueError('process_visibility_unverified')
+  with self.assertRaisesRegex(ValueError,'process_visibility_unverified'):self.run_prepare(unavailable)
+  self.assertTrue((self.bridge/'deploy-enabled').exists())
+  self.assertFalse((self.bridge/'deployment-incomplete.json').exists())
+  self.assertEqual((self.bridge/'apply_update.py').read_bytes(),self.old['apply_update.py'])
+ def test_precheck_active_guard_does_not_change_gate(self):
+  with self.assertRaisesRegex(ValueError,'guard_in_flight'):self.run_prepare(lambda _:False)
+  self.assertTrue((self.bridge/'deploy-enabled').exists())
+  self.assertFalse((self.bridge/'deployment-incomplete.json').exists())
  def test_incorrect_requirements_leave_gate_untouched(self):
   (self.app/'requirements.txt').write_bytes(b'other')
   with self.assertRaisesRegex(ValueError,'requirements_changed'):self.run_prepare()
