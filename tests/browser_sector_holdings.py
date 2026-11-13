@@ -9,7 +9,7 @@ case=PortfolioValueChart();case.setUp()
 now=time.time();today=datetime.now(timezone.utc).date().isoformat();series=json.dumps([{'date':'2026-10-01','close':100},{'date':today,'close':110}]);series_extra=json.dumps([{'date':'2026-10-01','close':100},{'date':'2026-10-18','close':105},{'date':today,'close':110}])
 with app.connect() as c:
  for symbol,region,sectorname,src in [('XLU.US','USA','Forsyning','x'),('XLY.US','USA','Forbrug','x'),('EXH4.XETRA','Europa','Industri','x'),('IXN.US','Globalt','Teknologi','x')]:
-  c.execute('INSERT INTO sector_benchmarks(symbol,region,sector,status,updated,next_attempt,proof_source) VALUES(?,?,?,?,?,?,?)',(symbol,region,sectorname,'VERIFIED',now,now+86400,src))
+  c.execute('INSERT INTO sector_benchmarks(symbol,region,sector,status,updated,next_attempt,proof_source,currency) VALUES(?,?,?,?,?,?,?,?)',(symbol,region,sectorname,'VERIFIED',now,now+86400,src,'USD'))
   c.execute('INSERT INTO sector_market(symbol,region,sector,payload,status,updated,next_attempt,price_basis) VALUES(?,?,?,?,?,?,?,?)',(symbol,region,sectorname,series_extra if symbol=='XLY.US' else series,'OK',now,now+86400,'close'))
  c.execute("UPDATE sector_benchmarks SET name=?,exchange='XETRA' WHERE symbol='EXH4.XETRA'",('iShares STOXX Europe 600 Industrial Goods & Services UCITS ETF (DE)',))
 server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
