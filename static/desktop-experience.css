@@ -210,3 +210,8 @@
 
 /* Keep selected price outside the plotted line on phone and desktop. */
 .market-plot .market-hover,#dashboard-detail .market-plot .market-hover{top:auto;bottom:calc(100% + 6px)}
+
+/* Compact chart detail with fine, unscaled purchase marker. */
+.market-marker{vector-effect:non-scaling-stroke;stroke-width:1.2;stroke-dasharray:4 3}
+.market-choose-link{border:0;background:transparent;color:var(--accent);padding:4px 0;font-size:11px}
+@media(min-width:901px){#dashboard-detail,.market-chart-dialog{width:min(760px,95vw)}#dashboard-detail .market-plot svg,.market-chart-dialog .market-plot svg{height:190px}}
