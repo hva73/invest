@@ -57,7 +57,6 @@ def normalized(raw,asset_id,now=None,expected_period='ONE_WEEK'):
         lower=stamp(performance.get('from'));upper=stamp(performance.get('to'))
         if lower>upper:raise MarketError('Grafens tidsinterval er ugyldigt.')
         points=performance['series']
-        if len(points)>10000:raise MarketError('Kurshistorikken overstiger visningens punktgrænse.')
         by_time={}
         for p in points:
             if not isinstance(p,dict):raise MarketError('Ukendt kurspunkt i historikken.')
