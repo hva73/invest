@@ -166,13 +166,13 @@ window.DashboardUI=(()=>{
   const prefix='dashboard/portfolio-history?period='+encodeURIComponent(selected)+'&scope='+encodeURIComponent(scope);
   const work=async()=>{
    if(refresh&&entry.points.length){
-    let since=Date.parse(entry.points.at(-1).at)/1000,combined=entry.points.slice(),result;
+    let since=entry.points.at(-1).epoch,combined=entry.points.slice(),result;
     do {result=await api(prefix+'&since='+encodeURIComponent(since));if(result.scope!==scope||!Array.isArray(result.points))throw Error('history scope');combined=combined.concat(result.points);since=result.next_since} while(since!=null);
-    entry.start=result.start;entry.points=combined.filter(p=>Date.parse(p.at)/1000>=entry.start);entry.total=result.total;
+    entry.start=result.start;entry.points=combined.filter(p=>p.epoch>=entry.start);entry.total=result.total;
     if(entry.next_before!=null&&entry.next_before<=result.start)entry.next_before=null;
    }else{
     const page=await api(prefix+(more?'&before='+encodeURIComponent(entry.next_before)+'&asof='+encodeURIComponent(entry.asof):''));
-    if(page.scope!==scope||!Array.isArray(page.points))throw Error('history scope');entry.points=more?page.points.filter(p=>Date.parse(p.at)/1000>=entry.start).concat(entry.points):page.points;if(!more){entry.total=page.total;entry.asof=page.asof;entry.start=page.start}entry.next_before=page.next_before!=null&&page.next_before>entry.start?page.next_before:null;entry.loaded=true;
+    if(page.scope!==scope||!Array.isArray(page.points))throw Error('history scope');entry.points=more?page.points.filter(p=>p.epoch>=entry.start).concat(entry.points):page.points;if(!more){entry.total=page.total;entry.asof=page.asof;entry.start=page.start}entry.next_before=page.next_before!=null&&page.next_before>entry.start?page.next_before:null;entry.loaded=true;
    }
    entry.snapshot=snapshot;
   };
