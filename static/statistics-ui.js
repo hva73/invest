@@ -13,7 +13,8 @@
     if (n !== 0 && Math.abs(n) < 0.01) {
       const fraction=value.replace(/^-/, '').split('.')[1] || '';
       const short=fraction.slice(0,12).replace(/0+$/, '');
-      return short ? `${sign}0,${short}` : `${sign}&lt;0,000000000001`;
+      const approximate=/[1-9]/.test(fraction.slice(12));
+      return short ? `${approximate ? '≈ ' : ''}${sign}0,${short}` : `${sign}&lt;0,000000000001`;
     }
     return sign+new Intl.NumberFormat('da-DK', {minimumFractionDigits:2, maximumFractionDigits:2}).format(Math.abs(n));
   }
