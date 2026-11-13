@@ -31,11 +31,10 @@ try:
   expect(dialog).to_be_visible();expect(dialog).to_contain_text('a'*40);expect(dialog).to_contain_text('Test: mobil og data')
   assert calls==[], 'Runner must not start before owner approval'
   dialog.locator('[data-release-confirm]').click()
-  expect(dialog.locator('[data-release-status]')).to_have_text('Installationen er gennemført. Kontrol af app og data følger.',timeout=15000)
+  expect(dialog).not_to_be_visible()
   worker.join(timeout=5)
   assert not worker.is_alive() and results[0]['status']=='completed'
   assert calls==[('a'*40,('proof','a'*40))],calls
-  dialog.locator('[data-release-close]').click()
   page.locator('#release-approval-open').click()
   expect(dialog.locator('[data-release-status]')).to_have_text('Installationen er gennemført. Kontrol af app og data følger.')
   browser.close()

@@ -200,3 +200,22 @@
  .dash-chart-plot .inspect-chart-svg .dash-chart-point.is-selected, .dash-chart-plot .inspect-chart-svg .dash-chart-point:focus-visible { opacity:1; }
  .si-bar-column .dash-chart-tooltip { text-align:left; top:8px; bottom:auto; }
 }
+
+/* Keep inspection readable and outside the portfolio chart. */
+.dash-hero .dash-chart-tooltip{bottom:calc(100% + 8px);max-width:calc(100vw - 32px)}
+.dash-chart-guide{stroke:#a9d8ca;stroke-width:1;stroke-dasharray:3 3;vector-effect:non-scaling-stroke;pointer-events:none}
+.dash-chart-guide[hidden]{display:none}
+.dash-hero .dash-chart-latest-time{position:absolute;transform:translate(-50%,-115%);font-size:11px;line-height:1.2;font-weight:600;color:#e4f4ef;text-shadow:0 1px 3px #071820;white-space:nowrap;pointer-events:none;font-variant-numeric:tabular-nums}
+@media(max-width:700px){.dash-hero-intro .dash-overview-updated{display:block;margin-top:4px;color:#a6b9c2;font-size:11px;letter-spacing:0}}
+
+/* Keep selected price outside the plotted line on phone and desktop. */
+.market-plot .market-hover,#dashboard-detail .market-plot .market-hover{top:auto;bottom:calc(100% + 6px)}
+
+/* Compact chart detail with fine, unscaled purchase marker. */
+.market-marker{vector-effect:non-scaling-stroke;stroke-width:1.2;stroke-dasharray:4 3}
+.market-choose-link{border:0;background:transparent;color:var(--accent);padding:4px 0;font-size:11px}
+@media(min-width:901px){#dashboard-detail,.market-chart-dialog{width:min(760px,95vw)}#dashboard-detail .market-plot svg,.market-chart-dialog .market-plot svg{height:190px}}
+
+@media(max-width:700px){#dashboard-detail .market-controls,.market-chart-dialog .market-controls{flex-wrap:nowrap}#dashboard-detail .market-period-buttons,.market-chart-dialog .market-period-buttons{flex:1 1 auto;min-width:0;gap:3px}#dashboard-detail .market-controls>button[data-market-refresh],.market-chart-dialog .market-controls>button[data-market-refresh]{min-height:44px;min-width:44px;padding:4px}}
+
+@media(min-width:701px){#dashboard-detail .market-controls>button[data-market-refresh],.market-chart-dialog .market-controls>button[data-market-refresh]{min-height:40px;min-width:40px}}

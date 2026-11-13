@@ -15,7 +15,12 @@ try:
   browser=pw.chromium.launch(headless=True)
   for width in (320,390,768,1280):
    page=browser.new_page(viewport={'width':width,'height':900},is_mobile=width<700,has_touch=width<700)
-   page.route('**/api/realized-statistics',lambda route:route.fulfill(json=sample))
+   mode={'value':'normal'}
+   def statistics_route(route):
+    if mode['value']=='failure':route.fulfill(status=503,json={'error':'Historik utilgængelig','diagnostic':'BROKER_CATALOG'})
+    elif mode['value']=='partial':route.fulfill(json={**sample,'errors':['incomplete'],'error_codes':['DIRECT_REQUEST_TIMEOUT']})
+    else:route.fulfill(json=sample)
+   page.route('**/api/realized-statistics',statistics_route)
    page.goto(f'http://127.0.0.1:{server.server_port}/');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();expect(page.locator('.dashboard-v1')).to_be_visible()
    if width<=900:page.locator('#mobile-more').click()
    page.locator('nav [data-view=statistics]').click()
@@ -29,6 +34,9 @@ try:
     page.locator('.statistics-trade-button').last.scroll_into_view_if_needed()
     box=page.locator('.statistics-trade-button').last.bounding_box();nav=page.locator('body > aside nav').bounding_box()
     assert box['y']+box['height']<=nav['y'] or box['y']>=nav['y']+nav['height'],(width,box,nav)
+   mode['value']='failure';page.locator('[data-statistics-reload]').click();expect(page.locator('#content')).to_contain_text('BROKER_CATALOG');expect(page.locator('[data-statistics-reload]')).to_be_visible()
+   mode['value']='partial';page.locator('[data-statistics-reload]').click();expect(page.locator('#content')).to_contain_text('DIRECT_REQUEST_TIMEOUT');expect(page.locator('#content')).to_contain_text('ufuldstændig')
+   mode['value']='normal';page.locator('[data-statistics-reload]').click();expect(page.locator('.statistics-summary>div:first-child>strong')).to_contain_text('+8,25 USD')
    screenshots=os.environ.get('ESCAPE_SCREENSHOTS')
    if screenshots:
     page.evaluate("document.body.insertAdjacentHTML('afterbegin','<div style=\"background:#b37400;color:white;padding:6px;text-align:center\">DESIGNFORSLAG · FIKTIVE DATA</div>')")

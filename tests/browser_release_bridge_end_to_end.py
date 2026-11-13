@@ -56,10 +56,12 @@ try:
   page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click()
   dialog=page.locator('#release-approval-dialog');expect(dialog).to_be_visible();expect(dialog).to_contain_text(SHA);assert calls==[]
   dialog.locator('[data-release-confirm]').click()
-  expect(dialog.locator('[data-release-status]')).to_have_text('Installationen er gennemført. Kontrol af app og data følger.',timeout=15000)
+  expect(dialog).not_to_be_visible()
   thread.join(timeout=5);assert not thread.is_alive() and not failures
   assert calls==[SHA] and results==[{'operation':'app-deploy','status':'ok','sha':SHA}]
   assert not (bridge_dir/'deployment-incomplete.json').exists()
+  page.locator('#release-approval-open').click()
+  expect(dialog.locator('[data-release-status]')).to_have_text('Installationen er gennemført. Kontrol af app og data følger.')
   browser.close()
  print('PASS: synthetic owner browser -> fixed client/guard -> authenticated proof/runner once; no SSH or real installation')
 finally:

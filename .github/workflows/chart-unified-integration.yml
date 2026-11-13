@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   integration:
-    if: github.event.pull_request.head.ref == 'codex/chart-unified-release'
+    if: contains(fromJSON('["codex/chart-unified-release","codex/hotfix-combined-snapshot"]'), github.event.pull_request.head.ref)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:

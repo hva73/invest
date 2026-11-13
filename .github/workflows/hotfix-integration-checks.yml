@@ -1,0 +1,34 @@
+name: Hotfix integration checks
+on:
+  pull_request:
+    branches: [codex/issue57-integrated-review]
+permissions:
+  contents: read
+jobs:
+  integrated:
+    if: github.event.pull_request.head.ref == 'codex/hotfix-combined-snapshot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Test calendar, feed, engine and dashboard
+        env:
+          PYTHONPATH: "tools:."
+        run: |
+          python -m unittest discover -s tests -p 'test_calendar_refresh.py'
+          python -m unittest discover -s tests -p 'test_eodhd_feeds.py'
+          python -m unittest discover -s tests -p 'test_hotwatch_engine.py'
+          node --check static/app.js
+          node --check static/dashboard-ui.js
+          node --check static/market-ui.js
+          node tests/test_dashboard_data.js
+          node tests/test_market_daily_stale.cjs
+          python -m unittest discover -s tests -p 'test_statistics_diagnostic.py'
+          node tests/test_statistics_diagnostic.cjs
