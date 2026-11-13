@@ -831,3 +831,5 @@ body > aside nav .nav-sector-mobile{display:none}
  .si-journey .mobile-holding-value{text-align:right;max-width:58%}
  .si-journey .mobile-holding small{font-size:11px;line-height:1.4;letter-spacing:0}
 }
+
+.market-source-choice{display:grid;gap:5px;justify-items:start;margin-top:6px}.market-source-choice button{font-size:10px;line-height:1.4;min-height:28px;padding:5px 8px;border-radius:6px}.market-source-range{font-size:9px!important;line-height:1.5;letter-spacing:0!important;color:#b6c8cf;overflow-wrap:anywhere}

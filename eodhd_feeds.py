@@ -144,8 +144,8 @@ class EODHDFeeds:
   if not isinstance(data,dict) or data.get('code') not in (symbol,symbol.rsplit('.',1)[0]):return _result('INVALID_RESPONSE','/real-time/{symbol}')
   price=_number(data.get('close'));at=_timestamp(data.get('timestamp'),1)
   return {**res,'status':'OK' if price is not None and Decimal(price)>0 and at else 'NO_DATA','price':price,'event_time':at,'volume':_number(data.get('volume')),'volume_type':'unknown'}
- def intraday(self,symbol,interval='1m',start=None,end=None):
-  if not _valid_symbol(symbol) or interval not in ('1m','5m','1h') or any(x is not None and (type(x) is not int or x<0) for x in (start,end)) or start is not None and end is not None and start>end:return _result('INVALID_INPUT','/intraday')
+ def intraday(self,symbol,interval='1m',start=None,end=None,max_points=1000):
+  if not _valid_symbol(symbol) or interval not in ('1m','5m','1h') or any(x is not None and (type(x) is not int or x<0) for x in (start,end)) or start is not None and end is not None and start>end or max_points is not None and (type(max_points) is not int or max_points<1):return _result('INVALID_INPUT','/intraday')
   params={'interval':interval,'fmt':'json'}
   if start is not None:params['from']=start
   if end is not None:params['to']=end
@@ -154,7 +154,8 @@ class EODHDFeeds:
   rows=res.pop('payload')
   if not isinstance(rows,list):return _result('INVALID_RESPONSE','/intraday/{symbol}')
   out=[]
-  for row in sorted((x for x in rows if isinstance(x,dict) and type(x.get('timestamp')) is int),key=lambda x:x['timestamp'])[-1000:]:
+  ordered=sorted((x for x in rows if isinstance(x,dict) and type(x.get('timestamp')) is int),key=lambda x:x['timestamp'])
+  for row in (ordered[-max_points:] if max_points is not None else ordered):
    if not isinstance(row,dict):continue
    ts=_timestamp(row.get('timestamp'),1);values={k:_number(row.get(k)) for k in ('open','high','low','close','volume')}
    if ts and all(values[k] is not None for k in ('open','high','low','close')):out.append({'symbol':symbol,'bar_open_at':ts,**values,'volume_type':'interval'})
