@@ -25,6 +25,24 @@ class Diagnostics(unittest.TestCase):
                 statistics.read(self.connect, 1, lambda token: Client())
         self.assertEqual(str(failure.exception), 'BROKER_CATALOG')
 
+    def test_depot_permission_and_budget_are_distinct_and_sanitized(self):
+        class DB:
+            def execute(self, *args): return [{'id':1,'name':'Private','external_id':'portfolios:private','kind':'portfolio','parent_external_id':None}]
+        @contextmanager
+        def connect(): yield DB()
+        class Client:
+            def __init__(self, allowed): self.allowed=allowed
+            def tools(self):
+                return [{'name':'list_orders','annotations':{'readOnlyHint':True},'inputSchema':{'type':'object','properties':{'portfolioId':{'type':'string'}}}}] if self.allowed else []
+            def request(self, *args):
+                error=RuntimeError('private secret'); error.code='PROVIDER_RATE_BUDGET'; raise error
+        with patch('oauth.access_token', return_value='token'):
+            for allowed, expected in [(False,'DIRECT_PERMISSION'),(True,'PROVIDER_RATE_BUDGET')]:
+                with self.subTest(expected=expected):
+                    result=statistics.read(connect,1,lambda token:Client(allowed))
+                    self.assertEqual(result['error_codes'],[expected])
+                    self.assertNotIn('private secret',str(result))
+
     def test_authenticated_http_errors_are_categorized_without_private_text(self):
         import io, json, tempfile
         import app, passenger_wsgi
