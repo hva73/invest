@@ -32,6 +32,11 @@ def main():
    plot=slot.locator('.market-plot svg');plot.scroll_into_view_if_needed();box=plot.bounding_box();page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5);expect(slot.locator('.market-hover')).to_be_visible();expect(slot.locator('.market-hover')).to_contain_text('minutbarens start');expect(slot.locator('.market-hover')).to_contain_text('999')
    slot.locator('[data-market-period=week]').click();assert slot.locator('.market-line').get_attribute('d').count('L')==81
    assert calls and calls[0][0]=='CHART.US' and calls[0][1]['max_points'] is None
+   page.evaluate("window.ESCAPE_DEMO=true")
+   slot.locator('[data-market-refresh]').click();expect(slot.locator('.market-origin')).to_contain_text('Demo')
+   page.evaluate("""() => {const n=document.querySelector('.market-slot').cloneNode(true);n.id='demo-quote-test';n.dataset.marketLayout='quote';n.style.cssText='position:fixed;top:0;left:0;width:250px;z-index:9999';document.body.append(n)}""")
+   page.evaluate("window.MarketUI.refreshVisible()")
+   expect(page.locator('#demo-quote-test .market-mini-title')).to_contain_text('Dagens kurs · Demo')
    assert not errors,errors;browser.close()
  finally:server.shutdown();server.server_close();case.tearDown()
  print('PASS: source-selected 130 minute bars and 82 separate Pluto points')
