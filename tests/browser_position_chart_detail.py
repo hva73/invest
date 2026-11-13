@@ -25,7 +25,7 @@ def main():
    page.route('**/api/portfolios/data',lambda route:route.fulfill(json={'ok':True,'complete':True,'errors':[],'message':'Synthetic'}))
    page.route('**/api/portfolios/sync',lambda route:route.fulfill(json={'ok':True,'count':1}))
    page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click()
-   page.locator('[data-dashboard-open]').first.click();graph=page.locator('#dashboard-detail .market-slot');expect(graph.locator('.market-price')).to_be_visible()
+   page.locator('[data-dashboard-open]:visible').first.click();graph=page.locator('#dashboard-detail .market-slot');expect(graph.locator('.market-price')).to_be_visible()
    graph.locator('[data-market-period=week]').click();assert graph.locator('.market-line').get_attribute('d').count('L')==81
    plot=graph.locator('.market-plot svg');plot.scroll_into_view_if_needed();plot.hover();expect(graph.locator('.market-hover')).to_be_visible()
    page.set_viewport_size({'width':390,'height':900});plot.scroll_into_view_if_needed();box=plot.bounding_box();page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5);expect(graph.locator('.market-hover')).to_be_visible();expect(graph.locator('.market-hover strong')).to_contain_text('USD')
