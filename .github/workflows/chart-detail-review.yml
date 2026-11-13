@@ -4,7 +4,7 @@ permissions:
   contents: read
 jobs:
   review:
-    if: github.event.pull_request.head.ref == 'codex/chart-detail-completion'
+    if: contains(fromJSON('["codex/chart-detail-completion","codex/graph-combined-release"]'), github.event.pull_request.head.ref)
     runs-on: ubuntu-24.04
     timeout-minutes: 18
     strategy:
@@ -16,6 +16,9 @@ jobs:
       ESCAPE_PLAYWRIGHT_MANAGED: '1'
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
@@ -34,6 +37,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_eodhd_feeds.py'
       - if: matrix.suite == 'dashboard-sector'
         run: |
+          python tests/browser_graph_fidelity.py
           python tests/browser_portfolio_value_chart.py
           python tests/browser_sector_holdings.py
       - if: matrix.suite == 'market-signal-position'
