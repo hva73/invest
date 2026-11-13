@@ -54,6 +54,7 @@ def main():
    for width in (390,1440):
     page.set_viewport_size({'width':width,'height':900});slot.locator('[data-market-excerpt]').click()
     expect(slot.locator('.market-session')).to_contain_text('EODHD · minutbarer · 160 punkter')
+    expect(slot.locator('.market-period-title')).to_contain_text('Uge · EODHD')
     assert slot.locator('.market-line').get_attribute('d').count('L')==159
     label=slot.locator('.market-source-range');expect(label).to_contain_text('dækker ikke hele Pluto-perioden')
     request=calls[-1][1];first=datetime.fromtimestamp(request['end']-160*60,timezone.utc).astimezone(ZoneInfo('Europe/Copenhagen'));last=datetime.fromtimestamp(request['end']-60,timezone.utc).astimezone(ZoneInfo('Europe/Copenhagen'))
@@ -64,6 +65,7 @@ def main():
     else:plot.hover()
     expect(slot.locator('.market-hover')).to_be_visible();expect(slot.locator('.market-hover')).to_contain_text('999')
     slot.locator('[data-market-excerpt]').click();expect(slot.locator('.market-session')).to_contain_text('Plutos observerede kurspunkter · 82 punkter');assert slot.locator('.market-line').get_attribute('d').count('L')==81
+    expect(slot.locator('.market-period-title')).not_to_contain_text('EODHD')
    short_mode[0]=False
    assert calls and calls[0][0]=='CHART.US' and calls[0][1]['max_points'] is None
    page.evaluate("window.ESCAPE_DEMO=true")
