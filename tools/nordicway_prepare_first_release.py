@@ -137,6 +137,8 @@ def prepare(root, release, updater_blob, release_updater, requirements, old_modu
         if private_file(bridge/name) != expected: raise ValueError('bridge_changed')
     if private_file(bridge/'deploy-enabled',4) != b'1\n': raise ValueError('gate_not_enabled')
     private_file(bridge/'approved-sha', 41)
+    # Check visibility before touching gate/claim, then repeat while claimed.
+    if not inspect(bridge/'nordicway_deploy_guard.py'): raise ValueError('guard_in_flight')
     lock = os.open(var/'escape-deploy.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     marker = bridge/'deployment-incomplete.json'; claimed=False; gate_closed=False
     try:
