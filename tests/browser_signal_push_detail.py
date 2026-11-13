@@ -92,11 +92,11 @@ def main():
    else: page.mouse.move(box['x']+box['width']*.5,box['y']+box['height']*.5)
    expect(slot.locator('.market-hover')).to_be_visible()
    plot=slot.locator('[data-market-plot]');plot.focus();page.keyboard.press('ArrowLeft')
-   expect(plot.locator('.market-hover')).to_be_visible();expect(plot.locator('.market-hover small')).to_have_text(re.compile(r'^\d{2}\.\d{2}$'))
+   expect(plot.locator('.market-hover')).to_be_visible();expect(plot.locator('.market-hover small')).to_have_text(re.compile(r'^\d{2}\.\d{2}\.\d{2}.*\d{2}[.:]\d{2}$'))
    expect(plot.locator('.market-hover strong')).to_contain_text('USD')
    if shot:page.screenshot(path=f'{shot}/signal-hover-390.png')
    for name in ['week','month','year','day']:
-    slot.locator('[data-market-period='+name+']').click();expect(slot.locator('[data-market-period='+name+']')).to_have_attribute('aria-pressed','true');page.wait_for_timeout(300);plot=slot.locator('[data-market-plot]');plot.focus();page.keyboard.press('ArrowLeft');expect(plot.locator('.market-hover small')).to_have_text(re.compile(r'^\d{2}\.\d{2}$' if name=='day' else r'^\d{2}\.\d{2}\.\d{2}$'))
+    slot.locator('[data-market-period='+name+']').click();expect(slot.locator('[data-market-period='+name+']')).to_have_attribute('aria-pressed','true');page.wait_for_timeout(300);plot=slot.locator('[data-market-plot]');plot.focus();page.keyboard.press('ArrowLeft');expect(plot.locator('.market-hover small')).to_have_text(re.compile(r'^\d{2}\.\d{2}\.\d{2}.*\d{2}[.:]\d{2}$'))
    assert 'ONE_MONTH' in periods and 'ONE_YEAR' in periods,periods
    for offset in (0,300,700,1200):
     d.evaluate('(e,y)=>e.scrollTop=y',offset);box=d.locator('.signal-action-bar').bounding_box();viewport=page.viewport_size;assert box and box['y']>=0 and box['y']+box['height']<=viewport['height']+1,(offset,box)
@@ -134,6 +134,7 @@ def main():
    d.get_by_role('button',name='Køb').click();expect(quick).to_contain_text('Køb · TSM');expect(quick.locator('[name=portfolio_id]')).to_have_value(str(case.root));expect(quick.locator('[name=asset_id]')).to_have_value('synthetic-asset');quick.locator('[data-quick-close]').click()
    account['dashboard']['positions']=[];session['latest_context']['position']='none';session['request']['report_id']='synthetic-report';session['request']['candidate_id']='synthetic-candidate'
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('.market-slot .market-price')).to_be_visible();expect(d.locator('.market-marker-entry')).to_have_count(0);expect(d.locator('.market-entry-label')).to_have_count(0);expect(d.locator('.market-marker-signal')).to_have_count(0);expect(d.locator('.market-peak-label')).to_have_text('Top 3,41 USD');expect(d.get_by_role('button',name='Køb')).to_be_visible()
+   buyplot=d.locator('.market-plot svg');buyplot.scroll_into_view_if_needed();box=buyplot.bounding_box();page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5);expect(d.locator('.market-hover')).to_be_visible();expect(d.locator('.market-hover strong')).to_contain_text('USD')
    if shot:page.screenshot(path=f'{shot}/signal-buy-390.png')
    d.get_by_role('button',name='Ignorér og luk signalet').click();expect(d).not_to_be_visible()
    account['dashboard']['positions']=[holding];session['latest_context']['position']='held';session['request'].pop('report_id');session['request'].pop('candidate_id')
