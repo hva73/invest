@@ -51,7 +51,8 @@ try:
    page.locator('nav [data-view=sectors]').click()
    expect(page.locator('.sector-row').filter(has_text='Sundhed')).to_be_visible()
    if width >= 901:
-    bar=page.locator('.si-bar-column[data-sector-select]').first;bar.hover();tip=bar.locator('.dash-chart-tooltip');expect(tip).to_be_visible();expect(tip).to_contain_text('Resultat');expect(tip.locator('[data-chart-value]')).not_to_have_text('—')
+    bar=page.locator('.si-bar-column[data-sector-select]').first;bar.scroll_into_view_if_needed();page.wait_for_timeout(300);page.mouse.move(0,0);bar.hover();tip=bar.locator('.dash-chart-tooltip');expect(tip).to_be_visible();expect(tip).to_contain_text('Resultat');expect(tip.locator('[data-chart-value]')).not_to_have_text('—')
+    page.mouse.move(0,0);expect(tip).to_be_hidden();bar.hover();expect(tip).to_be_visible();page.mouse.wheel(0,80);expect(tip).to_be_hidden();bar.scroll_into_view_if_needed();page.wait_for_timeout(300);page.mouse.move(0,0);bar.hover();expect(tip).to_be_visible()
     assert tip.evaluate("e => { const t=e.getBoundingClientRect(), p=e.closest('.si-bars').getBoundingClientRect(); return t.top>=p.top && t.bottom<=p.bottom && t.left>=p.left && t.right<=p.right }")
     page.locator('.si-results').screenshot(path=str(screens/'sektor-resultat-mouseover.png'))
     bar.focus();expect(tip).to_be_visible();page.locator('.sector-heading h2').first.hover();expect(tip).to_be_hidden()
