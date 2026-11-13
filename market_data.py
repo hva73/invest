@@ -200,7 +200,7 @@ def quote(connect,user_id,data,factory=None):
                 if requested_period=='ONE_WEEK' and data.get('include_intraday') is True and not data.get('is_test',False):
                     response=enrich_intraday(connect,user_id,response)
                     persisted={k:v for k,v in response.items() if k not in ('cached','last_error')}
-                    db.execute('UPDATE market_asset_cache SET payload=? WHERE user_id=? AND asset_id=?',(json.dumps(persisted),user_id,aid))
+                    db.execute('UPDATE market_asset_cache SET payload=? WHERE user_id=? AND asset_id=? AND fetched IS ? AND attempted=?',(json.dumps(persisted),user_id,aid,cached['fetched'],cached['attempted']))
                 return response
             if not cached['last_error'] and cached['attempted']>time.time()-30:return {'pending':True,'retry_after':2}
             raise MarketError(cached['last_error'] or 'Kursopslaget er allerede i gang. Prøv igen om lidt.')
