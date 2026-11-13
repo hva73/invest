@@ -2,7 +2,7 @@ from playwright.sync_api import sync_playwright
 from pathlib import Path
 import json
 fixture={'portfolios':[{'portfolio_id':'1','name':'Fiktivt','items':[
- {'ticker':'WIN','name':'Winner','currency':'DKK','gross':'1200.00','gross_percent':'8.00','quantity':'12','sell_price':'1350','basis':'15000','proceeds':'16200','note':'Foreløbigt'},
+ {'ticker':'WIN','name':'Winner','currency':'DKK','gross':'1200.00','gross_percent':'8.00','quantity':'12','sell_price':'1350','buy_price':'1250','cost_basis':'15000','sale_proceeds':'16200','note':'Foreløbigt'},
  {'ticker':'LOSS','name':'Loser','currency':'DKK','gross':'-300.00','gross_percent':'-5.00','quantity':'1','sell_price':'5700','note':'Foreløbigt'}]}]}
 with sync_playwright() as p:
  browser=p.chromium.launch()
