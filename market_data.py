@@ -157,7 +157,10 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
             if start>=end:return unavailable('SOURCE_UNAVAILABLE')
         response=feed_factory().intraday(symbol,interval=interval,start=int(start),end=int(end),max_points=None)
         if response.get('status')!='OK' or not isinstance(response.get('bars'),list):
-            result['intraday_status']='SOURCE_UNAVAILABLE';return result
+            result['intraday_status']='SOURCE_UNAVAILABLE'
+            fields={k:result[k] for k in ('intraday_period','intraday_interval','intraday_checked_at','intraday_symbol','intraday_status')}
+            cache[period]={'symbol':symbol,'checked_at':now.timestamp(),'pluto_fetched':result.get('fetched_at'),'fields':fields};result['intraday_cache']=cache
+            return result
         series=[]
         for row in response['bars']:
             at=stamp(row.get('bar_open_at'));value=decimal(row.get('close'),positive=True)
