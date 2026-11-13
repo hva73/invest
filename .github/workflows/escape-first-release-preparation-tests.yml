@@ -1,0 +1,21 @@
+name: ESCAPE first-release preparation tests
+on:
+  pull_request:
+    branches: [codex/escape-development]
+permissions:
+  contents: read
+jobs:
+  tests:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue57-first-release-preparation'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Test owner-side transition in temporary directories
+        run: python -m unittest tests.test_nordicway_prepare_first_release
