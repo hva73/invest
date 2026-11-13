@@ -100,6 +100,14 @@ class Quotes(unittest.TestCase):
   for user,data in [(2,self.request),(1,dict(self.request,is_test=True)),(1,dict(self.request,candidate_id='unknown'))]:
    with self.assertRaises((market_data.MarketError,ValueError,KeyError)):market_data.quote(app.connect,user,data,self.factory)
   self.assertEqual(self.calls,[])
+ def test_more_than_ten_thousand_real_source_points_are_not_discarded(self):
+  raw=copy.deepcopy(self.raw);end=self.fixed;start=end-timedelta(seconds=10000)
+  raw['performance']['from']=start.isoformat();raw['performance']['to']=end.isoformat()
+  raw['performance']['series']=[{'timestamp':(start+timedelta(seconds=i)).isoformat(),'close':str(10+i/10000)} for i in range(10001)]
+  result=market_data.normalized(raw,'synthetic-chart-asset',self.fixed)
+  self.assertIsNone(result['series_error']);self.assertEqual(len(result['series']),10001)
+  self.assertEqual(result['series'][0]['source_timestamp'],raw['performance']['series'][0]['timestamp'])
+  self.assertEqual(result['series'][-1]['source_timestamp'],raw['performance']['series'][-1]['timestamp'])
  def test_bad_series_does_not_invent_chart_or_remove_valid_quote(self):
   for change in ['timezone','currency','conflict','future','period']:
    raw=copy.deepcopy(self.raw)
