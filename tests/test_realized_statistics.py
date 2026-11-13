@@ -75,6 +75,54 @@ class StatisticsTest(unittest.TestCase):
         row=project([], [('c',self.buy),('c',b2),('c',sale)])['items'][0]
         self.assertEqual((row['cost_basis'],row['sale_proceeds'],row['gross']),('34','45','11'))
         self.assertEqual(row['buy_price'],str(__import__('decimal').Decimal(34)/3))
+    def test_high_precision_fractional_direct_amounts_and_summary(self):
+        from decimal import Decimal, localcontext
+        qty='123456789.123456789'
+        buy=order('BUY',qty,'0.000012345678912345','2026-01-01T00:00:00Z','b')
+        sell=order('SELL',qty,'0.000012345678912346','2026-01-02T00:00:00Z','s')
+        result=project([buy,sell]); row=result['items'][0]
+        with localcontext() as ctx:
+            ctx.prec=150
+            basis=Decimal(qty)*Decimal(buy['filledAveragePrice'])
+            proceeds=Decimal(qty)*Decimal(sell['filledAveragePrice'])
+            self.assertEqual(Decimal(row['cost_basis']),basis)
+            self.assertEqual(Decimal(row['sale_proceeds']),proceeds)
+            self.assertEqual(Decimal(row['gross']),proceeds-basis)
+            self.assertEqual(Decimal(result['summary_by_currency']['USD']['gross_total']),proceeds-basis)
+        self.assertEqual(row['gross'],'0.000000000123456789123456789')
+    def test_high_precision_collection_fifo_and_summary(self):
+        from decimal import Decimal, localcontext
+        b1=order('BUY','123456789.123456789','0.000012345678912345','2026-01-01T00:00:00Z','b1')
+        b2=order('BUY','0.123456789123456789','0.000012345678912344','2026-01-02T00:00:00Z','b2')
+        s=order('SELL','123456789.223456789','0.000012345678912346','2026-01-03T00:00:00Z','s')
+        result=project([], [('c',b1),('c',b2),('c',s)])
+        with localcontext() as ctx:
+            ctx.prec=150
+            basis=Decimal(b1['filledQuantity'])*Decimal(b1['filledAveragePrice'])+Decimal('0.1')*Decimal(b2['filledAveragePrice'])
+            proceeds=Decimal(s['filledQuantity'])*Decimal(s['filledAveragePrice'])
+            row=result['items'][0]
+            self.assertEqual(Decimal(row['cost_basis']),basis)
+            self.assertEqual(Decimal(row['sale_proceeds']),proceeds)
+            self.assertEqual(Decimal(row['gross']),proceeds-basis)
+            self.assertEqual(Decimal(result['summary_by_currency']['USD']['gross_total']),proceeds-basis)
+    def test_projection_keeps_callers_decimal_context(self):
+        from decimal import getcontext, localcontext
+        with localcontext() as ctx:
+            ctx.prec=9
+            project([self.buy,self.sell])
+            self.assertEqual(getcontext().prec,9)
+    def test_summary_preserves_small_profit_beside_large_profit(self):
+        from decimal import Decimal, localcontext
+        big_buy=order('BUY','1','1','2026-01-01T00:00:00Z','b1')
+        big_sell=order('SELL','1','100000000000000000000000000001','2026-01-02T00:00:00Z','s1')
+        asset={'ticker':'SMALL','name':'Small','currency':'USD'}
+        small_buy=order('BUY','0.000000000000000000000000000001','1','2026-01-01T00:00:00Z','b2',asset=asset)
+        small_sell=order('SELL','0.000000000000000000000000000001','2','2026-01-02T00:00:00Z','s2',asset=asset)
+        result=project([big_buy,big_sell,small_buy,small_sell])
+        with localcontext() as ctx:
+            ctx.prec=150
+            self.assertEqual(Decimal(result['summary_by_currency']['USD']['gross_total']),
+                             Decimal('100000000000000000000000000000')+Decimal('0.000000000000000000000000000001'))
     def test_missing_buy_is_not_profit(self):
         self.assertEqual(project([self.sell])['items'],[])
         self.assertEqual(project([], [('c',self.sell)])['items'],[])
