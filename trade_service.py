@@ -19,6 +19,7 @@ class InsufficientBuyingPower(TradeError):
 def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS broker_proposals(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),fingerprint TEXT NOT NULL,report_id TEXT NOT NULL,candidate_id TEXT NOT NULL,kind TEXT NOT NULL,portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),payload TEXT NOT NULL,status TEXT NOT NULL,created REAL NOT NULL,estimated REAL,review_token TEXT,estimate TEXT,asset TEXT,intent_id TEXT,response TEXT,error TEXT,UNIQUE(user_id,fingerprint))')
     if 'sell_basis' not in {r[1] for r in c.execute('PRAGMA table_info(broker_proposals)')}:c.execute('ALTER TABLE broker_proposals ADD COLUMN sell_basis TEXT')
+    if 'signal_event_id' not in {r[1] for r in c.execute('PRAGMA table_info(broker_proposals)')}:c.execute('ALTER TABLE broker_proposals ADD COLUMN signal_event_id TEXT')
     c.execute('CREATE TABLE IF NOT EXISTS manual_test_signals(user_id INTEGER PRIMARY KEY REFERENCES users(id),portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),ticker TEXT NOT NULL,amount TEXT NOT NULL,expires REAL NOT NULL)')
     if 'side' not in {r[1] for r in c.execute('PRAGMA table_info(manual_test_signals)')}:c.execute("ALTER TABLE manual_test_signals ADD COLUMN side TEXT NOT NULL DEFAULT 'BUY'")
 
@@ -135,6 +136,27 @@ def verify_expected_side(data,source):
     if expected not in ('BUY','SELL'):raise TradeError('Signalets retning mangler. Åbn signalet igen før du fortsætter.')
     if expected!=('BUY' if source['signal']=='KØB' else 'SELL'):
         raise TradeError('Signalets retning er ændret. Kontrollér signalet og start igen.')
+
+def selected_signal_event(connect,user_id,data,payload,portfolio_id):
+    """Return only the explicit, still-current event the user opened.
+
+    This is proposal provenance, never evidence of a broker execution. Missing,
+    changed or unverified evidence is recorded as unknown and does not change
+    the existing trade gates.
+    """
+    event_id=data.get('signal_event_id')
+    if data.get('report_id')!='@hotwatch' or not isinstance(event_id,str) or not re.fullmatch(r'hw-[a-f0-9]{24}',event_id):return None
+    try:
+        import hotwatch_engine
+        session=hotwatch_engine.item(connect,user_id,data['candidate_id'],False)['session']
+        request=session.get('request') or {};event=session.get('last_action_signal') or {};orders=payload.get('orders') or []
+        expected={'BUY':'BUY_SIGNAL','SELL':'SELL_SIGNAL','REDUCE':'REDUCE_SIGNAL'}.get(session.get('signal'))
+        if (session.get('status')!='ACTIVE' or event.get('state')!='ACTIVE' or event.get('event_id')!=event_id
+                or event.get('event_type')!=expected or request.get('portfolio_ids')!=[portfolio_id]
+                or len(orders)!=1 or orders[0].get('assetId')!=request.get('asset_id')
+                or orders[0].get('side')!=('BUY' if session.get('signal')=='BUY' else 'SELL')):return None
+        return event_id
+    except Exception:return None
 
 def verify_proposal_source(connect,user_id,row):
     source=signal_source(connect,user_id,row['report_id'],row['candidate_id'])
@@ -345,6 +367,7 @@ def estimate(connect,user_id,data,factory=None):
     p,payload=build(connect,user_id,data);kind=data['kind']
     if basis is not None and (len(payload.get('orders') or [])!=1 or payload['orders'][0].get('side')!='SELL'):
         raise TradeError('Signalets retning er ændret. Kontrollér signalet og start igen.')
+    selected_event=selected_signal_event(connect,user_id,data,payload,p['id'])
     fingerprint=hashlib.sha256(json.dumps({'report':data['report_id'],'candidate':data['candidate_id'],'kind':kind,'payload':payload},sort_keys=True).encode()).hexdigest()
     with connect() as c:
         c.execute('BEGIN IMMEDIATE')
@@ -362,8 +385,9 @@ def estimate(connect,user_id,data,factory=None):
     # The signal may change while the external, read-only estimate is pending.
     # Do not present an estimate for an action that is no longer current.
     verify_proposal_source(connect,user_id,row)
+    if selected_event!=selected_signal_event(connect,user_id,data,payload,p['id']):selected_event=None
     with connect() as c:
-        c.execute("UPDATE broker_proposals SET status='estimated',estimated=?,review_token=?,estimate=?,asset=?,sell_basis=?,error=NULL WHERE id=? AND user_id=? AND status IN ('draft','estimated')",(time.time(),secrets.token_urlsafe(24),json.dumps(result),json.dumps(asset),json.dumps(basis) if basis else None,pid,user_id))
+        c.execute("UPDATE broker_proposals SET status='estimated',estimated=?,review_token=?,estimate=?,asset=?,sell_basis=?,signal_event_id=?,error=NULL WHERE id=? AND user_id=? AND status IN ('draft','estimated')",(time.time(),secrets.token_urlsafe(24),json.dumps(result),json.dumps(asset),json.dumps(basis) if basis else None,selected_event,pid,user_id))
     return {'proposal':view(get(connect,user_id,pid))}
 
 def intent_reference(raw,payload):
