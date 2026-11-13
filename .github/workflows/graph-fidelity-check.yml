@@ -1,0 +1,39 @@
+name: Graph fidelity checks
+on:
+  push:
+    branches: [codex/graph-fidelity-819a]
+  pull_request:
+    branches: [codex/escape-development]
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  graph-fidelity:
+    if: github.repository == 'hva73/invest' && (github.event_name == 'push' || github.event.pull_request.head.ref == 'codex/graph-fidelity-819a')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt playwright==1.56.0
+          python -m playwright install --with-deps chromium
+      - name: Test observed data and interactive graphs
+        env:
+          ESCAPE_PLAYWRIGHT_MANAGED: '1'
+          PYTHONPATH: .:tests
+        run: |
+          node tests/test_dashboard_data.js
+          node tests/test_engine_chart_hover.cjs
+          python -m unittest discover -s tests -p test_portfolio_value_chart.py
+          python -m unittest discover -s tests -p test_market_data.py
+          python tests/browser_graph_fidelity.py
+          python tests/browser_market_charts.py
+          python tests/browser_holdings_chart.py
+          python tests/browser_engine_graph_hover.py
+          python tests/browser_sector_journey.py
