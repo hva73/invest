@@ -8,6 +8,7 @@ import fcntl
 import json
 import os
 import re
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -106,6 +107,15 @@ def prepare(root, release, bridge_sha, updater_blob, release_updater, bridge_upd
         os.close(lock)
 
 
+def verify_checkout(repo):
+    if repo.is_symlink() or not repo.is_dir(): raise ValueError('checkout_unavailable')
+    result=subprocess.run(['git','-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false',
+                           '-C',str(repo),'status','--porcelain=v1','--untracked-files=all'],
+                          capture_output=True,timeout=15,check=False,
+                          env={**os.environ,'GIT_TERMINAL_PROMPT':'0','GIT_OPTIONAL_LOCKS':'0'})
+    if result.returncode!=0 or result.stdout: raise ValueError('checkout_not_clean')
+
+
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--release',required=True);parser.add_argument('--bridge',required=True)
@@ -114,7 +124,7 @@ def main():
     for value in (args.release,args.bridge,args.updater_blob):
         if not re.fullmatch('[0-9a-f]{40}',value): raise ValueError('invalid_revision')
     repo=base.ROOT/'escape_deploy/invest'
-    if repo.is_symlink() or not repo.is_dir(): raise ValueError('checkout_unavailable')
+    verify_checkout(repo)
     modules={name:base.git_file(repo,base.OLD_BRIDGE,'apply_update.py' if name=='apply_update.py' else 'tools/'+name)
              for name in (*base.MODULES,'apply_update.py')}
     # Both executable modules and installer source are retrieved from the
