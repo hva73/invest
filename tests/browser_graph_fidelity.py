@@ -33,11 +33,13 @@ def main():
     assert page.locator('#dashboard-value-chart .dash-chart-point').count()==len(valid),(width,len(valid),page.locator('#dashboard-value-chart .dash-chart-point').count())
     assert str(data['total'])+' registreringer' in status.inner_text()
     assert data['next_before'] is not None and len(valid)==2000
+    assert 'Udvikling i viste punkter' in page.locator('#dashboard-value-chart').inner_text()
     more=page.locator('[data-dashboard-history-more]');expect(more).to_be_visible();more.click()
     older=page.request.get(base+'/api/dashboard/portfolio-history',params={'period':'week','scope':data['scope'],'asof':data['asof'],'before':data['next_before']}).json()
     all_points=older['points']+data['points'];shown=sum(1 for p in all_points if p['reported_result'] is not None)
     expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown);assert shown==data['total']
     assert page.locator('[data-dashboard-history-more]').count()==0
+    assert 'Udvikling i valgt periode' in page.locator('#dashboard-value-chart').inner_text()
     assert page.request.get(base+'/api/dashboard/portfolio-history?period=week&scope=wrong').status==400
     svg=page.locator('#dashboard-value-chart .dash-chart-svg');svg.scroll_into_view_if_needed();box=svg.bounding_box();x=box['x']+box['width']*.55;y=box['y']+box['height']*.5
     if touch:page.touchscreen.tap(x,y)
