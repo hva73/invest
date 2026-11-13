@@ -23,18 +23,12 @@ try:
    assert page.locator('[data-statistics-reload]').evaluate('(e) => e.scrollWidth <= e.clientWidth'), width
    expect(page.locator('.statistics-summary>div:first-child>strong')).to_contain_text('+8,25 USD')
    expect(page.locator('.statistics-summary')).to_contain_text('omkostninger')
-   page.locator('.statistics-trade').first.locator('summary').click();expect(page.locator('.statistics-detail').first).to_be_visible();page.locator('.statistics-trade').first.locator('summary').click()
+   page.locator('[data-statistics-group=wins]').click();page.locator('.statistics-trade-button').first.click();expect(page.locator('dialog:modal .statistics-detail')).to_be_visible();page.locator('dialog:modal button[aria-label="Luk"]').click()
    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1'),width
    if width<=900:
-    page.locator('.statistics-trade').last.locator('summary').click()
-    page.evaluate('window.scrollTo(0,document.documentElement.scrollHeight)')
-    last=page.locator('.statistics-trade').last.locator('.statistics-detail').bounding_box()
-    detail=page.locator('.statistics-trade').last.locator('.statistics-detail').bounding_box()
-    nav=page.locator('body > aside nav').bounding_box()
-    assert last['y']+last['height']<=nav['y'] or last['y']>=nav['y']+nav['height'],(width,last,nav)
-    assert detail['y']+detail['height']<=nav['y'] or detail['y']>=nav['y']+nav['height'],(width,detail,nav)
-    page.locator('.statistics-trade').last.locator('summary').click()
-    page.evaluate('window.scrollTo(0,0)')
+    page.locator('.statistics-trade-button').last.scroll_into_view_if_needed()
+    box=page.locator('.statistics-trade-button').last.bounding_box();nav=page.locator('body > aside nav').bounding_box()
+    assert box['y']+box['height']<=nav['y'] or box['y']>=nav['y']+nav['height'],(width,box,nav)
    screenshots=os.environ.get('ESCAPE_SCREENSHOTS')
    if screenshots:
     page.evaluate("document.body.insertAdjacentHTML('afterbegin','<div style=\"background:#b37400;color:white;padding:6px;text-align:center\">DESIGNFORSLAG · FIKTIVE DATA</div>')")
