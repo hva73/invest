@@ -241,7 +241,7 @@ def run_request(sha, stream):
         # Only an already-created, SHA-bound, expiring local ticket can
         # authorize this legacy client; run() still consumes it atomically.
         return run(sha, request['cpanel_token'])
-    if set(request) != {'cpanel_token', 'approval'}:
+    if set(request) != {'cpanel_token', 'approval'} or not isinstance(request['approval'], dict):
         raise ValueError('invalid_request')
     return run(sha, request['cpanel_token'], owner_request=request['approval'])
 
