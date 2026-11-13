@@ -19,7 +19,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install -r requirements.txt playwright==1.56.0 && python -m playwright install --with-deps chromium
-      - run: mkdir -p "$ESCAPE_SCREENSHOTS" && node tests/test_statistics_desktop_review.cjs && node tests/test_statistics_ui.cjs && python tests/browser_statistics_desktop_accept.py && python tests/browser_statistics_preview.py && python tests/browser_statistics_integration.py
+      - run: mkdir -p "$ESCAPE_SCREENSHOTS" && node tests/test_statistics_desktop_review.cjs && node tests/test_statistics_ui.cjs && python -m unittest discover -s tests -p test_realized_statistics.py && python tests/browser_statistics_desktop_accept.py && python tests/browser_statistics_preview.py && python tests/browser_statistics_integration.py
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
