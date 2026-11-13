@@ -1,6 +1,6 @@
 """Graph point fidelity and pointer interaction using synthetic test data."""
 import os,re,sys,threading
-from datetime import timedelta
+from datetime import datetime,timezone,timedelta
 from pathlib import Path
 from unittest.mock import patch
 sys.path[:0]=[str(Path(__file__).resolve().parents[1]),str(Path(__file__).resolve().parent)]
@@ -40,12 +40,16 @@ def main():
     expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown);assert shown==data['total']
     assert page.locator('[data-dashboard-history-more]').count()==0
     assert 'Udvikling i valgt periode' in page.locator('#dashboard-value-chart').inner_text()
+    new_at=datetime.now(timezone.utc)
+    with app.connect() as c:
+     c.execute('INSERT INTO display_portfolio_values VALUES(?,?,?,?,?,?,?,?)',(1,data['scope'],new_at.timestamp(),new_at.isoformat(),'1500','DKK',new_at.isoformat(),'99'))
     requested=[]
     page.on('request',lambda req:requested.append(req.url) if '/api/dashboard/portfolio-history?' in req.url else None)
     page.evaluate("""() => {state.dashboard.snapshot_at = 'refresh-' + Date.now();document.getElementById('dashboard-value-chart').innerHTML=window.DashboardUI.portfolioChart(state.dashboard)}""")
     expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown)
+    expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown+1)
     page.wait_for_timeout(700)
-    expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown)
+    expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown+1)
     assert len(requested)==1 and 'before=' not in requested[0],requested
     assert 'Udvikling i valgt periode' in page.locator('#dashboard-value-chart').inner_text()
 
