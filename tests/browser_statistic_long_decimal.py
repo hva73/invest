@@ -29,4 +29,12 @@ with sync_playwright() as p:
  result=page.locator('dialog').evaluate('el => ({scroll:el.scrollWidth,client:el.clientWidth, rows:[...el.querySelectorAll(".statistics-calc > div")].map(x=>({scroll:x.scrollWidth,client:x.clientWidth,text:x.innerText}))})')
  print(result,flush=True)
  assert result['scroll']<=result['client'] and all(x['scroll']<=x['client'] for x in result['rows']), 'Popup indhold flyder vandret over'
+ tiny_buy=order('BUY','1000000000','0.000000001','2026-01-01T00:00:00Z','tb')
+ tiny_sale=order('SELL','1000000000','0.000000002','2026-01-02T00:00:00Z','ts')
+ tiny=project([tiny_buy,tiny_sale])['items'][0]
+ tiny_html=page.evaluate('(row) => StatisticsUI.render({portfolios:[{portfolio_id:1,name:"Test",items:[row]}]}, {group:"wins"})',tiny)
+ page.locator('#test').evaluate('(el, html) => el.innerHTML=html',tiny_html)
+ shown=page.locator('.statistics-calc > div').nth(1).locator('strong').text_content()
+ print('Shown nonzero buy price:',shown,flush=True)
+ assert shown not in ('0,00 kr.','≈ 0,00 kr.','0,00 DKK','≈ 0,00 DKK'), 'Ikke-nul købspris vises fejlagtigt som nul'
  browser.close()
