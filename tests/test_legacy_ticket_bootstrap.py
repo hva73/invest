@@ -35,3 +35,27 @@ class LegacyTicket(unittest.TestCase):
   import json
   ticket=json.loads(path.read_text());ticket['expires']=int(time.time())-1;path.write_text(json.dumps(ticket));path.chmod(0o600)
   with self.assertRaises(ValueError): self.submit()
+
+class ExistingClientJourney(LegacyTicket):
+ def test_actual_existing_client_to_guard_and_runner(self):
+  import importlib.util, json
+  from types import SimpleNamespace
+  import nordicway_deploy_guard as guard
+  legacy=Path(os.environ['ESCAPE_TEST_LEGACY_BRIDGE'])
+  spec=importlib.util.spec_from_file_location('old_client',legacy/'tools/nordicway_deploy_client.py')
+  old=importlib.util.module_from_spec(spec);spec.loader.exec_module(old)
+  env={'ESCAPE_RELEASE_SHA':SHA,'ESCAPE_CPANEL_API_TOKEN':'test_token_12345',
+       'ESCAPE_DEPLOY_OPERATION':'deploy','ESCAPE_DEPLOY_AUTHORIZED':'1',
+       'SSH_AUTH_SOCK':'/synthetic','NORDICWAY_KNOWN_HOST':'x','NORDICWAY_VERIFIED_FINGERPRINT':'x'}
+  self.approved();real=runner.run
+  def run_local(sha,token,**kwargs):
+   return real(sha,token,bridge=self.bridge,authorization_lock=self.lock,adapter_factory=Mock(),
+               deploy=lambda *_:Outcome('ok','complete',True),prepare=lambda *_:None,**kwargs)
+  def transport(command,**kwargs):
+   self.assertEqual(json.loads(kwargs['input']),{'cpanel_token':'test_token_12345'})
+   result=guard.dispatch(command[-1],runner=lambda sha:runner.run_request(sha,io.BytesIO(kwargs['input'])))
+   return SimpleNamespace(returncode=0,stdout=json.dumps(result).encode())
+  with patch.object(old,'verify',return_value='synthetic-key'),patch.object(runner,'run',side_effect=run_local):
+   result=old.run(env,transport)
+  self.assertEqual(result['status'],'ok');self.assertFalse(result['recovery_required'])
+  self.assertFalse((self.bridge/'approval-ticket.json').exists())
