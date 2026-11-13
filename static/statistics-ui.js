@@ -61,6 +61,7 @@
     const lost = totalGross(rows.filter(item => number(item.gross) < 0));
     const rate = rows.length ? new Intl.NumberFormat('da-DK', {maximumFractionDigits:2}).format(wins * 100 / rows.length) : '—';
     const hasErrors = Array.isArray(data?.errors) && data.errors.length > 0;
+    const diagnosticCodes = Array.isArray(data?.error_codes) ? data.error_codes.filter(code => ['IDENTITY','DIRECT_PERMISSION','DIRECT_REQUEST','DIRECT_PROJECTION','COLLECTION_PERMISSION','COLLECTION_REQUEST','COLLECTION_PROJECTION','PROVIDER_RATE_BUDGET',...['DIRECT_REQUEST','COLLECTION_REQUEST'].flatMap(stage=>['_LOCAL_GUARD','_DENIED','_HTTP','_TIMEOUT','_NETWORK','_RESPONSE'].map(suffix=>stage+suffix))].includes(code)) : [];
     const portfolioOptions = portfolios.map(p => `<option value="${esc(p.portfolio_id)}"${p === portfolio ? ' selected' : ''}>${esc(p.name || 'Depot')}</option>`).join('');
     const currencyOptions = currencies.map(c => `<option value="${esc(c)}"${c === currency ? ' selected' : ''}>${esc(c)}</option>`).join('');
     const options = portfolios.length ? `<div class="statistics-filters"><label>Depot<select data-statistics-portfolio>${portfolioOptions}</select></label>${currency ? `<label>Valuta<select data-statistics-currency>${currencyOptions}</select></label>` : ''}</div>` : '';
@@ -81,7 +82,7 @@
     const note = portfolio?.omitted > 0 ? '<p class="statistics-warning" role="status">Nogle oplysninger mangler; overblikket kan være ufuldstændigt.</p>' : '';
     const value = (part, fallback) => part ? part.text : fallback;
     const result = rows.length && total ? `<div class="statistics-overview"><div class="statistics-summary"><div><small>SAMLET RESULTAT AF SALG</small><strong class="${direction(total.sign)}">${arrow(total.sign)} ${total.text} ${esc(unit)}</strong><span>Foreløbigt · ufuldstændig historik og før ikke-oplyste omkostninger</span></div><div class="statistics-breakdown"><button type="button" data-statistics-group="wins" aria-expanded="${group==='wins'}"><small>SAMLET GEVINST</small><strong class="${wins ? 'positive' : 'neutral'}">${wins ? '↑ ' : '→ '}${value(gains, '0,00')} ${esc(unit)} ⌄</strong></button><button type="button" data-statistics-group="losses" aria-expanded="${group==='losses'}"><small>SAMLET TAB</small><strong class="${losses ? 'negative' : 'neutral'}">${losses ? '↓ ' : '→ '}${value(lost, '0,00')} ${esc(unit)} ⌄</strong></button></div></div><div class="statistics-distribution"><div class="statistics-distribution-head"><div><small>GEVINSTANDEL</small><div class="statistics-win-rate">${rate} %</div></div><span>${rows.length} afsluttede salg</span></div><div class="statistics-distribution-bar" role="img" aria-label="${wins} med gevinst, ${losses} med tab${flat ? ', '+flat+' uden gevinst eller tab' : ''}"><span class="positive" data-statistics-segment="${wins}"></span><span class="negative" data-statistics-segment="${losses}"></span><span class="neutral" data-statistics-segment="${flat}"></span></div><div class="statistics-distribution-legend"><span class="${wins ? 'positive' : 'neutral'}">${wins ? '↑ ' : '→ '}${wins} med gevinst</span><span class="${losses ? 'negative' : 'neutral'}">${losses ? '↓ ' : '→ '}${losses} med tab</span>${flat ? `<button type="button" class="statistics-flat neutral" data-statistics-group="flat" aria-expanded="${group==='flat'}">→ ${flat} uændret ⌄</button>` : ''}</div></div></div>${note}${group ? `<section class="statistics-list"><div class="statistics-list-heading"><h3>${group==='wins'?'Handler med gevinst':group==='losses'?'Handler med tab':'Handler uden gevinst eller tab'}</h3></div>${list || '<p>Ingen handler i denne kategori.</p>'}</section>` : ''}` : '<p class="statistics-empty">Ingen handler med tilstrækkelige oplysninger i dette depot endnu.</p>' + note;
-    return `<section class="statistics-view" aria-labelledby="statistics-title"><header class="statistics-heading"><div><small>AFSLUTTEDE HANDLER</small><h2 id="statistics-title">Hvordan står det til<span>?</span></h2><p>Et overblik over de andele, du har solgt.</p></div><button type="button" data-statistics-reload>Opdatér ↻</button></header>${options}${hasErrors ? '<p class="statistics-warning" role="status">Nogle depoter kunne ikke læses. Oversigten er ufuldstændig.</p>' : ''}${result}</section>`;
+    return `<section class="statistics-view" aria-labelledby="statistics-title"><header class="statistics-heading"><div><small>AFSLUTTEDE HANDLER</small><h2 id="statistics-title">Hvordan står det til<span>?</span></h2><p>Et overblik over de andele, du har solgt.</p></div><button type="button" data-statistics-reload>Opdatér ↻</button></header>${options}${hasErrors ? '<p class="statistics-warning" role="status">Nogle depoter kunne ikke læses. Oversigten er ufuldstændig.'+(diagnosticCodes.length?' ('+diagnosticCodes.join(', ')+')':'')+'</p>' : ''}${result}</section>`;
   }
   function mount(container, load) {
     if (!container || typeof load !== 'function') throw new TypeError('statistics mount requires a container and loader');
@@ -89,8 +90,15 @@
     const draw = () => { container.innerHTML = render(data, selected); container.querySelectorAll('[data-statistics-segment]').forEach(el => { el.style.flexGrow = el.dataset.statisticsSegment; }); };
     const refresh = async () => {
       container.innerHTML = '<p role="status">Henter handelshistorik…</p>';
-      try { data = await load(); draw(); }
-      catch (_) { container.innerHTML = '<p role="alert">Handelshistorikken kunne ikke hentes. Prøv igen.</p><button type="button" data-statistics-reload>Prøv igen</button>'; }
+      try { data = await load(); }
+      catch (error) {
+        const allowed=['DATABASE','CONNECTION','BROKER_CATALOG','UNEXPECTED'];
+        const category=allowed.includes(error?.details?.diagnostic)?error.details.diagnostic:'REQUEST';
+        container.innerHTML = '<p role="alert">Handelshistorikken kunne ikke hentes. Prøv igen. ('+category+')</p><button type="button" data-statistics-reload>Prøv igen</button>';
+        return;
+      }
+      try { draw(); }
+      catch (_) { container.innerHTML = '<p role="alert">Handelshistorikken kunne ikke vises. Prøv igen. (DISPLAY)</p><button type="button" data-statistics-reload>Prøv igen</button>'; }
     };
     container.addEventListener('change', event => {
       if (event.target.matches('[data-statistics-portfolio]')) { selected={portfolio:event.target.value}; draw(); }
