@@ -28,7 +28,9 @@ class FirstAppBridge(unittest.TestCase):
   with patch.object(installer,'_sources',return_value=self.files):
    return setup.prepare(self.root,SHA,BRIDGE_SHA,base.blob(self.updater),self.updater,self.updater,b'same',self.old,installer,approval,self.root,inspect=lambda _:True)
  def test_actual_installer_then_signed_ticket_and_legacy_request(self):
-  result=self.prepare();self.assertEqual(result['status'],'prepared')
+  import time
+  before=int(time.time());result=self.prepare();self.assertEqual(result['status'],'prepared')
+  self.assertGreaterEqual(result['expires'],before+299);self.assertLessEqual(result['expires'],int(time.time())+300)
   self.assertEqual((self.bridge/'nordicway_deploy_guard.py').read_bytes(),self.files['nordicway_deploy_guard.py'])
   self.assertEqual((self.bridge/'deploy-enabled').read_bytes(),b'1\n')
   self.assertFalse((self.bridge/'deployment-incomplete.json').exists());self.assertFalse((self.bridge/'first-release-setup-incomplete.json').exists())
