@@ -45,9 +45,11 @@ def _result(buy, sell, quantity, basis, provisional):
     proceeds = quantity * sell['price']
     profit = proceeds - basis
     return {'ticker': sell['ticker'], 'name': sell['name'], 'scope': sell['scope'], 'currency': sell['currency'],
-            'quantity': format(quantity, 'f'), 'gross': format(profit, 'f'), 'gross_percent': format(profit / basis * 100, 'f'),
+            'quantity': format(quantity, 'f'), 'cost_basis': format(basis, 'f'), 'sale_proceeds': format(proceeds, 'f'),
+            'gross': format(profit, 'f'), 'gross_percent': format(profit / basis * 100, 'f'),
             'gross_dkk': format(profit, 'f') if sell['currency']=='DKK' else None,
             'net_dkk': None, 'fees_status': 'unknown',
+            'buy_origin': 'unknown', 'sell_origin': 'unknown',
             'buy_price': format(buy['price'], 'f'), 'sell_price': format(sell['price'], 'f'),
             'sell_time': None if provisional else sell['time'].isoformat(),
             'order_created_at': sell['time'].isoformat() if provisional else None,
@@ -220,3 +222,4 @@ def read(connect, user_id, client_factory=None):
             errors.append('En historik kunne ikke læses; eventuelle tal dækker ikke alle depoter.')
     return {'portfolios':output,'errors':errors,'observed':datetime.now(timezone.utc).isoformat(),
             'history_complete':False}
+
