@@ -60,7 +60,7 @@ def state():
             'installed_old_release':not build.is_symlink() and build.is_file() and
                 build.read_text().strip()=='483a4b55ce4381e42ffb828125c9bcc0807cc8ba'}
 
-def main(challenge, wait_seconds=180, drain_seconds=150, pause=.25):
+def main(challenge, wait_seconds=600, drain_seconds=150, pause=1):
     if not re.fullmatch('[0-9a-f]{40}',challenge) or challenge=='0'*40:
         print(json.dumps({'status':'invalid_challenge'})); return 1
     if not same_old_code():
