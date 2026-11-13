@@ -54,4 +54,14 @@ class PortfolioValueChart(unittest.TestCase):
    history=dashboard.portfolio_value_history(c,1,self.now)
   self.assertEqual([p['amount'] for p in history['periods']['week']],['1000']);self.assertIsNone(history['reported_result']);self.assertIsNone(history['current_value'])
 
+ def test_history_keeps_all_real_observations_within_same_old_sampling_bucket(self):
+  now=datetime(2026,11,12,12,0,tzinfo=timezone.utc)
+  for i in range(5):
+   self.save(self.root,str(1000+i),now-timedelta(seconds=(4-i)*30),result=str(20+i))
+  with app.connect() as c:
+   history=dashboard.portfolio_value_history(c,1,now)
+  for period in ('day','week','month','year'):
+   self.assertEqual([p['amount'] for p in history['periods'][period]],[str(1000+i) for i in range(5)])
+   self.assertEqual([p['reported_result'] for p in history['periods'][period]],[str(20+i) for i in range(5)])
+
 if __name__=='__main__':unittest.main()

@@ -14,9 +14,12 @@ def main():
   server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
   try:
    with patch('mcp_client.MCP.request',side_effect=AssertionError('No broker calls in browser test')),sync_playwright() as pw:
-    browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':1440,'height':1000});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+    browser=pw.chromium.launch(**({} if __import__('os').environ.get('ESCAPE_PLAYWRIGHT_MANAGED') else {'executable_path':'/usr/bin/chromium'}),headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':1440,'height':1000},has_touch=True);errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click()
     expect(page.locator('.dash-chart-svg')).to_be_visible();expect(page.locator('.dash-chart-change')).to_contain_text('+10,00');expect(page.locator('.dash-chart-summary .dash-result-share').first).to_contain_text('+1,00 %');expect(page.locator('.dash-chart-summary .dash-result-share').last).to_contain_text('+2,73 %');assert page.locator('.dash-chart-summary .dash-result-share').first.evaluate('(n)=>getComputedStyle(n).color')=='rgb(139, 223, 184)'
+    page.locator('.dash-chart-svg').hover();expect(page.locator('.dash-chart-tooltip')).to_be_visible();expect(page.locator('.dash-chart-tooltip [data-chart-date]')).not_to_be_empty();expect(page.locator('.dash-chart-tooltip [data-chart-value]')).not_to_be_empty()
+    page.set_viewport_size({'width':390,'height':1000});plot=page.locator('.dash-chart-svg');plot.scroll_into_view_if_needed();box=plot.bounding_box();page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5);expect(page.locator('.dash-chart-tooltip')).to_be_visible();expect(page.locator('.dash-chart-tooltip [data-chart-date]')).not_to_be_empty();expect(page.locator('.dash-chart-tooltip [data-chart-value]')).not_to_be_empty()
+    page.set_viewport_size({'width':1440,'height':1000})
     page.evaluate('''() => {
      const points=[{at:'2026-11-07T23:04:00Z',amount:'2830',reported_result:'-169.44',currency:'DKK'},{at:'2026-11-07T23:10:00Z',amount:'2830',reported_result:'-169.25',currency:'DKK'}];
      const chart=p=>new DOMParser().parseFromString(window.DashboardUI.portfolioChart({portfolio_value_history:{day_start:'2026-11-07T23:00:00Z',day_end:'2026-11-08T23:00:00Z',periods:{day:p}}}),'text/html');

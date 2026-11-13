@@ -155,7 +155,6 @@
  .dashboard-v1 .dash-total.neutral span { color:#a9c6c1; }
 }
 
-@media (min-width: 901px) {
  .dash-chart-plot { position:relative; }
  .dash-chart-plot .dash-chart-svg, .dash-chart-plot .inspect-chart-svg { pointer-events:all; }
  .dash-chart-plot .dash-chart-point.is-selected { opacity:1; stroke:#e9fff6; stroke-width:1.5; r:4; }
@@ -168,7 +167,6 @@
  .dash-chart-tooltip [data-chart-share] { text-align:right; margin:2px 0 0; }
  .dash-chart-tooltip[data-chart-tone="positive"] :is([data-chart-value],[data-chart-result],[data-chart-share]) { color:#80ddb3; }
  .dash-chart-tooltip[data-chart-tone="negative"] :is([data-chart-value],[data-chart-result],[data-chart-share]) { color:#ff9ca9; }
-}
 
 @media (min-width: 901px) {
  main:has(#content > .dashboard-v1) > header #title { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
@@ -193,4 +191,12 @@
  .dash-chart-plot .inspect-chart-svg .dash-chart-point { opacity:0; }
  .dash-chart-plot .inspect-chart-svg .dash-chart-point.is-selected,
  .dash-chart-plot .inspect-chart-svg .dash-chart-point:focus-visible { opacity:1; }
+}
+
+/* Selection works with touch and mouse at every viewport size. */
+.dash-chart-plot .inspect-chart-svg[viewBox="0 0 100 100"] .dash-chart-point.is-selected { r:1; stroke-width:1.5; vector-effect:non-scaling-stroke; }
+@media (max-width: 900px) {
+ .dash-chart-plot .inspect-chart-svg .dash-chart-point { opacity:0; }
+ .dash-chart-plot .inspect-chart-svg .dash-chart-point.is-selected, .dash-chart-plot .inspect-chart-svg .dash-chart-point:focus-visible { opacity:1; }
+ .si-bar-column .dash-chart-tooltip { text-align:left; top:8px; bottom:auto; }
 }
