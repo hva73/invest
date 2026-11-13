@@ -134,7 +134,10 @@ def main():
    d.get_by_role('button',name='Køb').click();expect(quick).to_contain_text('Køb · TSM');expect(quick.locator('[name=portfolio_id]')).to_have_value(str(case.root));expect(quick.locator('[name=asset_id]')).to_have_value('synthetic-asset');quick.locator('[data-quick-close]').click()
    account['dashboard']['positions']=[];session['latest_context']['position']='none';session['request']['report_id']='synthetic-report';session['request']['candidate_id']='synthetic-candidate'
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('.market-slot .market-price')).to_be_visible();expect(d.locator('.market-marker-entry')).to_have_count(0);expect(d.locator('.market-entry-label')).to_have_count(0);expect(d.locator('.market-marker-signal')).to_have_count(0);expect(d.locator('.market-peak-label')).to_have_text('Top 3,41 USD');expect(d.get_by_role('button',name='Køb')).to_be_visible()
-   buyplot=d.locator('.market-plot svg');buyplot.scroll_into_view_if_needed();box=buyplot.bounding_box();page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5);expect(d.locator('.market-hover')).to_be_visible();expect(d.locator('.market-hover strong')).to_contain_text('USD')
+   buyplot=d.locator('.market-plot svg');buyplot.scroll_into_view_if_needed();box=buyplot.bounding_box()
+   if page.evaluate('navigator.maxTouchPoints > 0'):page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5)
+   else:buyplot.hover()
+   expect(d.locator('.market-hover')).to_be_visible();expect(d.locator('.market-hover strong')).to_contain_text('USD')
    if shot:page.screenshot(path=f'{shot}/signal-buy-390.png')
    d.get_by_role('button',name='Ignorér og luk signalet').click();expect(d).not_to_be_visible()
    account['dashboard']['positions']=[holding];session['latest_context']['position']='held';session['request'].pop('report_id');session['request'].pop('candidate_id')
