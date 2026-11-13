@@ -52,7 +52,7 @@ window.MarketUI=(()=>{
   const fetched=Date.parse(d.fetched_at),fetchAge=now()-fetched,sourceTime=d.price_time==null||d.price_time===''?null:Date.parse(d.price_time);
   // Missing time remains unknown; invalid or future timestamps are not current.
   const sourceTimeValid=sourceTime===null||(Number.isFinite(sourceTime)&&sourceTime<=now()),fetchTimeValid=Number.isFinite(fetched)&&fetchAge>=0;
-  const warning=r.error||d.last_error||(!sourceTimeValid?'Kurstid er ugyldig eller ligger i fremtiden.':!fetchTimeValid?'Hentetid er ugyldig eller ligger i fremtiden.':null),quality=age(d.price_time,d.fetched_at,Boolean(warning));node.classList.toggle('market-stale',quality.tone==='stale');
+  const warning=r.error||d.last_error||(!sourceTimeValid||!fetchTimeValid?'Kurs kan ikke bekræftes.':null),quality=age(d.price_time,d.fetched_at,Boolean(warning));node.classList.toggle('market-stale',quality.tone==='stale');
   const dayComparison=sourceTimeValid&&fetchTimeValid?(d.daily_comparison?.basis==='official_close'?d.daily_comparison:d.daily_change_percent!==null&&d.daily_change_percent!==undefined&&!d.daily_note?{percent:d.daily_change_percent,amount:d.daily_change,basis:'pluto_reported_daily_change'}:null):null,dailyTone=tone(dayComparison?.percent),arrow=!dayComparison?'—':dailyTone==='positive'?'↑':dailyTone==='negative'?'↓':'→';
   const fetchLabel=fetchTimeValid?clock(d.fetched_at):'ukendt';
   // The holding quote is scoped by exact depot and Pluto asset identity.
