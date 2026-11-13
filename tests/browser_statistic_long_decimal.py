@@ -1,5 +1,16 @@
 from playwright.sync_api import sync_playwright
-data={'portfolios':[{'portfolio_id':'1','name':'Fiktivt','items':[{'ticker':'TEST','name':'Fiktiv aktie','currency':'DKK','gross':'2','gross_percent':'5','quantity':'3','buy_price':'13.33333333333333333333333333','cost_basis':'40','sell_price':'14','sale_proceeds':'42','note':'Foreløbigt'}]}]}
+import sys
+sys.path.insert(0,'.')
+from realized_statistics import project
+def order(side, quantity, price, timestamp, ident):
+ return {'id':ident,'side':side,'status':'FILLED','filledQuantity':quantity,'filledAveragePrice':price,'createdAt':timestamp,'filledAt':timestamp,'scope':'ROOT','collectionId':None,'asset':{'ticker':'TEST','name':'Fiktiv aktie','currency':'DKK'}}
+buys=[order('BUY','1','12','2026-01-01T00:00:00Z','b1'),order('BUY','2','14','2026-01-02T00:00:00Z','b2')]
+sale=order('SELL','3','14','2026-01-03T00:00:00Z','s')
+result=project([], [('c',row) for row in [*buys,sale]])
+assert len(result['items'])==1
+row=result['items'][0]
+assert (row['cost_basis'],row['sale_proceeds'],row['gross'])==('40','42','2')
+data={'portfolios':[{'portfolio_id':'1','name':'Fiktivt',**result}]}
 with sync_playwright() as p:
  browser=p.chromium.launch()
  page=browser.new_page(viewport={'width':320,'height':760})
@@ -11,6 +22,9 @@ with sync_playwright() as p:
  page.locator('[data-statistics-group=wins]').click()
  page.locator('.statistics-trade-button').click()
  page.wait_for_selector('dialog:modal')
+ assert '40 kr.' in page.locator('dialog:modal').inner_text()
+ assert '42 kr.' in page.locator('dialog:modal').inner_text()
+ assert '+2,00 kr.' in page.locator('dialog:modal').inner_text()
  page.screenshot(path='statistics-long-decimal-320.png')
  result=page.locator('dialog').evaluate('el => ({scroll:el.scrollWidth,client:el.clientWidth, rows:[...el.querySelectorAll(".statistics-calc > div")].map(x=>({scroll:x.scrollWidth,client:x.clientWidth,text:x.innerText}))})')
  print(result,flush=True)
