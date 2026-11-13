@@ -40,23 +40,21 @@ def main():
     expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown);assert shown==data['total']
     assert page.locator('[data-dashboard-history-more]').count()==0
     assert 'Udvikling i valgt periode' in page.locator('#dashboard-value-chart').inner_text()
-    new_at=datetime.now(timezone.utc)
-    with app.connect() as c:
-     c.execute('INSERT INTO display_portfolio_values VALUES(?,?,?,?,?,?,?,?)',(1,data['scope'],new_at.timestamp(),new_at.isoformat(),'1500','DKK',new_at.isoformat(),'99'))
-    requested=[]
-    page.on('request',lambda req:requested.append(req.url) if '/api/dashboard/portfolio-history?' in req.url else None)
-    page.evaluate("""() => {state.dashboard.snapshot_at = 'refresh-' + Date.now();document.getElementById('dashboard-value-chart').innerHTML=window.DashboardUI.portfolioChart(state.dashboard)}""")
-    expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown+1)
-    page.wait_for_timeout(700)
-    expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown+1)
-    assert len(requested)==1 and 'before=' not in requested[0],requested
-    assert 'Udvikling i valgt periode' in page.locator('#dashboard-value-chart').inner_text()
-
     assert page.request.get(base+'/api/dashboard/portfolio-history?period=week&scope=wrong').status==400
     svg=page.locator('#dashboard-value-chart .dash-chart-svg');svg.scroll_into_view_if_needed();box=svg.bounding_box();x=box['x']+box['width']*.55;y=box['y']+box['height']*.5
     if touch:page.touchscreen.tap(x,y)
     else:page.mouse.move(x,y)
-    tip=page.locator('#dashboard-value-chart .dash-chart-tooltip');expect(tip).to_be_visible();expect(tip.locator('[data-chart-date]')).to_have_text(re.compile(r'^\d{2}\.\d{2}\.\d{2}.*\d{2}[.:]\d{2}$'));expect(tip.locator('[data-chart-value]')).not_to_have_text('—');expect(tip.locator('[data-chart-result]')).not_to_have_text('—')
+    tip=page.locator('#dashboard-value-chart .dash-chart-tooltip');expect(tip).to_be_visible();expect(tip.locator('[data-chart-date]')).to_have_text(re.compile(r'\d{2}\.\d{2}\.\d{2}.*\d{2}[:.]\d{2}'));expect(tip.locator('[data-chart-value]')).not_to_have_text('—');expect(tip.locator('[data-chart-result]')).not_to_have_text('—')
+    calls=[]
+    page.on('request',lambda request:calls.append(request.url) if '/api/dashboard/portfolio-history?' in request.url else None)
+    updated=datetime.now(timezone.utc);case.save(case.root,'52000',updated,result='2000')
+    page.evaluate('refresh()')
+    expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown+1,timeout=15000)
+    assert len(calls)==1 and 'since=' in calls[0] and 'before=' not in calls[0],calls
+    case.save(case.root,'52001',datetime.now(timezone.utc),result='2001');page.evaluate('refresh()')
+    expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown+2,timeout=15000)
+    assert len(calls)==2 and all('since=' in call and 'before=' not in call for call in calls),calls
+    assert page.locator('[data-dashboard-history-more]').count()==0
     assert not errors,errors;context.close()
    browser.close()
   print('PASS: authenticated full history compared with rendered points, desktop mouse and mobile touch')
