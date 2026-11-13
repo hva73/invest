@@ -16,7 +16,7 @@ with sync_playwright() as p:
   page.evaluate('(data) => StatisticsUI.mount(document.querySelector("#content"), async () => data)',sample)
   expect(page.locator('#statistics-title')).to_contain_text('Hvordan står det til')
   expect(page.locator('.statistics-summary>div:first-child>strong')).to_contain_text('+8,25 USD')
-  page.locator('.statistics-trade').first.locator('summary').click();expect(page.locator('.statistics-detail').first).to_be_visible()
+  page.locator('[data-statistics-group=wins]').click();page.locator('.statistics-trade-button').first.click();expect(page.locator('dialog:modal .statistics-detail')).to_be_visible()
   assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1'),width
   page.screenshot(path=str(out/f'statistik-fiktiv-{width}.png'),full_page=True)
   page.close()
