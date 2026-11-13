@@ -15,7 +15,7 @@ window.MarketUI=(()=>{
  function periodKey(period){return period==='month'?'ONE_MONTH':period==='year'?'ONE_YEAR':'ONE_WEEK'}
  function points(data,period){const all=data.series||[];if(period!=='day')return all;if(!all.length)return [];const end=Number(all[all.length-1].epoch),cutoff=end-24*60*60;return all.filter(p=>Number(p.epoch)>cutoff&&Number(p.epoch)<=end)}
  function session(data,rows){if(!rows.length||!['NASDAQ','NYSE'].includes(data.exchange)||!['CS','ETF'].includes(data.asset_type))return 'Begrænset dagsgraf';const minutes=rows.map(p=>{const parts=new Intl.DateTimeFormat('en-GB',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(p.timestamp));return Number(parts.find(x=>x.type==='hour').value)*60+Number(parts.find(x=>x.type==='minute').value)});return minutes.every(m=>m>=240&&m<570)?'Førmarked · timepunkter':minutes.every(m=>m>=960&&m<=1200)?'Eftermarked · timepunkter':'Begrænset dagsgraf'}
- function scale(values){const min=Math.min(...values),max=Math.max(...values),mid=min+(max-min)/2,range=Math.max((max-min)*1.2,mid*.01);return {lo:mid-range/2,hi:mid+range/2,range}}
+ function scale(values){const {min,max}=values.reduce((r,v)=>({min:Math.min(r.min,v),max:Math.max(r.max,v)}),{min:Infinity,max:-Infinity}),mid=min+(max-min)/2,range=Math.max((max-min)*1.2,mid*.01);return {lo:mid-range/2,hi:mid+range/2,range}}
  function plotScale(values,markers,currency,includeEntry){
   const entry=includeEntry?markers.find(m=>m?.kind==='entry'&&m.currency===currency&&m.value!==null&&m.value!==undefined&&m.value!==''&&Number.isFinite(Number(m.value))&&Number(m.value)>0):null;
   return scale(entry?[...values,Number(entry.value)]:values);
@@ -28,7 +28,7 @@ window.MarketUI=(()=>{
   const signalMarker=!signalView&&markers.find(m=>m?.kind==='signal'&&Number.isFinite(Date.parse(m.at))&&Date.parse(m.at)/1000>=first&&Date.parse(m.at)/1000<=last&&last>first),signalX=signalMarker?pad+(Date.parse(signalMarker.at)/1000-first)/(last-first)*(width-pad*2):null;
   const change=values.length>1?(values[values.length-1]/values[0]-1)*100:null,color=tone(change);const axisPrice=v=>new Intl.NumberFormat('da-DK',{maximumSignificantDigits:5}).format(v);
   const legendMarkers=signalView?validMarkers.filter(m=>m.kind!=='entry'):validMarkers;
-  const peakIndex=values.indexOf(Math.max(...values)),peakPoint=coords[peakIndex],entryMarker=visibleMarkers.find(m=>m.kind==='entry');
+  const peakIndex=values.indexOf(values.reduce((max,v)=>Math.max(max,v),-Infinity)),peakPoint=coords[peakIndex],entryMarker=visibleMarkers.find(m=>m.kind==='entry');
   const peakLeft=Math.max(18,Math.min(80,peakPoint[0]/width*100)),peakTop=peakPoint[1]/height*100,entryTop=entryMarker?(57-(Number(entryMarker.value)-band.lo)/band.range*52)/height*100:null;
   const peakBelow=entryMarker&&peakLeft>58&&Math.abs(peakTop-entryTop)<12;
   const labels=signalView?`<span class="market-peak-label ${peakBelow?'market-label-below':''}" data-label-left="${peakLeft}" data-label-top="${peakTop}">Top ${axisPrice(values[peakIndex])} ${esc(data.currency)}</span>${entryMarker?`<span class="market-entry-label" data-label-top="${entryTop}">Gns. købskurs ${axisPrice(Number(entryMarker.value))} ${esc(data.currency)}</span>`:''}`:'';
