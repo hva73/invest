@@ -15,5 +15,9 @@ function container() { return {innerHTML:'',addEventListener(){},querySelectorAl
   el=container();
   await ui.mount(el,async()=>({portfolios:[],errors:[]}));
   assert(el.innerHTML.includes('Hvordan står det til'));
+  el=container();
+  await ui.mount(el,async()=>({portfolios:[],errors:['incomplete'],error_codes:['DIRECT_PERMISSION','<script>SECRET</script>']}));
+  assert(el.innerHTML.includes('DIRECT_PERMISSION'));assert(!el.innerHTML.includes('SECRET'));
   console.log('Statistics diagnostics PASS');
 })().catch(error=>{console.error(error);process.exitCode=1;});
+
