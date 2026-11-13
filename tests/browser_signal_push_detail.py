@@ -92,11 +92,11 @@ def main():
    else: page.mouse.move(box['x']+box['width']*.5,box['y']+box['height']*.5)
    expect(slot.locator('.market-hover')).to_be_visible()
    plot=slot.locator('[data-market-plot]');plot.focus();page.keyboard.press('ArrowLeft')
-   expect(plot.locator('.market-hover')).to_be_visible();expect(plot.locator('.market-hover small')).to_have_text(re.compile(r'^\d{2}\.\d{2}\.\d{2}.*\d{2}[.:]\d{2}
+   expect(plot.locator('.market-hover')).to_be_visible();expect(plot.locator('.market-hover small')).to_have_text(re.compile(r'^\d{2}\.\d{2}\.\d{2}.*\d{2}[.:]\d{2}$'))
    expect(plot.locator('.market-hover strong')).to_contain_text('USD')
    if shot:page.screenshot(path=f'{shot}/signal-hover-390.png')
    for name in ['week','month','year','day']:
-    slot.locator('[data-market-period='+name+']').click();expect(slot.locator('[data-market-period='+name+']')).to_have_attribute('aria-pressed','true');page.wait_for_timeout(300);plot=slot.locator('[data-market-plot]');plot.focus();page.keyboard.press('ArrowLeft');expect(plot.locator('.market-hover small')).to_have_text(re.compile(r'^\d{2}\.\d{2}\.\d{2}.*\d{2}[.:]\d{2}
+    slot.locator('[data-market-period='+name+']').click();expect(slot.locator('[data-market-period='+name+']')).to_have_attribute('aria-pressed','true');page.wait_for_timeout(300);plot=slot.locator('[data-market-plot]');plot.focus();page.keyboard.press('ArrowLeft');expect(plot.locator('.market-hover small')).to_have_text(re.compile(r'^\d{2}\.\d{2}\.\d{2}.*\d{2}[.:]\d{2}$'))
    assert 'ONE_MONTH' in periods and 'ONE_YEAR' in periods,periods
    for offset in (0,300,700,1200):
     d.evaluate('(e,y)=>e.scrollTop=y',offset);box=d.locator('.signal-action-bar').bounding_box();viewport=page.viewport_size;assert box and box['y']>=0 and box['y']+box['height']<=viewport['height']+1,(offset,box)
