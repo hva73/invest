@@ -1,5 +1,5 @@
 """Synthetic Pluto series rendered in candidate cards; no external data or trades."""
-import copy,os,sys,threading
+import copy,os,sys,threading,re
 from pathlib import Path
 from unittest.mock import patch
 from datetime import datetime,timezone,timedelta
@@ -43,7 +43,7 @@ def main():
     if width==390:
      plot=slot.locator('.market-plot svg');plot.scroll_into_view_if_needed();box=plot.bounding_box();page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5)
      assert slot.locator('.market-hover').is_visible()
-     assert slot.locator('.market-hover').inner_text().count(':')>=1
+     assert 'Kurs' in slot.locator('.market-hover').inner_text() and re.search(r'\\d{2}[.:]\\d{2}',slot.locator('.market-hover').inner_text())
     if width in [390,1440]:page.locator('.desk-candidate').first.scroll_into_view_if_needed();page.screenshot(path=f'/tmp/escape-market-{width}.png')
    # Rolling day includes the previous evening: 25 hourly observations give 24 points.
    end=datetime(2026,11,2,10,tzinfo=timezone.utc)
