@@ -43,6 +43,16 @@ class Diagnostics(unittest.TestCase):
                     self.assertEqual(result['error_codes'],[expected])
                     self.assertNotIn('private secret',str(result))
 
+    def test_request_error_types_have_fixed_categories(self):
+        from urllib.error import HTTPError, URLError
+        from mcp_client import PortfolioFormatError
+        guard=RuntimeError('secret'); guard.code='PLUTO_WRITE_OR_UNKNOWN_TOOL_BLOCKED'
+        for error, suffix in [(guard,'LOCAL_GUARD'),(HTTPError('https://secret',403,'secret',None,None),'DENIED'),(TimeoutError('secret'),'TIMEOUT'),(URLError('secret'),'NETWORK'),(PortfolioFormatError('secret'),'RESPONSE')]:
+            with self.subTest(suffix=suffix):
+                result=statistics.depot_error_code('DIRECT_REQUEST',error)
+                self.assertEqual(result,'DIRECT_REQUEST_'+suffix)
+                self.assertNotIn('secret',result.lower())
+
     def test_authenticated_http_errors_are_categorized_without_private_text(self):
         import io, json, tempfile
         import app, passenger_wsgi
