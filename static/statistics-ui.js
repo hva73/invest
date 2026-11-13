@@ -68,7 +68,7 @@
     const group = selected.group === 'wins' || selected.group === 'losses' ? selected.group : null;
     const list = (group ? groups[group] : []).map(item => {
       const gross=number(item.gross), percent=number(item.gross_percent), cls=direction(gross);
-      const time=item.sell_time && Number.isFinite(Date.parse(item.sell_time)) ? `<span>Udført ${esc(new Date(item.sell_time).toLocaleString('da-DK',{timeZone:'Europe/Copenhagen'}))}</span>` : '<span>Fyldtid ikke oplyst</span>';
+      const time=item.sell_time && Number.isFinite(Date.parse(item.sell_time)) ? `<span>Udført ${esc(new Date(item.sell_time).toLocaleString('da-DK',{timeZone:'Europe/Copenhagen'}))}</span>` : '<span>Handelstid ikke oplyst</span>';
       // A FIFO sale may combine several purchase prices. Never infer total basis
       // from buy_price, which can represent only the first lot.
       const basis=number(item.cost_basis) !== null ? `${esc(item.cost_basis.replace('.',','))} ${esc(unit)}` : 'Ikke oplyst';
