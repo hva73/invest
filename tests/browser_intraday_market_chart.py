@@ -11,7 +11,7 @@ def main():
  case=fixtures.Quotes();case.setUp()
  payload={'source':'Synthetic','observed':datetime.now(timezone.utc).isoformat(),'kind':'portfolio','positions':[],'accounts':[],'pending_orders':[],'value':None,'errors':[],'complete':True,'orders_complete':True}
  portfolios=[{'id':'portfolios:root','name':'Synthetic root','kind':'portfolio','can_trade':True},{'id':'collections:child','name':'Synthetic child','kind':'collection','parent_external_id':'portfolios:root'}]
- calls=[];real_normalize=market_data.normalized;real_enrich=market_data.enrich_intraday
+ calls=[];real_normalize=market_data.normalized;real_enrich=market_data.enrich_intraday;real_enrich=market_data.enrich_intraday
  class Feed:
   def intraday(self,symbol,**kwargs):
    calls.append((symbol,kwargs));now=datetime.now(timezone.utc).replace(microsecond=0)
@@ -24,7 +24,7 @@ def main():
    return super().request(method,params)
  server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
  try:
-  with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_REST_ENABLED':'1'}),patch('trade_service.MCP',Extended),patch('mcp_client.read_portfolios',return_value=portfolios),patch('portfolio_data.read',return_value=payload),patch('market_data.normalized',side_effect=lambda raw,aid,**kw:real_normalize(raw,aid,case.fixed,**kw)),patch('market_data.enrich_intraday',side_effect=lambda connect,uid,result,**kw:real_enrich(connect,uid,result,now=case.fixed,**kw)),patch('hotwatch_service.verified_existing_feed',return_value={'provider_symbol':'CHART.US'}),patch('hotwatch_adapters.EODHDAdapter.feeds',return_value=Feed()),sync_playwright() as p:
+  with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_REST_ENABLED':'1'}),patch('trade_service.MCP',Extended),patch('mcp_client.read_portfolios',return_value=portfolios),patch('portfolio_data.read',return_value=payload),patch('market_data.normalized',side_effect=lambda raw,aid,**kw:real_normalize(raw,aid,case.fixed,**kw)),patch('market_data.enrich_intraday',side_effect=lambda connect,uid,result,**kw:real_enrich(connect,uid,result,now=case.fixed,**kw)),patch('market_data.enrich_intraday',side_effect=lambda connect,uid,result,**kw:real_enrich(connect,uid,result,now=case.fixed,**kw)),patch('hotwatch_service.verified_existing_feed',return_value={'provider_symbol':'CHART.US'}),patch('hotwatch_adapters.EODHDAdapter.feeds',return_value=Feed()),sync_playwright() as p:
    browser=p.chromium.launch(**({} if os.environ.get('ESCAPE_PLAYWRIGHT_MANAGED') else {'executable_path':'/usr/bin/chromium'}),headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':390,'height':900},has_touch=True);errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
    page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();page.locator('#refresh-status[data-kind=success]').wait_for()
    page.locator('#mobile-more').click();page.locator('nav [data-view=radar]').click();slot=page.locator('.market-slot').first;slot.locator('[data-market-load]').click()
