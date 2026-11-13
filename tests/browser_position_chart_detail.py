@@ -27,8 +27,8 @@ def main():
    page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click()
    page.locator('[data-dashboard-open]:visible').first.click();graph=page.locator('#dashboard-detail .market-slot');expect(graph.locator('.market-price')).to_be_visible()
    graph.locator('[data-market-period=week]').click();assert graph.locator('.market-line').get_attribute('d').count('L')==81
-   plot=graph.locator('.market-plot svg');plot.scroll_into_view_if_needed();plot.hover();expect(graph.locator('.market-hover')).to_be_visible()
-   page.set_viewport_size({'width':390,'height':900});plot.scroll_into_view_if_needed();box=plot.bounding_box();page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5);expect(graph.locator('.market-hover')).to_be_visible();expect(graph.locator('.market-hover strong')).to_contain_text('USD')
+   plot=graph.locator('.market-plot svg');plot.scroll_into_view_if_needed();plot.hover();tip=graph.locator('.market-hover');expect(tip).to_be_visible();assert tip.bounding_box()['y']+tip.bounding_box()['height']<=plot.bounding_box()['y']
+   page.set_viewport_size({'width':390,'height':900});plot.scroll_into_view_if_needed();box=plot.bounding_box();plot.dispatch_event('pointerdown',{'pointerType':'touch','clientX':box['x']+box['width']*.5,'clientY':box['y']+box['height']*.5});expect(tip).to_be_visible();expect(graph.locator('.market-hover strong')).to_contain_text('USD');assert tip.bounding_box()['y']+tip.bounding_box()['height']<=plot.bounding_box()['y'];plot.dispatch_event('pointerup',{'pointerType':'touch'});expect(tip).to_be_hidden()
    assert not errors,errors;browser.close()
  finally:server.shutdown();server.server_close();case.tearDown()
  print('PASS: position chart points, touch and mouse')

@@ -1,0 +1,40 @@
+name: Approved overview restoration
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  browser:
+    if: github.event.pull_request.head.ref == 'codex/approved-display-restoration'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .:tests
+      ESCAPE_PLAYWRIGHT_MANAGED: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt playwright==1.56.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Approved layout and data checks
+        run: |
+          node tests/test_dashboard_data.js
+          node tests/test_dashboard_attention.js
+          node tests/test_statistics_ui.cjs
+          python tests/browser_approved_overview_restoration.py
+          python tests/browser_portfolio_value_chart.py
+          python tests/browser_position_chart_detail.py
+          python tests/browser_position_entry_regression.py
+          python tests/browser_desktop_experience.py
+          python tests/browser_statistics_integration.py
+          python tests/browser_statistics_desktop_accept.py
+
+      - name: Save synthetic screenshots for visual review
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: approved-design-visual-review
+          path: visual-review/*.png
+          if-no-files-found: warn
