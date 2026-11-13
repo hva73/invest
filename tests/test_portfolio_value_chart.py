@@ -68,8 +68,20 @@ class PortfolioValueChart(unittest.TestCase):
    self.assertEqual((newest['total'],len(newest['points']),len(older['points'])),(2051,2000,51))
    points=older['points']+newest['points'];self.assertEqual([p['at'] for p in points],[r[3] for r in records]+[self.now.isoformat()])
    self.assertIsNone(older['next_before'])
+   incremental=dashboard.portfolio_history_page(c,1,'week',self.now,scope=scope,since=records[-1][2]);self.assertEqual(len(incremental['points']),1);self.assertEqual(incremental['points'][0]['at'],self.now.isoformat())
+   with self.assertRaises(ValueError):dashboard.portfolio_history_page(c,1,'week',self.now,scope=scope,since='nan')
    with self.assertRaises(ValueError):dashboard.portfolio_history_page(c,1,'week',self.now,scope='wrong')
    with self.assertRaises(ValueError):dashboard.portfolio_history_page(c,1,'week',self.now,scope=scope,before='nan')
    self.assertEqual(dashboard.portfolio_history_page(c,2,'week',self.now)['points'],[])
+
+ def test_history_keeps_all_real_observations_within_same_old_sampling_bucket(self):
+  now=datetime(2026,11,12,12,0,tzinfo=timezone.utc)
+  for i in range(5):
+   self.save(self.root,str(1000+i),now-timedelta(seconds=(4-i)*30),result=str(20+i))
+  with app.connect() as c:
+   for period in ('day','week','month','year'):
+    points=dashboard.portfolio_history_page(c,1,period,now)['points']
+    self.assertEqual([p['amount'] for p in points],[str(1000+i) for i in range(5)])
+    self.assertEqual([p['reported_result'] for p in points],[str(20+i) for i in range(5)])
 
 if __name__=='__main__':unittest.main()
