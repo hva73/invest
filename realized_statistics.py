@@ -7,11 +7,25 @@ indicative gross price comparison, never as a verified cost basis or net profit.
 from decimal import Decimal, InvalidOperation, localcontext
 from datetime import datetime, timezone
 from collections import defaultdict, deque
+from urllib.error import HTTPError, URLError
 
 class StatisticsUnavailable(Exception):
     def __init__(self, category):
         self.category = category
         super().__init__(category)
+
+def depot_error_code(stage, error):
+    """Return only fixed, non-sensitive categories for operational diagnosis."""
+    if getattr(error, 'code', None) == 'PROVIDER_RATE_BUDGET': return 'PROVIDER_RATE_BUDGET'
+    if stage not in ('DIRECT_REQUEST', 'COLLECTION_REQUEST'): return stage
+    if getattr(error, 'code', None) == 'PLUTO_WRITE_OR_UNKNOWN_TOOL_BLOCKED': return stage + '_LOCAL_GUARD'
+    if isinstance(error, HTTPError):
+        return stage + ('_DENIED' if error.code in (401, 403) else '_HTTP')
+    if isinstance(error, TimeoutError): return stage + '_TIMEOUT'
+    if isinstance(error, (URLError, ConnectionError)): return stage + '_NETWORK'
+    from mcp_client import PortfolioFormatError
+    if isinstance(error, PortfolioFormatError): return stage + '_RESPONSE'
+    return stage
 
 
 def _decimal(value):
@@ -279,7 +293,7 @@ def read(connect, user_id, client_factory=None):
             else: continue
             output.append({'portfolio_id':portfolio['id'],'name':portfolio['name'],'kind':portfolio['kind'],**result})
         except Exception as error:
-            if getattr(error, 'code', None) == 'PROVIDER_RATE_BUDGET': stage = 'PROVIDER_RATE_BUDGET'
+            stage = depot_error_code(stage, error)
             if stage not in error_codes: error_codes.append(stage)
             errors.append('En historik kunne ikke læses; eventuelle tal dækker ikke alle depoter.')
     return {'portfolios':output,'errors':errors,'error_codes':error_codes,'observed':datetime.now(timezone.utc).isoformat(),
