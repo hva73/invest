@@ -179,6 +179,7 @@ class EODHDFeeds:
    cached=_status_cache.get(key);now=time.monotonic()
    cache_limit=STATUS_CACHE_TTL_S if max_cache_age_s is None else min(STATUS_CACHE_TTL_S,max_cache_age_s)
    if cached and 0<=now-cached[0]<cache_limit:
+    if max_cache_age_s is None:return copy.deepcopy(cached[1])
     try:
      received=datetime.fromisoformat(cached[1]['received_at']);age=(datetime.now(timezone.utc)-received).total_seconds()
      if 0<=age<cache_limit:return copy.deepcopy(cached[1])
