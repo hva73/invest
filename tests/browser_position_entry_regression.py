@@ -1,5 +1,5 @@
 """Position graph with real synthetic source points, entry marker and inspection."""
-import os,sys,threading
+import os,sys,threading,re
 from pathlib import Path
 from datetime import datetime,timezone
 from unittest.mock import patch
@@ -29,7 +29,7 @@ def main():
     page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();page.locator('[data-dashboard-open]:visible').first.click()
     graph=page.locator('#dashboard-detail .market-slot');expect(graph.locator('.market-price')).to_be_visible();graph.locator('[data-market-period=week]').click();expect(graph.locator('.market-line')).to_be_visible();assert graph.locator('.market-line').get_attribute('d').count('L')==81
     entry=graph.locator('.market-marker-entry');expect(entry).to_have_count(1);assert entry.get_attribute('y1')==entry.get_attribute('y2');assert entry.evaluate("e=>getComputedStyle(e).strokeDasharray") not in ('none','0px')
-    expect(graph.locator('.market-entry-label')).to_contain_text('Gns. købskurs');expect(graph.locator('.market-entry-label')).to_contain_text('18,5');expect(graph.locator('.market-peak-label')).to_contain_text('Top')
+    expect(graph.locator('.market-entry-label')).to_contain_text('Gns. købskurs');expect(graph.locator('.market-entry-label')).to_contain_text('18,5');expect(graph.locator('.market-peak-label')).to_contain_text('Top 20,081 USD');expect(graph.locator('.market-about')).to_have_count(0);expect(graph.locator('.market-session')).not_to_contain_text('punkter');assert entry.evaluate("e=>getComputedStyle(e).vectorEffect")=='non-scaling-stroke'
     svg=graph.locator('.market-plot svg');svg.scroll_into_view_if_needed();box=svg.bounding_box();x=box['x']+box['width']*.55;y=box['y']+box['height']*.5;tip=graph.locator('.market-hover')
     if touch:
      cdp=context.new_cdp_session(page);cdp.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[{'x':x,'y':y}]})
@@ -38,7 +38,10 @@ def main():
     Path('visual-review').mkdir(exist_ok=True);page.screenshot(path=f'visual-review/position-{width}.png',full_page=True)
     if touch:cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
     else:page.mouse.move(0,0)
-    expect(tip).to_be_hidden();assert not errors,errors;context.close()
+    expect(tip).to_be_hidden()
+    for period in ('day','week','month','year'):
+     button=graph.locator('[data-market-period='+period+']');button.click();expect(button).to_have_attribute('aria-pressed','true');plot=graph.locator('[data-market-plot]');expect(plot).to_be_visible();plot.focus();page.keyboard.press('ArrowLeft');point=graph.locator('.market-hover');expect(point).to_be_visible();when=point.locator('small').inner_text();assert re.fullmatch(r'\d{2}\.\d{2}' if period=='day' else r'\d{2}\.\d{2}\.\d{2}',when),(period,when)
+    assert not errors,errors;context.close()
    browser.close()
  finally:server.shutdown();server.server_close();case.tearDown()
  print('PASS: position entry, actual high, nonoverlapping inspection, mobile and desktop')
