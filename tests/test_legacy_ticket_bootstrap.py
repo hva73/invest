@@ -30,6 +30,24 @@ class LegacyTicket(unittest.TestCase):
  def test_ticket_for_other_sha_rejected(self):
   self.approved('b'*40)
   with self.assertRaises(ValueError): self.submit()
+ def test_null_approval_is_rejected_without_consuming_ticket(self):
+  self.approved()
+  with self.assertRaisesRegex(ValueError,'invalid_request'):
+   runner.run_request(SHA,io.BytesIO(b'{"cpanel_token":"test_token_12345","approval":null}'))
+  self.assertTrue((self.bridge/'approval-ticket.json').exists())
+ def test_existing_claim_blocks_without_consuming_ticket(self):
+  self.approved();(self.bridge/'deployment-incomplete.json').write_text('keep')
+  with self.assertRaises(FileExistsError): self.submit()
+  self.assertTrue((self.bridge/'approval-ticket.json').exists())
+ def test_preflight_failure_consumes_ticket(self):
+  self.approved();real=runner.run
+  def wrapped(candidate,token,**kwargs):
+   return real(candidate,token,bridge=self.bridge,authorization_lock=self.lock,adapter_factory=Mock(),
+    deploy=lambda *_:Outcome('failed','preflight',False),prepare=lambda *_:None,**kwargs)
+  with patch.object(runner,'run',side_effect=wrapped):
+   result=runner.run_request(SHA,self.payload)
+  self.assertEqual(result['stage'],'preflight');self.assertFalse(result['recovery_required'])
+  with self.assertRaises(FileNotFoundError):self.submit()
  def test_expired_ticket_rejected(self):
   self.approved();path=self.bridge/'approval-ticket.json'
   import json
