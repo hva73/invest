@@ -27,7 +27,18 @@ def main():
     context=browser.new_context(viewport={'width':width,'height':900},is_mobile=touch,has_touch=touch);page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
     assert page.request.get(base+'/api/dashboard/portfolio-history').status==401
     page.goto(base);page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();expect(page.locator('.dashboard-v1')).to_be_visible()
-    page.locator('[data-dashboard-range=week]').click();status=page.locator('.dash-history-status');expect(status).to_be_visible()
+    page.evaluate("""() => {const real=window.fetch;window.fetch=(url,...args)=>String(url).includes('/dashboard/portfolio-history?period=week')?new Promise(resolve=>setTimeout(resolve,1200)).then(()=>real(url,...args)):real(url,...args)}""")
+    page.locator('[data-dashboard-range=week]').click()
+    waiting_svg=page.locator('#dashboard-value-chart .dash-chart-svg');waiting_svg.scroll_into_view_if_needed();box=waiting_svg.bounding_box()
+    if touch:page.touchscreen.tap(box['x']+box['width']*.9,box['y']+box['height']*.5)
+    else:page.mouse.move(box['x']+box['width']*.9,box['y']+box['height']*.5)
+    expect(page.locator('#dashboard-value-chart .dash-chart-tooltip')).to_be_visible()
+    selected=page.locator('#dashboard-value-chart .dash-chart-point.is-selected').get_attribute('data-chart-at');assert selected
+    status=page.locator('.dash-history-status');expect(status).to_be_visible(timeout=10000)
+    expect(page.locator('#dashboard-value-chart .dash-chart-tooltip')).to_be_visible()
+    assert page.locator('#dashboard-value-chart .dash-chart-point.is-selected').get_attribute('data-chart-at')==selected
+    expect(page.locator('#dashboard-value-chart .dash-chart-tooltip [data-chart-date]')).not_to_be_empty()
+
     response=page.request.get(base+'/api/dashboard/portfolio-history?period=week');assert response.ok
     data=response.json();valid=[x for x in data['points'] if x['reported_result'] is not None];assert len(valid)>70
     assert page.locator('#dashboard-value-chart .dash-chart-point').count()==len(valid),(width,len(valid),page.locator('#dashboard-value-chart .dash-chart-point').count())
