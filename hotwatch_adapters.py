@@ -392,11 +392,12 @@ class EODHDAdapter:
     row=c.execute('SELECT s.received,s.is_open,c.received AS calendar_received,c.timezone,c.calendar FROM hw_exchange_status s JOIN hw_exchange_calendar c ON c.exchange=s.exchange WHERE s.exchange=?',(exchange,)).fetchone()
    if row and row['received']==row['calendar_received'] and row['is_open'] in (0,1):
     try:
-     if 0<=(utc()-stamp(row['received'])).total_seconds()<=max_age:
+     if 0<=(utc()-stamp(row['received'])).total_seconds()<=max_age/2:
       calendar=json.loads(row['calendar'])
       if isinstance(calendar,dict) and isinstance(row['timezone'],str):return {'status':'OK','exchange':exchange,'exchange_open':bool(row['is_open']),'received_at':row['received'],'timezone':row['timezone'],'calendar':calendar}
     except (ValueError,TypeError,KeyError):pass
-  return client.market_status(exchange)
+  bounded=getattr(client,'market_status_for_scan',None)
+  return bounded(exchange,max_age/2) if callable(bounded) else client.market_status(exchange)
  def capture(self,client,feed,symbol,session):
   """Share one bounded stream across due, independently verified watches."""
   req=session['request_data'];capture_started=time.monotonic()
@@ -811,3 +812,4 @@ class InboxAdapter:
   if not m['price'] or not m['price_at'] or d['instrument']['asset_id']!=r['asset_id']:raise DataUnavailable('INBOX_PRICE_OR_IDENTITY_UNKNOWN')
   at=stamp(m['price_at'])
   return {'sample_id':d['observation_id'],'source':'report_inbox','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':m['venue'],'currency':m['price']['currency'],'event_time':m['price_at'],'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'Sender-provided report observation; not a direct provider feed','documented_delay_s':m['delay_seconds'],'verification':'unverified','error_code':None,'interval_s':60,'price':m['price']['amount'],'bid':None,'ask':None,'volume':None,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':unknown_context()}
+
