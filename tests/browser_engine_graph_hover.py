@@ -20,6 +20,11 @@ def main():
   prices=['100' if i%2==0 else '100.5' for i in range(34)]+['100.55','100.70','100.90','101.15','101.45','101.80']
   for i,price in enumerate(prices):
    at=base+timedelta(minutes=i);t=tick(at,i,price);t['volume']=str(100 if i<34 else 1000*2**(i-34));engine.ingest(app.connect,1,req['watch_id'],True,t,at)
+  # Add older, out-of-order synthetic observations to exercise pagination and time sorting.
+  with app.connect() as c:
+   sample=c.execute('SELECT * FROM hw_samples ORDER BY id LIMIT 1').fetchone();original=json.loads(sample['payload'])
+   for i in range(190):
+    at=base-timedelta(minutes=190-i);data=dict(original,event_time=at.isoformat(),sample_id='old-'+str(i));c.execute('INSERT INTO hw_samples(watch_row_id,source,sample_id,event_epoch,received,payload,digest) VALUES(?,?,?,?,?,?,?)',(sample['watch_row_id'],sample['source'],data['sample_id'],at.timestamp(),at.isoformat(),json.dumps(data),'synthetic-'+str(i)))
   prod=merc_report(False);prod['report_id']='SYNTHETIC-STATUS-PRODUCTION-FIXTURE';prod['source']='KUN SYNTETISKE TESTDATA I MIDLERTIDIG DATABASE'
   for index,status in [(0,'CLOSED'),(1,'ARCHIVED')]:prod['candidates'][index]['lifecycle']={'status':status,'changed_at':prod['generated_at'],'reason':'Syntetisk lukning uden udført handel','source_ids':['synthetic-source'],'trade_cycle_id':'synthetic-cycle-'+str(index)}
   prod['candidates'][4].update(asset_id='synthetic-FCX',decision=decision('FRAVÆLG',prod['generated_at']));report_ingest.save(app.connect,1,prod)
@@ -30,7 +35,11 @@ def main():
   try:
    with patch('hotwatch_engine.utc',return_value=fixed),patch('mcp_client.MCP.request',side_effect=AssertionError('No provider calls in this test')),patch('hotwatch_adapters.search_eodhd_symbols',side_effect=eodhd_fake),sync_playwright() as pw:
     browser=pw.chromium.launch(headless=True) if os.environ.get('ESCAPE_PLAYWRIGHT_MANAGED')=='1' else pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':1440,'height':1000});errors=[];page.on('pageerror',lambda e:errors.append(str(e)));page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();page.locator('nav [data-view=hot-watch]').click();page.locator('.engine-overview').wait_for();assert page.locator('.engine-list-row').count()==0
-    page.locator('.hotwatch-mode summary').click();page.locator('#watch-mode').select_option('true');page.locator('.engine-list-row').wait_for();expect(page.locator('.engine-list-row')).to_contain_text('KØB');page.locator('.engine-list-row .engine-list-identity').click();dialog=page.locator('#engine-dialog');dialog.wait_for(state='visible');assert dialog.locator('.engine-chart path').count()==1
+    page.evaluate('window.EngineUI.mount(true)');page.locator('.engine-list-row').wait_for();expect(page.locator('.engine-list-row')).to_contain_text('KØB');page.locator('.engine-list-row .engine-list-identity').click();dialog=page.locator('#engine-dialog');dialog.wait_for(state='visible');assert dialog.locator('.engine-chart path').count()==1
+    assert dialog.locator('.engine-chart .dash-chart-point').count()==100
+    dialog.locator('[data-engine-more-samples]').click();expect(dialog.locator('.engine-chart .dash-chart-point')).to_have_count(200)
+    dialog.locator('[data-engine-more-samples]').click();expect(dialog.locator('.engine-chart .dash-chart-point')).to_have_count(230)
+    assert dialog.locator('[data-engine-more-samples]').count()==0
     curve=dialog.locator('.engine-chart .inspect-chart-svg');curve.scroll_into_view_if_needed();box=curve.bounding_box();page.mouse.move(box['x']+box['width']*.55,box['y']+box['height']*.5);tip=dialog.locator('.engine-chart .dash-chart-tooltip');expect(tip).to_be_visible();expect(tip).to_contain_text('Kurs');expect(tip.locator('[data-chart-share]')).to_contain_text('%')
     if os.environ.get('ESCAPE_SCREENSHOTS'): dialog.screenshot(path=str(Path(os.environ['ESCAPE_SCREENSHOTS'])/'motor-kurs-mouseover.png'))
     dialog.locator('h2').first.hover();expect(tip).to_be_hidden();curve.locator('.dash-chart-point').first.focus();expect(tip).to_be_visible()
