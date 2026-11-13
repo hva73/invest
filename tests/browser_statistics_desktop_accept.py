@@ -19,7 +19,10 @@ for row,ticker in zip(rows,['DELSALG','TAB','NUL']):row['ticker']=ticker
 usd_buy=order('BUY','1','1000','2026-01-01T00:00:00Z','b2');usd_sell=order('SELL','1','1100','2026-01-02T00:00:00Z','s4')
 for row in [usd_buy,usd_sell]:row['asset']={'ticker':'USD_ONLY','name':'Fiktiv handel i USD','currency':'USD'}
 rows+=project([usd_buy,usd_sell])['items']
-payload={'portfolios':[{'portfolio_id':1,'name':'Fiktivt depot','items':rows,'omitted':1,'history_complete':False}],'errors':[],'history_complete':False}
+tiny_buy=order('BUY','1000000000','0.000000001','2026-01-01T00:00:00Z','tiny-buy');tiny_sell=order('SELL','1000000000','0.000000002','2026-01-02T00:00:00Z','tiny-sell')
+for row in [tiny_buy,tiny_sell]:row['asset']={'ticker':'TINY','name':'Fiktiv lille kurs','currency':'DKK'}
+tiny_rows=project([tiny_buy,tiny_sell])['items']
+payload={'portfolios':[{'portfolio_id':1,'name':'Fiktivt depot','items':rows,'omitted':1,'history_complete':False},{'portfolio_id':2,'name':'Fiktiv lille kurs','items':tiny_rows,'omitted':0,'history_complete':False}],'errors':[],'history_complete':False}
 try:
  with patch('mcp_client.MCP.request',side_effect=AssertionError('No broker calls')),sync_playwright() as p:
   browser=p.chromium.launch(headless=True)
@@ -47,7 +50,9 @@ try:
    opener.click();page.locator('dialog:modal button[aria-label="Luk"]').click();expect(page.locator('dialog:modal')).to_have_count(0)
    page.locator('[data-statistics-group=losses]').click();expect(page.locator('.statistics-list')).to_contain_text('TAB');expect(page.locator('.statistics-list')).not_to_contain_text('DELSALG')
    page.locator('[data-statistics-group=losses]').click();expect(page.locator('.statistics-list')).to_have_count(0)
+   page.locator('[data-statistics-group=flat]').click();expect(page.locator('.statistics-list')).to_contain_text('NUL');page.locator('.statistics-trade-button').click();expect(page.locator('dialog:modal')).to_contain_text('0,00');page.keyboard.press('Escape');page.locator('[data-statistics-group=flat]').click()
    page.locator('[data-statistics-currency]').select_option('USD');page.locator('[data-statistics-group=wins]').click();expect(page.locator('.statistics-list')).to_contain_text('USD_ONLY');expect(page.locator('.statistics-list')).not_to_contain_text('DELSALG')
+   page.locator('[data-statistics-portfolio]').select_option('2');page.locator('[data-statistics-group=wins]').click();page.locator('.statistics-trade-button').click();expect(page.locator('dialog:modal')).to_contain_text('<0,000001 kr.');page.keyboard.press('Escape')
    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),width
    assert not errors,errors;page.close()
   browser.close()
