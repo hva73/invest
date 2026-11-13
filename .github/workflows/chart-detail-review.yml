@@ -38,4 +38,4 @@ jobs:
           python tests/browser_signal_push_detail.py
           python tests/browser_holdings_chart.py
       - if: matrix.suite == 'hotwatch'
-        run: python tests/browser_hotwatch_engine.py
+        run: python tests/browser_hotwatch_chart_pagination.py
