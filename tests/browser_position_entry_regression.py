@@ -35,6 +35,7 @@ def main():
      cdp=context.new_cdp_session(page);cdp.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[{'x':x,'y':y}]})
     else:page.mouse.move(x,y)
     expect(tip).to_be_visible();expect(tip.locator('strong')).to_contain_text('USD');tipbox=tip.bounding_box();assert tipbox['y']+tipbox['height']<=box['y'] or tipbox['y']>=box['y']+box['height'],(width,tipbox,box)
+    Path('visual-review').mkdir(exist_ok=True);page.screenshot(path=f'visual-review/position-{width}.png',full_page=True)
     if touch:cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
     else:page.mouse.move(0,0)
     expect(tip).to_be_hidden();assert not errors,errors;context.close()
