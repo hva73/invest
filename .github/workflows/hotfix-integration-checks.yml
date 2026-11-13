@@ -29,3 +29,5 @@ jobs:
           node --check static/dashboard-ui.js
           node --check static/market-ui.js
           node tests/test_dashboard_data.js
+          python -m unittest discover -s tests -p 'test_statistics_diagnostic.py'
+          node tests/test_statistics_diagnostic.cjs
