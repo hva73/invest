@@ -373,11 +373,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,result)
             if self.path=='/api/dashboard/portfolio-history':
                 import dashboard_projection
-                from datetime import datetime,timezone
+                import datetime as history_datetime
                 q=parse_qs(request.query)
                 if any(len(v)!=1 for v in q.values()) or set(q)-{'period','before','asof','scope'}:return self.send(400,{'error':'Ugyldigt historikvalg'})
                 try:
-                    with connect() as c: result=dashboard_projection.portfolio_history_page(c,user_id,q.get('period',['day'])[0],datetime.now(timezone.utc),before=q.get('before',[None])[0],asof=q.get('asof',[None])[0],scope=q.get('scope',[None])[0])
+                    with connect() as c: result=dashboard_projection.portfolio_history_page(c,user_id,q.get('period',['day'])[0],history_datetime.datetime.now(history_datetime.timezone.utc),before=q.get('before',[None])[0],asof=q.get('asof',[None])[0],scope=q.get('scope',[None])[0])
                 except (ValueError,OverflowError):return self.send(400,{'error':'Ugyldigt historikvalg eller ændret depot'})
                 return self.send(200,result)
             if self.path=='/api/sector-intelligence':
