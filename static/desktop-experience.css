@@ -207,3 +207,6 @@
 .dash-chart-guide[hidden]{display:none}
 .dash-hero .dash-chart-latest-time{position:absolute;transform:translate(-50%,-115%);font-size:11px;line-height:1.2;font-weight:600;color:#e4f4ef;text-shadow:0 1px 3px #071820;white-space:nowrap;pointer-events:none;font-variant-numeric:tabular-nums}
 @media(max-width:700px){.dash-hero-intro .dash-overview-updated{display:block;margin-top:4px;color:#a6b9c2;font-size:11px;letter-spacing:0}}
+
+/* Keep selected price outside the plotted line on phone and desktop. */
+.market-plot .market-hover,#dashboard-detail .market-plot .market-hover{top:auto;bottom:calc(100% + 6px)}
