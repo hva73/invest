@@ -1,5 +1,5 @@
 """Integrated synthetic Pluto quote + verified EODHD minute chart."""
-import os,sys,threading
+import copy,os,sys,threading
 from datetime import datetime,timezone,timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -15,10 +15,16 @@ def main():
  class Feed:
   def intraday(self,symbol,**kwargs):
    calls.append((symbol,kwargs));now=datetime.now(timezone.utc).replace(microsecond=0)
-   return {'status':'OK','bars':[{'bar_open_at':(now-timedelta(minutes=130-i)).isoformat(),'close':str(999+i/1000)} for i in range(130)]}
+   span=kwargs['end']-kwargs['start']; count=130 if span<2*86400 else 160 if span<8*86400 else 180 if span<40*86400 else 200; step={'1m':60,'5m':300,'1h':3600}[kwargs['interval']]
+   return {'status':'OK','bars':[{'bar_open_at':(now-timedelta(seconds=step*(count-i))).isoformat(),'close':str(999+i/1000)} for i in range(count)]}
+ class Extended(case.factory):
+  def request(self,method,params):
+   if params['name']=='get_asset' and params['arguments']['period'] in ('ONE_MONTH','ONE_YEAR'):
+    case.calls.append(params);raw=copy.deepcopy(case.raw);raw['performance']['period']=params['arguments']['period'];return {'structuredContent':raw}
+   return super().request(method,params)
  server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
  try:
-  with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_REST_ENABLED':'1'}),patch('trade_service.MCP',case.factory),patch('mcp_client.read_portfolios',return_value=portfolios),patch('portfolio_data.read',return_value=payload),patch('market_data.normalized',side_effect=lambda raw,aid,**kw:real_normalize(raw,aid,case.fixed,**kw)),patch('hotwatch_service.verified_existing_feed',return_value={'provider_symbol':'CHART.US'}),patch('hotwatch_adapters.EODHDAdapter.feeds',return_value=Feed()),sync_playwright() as p:
+  with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_REST_ENABLED':'1'}),patch('trade_service.MCP',Extended),patch('mcp_client.read_portfolios',return_value=portfolios),patch('portfolio_data.read',return_value=payload),patch('market_data.normalized',side_effect=lambda raw,aid,**kw:real_normalize(raw,aid,case.fixed,**kw)),patch('hotwatch_service.verified_existing_feed',return_value={'provider_symbol':'CHART.US'}),patch('hotwatch_adapters.EODHDAdapter.feeds',return_value=Feed()),sync_playwright() as p:
    browser=p.chromium.launch(**({} if os.environ.get('ESCAPE_PLAYWRIGHT_MANAGED') else {'executable_path':'/usr/bin/chromium'}),headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':390,'height':900},has_touch=True);errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
    page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();page.locator('#refresh-status[data-kind=success]').wait_for()
    page.locator('#mobile-more').click();page.locator('nav [data-view=radar]').click();slot=page.locator('.market-slot').first;slot.locator('[data-market-load]').click()
@@ -30,7 +36,11 @@ def main():
    expect(slot.locator('.market-price')).to_contain_text('18,636')
    assert slot.locator('.market-line').get_attribute('d').count('L')==129
    plot=slot.locator('.market-plot svg');plot.scroll_into_view_if_needed();box=plot.bounding_box();page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5);expect(slot.locator('.market-hover')).to_be_visible();expect(slot.locator('.market-hover')).to_contain_text('minutbarens start');expect(slot.locator('.market-hover')).to_contain_text('999')
-   slot.locator('[data-market-period=week]').click();assert slot.locator('.market-line').get_attribute('d').count('L')==81
+   for period,label,count in [('week','minutbarer',160),('month','5-minutsbarer',180),('year','timebarer',200)]:
+    slot.locator('[data-market-period='+period+']').click();expect(slot.locator('.market-session')).to_contain_text('EODHD · '+label+' · '+str(count)+' punkter',timeout=30000)
+    assert slot.locator('.market-line').get_attribute('d').count('L')==count-1
+    expect(slot.locator('.market-price')).to_contain_text('18,636');expect(slot.locator('.market-origin')).to_contain_text('Pluto · kurstid ukendt')
+    plot=slot.locator('.market-plot svg');plot.scroll_into_view_if_needed();box=plot.bounding_box();page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5);expect(slot.locator('.market-hover')).to_be_visible();expect(slot.locator('.market-hover')).to_contain_text('barens start')
    assert calls and calls[0][0]=='CHART.US' and calls[0][1]['max_points'] is None
    page.evaluate("window.ESCAPE_DEMO=true")
    slot.locator('[data-market-refresh]').click();expect(slot.locator('.market-origin')).to_contain_text('Demo')
