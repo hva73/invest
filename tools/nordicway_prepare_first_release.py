@@ -184,6 +184,13 @@ def prepare(root, release, updater_blob, release_updater, requirements, old_modu
         os.close(lock)
 
 
+def failure_status(root, reason):
+    bridge=Path(root)/'.escape_deploy_bridge'
+    return {'status':'stopped','reason':reason,
+            'gate_present':os.path.lexists(bridge/'deploy-enabled'),
+            'recovery_present':os.path.lexists(bridge/'deployment-incomplete.json')}
+
+
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--release', required=True)
@@ -204,8 +211,5 @@ if __name__ == '__main__':
     except Exception as exc:
         # Avoid printing paths, data, subprocess output or secrets.
         reason=str(exc) if isinstance(exc,ValueError) and str(exc).replace('_','').isalnum() else 'preparation_failed'
-        bridge=ROOT/'.escape_deploy_bridge'
-        print(json.dumps({'status':'stopped','reason':reason,
-                          'gate_present':os.path.lexists(bridge/'deploy-enabled'),
-                          'recovery_present':os.path.lexists(bridge/'deployment-incomplete.json')},sort_keys=True))
+        print(json.dumps(failure_status(ROOT,reason),sort_keys=True))
         raise SystemExit(1) from None
