@@ -121,20 +121,24 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None):
     """Add real one-minute bars only for an independently verified feed link."""
     import os
     now=now or datetime.now(timezone.utc)
-    checked=result.get('intraday_checked_at')
-    if isinstance(checked,(int,float)) and 0<=now.timestamp()-checked<300:return result
-    result=dict(result);result.pop('intraday_series',None);result.pop('intraday_source',None)
-    result['intraday_checked_at']=now.timestamp()
+    result=dict(result)
+    def unavailable(status):
+        result.pop('intraday_series',None);result.pop('intraday_source',None);result.pop('intraday_symbol',None)
+        result['intraday_status']=status;result['intraday_checked_at']=now.timestamp();return result
     if not os.environ.get('ESCAPE_EODHD_API_KEY','').strip() or os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':
-        result['intraday_status']='EODHD_NOT_ENABLED';return result
+        return unavailable('EODHD_NOT_ENABLED')
     try:
         from hotwatch_service import verified_existing_feed
         holding={'asset_id':result.get('asset_id'),'ticker':result.get('ticker'),'currency':result.get('currency'),'exchange':result.get('exchange'),'isin':result.get('isin'),'type':result.get('asset_type'),'name':result.get('name')}
         if not holding['asset_id'] or not holding['ticker'] or not holding['currency'] or not holding['exchange']:
-            result['intraday_status']='IDENTITY_UNVERIFIED';return result
+            return unavailable('IDENTITY_UNVERIFIED')
         link=verified_existing_feed(connect,user_id,holding,now)
-        if not link:
-            result['intraday_status']='IDENTITY_UNVERIFIED';return result
+        if not link or not link.get('provider_symbol'):
+            return unavailable('IDENTITY_UNVERIFIED')
+        checked=result.get('intraday_checked_at')
+        if isinstance(checked,(int,float)) and 0<=now.timestamp()-checked<300 and result.get('intraday_symbol')==link['provider_symbol']:return result
+        result.pop('intraday_series',None);result.pop('intraday_source',None)
+        result['intraday_checked_at']=now.timestamp();result['intraday_symbol']=link['provider_symbol']
         if feed_factory is None:
             from hotwatch_adapters import EODHDAdapter
             feed_factory=lambda:EODHDAdapter(connect,user_id).feeds()
@@ -157,7 +161,7 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None):
         else:result['intraday_status']='PLUTO_AS_DETAILED'
         return result
     except Exception:
-        result['intraday_status']='SOURCE_UNAVAILABLE';return result
+        return unavailable('SOURCE_UNAVAILABLE')
 
 def quote(connect,user_id,data,factory=None):
     requested_period=data.get('period','ONE_WEEK')
