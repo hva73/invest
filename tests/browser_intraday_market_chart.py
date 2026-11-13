@@ -2,6 +2,7 @@
 import copy,os,sys,threading
 from datetime import datetime,timezone,timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from unittest.mock import patch
 sys.path[:0]=[str(Path(__file__).resolve().parents[1]),str(Path(__file__).resolve().parent)]
 import app,market_data
@@ -11,12 +12,14 @@ def main():
  case=fixtures.Quotes();case.setUp()
  payload={'source':'Synthetic','observed':datetime.now(timezone.utc).isoformat(),'kind':'portfolio','positions':[],'accounts':[],'pending_orders':[],'value':None,'errors':[],'complete':True,'orders_complete':True}
  portfolios=[{'id':'portfolios:root','name':'Synthetic root','kind':'portfolio','can_trade':True},{'id':'collections:child','name':'Synthetic child','kind':'collection','parent_external_id':'portfolios:root'}]
- calls=[];real_normalize=market_data.normalized;real_enrich=market_data.enrich_intraday
+ calls=[];short_mode=[False];real_normalize=market_data.normalized;real_enrich=market_data.enrich_intraday
  class Feed:
   def intraday(self,symbol,**kwargs):
    calls.append((symbol,kwargs));now=datetime.now(timezone.utc).replace(microsecond=0)
    span=kwargs['end']-kwargs['start']; count=180 if kwargs['interval']=='5m' else 200 if kwargs['interval']=='1h' else 130 if span<2*86400 else 160; step={'1m':60,'5m':300,'1h':3600}[kwargs['interval']]
-   return {'status':'OK','bars':[{'bar_open_at':datetime.fromtimestamp(kwargs['start']+(span-step)*i/(count-1),timezone.utc).isoformat(),'close':str(999+i/1000)} for i in range(count)]}
+   start=max(kwargs['start'],kwargs['end']-count*step) if short_mode[0] else kwargs['start']
+   span=kwargs['end']-start
+   return {'status':'OK','bars':[{'bar_open_at':datetime.fromtimestamp(start+(span-step)*i/(count-1),timezone.utc).isoformat(),'close':str(999+i/1000)} for i in range(count)]}
  class Extended(case.factory):
   def request(self,method,params):
    if params['name']=='get_asset' and params['arguments']['period'] in ('ONE_MONTH','ONE_YEAR'):
@@ -41,6 +44,27 @@ def main():
     assert slot.locator('.market-line').get_attribute('d').count('L')==count-1
     expect(slot.locator('.market-price')).to_contain_text('18,636');expect(slot.locator('.market-origin')).to_contain_text('Pluto · kurstid ukendt')
     plot=slot.locator('.market-plot svg');plot.scroll_into_view_if_needed();box=plot.bounding_box();page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5);expect(slot.locator('.market-hover')).to_be_visible();expect(slot.locator('.market-hover')).to_contain_text('barens start')
+   # A denser but shorter provider fragment must stay separate from the full Pluto graph.
+   short_mode[0]=True
+   with app.connect() as c:c.execute('UPDATE market_asset_cache SET attempted=0')
+   slot.locator('[data-market-period=week]').click();slot.locator('[data-market-refresh]').click()
+   choice=slot.locator('[data-market-excerpt]');expect(choice).to_have_text('Vis detaljeret EODHD-udsnit',timeout=30000)
+   expect(slot.locator('.market-session')).to_contain_text('Plutos observerede kurspunkter · 82 punkter')
+   assert slot.locator('.market-line').get_attribute('d').count('L')==81
+   for width in (390,1440):
+    page.set_viewport_size({'width':width,'height':900});slot.locator('[data-market-excerpt]').click()
+    expect(slot.locator('.market-session')).to_contain_text('EODHD · minutbarer · 160 punkter')
+    assert slot.locator('.market-line').get_attribute('d').count('L')==159
+    label=slot.locator('.market-source-range');expect(label).to_contain_text('dækker ikke hele Pluto-perioden')
+    request=calls[-1][1];first=datetime.fromtimestamp(request['end']-160*60,timezone.utc).astimezone(ZoneInfo('Europe/Copenhagen'));last=datetime.fromtimestamp(request['end']-60,timezone.utc).astimezone(ZoneInfo('Europe/Copenhagen'))
+    expect(label).to_contain_text(first.strftime('%d.%m.%Y'));expect(label).to_contain_text(first.strftime('%H.%M'));expect(label).to_contain_text(last.strftime('%d.%m.%Y'));expect(label).to_contain_text(last.strftime('%H.%M'))
+    expect(slot.locator('.market-price')).to_contain_text('18,636');expect(slot.locator('.market-origin')).to_contain_text('Pluto · kurstid ukendt')
+    plot=slot.locator('.market-plot svg');plot.scroll_into_view_if_needed();box=plot.bounding_box()
+    if width==390:page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5)
+    else:plot.hover()
+    expect(slot.locator('.market-hover')).to_be_visible();expect(slot.locator('.market-hover')).to_contain_text('999')
+    slot.locator('[data-market-excerpt]').click();expect(slot.locator('.market-session')).to_contain_text('Plutos observerede kurspunkter · 82 punkter');assert slot.locator('.market-line').get_attribute('d').count('L')==81
+   short_mode[0]=False
    assert calls and calls[0][0]=='CHART.US' and calls[0][1]['max_points'] is None
    page.evaluate("window.ESCAPE_DEMO=true")
    slot.locator('[data-market-refresh]').click();expect(slot.locator('.market-origin')).to_contain_text('Demo')
