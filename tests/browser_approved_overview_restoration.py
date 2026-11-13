@@ -36,6 +36,7 @@ def main():
      expect(tip).to_be_hidden();expect(guide).to_be_hidden()
     page.locator('[data-dashboard-range=day]').click();expect(hero.locator('.dash-history-status')).to_have_count(1)
     label=hero.locator('.dash-chart-latest-time');expect(label).to_be_visible();assert label.bounding_box()['width']<80
+    Path('visual-review').mkdir(exist_ok=True);page.screenshot(path=f'visual-review/overblik-{width}.png',full_page=True)
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1')
     assert not errors,errors
     page.close()
