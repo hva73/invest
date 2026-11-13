@@ -47,7 +47,7 @@ def remember_portfolio_value(c,uid):
  c.execute('INSERT OR IGNORE INTO display_portfolio_values VALUES(?,?,?,?,?,?,?,?)',(uid,value['scope'],at.timestamp(),at.isoformat(),str(value['amount']),value['currency'],value['source_time'],str(value['reported_result']) if value['reported_result'] is not None else None))
 
 def portfolio_value_history(c,uid,now):
- """Return recorded, scope-matched points with bounded sampling per period."""
+ """Return every recorded, scope-matched observation in each period."""
  from calendar import monthrange
  from zoneinfo import ZoneInfo
  current=portfolio_value_snapshot(c,uid)
@@ -59,11 +59,9 @@ def portfolio_value_history(c,uid,now):
   index=local.year*12+local.month-1-months;year,month=divmod(index,12);month+=1
   return local.replace(year=year,month=month,day=min(local.day,monthrange(year,month)[1])).astimezone(timezone.utc)
  periods={}
- for name,start,bucket in [('day',midnight,300),('week',(local-timedelta(days=7)).astimezone(timezone.utc),3600),('month',months_before(1),21600),('year',months_before(12),86400)]:
+ for name,start in [('day',midnight),('week',(local-timedelta(days=7)).astimezone(timezone.utc)),('month',months_before(1)),('year',months_before(12))]:
   args=(uid,current['scope'],start.timestamp(),now.timestamp())
-  first=c.execute('SELECT observed_epoch,observed,amount,currency,source_time,reported_result FROM display_portfolio_values WHERE user_id=? AND scope=? AND observed_epoch BETWEEN ? AND ? ORDER BY observed_epoch LIMIT 1',args).fetchone()
-  rows=c.execute('SELECT observed_epoch,observed,amount,currency,source_time,reported_result FROM display_portfolio_values WHERE user_id=? AND scope=? AND observed_epoch IN (SELECT MAX(observed_epoch) FROM display_portfolio_values WHERE user_id=? AND scope=? AND observed_epoch BETWEEN ? AND ? GROUP BY CAST(observed_epoch / ? AS INTEGER)) ORDER BY observed_epoch',(uid,current['scope'],*args,bucket)).fetchall()
-  points=([first] if first and (not rows or first['observed_epoch']!=rows[0]['observed_epoch']) else [])+list(rows)
+  points=c.execute('SELECT observed_epoch,observed,amount,currency,source_time,reported_result FROM display_portfolio_values WHERE user_id=? AND scope=? AND observed_epoch BETWEEN ? AND ? ORDER BY observed_epoch',args).fetchall()
   periods[name]=[{'at':r['observed'],'amount':r['amount'],'currency':r['currency'],'source_time':r['source_time'],'reported_result':r['reported_result']} for r in points]
  result=current['reported_result'] if fresh_snapshot else None
  return {'periods':periods,'day_start':midnight.isoformat(),'day_end':next_midnight.isoformat(),'current_value':{'amount':str(current['amount']),'currency':current['currency']} if fresh_snapshot else None,'reported_result':{'amount':str(result),'currency':current['currency']} if result is not None else None}
