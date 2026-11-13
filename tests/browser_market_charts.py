@@ -20,7 +20,7 @@ def main():
  server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
  try:
   with patch('trade_service.MCP',Extended),patch('mcp_client.read_portfolios',return_value=items),patch('portfolio_data.read',return_value=payload),patch('market_data.normalized',side_effect=lambda raw,aid,**kw:real_normalize(raw,aid,case.fixed,**kw)),sync_playwright() as p:
-   browser=p.chromium.launch(**({} if os.environ.get('ESCAPE_PLAYWRIGHT_MANAGED') else {'executable_path':'/usr/bin/chromium'}),headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':1440,'height':1000});errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+   browser=p.chromium.launch(**({} if os.environ.get('ESCAPE_PLAYWRIGHT_MANAGED') else {'executable_path':'/usr/bin/chromium'}),headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':1440,'height':1000},has_touch=True);errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
    page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();page.locator('#refresh-status[data-kind=success]').wait_for()
    page.locator('nav [data-view=radar]').click();slot=page.locator('.market-slot').first;slot.locator('.market-price').wait_for();assert '18,636' in slot.inner_text();assert '+1,22' in slot.inner_text();assert 'Førmarked' in slot.inner_text();assert 'kurstid ukendt' in slot.inner_text();assert slot.locator('[data-market-period=day]').get_attribute('aria-pressed')=='true'
    assert slot.locator('.market-line').get_attribute('d').count('L')==1;assert slot.locator('.market-change.market-positive').count()==1
@@ -40,6 +40,10 @@ def main():
     for selector in ['.desk-candidate','.market-slot']:
      assert page.locator(selector).first.evaluate('(n)=>n.scrollWidth<=n.clientWidth+1'),(width,selector)
     slot.locator('.market-about summary').click();assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),('about',width);slot.locator('.market-about summary').click()
+    if width==390:
+     plot=slot.locator('.market-plot svg');plot.scroll_into_view_if_needed();box=plot.bounding_box();page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5)
+     assert slot.locator('.market-hover').is_visible()
+     assert slot.locator('.market-hover').inner_text().count(':')>=1
     if width in [390,1440]:page.locator('.desk-candidate').first.scroll_into_view_if_needed();page.screenshot(path=f'/tmp/escape-market-{width}.png')
    # Rolling day includes the previous evening: 25 hourly observations give 24 points.
    end=datetime(2026,11,2,10,tzinfo=timezone.utc)
