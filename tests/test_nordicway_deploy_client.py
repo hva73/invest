@@ -8,6 +8,14 @@ import nordicway_deploy_client as client
 
 
 class ClientTests(unittest.TestCase):
+    def test_legacy_ticket_fallback_sends_token_only(self):
+        send = Mock(return_value=SimpleNamespace(returncode=0, stdout=json.dumps(self.reply).encode()))
+        self.env.pop('ESCAPE_OWNER_APPROVAL_PROOF')
+        with patch.object(client, 'verify', return_value='host key\n'):
+            result = client.run(self.env, send)
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(json.loads(send.call_args.kwargs['input']), {'cpanel_token':'test_token_12345'})
+
     def setUp(self):
         self.env = {'ESCAPE_RELEASE_SHA': 'a' * 40, 'ESCAPE_CPANEL_API_TOKEN': 'test_token_12345',
                     'ESCAPE_DEPLOY_AUTHORIZED': '1', 'ESCAPE_OWNER_APPROVAL_PROOF': json.dumps({'nonce':'1'*32,'expires':2000,'mac':'a'*64}), 'SSH_AUTH_SOCK': '/tmp/agent',
@@ -174,3 +182,4 @@ class ClientTests(unittest.TestCase):
             reply['reason'] = 'private command line'
             send.return_value.stdout = json.dumps(reply).encode()
             self.assertEqual(client.run(self.env, send)['status'], 'unknown')
+
