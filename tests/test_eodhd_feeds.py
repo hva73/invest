@@ -386,6 +386,11 @@ class FeedTests(unittest.TestCase):
    def minute_bars(self,*args):return {'status':'OK','bars':[{'bar_open_at':at,'open':'10','high':'12','low':'9','close':'11','volume':'50'}]}
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
   hotwatch_engine.sample_errors(sample,req,now);self.assertEqual(sample['event_time'],at);self.assertEqual(sample['price_time_kind'],'bar_open');self.assertEqual(sample['close'],'11');self.assertEqual(sample['volume_type'],'interval');self.assertEqual(sample['market_status'],'UNKNOWN')
+ def test_intraday_chart_can_request_all_points_without_changing_default_limit(self):
+  rows=[{'timestamp':1730000000+i*60,'open':10,'high':12,'low':9,'close':11,'volume':20} for i in range(1100)]
+  limited=EODHDFeeds(SECRET,opener=Opener(rows)).intraday('AMD.US')
+  full=EODHDFeeds(SECRET,opener=Opener(rows)).intraday('AMD.US',max_points=None)
+  self.assertEqual(len(limited['bars']),1000);self.assertEqual(len(full['bars']),1100)
  def test_intraday_fallback_requests_only_possible_new_bars_with_overlap(self):
   from test_hotwatch_engine import request
   req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime(2026,11,10,5,20,tzinfo=timezone.utc);previous=now-timedelta(minutes=2);new=now-timedelta(minutes=1)
