@@ -157,28 +157,29 @@ window.DashboardUI=(()=>{
   document.addEventListener('focusout',e=>{const discrete=e.target?.closest?.('[data-chart-discrete]');if(discrete&&!discrete.contains(e.relatedTarget))hideDiscreteChart(discrete);const point=e.target?.closest?.('.dash-chart-point'),svg=point?.closest('.dash-chart-svg, .inspect-chart-svg');if(svg&&!svg.contains(e.relatedTarget)){const tip=svg.closest('.dash-chart-plot')?.querySelector('.dash-chart-tooltip');if(tip)tip.hidden=true;svg.querySelector('.dash-chart-point.is-selected')?.classList.remove('is-selected')}});
  }
  const portfolioChartPages=new Map();
- function portfolioChartKey(d){const h=d?.portfolio_value_history,user=getState?.()?.user?.username;return h?.scope&&user?[user,h.scope,chartPeriod].join('|'):null}
- function loadPortfolioChart(d,more=false){
+ function portfolioChartKey(d){const h=d?.portfolio_value_history,user=getState?.()?.user?.username;return h?.scope&&user?[user,h.scope,chartPeriod,chartPeriod==='day'?h.day_start:''].join('|'):null}
+ function loadPortfolioChart(d,more=false,refresh=false){
   const key=portfolioChartKey(d),history=d?.portfolio_value_history;if(!key||window.ESCAPE_DEMO||typeof api!=='function')return;
-  let entry=portfolioChartPages.get(key);if(entry?.loading||more&&(!entry||entry.next_before==null))return;
-  const snapshot=d.snapshot_at||'';if(entry&&!more&&entry.snapshot===snapshot)return;
+  let entry=portfolioChartPages.get(key);if(entry?.loading||entry&&more&&entry.next_before==null||entry?.loaded&&!more&&!refresh)return;
   if(!entry){entry={points:[],loading:false,next_before:null};portfolioChartPages.set(key,entry);while(portfolioChartPages.size>12)portfolioChartPages.delete(portfolioChartPages.keys().next().value)}
-  const selected=chartPeriod,scope=history.scope;entry.loading=true;entry.error=false;if(!more)entry.snapshot=snapshot;
-  const query='dashboard/portfolio-history?period='+encodeURIComponent(selected)+'&scope='+encodeURIComponent(scope)+(more?'&before='+encodeURIComponent(entry.next_before)+'&asof='+encodeURIComponent(entry.asof):'');
-  Promise.resolve(api(query)).then(page=>{
-   if(page.scope!==scope||!Array.isArray(page.points)||!Number.isFinite(Number(page.start_epoch)))throw Error('history scope');
-   const oldTimes=new Set(entry.points.map(old=>old.at));
-   if(more){entry.points=page.points.concat(entry.points);entry.next_before=page.next_before}
-   else if(entry.loaded&&entry.points.length&&page.points.some(p=>oldTimes.has(p.at))){
-    const fresh=new Set(page.points.map(p=>p.at));const cutoff=Number(page.start_epoch)*1000;
-    entry.points=entry.points.filter(p=>Date.parse(p.at)>=cutoff&&!fresh.has(p.at)).concat(page.points);
-    if(entry.points.length>=page.total)entry.next_before=null;
-   }else{entry.points=page.points;entry.next_before=page.next_before}
-   entry.total=page.total;entry.asof=page.asof;entry.loaded=true;
-  }).catch(()=>{entry.error=true}).finally(()=>{entry.loading=false;const state=getState?.(),root=document.getElementById('dashboard-value-chart');if(root&&state?.dashboard&&portfolioChartKey(state.dashboard)===key){root.innerHTML=portfolioChart(state.dashboard);if(more)root.querySelector('[data-dashboard-history-more]')?.focus({preventScroll:true})}});
+  const selected=chartPeriod,scope=history.scope,snapshot=d.snapshot_at||'';entry.loading=true;entry.error=false;entry.attemptedSnapshot=snapshot;
+  const prefix='dashboard/portfolio-history?period='+encodeURIComponent(selected)+'&scope='+encodeURIComponent(scope);
+  const work=async()=>{
+   if(refresh&&entry.points.length){
+    let since=entry.points.at(-1).epoch,combined=entry.points.slice(),result;
+    do {result=await api(prefix+'&since='+encodeURIComponent(since));if(result.scope!==scope||!Array.isArray(result.points))throw Error('history scope');combined=combined.concat(result.points);since=result.next_since} while(since!=null);
+    entry.start=result.start;entry.points=combined.filter(p=>p.epoch>=entry.start);entry.total=result.total;
+    if(entry.next_before!=null&&entry.next_before<=result.start)entry.next_before=null;
+   }else{
+    const page=await api(prefix+(more?'&before='+encodeURIComponent(entry.next_before)+'&asof='+encodeURIComponent(entry.asof):''));
+    if(page.scope!==scope||!Array.isArray(page.points))throw Error('history scope');entry.points=more?page.points.filter(p=>p.epoch>=entry.start).concat(entry.points):page.points;if(!more){entry.total=page.total;entry.asof=page.asof;entry.start=page.start}entry.next_before=page.next_before!=null&&page.next_before>entry.start?page.next_before:null;entry.loaded=true;
+   }
+   entry.snapshot=snapshot;
+  };
+  Promise.resolve().then(work).catch(()=>{entry.error=true}).finally(()=>{entry.loading=false;const state=getState?.(),root=document.getElementById('dashboard-value-chart');if(root&&state?.dashboard&&portfolioChartKey(state.dashboard)===key){root.innerHTML=portfolioChart(state.dashboard);if(more)root.querySelector('[data-dashboard-history-more]')?.focus({preventScroll:true})}});
  }
  function portfolioChart(d){
-  const history=d.portfolio_value_history||{},periods=history.periods||{},key=portfolioChartKey(d),page=key?portfolioChartPages.get(key):null; if(key&&(!page||page.snapshot!==(d.snapshot_at||'')))loadPortfolioChart(d);const points=((page?.loaded?page.points:periods[chartPeriod])||[]).filter(p=>p&&p.reported_result!==null&&p.reported_result!==undefined&&p.reported_result!==''&&Number.isFinite(Number(p.reported_result))&&Number.isFinite(Date.parse(p.at)));
+  const history=d.portfolio_value_history||{},periods=history.periods||{},key=portfolioChartKey(d),page=key?portfolioChartPages.get(key):null; if(key&&!page)loadPortfolioChart(d);else if(page?.loaded&&!page.loading&&page.attemptedSnapshot!==(d.snapshot_at||''))loadPortfolioChart(d,false,true);const points=((page?.loaded?page.points:periods[chartPeriod])||[]).filter(p=>p&&p.reported_result!==null&&p.reported_result!==undefined&&p.reported_result!==''&&Number.isFinite(Number(p.reported_result))&&Number.isFinite(Date.parse(p.at)));
   const first=points[0],last=points[points.length-1],value=points.length>1?Number(last.reported_result)-Number(first.reported_result):null,sign=tone(value);
   const buttons=[['day','I dag'],['week','Uge'],['month','Måned'],['year','År']].map(([key,label])=>`<button type="button" data-dashboard-range="${key}" aria-pressed="${chartPeriod===key}">${label}</button>`).join('');
   let visual='<div class="dash-chart-empty">Afventer flere registrerede resultater fra Pluto.</div>';
