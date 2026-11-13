@@ -81,6 +81,12 @@ class TestFirstRelease(unittest.TestCase):
    with self.assertRaises(OSError): self.run_prepare()
   self.assertTrue((self.bridge/'deployment-incomplete.json').exists())
   self.assertTrue((self.bridge/'deploy-enabled').exists())
+ def test_failure_status_reports_open_gate_and_claim(self):
+  (self.bridge/'deployment-incomplete.json').write_text('claim')
+  self.assertEqual(p.failure_status(self.root,'open_failed'),{'status':'stopped','reason':'open_failed','gate_present':True,'recovery_present':True})
+ def test_failure_status_reports_closed_gate_and_claim(self):
+  (self.bridge/'deployment-incomplete.json').write_text('claim');(self.bridge/'deploy-enabled').unlink()
+  self.assertEqual(p.failure_status(self.root,'open_failed'),{'status':'stopped','reason':'open_failed','gate_present':False,'recovery_present':True})
  def test_arrival_during_gate_open_sees_claim(self):
   original=p.atomic
   def during_open(parent,name,data):
