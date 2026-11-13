@@ -173,6 +173,7 @@ def prepare(root, release, updater_blob, release_updater, requirements, old_modu
         # A request arriving while the gate opens sees our claim and fails
         # safely. If reopening fails or the process dies, the claim remains.
         atomic(bridge,'deploy-enabled',b'1\n');gate_closed=False
+        if private_file(bridge/'deploy-enabled',4) != b'1\n': raise ValueError('gate_readback_failed')
         os.unlink(marker);claimed=False
         directory=os.open(bridge,os.O_RDONLY|os.O_DIRECTORY)
         try: os.fsync(directory)
