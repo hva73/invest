@@ -13,10 +13,10 @@ with sync_playwright() as p:
   page=browser.new_page(viewport={'width':width,'height':900},device_scale_factor=1)
   page.set_content('<!doctype html><html lang="da"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0;padding:20px;background:#091820;font-family:system-ui"><p style="color:#b6cec5">DESIGNFORSLAG · FIKTIVE DATA</p><main id="content"></main></body></html>')
   page.add_style_tag(path='static/statistics.css');page.add_script_tag(path='static/statistics-ui.js')
-  page.evaluate('(data) => document.querySelector("#content").innerHTML = StatisticsUI.render(data, {currency:"USD"})',sample)
+  page.evaluate('(data) => StatisticsUI.mount(document.querySelector("#content"), async () => data)',sample)
   expect(page.locator('#statistics-title')).to_contain_text('Hvordan står det til')
-  expect(page.locator('.statistics-summary strong')).to_contain_text('+8,25 USD')
-  page.locator('.statistics-trade').first.locator('summary').click();expect(page.locator('.statistics-detail').first).to_be_visible()
+  expect(page.locator('.statistics-summary>div:first-child>strong')).to_contain_text('+8,25 USD')
+  page.locator('[data-statistics-group=wins]').click();page.locator('.statistics-trade-button').first.click();expect(page.locator('dialog:modal .statistics-detail')).to_be_visible()
   assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1'),width
   page.screenshot(path=str(out/f'statistik-fiktiv-{width}.png'),full_page=True)
   page.close()
