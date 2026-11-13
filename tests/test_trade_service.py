@@ -43,6 +43,21 @@ class Trading(unittest.TestCase):
  def estimate(self,request=None):return trade.estimate(app.connect,1,request or self.request,self.factory)['proposal']
  def send(self,proposal):return trade.send(app.connect,1,{'id':proposal['id'],'review_token':proposal['review_token'],'confirm':True},self.factory)['proposal']
  def writes(self):return [c for c in self.calls if c['name'].startswith('propose_')]
+ def test_graph_history_never_becomes_broker_estimate_or_order_price(self):
+  import market_data
+  from datetime import datetime,timezone,timedelta
+  now=datetime.now(timezone.utc)
+  class Feed:
+   def intraday(self,*args,**kwargs):
+    return {'status':'OK','bars':[{'bar_open_at':(now-timedelta(minutes=2)).isoformat(),'close':'999'},{'bar_open_at':(now-timedelta(minutes=1)).isoformat(),'close':'999'}]}
+  quote={'asset_id':'asset-test','ticker':'TEST','exchange':'NASDAQ','currency':'USD','price':'18','series':[]}
+  with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_REST_ENABLED':'1'}),patch('hotwatch_service.verified_existing_feed',return_value={'provider_symbol':'TEST.US'}):
+   result=market_data.enrich_intraday(app.connect,1,quote,now,lambda:Feed())
+  self.assertEqual(result['price'],'18');self.assertEqual(result['intraday_series'][0]['price'],'999')
+  with patch('market_data.enrich_intraday',side_effect=AssertionError('graph history must not be used for broker estimate')):
+   proposal=self.estimate()
+  self.assertEqual(proposal['payload']['orders'][0]['limitPrice'],'100.50')
+  self.assertTrue(any(c['name']=='get_asset' for c in self.calls));self.assertTrue(any(c['name']=='estimate_order' for c in self.calls));self.assertFalse(self.writes())
  def test_buying_power_checked_per_currency_without_guessing(self):
   self.account_data={'accounts':[{'currency':'DKK','buyingPower':'100.127','cash':'500'},{'currency':'EUR','buyingPower':'25','cash':'100'},{'currency':'USD','cash':'200','withdrawalPower':'10'}]}
   request=dict(self.request,report_id='@manual-buy',candidate_id='',size_mode='amount',order_type='MARKET',currency='DKK',size='101')
