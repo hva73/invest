@@ -1,7 +1,7 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const daily={dataset:{},innerHTML:'',textContent:'',closest:()=>({dataset:{positionQuantity:'2'}})};
 const detail={querySelector:()=>daily};
-const node={isConnected:true,dataset:{marketHoldingPortfolio:'7',marketHoldingAsset:'held-asset',marketTest:'false',marketLayout:'chart'},classList:{toggle(){}},closest:s=>s==='#dashboard-detail'?detail:null,querySelector:()=>null,getBoundingClientRect:()=>({top:0,bottom:300}),innerHTML:''};
+const node={isConnected:true,dataset:{marketHoldingPortfolio:'7',marketHoldingAsset:'held-asset',marketTest:'false',marketLayout:'chart'},classList:{toggle(){}},closest:s=>s==='#dashboard-detail'?detail:null,querySelector:()=>null,querySelectorAll:()=>[],getBoundingClientRect:()=>({top:0,bottom:300}),innerHTML:''};
 const document={hidden:false,querySelectorAll:s=>s==='.market-slot'?[node]:[],addEventListener(){}};
 let mode='good';const requests=[];const now=Date.now();
 const ctx={window:{},document,Intl,Date,Number,String,JSON,Map,Math,Boolean,console,innerHeight:800,setInterval(){},setTimeout};
@@ -24,5 +24,8 @@ ctx.window.MarketUI.setup({owner:()=>1,connected:()=>true,now:()=>now,age:(price
  mode='sourcebad';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.dataset.marketOverride,undefined);assert.equal(daily.textContent,'— · — %');
  mode='good';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.dataset.marketOverride,'true');
  mode='fetchbad';await ctx.window.MarketUI.refreshVisible();assert.equal(daily.dataset.marketOverride,undefined);assert.equal(daily.textContent,'— · — %');assert.match(node.innerHTML,/Hentetid er ugyldig eller ligger i fremtiden/);
+ mode='good';ctx.window.ESCAPE_DEMO=true;node.dataset.marketLayout='chart';await ctx.window.MarketUI.refreshVisible();assert.match(node.innerHTML,/TEST · Demo · kurstid ukendt/);assert.match(node.innerHTML,/Graf: Fiktive demopunkter/);
+ node.dataset.marketLayout='quote';await ctx.window.MarketUI.refreshVisible();assert.match(node.innerHTML,/Dagens kurs · Demo/);assert.doesNotMatch(node.innerHTML,/Dagens kurs · Pluto/);
+ ctx.window.ESCAPE_DEMO=false;await ctx.window.MarketUI.refreshVisible();assert.match(node.innerHTML,/Dagens kurs · Pluto/);
  console.log('PASS: actual quote refresh clears daily amount on failed, invalid and future responses');
 })().catch(e=>{console.error(e);process.exitCode=1});
