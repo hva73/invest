@@ -89,8 +89,15 @@
     const draw = () => { container.innerHTML = render(data, selected); container.querySelectorAll('[data-statistics-segment]').forEach(el => { el.style.flexGrow = el.dataset.statisticsSegment; }); };
     const refresh = async () => {
       container.innerHTML = '<p role="status">Henter handelshistorik…</p>';
-      try { data = await load(); draw(); }
-      catch (_) { container.innerHTML = '<p role="alert">Handelshistorikken kunne ikke hentes. Prøv igen.</p><button type="button" data-statistics-reload>Prøv igen</button>'; }
+      try { data = await load(); }
+      catch (error) {
+        const allowed=['DATABASE','CONNECTION','BROKER_CATALOG','UNEXPECTED'];
+        const category=allowed.includes(error?.details?.diagnostic)?error.details.diagnostic:'REQUEST';
+        container.innerHTML = '<p role="alert">Handelshistorikken kunne ikke hentes. Prøv igen. ('+category+')</p><button type="button" data-statistics-reload>Prøv igen</button>';
+        return;
+      }
+      try { draw(); }
+      catch (_) { container.innerHTML = '<p role="alert">Handelshistorikken kunne ikke vises. Prøv igen. (DISPLAY)</p><button type="button" data-statistics-reload>Prøv igen</button>'; }
     };
     container.addEventListener('change', event => {
       if (event.target.matches('[data-statistics-portfolio]')) { selected={portfolio:event.target.value}; draw(); }
