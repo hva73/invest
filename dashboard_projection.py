@@ -46,7 +46,7 @@ def remember_portfolio_value(c,uid):
  at=value['observed']
  c.execute('INSERT OR IGNORE INTO display_portfolio_values VALUES(?,?,?,?,?,?,?,?)',(uid,value['scope'],at.timestamp(),at.isoformat(),str(value['amount']),value['currency'],value['source_time'],str(value['reported_result']) if value['reported_result'] is not None else None))
 
-def portfolio_history_page(c,uid,period,now,before=None,asof=None,scope=None,limit=2000):
+def portfolio_history_page(c,uid,period,now,before=None,asof=None,scope=None,limit=2000,since=None):
  """Page actual recorded observations for one selected scope and period."""
  import math
  from calendar import monthrange
@@ -56,9 +56,9 @@ def portfolio_history_page(c,uid,period,now,before=None,asof=None,scope=None,lim
  current=portfolio_value_snapshot(c,uid) or portfolio_value_snapshot(c,uid,allow_failed=True)
  if not current:return {'points':[],'total':0,'next_before':None,'scope':None,'asof':now.timestamp()}
  if scope is not None and scope!=current['scope']:raise ValueError('portfolio scope changed')
- try:upper=now.timestamp() if asof is None else float(asof);cursor=None if before is None else float(before)
+ try:upper=now.timestamp() if asof is None else float(asof);cursor=None if before is None else float(before);after=None if since is None else float(since)
  except (TypeError,ValueError,OverflowError):raise ValueError('invalid history cursor')
- if not math.isfinite(upper) or upper>now.timestamp() or upper<0 or cursor is not None and (not math.isfinite(cursor) or cursor<=0 or cursor>upper):raise ValueError('invalid history cursor')
+ if not math.isfinite(upper) or upper>now.timestamp() or upper<0 or cursor is not None and (not math.isfinite(cursor) or cursor<=0 or cursor>upper) or after is not None and (not math.isfinite(after) or after<=0 or after>upper or cursor is not None):raise ValueError('invalid history cursor')
  local=datetime.fromtimestamp(upper,timezone.utc).astimezone(ZoneInfo('Europe/Copenhagen'))
  if period=='day': start=local.replace(hour=0,minute=0,second=0,microsecond=0)
  elif period=='week': start=local-timedelta(days=7)
@@ -70,9 +70,11 @@ def portfolio_history_page(c,uid,period,now,before=None,asof=None,scope=None,lim
  sql='SELECT observed_epoch,observed,amount,currency,source_time,reported_result FROM display_portfolio_values WHERE user_id=? AND scope=? AND observed_epoch BETWEEN ? AND ?'
  params=list(args)
  if cursor is not None:sql+=' AND observed_epoch < ?';params.append(cursor)
- params.append(limit+1);rows=c.execute(sql+' ORDER BY observed_epoch DESC LIMIT ?',params).fetchall()
- more=len(rows)>limit;rows=rows[:limit];points=[{'at':r['observed'],'amount':r['amount'],'currency':r['currency'],'source_time':r['source_time'],'reported_result':r['reported_result']} for r in reversed(rows)]
- return {'points':points,'total':total,'next_before':rows[-1]['observed_epoch'] if more else None,'scope':current['scope'],'asof':upper,'start_epoch':begin}
+ if after is not None:sql+=' AND observed_epoch > ?';params.append(after)
+ params.append(limit+1);rows=c.execute(sql+(' ORDER BY observed_epoch ASC LIMIT ?' if after is not None else ' ORDER BY observed_epoch DESC LIMIT ?'),params).fetchall()
+ more=len(rows)>limit;rows=rows[:limit];ordered=rows if after is not None else reversed(rows)
+ points=[{'at':r['observed'],'epoch':r['observed_epoch'],'amount':r['amount'],'currency':r['currency'],'source_time':r['source_time'],'reported_result':r['reported_result']} for r in ordered]
+ return {'points':points,'total':total,'next_before':rows[-1]['observed_epoch'] if more and after is None else None,'next_since':rows[-1]['observed_epoch'] if more and after is not None else None,'scope':current['scope'],'asof':upper,'start':begin}
 
 def portfolio_value_history(c,uid,now):
  """Return recorded, scope-matched points with bounded sampling per period."""
