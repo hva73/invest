@@ -16,7 +16,7 @@ jobs:
       - name: Check out pinned approval bridge for offline integration test
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: a0fe4ae4c4b44b75f54c0352d2d52d8647cdc936
+          ref: 850b53406eaa1ac12d57699a1f8fdb99c2678293
           path: _bridge
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -24,6 +24,8 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install -r requirements.txt playwright==1.56.0
       - run: python -m playwright install --with-deps chromium
+      - name: Verify bridge updater matches this release
+        run: cmp apply_update.py _bridge/apply_update.py
       - name: Data, broker and signal regression
         env:
           PYTHONPATH: .:tests
