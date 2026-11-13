@@ -70,6 +70,7 @@ def normalized(raw,asset_id,now=None,expected_period='ONE_WEEK'):
         result['series']=sorted(by_time.values(),key=lambda p:p['epoch'])
         result['week_change_percent']=decimal(performance.get('returnPct')) if expected_period=='ONE_WEEK' else None
         result['series_period']=expected_period
+        result['series_from']=lower.isoformat();result['series_to']=upper.isoformat()
     except MarketError as error:result['series']=[];result['series_error']=str(error)
     return result
 
@@ -141,7 +142,7 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
         symbol=link['provider_symbol'];cache=dict(result.get('intraday_cache') or {})
         cached=cache.get(period) or {}
         checked=cached.get('checked_at')
-        if cached.get('symbol')==symbol and isinstance(checked,(int,float)) and 0<=now.timestamp()-checked<300:
+        if cached.get('symbol')==symbol and cached.get('pluto_fetched')==result.get('fetched_at') and isinstance(checked,(int,float)) and 0<=now.timestamp()-checked<300:
             for key in ('intraday_series','intraday_source'):result.pop(key,None)
             result.update(cached['fields']);result['intraday_cache']=cache
             return result
@@ -150,19 +151,25 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
         if feed_factory is None:
             from hotwatch_adapters import EODHDAdapter
             feed_factory=lambda:EODHDAdapter(connect,user_id).feeds()
-        response=feed_factory().intraday(symbol,interval=interval,start=int(now.timestamp()-window),end=int(now.timestamp()),max_points=None)
+        start=now.timestamp()-window;end=now.timestamp()
+        if period!='day' and result.get('series_from') and result.get('series_to'):
+            start=stamp(result['series_from']).timestamp();end=min(stamp(result['series_to']).timestamp(),end)
+            if start>=end:return unavailable('SOURCE_UNAVAILABLE')
+        response=feed_factory().intraday(symbol,interval=interval,start=int(start),end=int(end),max_points=None)
         if response.get('status')!='OK' or not isinstance(response.get('bars'),list):
             result['intraday_status']='SOURCE_UNAVAILABLE';return result
         series=[]
         for row in response['bars']:
             at=stamp(row.get('bar_open_at'));value=decimal(row.get('close'),positive=True)
-            if value is None or at.timestamp()<=now.timestamp()-window or at.timestamp()+bar_seconds>now.timestamp():continue
+            if value is None or at.timestamp()<start or at.timestamp()+bar_seconds>end:continue
             series.append({'timestamp':at.isoformat(timespec='milliseconds'),'source_timestamp':row.get('bar_open_at'),'epoch':at.timestamp(),'price':value,'date':at.astimezone(COPENHAGEN).date().isoformat()})
         series.sort(key=lambda p:p['epoch'])
         if len({p['epoch'] for p in series})!=len(series):
             result['intraday_status']='SOURCE_INCONSISTENT';return result
         pluto=result.get('series') or []
-        recent=[p for p in pluto if isinstance(p,dict) and isinstance(p.get('epoch'),(int,float)) and now.timestamp()-window<p['epoch']<=now.timestamp()]
+        recent=[p for p in pluto if isinstance(p,dict) and isinstance(p.get('epoch'),(int,float)) and p['epoch']<=now.timestamp()]
+        if period=='day' and recent:
+            cutoff=max(p['epoch'] for p in recent)-86400;recent=[p for p in recent if p['epoch']>cutoff]
         # More bars are useful only if they also cover the actual Pluto observations.
         # A short, dense fragment must never replace a longer source interval.
         covers=not recent or bool(series) and series[0]['epoch']<=min(p['epoch'] for p in recent)+bar_seconds and series[-1]['epoch']>=max(p['epoch'] for p in recent)-bar_seconds
@@ -171,7 +178,7 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
         elif len(series)>len(recent) and len(series)>1:result['intraday_status']='SOURCE_INCOMPLETE'
         else:result['intraday_status']='PLUTO_AS_DETAILED'
         fields={k:result[k] for k in ('intraday_period','intraday_interval','intraday_checked_at','intraday_symbol','intraday_status','intraday_series','intraday_source') if k in result}
-        cache[period]={'symbol':symbol,'checked_at':now.timestamp(),'fields':fields};result['intraday_cache']=cache
+        cache[period]={'symbol':symbol,'checked_at':now.timestamp(),'pluto_fetched':result.get('fetched_at'),'fields':fields};result['intraday_cache']=cache
         return result
     except Exception:
         return unavailable('SOURCE_UNAVAILABLE')
