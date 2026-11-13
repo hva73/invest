@@ -1,0 +1,63 @@
+import io,json,os,tempfile,unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock,patch
+import nordicway_first_app_bridge_setup as setup
+import nordicway_prepare_first_release as base
+import nordicway_install_bridge as installer
+import nordicway_owner_approval as approval
+import nordicway_deploy_runner as runner
+import nordicway_deploy_guard as guard
+from nordicway_deploy_sequence import Outcome
+SHA='a'*40; BRIDGE_SHA='b'*40
+LEGACY=Path(os.environ['ESCAPE_TEST_LEGACY_BRIDGE'])
+NEW=Path(__file__).resolve().parents[1]
+class FirstAppBridge(unittest.TestCase):
+ def setUp(self):
+  self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name)
+  self.bridge=self.root/'.escape_deploy_bridge';self.bridge.mkdir(mode=0o700);self.app=self.root/'escape_app';(self.app/'var').mkdir(parents=True)
+  (self.app/'BUILD_COMMIT').write_text(base.INSTALLED+'\n');(self.app/'requirements.txt').write_bytes(b'same')
+  self.old={name:(LEGACY/('apply_update.py' if name=='apply_update.py' else 'tools/'+name)).read_bytes() for name in (*base.MODULES,'apply_update.py')}
+  for name,data in self.old.items():
+   p=self.bridge/name;p.write_bytes(data);p.chmod(0o600)
+  for name,data in [('deploy-enabled',b'1\n'),('approved-sha',b'c'*40+b'\n')]:
+   p=self.bridge/name;p.write_bytes(data);p.chmod(0o600)
+  self.files={Path(name).name:(NEW/name).read_bytes() for name in installer.MODULES}
+  self.updater=self.files['apply_update.py']
+ def prepare(self):
+  with patch.object(installer,'_sources',return_value=self.files):
+   return setup.prepare(self.root,SHA,BRIDGE_SHA,base.blob(self.updater),self.updater,self.updater,b'same',self.old,installer,approval,self.root,inspect=lambda _:True)
+ def test_actual_installer_then_signed_ticket_and_legacy_request(self):
+  result=self.prepare();self.assertEqual(result['status'],'prepared')
+  self.assertEqual((self.bridge/'nordicway_deploy_guard.py').read_bytes(),self.files['nordicway_deploy_guard.py'])
+  self.assertEqual((self.bridge/'deploy-enabled').read_bytes(),b'1\n')
+  self.assertFalse((self.bridge/'deployment-incomplete.json').exists());self.assertFalse((self.bridge/'first-release-setup-incomplete.json').exists())
+  self.assertTrue((self.bridge/'approval-ticket.json').is_file())
+  real=runner.run
+  def execute(sha,token,**kwargs):
+   return real(sha,token,bridge=self.bridge,authorization_lock=self.app/'var/escape-deploy.lock',adapter_factory=Mock(),deploy=lambda *_:Outcome('ok','complete',True),prepare=lambda *_:None,**kwargs)
+  with patch.object(runner,'run',side_effect=execute):
+   result=guard.dispatch('escape-deploy-v1 deploy '+SHA,runner=lambda sha:runner.run_request(sha,io.BytesIO(b'{"cpanel_token":"test_token_12345"}')))
+  self.assertEqual(result['status'],'ok');self.assertFalse((self.bridge/'approval-ticket.json').exists())
+  self.assertEqual((self.app/'BUILD_COMMIT').read_text().strip(),base.INSTALLED)
+ def test_installer_failure_keeps_gate_closed_and_both_markers(self):
+  with patch.object(installer,'install',side_effect=OSError('fail')):
+   with self.assertRaises(OSError):self.prepare()
+  self.assertFalse((self.bridge/'deploy-enabled').exists());self.assertTrue((self.bridge/'first-release-setup-incomplete.json').exists());self.assertTrue((self.bridge/'deployment-incomplete.json').exists())
+ def test_approval_failure_keeps_gate_closed_and_setup_marker(self):
+  with patch.object(approval,'approve',side_effect=OSError('fail')):
+   with self.assertRaises(OSError):self.prepare()
+  self.assertFalse((self.bridge/'deploy-enabled').exists());self.assertTrue((self.bridge/'first-release-setup-incomplete.json').exists())
+ def test_gate_failure_preserves_claim_and_setup_marker(self):
+  original=base.atomic
+  def fail_gate(parent,name,data):
+   if name=='deploy-enabled':raise OSError('fail')
+   return original(parent,name,data)
+  with patch.object(base,'atomic',side_effect=fail_gate):
+   with self.assertRaises(OSError):self.prepare()
+  self.assertTrue((self.bridge/'deployment-incomplete.json').exists());self.assertTrue((self.bridge/'first-release-setup-incomplete.json').exists());self.assertFalse((self.bridge/'deploy-enabled').exists())
+ def test_mismatched_updater_does_not_change_bridge(self):
+  with patch.object(installer,'_sources',return_value=self.files):
+   with self.assertRaisesRegex(ValueError,'candidate_mismatch'):
+    setup.prepare(self.root,SHA,BRIDGE_SHA,base.blob(self.updater),self.updater,b'wrong',b'same',self.old,installer,approval,self.root,inspect=lambda _:True)
+  self.assertEqual((self.bridge/'deploy-enabled').read_bytes(),b'1\n');self.assertFalse((self.bridge/'first-release-setup-incomplete.json').exists())
