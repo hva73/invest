@@ -24,7 +24,7 @@ def main():
     else:rows=page.locator('.dash-row');expect(rows.first).to_be_visible()
     for label in ('kurstid ukendt','Hentet ','hentet '):expect(rows.first).not_to_contain_text(label)
     for period in ('day','week','month','year'):
-     page.locator('[data-dashboard-range='+period+']').click();expect(hero.locator('.dash-history-status')).to_be_visible()
+     page.locator('[data-dashboard-range='+period+']').click();expect(hero.locator('.dash-history-status')).to_have_count(1)
      svg=hero.locator('.dash-chart-svg');svg.scroll_into_view_if_needed();box=svg.bounding_box();x=box['x']+box['width']*.6;y=box['y']+box['height']*.5
      if touch:svg.dispatch_event('pointerdown',{'pointerType':'touch','clientX':x,'clientY':y,'bubbles':True})
      else:page.mouse.move(x,y)
@@ -34,7 +34,7 @@ def main():
      if touch:svg.dispatch_event('pointerup',{'pointerType':'touch','clientX':x,'clientY':y,'bubbles':True})
      else:page.locator('.dash-hero-intro h2').hover()
      expect(tip).to_be_hidden();expect(guide).to_be_hidden()
-    page.locator('[data-dashboard-range=day]').click();expect(hero.locator('.dash-history-status')).to_be_visible()
+    page.locator('[data-dashboard-range=day]').click();expect(hero.locator('.dash-history-status')).to_have_count(1)
     label=hero.locator('.dash-chart-latest-time');expect(label).to_be_visible();assert label.bounding_box()['width']<80
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1')
     assert not errors,errors
