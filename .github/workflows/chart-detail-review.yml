@@ -28,6 +28,7 @@ jobs:
           node tests/test_sector_ui.js
           python tests/test_portfolio_value_chart.py
           python tests/test_market_data.py
+          python tests/test_eodhd_feeds.py
       - if: matrix.suite == 'dashboard-sector'
         run: |
           python tests/browser_portfolio_value_chart.py
