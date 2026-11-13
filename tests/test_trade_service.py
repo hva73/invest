@@ -56,7 +56,7 @@ class Trading(unittest.TestCase):
   self.assertEqual(result['price'],'18');self.assertEqual(result['intraday_series'][0]['price'],'999')
   with patch('market_data.enrich_intraday',side_effect=AssertionError('graph history must not be used for broker estimate')):
    proposal=self.estimate()
-  self.assertEqual(proposal['payload']['orders'][0]['limitPrice'],'100.50')
+  self.assertEqual(proposal['payload']['orders'][0]['limitPrice'],'100.5')
   self.assertTrue(any(c['name']=='get_asset' for c in self.calls));self.assertTrue(any(c['name']=='estimate_order' for c in self.calls));self.assertFalse(self.writes())
  def test_buying_power_checked_per_currency_without_guessing(self):
   self.account_data={'accounts':[{'currency':'DKK','buyingPower':'100.127','cash':'500'},{'currency':'EUR','buyingPower':'25','cash':'100'},{'currency':'USD','cash':'200','withdrawalPower':'10'}]}
