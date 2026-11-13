@@ -18,7 +18,7 @@ jobs:
       - name: Check out pinned pre-backup recovery for offline validation
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: bf297061870e640e5576ddbab43b04c619f7fac4
+          ref: a99c805280879101503d190dc47cc2558e2f007b
           path: _recovery
           persist-credentials: false
       - name: Run isolated diagnostic tests
