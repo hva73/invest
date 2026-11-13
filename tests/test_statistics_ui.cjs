@@ -8,3 +8,15 @@ html=render({portfolios:[{portfolio_id:1,items:[{...items[0],gross:'NaN'}]}]});a
 html=render({portfolios:[{portfolio_id:1,items:[{...items[0],gross:'0.104'},{...items[0],gross:'0.101'}]}]});assert.match(html,/\+0,21 USD/);
 let tiny={portfolios:[{portfolio_id:1,items:[{...items[0],gross:'0.000000001',gross_percent:'-0.00001'},{...items[1],gross:'-0.000000001',gross_percent:'0.00001'}]}]};html=render(tiny,{group:'wins'});assert.match(html,/\+0,000000001 USD/);assert.match(html,/class="negative">↓ −0,00001 %/);assert.match(html,/0,00 USD/);html=render(tiny,{group:'losses'});assert.match(html,/−0,000000001 USD/);assert.match(html,/class="positive">↑ \+0,00001 %/);
 html=render({portfolios:[{portfolio_id:1,items:[{...items[0],gross:'0.'+'0'.repeat(179)+'1'}]}]},{group:'wins'});assert.match(html,/\+&lt;0,000000000001|\+<0,000000000001/);console.log('PASS: currency scope, precision, empty state and escaped details');
+
+const flatRow={...items[0],ticker:'FLAT',name:'Uændret',gross:'0',gross_percent:'0'};
+const flatData={portfolios:[{portfolio_id:1,items:[items[0],items[1],flatRow]}]};
+const closedFlat=render(flatData,{currency:'USD'});
+assert.match(closedFlat,/data-statistics-group="flat"/);
+assert.match(closedFlat,/→ 1 uændret/);
+assert.doesNotMatch(closedFlat,/>FLAT<small>/);
+const openedFlat=render(flatData,{currency:'USD',group:'flat'});
+assert.match(openedFlat,/Uændrede handler/);
+assert.match(openedFlat,/>FLAT<small>/);
+assert.match(openedFlat,/class="neutral">→ 0,00 %/);
+assert.doesNotMatch(openedFlat,/>GAIN<small>/);
