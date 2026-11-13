@@ -51,6 +51,9 @@ def main():
     page.evaluate('refresh()')
     expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown+1,timeout=15000)
     assert len(calls)==1 and 'since=' in calls[0] and 'before=' not in calls[0],calls
+    case.save(case.root,'52001',datetime.now(timezone.utc),result='2001');page.evaluate('refresh()')
+    expect(page.locator('#dashboard-value-chart .dash-chart-point')).to_have_count(shown+2,timeout=15000)
+    assert len(calls)==2 and all('since=' in call and 'before=' not in call for call in calls),calls
     assert page.locator('[data-dashboard-history-more]').count()==0
     assert not errors,errors;context.close()
    browser.close()
