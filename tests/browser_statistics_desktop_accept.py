@@ -8,7 +8,17 @@ from test_portfolio_value_chart import PortfolioValueChart
 from playwright.sync_api import expect,sync_playwright
 case=PortfolioValueChart();case.setUp()
 server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
-rows=[{'ticker':'DELSALG','name':'Fiktiv aktie','currency':'DKK','gross':'8','gross_percent':'20','quantity':'4','buy_price':'10','sell_price':'12','cost_basis':'40','sale_proceeds':'48','sell_time':None,'buy_origin':'unknown','sell_origin':'unknown'},{'ticker':'TAB','name':'Fiktiv tabshandel','currency':'DKK','gross':'-4','gross_percent':'-20','quantity':'2','buy_price':'10','sell_price':'8','cost_basis':'20','sale_proceeds':'16','sell_time':None,'buy_origin':'unknown','sell_origin':'unknown'},{'ticker':'NUL','name':'Fiktiv neutral handel','currency':'DKK','gross':'0','gross_percent':'0','quantity':'1','buy_price':'10','sell_price':'10','cost_basis':'10','sale_proceeds':'10','sell_time':None,'buy_origin':'unknown','sell_origin':'unknown'},{'ticker':'USD_ONLY','name':'Fiktiv handel i USD','currency':'USD','gross':'100','gross_percent':'10','quantity':'1','buy_price':'1000','sell_price':'1100','cost_basis':'1000','sale_proceeds':'1100','sell_time':None,'buy_origin':'unknown','sell_origin':'unknown'}]
+from realized_statistics import project
+from test_realized_statistics import order
+buy=order('BUY','10','10','2026-01-01T00:00:00Z','b')
+sales=[order('SELL','4','12','2026-01-02T00:00:00Z','s1'),order('SELL','2','8','2026-01-03T00:00:00Z','s2'),order('SELL','1','10','2026-01-04T00:00:00Z','s3')]
+for row in [buy,*sales]: row['asset']={'ticker':'SYNTH','name':'Fiktiv aktie','currency':'DKK'}
+rows=project([buy,*sales])['items']
+assert [(r['cost_basis'],r['sale_proceeds'],r['gross']) for r in rows]==[('40','48','8'),('20','16','-4'),('10','10','0')]
+for row,ticker in zip(rows,['DELSALG','TAB','NUL']):row['ticker']=ticker
+usd_buy=order('BUY','1','1000','2026-01-01T00:00:00Z','b2');usd_sell=order('SELL','1','1100','2026-01-02T00:00:00Z','s4')
+for row in [usd_buy,usd_sell]:row['asset']={'ticker':'USD_ONLY','name':'Fiktiv handel i USD','currency':'USD'}
+rows+=project([usd_buy,usd_sell])['items']
 payload={'portfolios':[{'portfolio_id':1,'name':'Fiktivt depot','items':rows,'omitted':1,'history_complete':False}],'errors':[],'history_complete':False}
 try:
  with patch('mcp_client.MCP.request',side_effect=AssertionError('No broker calls')),sync_playwright() as p:
