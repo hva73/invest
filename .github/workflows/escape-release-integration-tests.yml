@@ -16,7 +16,7 @@ jobs:
       - name: Check out pinned approval bridge for offline integration test
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 850b53406eaa1ac12d57699a1f8fdb99c2678293
+          ref: 2637dcb4c69487375f83bfca2091b5c88e9baf86
           path: _bridge
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
