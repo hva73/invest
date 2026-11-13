@@ -22,7 +22,10 @@ def main():
    browser=p.chromium.launch(**({} if os.environ.get('ESCAPE_PLAYWRIGHT_MANAGED') else {'executable_path':'/usr/bin/chromium'}),headless=True,args=['--no-sandbox']);page=browser.new_page(viewport={'width':390,'height':900},has_touch=True);errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
    page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();page.locator('#refresh-status[data-kind=success]').wait_for()
    page.locator('#mobile-more').click();page.locator('nav [data-view=radar]').click();slot=page.locator('.market-slot').first
-   expect(slot.locator('.market-session')).to_contain_text('EODHD · minutbarer · 130 punkter',timeout=30000)
+   try: expect(slot.locator('.market-session')).to_contain_text('EODHD · minutbarer · 130 punkter',timeout=12000)
+   except AssertionError:
+    print('DIAGNOSTIC slot count',page.locator('.market-slot').count(),'body',page.locator('body').inner_text()[:5000],'calls',calls,'errors',errors)
+    raise
    assert slot.locator('.market-line').get_attribute('d').count('L')==129
    plot=slot.locator('.market-plot svg');plot.scroll_into_view_if_needed();box=plot.bounding_box();page.touchscreen.tap(box['x']+box['width']*.5,box['y']+box['height']*.5);expect(slot.locator('.market-hover')).to_be_visible();expect(slot.locator('.market-hover')).to_contain_text('minutbarens start')
    slot.locator('[data-market-period=week]').click();assert slot.locator('.market-line').get_attribute('d').count('L')==81
