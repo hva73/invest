@@ -39,6 +39,8 @@ jobs:
           node tests/test_notification_ui.cjs
           node tests/test_signal_buy_context.cjs
           node tests/test_signal_direction_guard.cjs
+          node tests/test_quick_review.cjs
+          node tests/test_notification_sale_review.cjs
       - name: Browser journeys with synthetic data
         env:
           ESCAPE_PLAYWRIGHT_MANAGED: '1'

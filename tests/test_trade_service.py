@@ -190,6 +190,35 @@ class Trading(unittest.TestCase):
    session.update(signal='WAIT',display_status='AFVENT')
    with self.assertRaises(trade.TradeError):self.send(proposal)
    self.assertFalse(self.writes())
+ def test_signal_provenance_records_only_the_selected_current_event(self):
+  event='hw-'+'a'*24
+  session={'status':'ACTIVE','signal':'SELL','display_status':'SÆLGSSIGNAL','request':{'asset_id':'asset-test','ticker':'TEST','portfolio_ids':[self.root]},'last_action_signal':{'event_id':event,'event_type':'SELL_SIGNAL','state':'ACTIVE'}}
+  request=dict(self.request,report_id='@hotwatch',candidate_id='watch-1',expected_side='SELL',signal_event_id=event,size_mode='percent',size='25',order_type='MARKET')
+  holding={'positions_complete':True,'observed':'2026-11-12T20:00:00Z','positions':[{'kind':'holding','asset_id':'asset-test','quantity':'8'}]}
+  with patch('hotwatch_engine.item',return_value={'session':session}),patch('portfolio_data.read',return_value=holding):
+   proposal=self.estimate(request)
+   self.assertEqual(proposal['signal_event_id'],event)
+   self.assertFalse(self.writes())
+   # A different, old or omitted event cannot be asserted as provenance.
+   self.assertIsNone(self.estimate(dict(request,signal_event_id='hw-'+'b'*24))['signal_event_id'])
+   session['last_action_signal']['state']='HISTORICAL'
+   self.assertIsNone(self.estimate(request)['signal_event_id'])
+   self.assertIsNone(self.estimate(dict(request,signal_event_id=None))['signal_event_id'])
+   self.assertFalse(self.writes())
+ def test_manual_proposal_cannot_claim_a_signal_event(self):
+  request=dict(self.request,report_id='@manual-buy',candidate_id='',signal_event_id='hw-'+'a'*24,size_mode='amount',size='100',order_type='MARKET')
+  self.assertIsNone(self.estimate(request)['signal_event_id'])
+  self.assertFalse(self.writes())
+ def test_buy_signal_event_is_bound_to_asset_side_and_account(self):
+  event='hw-'+'a'*24
+  session={'status':'ACTIVE','signal':'BUY','request':{'asset_id':'asset-test','portfolio_ids':[self.root]},'last_action_signal':{'event_id':event,'event_type':'BUY_SIGNAL','state':'ACTIVE'}}
+  data={'report_id':'@hotwatch','candidate_id':'watch-1','signal_event_id':event}
+  payload={'orders':[{'assetId':'asset-test','side':'BUY'}]}
+  with patch('hotwatch_engine.item',return_value={'session':session}):
+   self.assertEqual(trade.selected_signal_event(app.connect,1,data,payload,self.root),event)
+   for wrong in ({'orders':[{'assetId':'other','side':'BUY'}]},{'orders':[{'assetId':'asset-test','side':'SELL'}]}):
+    self.assertIsNone(trade.selected_signal_event(app.connect,1,data,wrong,self.root))
+   self.assertIsNone(trade.selected_signal_event(app.connect,1,data,payload,self.child))
  def test_exit_watch_denied_permission_and_collection_do_not_propose(self):
   session={'status':'ACTIVE','signal':'SELL','display_status':'SÆLGSSIGNAL','request':{'asset_id':'asset-test','ticker':'TEST','portfolio_ids':[self.root]}}
   request=dict(self.request,report_id='@hotwatch',candidate_id='watch-1',expected_side='SELL',size_mode='percent',size='25',order_type='MARKET')
