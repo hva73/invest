@@ -1,0 +1,46 @@
+name: ESCAPE guarded SSH observation (disabled)
+on:
+  pull_request:
+    branches: [codex/escape-development]
+permissions:
+  contents: read
+jobs:
+  observe:
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    environment: ESCAPE_NORDICWAY_DEPLOY
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Start restricted observation window
+        env:
+          NORDICWAY_DEPLOY_PING_AUTHORIZED: ${{ vars.ESCAPE_NORDICWAY_DEPLOY_PING_AUTHORIZED }}
+          NORDICWAY_KNOWN_HOST: ${{ secrets.ESCAPE_NORDICWAY_KNOWN_HOST }}
+          NORDICWAY_VERIFIED_FINGERPRINT: ${{ secrets.ESCAPE_NORDICWAY_VERIFIED_FINGERPRINT }}
+          NORDICWAY_PRIVATE_KEY: ${{ secrets.ESCAPE_NORDICWAY_DEPLOY_PRIVATE_KEY }}
+          NORDICWAY_KEY_PASSPHRASE: ${{ secrets.ESCAPE_NORDICWAY_DEPLOY_PASSPHRASE }}
+        run: |
+          set -eu
+          umask 077
+          [ "$NORDICWAY_DEPLOY_PING_AUTHORIZED" = '1' ] && [ -n "$NORDICWAY_PRIVATE_KEY" ]
+          python tools/nordicway_hostkey.py
+          eval "$(ssh-agent -s)" >/dev/null
+          askpass="$RUNNER_TEMP/escape-ssh-askpass"
+          trap 'ssh-agent -k >/dev/null 2>&1 || true; rm -f "$askpass"' EXIT
+          cat > "$askpass" <<'ASKPASS'
+          #!/bin/sh
+          printf '%s\n' "$NORDICWAY_KEY_PASSPHRASE"
+          ASKPASS
+          chmod 700 "$askpass"
+          export SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0
+          if ! printf '%s\n' "$NORDICWAY_PRIVATE_KEY" | ssh-add - >/dev/null 2>&1; then
+            printf '%s\n' 'Restricted SSH credential unavailable.'
+            exit 1
+          fi
+          unset NORDICWAY_PRIVATE_KEY NORDICWAY_KEY_PASSPHRASE
+          PYTHONPATH=tools python tools/nordicway_guard_observe_hold.py
