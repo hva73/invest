@@ -37,6 +37,7 @@ jobs:
       - if: matrix.suite == 'market-signal-position'
         run: |
           python tests/browser_market_charts.py
+          python tests/browser_intraday_market_chart.py
           python tests/browser_signal_push_detail.py
           python tests/browser_position_chart_detail.py
       - if: matrix.suite == 'hotwatch'
