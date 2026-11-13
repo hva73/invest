@@ -25,6 +25,7 @@ jobs:
       - if: matrix.suite == 'unit'
         run: |
           node tests/test_chart_samples_pagination.cjs
+          node tests/test_chart_source_selection.cjs
           node tests/test_sector_ui.js
           python tests/test_portfolio_value_chart.py
           python tests/test_market_data.py
