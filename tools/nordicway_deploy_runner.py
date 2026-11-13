@@ -182,6 +182,10 @@ def run(sha, token, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
     # Lock only the approval check and durable claim; release before the
     # existing Adapter.lock(), which otherwise would deadlock on a second fd.
     with nordicway_owner_approval.deployment_lock(lock_path):
+        # The first-time bridge setup may have been interrupted after the
+        # gate reopened. Never consume a ticket until setup is complete.
+        if os.path.lexists(bridge / 'first-release-setup-incomplete.json'):
+            raise ValueError('setup_incomplete')
         if owner_request is not None:
             nordicway_owner_approval.approve(bridge, lock_path, sha, owner_request, already_locked=True)
         if _approved_sha(bridge) != sha:
@@ -235,7 +239,13 @@ def run_request(sha, stream):
         request = json.loads(raw)
     except (UnicodeError, ValueError):
         raise ValueError('invalid_request') from None
-    if not isinstance(request, dict) or set(request) != {'cpanel_token', 'approval'}:
+    if not isinstance(request, dict):
+        raise ValueError('invalid_request')
+    if set(request) == {'cpanel_token'}:
+        # Only an already-created, SHA-bound, expiring local ticket can
+        # authorize this legacy client; run() still consumes it atomically.
+        return run(sha, request['cpanel_token'])
+    if set(request) != {'cpanel_token', 'approval'} or not isinstance(request['approval'], dict):
         raise ValueError('invalid_request')
     return run(sha, request['cpanel_token'], owner_request=request['approval'])
 
@@ -310,3 +320,5 @@ def resume(sha, *, bridge=BRIDGE, checkout=CHECKOUT, target=TARGET,
         return {'operation': 'resume', 'status': 'ok', 'recovery_required': False, 'backup_cleanup': cleanup}
     except Exception:
         return {'operation': 'resume', 'status': 'failed', 'recovery_required': True, 'backup_cleanup': 'not_run'}
+
+

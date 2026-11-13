@@ -10,6 +10,7 @@ PROBE_FILENAME = '.escape-deploy-write-probe'
 DEPLOY_ENABLED = '/home/nordicr4/.escape_deploy_bridge/deploy-enabled'
 APP_PYTHON = '/home/nordicr4/virtualenv/escape_app/3.11/bin/python'
 APP_ENTRY = '/home/nordicr4/.escape_deploy_bridge/nordicway_app_release_entry.py'
+SETUP_MARKER = '/home/nordicr4/.escape_deploy_bridge/first-release-setup-incomplete.json'
 
 
 def deployment_enabled(path=DEPLOY_ENABLED):
@@ -96,6 +97,9 @@ def main():
             if not deployment_enabled():
                 print(json.dumps({'status': 'blocked', 'reason': 'deployment_not_ready'}, separators=(',', ':')))
                 return 1
+            if os.path.lexists(SETUP_MARKER):
+                print(json.dumps({'status':'blocked','reason':'setup_incomplete'},separators=(',',':')))
+                return 1
             if ' app-deploy ' in command or ' app-resume ' in command:
                 sha=command.rsplit(' ',1)[1]
                 # The forced-command guard runs with -I -S. The installed
@@ -116,3 +120,4 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+

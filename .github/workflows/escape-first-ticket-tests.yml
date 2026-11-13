@@ -1,0 +1,30 @@
+name: ESCAPE first ticket compatibility tests
+on:
+  pull_request:
+    branches: [codex/issue57-owner-approval]
+permissions:
+  contents: read
+jobs:
+  tests:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue57-legacy-ticket'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Check out installed legacy client
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: c1b6db6ca1ded2f3a81601608bdfa455145798f2
+          path: _legacy
+          persist-credentials: false
+      - name: Test one-time owner ticket and existing client payload
+        env:
+          PYTHONPATH: tools:.
+          ESCAPE_TEST_LEGACY_BRIDGE: ${{ github.workspace }}/_legacy
+        run: python -m unittest tests.test_proc_visibility tests.test_first_app_bridge_setup tests.test_legacy_ticket_bootstrap tests.test_nordicway_deploy_runner tests.test_nordicway_owner_approval tests.test_nordicway_deploy_guard tests.test_nordicway_deploy_client tests.test_nordicway_deploy_request tests.test_nordicway_deploy_sequence tests.test_nordicway_deploy_adapter
