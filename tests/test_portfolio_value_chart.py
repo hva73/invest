@@ -54,14 +54,34 @@ class PortfolioValueChart(unittest.TestCase):
    history=dashboard.portfolio_value_history(c,1,self.now)
   self.assertEqual([p['amount'] for p in history['periods']['week']],['1000']);self.assertIsNone(history['reported_result']);self.assertIsNone(history['current_value'])
 
+ def test_full_history_pages_keep_all_actual_observations_and_isolate_scope(self):
+  self.save(self.root,'1000',self.now,result='20')
+  with app.connect() as c:
+   scope=dashboard.portfolio_value_snapshot(c,1)['scope']
+   records=[]
+   for i in range(2050):
+    at=self.now-timedelta(seconds=2050-i)
+    records.append((1,scope,at.timestamp(),at.isoformat(),str(1000+i),'DKK',at.isoformat(),str(i)))
+   c.executemany('INSERT INTO display_portfolio_values VALUES(?,?,?,?,?,?,?,?)',records)
+   newest=dashboard.portfolio_history_page(c,1,'week',self.now,scope=scope)
+   older=dashboard.portfolio_history_page(c,1,'week',self.now,scope=scope,before=newest['next_before'],asof=newest['asof'])
+   self.assertEqual((newest['total'],len(newest['points']),len(older['points'])),(2051,2000,51))
+   points=older['points']+newest['points'];self.assertEqual([p['at'] for p in points],[r[3] for r in records]+[self.now.isoformat()])
+   self.assertIsNone(older['next_before'])
+   incremental=dashboard.portfolio_history_page(c,1,'week',self.now,scope=scope,since=records[-1][2]);self.assertEqual(len(incremental['points']),1);self.assertEqual(incremental['points'][0]['at'],self.now.isoformat())
+   with self.assertRaises(ValueError):dashboard.portfolio_history_page(c,1,'week',self.now,scope=scope,since='nan')
+   with self.assertRaises(ValueError):dashboard.portfolio_history_page(c,1,'week',self.now,scope='wrong')
+   with self.assertRaises(ValueError):dashboard.portfolio_history_page(c,1,'week',self.now,scope=scope,before='nan')
+   self.assertEqual(dashboard.portfolio_history_page(c,2,'week',self.now)['points'],[])
+
  def test_history_keeps_all_real_observations_within_same_old_sampling_bucket(self):
   now=datetime(2026,11,12,12,0,tzinfo=timezone.utc)
   for i in range(5):
    self.save(self.root,str(1000+i),now-timedelta(seconds=(4-i)*30),result=str(20+i))
   with app.connect() as c:
-   history=dashboard.portfolio_value_history(c,1,now)
-  for period in ('day','week','month','year'):
-   self.assertEqual([p['amount'] for p in history['periods'][period]],[str(1000+i) for i in range(5)])
-   self.assertEqual([p['reported_result'] for p in history['periods'][period]],[str(20+i) for i in range(5)])
+   for period in ('day','week','month','year'):
+    points=dashboard.portfolio_history_page(c,1,period,now)['points']
+    self.assertEqual([p['amount'] for p in points],[str(1000+i) for i in range(5)])
+    self.assertEqual([p['reported_result'] for p in points],[str(20+i) for i in range(5)])
 
 if __name__=='__main__':unittest.main()
