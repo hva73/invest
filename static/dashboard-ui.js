@@ -21,7 +21,11 @@ window.DashboardUI=(()=>{
  function profit(v,pct){if(!v||v.amount===null||v.amount===undefined||v.amount===''||!Number.isFinite(Number(v.amount)))return '<span class="dash-neutral">—</span>';const t=tone(v.amount),p=tone(pct),arrow=x=>x==='positive'?'↑':x==='negative'?'↓':'→';return `<span class="dash-change ${t}">${arrow(t)} ${Number(v.amount)>0?'+':''}${amount(v)}</span>${pct!==null&&pct!==undefined&&pct!==''&&Number.isFinite(Number(pct))?`<small class="dash-profit-percent ${p}">${arrow(p)} ${percent(pct)}</small>`:''}`}
  function desktopDailyData(r){
   const d=r.daily||{},at=Date.parse(d.to||''),local=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Copenhagen'}),valid=r.verification==='broker_snapshot'&&['fresh','session_close'].includes(r.price_freshness?.state)&&Number.isFinite(at)&&at<=Date.now()&&local.format(new Date(at))===local.format(new Date());
-  if(!valid)return null;
+  if(!valid){
+   if(mobileDaily(r).endsWith('—'))return null;
+   const total=mobileDailyAmount(r);
+   return {percent:Number(d.percent),amount:total?Number(total.amount):null,currency:total?.currency||null};
+  }
   const numeric=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:Number(v),change=numeric(d.amount),qty=numeric(r.quantity),p=numeric(d.percent),currency=typeof d.currency==='string'&&/^[A-Z]{3}$/.test(d.currency)&&d.currency===r.price?.currency?d.currency:null,total=change!==null&&qty!==null&&qty>=0&&currency?change*qty:null;
   return {percent:p,amount:total,currency};
  }
