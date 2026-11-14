@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   test:
-    if: github.event.pull_request.head.ref == 'codex/release-push-observation'
+    if: contains(fromJSON('["codex/release-push-observation","codex/data-and-notification-prep"]'), github.event.pull_request.head.ref)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
