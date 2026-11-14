@@ -72,7 +72,7 @@ def normalized(raw,asset_id,now=None,expected_period='ONE_WEEK'):
         # A fresh response is not proof that the requested period is current
         # or complete. Only publish the provider return when its declared
         # interval and observed endpoints support that label.
-        min_days={'ONE_MONTH':27,'ONE_YEAR':350}.get(expected_period)
+        min_days={'ONE_MONTH':27,'ONE_YEAR':360}.get(expected_period)
         if min_days is not None:
             span=(upper-lower).total_seconds()
             end_age=(now-upper).total_seconds()
