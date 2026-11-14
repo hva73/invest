@@ -219,3 +219,38 @@
 @media(max-width:700px){#dashboard-detail .market-controls,.market-chart-dialog .market-controls{flex-wrap:nowrap}#dashboard-detail .market-period-buttons,.market-chart-dialog .market-period-buttons{flex:1 1 auto;min-width:0;gap:3px}#dashboard-detail .market-controls>button[data-market-refresh],.market-chart-dialog .market-controls>button[data-market-refresh]{min-height:44px;min-width:44px;padding:4px}}
 
 @media(min-width:701px){#dashboard-detail .market-controls>button[data-market-refresh],.market-chart-dialog .market-controls>button[data-market-refresh]{min-height:40px;min-width:40px}}
+
+/* Approved compact mobile position detail (shared by holdings and sectors). */
+.position-mobile-quote{display:none}
+@media(max-width:700px){
+ #dashboard-detail .position-desktop-portfolio{display:none}
+ #dashboard-detail .position-mobile-quote{display:inline-block;font-size:14px;font-weight:600;color:#d9ebe5;border-left:1px solid #3b5c61;padding-left:10px;margin-left:8px;vertical-align:middle}
+ #dashboard-detail .position-mobile-facts{grid-template-columns:1fr 1.15fr .85fr;gap:0;border-block:1px solid #315360;padding:10px 0}
+ #dashboard-detail .position-mobile-facts>div{background:transparent;border:0;border-radius:0;padding:0 8px;min-width:0}
+ #dashboard-detail .position-mobile-facts>div:first-child{padding-left:0}
+ #dashboard-detail .position-mobile-facts>div+div{border-left:1px solid #315360}
+ #dashboard-detail .position-mobile-facts dt{font-size:10px;line-height:1.3}
+ #dashboard-detail .position-mobile-facts dd{font-size:12px;line-height:1.4;margin-top:5px;overflow-wrap:anywhere}
+ #dashboard-detail .position-mobile-facts dd small{display:inline;font-size:11px}
+ #dashboard-detail .dashboard-detail-body>h3{display:none}
+ #dashboard-detail .market-slot{border:0;background:transparent;box-shadow:none;padding:4px 0}
+ #dashboard-detail .market-quote>.market-price,#dashboard-detail .market-quote>.market-change{display:none}
+}
+
+@media(max-width:900px){
+ .mobile-holding.mobile-holding-card{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;text-align:left}
+ .mobile-holding-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;min-width:0}
+ .mobile-holding-head .mobile-holding-name{display:grid;gap:2px;min-width:0}
+ .mobile-holding-total{white-space:nowrap;font-variant-numeric:tabular-nums}
+ .mobile-holding-total.positive{color:#82dab4}.mobile-holding-total.negative{color:#ff9fa9}.mobile-holding-total.neutral{color:#dce8e9}
+ .mobile-holding-metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px;border-top:1px solid #315360;padding-top:8px}
+ .mobile-holding-metrics>span{display:grid;gap:3px;min-width:0;align-content:start}
+ .mobile-holding-metrics>span+span{border-left:1px solid #315360;padding-left:10px}
+ .mobile-holding-metrics small{color:#a9bec1;font-size:10px}
+ .mobile-holding-metrics .dash-profit-percent{display:inline;font-size:11px}
+ .mobile-holding-daily{font-size:11px;overflow-wrap:anywhere}
+ .mobile-holding-since{display:flex;justify-content:center;gap:8px;border-top:1px solid #315360;padding-top:6px;font-size:11px;color:#a9bec1}
+}
+
+/* Let long amounts wrap within the compact mobile facts. */
+@media(max-width:700px){#dashboard-detail .position-mobile-facts :is(.position-daily-value,.position-daily-percent){display:inline;white-space:normal;overflow-wrap:anywhere}}
