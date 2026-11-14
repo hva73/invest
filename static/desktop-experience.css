@@ -303,3 +303,9 @@
 }
 
 @media(max-width:700px){#dashboard-detail .market-plot svg{height:clamp(160px,46vw,200px)}}
+
+@media(max-width:700px){
+ .mobile-holdings-list{display:grid;gap:8px}
+ .mobile-holding.mobile-holding-card{border:1px solid #315a5d;border-radius:12px}
+ .mobile-holding-since{justify-content:flex-start}
+}
