@@ -37,7 +37,7 @@ def main():
    assert 'disabled' in rows['duplicate'] and 'data-dashboard-member' not in rows['duplicate']
 
    def market(route):
-    periods.append(route.request.post_data_json.get('period'));route.fulfill(json=quote)
+    period=route.request.post_data_json.get('period');periods.append(period);route.fulfill(json={**quote,'series_period':period,'period_change_percent':{'ONE_MONTH':'5.72','ONE_YEAR':'18.36'}.get(period)})
    page.route('**/api/market/quote',market)
    page.evaluate("window.EngineUI.openNotification('synthetic-push')")
    d=page.locator('#engine-dialog');expect(d.locator('h2')).to_have_text('TSM');expect(d.locator('h2')).not_to_contain_text('SÆLGSSIGNAL');expect(d).to_contain_text('siden køb');expect(d).to_contain_text('ikke sendt en ordre')
@@ -65,6 +65,12 @@ def main():
    ignored=[];page.on('request',lambda r:ignored.append(r.url) if '/ack-signal' in r.url else None)
    d.get_by_role('button',name='Ignorér og luk signalet').click();expect(d).not_to_be_visible();assert not orders and not ignored
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_be_visible()
+   expect(d.locator('[data-signal-daily]')).to_have_text('↓ -3 %')
+   expect(d.locator('[data-signal-month]')).to_have_text('↑ +5,72 %')
+   expect(d.locator('[data-signal-year]')).to_have_text('↑ +18,36 %')
+   expect(d.locator('.signal-why')).not_to_have_attribute('open','')
+   d.locator('.signal-why summary').click();expect(d.locator('.signal-why p')).to_be_visible()
+   d.locator('.signal-why summary').click()
    assert page.evaluate("getComputedStyle(document.documentElement).overflowY")=='hidden'
    background=page.evaluate('window.scrollY');page.mouse.move(2,2);page.mouse.wheel(0,900);page.wait_for_timeout(150);assert page.evaluate('window.scrollY')==background
    shot=os.environ.get('ESCAPE_SCREENSHOTS');
