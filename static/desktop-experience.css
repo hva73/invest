@@ -274,3 +274,5 @@
 }
 
 @media(max-width:700px){.signal-overview :is(.market-sample-change,.market-scale,.market-axis,.market-marker-legend){display:none}}
+
+@media(max-width:700px){.signal-overview .signal-trade-ready-hint{display:none}.signal-mobile-nav .signal-why{margin:0;padding:0}.signal-mobile-nav .signal-why summary{padding:0;margin:0;line-height:1.4}.signal-mobile-nav>button{line-height:1.4}}
