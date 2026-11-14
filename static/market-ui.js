@@ -40,6 +40,7 @@ window.MarketUI=(()=>{
   // Replace a previous quote-derived value only while its own quote remains
   // usable. Never leave it looking current after an error or expired refresh.
   const dailyBox=node.closest('#dashboard-detail')?.querySelector('[data-position-daily] dd');
+  const headerQuote=node.closest('#dashboard-detail')?.querySelector('[data-position-live-price]');if(headerQuote)headerQuote.textContent='—';
   if(dailyBox?.dataset.marketOverride==='true'){dailyBox.textContent='— · — %';delete dailyBox.dataset.marketOverride} 
 
   if(!connected()){node.innerHTML='<div class="market-placeholder"><span>Kurs og dagsændring kræver Pluto-login</span><button type="button" data-view="settings">Se forbindelse</button></div>';return}
@@ -53,6 +54,7 @@ window.MarketUI=(()=>{
   // Missing time remains unknown; invalid or future timestamps are not current.
   const sourceTimeValid=sourceTime===null||(Number.isFinite(sourceTime)&&sourceTime<=now()),fetchTimeValid=Number.isFinite(fetched)&&fetchAge>=-1000;
   const warning=r.error||d.last_error||(!sourceTimeValid||!fetchTimeValid?'Kurs kan ikke bekræftes.':null),quality=age(d.price_time,d.fetched_at,Boolean(warning));node.classList.toggle('market-stale',quality.tone==='stale');
+  if(headerQuote&&node.dataset.marketHoldingPortfolio&&node.dataset.marketHoldingAsset&&!warning&&quality.tone!=='stale'&&Number.isFinite(Number(d.price))&&Number(d.price)>0&&typeof d.currency==='string'&&/^[A-Z]{3}$/.test(d.currency))headerQuote.innerHTML=money({amount:d.price,currency:d.currency});
   const dayComparison=sourceTimeValid&&fetchTimeValid?(d.daily_comparison?.basis==='official_close'?d.daily_comparison:d.daily_change_percent!==null&&d.daily_change_percent!==undefined&&!d.daily_note?{percent:d.daily_change_percent,amount:d.daily_change,basis:'pluto_reported_daily_change'}:null):null,dailyTone=tone(dayComparison?.percent),arrow=!dayComparison?'—':dailyTone==='positive'?'↑':dailyTone==='negative'?'↓':'→';
   const fetchLabel=fetchTimeValid?clock(d.fetched_at):'ukendt';
   // The holding quote is scoped by exact depot and Pluto asset identity.
