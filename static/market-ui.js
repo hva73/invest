@@ -42,7 +42,7 @@ window.MarketUI=(()=>{
   for(const [name,period] of [['month','ONE_MONTH'],['year','ONE_YEAR']]){
    try{const result=await api('market/quote',{...identity,is_test:false,period,include_intraday:false,refresh:false});
     if(owner()!==requestOwner)return;
-    const t=Date.parse(result.fetched_at),value=result.period_change_percent,start=Date.parse(result.series_from),end=Date.parse(result.series_to),rows=result.series,minimum=(period==='ONE_MONTH'?27:350)*86400000,span=end-start;
+    const t=Date.parse(result.fetched_at),value=result.period_change_percent,start=Date.parse(result.series_from),end=Date.parse(result.series_to),rows=result.series,minimum=(period==='ONE_MONTH'?27:360)*86400000,span=end-start;
     const covered=Number.isFinite(start)&&Number.isFinite(end)&&span>=minimum&&span<=minimum+45*86400000&&now()-end>=0&&now()-end<=72*3600000&&Array.isArray(rows)&&rows.length>=2&&Number.isFinite(Number(rows[0].epoch))&&Number.isFinite(Number(rows[rows.length-1].epoch))&&Number(rows[0].epoch)*1000>=start-1000&&Number(rows[rows.length-1].epoch)*1000<=end+1000&&Number(rows[0].epoch)*1000-start<=7*86400000&&end-Number(rows[rows.length-1].epoch)*1000<=4*86400000;
     if(!result.pending&&!result.selection_required&&!result.last_error&&!result.series_error&&result.series_period===period&&result.currency===currency&&covered&&Number.isFinite(t)&&now()-t>=-1000&&now()-t<=300000&&value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value)))r.signalReturns[name]=value;
    }catch{}
