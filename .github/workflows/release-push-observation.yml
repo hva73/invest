@@ -21,3 +21,4 @@ jobs:
         env:
           PYTHONPATH: ".:tools"
       - run: node --check static/app.js
+      - run: node tests/test_release_push_status.cjs
