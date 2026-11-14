@@ -280,3 +280,17 @@
 @media(max-width:700px){.signal-overview-dialog .signal-mobile-nav{align-items:center}.signal-overview-dialog .signal-mobile-nav .signal-why summary{min-height:0}}
 
 @media(max-width:700px){.signal-overview>details{display:none}}
+
+/* Match the approved compact holdings cards and position detail. */
+@media(max-width:700px){
+ .mobile-holding.mobile-holding-card{gap:5px;padding:9px 10px}
+ .mobile-holding-head .mobile-holding-name{gap:1px}
+ .mobile-holding-status,.mobile-holding-market{font-size:10px;line-height:1.25}
+ .mobile-holding-metrics{gap:8px;padding-top:6px}
+ .mobile-holding-metrics>span{gap:2px}
+ .mobile-holding-since{padding-top:4px}
+ #dashboard-detail .dashboard-detail-body{padding-top:8px}
+ #dashboard-detail .position-mobile-status{margin:6px 0 2px}
+ #dashboard-detail .position-mobile-facts{padding:7px 0}
+ #dashboard-detail .market-slot{padding:0}
+}
