@@ -92,7 +92,7 @@
       container.innerHTML = '<p role="status">Henter handelshistorik…</p>';
       try { data = await load(); }
       catch (error) {
-        const allowed=['DATABASE','CONNECTION','BROKER_CATALOG','UNEXPECTED'];
+        const allowed=['DATABASE','CONNECTION','BROKER_CATALOG','CATALOG_BUDGET','CATALOG_DATABASE','CATALOG_DENIED','CATALOG_RATE_LIMIT','CATALOG_HTTP','CATALOG_TIMEOUT','CATALOG_NETWORK','CATALOG_RESPONSE','UNEXPECTED'];
         const category=allowed.includes(error?.details?.diagnostic)?error.details.diagnostic:'REQUEST';
         container.innerHTML = '<p role="alert">Handelshistorikken kunne ikke hentes. Prøv igen. ('+category+')</p><button type="button" data-statistics-reload>Prøv igen</button>';
         return;
