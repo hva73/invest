@@ -69,6 +69,7 @@ def normalized(raw,asset_id,now=None,expected_period='ONE_WEEK'):
             by_time[key]={'timestamp':key,'source_timestamp':p['timestamp'],'epoch':at.timestamp(),'price':value,'date':at.astimezone(COPENHAGEN).date().isoformat()}
         result['series']=sorted(by_time.values(),key=lambda p:p['epoch'])
         result['week_change_percent']=decimal(performance.get('returnPct')) if expected_period=='ONE_WEEK' else None
+        result['period_change_percent']=decimal(performance.get('returnPct'))
         result['series_period']=expected_period
         result['series_from']=lower.isoformat();result['series_to']=upper.isoformat()
     except MarketError as error:result['series']=[];result['series_error']=str(error)
