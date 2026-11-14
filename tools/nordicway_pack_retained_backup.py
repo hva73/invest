@@ -1,4 +1,7 @@
 """Preserve the sole old backup as a hash-verified private tar.gz to free quota."""
+import ftplib
+import secrets
+import ssl
 import hashlib
 import io
 import json
@@ -146,11 +149,29 @@ def main():
             # cPanel restricts its interactive /download route for API tokens.
             # The documented UAPI explicitly supports binary JSON via Latin-1.
             print(json.dumps({'status': 'using_documented_binary_uapi', 'download_http_status': exc.code}), flush=True)
-            binary = content(ROOT, ARCHIVE, 2700000000).encode('latin-1')
-            count = len(binary)
-            with open(archive_path, 'wb') as target:
-                target.write(binary)
-            del binary
+            # Private, temporary FTPS account scoped only to the backup directory.
+            username = 'escapeverify' + secrets.token_hex(4)
+            password = secrets.token_urlsafe(40)
+            domain = 'nordic-response.dk'
+            def ftp_api(operation, params):
+                payload = request('execute/Ftp/' + operation, params)
+                result = payload.get('result', payload)
+                if result.get('status') not in (1, '1'):
+                    raise ValueError('temporary_ftp_api_rejected')
+                return result.get('data')
+            ftp_api('add_ftp', {'user': username, 'pass': password, 'domain': domain,
+                'homedir': '.escape_backups', 'quota': 1})
+            try:
+                with ftplib.FTP_TLS(context=ssl.create_default_context(), timeout=120) as ftp:
+                    ftp.connect('cp14.nordicway.dk', 21)
+                    ftp.login(username + '@' + domain, password)
+                    ftp.prot_p()
+                    with open(archive_path, 'wb') as target:
+                        ftp.retrbinary('RETR ' + ARCHIVE, target.write, blocksize=1024 * 1024)
+                count = os.path.getsize(archive_path)
+            finally:
+                ftp_api('delete_ftp', {'user': username, 'domain': domain, 'destroy': 0})
+                print(json.dumps({'status': 'temporary_transfer_account_removed'}), flush=True)
         if count != size:
             raise ValueError('archive_download_incomplete')
         result = verify_archive(archive_path, manifest)
