@@ -219,3 +219,15 @@
 @media(max-width:700px){#dashboard-detail .market-controls,.market-chart-dialog .market-controls{flex-wrap:nowrap}#dashboard-detail .market-period-buttons,.market-chart-dialog .market-period-buttons{flex:1 1 auto;min-width:0;gap:3px}#dashboard-detail .market-controls>button[data-market-refresh],.market-chart-dialog .market-controls>button[data-market-refresh]{min-height:44px;min-width:44px;padding:4px}}
 
 @media(min-width:701px){#dashboard-detail .market-controls>button[data-market-refresh],.market-chart-dialog .market-controls>button[data-market-refresh]{min-height:40px;min-width:40px}}
+
+/* Mobile signal proposal: desktop and the existing trade action remain intact. */
+.signal-mobile-nav,.signal-mobile-metrics{display:none}
+@media(max-width:700px){
+ .signal-overview .signal-mobile-nav{display:grid;grid-template-columns:1fr auto 1fr;align-items:start;gap:8px}
+ .signal-mobile-nav>strong{font-size:16px;text-align:center}.signal-mobile-nav>button{justify-self:end;border:0;background:transparent;color:#b5c9d0;padding:0;font-size:12px}
+ .signal-mobile-nav .signal-why{min-width:0;font-size:12px}.signal-why summary{cursor:pointer;list-style:none;text-decoration:none;color:#b5c9d0}.signal-why summary::-webkit-details-marker{display:none}.signal-why p{position:relative;z-index:1;max-width:260px;color:#d8e9e6;background:#193641;padding:10px;border-radius:8px;line-height:1.4}
+ .signal-overview .signal-mobile-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-block:1px solid #315360;padding:10px 0;gap:0}
+ .signal-mobile-metrics>div{min-width:0;padding:0 8px}.signal-mobile-metrics>div:first-child{padding-left:0}.signal-mobile-metrics>div+div{border-left:1px solid #315360}.signal-mobile-metrics small{display:block;font-size:10px;color:#b5c9d0}.signal-mobile-metrics strong{display:block;margin-top:5px;font-size:12px;overflow-wrap:anywhere}.signal-mobile-metrics .signed-positive{color:#80ddb3}.signal-mobile-metrics .signed-negative{color:#ff9ca9}
+ .signal-overview .signal-kpis,.signal-overview .signal-explanation,.signal-action-bar .signal-ignore{display:none}
+ .signal-overview .signal-chart-peak{display:none}
+}
