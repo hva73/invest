@@ -22,7 +22,9 @@ def main():
       const row=state.dashboard.positions[0];row.price_time=null;row.price_freshness={state:freshness};row.verification='broker_snapshot';row.daily={to:new Date(Date.now()+offset).toISOString(),basis,percent:'2',amount:'1',currency:row.price.currency};state.dashboard.positions=[row];state.dashboard.overview_positions=[row];
       document.querySelector('#content').innerHTML=window.DashboardUI.render(state);
      }""",[freshness,offset,basis])
-     if width==390: result=page.locator('.mobile-holding-daily').first
+     if width==390:
+      expect(page.locator('.mobile-holding-since').first).to_be_visible();expect(page.locator('.mobile-holding-since').first).to_contain_text('Siden sidst')
+      result=page.locator('.mobile-holding-daily').first
      else: result=page.locator('.dash-row .dash-day-desktop').first
      expect(result).to_be_visible();expect(result).to_contain_text('+2,00 %' if visible else '—')
      if visible:
