@@ -6,6 +6,7 @@ import os
 from pathlib import PurePosixPath
 import re
 import tarfile
+import tempfile
 import urllib.parse
 import urllib.request
 from nordicway_storage_inventory import NoRedirect
@@ -22,7 +23,8 @@ def verify_archive(data, manifest_content, expected_size=DB_BYTES):
     if expected.get('format') != 1 or not re.fullmatch(r'[0-9a-f]{64}', expected.get('database_sha256', '')):
         raise ValueError('invalid_backup_manifest')
     hashes = {}; database_size = None; archived_manifest = None
-    with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as archive:
+    archive_input = {'name': data} if isinstance(data, str) else {'fileobj': io.BytesIO(data)}
+    with tarfile.open(mode='r:gz', **archive_input) as archive:
         for member in archive:
             path = PurePosixPath(member.name)
             if '..' in path.parts or member.issym() or member.islnk():
@@ -59,7 +61,7 @@ def verify_archive(data, manifest_content, expected_size=DB_BYTES):
             wanted[name] = digest
     if hashes != wanted:
         raise ValueError('backup_hash_mismatch')
-    return {'database_bytes': database_size, 'verified_files': len(hashes), 'archive_bytes': len(data)}
+    return {'database_bytes': database_size, 'verified_files': len(hashes)}
 
 
 def main():
@@ -99,23 +101,46 @@ def main():
     if before.get('escape.db', {}).get('type') != 'file' or int(before['escape.db']['size']) != DB_BYTES:
         raise ValueError('original_backup_changed')
     manifest = content(ROOT + '/' + NAME, 'manifest.json')
+    if ARCHIVE not in top and '.escape_backups' in top:
+        nested = listing(ROOT + '/.escape_backups')
+        if ARCHIVE in nested:
+            uapi('move_file', {'source': ROOT + '/.escape_backups/' + ARCHIVE, 'destination': ROOT + '/' + ARCHIVE})
+            if not listing(ROOT + '/.escape_backups'):
+                uapi('delete_file', {'path': ROOT + '/.escape_backups'})
+            top = listing(ROOT)
     if ARCHIVE not in top:
         params = {'cpanel_jsonapi_user': 'nordicr4', 'cpanel_jsonapi_apiversion': 2,
             'cpanel_jsonapi_module': 'Fileman', 'cpanel_jsonapi_func': 'fileop',
-            'op': 'compress', 'sourcefiles': '.escape_backups/' + NAME,
-            'destfiles': '.escape_backups/' + ARCHIVE, 'metadata': 'tar.gz', 'doubledecode': 0}
+            'op': 'compress', 'sourcefiles': ROOT + '/' + NAME,
+            'destfiles': ROOT + '/' + ARCHIVE, 'metadata': 'tar.gz', 'doubledecode': 0}
         result = request('json-api/cpanel', params).get('cpanelresult', {})
         if result.get('event', {}).get('result') not in (1, '1'):
             raise ValueError('archive_creation_failed')
     archive_row = listing(ROOT).get(ARCHIVE, {})
     size = int(archive_row.get('size', 0))
-    if archive_row.get('type') != 'file' or not 1000 < size <= 300000000:
+    if archive_row.get('type') != 'file' or not 1000 < size <= 600000000:
         raise ValueError('archive_size_unavailable')
     print(json.dumps({'status': 'archive_created', 'archive_bytes': size}), flush=True)
-    data = content(ROOT, ARCHIVE, 1800000000).encode('latin-1')
-    if len(data) != size:
-        raise ValueError('archive_download_incomplete')
-    result = verify_archive(data, manifest)
+    # Stream the authenticated File Manager download; avoid loading a large
+    # binary backup through the JSON text-content API on the cPanel server.
+    download_url = 'https://cp14.nordicway.dk:2083/download?' + urllib.parse.urlencode({'file': ROOT + '/' + ARCHIVE})
+    req = urllib.request.Request(download_url, headers={'Authorization': 'cpanel nordicr4:' + token})
+    with tempfile.TemporaryDirectory(prefix='escape-private-backup-') as temporary:
+        archive_path = temporary + '/retained.tar.gz'
+        with opener.open(req, timeout=240) as response, open(archive_path, 'wb') as target:
+            first = response.read(2)
+            if first != b'\x1f\x8b':
+                raise ValueError('archive_download_not_gzip')
+            count = len(first); target.write(first)
+            while block := response.read(1024 * 1024):
+                count += len(block)
+                if count > size:
+                    raise ValueError('archive_download_incomplete')
+                target.write(block)
+        if count != size:
+            raise ValueError('archive_download_incomplete')
+        result = verify_archive(archive_path, manifest)
+    result['archive_bytes'] = size
     print(json.dumps({'status': 'archive_hashes_verified', **result}), flush=True)
     after = listing(ROOT + '/' + NAME)
     metadata = lambda rows: {name: {k: row.get(k) for k in ('file','type','mode','size','mtime')} for name,row in rows.items()}
