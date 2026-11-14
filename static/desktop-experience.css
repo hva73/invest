@@ -251,3 +251,6 @@
  .mobile-holding-daily{font-size:11px;overflow-wrap:anywhere}
  .mobile-holding-since{display:flex;justify-content:center;gap:8px;border-top:1px solid #315360;padding-top:6px;font-size:11px;color:#a9bec1}
 }
+
+/* Let long amounts wrap within the compact mobile facts. */
+@media(max-width:700px){#dashboard-detail .position-mobile-facts :is(.position-daily-value,.position-daily-percent){display:inline;white-space:normal;overflow-wrap:anywhere}}
