@@ -77,6 +77,8 @@ class Quotes(unittest.TestCase):
    self.assertNotIn('period_change_percent',market_data.normalized(empty,'synthetic-chart-asset',self.fixed,period))
    short=copy.deepcopy(raw);short['performance']['from']=(self.fixed-timedelta(days=1)).isoformat();short['performance']['series'][0]['timestamp']=short['performance']['from']
    self.assertNotIn('period_change_percent',market_data.normalized(short,'synthetic-chart-asset',self.fixed,period))
+   long=copy.deepcopy(raw);long['performance']['from']=(self.fixed-timedelta(days=60 if period=='ONE_MONTH' else 400)).isoformat();long['performance']['series'][0]['timestamp']=long['performance']['from']
+   self.assertNotIn('period_change_percent',market_data.normalized(long,'synthetic-chart-asset',self.fixed,period))
    stale=copy.deepcopy(raw);stale['performance']['from']=(self.fixed-timedelta(days=days+6)).isoformat();stale['performance']['to']=(self.fixed-timedelta(days=6)).isoformat();stale['performance']['series'][0]['timestamp']=stale['performance']['from'];stale['performance']['series'][1]['timestamp']=stale['performance']['to']
    self.assertNotIn('period_change_percent',market_data.normalized(stale,'synthetic-chart-asset',self.fixed,period))
  def test_actual_shape_missing_quote_time_and_daily_not_week(self):
