@@ -11,7 +11,7 @@ ui.setup({api:()=>{throw Error('UI grouping must not call the broker')},escape:v
 let html=ui.render(state),holdings=html.slice(html.indexOf('dash-holdings'));
 assert.equal((holdings.match(/data-dashboard-key=/g)||[]).length,1);assert.match(holdings,/Antal 2 · Gns/);assert.match(holdings,/2 depoter · se signaler/);assert.match(holdings,/data-dashboard-open="2"/);
 await ui.click({hasAttribute:()=>false,dataset:{dashboardOpen:'2'}});assert.match(dialog.innerHTML,/samlet beholdning/);assert.match(dialog.innerHTML,/Vægtet gennemsnitskurs/);assert.match(dialog.innerHTML,/Depot 1/);assert.match(dialog.innerHTML,/Depot 2/);assert.equal(trades.length,0);
-assert.match(dialog.innerHTML,/data-dashboard-member="scope-2"/);await ui.click({hasAttribute:()=>false,dataset:{dashboardMember:'scope-2'}});assert.equal(trades.length,1);assert.equal(trades[0].portfolioId,2);assert.equal(trades[0].assetId,'same');
+assert.match(dialog.innerHTML,/data-dashboard-member="scope-2"/);await ui.click({hasAttribute:()=>false,dataset:{dashboardMember:'scope-2'}});assert.equal(trades.length,2);for(const action of trades){assert.equal(action.portfolioId,2);assert.equal(action.assetId,'same');}
 html=ui.portfolioHoldings(1);assert.match(html,/data-dashboard-key="scope-1"/);assert.doesNotMatch(html,/asset:same|scope-2|samlet beholdning/);
 html=ui.portfolioHoldings(2);assert.match(html,/data-dashboard-key="scope-2"/);assert.doesNotMatch(html,/scope-1/);
 // The attention row still opens the exact lot, even after holdings resets its
