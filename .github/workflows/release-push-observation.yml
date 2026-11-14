@@ -20,5 +20,7 @@ jobs:
       - run: python -m unittest tests.test_web_push tests.test_release_approval tests.test_app.Workflow.test_release_approval_requires_owner_session_csrf_and_exact_version
         env:
           PYTHONPATH: ".:tools"
+      - run: python -m unittest tests.test_statistics_diagnostic
+      - run: node tests/test_statistics_diagnostic.cjs
       - run: node --check static/app.js
       - run: node tests/test_release_push_status.cjs
