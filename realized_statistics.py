@@ -8,11 +8,27 @@ from decimal import Decimal, InvalidOperation, localcontext
 from datetime import datetime, timezone
 from collections import defaultdict, deque
 from urllib.error import HTTPError, URLError
+import sqlite3
 
 class StatisticsUnavailable(Exception):
     def __init__(self, category):
         self.category = category
         super().__init__(category)
+
+def catalog_error_code(error):
+    """Classify startup failures without returning provider or account details."""
+    if getattr(error, 'code', None) == 'PROVIDER_RATE_BUDGET': return 'CATALOG_BUDGET'
+    if isinstance(error, sqlite3.Error): return 'CATALOG_DATABASE'
+    if isinstance(error, HTTPError):
+        if error.code in (401, 403): return 'CATALOG_DENIED'
+        if error.code == 429: return 'CATALOG_RATE_LIMIT'
+        return 'CATALOG_HTTP'
+    if isinstance(error, TimeoutError): return 'CATALOG_TIMEOUT'
+    if isinstance(error, URLError):
+        return 'CATALOG_TIMEOUT' if isinstance(error.reason, TimeoutError) else 'CATALOG_NETWORK'
+    if isinstance(error, ConnectionError): return 'CATALOG_NETWORK'
+    if isinstance(error, (ValueError, TypeError, KeyError)): return 'CATALOG_RESPONSE'
+    return 'BROKER_CATALOG'
 
 def depot_error_code(stage, error):
     """Return only fixed, non-sensitive categories for operational diagnosis."""
@@ -248,7 +264,7 @@ def read(connect, user_id, client_factory=None):
         client = client_factory(token)
         tools = client.tools()
     except Exception as error:
-        raise StatisticsUnavailable('BROKER_CATALOG') from error
+        raise StatisticsUnavailable(catalog_error_code(error)) from error
     output = []; errors = []; error_codes = []
     for portfolio in portfolios:
         external = portfolio['external_id'] or ''
