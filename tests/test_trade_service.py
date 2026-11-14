@@ -388,10 +388,16 @@ class Trading(unittest.TestCase):
     holding={'positions_complete':True,'positions':[{'kind':'holding','asset_id':'asset-test','quantity':'2'}]}
     with patch('portfolio_data.read',return_value=holding):
      proposal=trade.estimate(app.connect,1,request,LiveAccounts)['proposal']
-    self.assertEqual(proposal['status'],'estimated')
+     self.assertEqual(proposal['status'],'estimated');self.assertFalse(self.writes())
+     result=trade.send(app.connect,1,{'id':proposal['id'],'review_token':proposal['review_token'],'confirm':True},LiveAccounts)
+     self.assertEqual(result['proposal']['status'],'sent')
+     self.assertEqual(result['proposal']['intent_id'],'synthetic-intent')
+     duplicate=trade.send(app.connect,1,{'id':proposal['id']},LiveAccounts)
+     self.assertTrue(duplicate['duplicate']);self.assertEqual(len(self.writes()),1)
+     self.assertEqual(self.writes()[0]['arguments']['orders'][0]['side'],side)
     accounts=[c for c in self.calls if c['name']=='get_accounts']
-    self.assertTrue(accounts);self.assertEqual(accounts[0]['arguments'],{'portfolioId':'root'})
-    self.assertFalse(self.writes())
+    self.assertGreaterEqual(len(accounts),2)
+    self.assertTrue(all(c['arguments']=={'portfolioId':'root'} for c in accounts))
   broken=copy.deepcopy(live);broken['inputSchema']['properties']['portfolioId']['type']='integer'
   client=LiveAccounts('synthetic')
   with self.assertRaisesRegex(trade.TradeError,'get_accounts'):
