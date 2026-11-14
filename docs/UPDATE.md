@@ -1,3 +1,22 @@
+## Automatisk pladsoprydning efter godkendt release (14. november 2026)
+
+Den eksisterende `escape-deploy-ping.yml` kører nu `nordicway_release_retention.py`
+efter et vellykket `deploy`/`app-deploy`, inklusive broens backup-, installations-
+og driftskontrol. Releasejob serialiseres, og oprydningen kontrollerer den installerede
+SHA igen før sletning. Fejlede/ukendte installationer og recovery starter ikke oprydning.
+
+Den nye backup pakkes privat som `retained-<backupnavn>.tar.gz`. Arkivet hentes via
+krypteret FTPS med en midlertidig konto afgrænset til backupmappen, som fjernes igen.
+Databasen, manifestet, alle kodefiler og nøgler kontrolleres mod backupens oprindelige
+SHA256-værdier. Først derefter slettes den redundante råkopi og ældre kendte arkiver.
+Den aktuelle installationspakke beholdes; ældre `.escape-release-*`-mapper med kendt
+BUILD_COMMIT fjernes. Ukendte filer, nyere mapper og produktionsdatabasen røres ikke.
+
+Ved fejl bliver jobbet rødt med en særskilt oprydningsfejl; en allerede gennemført
+installation rulles ikke tilbage. Originalbackupen bevares ved komprimerings-,
+overførsels- eller kontrolfejl. Status er testet kode, ikke dokumentation for en ny
+produktionsinstallation; den aktiveres, når workflowændringen er flettet til standardgrenen.
+
 # Opdatering v0.4 på Nordicway
 
 > **Aktuel læsevejledning (10. november 2026):** Dette er historiske installationsnoter. Automatisk GitHub Actions → SSH-installation er et mål i [Issue #16](https://github.com/hva73/invest/issues/16), ikke dokumenteret aktiv. En separat checkout er ikke produktion; vælg ikke en gammel ZIP-vejledning som en aktuel release uden at kontrollere version og særskilt ejergodkendelse.
