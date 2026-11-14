@@ -39,3 +39,4 @@ jobs:
             daily-parity-screens/*.png
             visual-review/*.png
           if-no-files-found: ignore
+
