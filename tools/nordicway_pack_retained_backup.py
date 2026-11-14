@@ -9,6 +9,7 @@ import tarfile
 import tempfile
 import urllib.parse
 import urllib.request
+import urllib.error
 from nordicway_storage_inventory import NoRedirect
 
 NAME = '20261113-181931-xhdz28wf'
@@ -127,16 +128,28 @@ def main():
     req = urllib.request.Request(download_url, headers={'Authorization': 'cpanel nordicr4:' + token})
     with tempfile.TemporaryDirectory(prefix='escape-private-backup-') as temporary:
         archive_path = temporary + '/retained.tar.gz'
-        with opener.open(req, timeout=240) as response, open(archive_path, 'wb') as target:
-            first = response.read(2)
-            if first != b'\x1f\x8b':
-                raise ValueError('archive_download_not_gzip')
-            count = len(first); target.write(first)
-            while block := response.read(1024 * 1024):
-                count += len(block)
-                if count > size:
-                    raise ValueError('archive_download_incomplete')
-                target.write(block)
+        try:
+            with opener.open(req, timeout=240) as response, open(archive_path, 'wb') as target:
+                first = response.read(2)
+                if first != b'\x1f\x8b':
+                    raise ValueError('archive_download_not_gzip')
+                count = len(first); target.write(first)
+                while block := response.read(1024 * 1024):
+                    count += len(block)
+                    if count > size:
+                        raise ValueError('archive_download_incomplete')
+                    target.write(block)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (400, 401, 403, 404):
+                raise
+            # cPanel restricts its interactive /download route for API tokens.
+            # The documented UAPI explicitly supports binary JSON via Latin-1.
+            print(json.dumps({'status': 'using_documented_binary_uapi', 'download_http_status': exc.code}), flush=True)
+            binary = content(ROOT, ARCHIVE, 2700000000).encode('latin-1')
+            count = len(binary)
+            with open(archive_path, 'wb') as target:
+                target.write(binary)
+            del binary
         if count != size:
             raise ValueError('archive_download_incomplete')
         result = verify_archive(archive_path, manifest)
