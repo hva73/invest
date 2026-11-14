@@ -26,6 +26,7 @@ def main():
      else: result=page.locator('.dash-row .dash-day-desktop').first
      expect(result).to_be_visible();expect(result).to_contain_text('+2,00 %' if visible else '—')
      if visible:
+      page.evaluate("""() => {const n=document.createElement('div');n.textContent='FIKTIVE TESTDATA';Object.assign(n.style,{position:'fixed',top:'0',left:'0',zIndex:'99999',background:'#b6eddf',color:'#102c29',fontWeight:'bold',padding:'6px 12px'});document.body.append(n)}""")
       Path('daily-parity-screens').mkdir(exist_ok=True);page.screenshot(path=f'daily-parity-screens/oversigt-{width}.png',full_page=True)
     page.close()
    browser.close()
