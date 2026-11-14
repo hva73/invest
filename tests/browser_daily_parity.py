@@ -25,6 +25,8 @@ def main():
      if width==390: result=page.locator('.mobile-holding-daily').first
      else: result=page.locator('.dash-row .dash-day-desktop').first
      expect(result).to_be_visible();expect(result).to_contain_text('+2,00 %' if visible else '—')
+     if visible:
+      Path('daily-parity-screens').mkdir(exist_ok=True);page.screenshot(path=f'daily-parity-screens/oversigt-{width}.png',full_page=True)
     page.close()
    browser.close()
  finally:server.shutdown();server.server_close();case.tearDown()
