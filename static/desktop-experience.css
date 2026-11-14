@@ -237,3 +237,5 @@
  .signal-overview .market-quote{order:1}.signal-overview .market-controls{order:2}.signal-overview .market-chart{order:3}
  .signal-overview .market-period-title{display:none}
 }
+
+@media(max-width:700px){.signal-overview :is(.market-sample-change,.market-scale,.market-axis,.market-marker-legend){display:none}}
