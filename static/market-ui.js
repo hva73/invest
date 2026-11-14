@@ -61,7 +61,7 @@ window.MarketUI=(()=>{
   if(dailyBox&&node.dataset.marketHoldingPortfolio&&node.dataset.marketHoldingAsset&&dayComparison&&Number.isFinite(Number(dayComparison.percent))&&!warning&&quality.tone!=='stale'&&sourceTimeValid&&fetchTimeValid&&fetchAge<=300000&&dateKey(fetched)===today){
    const qty=Number(dailyBox.closest('[data-position-daily]')?.dataset.positionQuantity),pct=Number(dayComparison.percent),unit=dayComparison.amount!==null&&dayComparison.amount!==undefined&&dayComparison.amount!==''?Number(dayComparison.amount):NaN,price=Number(d.price),estimated=!Number.isFinite(unit),delta=estimated&&Number.isFinite(price)&&price>0&&pct>-100?price*pct/(100+pct):unit;
    const value=Number.isFinite(qty)&&qty>0&&Number.isFinite(delta)&&d.currency?(estimated?'≈ ':'')+(delta*qty>0?'+':'')+money({amount:String(delta*qty),currency:d.currency}):'—';
-   dailyBox.innerHTML='<span class="position-daily-value '+tone(pct)+'">'+value+'</span> <span class="position-daily-percent '+tone(pct)+'">'+percent(pct)+'</span>';dailyBox.dataset.marketOverride='true';
+   const direction=pct>0?'↑':pct<0?'↓':'→';dailyBox.innerHTML='<span class="position-daily-value '+tone(pct)+'">'+direction+' '+value+'</span> <span class="position-daily-percent '+tone(pct)+'">'+direction+' '+percent(pct)+'</span>';dailyBox.dataset.marketOverride='true';
   }
 
   if(node.dataset.marketLayout==='quote'){
