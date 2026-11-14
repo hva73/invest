@@ -120,6 +120,9 @@ def main():
    def ack(route):
     acknowledgements.append(route.request.post_data_json);route.fulfill(json={'ok':True})
    page.route('**/api/v1/hotwatch/sessions/synthetic-push/ack-signal',ack)
+   expect(d.get_by_text('Tekniske detaljer og overvågning')).not_to_be_visible()
+   expect(d.get_by_text('Se signalets grundlag')).not_to_be_visible()
+   page.set_viewport_size({'width':1024,'height':768})
    d.get_by_text('Tekniske detaljer og overvågning').click()
    page.route('**/api/v1/hotwatch/sessions/synthetic-push/events*',lambda route:route.fulfill(json={'items':[]}))
    page.route('**/api/v1/hotwatch/sessions/synthetic-push/samples*',lambda route:route.fulfill(json={'items':[]}))
@@ -127,6 +130,7 @@ def main():
    d.locator('[data-engine-close]').first.click();page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('h2')).to_have_text('TSM');d.get_by_text('Tekniske detaljer og overvågning').click()
    d.locator('[data-engine-ack=synthetic-push]').click();expect(d).not_to_be_visible()
    assert acknowledgements==[{'event_id':'hw-'+'a'*24,'is_test':False}],acknowledgements
+   page.set_viewport_size({'width':390,'height':700})
    session.update(status='DEGRADED',signal='NO_DATA',display_status='DATA FOR GAMLE',data_stale=True,latest_context={})
    session['data_status']={'price':None,'price_status':'STALE','market_status':'UNKNOWN'}
    page.evaluate("window.EngineUI.openNotification('synthetic-push')")
