@@ -55,6 +55,9 @@ window.MarketUI=(()=>{
   const warning=r.error||d.last_error||(!sourceTimeValid||!fetchTimeValid?'Kurs kan ikke bekræftes.':null),quality=age(d.price_time,d.fetched_at,Boolean(warning));node.classList.toggle('market-stale',quality.tone==='stale');
   const dayComparison=sourceTimeValid&&fetchTimeValid?(d.daily_comparison?.basis==='official_close'?d.daily_comparison:d.daily_change_percent!==null&&d.daily_change_percent!==undefined&&!d.daily_note?{percent:d.daily_change_percent,amount:d.daily_change,basis:'pluto_reported_daily_change'}:null):null,dailyTone=tone(dayComparison?.percent),arrow=!dayComparison?'—':dailyTone==='positive'?'↑':dailyTone==='negative'?'↓':'→';
   const fetchLabel=fetchTimeValid?clock(d.fetched_at):'ukendt';
+  const signalDaily=node.closest('.signal-overview')?.querySelector('[data-signal-daily]');
+  if(signalDaily){const value=dayComparison?.percent;const usable=value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value))&&!warning&&quality.tone!=='stale';signalDaily.className=usable?'signed-'+tone(value):'';signalDaily.textContent=usable?direction(value)+' '+percent(value):'—';}
+
   // The holding quote is scoped by exact depot and Pluto asset identity.
   if(dailyBox&&node.dataset.marketHoldingPortfolio&&node.dataset.marketHoldingAsset&&dayComparison&&Number.isFinite(Number(dayComparison.percent))&&!warning&&quality.tone!=='stale'&&sourceTimeValid&&fetchTimeValid&&fetchAge<=300000&&dateKey(fetched)===today){
    const qty=Number(dailyBox.closest('[data-position-daily]')?.dataset.positionQuantity),pct=Number(dayComparison.percent),unit=dayComparison.amount!==null&&dayComparison.amount!==undefined&&dayComparison.amount!==''?Number(dayComparison.amount):NaN,price=Number(d.price),estimated=!Number.isFinite(unit),delta=estimated&&Number.isFinite(price)&&price>0&&pct>-100?price*pct/(100+pct):unit;
