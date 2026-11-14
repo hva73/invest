@@ -219,3 +219,20 @@
 @media(max-width:700px){#dashboard-detail .market-controls,.market-chart-dialog .market-controls{flex-wrap:nowrap}#dashboard-detail .market-period-buttons,.market-chart-dialog .market-period-buttons{flex:1 1 auto;min-width:0;gap:3px}#dashboard-detail .market-controls>button[data-market-refresh],.market-chart-dialog .market-controls>button[data-market-refresh]{min-height:44px;min-width:44px;padding:4px}}
 
 @media(min-width:701px){#dashboard-detail .market-controls>button[data-market-refresh],.market-chart-dialog .market-controls>button[data-market-refresh]{min-height:40px;min-width:40px}}
+
+/* Approved compact mobile position detail (shared by holdings and sectors). */
+.position-mobile-quote{display:none}
+@media(max-width:700px){
+ #dashboard-detail .position-desktop-portfolio{display:none}
+ #dashboard-detail .position-mobile-quote{display:inline-block;font-size:14px;font-weight:600;color:#d9ebe5;border-left:1px solid #3b5c61;padding-left:10px;margin-left:8px;vertical-align:middle}
+ #dashboard-detail .position-mobile-facts{grid-template-columns:1fr 1.15fr .85fr;gap:0;border-block:1px solid #315360;padding:10px 0}
+ #dashboard-detail .position-mobile-facts>div{background:transparent;border:0;border-radius:0;padding:0 8px;min-width:0}
+ #dashboard-detail .position-mobile-facts>div:first-child{padding-left:0}
+ #dashboard-detail .position-mobile-facts>div+div{border-left:1px solid #315360}
+ #dashboard-detail .position-mobile-facts dt{font-size:10px;line-height:1.3}
+ #dashboard-detail .position-mobile-facts dd{font-size:12px;line-height:1.4;margin-top:5px;overflow-wrap:anywhere}
+ #dashboard-detail .position-mobile-facts dd small{display:inline;font-size:11px}
+ #dashboard-detail .dashboard-detail-body>h3{display:none}
+ #dashboard-detail .market-slot{border:0;background:transparent;box-shadow:none;padding:4px 0}
+ #dashboard-detail .market-quote>.market-price,#dashboard-detail .market-quote>.market-change{display:none}
+}
