@@ -69,7 +69,19 @@ def normalized(raw,asset_id,now=None,expected_period='ONE_WEEK'):
             by_time[key]={'timestamp':key,'source_timestamp':p['timestamp'],'epoch':at.timestamp(),'price':value,'date':at.astimezone(COPENHAGEN).date().isoformat()}
         result['series']=sorted(by_time.values(),key=lambda p:p['epoch'])
         result['week_change_percent']=decimal(performance.get('returnPct')) if expected_period=='ONE_WEEK' else None
-        result['period_change_percent']=decimal(performance.get('returnPct'))
+        # A fresh response is not proof that the requested period is current
+        # or complete. Only publish the provider return when its declared
+        # interval and observed endpoints support that label.
+        min_days={'ONE_MONTH':27,'ONE_YEAR':350}.get(expected_period)
+        if min_days is not None:
+            span=(upper-lower).total_seconds()
+            end_age=(now-upper).total_seconds()
+            series=result['series']
+            covered=(min_days*86400<=span<=(min_days+45)*86400
+                     and 0<=end_age<=72*3600 and len(series)>=2
+                     and series[0]['epoch']-lower.timestamp()<=7*86400
+                     and upper.timestamp()-series[-1]['epoch']<=4*86400)
+            if covered:result['period_change_percent']=decimal(performance.get('returnPct'))
         result['series_period']=expected_period
         result['series_from']=lower.isoformat();result['series_to']=upper.isoformat()
     except MarketError as error:result['series']=[];result['series_error']=str(error)
