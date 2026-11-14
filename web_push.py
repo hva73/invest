@@ -312,7 +312,8 @@ def notify_release_ready(connect, uid, sender=None):
     with connect() as c:
         owner=c.execute("SELECT id FROM users WHERE id=? AND username='owner' AND role='admin' AND active=1",(uid,)).fetchone()
         devices=c.execute('SELECT payload FROM push_devices WHERE user_id=?',(uid,)).fetchall() if owner else []
-    if not owner or not release_approval.pending(connect,uid):return {'sent':0,'failed':0}
+    candidate=release_approval.pending(connect,uid) if owner else None
+    if not candidate:return {'sent':0,'failed':0}
     sender=sender or _send;sent=failed=0
     for row in devices:
         try:
@@ -320,7 +321,31 @@ def notify_release_ready(connect, uid, sender=None):
             sent+=1
         except Exception:
             failed+=1
+    # Store aggregate counts only; never persist a subscription or exception.
+    # Notification failure must never block the admin approval path.
+    try:
+        with connect() as c:
+            c.execute('INSERT INTO admin_actions(admin_id,target_id,action,created) VALUES(?,?,?,?)',
+                      (uid,uid,'release_push:'+candidate['id']+':'+str(sent)+':'+str(failed),str(time.time())))
+    except Exception:
+        pass
     return {'sent':sent,'failed':failed}
+
+
+def release_notification_status(connect, uid, candidate_id):
+    """Read only aggregate notification counts for the owner's candidate."""
+    import re
+    if not isinstance(candidate_id,str) or not re.fullmatch(r'[0-9a-f]{32}',candidate_id):
+        return None
+    try:
+        with connect() as c:
+            row=c.execute('SELECT action FROM admin_actions WHERE admin_id=? AND target_id=? AND action LIKE ? ORDER BY id DESC LIMIT 1',
+                          (uid,uid,'release_push:'+candidate_id+':%')).fetchone()
+        if not row:return None
+        match=re.fullmatch(r'release_push:'+candidate_id+r':([0-9]{1,2}):([0-9]{1,2})',row[0])
+        return {'sent':int(match[1]),'failed':int(match[2])} if match else None
+    except Exception:
+        return None
 
 
 def dispatch_one(connect,now=None,sender=None):
