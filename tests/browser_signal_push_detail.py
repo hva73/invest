@@ -37,7 +37,12 @@ def main():
    assert 'disabled' in rows['duplicate'] and 'data-dashboard-member' not in rows['duplicate']
 
    def market(route):
-    periods.append(route.request.post_data_json.get('period'));route.fulfill(json=quote)
+    period=route.request.post_data_json.get('period');periods.append(period)
+    response={**quote,'series_period':period,'period_change_percent':{'ONE_MONTH':'5.72','ONE_YEAR':'18.36'}.get(period)}
+    if period in ('ONE_MONTH','ONE_YEAR'):
+     start=now-timedelta(days=30 if period=='ONE_MONTH' else 365)
+     response.update(series_from=start.isoformat(),series_to=now.isoformat(),series=[{'price':'2.5','epoch':start.timestamp(),'timestamp':start.isoformat(),'date':start.date().isoformat()},{'price':'3.1','epoch':now.timestamp(),'timestamp':now.isoformat(),'date':now.date().isoformat()}])
+    route.fulfill(json=response)
    page.route('**/api/market/quote',market)
    page.evaluate("window.EngineUI.openNotification('synthetic-push')")
    d=page.locator('#engine-dialog');expect(d.locator('h2')).to_have_text('TSM');expect(d.locator('h2')).not_to_contain_text('SÆLGSSIGNAL');expect(d).to_contain_text('siden køb');expect(d).to_contain_text('ikke sendt en ordre')
@@ -65,6 +70,12 @@ def main():
    ignored=[];page.on('request',lambda r:ignored.append(r.url) if '/ack-signal' in r.url else None)
    d.get_by_role('button',name='Ignorér og luk signalet').click();expect(d).not_to_be_visible();assert not orders and not ignored
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_be_visible()
+   expect(d.locator('[data-signal-daily]')).to_have_text('↓ -3 %')
+   expect(d.locator('[data-signal-month]')).to_have_text('↑ +5,72 %')
+   expect(d.locator('[data-signal-year]')).to_have_text('↑ +18,36 %')
+   expect(d.locator('.signal-why')).not_to_have_attribute('open','')
+   d.locator('.signal-why summary').click();expect(d.locator('.signal-why p')).to_be_visible()
+   d.locator('.signal-why summary').click()
    assert page.evaluate("getComputedStyle(document.documentElement).overflowY")=='hidden'
    background=page.evaluate('window.scrollY');page.mouse.move(2,2);page.mouse.wheel(0,900);page.wait_for_timeout(150);assert page.evaluate('window.scrollY')==background
    shot=os.environ.get('ESCAPE_SCREENSHOTS');
@@ -109,6 +120,9 @@ def main():
    def ack(route):
     acknowledgements.append(route.request.post_data_json);route.fulfill(json={'ok':True})
    page.route('**/api/v1/hotwatch/sessions/synthetic-push/ack-signal',ack)
+   expect(d.get_by_text('Tekniske detaljer og overvågning')).not_to_be_visible()
+   expect(d.get_by_text('Se signalets grundlag')).not_to_be_visible()
+   page.set_viewport_size({'width':1024,'height':768})
    d.get_by_text('Tekniske detaljer og overvågning').click()
    page.route('**/api/v1/hotwatch/sessions/synthetic-push/events*',lambda route:route.fulfill(json={'items':[]}))
    page.route('**/api/v1/hotwatch/sessions/synthetic-push/samples*',lambda route:route.fulfill(json={'items':[]}))
@@ -116,6 +130,7 @@ def main():
    d.locator('[data-engine-close]').first.click();page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('h2')).to_have_text('TSM');d.get_by_text('Tekniske detaljer og overvågning').click()
    d.locator('[data-engine-ack=synthetic-push]').click();expect(d).not_to_be_visible()
    assert acknowledgements==[{'event_id':'hw-'+'a'*24,'is_test':False}],acknowledgements
+   page.set_viewport_size({'width':390,'height':700})
    session.update(status='DEGRADED',signal='NO_DATA',display_status='DATA FOR GAMLE',data_stale=True,latest_context={})
    session['data_status']={'price':None,'price_status':'STALE','market_status':'UNKNOWN'}
    page.evaluate("window.EngineUI.openNotification('synthetic-push')")
@@ -137,6 +152,7 @@ def main():
    d.get_by_role('button',name='Køb').click();expect(quick).to_contain_text('Køb · TSM');expect(quick.locator('[name=portfolio_id]')).to_have_value(str(case.root));expect(quick.locator('[name=asset_id]')).to_have_value('synthetic-asset');quick.locator('[data-quick-close]').click()
    account['dashboard']['positions']=[];session['latest_context']['position']='none';session['request']['report_id']='synthetic-report';session['request']['candidate_id']='synthetic-candidate'
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('.market-slot .market-price')).to_be_visible();expect(d.locator('.market-marker-entry')).to_have_count(0);expect(d.locator('.market-entry-label')).to_have_count(0);expect(d.locator('.market-marker-signal')).to_have_count(0);expect(d.locator('.market-peak-label')).to_have_text('Top 3,41 USD');expect(d.get_by_role('button',name='Køb')).to_be_visible()
+   expect(d.locator('[data-market-choose]')).to_have_count(0)
    buyplot=d.locator('.market-plot svg');buyplot.scroll_into_view_if_needed();box=buyplot.bounding_box()
    if page.evaluate('navigator.maxTouchPoints > 0'):
     buycdp=page.context.new_cdp_session(page);buycdp.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[{'x':box['x']+box['width']*.5,'y':box['y']+box['height']*.5}]})
