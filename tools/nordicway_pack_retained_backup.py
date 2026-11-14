@@ -15,10 +15,10 @@ import urllib.request
 import urllib.error
 from nordicway_storage_inventory import NoRedirect
 
-NAME = '20261113-181931-xhdz28wf'
+NAME = '20261114-174620-t7m3tolt'
 ROOT = '/home/nordicr4/.escape_backups'
 ARCHIVE = 'retained-' + NAME + '.tar.gz'
-DB_BYTES = 2331734016
+DB_BYTES = 2653958144
 
 
 def verify_archive(data, manifest_content, expected_size=DB_BYTES):
@@ -187,7 +187,20 @@ def main():
     final = listing(ROOT)
     if NAME in final or ARCHIVE not in final or int(final[ARCHIVE]['size']) != size:
         raise ValueError('backup_replacement_unverified')
-    print(json.dumps({'status': 'verified', 'retained_archive': ARCHIVE, **result}), flush=True)
+    old = 'retained-20261113-181931-xhdz28wf.tar.gz'
+    old_row = final.get(old)
+    if old_row:
+        if old_row.get('type') != 'file' or int(old_row.get('size', 0)) != 444942482:
+            raise ValueError('older_archive_changed')
+        uapi('delete_file', {'path': ROOT + '/' + old})
+    stage_root = '/home/nordicr4/escape_app/opdatering'
+    old_stage = '.escape-release-19922l6v'
+    row = listing(stage_root).get(old_stage)
+    if row:
+        if row.get('type') != 'dir' or int(row.get('mtime', 0)) != 1794593960:
+            raise ValueError('older_staging_changed')
+        uapi('delete_file', {'path': stage_root + '/' + old_stage})
+    print(json.dumps({'status': 'verified', 'retained_archive': ARCHIVE, 'older_archive_removed': old not in listing(ROOT), **result}), flush=True)
 
 
 if __name__ == '__main__':
