@@ -236,3 +236,18 @@
  #dashboard-detail .market-slot{border:0;background:transparent;box-shadow:none;padding:4px 0}
  #dashboard-detail .market-quote>.market-price,#dashboard-detail .market-quote>.market-change{display:none}
 }
+
+@media(max-width:900px){
+ .mobile-holding.mobile-holding-card{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;text-align:left}
+ .mobile-holding-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;min-width:0}
+ .mobile-holding-head .mobile-holding-name{display:grid;gap:2px;min-width:0}
+ .mobile-holding-total{white-space:nowrap;font-variant-numeric:tabular-nums}
+ .mobile-holding-total.positive{color:#82dab4}.mobile-holding-total.negative{color:#ff9fa9}.mobile-holding-total.neutral{color:#dce8e9}
+ .mobile-holding-metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px;border-top:1px solid #315360;padding-top:8px}
+ .mobile-holding-metrics>span{display:grid;gap:3px;min-width:0;align-content:start}
+ .mobile-holding-metrics>span+span{border-left:1px solid #315360;padding-left:10px}
+ .mobile-holding-metrics small{color:#a9bec1;font-size:10px}
+ .mobile-holding-metrics .dash-profit-percent{display:inline;font-size:11px}
+ .mobile-holding-daily{font-size:11px;overflow-wrap:anywhere}
+ .mobile-holding-since{display:flex;justify-content:center;gap:8px;border-top:1px solid #315360;padding-top:6px;font-size:11px;color:#a9bec1}
+}
