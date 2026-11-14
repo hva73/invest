@@ -35,6 +35,19 @@ window.MarketUI=(()=>{
   return `<div class="market-plot market-${color}" data-market-plot><div class="market-sample-change">Udsnit: ${change===null?'ét punkt':`<span class="signed-${tone(change)}">${direction(change)} ${percent(change)}</span>`}</div><div class="market-scale">Skala ${axisPrice(band.lo)}–${axisPrice(band.hi)} ${esc(data.currency)}</div><div class="market-plot-canvas"><svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img" aria-label="${esc((period==='day'?'Kursudsnit for seneste døgn':period==='week'?'Kursudsnit for ugen':period==='month'?'Kursudsnit for måneden':'Kursudsnit for året')+' fra '+stamp(rows[0].timestamp)+' til '+stamp(rows[rows.length-1].timestamp)+', '+rows.length+' observerede punkter')}"><path class="market-guide" d="M5,57 L235,57"/>${visibleMarkers.map(m=>`<line class="market-marker market-marker-${m.kind}" x1="5" x2="235" y1="${57-(Number(m.value)-band.lo)/band.range*52}" y2="${57-(Number(m.value)-band.lo)/band.range*52}"><title>${m.kind==='stop'?'Analytisk stop':window.ESCAPE_DEMO?'Fiktiv gennemsnitlig anskaffelse':'Pluto gennemsnitlig anskaffelse'} ${esc(m.value)} ${esc(m.currency)}</title></line>`).join('')}${signalX===null?'':`<line class="market-marker-signal" x1="${signalX}" x2="${signalX}" y1="5" y2="57"><title>Signalets datatid · ikke signalpris</title></line>`}<path class="market-line" d="${path}"/><circle class="market-last" cx="${lastPoint[0]}" cy="${lastPoint[1]}" r="1.7"/><circle class="market-focus" r="1.7" hidden/></svg>${labels}</div>${legendMarkers.length||signalMarker?`<div class="market-marker-legend">${legendMarkers.map(m=>`${m.kind==='stop'?'Analytisk stop':window.ESCAPE_DEMO?'Fiktiv anskaffelse':'Pluto anskaffelse'} ${esc(m.value)} ${esc(m.currency)}${visibleMarkers.includes(m)?'':' · uden for skala'}`).join(' · ')}${signalMarker?' · Signalets datatid (ikke kurs)':''}</div>`:''}<output class="market-hover" hidden></output><div class="market-axis"><span>${period==='day'?clock(rows[0].timestamp):dayDate(rows[0].timestamp)}</span><span>${period==='day'?clock(rows[rows.length-1].timestamp):dayDate(rows[rows.length-1].timestamp)}</span></div></div>`
  }
  function sync(k){document.querySelectorAll('.market-slot').forEach(node=>{if(key(node)===k)paint(node,record(node))})}
+ async function signalReturns(node,r,currency){
+  if(r.signalPeriodsStarted||!currency||node.dataset.marketTest==='true')return;
+  r.signalPeriodsStarted=true;r.signalPeriodsAt=now();const requestOwner=owner();r.signalReturns={};
+  const identity=node.dataset.marketHoldingPortfolio?{holding_portfolio_id:Number(node.dataset.marketHoldingPortfolio),holding_asset_id:node.dataset.marketHoldingAsset}:{report_id:node.dataset.marketReport,...(node.dataset.marketPosition?{portfolio_id:node.dataset.marketPortfolio,position_id:node.dataset.marketPosition}:{candidate_id:node.dataset.marketCandidate})};
+  for(const [name,period] of [['month','ONE_MONTH'],['year','ONE_YEAR']]){
+   try{const result=await api('market/quote',{...identity,is_test:false,period,include_intraday:false,refresh:false});
+    if(owner()!==requestOwner)return;
+    const t=Date.parse(result.fetched_at),value=result.period_change_percent;
+    if(!result.pending&&!result.selection_required&&!result.last_error&&!result.series_error&&result.series_period===period&&result.currency===currency&&Number.isFinite(t)&&now()-t>=-1000&&now()-t<=300000&&value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value)))r.signalReturns[name]=value;
+   }catch{}
+  }
+  if(owner()===requestOwner)sync(r.key);
+ }
  function paint(node,r){
   if(!node.isConnected)return;
   // Replace a previous quote-derived value only while its own quote remains
@@ -55,6 +68,16 @@ window.MarketUI=(()=>{
   const warning=r.error||d.last_error||(!sourceTimeValid||!fetchTimeValid?'Kurs kan ikke bekræftes.':null),quality=age(d.price_time,d.fetched_at,Boolean(warning));node.classList.toggle('market-stale',quality.tone==='stale');
   const dayComparison=sourceTimeValid&&fetchTimeValid?(d.daily_comparison?.basis==='official_close'?d.daily_comparison:d.daily_change_percent!==null&&d.daily_change_percent!==undefined&&!d.daily_note?{percent:d.daily_change_percent,amount:d.daily_change,basis:'pluto_reported_daily_change'}:null):null,dailyTone=tone(dayComparison?.percent),arrow=!dayComparison?'—':dailyTone==='positive'?'↑':dailyTone==='negative'?'↓':'→';
   const fetchLabel=fetchTimeValid?clock(d.fetched_at):'ukendt';
+  const signalRoot=node.closest('.signal-overview');
+  if(signalRoot&&!warning&&quality.tone!=='stale'&&fetchTimeValid&&sourceTimeValid){
+   if(r.signalPeriodsStarted&&now()-r.signalPeriodsAt>300000){r.signalPeriodsStarted=false;r.signalReturns={};}
+   signalReturns(node,r,d.currency);
+   for(const name of ['month','year']){const target=signalRoot.querySelector('[data-signal-'+name+']'),value=r.signalReturns?.[name];if(target){const valid=value!==null&&value!==undefined&&Number.isFinite(Number(value));target.className=valid?'signed-'+tone(value):'';target.textContent=valid?direction(value)+' '+percent(value):'—';}}
+  }else if(signalRoot){for(const name of ['month','year']){const target=signalRoot.querySelector('[data-signal-'+name+']');if(target){target.className='';target.textContent='—';}}}
+
+  const signalDaily=node.closest('.signal-overview')?.querySelector('[data-signal-daily]');
+  if(signalDaily){const value=dayComparison?.percent;const usable=value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value))&&!warning&&quality.tone!=='stale';signalDaily.className=usable?'signed-'+tone(value):'';signalDaily.textContent=usable?direction(value)+' '+percent(value):'—';}
+
   // The holding quote is scoped by exact depot and Pluto asset identity.
   if(dailyBox&&node.dataset.marketHoldingPortfolio&&node.dataset.marketHoldingAsset&&dayComparison&&Number.isFinite(Number(dayComparison.percent))&&!warning&&quality.tone!=='stale'&&sourceTimeValid&&fetchTimeValid&&fetchAge<=300000&&dateKey(fetched)===today){
    const qty=Number(dailyBox.closest('[data-position-daily]')?.dataset.positionQuantity),pct=Number(dayComparison.percent),unit=dayComparison.amount!==null&&dayComparison.amount!==undefined&&dayComparison.amount!==''?Number(dayComparison.amount):NaN,price=Number(d.price),estimated=!Number.isFinite(unit),delta=estimated&&Number.isFinite(price)&&price>0&&pct>-100?price*pct/(100+pct):unit;
