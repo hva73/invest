@@ -63,10 +63,22 @@ class Quotes(unittest.TestCase):
   year=market_data.quote(app.connect,1,{**self.request,'period':'ONE_YEAR'},Extended)
   cached=market_data.quote(app.connect,1,{**self.request,'period':'ONE_MONTH'},Extended)
   self.assertEqual((week['series_period'],month['series_period'],year['series_period']),('ONE_WEEK','ONE_MONTH','ONE_YEAR'))
-  self.assertEqual(month['period_change_percent'],market_data.decimal(self.raw['performance']['returnPct']));self.assertEqual(year['period_change_percent'],month['period_change_percent'])
+  self.assertNotIn('period_change_percent',month);self.assertNotIn('period_change_percent',year)
   bad=copy.deepcopy(self.raw);bad['performance']['period']='ONE_YEAR';bad['performance']['currency']='INVALID';q=market_data.normalized(bad,'synthetic-chart-asset',self.fixed,'ONE_YEAR');self.assertNotIn('period_change_percent',q)
   self.assertTrue(cached['cached']);self.assertEqual([c['arguments']['period'] for c in self.calls if c['name']=='get_asset'],['ONE_WEEK','ONE_MONTH','ONE_YEAR'])
   with self.assertRaises(market_data.MarketError):market_data.quote(app.connect,1,{**self.request,'period':'INVALID'},Extended)
+ def test_period_return_requires_covered_and_recent_actual_interval(self):
+  for period,days in [('ONE_MONTH',30),('ONE_YEAR',365)]:
+   raw=copy.deepcopy(self.raw);p=raw['performance'];p['period']=period;p['from']=(self.fixed-timedelta(days=days)).isoformat();p['to']=self.fixed.isoformat()
+   p['series']=[{'timestamp':p['from'],'close':'10'},{'timestamp':p['to'],'close':'12'}];p['returnPct']='20'
+   good=market_data.normalized(raw,'synthetic-chart-asset',self.fixed,period)
+   self.assertEqual(good['period_change_percent'],'20')
+   empty=copy.deepcopy(raw);empty['performance']['series']=[]
+   self.assertNotIn('period_change_percent',market_data.normalized(empty,'synthetic-chart-asset',self.fixed,period))
+   short=copy.deepcopy(raw);short['performance']['from']=(self.fixed-timedelta(days=1)).isoformat();short['performance']['series'][0]['timestamp']=short['performance']['from']
+   self.assertNotIn('period_change_percent',market_data.normalized(short,'synthetic-chart-asset',self.fixed,period))
+   stale=copy.deepcopy(raw);stale['performance']['from']=(self.fixed-timedelta(days=days+6)).isoformat();stale['performance']['to']=(self.fixed-timedelta(days=6)).isoformat();stale['performance']['series'][0]['timestamp']=stale['performance']['from'];stale['performance']['series'][1]['timestamp']=stale['performance']['to']
+   self.assertNotIn('period_change_percent',market_data.normalized(stale,'synthetic-chart-asset',self.fixed,period))
  def test_actual_shape_missing_quote_time_and_daily_not_week(self):
   q=market_data.normalized(self.raw,'synthetic-chart-asset',self.fixed)
   self.assertEqual(q['price'],'18.636');self.assertEqual(q['daily_change'],'0.225');self.assertGreater(float(q['daily_change_percent']),0);self.assertLess(float(q['week_change_percent']),0)
