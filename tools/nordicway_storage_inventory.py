@@ -28,9 +28,15 @@ def main():
             raw = response.read(2_000_001)
         if len(raw) > 2_000_000:
             raise ValueError('inventory_too_large')
-        result = json.loads(raw).get('result', {})
+        payload = json.loads(raw)
+        result = payload.get('result', payload)
         if result.get('status') not in (1, '1'):
-            return {'status': 'unavailable'}
+            errors = str(result.get('errors', '')).lower()
+            category = ('denied' if any(s in errors for s in ('permission', 'denied', 'privilege'))
+                        else 'missing_directory' if any(s in errors for s in ('no such', 'does not exist'))
+                        else 'unsupported' if any(s in errors for s in ('not find', 'not found', 'unknown function'))
+                        else 'api_rejected')
+            return {'status': 'unavailable', 'category': category}
         rows = result.get('data')
         if not isinstance(rows, list):
             return {'status': 'unknown_shape', 'data_type': type(rows).__name__}
