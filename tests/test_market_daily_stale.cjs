@@ -1,6 +1,6 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const daily={dataset:{},innerHTML:'',textContent:'',closest:()=>({dataset:{positionQuantity:'2'}})};
-const detail={querySelector:()=>daily};
+const detail={querySelector:s=>s==='[data-position-daily] dd'?daily:null};
 const node={isConnected:true,dataset:{marketHoldingPortfolio:'7',marketHoldingAsset:'held-asset',marketTest:'false',marketLayout:'chart'},classList:{toggle(){}},closest:s=>s==='#dashboard-detail'?detail:null,querySelector:()=>null,querySelectorAll:()=>[],getBoundingClientRect:()=>({top:0,bottom:300}),innerHTML:''};
 const document={hidden:false,querySelectorAll:s=>s==='.market-slot'?[node]:[],addEventListener(){}};
 let mode='good';const requests=[];const now=Date.now();
