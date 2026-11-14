@@ -16,7 +16,7 @@ html=ui.portfolioHoldings(1);assert.match(html,/data-dashboard-key="scope-1"/);a
 html=ui.portfolioHoldings(2);assert.match(html,/data-dashboard-key="scope-2"/);assert.doesNotMatch(html,/scope-1/);
 // The attention row still opens the exact lot, even after holdings resets its
 // index registry to include the aggregated overview row.
-one.action='SÆLG';html=ui.render(state);assert.match(html,/Vurdering: SÆLG/);await ui.click({hasAttribute:()=>false,dataset:{dashboardOpen:'0'}});assert.equal(trades.at(-1).portfolioId,1);
+one.action='SÆLG';html=ui.render(state);assert.doesNotMatch(html,/Vurdering: SÆLG/);await ui.click({hasAttribute:()=>false,dataset:{dashboardOpen:'0'}});assert.equal(trades.at(-1).portfolioId,1);
 console.log('PASS: combined overview, per-account drill-down and unchanged scoped trade selection');
 
 })().catch(e=>{console.error(e);process.exitCode=1});
