@@ -107,7 +107,9 @@ try:
    page.locator('.sector-row').filter(has_text='Sundhed').click()
    stale=page.locator('#sector-journey [data-sector-position]').filter(has_text='AI').filter(has_text='NOVO-B')
    if width >= 901: expect(stale.locator('.si-position-metrics small').first).to_contain_text('— · —')
-   else: expect(stale.locator('.mobile-holding-daily')).to_contain_text('I dag —')
+   else:
+    expect(stale.locator('.mobile-holding-day small')).to_have_text('I dag')
+    expect(stale.locator('.mobile-holding-daily')).to_contain_text('—')
    expect(stale).to_contain_text('+45,00')
    child_row['price_freshness']=original_freshness
    if width >= 901:
