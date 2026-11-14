@@ -37,7 +37,12 @@ def main():
    assert 'disabled' in rows['duplicate'] and 'data-dashboard-member' not in rows['duplicate']
 
    def market(route):
-    period=route.request.post_data_json.get('period');periods.append(period);route.fulfill(json={**quote,'series_period':period,'period_change_percent':{'ONE_MONTH':'5.72','ONE_YEAR':'18.36'}.get(period)})
+    period=route.request.post_data_json.get('period');periods.append(period)
+    response={**quote,'series_period':period,'period_change_percent':{'ONE_MONTH':'5.72','ONE_YEAR':'18.36'}.get(period)}
+    if period in ('ONE_MONTH','ONE_YEAR'):
+     start=now-timedelta(days=30 if period=='ONE_MONTH' else 365)
+     response.update(series_from=start.isoformat(),series_to=now.isoformat(),series=[{'price':'2.5','epoch':start.timestamp(),'timestamp':start.isoformat(),'date':start.date().isoformat()},{'price':'3.1','epoch':now.timestamp(),'timestamp':now.isoformat(),'date':now.date().isoformat()}])
+    route.fulfill(json=response)
    page.route('**/api/market/quote',market)
    page.evaluate("window.EngineUI.openNotification('synthetic-push')")
    d=page.locator('#engine-dialog');expect(d.locator('h2')).to_have_text('TSM');expect(d.locator('h2')).not_to_contain_text('SÆLGSSIGNAL');expect(d).to_contain_text('siden køb');expect(d).to_contain_text('ikke sendt en ordre')
