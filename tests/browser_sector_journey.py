@@ -1,5 +1,5 @@
 """Sector navigation using real frontend and explicitly synthetic portfolio snapshots."""
-import json, os, sys, threading
+import json, os, sys, threading, re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -79,7 +79,7 @@ try:
     expect(root).to_contain_text('I dag · kurs pr. stk.')
     expect(root).to_contain_text('+6,30')
    else:
-    expect(root).to_have_class('mobile-holding')
+    expect(root).to_have_class(re.compile(r'\bmobile-holding\b'))
     expect(root).to_contain_text('I dag')
     expect(root).to_contain_text('+31,50')
    expect(root).to_contain_text('+2,39 %')
@@ -89,6 +89,8 @@ try:
    missing=journey.locator('[data-sector-position]').filter(has=page.get_by_text('AFVENTER',exact=True))
    expect(missing).to_contain_text('—')
    child.click();detail=page.locator('#dashboard-detail');expect(detail).to_be_visible()
+   if width==390:
+    expect(detail.locator('.position-mobile-facts')).to_be_visible();expect(detail.locator('.position-mobile-facts')).to_contain_text('Positionens værdi');expect(detail.locator('.position-mobile-facts')).to_contain_text('Siden køb');expect(detail.locator('.position-mobile-facts')).to_contain_text('I dag');expect(detail.locator('[data-position-live-price]')).to_be_visible()
    expect(detail.locator('h2')).to_contain_text('NOVO-B');expect(detail.locator('h2')).to_contain_text('AI')
    page.screenshot(path=str(screens/f'sektor-positionsdetalje-{width}.png'))
    detail.locator('[data-dashboard-close]').click();expect(journey).to_be_visible()
