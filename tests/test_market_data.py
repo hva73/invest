@@ -63,6 +63,8 @@ class Quotes(unittest.TestCase):
   year=market_data.quote(app.connect,1,{**self.request,'period':'ONE_YEAR'},Extended)
   cached=market_data.quote(app.connect,1,{**self.request,'period':'ONE_MONTH'},Extended)
   self.assertEqual((week['series_period'],month['series_period'],year['series_period']),('ONE_WEEK','ONE_MONTH','ONE_YEAR'))
+  self.assertEqual(month['period_change_percent'],market_data.decimal(self.raw['performance']['returnPct']));self.assertEqual(year['period_change_percent'],month['period_change_percent'])
+  bad=copy.deepcopy(self.raw);bad['performance']['period']='ONE_YEAR';bad['performance']['currency']='INVALID';q=market_data.normalized(bad,'synthetic-chart-asset',self.fixed,'ONE_YEAR');self.assertNotIn('period_change_percent',q)
   self.assertTrue(cached['cached']);self.assertEqual([c['arguments']['period'] for c in self.calls if c['name']=='get_asset'],['ONE_WEEK','ONE_MONTH','ONE_YEAR'])
   with self.assertRaises(market_data.MarketError):market_data.quote(app.connect,1,{**self.request,'period':'INVALID'},Extended)
  def test_actual_shape_missing_quote_time_and_daily_not_week(self):
