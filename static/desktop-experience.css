@@ -294,3 +294,5 @@
  #dashboard-detail .position-mobile-facts{padding:7px 0}
  #dashboard-detail .market-slot{padding:0}
 }
+
+@media(max-width:700px){#dashboard-detail .position-mobile-facts .position-daily-value{overflow-wrap:normal;word-break:normal;font-size:10px}}
