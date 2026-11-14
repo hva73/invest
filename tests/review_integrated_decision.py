@@ -9,12 +9,15 @@ def replace_once(text, old, new):
     return text.replace(old, new, 1)
 
 source = replace_once(source,
+    "   d.locator('.signal-why summary').click();expect(d.locator('.signal-why p')).to_be_visible()\n   d.locator('.signal-why summary').click()",
+    "   if page.viewport_size['width']<=700:\n    d.locator('.signal-why summary').click();expect(d.locator('.signal-why p')).to_be_visible()\n    d.locator('.signal-why summary').click()\n   else:\n    expect(d.locator('.signal-why')).to_be_hidden()\n    expect(d.locator('.signal-explanation')).to_be_visible()")
+source = replace_once(source,
     "expect(d.locator('.signal-action-bar .signal-help')).to_have_count(0)",
     "expect(d.locator('.signal-action-bar .signal-help')).to_have_count(0)\n"
     "   expect(d.locator('h2')).to_be_focused()\n"
     "   page.keyboard.press('Tab')\n"
     "   assert page.evaluate(\"!!document.activeElement.closest('#engine-dialog')\")")
-generated = Path('tests/_integrated_decision_generated.py')
+generated = Path('tests/_release_decision_generated.py')
 failures = []
 try:
     for width in (390, 1024, 1280, 1440, 1920):
