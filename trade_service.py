@@ -84,7 +84,12 @@ def provider_buying_power_error(message,args):
 
 def call(client,tools,name,args):
     expected=CONTRACT.get(name);actual=tools.get(name,{})
-    if not expected or actual.get('annotations',{}).get('readOnlyHint') is not expected['readOnlyHint'] or structural(actual.get('inputSchema'))!=expected['inputSchema']:
+    schema=structural(actual.get('inputSchema'))
+    # An empty required list and an omitted required list are equivalent.
+    # Limit this normalization to the read-only get_accounts input contract.
+    if name=='get_accounts' and isinstance(schema,dict) and schema.get('required')==[] and expected and 'required' not in expected['inputSchema']:
+        schema=dict(schema);schema.pop('required')
+    if not expected or actual.get('annotations',{}).get('readOnlyHint') is not expected['readOnlyHint'] or schema!=expected['inputSchema']:
         raise TradeError('Plutos værktøjskontrakt for '+name+' skal gennemgås før brug.')
     response=client.request('tools/call',{'name':name,'arguments':args})
     if name.startswith('estimate_') and isinstance(response,dict) and response.get('isError'):
