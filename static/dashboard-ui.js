@@ -22,7 +22,7 @@ window.DashboardUI=(()=>{
  function desktopDailyData(r){
   const d=r.daily||{},at=Date.parse(d.to||''),local=new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Copenhagen'}),valid=r.verification==='broker_snapshot'&&['fresh','session_close'].includes(r.price_freshness?.state)&&Number.isFinite(at)&&at<=Date.now()&&local.format(new Date(at))===local.format(new Date());
   if(!valid){
-   if(mobileDaily(r).endsWith('—'))return null;
+   if(r.price_freshness?.state!=='unknown'||mobileDaily(r).endsWith('—'))return null;
    const total=mobileDailyAmount(r);
    return {percent:Number(d.percent),amount:total?Number(total.amount):null,currency:total?.currency||null};
   }
