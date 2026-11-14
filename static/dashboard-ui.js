@@ -83,7 +83,7 @@ window.DashboardUI=(()=>{
   if(['fresh','session_close'].includes(r.price_freshness?.state))return 'I dag '+percent(p);
   // Pluto may supply a daily percentage and receipt time without a market
   // timestamp. Never call it a fresh quote: show that qualification explicitly.
-  if(!r.price_time&&r.daily?.basis==='pluto_reported_daily_change'&&age<=300000&&r.price_freshness?.state!=='stale')return 'I dag '+percent(p);
+  if(!r.price_time&&r.daily?.basis==='pluto_reported_daily_change'&&age<=300000&&r.price_freshness?.state==='unknown')return 'I dag '+percent(p);
   return 'I dag —';
  }
  function mobileDailyAmount(r){
