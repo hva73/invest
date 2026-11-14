@@ -37,7 +37,7 @@ window.MarketUI=(()=>{
  function sync(k){document.querySelectorAll('.market-slot').forEach(node=>{if(key(node)===k)paint(node,record(node))})}
  async function signalReturns(node,r,currency){
   if(r.signalPeriodsStarted||!currency||node.dataset.marketTest==='true')return;
-  r.signalPeriodsStarted=true;const requestOwner=owner();r.signalReturns={};
+  r.signalPeriodsStarted=true;r.signalPeriodsAt=now();const requestOwner=owner();r.signalReturns={};
   const identity=node.dataset.marketHoldingPortfolio?{holding_portfolio_id:Number(node.dataset.marketHoldingPortfolio),holding_asset_id:node.dataset.marketHoldingAsset}:{report_id:node.dataset.marketReport,...(node.dataset.marketPosition?{portfolio_id:node.dataset.marketPortfolio,position_id:node.dataset.marketPosition}:{candidate_id:node.dataset.marketCandidate})};
   for(const [name,period] of [['month','ONE_MONTH'],['year','ONE_YEAR']]){
    try{const result=await api('market/quote',{...identity,is_test:false,period,include_intraday:false,refresh:false});
@@ -70,6 +70,7 @@ window.MarketUI=(()=>{
   const fetchLabel=fetchTimeValid?clock(d.fetched_at):'ukendt';
   const signalRoot=node.closest('.signal-overview');
   if(signalRoot&&!warning&&quality.tone!=='stale'&&fetchTimeValid&&sourceTimeValid){
+   if(r.signalPeriodsStarted&&now()-r.signalPeriodsAt>300000){r.signalPeriodsStarted=false;r.signalReturns={};}
    signalReturns(node,r,d.currency);
    for(const name of ['month','year']){const target=signalRoot.querySelector('[data-signal-'+name+']'),value=r.signalReturns?.[name];if(target){const valid=value!==null&&value!==undefined&&Number.isFinite(Number(value));target.className=valid?'signed-'+tone(value):'';target.textContent=valid?direction(value)+' '+percent(value):'—';}}
   }else if(signalRoot){for(const name of ['month','year']){const target=signalRoot.querySelector('[data-signal-'+name+']');if(target){target.className='';target.textContent='—';}}}
