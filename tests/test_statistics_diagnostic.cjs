@@ -11,6 +11,13 @@ function container() { return {innerHTML:'',addEventListener(){},querySelectorAl
     await ui.mount(el,async()=>{const error=new Error('PRIVATE TOKEN');error.details={diagnostic:code};throw error;});
     assert(el.innerHTML.includes('('+code+')'));assert(!el.innerHTML.includes('PRIVATE TOKEN'));
   }
+  let handler, attempts=0;
+  el={innerHTML:'',addEventListener(type,fn){if(type==='click')handler=fn;},querySelectorAll(){return [];}};
+  await ui.mount(el,async()=>{if(++attempts===1){const e=new Error('secret');e.details={diagnostic:'CATALOG_BUDGET'};throw e;}return {portfolios:[],errors:[]};});
+  assert(el.innerHTML.includes('(CATALOG_BUDGET)'));
+  handler({target:{closest(selector){return selector==='[data-statistics-reload]'?{}:null;}}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(attempts,2);assert(el.innerHTML.includes('Hvordan står det til'));
   el=container();
   await ui.mount(el,async()=>{const error=new Error('SECRET');error.details={diagnostic:'<script>SECRET</script>'};throw error;});
   assert(el.innerHTML.includes('(REQUEST)'));assert(!el.innerHTML.includes('SECRET'));
