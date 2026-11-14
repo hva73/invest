@@ -296,3 +296,8 @@
 }
 
 @media(max-width:700px){#dashboard-detail .position-mobile-facts .position-daily-value{overflow-wrap:normal;word-break:normal;font-size:10px}}
+
+@media(max-width:700px){
+ #dashboard-detail .position-mobile-summary:not([data-signal-context="true"]) .position-mobile-status{display:none}
+ #dashboard-detail .market-period-title{display:none}
+}
