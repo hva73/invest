@@ -24,7 +24,7 @@ def main():
      }""",[freshness,offset,basis])
      if width==390: result=page.locator('.mobile-holding-daily').first
      else: result=page.locator('.dash-row .dash-day-desktop').first
-     expect(result).to_contain_text('+2,00 %' if visible else '—')
+     expect(result).to_be_visible();expect(result).to_contain_text('+2,00 %' if visible else '—')
     page.close()
    browser.close()
  finally:server.shutdown();server.server_close();case.tearDown()
