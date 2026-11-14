@@ -1,0 +1,387 @@
+[
+  {
+    "file": ".escape-release-00ng3lnz",
+    "mode": 16832,
+    "mtime": 1794578709,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": ".escape-release-1dx1gqft",
+    "mode": 16832,
+    "mtime": 1794419498,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": ".escape-release-3gdryy8s",
+    "mode": 16832,
+    "mtime": 1794467946,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": ".escape-release-86ioqfcf",
+    "mode": 16832,
+    "mtime": 1794425514,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": ".escape-release-9dezaw93",
+    "mode": 16832,
+    "mtime": 1794576457,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": ".escape-release-9vfwxh__",
+    "mode": 16832,
+    "mtime": 1794433337,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": ".escape-release-e5r2jj47",
+    "mode": 16832,
+    "mtime": 1794469471,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": ".escape-release-kem_c1g3",
+    "mode": 16832,
+    "mtime": 1794426185,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": ".escape-release-m5_6d9mv",
+    "mode": 16832,
+    "mtime": 1794497668,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": ".escape-release-qzh7zmb7",
+    "mode": 16832,
+    "mtime": 1794420747,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": ".escape-release-t6kwp1_t",
+    "mode": 16832,
+    "mtime": 1794573451,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": ".escape-release-xngt_r7q",
+    "mode": 16832,
+    "mtime": 1794421699,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": ".escape-release-xv1741ze",
+    "mode": 16832,
+    "mtime": 1794422934,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "__MACOSX",
+    "mode": 16893,
+    "mtime": 1793552560,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "auto-pluto",
+    "mode": 16877,
+    "mtime": 1793605680,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "beholdninger",
+    "mode": 16877,
+    "mtime": 1793557783,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "collection-hierarki",
+    "mode": 16877,
+    "mtime": 1793560458,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "collection-priser",
+    "mode": 16877,
+    "mtime": 1793562493,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "design-collections",
+    "mode": 16877,
+    "mtime": 1793561253,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "dynamisk",
+    "mode": 16877,
+    "mtime": 1793556108,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "escape_app",
+    "mode": 16877,
+    "mtime": 1793600931,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "estimat-design",
+    "mode": 16877,
+    "mtime": 1793616396,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "handelsforslag",
+    "mode": 16877,
+    "mtime": 1793610912,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "hotwatch-engine-fase1-2",
+    "mode": 16877,
+    "mtime": 1793742961,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "invest-codex-escape-development-147",
+    "mode": 16877,
+    "mtime": 1794309177,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "invest-codex-escape-development-148",
+    "mode": 16877,
+    "mtime": 1794309947,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "invest-codex-escape-development-149",
+    "mode": 16877,
+    "mtime": 1794312050,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "invest-codex-escape-development-150",
+    "mode": 16877,
+    "mtime": 1794315912,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "kontanter-collections",
+    "mode": 16877,
+    "mtime": 1793559748,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "kursgraf",
+    "mode": 16877,
+    "mtime": 1793619023,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "kursgraf-rettelse",
+    "mode": 16877,
+    "mtime": 1793620020,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "mcp-callback",
+    "mode": 16877,
+    "mtime": 1793575403,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "mcp-rapporter",
+    "mode": 16877,
+    "mtime": 1793572902,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "mobil-datatid",
+    "mode": 16877,
+    "mtime": 1793604762,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "mobil-ordrer",
+    "mode": 16877,
+    "mtime": 1793565728,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "mobil-traek",
+    "mode": 16877,
+    "mtime": 1793606349,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "ny",
+    "mode": 16877,
+    "mtime": 1793554260,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "nyheder",
+    "mode": 16877,
+    "mtime": 1793567676,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "overblik-brugere",
+    "mode": 16877,
+    "mtime": 1793600931,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "overblik-detaljer",
+    "mode": 16877,
+    "mtime": 1793628891,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "overblik-oprydning",
+    "mode": 16877,
+    "mtime": 1793631559,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "pluto-rettelse",
+    "mode": 16877,
+    "mtime": 1793557028,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "positionsvurderinger",
+    "mode": 16877,
+    "mtime": 1793716049,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "rapport-test",
+    "mode": 16877,
+    "mtime": 1793570020,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "rapport-v2",
+    "mode": 16877,
+    "mtime": 1793578473,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "rapport-validering",
+    "mode": 16877,
+    "mtime": 1793627446,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "release-8ed0e6-yTgAEY",
+    "mode": 16832,
+    "mtime": 1794378060,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "samlet-rettelse",
+    "mode": 16877,
+    "mtime": 1793558883,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "seneste-data",
+    "mode": 16877,
+    "mtime": 1793579950,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "status-design",
+    "mode": 16877,
+    "mtime": 1793581347,
+    "size": "4096",
+    "type": "dir"
+  },
+  {
+    "file": "escape-8ed0e6-manifest.zip",
+    "mode": 33188,
+    "mtime": 1794377642,
+    "size": "491847",
+    "type": "file"
+  },
+  {
+    "file": "invest-codex-design-review-wip-2",
+    "mode": 33188,
+    "mtime": 1793747117,
+    "size": "4748596",
+    "type": "file"
+  },
+  {
+    "file": "invest-codex-escape-development-148.zip",
+    "mode": 33188,
+    "mtime": 1794309918,
+    "size": "5359430",
+    "type": "file"
+  },
+  {
+    "file": "invest-codex-escape-development-149.zip",
+    "mode": 33188,
+    "mtime": 1794312019,
+    "size": "5389323",
+    "type": "file"
+  },
+  {
+    "file": "invest-codex-escape-development-150.zip",
+    "mode": 33188,
+    "mtime": 1794315484,
+    "size": "5393470",
+    "type": "file"
+  }
+]
