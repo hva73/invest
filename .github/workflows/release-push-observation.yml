@@ -1,0 +1,29 @@
+name: Release push observation checks
+on:
+  pull_request:
+    branches: [codex/hotfix-combined-snapshot]
+permissions:
+  contents: read
+jobs:
+  test:
+    if: github.event.pull_request.head.ref == 'codex/release-push-observation'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest tests.test_web_push tests.test_release_approval tests.test_app.Workflow.test_release_approval_requires_owner_session_csrf_and_exact_version
+        env:
+          PYTHONPATH: ".:tools"
+      - run: node --check static/app.js
+      - run: node tests/test_release_push_status.cjs
+      - run: python -m pip install playwright==1.56.0
+      - run: python -m playwright install --with-deps chromium
+      - run: python tests/browser_release_push_observation.py
+        env:
+          PYTHONPATH: ".:tools:tests"
