@@ -1,4 +1,6 @@
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+import threading
 from unittest.mock import Mock, patch
 import eodhd_feeds as feeds
 
@@ -19,6 +21,17 @@ class HistoryEmptyCacheTests(unittest.TestCase):
   self.client._minute_bars_uncached=Mock(side_effect=[{'status':'RATE_LIMIT'},{'status':'NO_DATA'},{'status':'NO_DATA'}])
   self.client.minute_bars('us','AAA');self.client.minute_bars('us','AAA');self.client.minute_bars('us','BBB')
   self.assertEqual(self.client._minute_bars_uncached.call_count,3)
+
+ def test_concurrent_requests_share_empty_result(self):
+  start=threading.Barrier(5)
+  self.client._minute_bars_uncached=Mock(return_value={'status':'NO_DATA','received_at':'original'})
+  def request():
+   start.wait(timeout=2)
+   return self.client.minute_bars('us','AAA')
+  with ThreadPoolExecutor(max_workers=5) as pool:
+   values=list(pool.map(lambda _:request(),range(5)))
+  self.assertEqual(self.client._minute_bars_uncached.call_count,1)
+  self.assertTrue(all(value=={'status':'NO_DATA','received_at':'original'} for value in values))
 
  def test_positive_result_keeps_existing_twenty_second_cache(self):
   self.client._minute_bars_uncached=Mock(return_value={'status':'OK','bars':[]})
