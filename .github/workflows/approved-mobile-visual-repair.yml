@@ -22,6 +22,8 @@ jobs:
       - run: node tests/test_dashboard_data.js
       - run: node tests/test_combined_holdings.js
       - run: node tests/test_sidebar_scope.js
+      - run: node tests/test_admin_diagnostics_ui.cjs
+      - run: node tests/test_diagnostics_live_ui.cjs
       - run: node tests/test_market_daily_stale.cjs
       - run: mkdir -p visual-review
       - run: python tests/browser_daily_parity.py
