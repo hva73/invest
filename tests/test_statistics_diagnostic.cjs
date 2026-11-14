@@ -6,6 +6,11 @@ function container() { return {innerHTML:'',addEventListener(){},querySelectorAl
   let el=container();
   await ui.mount(el,async()=>{const error=new Error('PRIVATE TOKEN');error.details={diagnostic:'BROKER_CATALOG'};throw error;});
   assert(el.innerHTML.includes('(BROKER_CATALOG)'));assert(!el.innerHTML.includes('PRIVATE TOKEN'));
+  for (const code of ['CATALOG_BUDGET','CATALOG_DATABASE','CATALOG_DENIED','CATALOG_RATE_LIMIT','CATALOG_HTTP','CATALOG_TIMEOUT','CATALOG_NETWORK','CATALOG_RESPONSE']) {
+    el=container();
+    await ui.mount(el,async()=>{const error=new Error('PRIVATE TOKEN');error.details={diagnostic:code};throw error;});
+    assert(el.innerHTML.includes('('+code+')'));assert(!el.innerHTML.includes('PRIVATE TOKEN'));
+  }
   el=container();
   await ui.mount(el,async()=>{const error=new Error('SECRET');error.details={diagnostic:'<script>SECRET</script>'};throw error;});
   assert(el.innerHTML.includes('(REQUEST)'));assert(!el.innerHTML.includes('SECRET'));
