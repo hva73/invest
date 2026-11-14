@@ -82,6 +82,7 @@ def main():
         payload = request('execute/Fileman/' + operation, params, limit)
         result = payload.get('result', payload)
         if result.get('status') not in (1, '1'):
+            print(json.dumps({'status': 'file_api_error', 'operation': operation, 'errors': str(result.get('errors', []))[:500].replace(token, '[redacted]')}), flush=True)
             raise ValueError('file_api_rejected')
         return result.get('data')
     def listing(path):
