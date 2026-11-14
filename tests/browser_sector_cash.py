@@ -25,10 +25,10 @@ payload = {
     'snapshot_at':older,'value':cash(900),'positions_status':'available','cash_status':'available','cash_accounts':[cash(100)]}],
   'positions':[
    {'asset_id':'direct','ticker':'TESTA','name':'Fiktiv aktie A','portfolio_id':1,
-    'snapshot_at':stamp,'value':cash(1200),'unrealized':cash(0),'cost_basis':cash(1200),
+    'snapshot_at':stamp,'value':cash(1200),'unrealized':cash(120),'cost_basis':cash(1080),
     'sector_intelligence':{'sector':'Teknologi'}},
    {'asset_id':'child','ticker':'TESTB','name':'Fiktiv aktie B','portfolio_id':2,
-    'snapshot_at':older,'value':cash(800),'unrealized':cash(0),'cost_basis':cash(800),
+    'snapshot_at':older,'value':cash(800),'unrealized':cash(-80),'cost_basis':cash(880),
     'sector_intelligence':{'sector':'Sundhed'}}],
   'snapshot_at':stamp,'warnings':[], 'portfolio_value_history':{}},
  'markets':[],'history':[],'regions':['USA','Europa','Asien','Globalt'],
@@ -48,6 +48,12 @@ try:
    page.locator('nav [data-view=sectors]').click()
    expect(page.locator('.si-donut strong')).to_contain_text('2.600,00')
    expect(page.locator('.si-donut')).to_contain_text('2 positioner')
+   if width >= 901:
+    zero = page.locator('.si-results .si-zero-line').bounding_box()['y']
+    up = page.locator('.si-results .si-bar.up').bounding_box()
+    down = page.locator('.si-results .si-bar.down').bounding_box()
+    assert abs((up['y']+up['height'])-zero)<=2,(width,up,zero)
+    assert abs(down['y']-zero)<=2,(width,down,zero)
    expect(page.locator('.si-allocation')).to_contain_text('Fordelingens datagrundlag: ældste')
    expect(page.locator('.sector-row').filter(has_text='Kontantbeholdning')).to_contain_text('600,00')
    page.screenshot(path=str(screens / f'sector-cash-{width}.png'),full_page=True)
