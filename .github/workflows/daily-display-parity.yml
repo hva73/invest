@@ -5,7 +5,7 @@ permissions:
   contents: read
 jobs:
   parity:
-    if: github.event.pull_request.head.ref == 'codex/desktop-daily-data-143'
+    if: contains(fromJSON('["codex/desktop-daily-data-143","codex/data-and-notification-prep"]'), github.event.pull_request.head.ref)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
