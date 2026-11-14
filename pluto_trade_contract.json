@@ -359,7 +359,10 @@
         "portfolioId": {
           "type": "string"
         }
-      }
+      },
+      "required": [
+        "portfolioId"
+      ]
     }
   },
   "list_orders": {
