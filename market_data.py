@@ -77,7 +77,7 @@ def normalized(raw,asset_id,now=None,expected_period='ONE_WEEK'):
             span=(upper-lower).total_seconds()
             end_age=(now-upper).total_seconds()
             series=result['series']
-            covered=(min_days*86400<=span<=(min_days+45)*86400
+            covered=(min_days*86400<=span<=(32 if expected_period=='ONE_MONTH' else 371)*86400
                      and 0<=end_age<=72*3600 and len(series)>=2
                      and series[0]['epoch']-lower.timestamp()<=7*86400
                      and upper.timestamp()-series[-1]['epoch']<=4*86400)
