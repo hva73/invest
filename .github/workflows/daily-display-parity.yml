@@ -10,6 +10,7 @@ jobs:
     timeout-minutes: 15
     env:
       PYTHONPATH: .:tests
+      ESCAPE_SCREENSHOTS: visual-review/sector
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
@@ -18,13 +19,19 @@ jobs:
       - run: python -m pip install -r requirements.txt playwright==1.56.0
       - run: python -m playwright install --with-deps chromium
       - run: node tests/test_dashboard_data.js
+      - run: node tests/test_market_daily_stale.cjs
       - run: python tests/browser_daily_parity.py
       - run: python tests/browser_desktop_experience.py
+      - run: python tests/browser_position_entry_regression.py
+      - run: python tests/browser_sector_journey.py
 
       - name: Save comparison screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: daily-parity-screens
-          path: daily-parity-screens/*.png
+          path: |
+            daily-parity-screens/*.png
+            visual-review/**/*.png
+            visual-review/*.png
           if-no-files-found: warn
