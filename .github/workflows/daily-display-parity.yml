@@ -20,3 +20,11 @@ jobs:
       - run: node tests/test_dashboard_data.js
       - run: python tests/browser_daily_parity.py
       - run: python tests/browser_desktop_experience.py
+
+      - name: Save synthetic screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: daily-parity-screens
+          path: daily-parity-screens/*.png
+          if-no-files-found: warn
