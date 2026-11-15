@@ -28,13 +28,13 @@ def main():
      else: result=page.locator('.dash-row .dash-day-desktop').first
      expect(result).to_be_visible();expect(result).to_contain_text('+2,00 %' if visible else '—')
      if visible:
-      page.evaluate("""() => {const n=document.createElement('div');n.textContent='FIKTIVE TESTDATA';Object.assign(n.style,{position:'fixed',top:'0',left:'0',zIndex:'99999',background:'#b6eddf',color:'#102c29',fontWeight:'bold',padding:'6px 12px'});document.body.append(n)}""")
-      Path('daily-parity-screens').mkdir(exist_ok=True);page.screenshot(path=f'daily-parity-screens/oversigt-{width}.png',full_page=True);page.locator('.mobile-holding' if width==390 else '.dash-row').first.screenshot(path=f'daily-parity-screens/beholdningskort-{width}.png')
+      page.evaluate("""() => {const n=document.createElement('div');n.textContent='FIKTIVE TESTDATA';Object.assign(n.style,{position:'fixed',top:'4px',right:'4px',left:'auto',zIndex:'99999',background:'#b6eddf',color:'#102c29',fontWeight:'bold',fontSize:'9px',padding:'3px 5px'});document.body.append(n)}""")
+      Path('daily-parity-screens').mkdir(exist_ok=True);page.evaluate('window.scrollTo(0,0)');page.screenshot(path=f'daily-parity-screens/oversigt-{width}.png',full_page=True);page.locator('.mobile-holding' if width==390 else '.dash-row').first.screenshot(path=f'daily-parity-screens/beholdningskort-{width}.png')
       if width==390:
        # A second, explicitly healthy synthetic response shows the approved no-alert overview.
        # Keep the original screenshot above to test the genuinely incomplete-source UI.
        page.evaluate("""() => { state.dashboard.warnings=[]; state.dashboard.accounts=(state.dashboard.accounts||[]).map(a=>({...a,failed:false})); document.querySelector('#content').innerHTML=window.DashboardUI.render(state); }""")
-       page.screenshot(path='daily-parity-screens/oversigt-healthy-390.png',full_page=True);
+       page.evaluate('window.scrollTo(0,0)');page.screenshot(path='daily-parity-screens/oversigt-healthy-390.png',full_page=True);
       if width==390:
        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), 'Mobilt overblik har vandret overløb'
        card=page.locator('.mobile-holding').first.bounding_box()
