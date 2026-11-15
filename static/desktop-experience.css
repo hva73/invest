@@ -440,3 +440,8 @@
  #dashboard-detail .position-mobile-facts{grid-template-columns:.92fr 1fr 1.08fr}
  #dashboard-detail .position-mobile-facts>div:last-child dd>span[class^="signed-"]{display:inline-block;white-space:nowrap;overflow-wrap:normal;word-break:normal;font-size:12px}
 }
+
+/* Proposal 4: keep the three approved KPI headings whole on narrow phones. */
+@media(max-width:700px){
+ #dashboard-detail .position-mobile-facts dt{font-size:clamp(8px,2.5vw,10px);white-space:nowrap}
+}
