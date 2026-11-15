@@ -258,7 +258,7 @@ def _project(direct_orders, collection_orders=(), signal_order_sides=None):
                         'currency': sell['currency'], 'quantity': format(sell['quantity'], 'f'),
                         'sell_price': format(sell['price'], 'f'),
                         'sale_proceeds': format(sell['quantity'] * sell['price'], 'f'),
-                        'buy_origin': 'unknown', 'sell_origin': 'unknown'})
+                        'buy_origin': 'unknown', 'sell_origin': sell.get('origin', 'unknown')})
             continue
         lots = deque(); unsafe = False
         for row in rows:
