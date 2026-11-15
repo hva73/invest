@@ -18,6 +18,8 @@ class BTCMarketSessionTest(unittest.TestCase):
   for change in ({'exchange_open':False},{'exchange':'US'},{'status':'ERROR'},{'received_at':(self.now-timedelta(seconds=121)).isoformat()},{'received_at':(self.now+timedelta(seconds=1)).isoformat()},{'calendar':None}):
    with self.subTest(change=change):self.assertIsNone(crypto_session(dict(self.schedule,**change),self.now.isoformat(),self.now,120))
   self.assertIsNone(crypto_session(self.schedule,(self.now-timedelta(seconds=121)).isoformat(),self.now,120))
+  close=self.now.replace(hour=23,minute=59);last=close-timedelta(seconds=30)
+  self.assertIsNone(crypto_session(dict(self.schedule,received_at=last.isoformat()),last.isoformat(),close,120))
 
  def test_btc_rest_uses_separate_cc_evidence_and_preserves_unknowns(self):
   req=request();req.update(provider='eodhd',provider_symbol='BTC-USD.CC',asset_id=BTC_PLUTO_ASSET_ID,ticker='BTC',quote_currency='USD')
