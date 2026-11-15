@@ -373,3 +373,21 @@
  .signal-overview:has(.signal-mobile-buy) .signal-action-bar>button.primary{background:#64edb3;color:#042321;border-color:#64edb3}
  .signal-overview:has(.signal-mobile-sell) .signal-action-bar>button.primary{background:#b83752;color:#fff;border-color:#b83752}
 }
+
+/* Mobile KØB/SALG: restore the approved 14 Nov readable graph, labels and balance.
+   Only the existing signal screen; no new controls, text or trading changes. */
+@media(max-width:700px){
+ .signal-overview-dialog .signal-overview{gap:10px}
+ .signal-overview .signal-mobile-nav>strong{font-size:21px;line-height:1.15}
+ .signal-overview .signal-mobile-instrument>strong{font-size:25px}
+ .signal-overview .signal-mobile-instrument>small{font-size:13px;line-height:1.4}
+ .signal-overview .market-period-buttons button{font-size:13px}
+ .signal-overview .market-period-buttons button[aria-pressed=true]{background:#64edb3;color:#062721;font-weight:700}
+ .signal-overview .market-plot svg{height:clamp(168px,46vw,215px)}
+ .signal-overview .market-peak-label,.signal-overview .market-entry-label{font-size:12px}
+ .signal-overview .signal-mobile-metrics{padding:12px 0}
+ .signal-overview .signal-mobile-metrics small{font-size:11px;line-height:1.3}
+ .signal-overview .signal-mobile-metrics strong{font-size:14px;line-height:1.35}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy small{font-size:10px}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy strong{font-size:13px}
+}
