@@ -32,6 +32,9 @@ def main():
      expect(page.locator('[data-position-live-price]')).not_to_have_text('—')
      expect(page.locator('#dashboard-detail .position-mobile-back')).to_be_visible()
      expect(page.locator('#dashboard-detail .position-mobile-name')).to_have_text('Position')
+     percent=page.locator('#dashboard-detail .position-mobile-facts>div:last-child dd>span[class^="signed-"]').last
+     expect(percent).to_be_visible()
+     assert percent.evaluate('(e)=>getComputedStyle(e).whiteSpace')=='nowrap'
     graph.locator('[data-market-period=week]').click();expect(graph.locator('.market-line')).to_be_visible();expect(graph.locator('.market-signal-area')).to_have_count(1);assert graph.locator('.market-line').get_attribute('d').count('L')==81
     entry=graph.locator('.market-marker-entry');expect(entry).to_have_count(1);assert entry.get_attribute('y1')==entry.get_attribute('y2');assert entry.evaluate("e=>getComputedStyle(e).strokeDasharray") not in ('none','0px')
     expect(graph.locator('.market-entry-label')).to_contain_text('Gns. købskurs');expect(graph.locator('.market-entry-label')).to_contain_text('18,5');expect(graph.locator('.market-peak-label')).to_contain_text('Top 20,081 USD');expect(graph.locator('.market-about')).to_have_count(0);expect(graph.locator('.market-session')).not_to_contain_text('punkter');expect(graph.locator('.market-fetch')).to_have_text(re.compile(r'^Opdateret (\d{2}\.\d{2}|ukendt)$'));expect(graph).not_to_contain_text('Kurstid');expect(graph).not_to_contain_text('Hentet');controls=graph.locator('.market-controls');buttons=controls.locator('[data-market-period]');refresh=controls.locator('[data-market-refresh]');assert abs(buttons.first.bounding_box()['y']-refresh.bounding_box()['y'])<5;assert entry.evaluate("e=>getComputedStyle(e).vectorEffect")=='non-scaling-stroke'
