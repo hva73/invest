@@ -423,6 +423,28 @@ def dispatch_one(connect,now=None,sender=None):
     return True
 
 
+def notify_manual_test_sell(connect,uid,ticker,sender=None):
+    """User-initiated TEST notification. No HOT WATCH event or broker action."""
+    if ticker!='CABA':raise ValueError('Ugyldigt testsignal')
+    import trade_service
+    with connect() as c:
+        owner=c.execute("SELECT 1 FROM users WHERE id=? AND username='owner' AND role='admin' AND active=1",(uid,)).fetchone()
+        test=trade_service.active_test_signal(c,uid) if owner else None
+        rows=c.execute("SELECT payload FROM push_devices WHERE user_id=? AND sell=1",(uid,)).fetchall() if test and test['side']=='SELL' and test['ticker']==ticker else []
+    if not owner or not test or test['ticker']!=ticker:raise ValueError('Testsig­n­alet er ikke aktivt')
+    sender=sender or _send;sent=failed=0
+    for row in rows:
+        try:
+            sender(unseal(uid,row['payload']),
+                   {'title':'TEST · CABA · SALG','body':'Fiktivt testsignal. Åbn ESCAPE og gennemgå salgsforløbet. Ingen ordre er sendt.',
+                    'kind':'manual_sell_test','tag':'escape-test-sell'},
+                   'escape-test-sell')
+            sent+=1
+        except Exception:
+            failed+=1
+    return {'sent':sent,'failed':failed}
+
+
 def send_test(connect,uid,endpoint,sender=None):
     if not isinstance(endpoint,str) or len(endpoint)>2048:raise ValueError('Ugyldig notifikationsadresse.')
     with connect() as c:row=c.execute('SELECT payload FROM push_devices WHERE user_id=? AND endpoint_hash=?',(uid,endpoint_hash(endpoint))).fetchone()
