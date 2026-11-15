@@ -24,7 +24,7 @@ def init(c):
     if 'side' not in {r[1] for r in c.execute('PRAGMA table_info(manual_test_signals)')}:c.execute("ALTER TABLE manual_test_signals ADD COLUMN side TEXT NOT NULL DEFAULT 'BUY'")
 
 def active_test_signal(c,user_id,now=None):
-    row=c.execute("SELECT t.portfolio_id,t.ticker,t.side,t.expires FROM manual_test_signals t JOIN portfolios p ON p.id=t.portfolio_id AND p.user_id=t.user_id WHERE t.user_id=? AND t.expires>? AND p.active=1 AND p.source='pluto' AND p.kind='portfolio'",(user_id,time.time() if now is None else now)).fetchone()
+    row=c.execute("SELECT t.portfolio_id,t.ticker,t.side,t.amount,t.expires FROM manual_test_signals t JOIN portfolios p ON p.id=t.portfolio_id AND p.user_id=t.user_id WHERE t.user_id=? AND t.expires>? AND p.active=1 AND p.source='pluto' AND p.kind='portfolio'",(user_id,time.time() if now is None else now)).fetchone()
     return dict(row) if row else None
 
 
