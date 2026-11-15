@@ -338,7 +338,7 @@ def _project(direct_orders, collection_orders=(), signal_order_sides=None, order
             'note': 'Kun observerede handler. Historikkens dækning, gebyrer og historisk valutakurs er ikke bekræftet. Direkte handler er foreløbige kursforskelle; oprettelsestid er ikke fyldtid.'}
 
 
-def display_currency(connect, output, now=None):
+def display_currency(connect, output, now=None, user_id=None):
     """DKK display estimate from the same cached reference sources as sectors.
 
     Original executions stay untouched. This is not historical settlement FX.
@@ -380,6 +380,30 @@ def display_currency(connect, output, now=None):
                 if code not in rates and code in needed and status == 'OK' and rate and 0 <= age <= 7*86400:
                     rates[code] = {'rate':format(rate,'f'), 'source':'EODHD', 'as_of':at}
         except sqlite3.OperationalError: pass
+        # Sector Intelligence also derives a display FX estimate from fresh
+        # pairs of original/DKK position values in the owner's Pluto snapshot.
+        if user_id is not None:
+            candidates = defaultdict(list)
+            try:
+                snapshots = db.execute('SELECT observed,payload FROM portfolio_snapshots WHERE user_id=? AND last_error IS NULL',(user_id,)).fetchall()
+                for at, payload in snapshots:
+                    try:
+                        age = (now - datetime.fromisoformat(at.replace('Z','+00:00'))).total_seconds()
+                        snapshot = json.loads(payload)
+                        if not 0 <= age <= 86400 or snapshot.get('positions_complete') is not True: continue
+                        for position in snapshot.get('positions',[]):
+                            foreign=position.get('value') or {}; local=position.get('value_in_portfolio_currency') or {}
+                            code=foreign.get('currency'); a=positive(foreign.get('amount')); b=positive(local.get('amount'))
+                            if code in needed and code not in rates and local.get('currency')=='DKK' and a and b:
+                                candidates[code].append((b/a,at))
+                    except (ValueError,TypeError,AttributeError): continue
+                for code, values in candidates.items():
+                    values.sort()
+                    if values[-1][0]/values[0][0] > Decimal('1.05'): continue
+                    mid=len(values)//2
+                    rate=values[mid][0] if len(values)%2 else (values[mid-1][0]+values[mid][0])/2
+                    rates[code]={'rate':format(rate,'f'),'source':'Pluto-estimat','as_of':max(at for _,at in values)}
+            except sqlite3.OperationalError: pass
     for portfolio in output.get('portfolios', []):
         for item in portfolio.get('items', []) + portfolio.get('unresolved_sales', []):
             info = rates.get(item.get('currency'))
@@ -470,5 +494,5 @@ def read(connect, user_id, client_factory=None):
             if stage not in error_codes: error_codes.append(stage)
             errors.append('En historik kunne ikke læses; eventuelle tal dækker ikke alle depoter.')
     return display_currency(connect, {'portfolios':output,'errors':errors,'error_codes':error_codes,'observed':datetime.now(timezone.utc).isoformat(),
-            'history_complete':False})
+            'history_complete':False}, user_id=user_id)
 
