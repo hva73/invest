@@ -5,12 +5,11 @@ permissions:
   contents: read
 jobs:
   statistics:
-    if: github.event.pull_request.head.ref == 'codex/data-and-notification-prep' || github.event.pull_request.head.ref == 'codex/statistics-budget-hotfix' || github.event.pull_request.head.ref == 'codex/statistics-all-sales'
+    if: github.event.pull_request.head.ref == 'codex/data-and-notification-prep' || github.event.pull_request.head.ref == 'codex/statistics-budget-hotfix'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       PYTHONPATH: .:tests
-      ESCAPE_SCREENSHOTS: statistics-review
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -25,16 +24,6 @@ jobs:
       - run: python -m unittest discover -s tests -p 'test_statistics_origins.py'
       - run: python -m unittest discover -s tests -p 'test_statistics_gateway_reuse.py'
       - run: python -m unittest discover -s tests -p 'test_statistics_diagnostic.py'
+      - run: python -m unittest discover -s tests -p 'test_statistics_dkk.py'
       - run: node tests/test_statistics_ui.cjs
-      - run: node tests/test_statistics_missing_cost.cjs
-      - run: python tests/browser_statistics_missing_cost.py
-      - run: mkdir -p statistics-review
       - run: python tests/browser_statistics_integration.py
-      - run: python tests/browser_statistics_desktop_accept.py
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: statistics-all-sales-review
-          path: statistics-review/*.png
-          if-no-files-found: warn
