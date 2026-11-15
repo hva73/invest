@@ -40,6 +40,16 @@ try:
   assert counts['stats']==4,counts
   pending[0].fulfill(json={'synthetic_changed':True});page.wait_for_timeout(300)
   expect(page.locator('#statistics-title')).to_be_visible();assert counts['stats']==4,counts
+  page.unroute('**/api/reports/desk')
+  page.locator('nav [data-view=overview]').click();expect(page.locator('.dashboard-v1')).to_be_visible()
+  pending_refresh=[]
+  page.route('**/api/automation',lambda route:pending_refresh.append(route))
+  page.evaluate('() => { refreshCurrent({automatic:true}); }')
+  page.wait_for_timeout(300);assert len(pending_refresh)==1,'automatic refresh did not start'
+  page.locator('nav [data-view=statistics]').click();expect(page.locator('#statistics-title')).to_be_visible()
+  assert counts['stats']==5,counts
+  pending_refresh[0].fulfill(json={});page.wait_for_timeout(300)
+  expect(page.locator('#statistics-title')).to_be_visible();assert counts['stats']==5,counts
   browser.close()
  print('PASS: background refresh, filters and explicit reload')
 finally:server.shutdown();server.server_close();case.tearDown()
