@@ -32,6 +32,7 @@ try:
    page.goto(f'http://127.0.0.1:{server.server_port}/');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click()
    if width<=900:page.locator('#mobile-more').click()
    page.locator('nav [data-view=statistics]').click();expect(page.locator('#statistics-title')).to_have_text('Hvordan står det til?')
+   page.locator('[data-statistics-portfolio]').select_option('1')
    page.locator('[data-statistics-currency]').select_option('DKK');view=page.locator('.statistics-view')
    expect(view).to_contain_text('33,33');expect(view).to_contain_text('8,00');expect(view).to_contain_text('4,00');expect(view).to_contain_text('foreløbig',ignore_case=True);expect(view).to_contain_text('ufuldstændig',ignore_case=True)
    assert page.locator('.statistics-trade').count()==0

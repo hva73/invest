@@ -41,6 +41,22 @@ try:
    if screenshots:
     page.evaluate("document.body.insertAdjacentHTML('afterbegin','<div style=\"background:#b37400;color:white;padding:6px;text-align:center\">DESIGNFORSLAG · FIKTIVE DATA</div>')")
     page.screenshot(path=str(Path(screenshots)/f'statistik-integreret-fiktiv-{width}.png'),full_page=True)
+   # Default aggregate view must reveal other currencies and missing-cost sales.
+   previous=sample['portfolios']
+   sample['portfolios']=[previous[0],{'portfolio_id':2,'name':'Fiktiv Collection','items':[{'ticker':'EURO','name':'Fiktiv EUR','currency':'EUR','gross':'3','gross_percent':'5','quantity':'1','sell_origin':'signal'}], 'unresolved_sales':[{'ticker':'MISSING','name':'Fiktivt salg uden kostpris','currency':'USD','quantity':'1','sell_price':'4','sale_proceeds':'4','sell_origin':'signal'}]}]
+   page.locator('[data-statistics-reload]').click()
+   expect(page.locator('.statistics-total-sales')).to_contain_text('4 afsluttede salg')
+   expect(page.locator('[data-statistics-portfolio]')).to_have_value('all')
+   expect(page.locator('[data-statistics-currency]')).to_have_value('all')
+   expect(page.locator('.statistics-currency')).to_have_count(2)
+   expect(page.locator('.statistics-view')).to_contain_text('MISSING')
+   usd=page.locator('.statistics-currency').filter(has=page.get_by_role('heading',name='USD',exact=True))
+   usd.locator('[data-statistics-group=all]').click()
+   expect(page.locator('.statistics-view')).to_contain_text('Køb: Ikke afklaret')
+   expect(page.locator('.statistics-view')).to_contain_text('Hvem stod bag salgene?')
+   assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1'),width
+   if screenshots:page.screenshot(path=str(Path(screenshots)/f'statistik-alle-depoter-{width}.png'),full_page=True)
+   sample['portfolios']=previous
    page.close()
   browser.close()
  print('PASS: statistics navigation and synthetic content at 320/390/768/1280')

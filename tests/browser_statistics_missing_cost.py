@@ -14,7 +14,7 @@ with sync_playwright() as playwright:
         }))''')
         assert page.get_by_text('Salg uden afklaret kostpris').is_visible()
         assert page.locator('select[data-statistics-currency]').input_value() == 'USD'
-        assert page.get_by_text('Resultat ikke afklaret').is_visible()
+        assert page.locator('[data-statistics-open]').get_by_text('Resultat ikke afklaret').is_visible()
         assert page.get_by_text('SAMLET RESULTAT AF SALG').count() == 0
         page.locator('[data-statistics-open]').click()
         dialog=page.get_by_role('dialog',name='Detaljer for Fiktiv aktie')
