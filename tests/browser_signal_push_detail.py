@@ -75,7 +75,30 @@ def main():
    expect(d.locator('[data-signal-year]')).to_have_text('↑ +18,36 %')
    expect(d.locator('.signal-why')).not_to_have_attribute('open','')
    d.locator('.signal-why summary').click();expect(d.locator('.signal-why p')).to_be_visible()
+   expect(d.locator('.signal-why p')).to_contain_text('Årsag: Syntetisk exit')
+   expect(d.locator('.signal-why p')).to_contain_text('Målinger: ingen verificerede signalmålinger')
+   expect(d.locator('.signal-why p')).to_contain_text('Datastatus: Aktivt signal')
    d.locator('.signal-why summary').click()
+   session['last_action_signal']['reason']='TRAILING_EXIT'
+   session['latest_calculation'].update(signal='SELL',data_timestamp=stamp,
+      human_readable_explanation='Kursen faldt fra den målte top.',
+      supporting_metrics={'return_window_pct':'-3.45','relative_volume':'2.1'})
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')")
+   d.locator('.signal-why summary').click()
+   expect(d.locator('.signal-why p')).to_contain_text('Årsag: Kursen faldt fra den målte top.')
+   expect(d.locator('.signal-why p')).to_contain_text('Kursændring i strategivinduet: -3,45 %')
+   expect(d.locator('.signal-why p')).to_contain_text('Relativ volumen: 2,1×')
+   d.locator('.signal-why summary').click()
+   session['data_stale']=True
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')")
+   d.locator('.signal-why summary').click()
+   expect(d.locator('.signal-why p')).to_contain_text('Kursdata er for gamle')
+   expect(d.locator('.signal-why p')).not_to_contain_text('Relativ volumen')
+   d.locator('.signal-why summary').click()
+   session['data_stale']=False
+   session['last_action_signal']['reason']='Syntetisk exit'
+   session['latest_calculation']={'reason_codes':['EXIT_RULES','TRAILING_EXIT']}
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')")
    assert page.evaluate("getComputedStyle(document.documentElement).overflowY")=='hidden'
    background=page.evaluate('window.scrollY');page.mouse.move(2,2);page.mouse.wheel(0,900);page.wait_for_timeout(150);assert page.evaluate('window.scrollY')==background
    shot=os.environ.get('ESCAPE_SCREENSHOTS');
