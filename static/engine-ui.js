@@ -214,7 +214,7 @@ window.EngineUI=(()=>{
   if(matches.length!==1)throw Error('Beholdningen er ikke entydigt bekræftet. Opdatér Pluto-data.');
   const holding=matches[0],entry=holding.average_entry;
   const chart=window.MarketUI.slot({
-   holding_portfolio_id:holding.portfolio_id,holding_asset_id:holding.asset_id,is_test:false,entry_scale:true,
+   report_id:'',holding_portfolio_id:holding.portfolio_id,holding_asset_id:holding.asset_id,is_test:false,entry_scale:true,
    markers:entry?.amount&&entry?.currency?[{kind:'entry',value:entry.amount,currency:entry.currency}]:[]
   });
   const body=`<section class="signal-overview">
