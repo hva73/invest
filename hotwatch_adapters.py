@@ -379,7 +379,8 @@ def crypto_session(schedule,event_time,now,max_age_s):
   if not 0<=(now-received).total_seconds()<=max_age_s or not 0<=(now-at).total_seconds()<=max_age_s:return None
   zone=ZoneInfo(schedule['timezone']);local=at.astimezone(zone);calendar=schedule['calendar']
   opening=datetime.strptime(calendar['open'],'%H:%M:%S').time();closing=datetime.strptime(calendar['close'],'%H:%M:%S').time()
-  if opening>=closing or received.astimezone(zone).date()!=local.date() or local.strftime('%a') not in calendar['working_days'] or local.date().isoformat() in calendar['excluded_dates'] or not opening<=local.time()<closing:return None
+  received_local=received.astimezone(zone);now_local=now.astimezone(zone)
+  if opening>=closing or received_local.date()!=local.date() or now_local.date()!=local.date() or local.strftime('%a') not in calendar['working_days'] or local.date().isoformat() in calendar['excluded_dates'] or not all(opening<=v.time()<closing for v in (local,received_local,now_local)):return None
   return {'market_status':'REGULAR','session_key':local.date().isoformat()+':REGULAR','status_at':received.isoformat(),'status_feed':'eodhd_cc_exchange_details'}
  except (KeyError,ValueError,TypeError,AttributeError,ZoneInfoNotFoundError):return None
 
