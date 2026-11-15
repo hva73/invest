@@ -1,0 +1,19 @@
+name: BTC session evidence regression
+on:
+  pull_request:
+    branches: [codex/btc-market-installed-base]
+permissions:
+  contents: read
+jobs:
+  btc-session:
+    if: github.event.pull_request.head.ref == 'codex/btc-market-evidence'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - run: PYTHONPATH=.:tests python -m unittest test_btc_market_session test_eodhd_feeds test_hotwatch_engine test_hotwatch_holdings_auto test_hotwatch_agreement test_hotwatch_bar_evidence test_hotwatch_warmup test_signal_readiness
