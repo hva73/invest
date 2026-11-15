@@ -22,7 +22,7 @@ try:
   page.locator('nav [data-view=statistics]').click();expect(page.locator('#statistics-title')).to_be_visible()
   page.locator('[data-statistics-currency]').select_option('USD');assert counts['stats']==1
   page.locator('[data-statistics-portfolio]').select_option('2');assert counts['stats']==1
-  page.locator('[data-statistics-portfolio]').select_option('1');page.locator('[data-statistics-currency]').select_option('USD');page.locator('h1').click()
+  page.locator('[data-statistics-portfolio]').select_option('1');page.locator('[data-statistics-currency]').select_option('USD');page.evaluate('document.activeElement.blur()')
   page.evaluate('Promise.all(window.testTimers.map(fn=>fn()))');page.wait_for_timeout(300)
   assert counts['stats']==1,counts
   expect(page.locator('[data-statistics-currency]')).to_have_value('USD')
