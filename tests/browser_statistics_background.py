@@ -28,6 +28,9 @@ try:
   expect(page.locator('[data-statistics-currency]')).to_have_value('USD')
   page.locator('[data-statistics-reload]').click();expect(page.locator('#statistics-title')).to_be_visible()
   assert counts['stats']==2,counts
+  page.locator('nav [data-view=overview]').click();expect(page.locator('.dashboard-v1')).to_be_visible()
+  page.locator('nav [data-view=statistics]').click();expect(page.locator('#statistics-title')).to_be_visible()
+  assert counts['stats']==3,counts
   browser.close()
  print('PASS: background refresh, filters and explicit reload')
 finally:server.shutdown();server.server_close();case.tearDown()
