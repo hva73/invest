@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   backup-inventory:
-    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'diagnostic/cpanel-quota-backups-20261115'
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'diagnostic/recover-retention-20261115'
     runs-on: ubuntu-latest
     environment: ESCAPE_NORDICWAY_DEPLOY
     timeout-minutes: 4
