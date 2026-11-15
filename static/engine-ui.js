@@ -15,6 +15,32 @@ window.EngineUI=(()=>{
  Object.assign(errors,{EODHD_INSTRUMENT_UNVERIFIED:'Kurskilden er endnu ikke matchet sikkert med Pluto-instrumentet.',EODHD_INSTRUMENT_REVALIDATION_REQUIRED:'Kurskildens instrumentmatch skal kontrolleres igen.',WAITING_FOR_NEW_VERIFIED_QUOTE:'Afventer en ny kurs efter kontrol af instrumentet.',CXE_REFERENCE_UNAVAILABLE:'Cboes instrumentreference kunne ikke hentes.',CXE_REFERENCE_STALE:'Cboes instrumentreference er for gammel til at bekræfte matchet.',CXE_REFERENCE_INVALID:'Cboes instrumentreference kunne ikke valideres.',EODHD_US_REFERENCE_UNAVAILABLE:'EODHDs USA-instrumentliste kunne ikke hentes.',EODHD_US_REFERENCE_INVALID:'EODHDs USA-instrumentliste kunne ikke valideres.'});
  errors.EXTENDED_HOURS_EXECUTION_UNCONFIRMED='Handelsmulighed uden for ordinær åbningstid er ikke bekræftet.';
  const reason=c=>{const m=typeof c==='string'&&c.match(/^EODHD_SEARCH_HTTP_(\d{3})$/);return m?'EODHD-symbolsøgning svarede HTTP '+m[1]:c==='EODHD_SEARCH_NETWORK_OR_RESPONSE_ERROR'?'EODHD-symbolsøgning kunne ikke forbindes eller svaret kunne ikke læses':errors[c]||c};
+ // Explain documented signal evidence, not mere price direction or a guessed cause.
+ function signalWhy(s){
+  const c=s.latest_calculation||{},a=s.last_action_signal||{},d=s.data_status||{},metrics=c.supporting_metrics||{};
+  const current=Boolean(c.data_timestamp&&c.data_timestamp===s.last_data_at&&c.signal===s.signal);
+  const meaningful=value=>typeof value==='string'&&value.trim()&&!/^[A-Z][A-Z0-9_ -]*$/.test(value.trim())?value.trim():null;
+  const eventCurrent=a.state==='ACTIVE'&&({BUY:'BUY_SIGNAL',SELL:'SELL_SIGNAL',REDUCE:'REDUCE_SIGNAL'})[s.signal]===a.event_type;
+  const cause=(eventCurrent?meaningful(a.reason):null)||(current?meaningful(c.human_readable_explanation):null);
+  const codes=eventCurrent?a.current_reason_codes:(current?c.reason_codes:[]);
+  const known=(Array.isArray(codes)?codes:[]).filter(x=>typeof x==='string'&&Object.prototype.hasOwnProperty.call(errors,x)&&!['NO_TRIGGER','ENTRY_RULES','EXIT_RULES'].includes(x));
+  const trigger=cause||known.map(x=>errors[x]).slice(0,2).join(' ')||'Motoren har ikke dokumenteret den udløsende regel.';
+  const valid=v=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v));
+  const fmt=v=>new Intl.NumberFormat('da-DK',{maximumFractionDigits:2}).format(Number(v));
+  const measures=[];
+  if(current&&s.data_stale===false){
+   for(const [key,label,unit] of [['return_window_pct','Kursændring i strategivinduet',' %'],['relative_volume','Relativ volumen','×'],['spread_pct','Spread',' %'],['distance_high_pct','Afstand til målt top',' %']]){
+    if(valid(metrics[key]))measures.push(label+': '+fmt(metrics[key])+unit);
+    if(measures.length===2)break;
+   }
+  }
+  const quality=s.data_stale===true||d.price_status==='STALE'||s.display_freshness?.state==='stale'
+    ?'Kursdata er for gamle til at bekræfte et aktuelt signal.'
+    :d.identity_verification==='unverified'?'Instrumentidentiteten er ikke verificeret.'
+    :d.price_status==='FRESH'&&s.status==='ACTIVE'&&eventCurrent?'Aktivt signal; handel kræver fortsat de øvrige kontroller.'
+    :'Aktualitet eller datagrundlag er ikke fuldt bekræftet.';
+  return 'Årsag: '+trigger+(measures.length?' Målinger: '+measures.join(' · ')+'.':' Målinger: ingen verificerede signalmålinger til visning.')+' Datastatus: '+quality;
+ }
  function decisionExplanation(s){
   const d=s.latest_calculation?.decision_diagnostics;if(!d||d.strategy_side!=='ENTRY')return '';
   const strategy={MET:'Strategiens købsbetingelser var opfyldt.',NOT_MET:'Strategiens købsbetingelser var ikke opfyldt.',UNKNOWN:'Strategien kunne ikke vurderes fuldt ud, fordi oplysninger manglede.'}[d.strategy];
@@ -201,7 +227,7 @@ window.EngineUI=(()=>{
   const explanation=c.human_readable_explanation||((a?.reason&&!/^[-_A-Z0-9]+$/.test(a.reason))?a.reason:'');
   const understandable=reasons.filter(x=>!/^[-_A-Z0-9]+$/.test(x));
   const why=explanation||understandable.join(' · ')||'Motoren har ikke leveret en forståelig begrundelse for signalet.';
-  const shortWhy=why.split(/(?<=[.!?])\s+/u).slice(0,2).join(' ').split(/\s+/u).slice(0,35).join(' ');
+  const shortWhy=signalWhy(s);
   const message=!active?'Signalet er ikke længere aktivt. Afvent en ny vurdering.':s.signal==='BUY'?'Motoren har registreret et muligt køb. Kontrollér grundlag og risiko, før du beslutter dig.':(canSell?'Motoren har registreret et muligt salg. Du kan gennemgå salget eller beholde positionen foreløbig.':'Motoren har registreret et muligt salg. Se nedenfor, hvorfor signalstyret salg ikke er tilgængeligt.');
   const reasonNoTrade=!active?'Signalet er ikke aktivt.':stale?'Nye eller bekræftede kursdata mangler.':s.signal==='BUY'&&!plan?.fresh?'En gyldig, kontrolleret købsplan mangler.':s.signal!=='BUY'&&!holding?'Positionen er ikke entydigt bekræftet i et depot.':s.signal!=='BUY'&&holding?.portfolio_kind==='collection'?'Aktien er i en Collection og kan ikke sælges enkeltvis her.':s.signal!=='BUY'&&!scopeMatches?'Signalet er ikke knyttet til ét entydigt depot.':d.market_status!=='OPEN'?'Handelstid er lukket eller ikke bekræftet.':'Depotets handelsmulighed er ikke tilstrækkeligt bekræftet.';
   const body=`<section class="signal-overview"><div class="signal-mobile-nav"><details class="signal-why"><summary>Hvorfor?</summary><p>${esc(shortWhy)}</p></details><strong>${s.signal==='BUY'?'KØB':['SELL','REDUCE'].includes(s.signal)?'SALG':'AFVENT'}</strong><button type="button" data-engine-close aria-label="Ignorér og luk signalet">Ignorer</button></div><div class="signal-mobile-instrument"><strong>${esc(req.ticker||"")}</strong>${holding?.name||req.name?`<small>${esc(holding?.name||req.name)}</small>`:""}</div><div class="signal-chart-main">${chart}</div><div class="signal-mobile-metrics ${s.signal==='BUY'?'signal-mobile-buy':'signal-mobile-sell'}"><div class="signal-mobile-year"><small>År</small><strong data-signal-year>—</strong></div><div class="signal-mobile-month"><small>Måned</small><strong data-signal-month>—</strong></div><div class="signal-mobile-change"><small>Dag</small><strong data-signal-daily>—</strong></div></div><div class="signal-kpis"><div><small>Min position · urealiseret siden køb</small><strong>${pnl}</strong><small>${pnlPct}${holding?.unrealized_estimated?' · estimat':''}${holding?.verification==='last_known'?' · tidligere snapshot':''}</small></div><div><small>Kursændring i dag</small><strong>${day}</strong><small>${dayAmount}</small></div><div><small>Senest oplyste kurs</small><strong>${price}</strong><small>Seneste modtagne data: ${date(s.last_data_at)} · kurstid kan være ukendt</small></div><div><small>Analytisk stop / exit</small><strong>${stopText}</strong><small>${stopDistance} fra kurs · ingen ordre</small></div></div><div class="signal-explanation"><div class="signal-head signal-${tone(s.signal)}"><p>${esc(message)}</p></div><h3>Hvorfor?</h3><p>${esc(why)}</p>${a?.state&&a.state!=='ACTIVE'?`<p>Tidligere advarsel: ${esc(noticeSide(a))} · ${noticeState(a)}. Ikke et aktuelt handelssignal.</p>`:''}</div><p class="muted ${canSell||canBuy?'signal-trade-ready-hint':''}">${canSell||canBuy?('Du kan gennemgå et '+(canSell?'salgsforslag. Handelsmuligheden kontrolleres under gennemgangen':'købsforslag')+'. Der er ikke sendt en ordre.'):esc(reasonNoTrade)+' Ingen ordre er sendt.'}</p><details><summary>Se signalets grundlag</summary><p>${esc(a?.reason||c.human_readable_explanation||'Ingen yderligere begrundelse modtaget.')}</p><small>Signal oprettet: ${date(a?.created)} · Data brugt til signalet: ${date(a?.data_timestamp)}</small><small>Seneste modtagne data: ${date(s.last_data_at)} · ${stale?'ikke aktuelle eller ikke bekræftede':'kontrollér tid og kilde'}</small></details><details><summary>Tekniske detaljer og overvågning</summary><p>At markere beskeden som set ændrer hverken signal eller handler.</p>${ack}<button type="button" data-engine-detail="${esc(wid)}">Se motorforløb og overvågningsstyring</button></details><div class="asset-trade-bar signal-action-bar">${trade}${manualSell}<button type="button" class="signal-ignore" data-engine-close aria-label="Ignorér og luk signalet">Ignorér</button></div></section>`;
