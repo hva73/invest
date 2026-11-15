@@ -438,5 +438,5 @@
 /* Proposal 4: today's verified amount and percent must never break mid-number. */
 @media(max-width:700px){
  #dashboard-detail .position-mobile-facts{grid-template-columns:.92fr 1fr 1.08fr}
- #dashboard-detail .position-mobile-facts .position-daily-percent{display:block;white-space:nowrap;overflow-wrap:normal;word-break:normal;font-size:12px}
+ #dashboard-detail .position-mobile-facts>div:last-child dd>span[class^="signed-"]{display:inline-block;white-space:nowrap;overflow-wrap:normal;word-break:normal;font-size:12px}
 }
