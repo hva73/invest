@@ -318,3 +318,9 @@
  .signal-mobile-metrics .signal-mobile-position strong,.signal-mobile-metrics .signal-mobile-entry strong,.signal-mobile-metrics .signal-mobile-return strong{font-size:12px}
  .signal-mobile-metrics .signal-mobile-position strong,.signal-mobile-metrics .signal-mobile-entry strong{color:inherit}
 }
+
+/* Remove redundant title and keep the approved single full-width action on mobile. */
+@media(max-width:700px){
+ .signal-overview-dialog > .overview-detail-header{display:none}
+ .signal-overview-dialog .signal-action-bar > button.primary{flex:1 1 100%;width:100%;max-width:none}
+}
