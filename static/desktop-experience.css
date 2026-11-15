@@ -283,7 +283,14 @@
 
 /* Match the approved compact holdings cards and position detail. */
 @media(max-width:700px){
- .mobile-holding.mobile-holding-card{gap:5px;padding:9px 10px}
+ .mobile-holding.mobile-holding-card{gap:8px;padding:14px 12px}
+ .mobile-holding-head .mobile-holding-name>strong{font-size:18px;line-height:1.2}
+ .mobile-holding-head .mobile-holding-name>small{font-size:12px;line-height:1.35}
+ .mobile-holding-head .mobile-holding-total{font-size:20px;line-height:1.2}
+ .mobile-holding-metrics small{font-size:11px}
+ .mobile-holding-metrics .dash-change{font-size:16px}
+ .mobile-holding-metrics .dash-profit-percent,.mobile-holding-daily{font-size:13px}
+ .mobile-holding-since{font-size:12px}
  .mobile-holding-head .mobile-holding-name{gap:1px}
  .mobile-holding-status,.mobile-holding-market{font-size:10px;line-height:1.25}
  .mobile-holding-metrics{gap:8px;padding-top:6px}
@@ -357,7 +364,10 @@
 @media(max-width:700px){
  .signal-overview .market-quote{display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;gap:2px;min-height:112px;padding:7px 0 0 47%;width:100%;box-sizing:border-box}
  .signal-overview .market-quote .market-price{display:block;font-size:clamp(22px,6.3vw,30px)!important;line-height:1.25;text-align:right;max-width:100%;white-space:nowrap}
- .signal-overview .market-quote .market-change{display:block;width:100%;text-align:right;white-space:nowrap;line-height:1.35}
+ .signal-overview .market-quote .market-change{display:block;width:100%;text-align:right;white-space:nowrap;font-size:12px;line-height:1.35}
+ .signal-overview .market-quote .market-change>br{display:none}
+ .signal-overview .market-quote .market-change>span{display:inline;margin-left:4px}
+ .signal-overview .market-quote .market-change small{display:none}
  .signal-overview .market-quote .market-fetch{display:block;width:100%;text-align:right;font-size:10px}
  .signal-overview .signal-mobile-instrument{min-height:112px;margin-bottom:-112px}
 }
@@ -422,7 +432,7 @@
  #dashboard-detail .position-mobile-quote{font-size:15px}
  #dashboard-detail .position-mobile-name{margin:12px 0 14px;font-size:14px;font-weight:400}
  #dashboard-detail .position-mobile-facts dt{font-size:11px}
- #dashboard-detail .position-mobile-facts dd{font-size:14px}
+ #dashboard-detail .position-mobile-facts dd{font-size:16px}
  #dashboard-detail .market-plot svg{height:clamp(210px,56vw,250px)}
 }
 
@@ -443,5 +453,5 @@
 
 /* Proposal 4: keep the three approved KPI headings whole on narrow phones. */
 @media(max-width:700px){
- #dashboard-detail .position-mobile-facts dt{font-size:clamp(8px,2.5vw,10px);white-space:nowrap}
+ #dashboard-detail .position-mobile-facts dt{font-size:clamp(9px,2.8vw,11px);white-space:nowrap}
 }
