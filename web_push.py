@@ -431,7 +431,7 @@ def notify_manual_test_sell(connect,uid,ticker,sender=None):
         owner=c.execute("SELECT 1 FROM users WHERE id=? AND username='owner' AND role='admin' AND active=1",(uid,)).fetchone()
         test=trade_service.active_test_signal(c,uid) if owner else None
         rows=c.execute("SELECT payload FROM push_devices WHERE user_id=? AND sell=1",(uid,)).fetchall() if test and test['side']=='SELL' and test['ticker']==ticker else []
-    if not owner or not test or test['ticker']!=ticker:raise ValueError('Testsig­n­alet er ikke aktivt')
+    if not owner or not test or test['ticker']!=ticker:raise ValueError('Testsignalet er ikke aktivt')
     sender=sender or _send;sent=failed=0
     for row in rows:
         try:
