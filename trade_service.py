@@ -1,6 +1,6 @@
 """Explicit, user-reviewed Pluto proposals. No direct execution or background writes."""
 import hashlib,json,re,secrets,time
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from pathlib import Path
 import oauth,report_ingest
 from mcp_client import MCP,decode_result,normalize,compatible
