@@ -411,3 +411,17 @@
  .signal-overview .signal-mobile-metrics strong{font-size:14px!important}
  .signal-overview .market-plot svg{height:clamp(205px,56vw,250px)}
 }
+
+/* 14 Nov owner-approved position design, proposal 4 (left OXY concept).
+   Only mobile position detail; desktop and shared signal screens unchanged. */
+.position-mobile-back{display:none}
+@media(max-width:700px){
+ #dashboard-detail .overview-detail-header{display:grid;grid-template-columns:32px minmax(0,1fr) 44px;align-items:center;gap:8px}
+ #dashboard-detail .overview-detail-header .position-mobile-back{display:inline-flex;align-items:center;justify-content:center;width:32px;min-height:38px;padding:0;border:0;background:transparent;color:#dcefeb;font-size:30px;line-height:1}
+ #dashboard-detail .overview-detail-header h2{min-width:0;margin:0;font-size:22px;line-height:1.25;text-align:left}
+ #dashboard-detail .position-mobile-quote{font-size:15px}
+ #dashboard-detail .position-mobile-name{margin:12px 0 14px;font-size:14px;font-weight:400}
+ #dashboard-detail .position-mobile-facts dt{font-size:11px}
+ #dashboard-detail .position-mobile-facts dd{font-size:14px}
+ #dashboard-detail .market-plot svg{height:clamp(210px,56vw,250px)}
+}
