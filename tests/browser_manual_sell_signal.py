@@ -69,6 +69,9 @@ def main():
    signal.locator('[data-trade-test-buy]').click()
    expect(page.locator('#quick-trade-dialog')).to_be_visible()
    expect(page.locator('#quick-trade-dialog')).to_contain_text('CABA')
+   expect(page.locator('#quick-trade-dialog')).to_contain_text('1 CABA-aktie')
+   assert page.locator('#quick-trade-form [name=size]').input_value()=='10'
+   assert page.locator('#quick-trade-form [name=size]').get_attribute('readonly') is not None
    assert not api_writes,api_writes
    # A push click only opens the isolated test, never an active motor session.
    page.goto('http://127.0.0.1:'+str(server.server_port)+'/?test_sell=1')
