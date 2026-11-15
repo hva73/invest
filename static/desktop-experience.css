@@ -351,3 +351,12 @@
  .signal-overview .market-origin{display:none}
  .signal-overview .signal-action-bar{margin-top:auto}
 }
+
+/* Fix observed 390 px regression: keep price and day change legible beside ticker. */
+@media(max-width:700px){
+ .signal-overview .market-quote{display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;gap:2px;min-height:112px;padding:7px 0 0 47%;width:100%;box-sizing:border-box}
+ .signal-overview .market-quote .market-price{display:block;font-size:clamp(22px,6.3vw,30px)!important;line-height:1.25;text-align:right;max-width:100%;white-space:nowrap}
+ .signal-overview .market-quote .market-change{display:block;width:100%;text-align:right;white-space:nowrap;line-height:1.35}
+ .signal-overview .market-quote .market-fetch{display:block;width:100%;text-align:right;font-size:10px}
+ .signal-overview .signal-mobile-instrument{min-height:112px;margin-bottom:-112px}
+}
