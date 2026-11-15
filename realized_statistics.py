@@ -158,7 +158,9 @@ def _project(direct_orders, collection_orders=(), signal_order_sides=None):
             except (InvalidOperation, ValueError): zero = False
             if not (zero and row.get('status') in ('CANCELED','CANCELLED','EXPIRED','REJECTED')): taint(row, scope)
             return
-        if scope == 'direct' and (signal_order_sides or {}).get(record['id']) == record['side']:
+        if (scope == 'direct' and isinstance(row.get('asset'), dict)
+                and isinstance(row['asset'].get('id'), str) and row['asset']['id']
+                and (signal_order_sides or {}).get(record['id']) == (record['side'], row['asset']['id'])):
             record['origin'] = 'signal'
         key = (scope, record['id'])
         if key in seen:
