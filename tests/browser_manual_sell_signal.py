@@ -37,9 +37,9 @@ def main():
    base['portfolios']=[{'id':case.root,'name':'Root','source':'pluto','kind':'portfolio','active':True,'can_trade':True}]
    base['test_trade_signal']={'portfolio_id':case.root,'ticker':'CABA','side':'SELL','expires':time.time()+900}
    base['connection']={'connected':True,'status':'Tilsluttet'}
-   series=[{'price':str(v),'epoch':time.time()-1200+120*i,'timestamp':datetime.fromtimestamp(time.time()-1200+120*i,timezone.utc).isoformat()} for i,v in enumerate([1.26,1.27,1.26,1.28,1.27,1.29,1.30,1.28,1.29,1.30,1.29])]
+   series=[{'price':str(v),'epoch':time.time()-1600+120*i,'timestamp':datetime.fromtimestamp(time.time()-1600+120*i,timezone.utc).isoformat()} for i,v in enumerate([1.26,1.27,1.26,1.28,1.27,1.29,1.30,1.28,1.29,1.30,1.29])]
    quote={'price':'1.29','currency':'USD','ticker':'CABA','exchange':'NASDAQ','name':'Cabaletta Bio, Inc. Common Stock',
-          'asset_id':'caba-asset-id','asset_type':'CS','price_time':now,'fetched_at':now,'series':series,
+          'asset_id':'caba-asset-id','asset_type':'CS','price_time':datetime.fromtimestamp(time.time()-60,timezone.utc).isoformat(),'fetched_at':datetime.fromtimestamp(time.time()-20,timezone.utc).isoformat(),'series':series,
           'series_period':'ONE_WEEK','daily_change_percent':'0.78','daily_change':'0.01'}
    page.route('**/api/market/quote',lambda route:route.fulfill(json=quote))
    page.route('**/api/state',lambda route:route.fulfill(json=base))
@@ -58,6 +58,10 @@ def main():
    expect(signal.locator('.signal-mobile-metrics')).to_contain_text('Måned')
    expect(signal.locator('.signal-mobile-metrics')).to_contain_text('År')
    expect(signal.locator('[data-trade-test-buy]')).to_be_visible()
+   expect(signal.locator('.market-price')).to_be_visible()
+   warning=signal.locator('.market-slot > .market-warning')
+   if warning.count():
+    assert warning.evaluate("el => getComputedStyle(el).order")=='4', 'Source warning must not overlap the test ticker'
    Path('visual-review').mkdir(exist_ok=True)
    signal.screenshot(path='visual-review/manual-caba-sell-test-390.png')
    signal.locator('[data-trade-test-buy]').click()
