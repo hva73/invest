@@ -80,6 +80,7 @@ def main():
    background=page.evaluate('window.scrollY');page.mouse.move(2,2);page.mouse.wheel(0,900);page.wait_for_timeout(150);assert page.evaluate('window.scrollY')==background
    shot=os.environ.get('ESCAPE_SCREENSHOTS');
    expect(d.locator('.market-slot .market-price')).to_be_visible()
+   assert page.evaluate("""() => [...document.querySelectorAll('#engine-dialog .market-quote .market-price,#engine-dialog .market-quote .market-change')].every(n => n.scrollWidth <= n.clientWidth + 1)"""), 'Signal quote must not overflow on iPhone'
    if shot:page.screenshot(path=f'{shot}/signal-sell-390.png')
    page.evaluate('state.dashboard.positions=[]')
    d.get_by_role('button',name='Sælg').click()
@@ -127,7 +128,7 @@ def main():
    page.route('**/api/v1/hotwatch/sessions/synthetic-push/events*',lambda route:route.fulfill(json={'items':[]}))
    page.route('**/api/v1/hotwatch/sessions/synthetic-push/samples*',lambda route:route.fulfill(json={'items':[]}))
    d.get_by_role('button',name='Se motorforløb og overvågningsstyring').click();expect(d).to_contain_text('motorforløb');expect(d.locator('[data-asset-trade=BUY]')).to_have_count(0);expect(d.locator('[data-trade-watch]')).to_have_count(0)
-   d.locator('[data-engine-close]').first.click();page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('h2')).to_have_text('TSM');d.get_by_text('Tekniske detaljer og overvågning').click()
+   d.locator('[data-engine-close]:visible').first.click();page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('h2')).to_have_text('TSM');d.get_by_text('Tekniske detaljer og overvågning').click()
    d.locator('[data-engine-ack=synthetic-push]').click();expect(d).not_to_be_visible()
    assert acknowledgements==[{'event_id':'hw-'+'a'*24,'is_test':False}],acknowledgements
    page.set_viewport_size({'width':390,'height':700})
@@ -135,20 +136,21 @@ def main():
    session['data_status']={'price':None,'price_status':'STALE','market_status':'UNKNOWN'}
    page.evaluate("window.EngineUI.openNotification('synthetic-push')")
    expect(d).to_contain_text('ikke længere aktivt');expect(d.locator('[data-trade-watch]')).to_have_count(0);expect(d.get_by_role('button',name='Åbn depot for manuelt salg →')).to_be_visible()
-   d.locator('[data-engine-close]').first.click();expect(d).not_to_be_visible();assert page.evaluate("getComputedStyle(document.documentElement).overflowY")!='hidden'
+   d.locator('[data-engine-close]:visible').first.click();expect(d).not_to_be_visible();assert page.evaluate("getComputedStyle(document.documentElement).overflowY")!='hidden'
    session.update(status='ACTIVE',signal='SELL',display_status='SÆLGSSIGNAL',data_stale=False,latest_context={'status':'verified','position':'held','tradability':'available','as_of':stamp,'orders':[]});session['data_status']={'price':'3.1','price_status':'FRESH','market_status':'UNKNOWN','identity_verification':'verified'}
-   page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_contain_text('Handelstid er lukket eller ikke bekræftet');expect(d.locator('[data-trade-watch]')).to_have_count(0);expect(d.get_by_role('button',name='Åbn depot for manuelt salg →')).to_be_visible();d.locator('[data-engine-close]').first.click()
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_contain_text('Handelstid er lukket eller ikke bekræftet');expect(d.locator('[data-trade-watch]')).to_have_count(0);expect(d.get_by_role('button',name='Åbn depot for manuelt salg →')).to_be_visible();d.locator('[data-engine-close]:visible').first.click()
    session['data_status']['market_status']='OPEN'
    for scope in ([],[case.root,999]):
-    session['request']['portfolio_ids']=scope;page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('[data-trade-watch]')).to_have_count(0);expect(d).to_contain_text('Signalet er ikke knyttet til ét entydigt depot');expect(d.get_by_role('button',name='Vælg depot for manuelt salg →')).to_be_visible();d.locator('[data-engine-close]').first.click()
+    session['request']['portfolio_ids']=scope;page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('[data-trade-watch]')).to_have_count(0);expect(d).to_contain_text('Signalet er ikke knyttet til ét entydigt depot');expect(d.get_by_role('button',name='Vælg depot for manuelt salg →')).to_be_visible();d.locator('[data-engine-close]:visible').first.click()
    session['request']['portfolio_ids']=[case.root]
    holding['portfolio_kind']='collection';account['portfolios'][0]['kind']='collection';session['data_status']['market_status']='OPEN'
-   page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_contain_text('Aktien er i en Collection og kan ikke sælges enkeltvis her');expect(d.get_by_role('button',name='Vælg depot for manuelt salg →')).to_be_visible();expect(d.locator('[data-trade-watch]')).to_have_count(0);d.locator('[data-engine-close]').first.click()
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_contain_text('Aktien er i en Collection og kan ikke sælges enkeltvis her');expect(d.get_by_role('button',name='Vælg depot for manuelt salg →')).to_be_visible();expect(d.locator('[data-trade-watch]')).to_have_count(0);d.locator('[data-engine-close]:visible').first.click()
    holding['portfolio_kind']='portfolio';account['portfolios'][0]['kind']='portfolio'
    session['latest_context']['tradability']='available';session.update(signal='BUY',display_status='KØBSSIGNAL');session['last_action_signal'].update(state='ACTIVE',event_type='BUY_SIGNAL');page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_contain_text('muligt køb');expect(d.get_by_role('button',name='Ignorér og luk signalet')).to_be_visible();expect(d.locator('[data-trade-watch]')).to_have_count(0)
-   d.locator('[data-engine-close]').first.click()
+   d.locator('[data-engine-close]:visible').first.click()
    session['data_status']['market_status']='OPEN';session['buy_plan']={'fresh':True,'portfolio_id':case.root,'quantity':'2','budget_dkk':'500','limit_price':'20','stop_price':'18'}
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.get_by_role('button',name='Køb')).to_be_visible();expect(d.locator('[data-trade-watch]')).to_have_attribute('data-trade-signal','BUY');expect(d.locator('.market-slot .market-price')).to_be_visible()
+   if shot:page.screenshot(path=f'{shot}/signal-buy-390.png')
    d.get_by_role('button',name='Køb').click();expect(quick).to_contain_text('Køb · TSM');expect(quick.locator('[name=portfolio_id]')).to_have_value(str(case.root));expect(quick.locator('[name=asset_id]')).to_have_value('synthetic-asset');quick.locator('[data-quick-close]').click()
    account['dashboard']['positions']=[];session['latest_context']['position']='none';session['request']['report_id']='synthetic-report';session['request']['candidate_id']='synthetic-candidate'
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('.market-slot .market-price')).to_be_visible();expect(d.locator('.market-marker-entry')).to_have_count(0);expect(d.locator('.market-entry-label')).to_have_count(0);expect(d.locator('.market-marker-signal')).to_have_count(0);expect(d.locator('.market-peak-label')).to_have_text('Top 3,41 USD');expect(d.get_by_role('button',name='Køb')).to_be_visible()
@@ -160,7 +162,7 @@ def main():
    expect(d.locator('.market-hover')).to_be_visible();expect(d.locator('.market-hover strong')).to_contain_text('USD')
    if page.evaluate('navigator.maxTouchPoints > 0'):
     buycdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]});expect(d.locator('.market-hover')).to_be_hidden()
-   if shot:page.screenshot(path=f'{shot}/signal-buy-390.png')
+   if shot:page.screenshot(path=f'{shot}/signal-buy-no-position-390.png')
    d.get_by_role('button',name='Ignorér og luk signalet').click();expect(d).not_to_be_visible()
    account['dashboard']['positions']=[holding];session['latest_context']['position']='held';session['request'].pop('report_id');session['request'].pop('candidate_id')
    session.update(status='DEGRADED',signal='NO_DATA',display_status='DATA FOR GAMLE',data_stale=True);session['last_action_signal'].update(event_type='SELL_SIGNAL',state='DATA_MISSING');page.evaluate("window.EngineUI.openNotification('synthetic-push')");d.get_by_role('button',name='Åbn depot for manuelt salg →').click();page.wait_for_function("() => view==='portfolio-detail'");assert page.evaluate('selectedPortfolio')==case.root;assert page.evaluate("state.dashboard.positions[0].asset_id")=='synthetic-asset'
@@ -176,7 +178,7 @@ def main():
     d.evaluate('(e,y)=>e.scrollTop=y',offset);rect=d.locator('.signal-action-bar').bounding_box()
     assert rect and rect['y']>=0 and rect['y']+rect['height']<=376,rect
    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
-   d.locator('[data-engine-close]').first.click()
+   d.locator('[data-engine-close]:visible').first.click()
    desktop=browser.new_page(viewport={'width':1280,'height':800});desktop.on('request',lambda r:orders.append(r.url) if '/api/trade/' in r.url else None)
    desktop.goto(f'http://127.0.0.1:{server.server_port}');desktop.locator('#login-form [name=password]').fill('test-password-long-enough');desktop.locator('#login-form button').click();desktop.locator('.dashboard-v1').wait_for()
    session.update(status='ACTIVE',signal='SELL',display_status='SÆLGSSIGNAL',data_stale=False,latest_context={'status':'verified','position':'held','tradability':'available','as_of':stamp,'orders':[]});session['last_action_signal'].update(state='ACTIVE',event_type='SELL_SIGNAL');session['data_status']={'price':'3.1','price_status':'FRESH','market_status':'OPEN','identity_verification':'verified'}

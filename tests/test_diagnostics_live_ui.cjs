@@ -1,7 +1,7 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const source=fs.readFileSync('static/app.js','utf8');
 const context={setInterval(){},Intl,Number,Date};vm.createContext(context);
-vm.runInContext(source.slice(source.indexOf('let diagnosticsData=null')),context);
+vm.runInContext(source.slice(source.indexOf('let diagnosticsData=null'),source.indexOf('// The mobile menu uses')),context);
 class Node {
  constructor(name,attrs={},children=[]){this.nodeName=name;this.tagName=name;this.nodeType=name==='#text'?3:1;this.nodeValue=null;this.attrs={...attrs};this.childNodes=children;this.parent=null;for(const c of children)c.parent=this}
  get attributes(){return Object.entries(this.attrs).map(([name,value])=>({name,value}))}

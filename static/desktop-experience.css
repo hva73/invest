@@ -280,3 +280,96 @@
 @media(max-width:700px){.signal-overview-dialog .signal-mobile-nav{align-items:center}.signal-overview-dialog .signal-mobile-nav .signal-why summary{min-height:0}}
 
 @media(max-width:700px){.signal-overview>details{display:none}}
+
+/* Match the approved compact holdings cards and position detail. */
+@media(max-width:700px){
+ .mobile-holding.mobile-holding-card{gap:5px;padding:9px 10px}
+ .mobile-holding-head .mobile-holding-name{gap:1px}
+ .mobile-holding-status,.mobile-holding-market{font-size:10px;line-height:1.25}
+ .mobile-holding-metrics{gap:8px;padding-top:6px}
+ .mobile-holding-metrics>span{gap:2px}
+ .mobile-holding-since{padding-top:4px}
+ #dashboard-detail .dashboard-detail-body{padding-top:8px}
+ #dashboard-detail .position-mobile-status{margin:6px 0 2px}
+ #dashboard-detail .position-mobile-facts{padding:7px 0}
+ #dashboard-detail .market-slot{padding:0}
+}
+
+@media(max-width:700px){#dashboard-detail .position-mobile-facts .position-daily-value{overflow-wrap:normal;word-break:normal;font-size:10px}}
+
+@media(max-width:700px){
+ #dashboard-detail .position-mobile-summary:not([data-signal-context="true"]) .position-mobile-status{display:none}
+ #dashboard-detail .market-period-title{display:none}
+}
+
+@media(max-width:700px){#dashboard-detail .market-plot svg{height:clamp(160px,46vw,200px)}}
+
+@media(max-width:700px){
+ .mobile-holdings-list{display:grid;gap:8px}
+ .mobile-holding.mobile-holding-card{border:1px solid #315a5d;border-radius:12px}
+ .mobile-holding-since{justify-content:flex-start}
+}
+
+/* Approved 14.11 mobile signal metrics; desktop remains unchanged. */
+@media(max-width:700px){
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy{grid-template-columns:repeat(4,minmax(0,1fr))}
+ .signal-overview .signal-mobile-metrics.signal-mobile-sell{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .signal-mobile-sell :is(.signal-mobile-change,.signal-mobile-month,.signal-mobile-year){display:none}
+ .signal-mobile-metrics .signal-mobile-position strong,.signal-mobile-metrics .signal-mobile-entry strong,.signal-mobile-metrics .signal-mobile-return strong{font-size:12px}
+ .signal-mobile-metrics .signal-mobile-position strong,.signal-mobile-metrics .signal-mobile-entry strong{color:inherit}
+}
+
+/* Remove redundant title and keep the approved single full-width action on mobile. */
+@media(max-width:700px){
+ .signal-overview-dialog > .overview-detail-header{display:none}
+ .signal-overview-dialog .signal-action-bar > button.primary{flex:1 1 100%;width:100%;max-width:none}
+}
+
+/* Preserve approved four-column BUY labels on narrow iPhones. */
+@media(max-width:700px){
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy > div{padding-inline:4px}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy > div:first-child{padding-left:0}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy small{font-size:9px}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy :is(.signal-mobile-change,.signal-mobile-month,.signal-mobile-year) small{white-space:nowrap}
+}
+
+/* Original approved BUY/SELL: instrument beneath header, no duplicate dialog heading. */
+.signal-mobile-instrument{display:none}
+@media(max-width:700px){
+ .signal-overview-dialog{box-sizing:border-box;width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;min-height:100dvh;margin:0;border:0;border-radius:0;overflow-y:auto}
+ .signal-overview .signal-mobile-instrument{display:flex;flex-direction:column;gap:2px;padding:12px 0;border-top:1px solid #315360}
+ .signal-mobile-instrument>strong{font-size:22px;font-weight:700;line-height:1.2}
+ .signal-mobile-instrument>small{font-size:12px;color:#b5c9d0}
+}
+
+/* Approved signal: instrument left, quote right, bottom trade action. */
+@media(max-width:700px){
+ .signal-overview-dialog .signal-overview{min-height:calc(100dvh - 32px);display:flex;flex-direction:column}
+ .signal-overview .signal-mobile-instrument{width:46%;box-sizing:border-box;min-height:66px;margin-bottom:-66px;position:relative;z-index:2;border-top:0;padding-top:7px;pointer-events:none}
+ .signal-overview .market-quote{padding-left:47%;box-sizing:border-box;min-height:65px}
+ .signal-overview .market-price{white-space:nowrap}
+ .signal-overview .market-origin{display:none}
+ .signal-overview .signal-action-bar{margin-top:auto}
+}
+
+/* Fix observed 390 px regression: keep price and day change legible beside ticker. */
+@media(max-width:700px){
+ .signal-overview .market-quote{display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;gap:2px;min-height:112px;padding:7px 0 0 47%;width:100%;box-sizing:border-box}
+ .signal-overview .market-quote .market-price{display:block;font-size:clamp(22px,6.3vw,30px)!important;line-height:1.25;text-align:right;max-width:100%;white-space:nowrap}
+ .signal-overview .market-quote .market-change{display:block;width:100%;text-align:right;white-space:nowrap;line-height:1.35}
+ .signal-overview .market-quote .market-fetch{display:block;width:100%;text-align:right;font-size:10px}
+ .signal-overview .signal-mobile-instrument{min-height:112px;margin-bottom:-112px}
+}
+
+/* Historical source label is technical detail, not in the approved signal screen. */
+@media(max-width:700px){.signal-overview .market-session{display:none}}
+
+/* Exact approved signal accents: underline and single prominent action. */
+@media(max-width:700px){
+ .signal-overview .signal-mobile-nav>strong::after{content:"";display:block;width:64px;max-width:100%;height:3px;border-radius:4px;margin:8px auto 0}
+ .signal-overview:has(.signal-mobile-buy) .signal-mobile-nav>strong::after{background:#64edb3}
+ .signal-overview:has(.signal-mobile-sell) .signal-mobile-nav>strong::after{background:#e34c68}
+ .signal-overview-dialog .signal-action-bar>button.primary{font-weight:750;font-size:17px;text-transform:uppercase;min-height:54px;border-radius:13px}
+ .signal-overview:has(.signal-mobile-buy) .signal-action-bar>button.primary{background:#64edb3;color:#042321;border-color:#64edb3}
+ .signal-overview:has(.signal-mobile-sell) .signal-action-bar>button.primary{background:#b83752;color:#fff;border-color:#b83752}
+}
