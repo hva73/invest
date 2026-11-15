@@ -1,0 +1,36 @@
+name: Statistics background refresh regression
+on:
+  pull_request:
+    branches: [codex/statistics-refresh-base]
+permissions:
+  contents: read
+jobs:
+  statistics:
+    if: github.event.pull_request.head.ref == 'codex/statistics-refresh-budget'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt playwright
+      - run: python -m playwright install --with-deps chromium
+      - name: Verify regression against candidate base
+        run: |
+          cp static/app.js /tmp/statistics-patched-app.js
+          git show 6f4d606183ccad9c04755252816d703c722c8a81:static/app.js > static/app.js
+          if PYTHONPATH=.:tests python tests/browser_statistics_background.py > /tmp/statistics-baseline.log 2>&1; then
+            cat /tmp/statistics-baseline.log
+            exit 1
+          fi
+          cat /tmp/statistics-baseline.log
+          grep -q "AssertionError: {'stats':" /tmp/statistics-baseline.log
+          cp /tmp/statistics-patched-app.js static/app.js
+      - run: PYTHONPATH=.:tests python tests/browser_statistics_background.py
+      - run: PYTHONPATH=.:tests python tests/browser_statistics_integration.py
+      - run: PYTHONPATH=.:tests python tests/browser_statistics_desktop_accept.py
+      - run: node tests/test_statistics_ui.cjs && node tests/test_statistics_diagnostic.cjs
+      - run: PYTHONPATH=.:tests python -m unittest test_realized_statistics test_statistics_diagnostic
