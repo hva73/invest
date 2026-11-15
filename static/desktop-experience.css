@@ -425,3 +425,12 @@
  #dashboard-detail .position-mobile-facts dd{font-size:14px}
  #dashboard-detail .market-plot svg{height:clamp(210px,56vw,250px)}
 }
+
+/* Approved OXY proposal 4: the position curve uses the same subtle area fill
+   as the approved signal chart, but only inside the mobile position dialog. */
+@media(max-width:700px){
+ #dashboard-detail .market-signal-area{display:block;stroke:none}
+ #dashboard-detail .market-positive .market-signal-area{fill:#51e2a6;fill-opacity:.19}
+ #dashboard-detail .market-negative .market-signal-area{fill:#ed5675;fill-opacity:.19}
+ #dashboard-detail .market-neutral .market-signal-area{fill:#a9bac5;fill-opacity:.10}
+}
