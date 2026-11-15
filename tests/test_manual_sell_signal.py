@@ -93,6 +93,30 @@ class ManualSellSignalTests(unittest.TestCase):
             self.assertEqual(c.execute('SELECT COUNT(*) FROM broker_proposals').fetchone()[0],0)
             self.assertEqual(c.execute('SELECT COUNT(*) FROM hw_events').fetchone()[0],0)
 
+    def test_test_order_provenance_rechecked_and_never_confused_with_hotwatch(self):
+        self.start()
+        row={'report_id':'@manual-test-sell','candidate_id':'caba-asset-id','kind':'direct',
+             'portfolio_id':self.pid,'payload':json.dumps({'orders':[{'assetId':'caba-asset-id','side':'SELL','shares':'1'}]})}
+        trade_service.verify_proposal_source(app.connect,1,row)
+        bad=dict(row,payload=json.dumps({'orders':[{'assetId':'caba-asset-id','side':'SELL','shares':'2'}]}))
+        with self.assertRaises(trade_service.TradeError):
+            trade_service.verify_proposal_source(app.connect,1,bad)
+        with app.connect() as c:c.execute('UPDATE manual_test_signals SET expires=0 WHERE user_id=1')
+        with self.assertRaises(trade_service.TradeError):
+            trade_service.verify_proposal_source(app.connect,1,row)
+
+    def test_test_sale_rejects_more_than_one_share_before_broker(self):
+        self.start()
+        payload={'report_id':'@manual-test-sell','candidate_id':'','portfolio_id':self.pid,
+                 'kind':'direct','asset_id':'caba-asset-id','size_mode':'percent','size':'10',
+                 'currency':'USD','order_type':'MARKET','time_in_force':'DAY'}
+        with patch('trade_service.direct_sell_basis',return_value={'asset_id':'caba-asset-id',
+             'quantity':'10','percentage':'10','shares':'2','observed':'synthetic'}):
+            with self.assertRaisesRegex(trade_service.TradeError,'præcis 1 aktie'):
+                trade_service.estimate(app.connect,1,payload)
+        with app.connect() as c:
+            self.assertEqual(c.execute('SELECT COUNT(*) FROM broker_proposals').fetchone()[0],0)
+
     def test_other_ticker_is_not_a_supported_live_fixture(self):
         with self.assertRaises(trade_service.TradeError):
             trade_service.start_manual_test_sell(app.connect,1,'OXY')
