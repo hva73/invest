@@ -331,6 +331,7 @@
  .signal-overview .signal-mobile-metrics.signal-mobile-buy > div:first-child{padding-left:0}
  .signal-overview .signal-mobile-metrics.signal-mobile-buy small{font-size:9px}
  .signal-overview .signal-mobile-metrics.signal-mobile-buy :is(.signal-mobile-change,.signal-mobile-month,.signal-mobile-year) small{white-space:nowrap}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy .signal-mobile-year strong{font-size:clamp(10px,2.6vw,12px);white-space:nowrap}
 }
 
 /* Original approved BUY/SELL: instrument beneath header, no duplicate dialog heading. */
