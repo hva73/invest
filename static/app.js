@@ -171,19 +171,19 @@ let deskPollBusy=false;setInterval(async()=>{if(deskPollBusy||userRefreshBusy||e
 // Pause background rendering while a user edits a form or chooses report history.
 function editingData(){return Boolean(pushBusy||document.querySelector('dialog[open],#content form[data-dirty="true"]')||document.activeElement?.matches('input,textarea,select')||['report-archive','mcp-consent'].includes(view)||document.querySelector('#report-mode')?.value==='true')}
 async function maybeAutoRefresh({force=false}={}){
- if(!state||document.hidden||userRefreshBusy||editingData()||view==='diagnostics')return;
+ if(!state||document.hidden||userRefreshBusy||editingData()||['diagnostics','statistics'].includes(view))return;
  if(pendingAutoRender){render();return}
  if(!force&&Date.now()<nextAutomaticAt||!(state.connection.connected||state.connection.can_renew))return;
  await refreshCurrent(force?{all:true}:{automatic:true});
 }
 document.addEventListener('input',e=>{window.TradeUI.change(e);const form=e.target.closest('#content form');if(form)form.dataset.dirty='true'});
-document.addEventListener('focusout',()=>{if(pendingAutoRender)setTimeout(()=>{if(state&&!editingData())render()},0)});
+document.addEventListener('focusout',()=>{if(pendingAutoRender)setTimeout(()=>{if(state&&!editingData()&&view!=='statistics')render()},0)});
 setInterval(maybeAutoRefresh,30000);
 
 // Refresh stored values without initiating extra Pluto or EODHD requests.
 let storedPollBusy=false;
 setInterval(async()=>{
- if(storedPollBusy||userRefreshBusy||!state||document.hidden||editingData()||['hot-watch','diagnostics'].includes(view)||document.querySelector('dialog[open]'))return;
+ if(storedPollBusy||userRefreshBusy||!state||document.hidden||editingData()||['hot-watch','diagnostics','statistics'].includes(view)||document.querySelector('dialog[open]'))return;
  const epoch=sessionEpoch,currentView=view;storedPollBusy=true;
  try{
   const current=await api('state');
