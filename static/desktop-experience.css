@@ -392,3 +392,12 @@
  .signal-overview .signal-mobile-metrics.signal-mobile-buy small{font-size:10px}
  .signal-overview .signal-mobile-metrics.signal-mobile-buy strong{font-size:13px}
 }
+
+/* Ejerens godkendte 14.11 signalgraf: diskret farvefelt under kurven på mobil. */
+.market-signal-area{display:none;pointer-events:none}
+@media(max-width:700px){
+ .signal-overview-dialog .market-signal-area{display:block;stroke:none}
+ .signal-overview-dialog .market-positive .market-signal-area{fill:#51e2a6;fill-opacity:.19}
+ .signal-overview-dialog .market-negative .market-signal-area{fill:#ed5675;fill-opacity:.19}
+ .signal-overview-dialog .market-neutral .market-signal-area{fill:#a9bac5;fill-opacity:.10}
+}
