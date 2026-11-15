@@ -475,7 +475,11 @@
    padding:0;margin-inline:0;
  }
  #dashboard-detail .position-mobile-facts dd{font-size:17px}
+ #dashboard-detail .position-mobile-facts .dash-change{font-size:17px}
+ #dashboard-detail .position-mobile-facts .dash-profit-percent{font-size:14px!important}
+ .mobile-holding-metrics>span>small:first-child{font-size:11px;font-weight:650;text-transform:uppercase}
  .mobile-holding-metrics .dash-profit-percent,
  .mobile-holding-daily{font-size:14px}
+ .mobile-holding-metrics .dash-profit-percent{font-size:14px!important}
  .mobile-holding.mobile-holding-card{padding-block:13px}
 }
