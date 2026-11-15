@@ -37,10 +37,10 @@ def main():
      cdp=context.new_cdp_session(page);cdp.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[{'x':x,'y':y}]})
     else:page.mouse.move(x,y)
     expect(tip).to_be_visible();expect(tip.locator('strong')).to_contain_text('USD');tipbox=tip.bounding_box();assert tipbox['y']+tipbox['height']<=box['y'] or tipbox['y']>=box['y']+box['height'],(width,tipbox,box)
-    Path('visual-review').mkdir(exist_ok=True);page.screenshot(path=f'visual-review/position-{width}.png',full_page=True)
     if touch:cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
     else:page.mouse.move(0,0)
     expect(tip).to_be_hidden()
+    Path('visual-review').mkdir(exist_ok=True);page.screenshot(path=f'visual-review/position-{width}.png',full_page=True)
     for period in ('day','week','month','year'):
      button=graph.locator('[data-market-period='+period+']');button.click();expect(button).to_have_attribute('aria-pressed','true');plot=graph.locator('[data-market-plot]');expect(plot).to_be_visible();plot.focus();page.keyboard.press('ArrowLeft');point=graph.locator('.market-hover');expect(point).to_be_visible();when=point.locator('small').inner_text();assert re.fullmatch(r'\d{2}\.\d{2}' if period=='day' else r'\d{2}\.\d{2}\.\d{2}',when),(period,when)
     assert not errors,errors;context.close()

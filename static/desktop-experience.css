@@ -312,9 +312,9 @@
 
 /* Approved 14.11 mobile signal metrics; desktop remains unchanged. */
 @media(max-width:700px){
- .signal-overview .signal-mobile-metrics.signal-mobile-buy{grid-template-columns:repeat(4,minmax(0,1fr))}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy{grid-template-columns:repeat(3,minmax(0,1fr))}
  .signal-overview .signal-mobile-metrics.signal-mobile-sell{grid-template-columns:repeat(3,minmax(0,1fr))}
- .signal-mobile-sell :is(.signal-mobile-change,.signal-mobile-month,.signal-mobile-year){display:none}
+ .signal-mobile-sell :is(.signal-mobile-change,.signal-mobile-month,.signal-mobile-year){display:block}
  .signal-mobile-metrics .signal-mobile-position strong,.signal-mobile-metrics .signal-mobile-entry strong,.signal-mobile-metrics .signal-mobile-return strong{font-size:12px}
  .signal-mobile-metrics .signal-mobile-position strong,.signal-mobile-metrics .signal-mobile-entry strong{color:inherit}
 }
@@ -400,4 +400,14 @@
  .signal-overview-dialog .market-positive .market-signal-area{fill:#51e2a6;fill-opacity:.19}
  .signal-overview-dialog .market-negative .market-signal-area{fill:#ed5675;fill-opacity:.19}
  .signal-overview-dialog .market-neutral .market-signal-area{fill:#a9bac5;fill-opacity:.10}
+}
+
+/* Latest explicit owner approval, 14 Nov after the earlier reference image:
+   both KØB and SALG show ONLY Dagsændring, Måned, År (no position-count column). */
+@media(max-width:700px){
+ .signal-overview .signal-mobile-metrics{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+ .signal-overview .signal-mobile-metrics :is(.signal-mobile-change,.signal-mobile-month,.signal-mobile-year){display:block}
+ .signal-overview .signal-mobile-metrics small{font-size:11px!important;white-space:nowrap}
+ .signal-overview .signal-mobile-metrics strong{font-size:14px!important}
+ .signal-overview .market-plot svg{height:clamp(205px,56vw,250px)}
 }

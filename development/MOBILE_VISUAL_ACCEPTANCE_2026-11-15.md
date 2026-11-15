@@ -1,5 +1,7 @@
 # ESCAPE Invest – mobil, dokumenteret designaccept (15.11.2026)
 
+**KRONOLOGISK FACIT – OVERSKRIVER ÆLDRE SKÆRMBILLEDE:** I tidligere Agent 2-ejerchat 14. november kl. ca. 16.26 dansk tid, **efter** billedet `Skærmbillede 2026-11-14 kl. 16.23.44.png`, godkendte ejeren udtrykkeligt ændringen: KØB og SALG viser kun **Dagsændring · Måned · År** i målerækken. Positionsantal skal fjernes fra denne række; øvrigt layout, grafmarkører og periodevalg bevares. Derfor er de fire kolonner på det ÆLDRE KØB-billede og Position/Gns. købskurs/Afkast-rækken på det ÆLDRE SALG-billede **ikke længere facit for målerækken**. Senere samme eftermiddag blev **»Skift aktiv« fjernet** på ejerens udtrykkelige ordre. Nyeste specifikke beslutning vinder. Disse tre ændringer er kodet på PR #175, før endelig releaseaccept. Grafen må fortsat vise gennemsnitlig købskurs, når en verificeret eksisterende position findes; dette gælder grafmarkøren, ikke en ekstra målekolonne.
+
 **Ejers beslutning:** Den senest konkret godkendte skærm er facit. Ingen egne designvalg. Grøn CI er nødvendig, men ikke i sig selv visuel accept. Denne kontrol gælder kun præcis SHA, ikke løbende branch-head. Ingen ordre/deploy her.
 
 ## Kilder (faktisk lokaliseret og visuelt læst)
