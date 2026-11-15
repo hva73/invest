@@ -23,7 +23,23 @@ class Diagnostics(unittest.TestCase):
         with patch('oauth.access_token', return_value='token'):
             with self.assertRaises(statistics.StatisticsUnavailable) as failure:
                 statistics.read(self.connect, 1, lambda token: Client())
-        self.assertEqual(str(failure.exception), 'BROKER_CATALOG')
+        self.assertEqual(str(failure.exception), 'CATALOG_RESPONSE')
+
+    def test_catalog_errors_remain_distinct_and_private(self):
+        import sqlite3
+        from urllib.error import HTTPError, URLError
+        budget = RuntimeError('private secret'); budget.code = 'PROVIDER_RATE_BUDGET'
+        cases = [(budget,'CATALOG_BUDGET'), (sqlite3.OperationalError('private secret'),'CATALOG_DATABASE'),
+                 (HTTPError('https://private',403,'secret',None,None),'CATALOG_DENIED'),
+                 (HTTPError('https://private',429,'secret',None,None),'CATALOG_RATE_LIMIT'),
+                 (HTTPError('https://private',500,'secret',None,None),'CATALOG_HTTP'),
+                 (URLError(TimeoutError('secret')),'CATALOG_TIMEOUT'),
+                 (URLError('secret'),'CATALOG_NETWORK'), (ValueError('secret'),'CATALOG_RESPONSE'),
+                 (RuntimeError('secret'),'BROKER_CATALOG')]
+        for error, category in cases:
+            with self.subTest(category=category):
+                self.assertEqual(statistics.catalog_error_code(error), category)
+                self.assertNotIn('secret', statistics.catalog_error_code(error))
 
     def test_depot_permission_and_budget_are_distinct_and_sanitized(self):
         class DB:

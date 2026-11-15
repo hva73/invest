@@ -21,12 +21,32 @@ class Push(unittest.TestCase):
   import release_approval
   self.subscribe();sent=[]
   self.assertEqual(web_push.notify_release_ready(app.connect,1,lambda *args:sent.append(args)),{'sent':0,'failed':0})
-  release_approval.prepare(app.connect,'a'*40,'Privat releasebeskrivelse',1)
+  candidate=release_approval.prepare(app.connect,'a'*40,'Privat releasebeskrivelse',1)
   self.assertEqual(web_push.notify_release_ready(app.connect,2,lambda *args:sent.append(args)),{'sent':0,'failed':0})
   self.assertEqual(web_push.notify_release_ready(app.connect,1,lambda *args:sent.append(args)),{'sent':1,'failed':0})
+  self.assertEqual(web_push.release_notification_status(app.connect,1,candidate['id']),{'sent':1,'failed':0})
+  self.assertIsNone(web_push.release_notification_status(app.connect,2,candidate['id']))
   self.assertEqual(sent[0][1]['kind'],'release_approval')
   self.assertNotIn('Privat releasebeskrivelse',str(sent[0][1]));self.assertNotIn('a'*40,str(sent[0][1]))
   self.assertEqual(web_push.notify_release_ready(app.connect,1,lambda *args:(_ for _ in ()).throw(OSError())),{'sent':0,'failed':1})
+  self.assertEqual(web_push.release_notification_status(app.connect,1,candidate['id']),{'sent':0,'failed':1})
+  with app.connect() as c:
+   audit=c.execute("SELECT action FROM admin_actions WHERE action LIKE 'release_push:%'").fetchall()
+   self.assertNotIn(self.sub['endpoint'],str([row[0] for row in audit]))
+ def test_release_notification_without_devices_and_unknown_candidate(self):
+  import release_approval
+  candidate=release_approval.prepare(app.connect,'b'*40,'Test release',1)
+  self.assertEqual(web_push.notify_release_ready(app.connect,1,lambda *args:None),{'sent':0,'failed':0})
+  self.assertEqual(web_push.release_notification_status(app.connect,1,candidate['id']),{'sent':0,'failed':0})
+  self.assertIsNone(web_push.release_notification_status(app.connect,1,'invalid'))
+ def test_release_notification_audit_failure_does_not_block_push(self):
+  import release_approval
+  self.subscribe();release_approval.prepare(app.connect,'b'*40,'Test release',1)
+  with app.connect() as c:
+   c.execute("CREATE TRIGGER reject_audit BEFORE INSERT ON admin_actions BEGIN SELECT RAISE(ABORT,'offline'); END")
+  sent=[]
+  self.assertEqual(web_push.notify_release_ready(app.connect,1,lambda *args:sent.append(args)),{'sent':1,'failed':0})
+  self.assertEqual(len(sent),1)
  def event(self,kind):
   with app.connect() as c:engine.event(c,self.watch,kind,self.now,'synthetic')
  def test_subscription_is_encrypted_and_owner_scoped(self):

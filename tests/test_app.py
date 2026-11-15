@@ -80,6 +80,16 @@ class Workflow(unittest.TestCase):
   self.assertEqual(release_approval.claim(app.connect,candidate['id'],candidate['sha'])['status'],'claimed')
   with self.assertRaisesRegex(ValueError,'approval_unavailable'):
    release_approval.claim(app.connect,candidate['id'],candidate['sha'])
+ def test_release_notification_follows_displayed_candidate_when_candidate_changes(self):
+  self.login()
+  old={'id':'old','sha':'a'*40,'summary':'Old','status':'pending'}
+  new={'id':'new','sha':'b'*40,'summary':'New'}
+  with patch('release_approval.current',return_value=old),patch('release_approval.pending',return_value=new),patch('web_push.release_notification_status',return_value={'sent':2,'failed':0}) as status:
+   code,body=self.request('admin/release-approval')
+  self.assertEqual(code,200)
+  self.assertEqual(body['candidate']['id'],'new')
+  self.assertEqual(body['notification']['sent'],2)
+  self.assertEqual(status.call_args.args[2],'new')
  def test_invalid_values_and_persistence(self):
   self.login();p={'portfolio_id':1,'ticker':'TEST','quantity':1,'price':100,'stop':110,'target':120,'costs':0,'fx':1}
   self.assertEqual(self.request('proposals',p)[0],400);p['stop']=90;p['price']=float('nan');self.assertEqual(self.request('proposals',p)[0],400)

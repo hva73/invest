@@ -104,9 +104,9 @@ class EODHDFeeds:
   key=(hashlib.sha256(self._key.encode()).digest(),market,symbol)
   with _history_locks[hash(key)%len(_history_locks)]:
    cached=_history_cache.get(key);now=time.monotonic()
-   if cached and 0<=now-cached[0]<20:return copy.deepcopy(cached[1])
+   if cached and 0<=now-cached[0]<(1 if cached[1].get('status')=='NO_DATA' else 20):return copy.deepcopy(cached[1])
    result=self._minute_bars_uncached(market,symbol)
-   if result.get('status')=='OK':
+   if result.get('status') in ('OK','NO_DATA'):
     if len(_history_cache)>=256:_history_cache.clear()
     _history_cache[key]=(time.monotonic(),copy.deepcopy(result))
    return result

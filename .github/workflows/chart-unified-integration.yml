@@ -1,12 +1,12 @@
 name: Unified chart release integration checks
 on:
   pull_request:
-    branches: [codex/issue57-integrated-review]
+    branches: [codex/issue57-integrated-review, codex/hotfix-combined-snapshot]
 permissions:
   contents: read
 jobs:
   integration:
-    if: contains(fromJSON('["codex/chart-unified-release","codex/hotfix-combined-snapshot"]'), github.event.pull_request.head.ref)
+    if: contains(fromJSON('["codex/chart-unified-release","codex/hotfix-combined-snapshot","codex/data-and-notification-prep"]'), github.event.pull_request.head.ref)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:

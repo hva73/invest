@@ -374,6 +374,34 @@ class Trading(unittest.TestCase):
   with app.connect() as c:c.execute('UPDATE broker_proposals SET estimated=?',(time.time()-121,))
   with self.assertRaises(trade.TradeError):self.send(q)
   self.assertFalse(self.writes());self.assertEqual(trade.history(app.connect,2),[])
+ def test_live_get_accounts_contract_buy_and_sell(self):
+  # Captured from the authenticated ESCAPE Pluto catalogue, 14 November 2026.
+  live={'name':'get_accounts','inputSchema':{'$schema':'http://json-schema.org/draft-07/schema#','type':'object','properties':{'portfolioId':{'type':'string','description':'Portfolio id from list_portfolios'}},'required':['portfolioId']},'annotations':{'readOnlyHint':True,'openWorldHint':False}}
+  original=self.factory
+  class LiveAccounts(original):
+   def tools(client):
+    return [live if t['name']=='get_accounts' else t for t in super().tools()]
+  for side in ('BUY','SELL'):
+   with self.subTest(side=side):
+    self.calls.clear()
+    request=dict(self.request,report_id='@manual-'+side.lower(),candidate_id='asset-test',order_type='MARKET',size_mode='amount' if side=='BUY' else 'percent',size='50')
+    holding={'positions_complete':True,'positions':[{'kind':'holding','asset_id':'asset-test','quantity':'2'}]}
+    with patch('portfolio_data.read',return_value=holding):
+     proposal=trade.estimate(app.connect,1,request,LiveAccounts)['proposal']
+     self.assertEqual(proposal['status'],'estimated');self.assertFalse(self.writes())
+     result=trade.send(app.connect,1,{'id':proposal['id'],'review_token':proposal['review_token'],'confirm':True},LiveAccounts)
+     self.assertEqual(result['proposal']['status'],'sent')
+     self.assertEqual(result['proposal']['intent_id'],'synthetic-intent')
+     duplicate=trade.send(app.connect,1,{'id':proposal['id']},LiveAccounts)
+     self.assertTrue(duplicate['duplicate']);self.assertEqual(len(self.writes()),1)
+     self.assertEqual(self.writes()[0]['arguments']['orders'][0]['side'],side)
+    accounts=[c for c in self.calls if c['name']=='get_accounts']
+    self.assertGreaterEqual(len(accounts),2)
+    self.assertTrue(all(c['arguments']=={'portfolioId':'root'} for c in accounts))
+  broken=copy.deepcopy(live);broken['inputSchema']['properties']['portfolioId']['type']='integer'
+  client=LiveAccounts('synthetic')
+  with self.assertRaisesRegex(trade.TradeError,'get_accounts'):
+   trade.call(client,{'get_accounts':broken},'get_accounts',{'portfolioId':'root'})
  def test_changed_permission_or_contract_stops_before_send(self):
   q=self.estimate();self.can_trade=False
   with self.assertRaises(trade.TradeError):self.send(q)

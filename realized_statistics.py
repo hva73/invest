@@ -8,11 +8,66 @@ from decimal import Decimal, InvalidOperation, localcontext
 from datetime import datetime, timezone
 from collections import defaultdict, deque
 from urllib.error import HTTPError, URLError
+import sqlite3
+import json
+import re
+
+def signal_order_sides(connect, user_id, portfolio_id):
+    """Return explicit, unambiguous provider order references to HOT WATCH proposals.
+
+    A proposal is not a fill. The consumer must independently verify an executed
+    order in the same portfolio and direction. Missing or contradictory evidence
+    leaves the source unknown.
+    """
+    try:
+        with connect() as db:
+            proposals = db.execute("SELECT p.signal_event_id,p.intent_id,p.payload,p.response,e.event_type,s.request FROM broker_proposals p JOIN hw_events e ON e.event_id=p.signal_event_id JOIN hw_sessions s ON s.id=e.watch_row_id "
+                                   "WHERE p.user_id=? AND p.portfolio_id=? AND p.kind='direct' AND p.status='sent' AND p.report_id='@hotwatch' AND s.user_id=p.user_id AND s.watch_id=p.candidate_id AND s.is_test=0",
+                                   (user_id, portfolio_id)).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    seen = {}
+    for event_id, intent_id, payload, response, event_type, request in proposals:
+        if not isinstance(event_id,str) or not re.fullmatch(r'hw-[a-f0-9]{24}',event_id): continue
+        try:
+            args, result, watch = json.loads(payload), json.loads(response), json.loads(request)
+        except (TypeError, ValueError): continue
+        if not isinstance(args,dict) or not isinstance(result,dict) or not isinstance(watch,dict): continue
+        orders = args.get('orders')
+        if not isinstance(orders,list) or len(orders)!=1 or not isinstance(orders[0],dict): continue
+        side=orders[0].get('side'); order_id=result.get('orderId'); asset_id=orders[0].get('assetId')
+        if side not in ('BUY','SELL') or not isinstance(intent_id,str) or not intent_id: continue
+        if not isinstance(asset_id,str) or not asset_id or watch.get('asset_id') != asset_id: continue
+        if watch.get('portfolio_ids') != [portfolio_id]: continue
+        if event_type not in ({'BUY_SIGNAL'} if side=='BUY' else {'SELL_SIGNAL','REDUCE_SIGNAL'}): continue
+        if result.get('orderIntentId')!=intent_id or str(result.get('status','')).upper()!='ACCEPTED': continue
+        if not isinstance(order_id,str) or not order_id or len(order_id)>200: continue
+        if order_id in seen:
+            seen[order_id]=None
+        else:
+            seen[order_id]=(side,asset_id)
+    return {key: value for key,value in seen.items() if value is not None}
+
 
 class StatisticsUnavailable(Exception):
     def __init__(self, category):
         self.category = category
         super().__init__(category)
+
+def catalog_error_code(error):
+    """Classify startup failures without returning provider or account details."""
+    if getattr(error, 'code', None) == 'PROVIDER_RATE_BUDGET': return 'CATALOG_BUDGET'
+    if isinstance(error, sqlite3.Error): return 'CATALOG_DATABASE'
+    if isinstance(error, HTTPError):
+        if error.code in (401, 403): return 'CATALOG_DENIED'
+        if error.code == 429: return 'CATALOG_RATE_LIMIT'
+        return 'CATALOG_HTTP'
+    if isinstance(error, TimeoutError): return 'CATALOG_TIMEOUT'
+    if isinstance(error, URLError):
+        return 'CATALOG_TIMEOUT' if isinstance(error.reason, TimeoutError) else 'CATALOG_NETWORK'
+    if isinstance(error, ConnectionError): return 'CATALOG_NETWORK'
+    if isinstance(error, (ValueError, TypeError, KeyError)): return 'CATALOG_RESPONSE'
+    return 'BROKER_CATALOG'
 
 def depot_error_code(stage, error):
     """Return only fixed, non-sensitive categories for operational diagnosis."""
@@ -82,7 +137,7 @@ def _result(buy, sell, quantity, basis, provisional):
             'gross': format(profit, 'f'), 'gross_percent': format(_percent(profit, basis), 'f'),
             'gross_dkk': format(profit, 'f') if sell['currency']=='DKK' else None,
             'net_dkk': None, 'fees_status': 'unknown',
-            'buy_origin': 'unknown', 'sell_origin': 'unknown',
+            'buy_origin': buy.get('origin', 'unknown'), 'sell_origin': sell.get('origin', 'unknown'),
             'buy_price': format(buy['price'], 'f'), 'sell_price': format(sell['price'], 'f'),
             'sell_time': None if provisional else sell['time'].isoformat(),
             'order_created_at': sell['time'].isoformat() if provisional else None,
@@ -91,7 +146,7 @@ def _result(buy, sell, quantity, basis, provisional):
                      else 'Foreløbigt brutto i handelsvaluta; gebyrer, valutaomregning og ældre historik er ikke dokumenteret.')}
 
 
-def project(direct_orders, collection_orders=()):
+def project(direct_orders, collection_orders=(), signal_order_sides=None):
     """Project orders using enough precision for exact finite amount arithmetic."""
     direct_orders = list(direct_orders)
     collection_orders = list(collection_orders)
@@ -111,10 +166,10 @@ def project(direct_orders, collection_orders=()):
         precision = 28
     with localcontext() as ctx:
         ctx.prec = precision
-        return _project(direct_orders, collection_orders)
+        return _project(direct_orders, collection_orders, signal_order_sides or {})
 
 
-def _project(direct_orders, collection_orders=()):
+def _project(direct_orders, collection_orders=(), signal_order_sides=None):
     """Return results per sale; inputs must already be isolated to one portfolio.
 
     Each collection tuple is (collection_id, nested order). Separate scopes are
@@ -142,6 +197,10 @@ def _project(direct_orders, collection_orders=()):
             except (InvalidOperation, ValueError): zero = False
             if not (zero and row.get('status') in ('CANCELED','CANCELLED','EXPIRED','REJECTED')): taint(row, scope)
             return
+        if (scope == 'direct' and isinstance(row.get('asset'), dict)
+                and isinstance(row['asset'].get('id'), str) and row['asset']['id']
+                and (signal_order_sides or {}).get(record['id']) == (record['side'], row['asset']['id'])):
+            record['origin'] = 'signal'
         key = (scope, record['id'])
         if key in seen:
             if seen[key] != record:
@@ -167,6 +226,7 @@ def _project(direct_orders, collection_orders=()):
             continue
         groups[(row['scope'], row['ticker'], row['name'], row['currency'])].append(row)
     results = []
+    unresolved_sales = []
     identities = defaultdict(set)
     for scope, ticker, name, currency in groups:
         identities[(scope, ticker.strip().casefold())].add((name, currency))
@@ -191,7 +251,14 @@ def _project(direct_orders, collection_orders=()):
                 buy=buys[0]
                 for sell in sells:
                     results.append(_result(buy,sell,sell['quantity'],sell['quantity']*buy['price'],True))
-            elif sells: omitted += 1
+            elif sells:
+                omitted += 1
+                for sell in sells:
+                    unresolved_sales.append({'ticker': sell['ticker'], 'name': sell['name'],
+                        'currency': sell['currency'], 'quantity': format(sell['quantity'], 'f'),
+                        'sell_price': format(sell['price'], 'f'),
+                        'sale_proceeds': format(sell['quantity'] * sell['price'], 'f'),
+                        'buy_origin': 'unknown', 'sell_origin': 'unknown'})
             continue
         lots = deque(); unsafe = False
         for row in rows:
@@ -220,7 +287,7 @@ def _project(direct_orders, collection_orders=()):
         gains=s['gains'];losses=s['losses_total']
         s.update(gains=format(gains,'f'),losses_total=format(losses,'f'),gross_total=format(gains+losses,'f'),
                  win_rate_percent=format(_percent(Decimal(s['wins']), Decimal(s['sales'])),'f'))
-    return {'items': results, 'summary_by_currency':summaries, 'omitted': omitted, 'history_complete': False,
+    return {'items': results, 'unresolved_sales': unresolved_sales, 'summary_by_currency':summaries, 'omitted': omitted, 'history_complete': False,
             'count_note':'Én observeret salgsordre tælles én gang; delsalg tælles hver for sig. Vinderandel er antal positive salg divideret med alle viste salg, også nulresultater.',
             'note': 'Kun observerede handler. Historikkens dækning, gebyrer og historisk valutakurs er ikke bekræftet. Direkte handler er foreløbige kursforskelle; oprettelsestid er ikke fyldtid.'}
 
@@ -248,7 +315,7 @@ def read(connect, user_id, client_factory=None):
         client = client_factory(token)
         tools = client.tools()
     except Exception as error:
-        raise StatisticsUnavailable('BROKER_CATALOG') from error
+        raise StatisticsUnavailable(catalog_error_code(error)) from error
     output = []; errors = []; error_codes = []
     for portfolio in portfolios:
         external = portfolio['external_id'] or ''
@@ -263,7 +330,7 @@ def read(connect, user_id, client_factory=None):
                     'portfolioId':identifier, 'scope':'DIRECT', 'statusGroup':'INACTIVE', 'limit':50}}), 'list_orders')
                 rows = list_data(data, ['orders','items','data'])
                 stage = 'DIRECT_PROJECTION'
-                result = project(rows)
+                result = project(rows, signal_order_sides=signal_order_sides(connect, user_id, portfolio['id']))
             elif portfolio['kind'] == 'collection' and namespace == 'collections':
                 stage = 'COLLECTION_PERMISSION'
                 if not allowed(tools, 'get_collection_activity', 'collectionId'): raise ValueError('Collectionhistorik er utilgængelig')

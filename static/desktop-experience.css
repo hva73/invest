@@ -219,3 +219,275 @@
 @media(max-width:700px){#dashboard-detail .market-controls,.market-chart-dialog .market-controls{flex-wrap:nowrap}#dashboard-detail .market-period-buttons,.market-chart-dialog .market-period-buttons{flex:1 1 auto;min-width:0;gap:3px}#dashboard-detail .market-controls>button[data-market-refresh],.market-chart-dialog .market-controls>button[data-market-refresh]{min-height:44px;min-width:44px;padding:4px}}
 
 @media(min-width:701px){#dashboard-detail .market-controls>button[data-market-refresh],.market-chart-dialog .market-controls>button[data-market-refresh]{min-height:40px;min-width:40px}}
+
+/* Approved compact mobile position detail (shared by holdings and sectors). */
+.position-mobile-quote{display:none}
+@media(max-width:700px){
+ #dashboard-detail .position-desktop-portfolio{display:none}
+ #dashboard-detail .position-mobile-quote{display:inline-block;font-size:14px;font-weight:600;color:#d9ebe5;border-left:1px solid #3b5c61;padding-left:10px;margin-left:8px;vertical-align:middle}
+ #dashboard-detail .position-mobile-facts{grid-template-columns:1fr 1.15fr .85fr;gap:0;border-block:1px solid #315360;padding:10px 0}
+ #dashboard-detail .position-mobile-facts>div{background:transparent;border:0;border-radius:0;padding:0 8px;min-width:0}
+ #dashboard-detail .position-mobile-facts>div:first-child{padding-left:0}
+ #dashboard-detail .position-mobile-facts>div+div{border-left:1px solid #315360}
+ #dashboard-detail .position-mobile-facts dt{font-size:10px;line-height:1.3}
+ #dashboard-detail .position-mobile-facts dd{font-size:12px;line-height:1.4;margin-top:5px;overflow-wrap:anywhere}
+ #dashboard-detail .position-mobile-facts dd small{display:inline;font-size:11px}
+ #dashboard-detail .dashboard-detail-body>h3{display:none}
+ #dashboard-detail .market-slot{border:0;background:transparent;box-shadow:none;padding:4px 0}
+ #dashboard-detail .market-quote>.market-price,#dashboard-detail .market-quote>.market-change{display:none}
+}
+
+@media(max-width:900px){
+ .mobile-holding.mobile-holding-card{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;text-align:left}
+ .mobile-holding-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;min-width:0}
+ .mobile-holding-head .mobile-holding-name{display:grid;gap:2px;min-width:0}
+ .mobile-holding-total{white-space:nowrap;font-variant-numeric:tabular-nums}
+ .mobile-holding-total.positive{color:#82dab4}.mobile-holding-total.negative{color:#ff9fa9}.mobile-holding-total.neutral{color:#dce8e9}
+ .mobile-holding-metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px;border-top:1px solid #315360;padding-top:8px}
+ .mobile-holding-metrics>span{display:grid;gap:3px;min-width:0;align-content:start}
+ .mobile-holding-metrics>span+span{border-left:1px solid #315360;padding-left:10px}
+ .mobile-holding-metrics small{color:#a9bec1;font-size:10px}
+ .mobile-holding-metrics .dash-profit-percent{display:inline;font-size:11px}
+ .mobile-holding-daily{font-size:11px;overflow-wrap:anywhere}
+ .mobile-holding-since{display:flex;justify-content:center;gap:8px;border-top:1px solid #315360;padding-top:6px;font-size:11px;color:#a9bec1}
+}
+
+/* Let long amounts wrap within the compact mobile facts. */
+@media(max-width:700px){#dashboard-detail .position-mobile-facts :is(.position-daily-value,.position-daily-percent){display:inline;white-space:normal;overflow-wrap:anywhere}}
+
+/* Mobile signal proposal: desktop and the existing trade action remain intact. */
+.signal-mobile-nav,.signal-mobile-metrics{display:none}
+@media(max-width:700px){
+ .signal-overview .signal-mobile-nav{display:grid;grid-template-columns:1fr auto 1fr;align-items:start;gap:8px}
+ .signal-mobile-nav>strong{font-size:16px;text-align:center}.signal-mobile-nav>button{justify-self:end;border:0;background:transparent;color:#b5c9d0;padding:0;font-size:12px}
+ .signal-mobile-nav .signal-why{min-width:0;font-size:12px}.signal-why summary{cursor:pointer;list-style:none;text-decoration:none;color:#b5c9d0}.signal-why summary::-webkit-details-marker{display:none}.signal-why p{position:relative;z-index:1;max-width:260px;color:#d8e9e6;background:#193641;padding:10px;border-radius:8px;line-height:1.4}
+ .signal-overview .signal-mobile-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-block:1px solid #315360;padding:10px 0;gap:0}
+ .signal-mobile-metrics>div{min-width:0;padding:0 8px}.signal-mobile-metrics>div:first-child{padding-left:0}.signal-mobile-metrics>div+div{border-left:1px solid #315360}.signal-mobile-metrics small{display:block;font-size:10px;color:#b5c9d0}.signal-mobile-metrics strong{display:block;margin-top:5px;font-size:12px;overflow-wrap:anywhere}.signal-mobile-metrics .signed-positive{color:#80ddb3}.signal-mobile-metrics .signed-negative{color:#ff9ca9}
+ .signal-overview .signal-kpis,.signal-overview .signal-explanation,.signal-action-bar .signal-ignore{display:none}
+ .signal-overview .signal-chart-peak{display:none}
+}
+
+@media(max-width:700px){
+ .signal-overview .market-slot{display:flex;flex-direction:column}
+ .signal-overview .market-quote{order:1}.signal-overview .market-controls{order:2}.signal-overview .market-chart{order:3}
+ .signal-overview .market-period-title{display:none}
+}
+
+@media(max-width:700px){.signal-overview :is(.market-sample-change,.market-scale,.market-axis,.market-marker-legend){display:none}}
+
+@media(max-width:700px){.signal-overview .signal-trade-ready-hint{display:none}.signal-mobile-nav .signal-why{margin:0;padding:0}.signal-mobile-nav .signal-why summary{padding:0;margin:0;line-height:1.4}.signal-mobile-nav>button{line-height:1.4}}
+
+@media(max-width:700px){.signal-overview-dialog .signal-mobile-nav{align-items:center}.signal-overview-dialog .signal-mobile-nav .signal-why summary{min-height:0}}
+
+@media(max-width:700px){.signal-overview>details{display:none}}
+
+/* Match the approved compact holdings cards and position detail. */
+@media(max-width:700px){
+ .mobile-holding.mobile-holding-card{gap:8px;padding:14px 12px}
+ .mobile-holding-head .mobile-holding-name>strong{font-size:18px;line-height:1.2}
+ .mobile-holding-head .mobile-holding-name>small{font-size:12px;line-height:1.35}
+ .mobile-holding-head .mobile-holding-total{font-size:20px;line-height:1.2}
+ .mobile-holding-metrics small{font-size:11px}
+ .mobile-holding-metrics .dash-change{font-size:16px}
+ .mobile-holding-metrics .dash-profit-percent,.mobile-holding-daily{font-size:13px}
+ .mobile-holding-since{font-size:12px}
+ .mobile-holding-head .mobile-holding-name{gap:1px}
+ .mobile-holding-status,.mobile-holding-market{font-size:10px;line-height:1.25}
+ .mobile-holding-metrics{gap:8px;padding-top:6px}
+ .mobile-holding-metrics>span{gap:2px}
+ .mobile-holding-since{padding-top:4px}
+ #dashboard-detail .dashboard-detail-body{padding-top:8px}
+ #dashboard-detail .position-mobile-status{margin:6px 0 2px}
+ #dashboard-detail .position-mobile-facts{padding:7px 0}
+ #dashboard-detail .market-slot{padding:0}
+}
+
+@media(max-width:700px){#dashboard-detail .position-mobile-facts .position-daily-value{overflow-wrap:normal;word-break:normal;font-size:10px}}
+
+@media(max-width:700px){
+ #dashboard-detail .position-mobile-summary:not([data-signal-context="true"]) .position-mobile-status{display:none}
+ #dashboard-detail .market-period-title{display:none}
+}
+
+@media(max-width:700px){#dashboard-detail .market-plot svg{height:clamp(160px,46vw,200px)}}
+
+@media(max-width:700px){
+ .mobile-holdings-list{display:grid;gap:8px}
+ .mobile-holding.mobile-holding-card{border:1px solid #315a5d;border-radius:12px}
+ .mobile-holding-since{justify-content:flex-start}
+}
+
+/* Approved 14.11 mobile signal metrics; desktop remains unchanged. */
+@media(max-width:700px){
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .signal-overview .signal-mobile-metrics.signal-mobile-sell{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .signal-mobile-sell :is(.signal-mobile-change,.signal-mobile-month,.signal-mobile-year){display:block}
+ .signal-mobile-metrics .signal-mobile-position strong,.signal-mobile-metrics .signal-mobile-entry strong,.signal-mobile-metrics .signal-mobile-return strong{font-size:12px}
+ .signal-mobile-metrics .signal-mobile-position strong,.signal-mobile-metrics .signal-mobile-entry strong{color:inherit}
+}
+
+/* Remove redundant title and keep the approved single full-width action on mobile. */
+@media(max-width:700px){
+ .signal-overview-dialog > .overview-detail-header{display:none}
+ .signal-overview-dialog .signal-action-bar > button.primary{flex:1 1 100%;width:100%;max-width:none}
+}
+
+/* Preserve approved four-column BUY labels on narrow iPhones. */
+@media(max-width:700px){
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy > div{padding-inline:4px}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy > div:first-child{padding-left:0}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy small{font-size:9px}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy :is(.signal-mobile-change,.signal-mobile-month,.signal-mobile-year) small{white-space:nowrap}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy .signal-mobile-year strong{font-size:clamp(10px,2.6vw,12px);white-space:nowrap}
+}
+
+/* Original approved BUY/SELL: instrument beneath header, no duplicate dialog heading. */
+.signal-mobile-instrument{display:none}
+@media(max-width:700px){
+ .signal-overview-dialog{box-sizing:border-box;width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;min-height:100dvh;margin:0;border:0;border-radius:0;overflow-y:auto}
+ .signal-overview .signal-mobile-instrument{display:flex;flex-direction:column;gap:2px;padding:12px 0;border-top:1px solid #315360}
+ .signal-mobile-instrument>strong{font-size:22px;font-weight:700;line-height:1.2}
+ .signal-mobile-instrument>small{font-size:12px;color:#b5c9d0}
+}
+
+/* Approved signal: instrument left, quote right, bottom trade action. */
+@media(max-width:700px){
+ .signal-overview-dialog .signal-overview{min-height:calc(100dvh - 32px);display:flex;flex-direction:column}
+ .signal-overview .signal-mobile-instrument{width:46%;box-sizing:border-box;min-height:66px;margin-bottom:-66px;position:relative;z-index:2;border-top:0;padding-top:7px;pointer-events:none}
+ .signal-overview .market-quote{padding-left:47%;box-sizing:border-box;min-height:65px}
+ .signal-overview .market-price{white-space:nowrap}
+ .signal-overview .market-origin{display:none}
+ .signal-overview .signal-action-bar{margin-top:auto}
+}
+
+/* Fix observed 390 px regression: keep price and day change legible beside ticker. */
+@media(max-width:700px){
+ .signal-overview .market-quote{display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;gap:2px;min-height:112px;padding:7px 0 0 47%;width:100%;box-sizing:border-box}
+ .signal-overview .market-quote .market-price{display:block;font-size:clamp(22px,6.3vw,30px)!important;line-height:1.25;text-align:right;max-width:100%;white-space:nowrap}
+ .signal-overview .market-quote .market-change{display:block;width:100%;text-align:right;white-space:nowrap;font-size:12px;line-height:1.35}
+ .signal-overview .market-quote .market-change>br{display:none}
+ .signal-overview .market-quote .market-change>span{display:inline;margin-left:4px}
+ .signal-overview .market-quote .market-change small{display:none}
+ .signal-overview .market-quote .market-fetch{display:block;width:100%;text-align:right;font-size:10px}
+ .signal-overview .signal-mobile-instrument{min-height:112px;margin-bottom:-112px}
+}
+
+/* Historical source label is technical detail, not in the approved signal screen. */
+@media(max-width:700px){.signal-overview .market-session{display:none}}
+
+/* Exact approved signal accents: underline and single prominent action. */
+@media(max-width:700px){
+ .signal-overview .signal-mobile-nav>strong::after{content:"";display:block;width:64px;max-width:100%;height:3px;border-radius:4px;margin:8px auto 0}
+ .signal-overview:has(.signal-mobile-buy) .signal-mobile-nav>strong::after{background:#64edb3}
+ .signal-overview:has(.signal-mobile-sell) .signal-mobile-nav>strong::after{background:#e34c68}
+ .signal-overview-dialog .signal-action-bar>button.primary{font-weight:750;font-size:17px;text-transform:uppercase;min-height:54px;border-radius:13px}
+ .signal-overview:has(.signal-mobile-buy) .signal-action-bar>button.primary{background:#64edb3;color:#042321;border-color:#64edb3}
+ .signal-overview:has(.signal-mobile-sell) .signal-action-bar>button.primary{background:#b83752;color:#fff;border-color:#b83752}
+}
+
+/* Mobile KØB/SALG: restore the approved 14 Nov readable graph, labels and balance.
+   Only the existing signal screen; no new controls, text or trading changes. */
+@media(max-width:700px){
+ .signal-overview-dialog .signal-overview{gap:10px}
+ .signal-overview .signal-mobile-nav>strong{font-size:21px;line-height:1.15}
+ .signal-overview .signal-mobile-instrument>strong{font-size:25px}
+ .signal-overview .signal-mobile-instrument>small{font-size:13px;line-height:1.4}
+ .signal-overview .market-period-buttons button{font-size:13px}
+ .signal-overview .market-period-buttons button[aria-pressed=true]{background:#64edb3;color:#062721;font-weight:700}
+ .signal-overview .market-plot svg{height:clamp(168px,46vw,215px)}
+ .signal-overview .market-peak-label,.signal-overview .market-entry-label{font-size:12px}
+ .signal-overview .signal-mobile-metrics{padding:12px 0}
+ .signal-overview .signal-mobile-metrics small{font-size:11px;line-height:1.3}
+ .signal-overview .signal-mobile-metrics strong{font-size:14px;line-height:1.35}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy small{font-size:10px}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy strong{font-size:13px}
+}
+
+/* Godkendt 14.11: diskret farvefelt i mobilens signalgraf, ikke i desktop. */
+.market-signal-area{display:none;pointer-events:none}
+@media(max-width:700px){
+ .signal-overview-dialog .market-signal-area{display:block;stroke:none}
+ .signal-overview-dialog .market-positive .market-signal-area{fill:#51e2a6;fill-opacity:.19}
+ .signal-overview-dialog .market-negative .market-signal-area{fill:#ed5675;fill-opacity:.19}
+ .signal-overview-dialog .market-neutral .market-signal-area{fill:#a9bac5;fill-opacity:.10}
+}
+
+/* Latest explicit owner approval, 14 Nov after the earlier reference image:
+   both KØB and SALG show ONLY Dagsændring, Måned, År (no position-count column). */
+@media(max-width:700px){
+ .signal-overview .signal-mobile-metrics{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+ .signal-overview .signal-mobile-metrics :is(.signal-mobile-change,.signal-mobile-month,.signal-mobile-year){display:block}
+ .signal-overview .signal-mobile-metrics small{font-size:11px!important;white-space:nowrap}
+ .signal-overview .signal-mobile-metrics strong{font-size:14px!important}
+ .signal-overview .market-plot svg{height:clamp(205px,56vw,250px)}
+}
+
+/* 14 Nov owner-approved position design, proposal 4 (left OXY concept).
+   Only mobile position detail; desktop and shared signal screens unchanged. */
+.position-mobile-back{display:none}
+@media(max-width:700px){
+ #dashboard-detail .overview-detail-header{display:grid;grid-template-columns:32px minmax(0,1fr) 44px;align-items:center;gap:8px}
+ #dashboard-detail .overview-detail-header .position-mobile-back{display:inline-flex;align-items:center;justify-content:center;width:32px;min-height:38px;padding:0;border:0;background:transparent;color:#dcefeb;font-size:30px;line-height:1}
+ #dashboard-detail .overview-detail-header h2{min-width:0;margin:0;font-size:22px;line-height:1.25;text-align:left}
+ #dashboard-detail .position-mobile-quote{font-size:15px}
+ #dashboard-detail .position-mobile-name{margin:12px 0 14px;font-size:14px;font-weight:400}
+ #dashboard-detail .position-mobile-facts dt{font-size:11px}
+ #dashboard-detail .position-mobile-facts dd{font-size:16px}
+ #dashboard-detail .market-plot svg{height:clamp(210px,56vw,250px)}
+}
+
+/* Approved OXY proposal 4: the position curve uses the same subtle area fill
+   as the approved signal chart, but only inside the mobile position dialog. */
+@media(max-width:700px){
+ #dashboard-detail .market-signal-area{display:block;stroke:none}
+ #dashboard-detail .market-positive .market-signal-area{fill:#51e2a6;fill-opacity:.19}
+ #dashboard-detail .market-negative .market-signal-area{fill:#ed5675;fill-opacity:.19}
+ #dashboard-detail .market-neutral .market-signal-area{fill:#a9bac5;fill-opacity:.10}
+}
+
+/* Proposal 4: today's verified amount and percent must never break mid-number. */
+@media(max-width:700px){
+ #dashboard-detail .position-mobile-facts{grid-template-columns:.92fr 1fr 1.08fr}
+ #dashboard-detail .position-mobile-facts>div:last-child dd>span[class^="signed-"]{display:inline-block;white-space:nowrap;overflow-wrap:normal;word-break:normal;font-size:12px}
+}
+
+/* Proposal 4: keep the three approved KPI headings whole on narrow phones. */
+@media(max-width:700px){
+ #dashboard-detail .position-mobile-facts dt{font-size:clamp(9px,2.8vw,11px);white-space:nowrap}
+}
+
+/* Owner reference QA 15.11: standalone actions, grouped signal periods, clear values.
+   Mobile only. Do not change trade gates, content or desktop. */
+@media(max-width:700px){
+ .signal-overview-dialog .signal-overview .signal-action-bar{
+   border:0;background:transparent;box-shadow:none;border-radius:0;
+   padding:0;margin-inline:0;
+ }
+ .signal-overview-dialog .signal-overview .market-period-buttons{
+   background:#102e38;border:1px solid #24444c;border-radius:13px;
+   padding:3px;gap:2px;
+ }
+ .signal-overview-dialog .signal-overview .market-period-buttons button{
+   border-radius:10px;
+ }
+ #dashboard-detail > .position-actions-mobile{
+   border:0;background:transparent;box-shadow:none;border-radius:0;
+   padding:0;margin-inline:0;
+ }
+ #dashboard-detail .position-mobile-facts dd{font-size:17px}
+ #dashboard-detail .position-mobile-facts .dash-change{font-size:14px;letter-spacing:0;white-space:nowrap}
+ #dashboard-detail .position-mobile-facts .dash-profit-percent{font-size:14px!important}
+ .mobile-holding-metrics>span>small:first-child{font-size:11px;font-weight:650;text-transform:uppercase}
+ .mobile-holding-metrics .dash-profit-percent,
+ .mobile-holding-daily{font-size:14px}
+ .mobile-holding-metrics .dash-profit-percent{font-size:14px!important}
+ .mobile-holding.mobile-holding-card{padding-block:10px}
+}
+
+/* Keep optional source warnings below the chart in the isolated test.
+   Existing production signal layouts remain unchanged. */
+@media(max-width:700px){
+ .signal-overview:has(.signal-test-disclaimer) .market-slot>.market-warning{
+  order:4;display:block;margin-top:6px;max-width:100%;
+ }
+}
