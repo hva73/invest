@@ -220,8 +220,8 @@ window.EngineUI=(()=>{
   const body=`<section class="signal-overview">
    <div class="signal-mobile-nav"><details class="signal-why"><summary>Hvorfor?</summary><p>Dette er et manuelt fiktivt testsignal, ikke en vurdering fra HOT WATCH.</p></details>
     <strong>TEST · SALG</strong><button data-engine-close type="button">Ignorer</button></div>
+   <p class="muted signal-test-disclaimer" role="status"><strong>FIKTIVT TESTSIGNAL</strong> · Intet markedssignal er beregnet, og ingen ordre er sendt. Du vælger selv, om du vil oprette et rigtigt Pluto-forslag.</p>
    <div class="signal-mobile-instrument"><strong>${esc(holding.ticker)}</strong><small>${esc(holding.name||'Cabaletta Bio')}</small></div>
-   <p class="muted" role="status"><strong>FIKTIVT TESTSIGNAL</strong> · Intet markedssignal er beregnet, og ingen ordre er sendt. Du vælger selv, om du vil oprette et rigtigt Pluto-forslag.</p>
    <div class="signal-chart-main">${chart}</div>
    <div class="signal-mobile-metrics signal-mobile-sell"><div class="signal-mobile-change"><small>Dagsændring</small><strong data-signal-daily>—</strong></div><div class="signal-mobile-month"><small>Måned</small><strong data-signal-month>—</strong></div><div class="signal-mobile-year"><small>År</small><strong data-signal-year>—</strong></div></div>
    <div class="asset-trade-bar signal-action-bar"><button type="button" class="primary asset-sell" data-trade-test-buy>Sælg · test</button><button type="button" class="signal-ignore" data-engine-close>Ignorer</button></div>
