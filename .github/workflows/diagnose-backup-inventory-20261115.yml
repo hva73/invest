@@ -1,0 +1,52 @@
+name: Read-only cPanel backup inventory diagnostic
+on:
+  pull_request:
+    branches: [codex/escape-development]
+permissions:
+  contents: read
+jobs:
+  backup-inventory:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'diagnostic/cpanel-quota-backups-20261115'
+    runs-on: ubuntu-latest
+    environment: ESCAPE_NORDICWAY_DEPLOY
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Read-only, bounded cPanel inventory (no file contents)
+        env:
+          ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
+        run: |
+          python - <<'PY'
+          import urllib.request, urllib.parse, urllib.error, json, os, re
+          base='https://cp14.nordicway.dk:2083/execute/Fileman/list_files'
+          token=os.environ.get('ESCAPE_CPANEL_API_TOKEN','')
+          if not re.fullmatch(r'[A-Za-z0-9_-]{10,256}',token):
+              raise SystemExit('INVALID_CREDENTIAL_SHAPE')
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*args,**kwargs):raise RuntimeError('REDIRECT_DENIED')
+          opener=urllib.request.build_opener(NoRedirect())
+          for folder in ['/home/nordicr4/.escape_backups','/home/nordicr4/escape_app/var']:
+              req=urllib.request.Request(base+'?'+urllib.parse.urlencode({'dir':folder,'show_hidden':1}),
+                  headers={'Authorization':'cpanel nordicr4:'+token,'Accept':'application/json'})
+              try:
+                  with opener.open(req,timeout=20) as f: raw=f.read(150001)
+                  if len(raw)>150000:raise RuntimeError('RESPONSE_TOO_LARGE')
+                  result=json.loads(raw).get('result',{})
+                  if result.get('status') not in (1,'1'):raise RuntimeError('API_REJECTED')
+                  entries=result.get('data',[])
+                  if not isinstance(entries,list) or len(entries)>500:raise RuntimeError('BAD_INVENTORY')
+                  safe=[]
+                  for e in entries:
+                      if not isinstance(e,dict):continue
+                      name=e.get('file','')
+                      if not isinstance(name,str):continue
+                      if folder.endswith('escape_app/var') and name!='escape.db':continue
+                      if folder.endswith('.escape_backups') and not (re.fullmatch(r'retained-\\d{8}-\\d{6}-[A-Za-z0-9_-]+\\.tar\\.gz',name) or re.fullmatch(r'\\d{8}-\\d{6}-[A-Za-z0-9_-]+',name) or name=='.escape_backups'):continue
+                      safe.append({'kind':e.get('type'),'size':e.get('size'),'label':name[:40]})
+                  print(json.dumps({'folder':'backups' if folder.endswith('.escape_backups') else 'database','items':safe},sort_keys=True))
+              except urllib.error.HTTPError as e:
+                  print(json.dumps({'folder':'backups' if folder.endswith('.escape_backups') else 'database','http_error':e.code}))
+                  raise SystemExit(1)
+          PY
