@@ -324,3 +324,11 @@
  .signal-overview-dialog > .overview-detail-header{display:none}
  .signal-overview-dialog .signal-action-bar > button.primary{flex:1 1 100%;width:100%;max-width:none}
 }
+
+/* Preserve approved four-column BUY labels on narrow iPhones. */
+@media(max-width:700px){
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy > div{padding-inline:4px}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy > div:first-child{padding-left:0}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy small{font-size:9px}
+ .signal-overview .signal-mobile-metrics.signal-mobile-buy :is(.signal-mobile-change,.signal-mobile-month,.signal-mobile-year) small{white-space:nowrap}
+}
