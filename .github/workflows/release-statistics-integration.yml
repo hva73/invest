@@ -5,7 +5,7 @@ permissions:
   contents: read
 jobs:
   statistics:
-    if: github.event.pull_request.head.ref == 'codex/data-and-notification-prep'
+    if: github.event.pull_request.head.ref == 'codex/data-and-notification-prep' || github.event.pull_request.head.ref == 'codex/statistics-budget-hotfix'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
