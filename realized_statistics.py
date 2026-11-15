@@ -70,15 +70,22 @@ def documented_order_origins(connect, user_id, portfolio_id):
             order = orders[0]; oid = response.get('orderId'); side=order.get('side'); aid=order.get('assetId')
             if not isinstance(oid,str) or not oid or side not in ('BUY','SELL') or not isinstance(aid,str) or not aid: continue
             if response.get('orderIntentId') != intent or not intent or response.get('status') != 'ACCEPTED': continue
-            if not isinstance(asset,dict) or asset.get('assetId',asset.get('id')) != aid: continue
-            if not isinstance(asset.get('name'),str) or not asset['name'] or not isinstance(asset.get('currency'),str): continue
+            # read_estimate stores the complete get_asset response. Pluto may
+            # wrap the verified instrument in an "asset" object; using only
+            # top-level fields falsely leaves documented trades unclassified.
+            if not isinstance(asset,dict): continue
+            node = asset.get('asset', asset)
+            if not isinstance(node,dict): continue
+            stored_ids = [node[key] for key in ('assetId','id') if key in node]
+            if not stored_ids or any(value != aid for value in stored_ids): continue
+            if not isinstance(node.get('name'),str) or not node['name'] or not isinstance(node.get('currency'),str): continue
             if signals.get(oid)==(side,aid):
                 origin='signal'; note='Bekræftet ordre-ID → forslag → valgt HOT WATCH-signal.'
             elif report in ('@manual-buy','@manual-sell') and side==('BUY' if report=='@manual-buy' else 'SELL'):
                 origin='own'; note='Bekræftet ordre-ID → manuelt oprettet forslag i ESCAPE.'
             else: continue
             if oid in matches: ambiguous.add(oid)
-            matches[oid]={'side':side,'asset_id':aid,'name':asset['name'],'currency':asset['currency'],'ticker':asset.get('ticker'),'origin':origin,'evidence':note}
+            matches[oid]={'side':side,'asset_id':aid,'name':node['name'],'currency':node['currency'],'ticker':node.get('ticker'),'origin':origin,'evidence':note}
         except (ValueError,TypeError,AttributeError,KeyError): continue
     return {oid:value for oid,value in matches.items() if oid not in ambiguous}
 

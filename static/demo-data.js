@@ -108,6 +108,13 @@ window.ESCAPE_DEMO_HISTORY=(()=>{
   s.data_status.price=p.price.amount;s.data_status.price_status=s.signal==='WAIT'?'DELAYED':'FRESH';s.data_status.market_status=s.signal==='WAIT'?'CLOSED':'OPEN';s.display_freshness={state:'fresh'};if(s.signal!=='WAIT')s.last_action_signal={event_id:'demo-'+s.signal,state:'ACTIVE',event_type:s.signal+'_SIGNAL'};s.last_data_at=p.price_time;s.last_computed_signal=s.signal;s.last_calculation_at=p.price_time;s.request.activation_reason='DEMO · Simuleret forløb, ikke handelsråd.';
   const demoAccount=demo.state.portfolios.find(x=>x.kind==='portfolio'&&x.source==='pluto');if(demoAccount)demoAccount.can_trade=true;
   if(s.signal!=='WAIT'){
+   // Use the existing synthetic cost/quantity for the approved SELL graph's
+   // dashed average-entry line. Never invent or change real portfolio data.
+   if(s.signal==='SELL'&&p.average_entry?.amount==null
+      &&Number(p.quantity)>0&&Number(p.cost_basis?.amount)>0
+      &&p.cost_basis.currency===p.price.currency){
+    p.average_entry={amount:String(Number(p.cost_basis.amount)/Number(p.quantity)),currency:p.price.currency};
+   }
    s.data_status.identity_verification='verified';s.latest_context={status:'verified',position:'held',tradability:'available',as_of:new Date().toISOString(),orders:[]};
    s.request.portfolio_ids=[s.signal==='SELL'?p.portfolio_id:demoAccount.id];s.request.risk={stop_price:String((Number(p.price.amount)*0.95).toFixed(2))};
    s.last_action_signal={event_id:'demo-'+s.signal,event_type:s.signal+'_SIGNAL',state:'ACTIVE',created:p.price_time,data_timestamp:p.price_time,reason:why};

@@ -46,6 +46,28 @@ class DkkDisplay(unittest.TestCase):
   self.assertIsNone(item['display_gross_dkk'])
 
 class OrderEvidence(unittest.TestCase):
+ def test_wrapped_get_asset_response_from_trade_service(self):
+  # trade_service.read_estimate() persists the entire get_asset response,
+  # whose verified asset can be nested under the "asset" key.
+  with tempfile.TemporaryDirectory() as directory:
+   path=str(Path(directory)/'db');connect=lambda:sqlite3.connect(path)
+   with connect() as c:
+    c.execute('CREATE TABLE broker_proposals(user_id INTEGER,portfolio_id INTEGER,kind TEXT,status TEXT,report_id TEXT,payload TEXT,response TEXT,intent_id TEXT,asset TEXT)')
+    row=(1,1,'direct','sent','@manual-sell',
+         json.dumps({'orders':[{'side':'SELL','assetId':'asset-1'}]}),
+         json.dumps({'orderId':'ASELL','orderIntentId':'intent','status':'ACCEPTED'}),
+         'intent',json.dumps({'asset':{'id':'asset-1','ticker':'A','name':'A','currency':'USD'},'buyBy':{}}))
+    c.execute('INSERT INTO broker_proposals VALUES(?,?,?,?,?,?,?,?,?)',row)
+   proof=documented_order_origins(connect,1,1)
+   self.assertEqual(proof['ASELL']['origin'],'own')
+   result=project([order('A','BUY','10'),order('A','SELL','12')],order_origins=proof)['items'][0]
+   self.assertEqual(result['sell_origin'],'own')
+   # A mismatched instrument must not inherit the provenance.
+   with connect() as c:
+    c.execute('UPDATE broker_proposals SET asset=?',
+              (json.dumps({'asset':{'id':'OTHER','ticker':'A','name':'A','currency':'USD'}}),))
+   self.assertEqual(documented_order_origins(connect,1,1),{})
+
  def test_exact_manual_order_reference_without_provider_asset_id(self):
   with tempfile.TemporaryDirectory() as directory:
    path=str(Path(directory)/'db');connect=lambda:sqlite3.connect(path)
