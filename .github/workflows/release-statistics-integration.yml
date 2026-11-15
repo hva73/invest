@@ -10,6 +10,7 @@ jobs:
     timeout-minutes: 20
     env:
       PYTHONPATH: .:tests
+      ESCAPE_SCREENSHOTS: statistics-review
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -27,5 +28,13 @@ jobs:
       - run: node tests/test_statistics_ui.cjs
       - run: node tests/test_statistics_missing_cost.cjs
       - run: python tests/browser_statistics_missing_cost.py
+      - run: mkdir -p statistics-review
       - run: python tests/browser_statistics_integration.py
       - run: python tests/browser_statistics_desktop_accept.py
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: statistics-all-sales-review
+          path: statistics-review/*.png
+          if-no-files-found: warn
