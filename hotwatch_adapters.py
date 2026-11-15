@@ -186,6 +186,7 @@ class PlutoAdapter:
     started=utc().timestamp();reserve(connect,uid,'pluto',purpose=purpose)
     try:result=super().request(method,params,notification)
     except Exception:self.broken=True;raise
+    if isinstance(result,dict) and result.get('isError') is True:self.broken=True
     if key and isinstance(result,dict) and result.get('isError') is not True:self.read_cache[key]=(started,copy.deepcopy(result))
     return result
   if self.gateway is not None:self.order_cache.clear();self.permission_cache.clear()
