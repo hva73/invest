@@ -49,6 +49,40 @@ def signal_order_sides(connect, user_id, portfolio_id):
     return {key: value for key,value in seen.items() if value is not None}
 
 
+def documented_order_origins(connect, user_id, portfolio_id):
+    """An explicit provider order reference, never price/time coincidence.
+
+    Preserve decision origin independently of Pluto's AI-agent routing label.
+    The stored, verified asset fills the identity gap in list_orders only when
+    name, currency, side, portfolio and exact order ID also agree.
+    """
+    signals = signal_order_sides(connect, user_id, portfolio_id)
+    try:
+        with connect() as db:
+            proposals = db.execute("SELECT report_id,payload,response,intent_id,asset FROM broker_proposals WHERE user_id=? AND portfolio_id=? AND kind='direct' AND status='sent'", (user_id, portfolio_id)).fetchall()
+    except sqlite3.OperationalError: return {}
+    matches = {}; ambiguous = set()
+    for report, payload, response, intent, stored_asset in proposals:
+        try:
+            payload, response, asset = json.loads(payload), json.loads(response), json.loads(stored_asset)
+            orders = payload.get('orders')
+            if not isinstance(orders,list) or len(orders)!=1: continue
+            order = orders[0]; oid = response.get('orderId'); side=order.get('side'); aid=order.get('assetId')
+            if not isinstance(oid,str) or not oid or side not in ('BUY','SELL') or not isinstance(aid,str) or not aid: continue
+            if response.get('orderIntentId') != intent or not intent or response.get('status') != 'ACCEPTED': continue
+            if not isinstance(asset,dict) or asset.get('assetId',asset.get('id')) != aid: continue
+            if not isinstance(asset.get('name'),str) or not asset['name'] or not isinstance(asset.get('currency'),str): continue
+            if signals.get(oid)==(side,aid):
+                origin='signal'; note='Bekræftet ordre-ID → forslag → valgt HOT WATCH-signal.'
+            elif report in ('@manual-buy','@manual-sell') and side==('BUY' if report=='@manual-buy' else 'SELL'):
+                origin='own'; note='Bekræftet ordre-ID → manuelt oprettet forslag i ESCAPE.'
+            else: continue
+            if oid in matches: ambiguous.add(oid)
+            matches[oid]={'side':side,'asset_id':aid,'name':asset['name'],'currency':asset['currency'],'ticker':asset.get('ticker'),'origin':origin,'evidence':note}
+        except (ValueError,TypeError,AttributeError,KeyError): continue
+    return {oid:value for oid,value in matches.items() if oid not in ambiguous}
+
+
 class StatisticsUnavailable(Exception):
     def __init__(self, category):
         self.category = category
@@ -138,6 +172,8 @@ def _result(buy, sell, quantity, basis, provisional):
             'gross_dkk': format(profit, 'f') if sell['currency']=='DKK' else None,
             'net_dkk': None, 'fees_status': 'unknown',
             'buy_origin': buy.get('origin', 'unknown'), 'sell_origin': sell.get('origin', 'unknown'),
+            'buy_order_id':buy['id'], 'sell_order_id':sell['id'],
+            'buy_origin_evidence':buy.get('origin_evidence'), 'sell_origin_evidence':sell.get('origin_evidence'),
             'buy_price': format(buy['price'], 'f'), 'sell_price': format(sell['price'], 'f'),
             'sell_time': None if provisional else sell['time'].isoformat(),
             'order_created_at': sell['time'].isoformat() if provisional else None,
@@ -146,7 +182,7 @@ def _result(buy, sell, quantity, basis, provisional):
                      else 'Foreløbigt brutto i handelsvaluta; gebyrer, valutaomregning og ældre historik er ikke dokumenteret.')}
 
 
-def project(direct_orders, collection_orders=(), signal_order_sides=None):
+def project(direct_orders, collection_orders=(), signal_order_sides=None, order_origins=None):
     """Project orders using enough precision for exact finite amount arithmetic."""
     direct_orders = list(direct_orders)
     collection_orders = list(collection_orders)
@@ -166,10 +202,10 @@ def project(direct_orders, collection_orders=(), signal_order_sides=None):
         precision = 28
     with localcontext() as ctx:
         ctx.prec = precision
-        return _project(direct_orders, collection_orders, signal_order_sides or {})
+        return _project(direct_orders, collection_orders, signal_order_sides or {}, order_origins or {})
 
 
-def _project(direct_orders, collection_orders=(), signal_order_sides=None):
+def _project(direct_orders, collection_orders=(), signal_order_sides=None, order_origins=None):
     """Return results per sale; inputs must already be isolated to one portfolio.
 
     Each collection tuple is (collection_id, nested order). Separate scopes are
@@ -201,6 +237,15 @@ def _project(direct_orders, collection_orders=(), signal_order_sides=None):
                 and isinstance(row['asset'].get('id'), str) and row['asset']['id']
                 and (signal_order_sides or {}).get(record['id']) == (record['side'], row['asset']['id'])):
             record['origin'] = 'signal'
+        proof = (order_origins or {}).get(record['id'])
+        if scope == 'direct' and isinstance(proof, dict):
+            asset_id = row['asset'].get('id')
+            same_identity = (asset_id == proof['asset_id'] if asset_id else
+                             record['name'] == proof['name'] and record['currency'] == proof['currency']
+                             and (not proof.get('ticker') or record['ticker'] == proof['ticker']))
+            if same_identity and record['side'] == proof['side']:
+                record['origin'] = proof['origin']
+                record['origin_evidence'] = proof['evidence']
         key = (scope, record['id'])
         if key in seen:
             if seen[key] != record:
@@ -258,7 +303,8 @@ def _project(direct_orders, collection_orders=(), signal_order_sides=None):
                         'currency': sell['currency'], 'quantity': format(sell['quantity'], 'f'),
                         'sell_price': format(sell['price'], 'f'),
                         'sale_proceeds': format(sell['quantity'] * sell['price'], 'f'),
-                        'buy_origin': 'unknown', 'sell_origin': sell.get('origin', 'unknown')})
+                        'buy_origin': 'unknown', 'sell_origin': sell.get('origin', 'unknown'),
+                        'sell_order_id':sell['id'], 'sell_origin_evidence':sell.get('origin_evidence')})
             continue
         lots = deque(); unsafe = False
         for row in rows:
@@ -290,6 +336,66 @@ def _project(direct_orders, collection_orders=(), signal_order_sides=None):
     return {'items': results, 'unresolved_sales': unresolved_sales, 'summary_by_currency':summaries, 'omitted': omitted, 'history_complete': False,
             'count_note':'Én observeret salgsordre tælles én gang; delsalg tælles hver for sig. Vinderandel er antal positive salg divideret med alle viste salg, også nulresultater.',
             'note': 'Kun observerede handler. Historikkens dækning, gebyrer og historisk valutakurs er ikke bekræftet. Direkte handler er foreløbige kursforskelle; oprettelsestid er ikke fyldtid.'}
+
+
+def display_currency(connect, output, now=None):
+    """DKK display estimate from the same cached reference sources as sectors.
+
+    Original executions stay untouched. This is not historical settlement FX.
+    No provider calls, writes or fixed exchange-rate defaults.
+    """
+    now = now or datetime.now(timezone.utc)
+    rates = {'DKK': {'rate':'1', 'source':'DKK', 'as_of':None}}
+    needed = {row.get('currency') for p in output.get('portfolios', [])
+              for row in p.get('items', []) + p.get('unresolved_sales', [])}
+    if not needed:
+        output['display_currency'] = 'DKK'
+        output['display_fx'] = rates
+        return output
+    def positive(value):
+        try:
+            n = Decimal(str(value))
+            return n if n.is_finite() and n > 0 else None
+        except (InvalidOperation, ValueError, TypeError): return None
+    with connect() as db:
+        try:
+            row = db.execute('SELECT source_date,payload FROM fx_snapshots ORDER BY source_date DESC,id DESC LIMIT 1').fetchone()
+            if row:
+                date, payload = row
+                age = (now.date() - datetime.fromisoformat(date).date()).days
+                values = json.loads(payload).get('rates', {})
+                dkk = positive(values.get('DKK'))
+                if 0 <= age <= 7 and dkk:
+                    for code in needed:
+                        foreign = Decimal(1) if code == 'EUR' else positive(values.get(code))
+                        if code != 'DKK' and foreign:
+                            rates[code] = {'rate':format(dkk / foreign,'f'), 'source':'ECB', 'as_of':date}
+        except (sqlite3.OperationalError, ValueError, TypeError, AttributeError): pass
+        try:
+            quotes = db.execute('SELECT currency,rate,event_time,status FROM sector_fx').fetchall()
+            for code, value, at, status in quotes:
+                rate = positive(value)
+                try: age = (now - datetime.fromisoformat(at.replace('Z','+00:00'))).total_seconds()
+                except (ValueError, TypeError, AttributeError): continue
+                if code not in rates and code in needed and status == 'OK' and rate and 0 <= age <= 7*86400:
+                    rates[code] = {'rate':format(rate,'f'), 'source':'EODHD', 'as_of':at}
+        except sqlite3.OperationalError: pass
+    for portfolio in output.get('portfolios', []):
+        for item in portfolio.get('items', []) + portfolio.get('unresolved_sales', []):
+            info = rates.get(item.get('currency'))
+            item['display_fx'] = info
+            for original, target in [('gross','display_gross_dkk'),('cost_basis','display_cost_dkk'),('sale_proceeds','display_proceeds_dkk')]:
+                item[target] = None
+                try:
+                    value = Decimal(item[original])
+                    if info and value.is_finite():
+                        with localcontext() as ctx:
+                            ctx.prec = 300
+                            item[target] = format(value * Decimal(info['rate']),'f')
+                except (KeyError, InvalidOperation, TypeError, ValueError): pass
+    output['display_currency'] = 'DKK'
+    output['display_fx'] = rates
+    return output
 
 
 def read(connect, user_id, client_factory=None):
@@ -330,7 +436,7 @@ def read(connect, user_id, client_factory=None):
                     'portfolioId':identifier, 'scope':'DIRECT', 'statusGroup':'INACTIVE', 'limit':50}}), 'list_orders')
                 rows = list_data(data, ['orders','items','data'])
                 stage = 'DIRECT_PROJECTION'
-                result = project(rows, signal_order_sides=signal_order_sides(connect, user_id, portfolio['id']))
+                result = project(rows, signal_order_sides=signal_order_sides(connect, user_id, portfolio['id']), order_origins=documented_order_origins(connect,user_id,portfolio['id']))
             elif portfolio['kind'] == 'collection' and namespace == 'collections':
                 stage = 'COLLECTION_PERMISSION'
                 if not allowed(tools, 'get_collection_activity', 'collectionId'): raise ValueError('Collectionhistorik er utilgængelig')
@@ -363,6 +469,6 @@ def read(connect, user_id, client_factory=None):
             stage = depot_error_code(stage, error)
             if stage not in error_codes: error_codes.append(stage)
             errors.append('En historik kunne ikke læses; eventuelle tal dækker ikke alle depoter.')
-    return {'portfolios':output,'errors':errors,'error_codes':error_codes,'observed':datetime.now(timezone.utc).isoformat(),
-            'history_complete':False}
+    return display_currency(connect, {'portfolios':output,'errors':errors,'error_codes':error_codes,'observed':datetime.now(timezone.utc).isoformat(),
+            'history_complete':False})
 
