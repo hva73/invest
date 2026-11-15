@@ -98,7 +98,7 @@ def _result(buy, sell, quantity, basis, provisional):
             'gross': format(profit, 'f'), 'gross_percent': format(_percent(profit, basis), 'f'),
             'gross_dkk': format(profit, 'f') if sell['currency']=='DKK' else None,
             'net_dkk': None, 'fees_status': 'unknown',
-            'buy_origin': 'unknown', 'sell_origin': 'unknown',
+            'buy_origin': buy.get('origin', 'unknown'), 'sell_origin': sell.get('origin', 'unknown'),
             'buy_price': format(buy['price'], 'f'), 'sell_price': format(sell['price'], 'f'),
             'sell_time': None if provisional else sell['time'].isoformat(),
             'order_created_at': sell['time'].isoformat() if provisional else None,
@@ -107,7 +107,7 @@ def _result(buy, sell, quantity, basis, provisional):
                      else 'Foreløbigt brutto i handelsvaluta; gebyrer, valutaomregning og ældre historik er ikke dokumenteret.')}
 
 
-def project(direct_orders, collection_orders=()):
+def project(direct_orders, collection_orders=(), signal_order_sides=None):
     """Project orders using enough precision for exact finite amount arithmetic."""
     direct_orders = list(direct_orders)
     collection_orders = list(collection_orders)
@@ -127,10 +127,10 @@ def project(direct_orders, collection_orders=()):
         precision = 28
     with localcontext() as ctx:
         ctx.prec = precision
-        return _project(direct_orders, collection_orders)
+        return _project(direct_orders, collection_orders, signal_order_sides or {})
 
 
-def _project(direct_orders, collection_orders=()):
+def _project(direct_orders, collection_orders=(), signal_order_sides=None):
     """Return results per sale; inputs must already be isolated to one portfolio.
 
     Each collection tuple is (collection_id, nested order). Separate scopes are
@@ -158,6 +158,10 @@ def _project(direct_orders, collection_orders=()):
             except (InvalidOperation, ValueError): zero = False
             if not (zero and row.get('status') in ('CANCELED','CANCELLED','EXPIRED','REJECTED')): taint(row, scope)
             return
+        if (scope == 'direct' and isinstance(row.get('asset'), dict)
+                and isinstance(row['asset'].get('id'), str) and row['asset']['id']
+                and (signal_order_sides or {}).get(record['id']) == (record['side'], row['asset']['id'])):
+            record['origin'] = 'signal'
         key = (scope, record['id'])
         if key in seen:
             if seen[key] != record:
@@ -287,7 +291,8 @@ def read(connect, user_id, client_factory=None):
                     'portfolioId':identifier, 'scope':'DIRECT', 'statusGroup':'INACTIVE', 'limit':50}}), 'list_orders')
                 rows = list_data(data, ['orders','items','data'])
                 stage = 'DIRECT_PROJECTION'
-                result = project(rows)
+                from statistics_origins import signal_order_sides
+                result = project(rows, signal_order_sides=signal_order_sides(connect, user_id, portfolio['id']))
             elif portfolio['kind'] == 'collection' and namespace == 'collections':
                 stage = 'COLLECTION_PERMISSION'
                 if not allowed(tools, 'get_collection_activity', 'collectionId'): raise ValueError('Collectionhistorik er utilgængelig')
