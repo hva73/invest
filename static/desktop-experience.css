@@ -341,3 +341,13 @@
  .signal-mobile-instrument>strong{font-size:22px;font-weight:700;line-height:1.2}
  .signal-mobile-instrument>small{font-size:12px;color:#b5c9d0}
 }
+
+/* Approved signal: instrument left, quote right, bottom trade action. */
+@media(max-width:700px){
+ .signal-overview-dialog .signal-overview{min-height:calc(100dvh - 32px);display:flex;flex-direction:column}
+ .signal-overview .signal-mobile-instrument{width:46%;box-sizing:border-box;min-height:66px;margin-bottom:-66px;position:relative;z-index:2;border-top:0;padding-top:7px;pointer-events:none}
+ .signal-overview .market-quote{padding-left:47%;box-sizing:border-box;min-height:65px}
+ .signal-overview .market-price{white-space:nowrap}
+ .signal-overview .market-origin{display:none}
+ .signal-overview .signal-action-bar{margin-top:auto}
+}
