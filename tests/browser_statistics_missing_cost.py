@@ -16,7 +16,7 @@ with sync_playwright() as playwright:
         assert page.locator('select[data-statistics-currency]').input_value() == 'USD'
         assert page.get_by_text('Resultat ikke afklaret').is_visible()
         assert page.get_by_text('SAMLET RESULTAT AF SALG').count() == 0
-        page.get_by_role('button', name='TEST Fiktiv aktie Resultat ikke afklaret').click()
+        page.locator('[data-statistics-open]').click()
         dialog=page.get_by_role('dialog',name='Detaljer for Fiktiv aktie')
         assert dialog.is_visible() and dialog.get_by_text('Kostpris').is_visible()
         dialog.get_by_role('button',name='Luk').click()
