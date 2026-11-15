@@ -30,3 +30,21 @@ class MissingCostTests(unittest.TestCase):
         result = project([buy,sell])['items'][0]
         self.assertEqual(Decimal(result['gross']).quantize(Decimal('.01')), Decimal('3.59'))
         self.assertEqual(Decimal(result['gross_percent']).quantize(Decimal('.01')), Decimal('13.43'))
+
+class DuplicatesAndScopes(unittest.TestCase):
+    def test_duplicate_and_cancelled_orders(self):
+        sale=order('UNKNOWN','SELL','12')
+        self.assertEqual(len(project([sale,dict(sale)])['unresolved_sales']),1)
+        conflict=dict(sale,filledAveragePrice='13')
+        self.assertEqual(project([sale,conflict])['unresolved_sales'],[])
+        cancelled=dict(sale,status='CANCELED',filledQuantity='0')
+        self.assertEqual(project([cancelled])['unresolved_sales'],[])
+        partial=dict(sale,status='CANCELED',filledQuantity='0.5')
+        self.assertEqual(project([partial])['unresolved_sales'][0]['quantity'],'0.5')
+    def test_separate_collection_and_direct(self):
+        direct=order('A','SELL','12')
+        buy=order('A','BUY','10'); sale=dict(order('A','SELL','12'),id='collection-sale')
+        buy['filledAt']='2026-01-01T00:00:00Z';sale['filledAt']='2026-01-02T00:00:00Z'
+        result=project([direct],[('c1',buy),('c1',sale)])
+        self.assertEqual(result['unresolved_sales'][0]['ticker'],'A')
+        self.assertEqual(result['items'][0]['scope'],'collection:c1')
