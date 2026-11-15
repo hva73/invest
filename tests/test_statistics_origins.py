@@ -1,6 +1,6 @@
 import json, sqlite3, tempfile, unittest
 from pathlib import Path
-from statistics_origins import signal_order_sides
+from realized_statistics import signal_order_sides
 from realized_statistics import project
 
 class OriginTest(unittest.TestCase):
