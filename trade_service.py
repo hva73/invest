@@ -161,7 +161,7 @@ def candidate(connect,user_id,report_id,candidate_id):
     return {**record['candidate'],'signal':signal}
 
 def signal_source(connect,user_id,report_id,candidate_id):
-    if report_id in ('@manual-buy','@manual-sell'):
+    if report_id in ('@manual-buy','@manual-sell','@manual-test-sell'):
         if not isinstance(candidate_id,str) or not 1<=len(candidate_id)<=200 or any(ord(x)<33 for x in candidate_id):raise TradeError('Vælg et gyldigt Pluto-aktiv.')
         return {'signal':'KØB' if report_id=='@manual-buy' else 'SÆLG','asset_id':candidate_id}
     if report_id!='@hotwatch':return candidate(connect,user_id,report_id,candidate_id)
@@ -217,6 +217,12 @@ def verify_proposal_source(connect,user_id,row):
         raise TradeError('Signalets aktiv er ændret. Hent et nyt estimat.')
     if row['kind']=='collection_buy' and expected!='BUY' or row['kind']=='collection_sell' and expected!='SELL':
         raise TradeError('Signalets retning er ændret. Hent et nyt estimat.')
+    if row['report_id']=='@manual-test-sell':
+        with connect() as db:t=active_test_signal(db,user_id)
+        if not t or t['ticker']!='CABA' or t['side']!='SELL' or str(t['portfolio_id'])!=str(row['portfolio_id']):
+            raise TradeError('CABA-testsignalet er udløbet. Opret ikke en ordre fra et udløbet signal.')
+        if row['kind']!='direct' or len(orders)!=1 or Decimal(str(orders[0].get('shares') or 0))!=Decimal('1'):
+            raise TradeError('CABA-testsignalet må kun oprette forslag for 1 aktie.')
     if row['report_id']=='@hotwatch':
         if expected=='BUY':
             import hotwatch_buy_plan
@@ -404,6 +410,12 @@ def estimate(connect,user_id,data,factory=None):
     if data.get('report_id')=='@manual-sell':
         if data.get('kind')!='direct' or data.get('size_mode')!='percent':raise TradeError('Et manuelt salg skal angives som procent af en direkte beholdning.')
         data={**data,'candidate_id':data.get('asset_id')}
+    if data.get('report_id')=='@manual-test-sell':
+        if data.get('kind')!='direct' or data.get('size_mode')!='percent':raise TradeError('CABA-testsalg skal være en direkte procentordre.')
+        with connect() as db: t=active_test_signal(db,user_id)
+        if not t or t['ticker']!='CABA' or t['side']!='SELL' or str(t['portfolio_id'])!=str(data.get('portfolio_id')):
+            raise TradeError('Testsalgssignalet er udløbet, eller depotet er ændret.')
+        data={**data,'candidate_id':data.get('asset_id')}
     if data.get('kind')=='direct' and data.get('size_mode')=='percent':
         c=signal_source(connect,user_id,str(data.get('report_id','')),str(data.get('candidate_id','')))
         verify_expected_side(data,c)
@@ -411,6 +423,8 @@ def estimate(connect,user_id,data,factory=None):
         try:portfolio_id=int(data.get('portfolio_id'))
         except (ValueError,TypeError):raise TradeError('Vælg et depot.')
         basis=direct_sell_basis(connect,user_id,portfolio_id,data.get('asset_id'),data.get('size'),factory)
+        if data.get('report_id')=='@manual-test-sell' and Decimal(basis['shares'])!=Decimal('1'):
+            raise TradeError('Fiktiv CABA-test er låst til præcis 1 aktie. Depotet er ændret; opdatér og start igen.')
         data={**data,'size_mode':'shares','size':basis['shares']}
     p,payload=build(connect,user_id,data);kind=data['kind']
     if basis is not None and (len(payload.get('orders') or [])!=1 or payload['orders'][0].get('side')!='SELL'):
