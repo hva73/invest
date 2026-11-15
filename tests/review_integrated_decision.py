@@ -17,7 +17,10 @@ source = replace_once(source,
 source = replace_once(source,
     "expect(d.locator('.signal-action-bar .signal-help')).to_have_count(0)",
     "expect(d.locator('.signal-action-bar .signal-help')).to_have_count(0)\n"
-    "   expect(d.locator('h2')).to_be_focused()\n"
+    "   if page.viewport_size['width']<=700:\n"
+    "    expect(d.locator('.signal-why summary')).to_be_focused()\n"
+    "   else:\n"
+    "    expect(d.locator('h2')).to_be_focused()\n"
     "   page.keyboard.press('Tab')\n"
     "   assert page.evaluate(\"!!document.activeElement.closest('#engine-dialog')\")")
 generated = Path('tests/_release_decision_generated.py')
