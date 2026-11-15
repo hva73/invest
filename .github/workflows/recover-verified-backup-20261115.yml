@@ -1,0 +1,33 @@
+name: Recover previously verified backup retention
+on:
+  pull_request:
+    branches: [codex/escape-development]
+permissions:
+  contents: read
+jobs:
+  retention:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'diagnostic/cpanel-quota-backups-20261115'
+    runs-on: ubuntu-24.04
+    environment: ESCAPE_NORDICWAY_DEPLOY
+    timeout-minutes: 15
+    env:
+      ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 625c17a1c38e34d973ecfebea956cc4fbb330e20
+          persist-credentials: false
+      - name: Archive, checksum-verify and replace 15 Nov uncompressed backup
+        run: |
+          python - <<'PY'
+          import sys,json
+          sys.path.insert(0,'tools')
+          import nordicway_release_retention as retention
+          sha='f24f14d584cbdb5dd80cd5e32175ed2f268e7b69'
+          started=1794768381
+          # Verified historical deployment receipt, not an invented release:
+          # GitHub deploy run 43748612178, install step success and readback.
+          retention.validate_result({'status':'ok','operation':'app-deploy','sha':sha},sha)
+          result=retention.maintain(retention.transport_api(),sha,started)
+          print(json.dumps({'status':'retention_recovered','verified_files':result['verified_files'],'database_bytes':result['database_bytes'],'archive_bytes':result['archive_bytes']}))
+          PY
