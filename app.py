@@ -487,6 +487,17 @@ class Handler(BaseHTTPRequestHandler):
                 try:result=release_approval.approve(connect,data.get('id'),data.get('sha'),user_id)
                 except ValueError:return self.send(409,{'error':'Opdateringen er udløbet eller ændret. Hent den aktuelle version igen.'})
                 return self.send(200,{**result,'deployment_started':False})
+            if self.path=='/api/admin/test-sell-signal':
+                if s['role']!='admin' or s['username']!='owner':
+                    return self.send(403,{'error':'Kun ejeren kan starte denne afgrænsede test'})
+                if set(data)!={'ticker'} or data['ticker']!='CABA':
+                    return self.send(400,{'error':'Kun CABA-testsalg er understøttet'})
+                import trade_service,web_push
+                try: result=trade_service.start_manual_test_sell(connect,user_id,'CABA')
+                except trade_service.TradeError as error:return self.send(409,{'error':str(error)})
+                try:push=web_push.notify_manual_test_sell(connect,user_id,'CABA')
+                except Exception:push={'sent':0,'failed':0,'note':'Push kunne ikke sendes; testsignalet er stadig synligt i appen'}
+                return self.send(200,{**result,'push':push})
             if self.path=='/api/admin/reset-password':
                 if s['role']!='admin':return self.send(403,{'error':'Kun administratoren kan ændre brugerens adgangskode'})
                 if self.throttled():return self.send(429,{'error':'Prøv igen om fem minutter'})
