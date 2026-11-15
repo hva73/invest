@@ -60,12 +60,10 @@ def start_manual_test_sell(connect,user_id,ticker):
         pending=c.execute("SELECT payload FROM broker_proposals WHERE user_id=? AND portfolio_id=? AND created>? AND status IN ('estimated','sending','sent','uncertain')",
                           (user_id,row['portfolio_id'],now-86400)).fetchall()
         for item in pending:
-            try:
-                orders=json.loads(item['payload']).get('orders',[])
-                if any(o.get('side')=='SELL' and o.get('assetId')==row['asset_id'] for o in orders):
-                    raise TradeError('ESCAPE har allerede et nyere CABA-salgsforslag. Kontrollér status inden ny test.')
-            except (ValueError,TypeError,AttributeError):
-                continue
+            try:orders=json.loads(item['payload']).get('orders',[])
+            except (ValueError,TypeError,AttributeError):continue
+            if isinstance(orders,list) and any(isinstance(o,dict) and o.get('side')=='SELL' and o.get('assetId')==row['asset_id'] for o in orders):
+                raise TradeError('ESCAPE har allerede et nyere CABA-salgsforslag. Kontrollér status inden ny test.')
         expires=now+900
         c.execute("""INSERT INTO manual_test_signals(user_id,portfolio_id,ticker,amount,expires,side)
                      VALUES(?,?,?,?,?,'SELL')
