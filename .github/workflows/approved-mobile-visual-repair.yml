@@ -4,7 +4,7 @@ permissions:
   contents: read
 jobs:
   review:
-    if: contains(fromJSON('["codex/approved-mobile-visual-fix","codex/mobile-approved-parity-15nov"]'), github.event.pull_request.head.ref) || contains(fromJSON('["codex/data-and-notification-prep","codex/mobile-five-view-acceptance","codex/mobile-approved-layout-correction","codex/position-proposal4-approved","codex/mobile-signal-area-release"]'), github.event.pull_request.head.ref)
+    if: contains(fromJSON('["codex/mobile-reference-legibility","codex/approved-mobile-visual-fix","codex/mobile-approved-parity-15nov"]'), github.event.pull_request.head.ref) || contains(fromJSON('["codex/data-and-notification-prep","codex/mobile-five-view-acceptance","codex/mobile-approved-layout-correction","codex/position-proposal4-approved","codex/mobile-signal-area-release"]'), github.event.pull_request.head.ref)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
