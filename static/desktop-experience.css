@@ -363,3 +363,13 @@
 
 /* Historical source label is technical detail, not in the approved signal screen. */
 @media(max-width:700px){.signal-overview .market-session{display:none}}
+
+/* Exact approved signal accents: underline and single prominent action. */
+@media(max-width:700px){
+ .signal-overview .signal-mobile-nav>strong::after{content:"";display:block;width:64px;max-width:100%;height:3px;border-radius:4px;margin:8px auto 0}
+ .signal-overview:has(.signal-mobile-buy) .signal-mobile-nav>strong::after{background:#64edb3}
+ .signal-overview:has(.signal-mobile-sell) .signal-mobile-nav>strong::after{background:#e34c68}
+ .signal-overview-dialog .signal-action-bar>button.primary{font-weight:750;font-size:17px;text-transform:uppercase;min-height:54px;border-radius:13px}
+ .signal-overview:has(.signal-mobile-buy) .signal-action-bar>button.primary{background:#64edb3;color:#042321;border-color:#64edb3}
+ .signal-overview:has(.signal-mobile-sell) .signal-action-bar>button.primary{background:#b83752;color:#fff;border-color:#b83752}
+}
