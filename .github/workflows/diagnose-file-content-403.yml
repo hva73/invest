@@ -1,0 +1,47 @@
+name: Diagnose cPanel file-read 403
+on:
+  pull_request:
+    branches: [codex/escape-development]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'diagnostic/recover-retention-20261115'
+    runs-on: ubuntu-latest
+    environment: ESCAPE_NORDICWAY_DEPLOY
+    timeout-minutes: 3
+    steps:
+      - name: Probe fixed read-only API endpoints, redact responses
+        env:
+          ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
+        run: |
+          python - <<'PY'
+          import urllib.request,urllib.error,urllib.parse,json,os,re
+          token=os.environ.get('ESCAPE_CPANEL_API_TOKEN','')
+          if not re.fullmatch('[A-Za-z0-9_-]{10,256}',token):raise SystemExit('credential_unavailable')
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,*args,**kw):raise RuntimeError('redirect_denied')
+          op=urllib.request.build_opener(NoRedirect())
+          base='https://cp14.nordicway.dk:2083/execute/'
+          operations=[
+           ('quota','StatsBar/get_stats',{'display':'diskusage'}),
+           ('files','Fileman/list_files',{'dir':'/home/nordicr4/.escape_backups','show_hidden':1}),
+           ('commit','Fileman/get_file_content',{'dir':'/home/nordicr4/escape_app','file':'BUILD_COMMIT','from_charset':'ISO-8859-1','to_charset':'UTF-8','update_html_document_encoding':0})]
+          for label,path,args in operations:
+              req=urllib.request.Request(base+path+'?'+urllib.parse.urlencode(args),headers={'Authorization':'cpanel nordicr4:'+token,'Accept':'application/json'})
+              try:
+                  with op.open(req,timeout=20) as r:payload=r.read(102401);status=r.status
+                  body=json.loads(payload)
+                  result=body.get('result',body)
+                  if label=='commit':
+                      v=result.get('data') if isinstance(result,dict) else None
+                      content=v.get('content') if isinstance(v,dict) else None
+                      info={'exists':isinstance(content,str),'match':content.strip()=='f24f14d584cbdb5dd80cd5e32175ed2f268e7b69' if isinstance(content,str) else False}
+                  else:info={'api_ok':result.get('status') in (1,'1') if isinstance(result,dict) else False}
+                  print(json.dumps({'endpoint':label,'http':status,**info}))
+              except urllib.error.HTTPError as e:
+                  body=e.read(2049).lower()
+                  marker='security_filter' if any(x in body for x in (b'imunify',b'mod_security',b'web application firewall',b'cloudflare')) else 'generic_forbidden'
+                  print(json.dumps({'endpoint':label,'http':e.code,'category':marker,'server':str(e.headers.get('Server',''))[:45]}))
+              except Exception as e:print(json.dumps({'endpoint':label,'error':type(e).__name__}))
+          PY
