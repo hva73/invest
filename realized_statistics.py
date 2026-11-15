@@ -183,6 +183,7 @@ def _project(direct_orders, collection_orders=()):
             continue
         groups[(row['scope'], row['ticker'], row['name'], row['currency'])].append(row)
     results = []
+    unresolved_sales = []
     identities = defaultdict(set)
     for scope, ticker, name, currency in groups:
         identities[(scope, ticker.strip().casefold())].add((name, currency))
@@ -207,7 +208,14 @@ def _project(direct_orders, collection_orders=()):
                 buy=buys[0]
                 for sell in sells:
                     results.append(_result(buy,sell,sell['quantity'],sell['quantity']*buy['price'],True))
-            elif sells: omitted += 1
+            elif sells:
+                omitted += 1
+                for sell in sells:
+                    unresolved_sales.append({'ticker': sell['ticker'], 'name': sell['name'],
+                        'currency': sell['currency'], 'quantity': format(sell['quantity'], 'f'),
+                        'sell_price': format(sell['price'], 'f'),
+                        'sale_proceeds': format(sell['quantity'] * sell['price'], 'f'),
+                        'buy_origin': 'unknown', 'sell_origin': 'unknown'})
             continue
         lots = deque(); unsafe = False
         for row in rows:
@@ -236,7 +244,7 @@ def _project(direct_orders, collection_orders=()):
         gains=s['gains'];losses=s['losses_total']
         s.update(gains=format(gains,'f'),losses_total=format(losses,'f'),gross_total=format(gains+losses,'f'),
                  win_rate_percent=format(_percent(Decimal(s['wins']), Decimal(s['sales'])),'f'))
-    return {'items': results, 'summary_by_currency':summaries, 'omitted': omitted, 'history_complete': False,
+    return {'items': results, 'unresolved_sales': unresolved_sales, 'summary_by_currency':summaries, 'omitted': omitted, 'history_complete': False,
             'count_note':'Én observeret salgsordre tælles én gang; delsalg tælles hver for sig. Vinderandel er antal positive salg divideret med alle viste salg, også nulresultater.',
             'note': 'Kun observerede handler. Historikkens dækning, gebyrer og historisk valutakurs er ikke bekræftet. Direkte handler er foreløbige kursforskelle; oprettelsestid er ikke fyldtid.'}
 
