@@ -8,9 +8,9 @@ class OriginTest(unittest.TestCase):
   self.tmp=tempfile.TemporaryDirectory();self.path=str(Path(self.tmp.name)/'db')
   with self.connect() as c:
    c.execute('CREATE TABLE broker_proposals(user_id INTEGER,portfolio_id INTEGER,kind TEXT,status TEXT,signal_event_id TEXT,intent_id TEXT,payload TEXT,response TEXT,report_id TEXT,candidate_id TEXT)')
-   c.execute('CREATE TABLE hw_sessions(id INTEGER,user_id INTEGER,candidate_id TEXT,is_test INTEGER,request TEXT)')
+   c.execute('CREATE TABLE hw_sessions(id INTEGER,user_id INTEGER,candidate_id TEXT,watch_id TEXT,is_test INTEGER,request TEXT)')
    c.execute('CREATE TABLE hw_events(event_id TEXT,watch_row_id INTEGER,event_type TEXT)')
-   c.execute('INSERT INTO hw_sessions VALUES(1,1,?,0,?)',('watch',json.dumps({'asset_id':'asset-1','portfolio_ids':[1]})))
+   c.execute('INSERT INTO hw_sessions VALUES(1,1,?,?,0,?)',('different-report-candidate','watch',json.dumps({'asset_id':'asset-1','portfolio_ids':[1]})))
    c.execute('INSERT INTO hw_events VALUES(?,1,?)',('hw-'+'a'*24,'BUY_SIGNAL'))
  def tearDown(self):self.tmp.cleanup()
  def connect(self):return sqlite3.connect(self.path)
@@ -33,3 +33,18 @@ class OriginTest(unittest.TestCase):
  def test_missing_schema_is_unknown(self):
   with self.connect() as c:c.execute('DROP TABLE broker_proposals')
   self.assertEqual(signal_order_sides(self.connect,1,1),{})
+
+class ActualSchemaTest(unittest.TestCase):
+ def test_watch_id_differs_from_report_candidate(self):
+  import app
+  with tempfile.TemporaryDirectory() as directory:
+   previous=app.DB;app.DB=str(Path(directory)/'db')
+   try:
+    app.init()
+    with sqlite3.connect(app.DB) as c:
+     c.execute("INSERT INTO hw_sessions(id,user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due) VALUES(1,1,'watch-id',0,'report-candidate','test','ACTIVE',?,'d','{}','{}','x','x',0)",(json.dumps({'asset_id':'asset-1','portfolio_ids':[1]}),))
+     event='hw-'+'a'*24
+     c.execute("INSERT INTO hw_events(event_id,watch_row_id,event_type,severity,created,payload) VALUES(?,1,'BUY_SIGNAL','info','x','{}')",(event,))
+     c.execute("INSERT INTO broker_proposals(user_id,fingerprint,report_id,candidate_id,kind,portfolio_id,payload,status,created,signal_event_id,intent_id,response) VALUES(1,'fp','@hotwatch','watch-id','direct',1,?,'sent',0,?,'i',?)",(json.dumps({'orders':[{'assetId':'asset-1','side':'BUY'}]}),event,json.dumps({'orderIntentId':'i','orderId':'o','status':'ACCEPTED'})))
+    self.assertEqual(signal_order_sides(lambda:sqlite3.connect(app.DB),1,1),{'o':('BUY','asset-1')})
+   finally:app.DB=previous
