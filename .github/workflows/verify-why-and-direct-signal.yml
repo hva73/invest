@@ -1,0 +1,24 @@
+name: Test approved signal Why and direct navigation
+on:
+  pull_request:
+    branches: [hotfix/baseline-why-20261115]
+permissions:
+  contents: read
+jobs:
+  signal-flow:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: .:tests
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt playwright==1.56.0
+      - run: python -m playwright install --with-deps chromium
+      - run: node --check static/engine-ui.js && node --check static/dashboard-ui.js
+      - run: python tests/browser_anonymous_demo.py
+      - run: python tests/browser_signal_push_detail.py
