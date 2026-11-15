@@ -455,3 +455,26 @@
 @media(max-width:700px){
  #dashboard-detail .position-mobile-facts dt{font-size:clamp(9px,2.8vw,11px);white-space:nowrap}
 }
+
+/* Owner reference QA 15.11: standalone actions, grouped signal periods, clear values.
+   Mobile only. Do not change trade gates, content or desktop. */
+@media(max-width:700px){
+ .signal-overview-dialog .signal-overview .signal-action-bar{
+   border:0;background:transparent;box-shadow:none;border-radius:0;
+   padding:0;margin-inline:0;
+ }
+ .signal-overview-dialog .signal-overview .market-period-buttons{
+   background:#102e38;border:1px solid #24444c;border-radius:13px;
+   padding:3px;gap:2px;
+ }
+ .signal-overview-dialog .signal-overview .market-period-buttons button{
+   border-radius:10px;
+ }
+ #dashboard-detail > .position-actions-mobile{
+   border:0;background:transparent;box-shadow:none;border-radius:0;
+   padding:0;margin-inline:0;
+ }
+ #dashboard-detail .position-mobile-facts dd{font-size:17px}
+ .mobile-holding-metrics .dash-profit-percent,
+ .mobile-holding-daily{font-size:14px}
+}
