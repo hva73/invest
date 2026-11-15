@@ -36,6 +36,12 @@ def main():
    base['dashboard']['positions']=[holding]
    base['portfolios']=[{'id':case.root,'name':'Root','source':'pluto','kind':'portfolio','active':True,'can_trade':True}]
    base['test_trade_signal']={'portfolio_id':case.root,'ticker':'CABA','side':'SELL','expires':time.time()+900}
+   base['connection']={'connected':True,'status':'Tilsluttet'}
+   series=[{'price':str(v),'epoch':time.time()-1200+120*i,'timestamp':datetime.fromtimestamp(time.time()-1200+120*i,timezone.utc).isoformat()} for i,v in enumerate([1.26,1.27,1.26,1.28,1.27,1.29,1.30,1.28,1.29,1.30,1.29])]
+   quote={'price':'1.29','currency':'USD','ticker':'CABA','exchange':'NASDAQ','name':'Cabaletta Bio, Inc. Common Stock',
+          'asset_id':'caba-asset-id','asset_type':'CS','price_time':now,'fetched_at':now,'series':series,
+          'series_period':'ONE_WEEK','daily_change_percent':'0.78','daily_change':'0.01'}
+   page.route('**/api/market/quote',lambda route:route.fulfill(json=quote))
    page.route('**/api/state',lambda route:route.fulfill(json=base))
    def create(route):
     assert route.request.post_data_json=={'ticker':'CABA'}
@@ -53,7 +59,7 @@ def main():
    expect(signal.locator('.signal-mobile-metrics')).to_contain_text('År')
    expect(signal.locator('[data-trade-test-buy]')).to_be_visible()
    Path('visual-review').mkdir(exist_ok=True)
-   page.screenshot(path='visual-review/manual-caba-sell-test-390.png',full_page=True)
+   signal.screenshot(path='visual-review/manual-caba-sell-test-390.png')
    signal.locator('[data-trade-test-buy]').click()
    expect(page.locator('#quick-trade-dialog')).to_be_visible()
    expect(page.locator('#quick-trade-dialog')).to_contain_text('CABA')
