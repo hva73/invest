@@ -79,8 +79,9 @@ def main():
    assert page.evaluate("getComputedStyle(document.documentElement).overflowY")=='hidden'
    background=page.evaluate('window.scrollY');page.mouse.move(2,2);page.mouse.wheel(0,900);page.wait_for_timeout(150);assert page.evaluate('window.scrollY')==background
    shot=os.environ.get('ESCAPE_SCREENSHOTS');
-   expect(d.locator('.market-slot .market-price')).to_be_visible();expect(d.locator('.market-signal-area')).to_have_count(1);expect(d.locator('.signal-mobile-metrics > div')).to_have_count(3);expect(d.locator('.signal-mobile-metrics')).to_contain_text('Dagsændring');expect(d.locator('.signal-mobile-metrics')).to_contain_text('Måned');expect(d.locator('.signal-mobile-metrics')).to_contain_text('År');expect(d.locator('.signal-mobile-position')).to_have_count(0)
+   expect(d.locator('.market-slot .market-price')).to_be_visible();expect(d.locator('.market-signal-area')).to_have_count(1);expect(d.locator('.signal-mobile-metrics > div')).to_have_count(3);expect(d.locator('.signal-mobile-metrics')).to_contain_text('Dagsændring');expect(d.locator('.signal-mobile-metrics')).to_contain_text('Måned');expect(d.locator('.signal-mobile-metrics')).to_contain_text('År');expect(d.locator('.signal-mobile-position')).to_have_count(0);expect(d.locator('.signal-mobile-metrics > div small')).to_have_text(['Dagsændring','Måned','År']);expect(d.get_by_text('Skift aktiv')).to_have_count(0)
    assert page.evaluate("""() => [...document.querySelectorAll('#engine-dialog .market-quote .market-price,#engine-dialog .market-quote .market-change')].every(n => n.scrollWidth <= n.clientWidth + 1)"""), 'Signal quote must not overflow on iPhone'
+   sell_action=d.get_by_role('button',name='Sælg').bounding_box();assert sell_action and 0<=sell_action['y'] and sell_action['y']+sell_action['height']<=page.viewport_size['height'], 'SELL action must be visible without scrolling on phone'
    if shot:page.screenshot(path=f'{shot}/signal-sell-390.png')
    page.evaluate('state.dashboard.positions=[]')
    d.get_by_role('button',name='Sælg').click()
@@ -150,6 +151,7 @@ def main():
    d.locator('[data-engine-close]:visible').first.click()
    session['data_status']['market_status']='OPEN';session['buy_plan']={'fresh':True,'portfolio_id':case.root,'quantity':'2','budget_dkk':'500','limit_price':'20','stop_price':'18'}
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.get_by_role('button',name='Køb')).to_be_visible();expect(d.locator('[data-trade-watch]')).to_have_attribute('data-trade-signal','BUY');expect(d.locator('.market-slot .market-price')).to_be_visible();expect(d.locator('.market-marker-entry')).to_have_count(1);expect(d.locator('.market-entry-label')).to_have_text('Gns. købskurs 3,55 USD')
+   expect(d.locator('.signal-mobile-metrics > div small')).to_have_text(['Dagsændring','Måned','År']);buy_action=d.get_by_role('button',name='Køb').bounding_box();assert buy_action and 0<=buy_action['y'] and buy_action['y']+buy_action['height']<=page.viewport_size['height'], 'BUY action must be visible without scrolling on phone'
    if shot:page.screenshot(path=f'{shot}/signal-buy-390.png')
    d.get_by_role('button',name='Køb').click();expect(quick).to_contain_text('Køb · TSM');expect(quick.locator('[name=portfolio_id]')).to_have_value(str(case.root));expect(quick.locator('[name=asset_id]')).to_have_value('synthetic-asset');quick.locator('[data-quick-close]').click()
    account['dashboard']['positions']=[];session['latest_context']['position']='none';session['request']['report_id']='synthetic-report';session['request']['candidate_id']='synthetic-candidate'
