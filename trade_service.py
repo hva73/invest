@@ -37,10 +37,11 @@ def start_manual_test_sell(connect,user_id,ticker):
         owned=portfolios.list_owned(c,user_id)
         snapshots=portfolio_data.snapshots(c,user_id)
     state=dashboard_projection.build(connect,user_id,owned,snapshots)
-    matches=[row for row in state.get('positions',[]) if row.get('ticker')=='CABA'
-             and row.get('portfolio_kind')=='portfolio' and row.get('verification')=='broker_snapshot'
-             and row.get('asset_id') and row.get('portfolio_id') is not None
-             and Decimal(str(row.get('quantity') or '0'))>=1]
+    def eligible(row):
+        if row.get('ticker')!='CABA' or row.get('portfolio_kind')!='portfolio' or row.get('verification')!='broker_snapshot' or not row.get('asset_id') or row.get('portfolio_id') is None:return False
+        try:return Decimal(str(row.get('quantity') or '0'))>=1
+        except (InvalidOperation,ValueError,TypeError):return False
+    matches=[row for row in state.get('positions',[]) if eligible(row)]
     if len(matches)!=1:
         raise TradeError('CABA skal findes i præcis ét verificeret direkte depot med mindst 1 aktie. Opdatér Pluto-data først.')
     row=matches[0];now=time.time()
