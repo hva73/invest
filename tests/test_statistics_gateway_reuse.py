@@ -39,6 +39,15 @@ class GatewayReuse(unittest.TestCase):
    with self.assertRaises(ConnectionError):self.run_read()
   with patch('hotwatch_adapters.reserve'),patch('mcp_client.MCP.request',lambda client,method,params=None,notification=False:self.request(client,method,params,notification)):self.run_read()
   self.assertEqual(self.calls.count('initialize'),2)
+ def test_provider_tool_error_invalidates_session_next_attempt(self):
+  def failing(client,method,params=None,notification=False):
+   if method=='tools/call':return {'isError':True}
+   return self.request(client,method,params,notification)
+  with patch('hotwatch_adapters.reserve'),patch('mcp_client.MCP.request',failing):
+   gateway=self.run_read();self.assertTrue(gateway.broken)
+  with patch('hotwatch_adapters.reserve'),patch('mcp_client.MCP.request',lambda client,method,params=None,notification=False:self.request(client,method,params,notification)):
+   self.run_read()
+  self.assertEqual(self.calls.count('initialize'),2)
  def test_expired_cache_reinitializes(self):
   with patch('hotwatch_adapters.time.monotonic',side_effect=[100,161]),patch('hotwatch_adapters.reserve'),patch('mcp_client.MCP.request',lambda client,method,params=None,notification=False:self.request(client,method,params,notification)):
    self.run_read();self.run_read()
