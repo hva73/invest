@@ -15,3 +15,14 @@ assert.match(html,/Gns\. købspris pr\. stk\.<\/span><strong>&lt;0,000001 USD/);
 assert.match(html,/Kostpris for solgte andele<\/span><strong>1 USD/);
 assert.match(html,/Salgsbeløb<\/span><strong>2 USD/);
 assert.doesNotMatch(html,/≈ 0,00 USD/);
+
+// Default overview must include every depot and currency, without summing FX.
+const multi={portfolios:[{portfolio_id:1,name:'Main',items:[{...items[0],sell_origin:'signal',buy_origin:'own'}]}, {portfolio_id:2,name:'AI collection',items:[{...items[2],sell_origin:'own'}],unresolved_sales:[{ticker:'UNMATCHED',name:'Missing basis',currency:'USD',quantity:'1',sell_price:'4',sale_proceeds:'4',sell_origin:'signal'}]}]};
+html=render(multi);
+assert.match(html,/Alle depoter<\/option>/);assert.match(html,/Alle valutaer<\/option>/);
+assert.match(html,/3 afsluttede salg på tværs af alle depoter/);
+assert.match(html,/\+3,00 USD/);assert.match(html,/\+100,00 EUR/);assert.doesNotMatch(html,/\+103,00/);
+assert.match(html,/UNMATCHED/);assert.match(html,/Hvem stod bag salgene/);
+html=render(multi,{group:'all'});assert.match(html,/Køb: Egen beslutning · Salg: ESCAPE-signal/);
+html=render(multi,{portfolio:1,currency:'USD',group:'all'});assert.doesNotMatch(html,/UNMATCHED|Missing basis|Euro<small>/);
+console.log('PASS: all depots/currencies by default, explicit origin and no invented FX');
