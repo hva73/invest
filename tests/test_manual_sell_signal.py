@@ -72,6 +72,27 @@ class ManualSellSignalTests(unittest.TestCase):
             self.start()
         with app.connect() as c:self.assertIsNone(trade_service.active_test_signal(c,1))
 
+    def test_push_is_test_labeled_and_cannot_send_trade(self):
+        import web_push
+        self.start()
+        with app.connect() as c:
+            c.execute("INSERT INTO push_devices(user_id,endpoint_hash,payload,buy,sell,created,updated) VALUES(1,'one',X'01',1,1,0,0)")
+            c.execute("INSERT INTO push_devices(user_id,endpoint_hash,payload,buy,sell,created,updated) VALUES(1,'two',X'02',1,0,0,0)")
+        delivered=[]
+        with patch('web_push.unseal',return_value={'endpoint':'synthetic'}):
+            result=web_push.notify_manual_test_sell(app.connect,1,'CABA',
+                  sender=lambda sub,payload,topic:delivered.append((payload,topic)))
+        self.assertEqual(result,{'sent':1,'failed':0})
+        self.assertEqual(len(delivered),1)
+        payload,topic=delivered[0]
+        self.assertEqual((payload['kind'],payload['tag'],topic),
+                         ('manual_sell_test','escape-test-sell','escape-test-sell'))
+        self.assertIn('Fiktivt',payload['body'])
+        self.assertNotIn('watch_id',payload)
+        with app.connect() as c:
+            self.assertEqual(c.execute('SELECT COUNT(*) FROM broker_proposals').fetchone()[0],0)
+            self.assertEqual(c.execute('SELECT COUNT(*) FROM hw_events').fetchone()[0],0)
+
     def test_other_ticker_is_not_a_supported_live_fixture(self):
         with self.assertRaises(trade_service.TradeError):
             trade_service.start_manual_test_sell(app.connect,1,'OXY')
