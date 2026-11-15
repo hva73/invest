@@ -477,4 +477,5 @@
  #dashboard-detail .position-mobile-facts dd{font-size:17px}
  .mobile-holding-metrics .dash-profit-percent,
  .mobile-holding-daily{font-size:14px}
+ .mobile-holding.mobile-holding-card{padding-block:13px}
 }
