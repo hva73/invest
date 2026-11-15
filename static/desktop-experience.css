@@ -360,3 +360,6 @@
  .signal-overview .market-quote .market-fetch{display:block;width:100%;text-align:right;font-size:10px}
  .signal-overview .signal-mobile-instrument{min-height:112px;margin-bottom:-112px}
 }
+
+/* Historical source label is technical detail, not in the approved signal screen. */
+@media(max-width:700px){.signal-overview .market-session{display:none}}
