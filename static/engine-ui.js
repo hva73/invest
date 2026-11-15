@@ -113,7 +113,7 @@ window.EngineUI=(()=>{
   const source=parent._signalWhy;
   if(typeof source!=='string')return;
   closeWhy();
-  const fields=/^Årsag: ([\\s\\S]*?) Målinger: ([\\s\\S]*?) Datastatus: ([\\s\\S]*)$/u.exec(source);
+  const fields=/^Årsag: ([\s\S]*?) Målinger: ([\s\S]*?) Datastatus: ([\\s\\S]*)$/u.exec(source);
   const sections=fields?[['Årsag',fields[1]],['Målinger',fields[2]],['Datastatus',fields[3]]]:[['Årsag',source]];
   const trigger=parent.querySelector('[data-engine-why-open]');
   const modal=document.createElement('dialog');
