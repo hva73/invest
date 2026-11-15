@@ -29,7 +29,13 @@ def main():
      expect(result).to_be_visible();expect(result).to_contain_text('+2,00 %' if visible else '—')
      if visible:
       page.evaluate("""() => {const n=document.createElement('div');n.textContent='FIKTIVE TESTDATA';Object.assign(n.style,{position:'fixed',top:'0',left:'0',zIndex:'99999',background:'#b6eddf',color:'#102c29',fontWeight:'bold',padding:'6px 12px'});document.body.append(n)}""")
-      Path('daily-parity-screens').mkdir(exist_ok=True);page.screenshot(path=f'daily-parity-screens/oversigt-{width}.png',full_page=True);page.locator('.mobile-holding' if width==390 else '.dash-row').first.screenshot(path=f'daily-parity-screens/position-{width}.png')
+      Path('daily-parity-screens').mkdir(exist_ok=True);page.screenshot(path=f'daily-parity-screens/oversigt-{width}.png',full_page=True);page.locator('.mobile-holding' if width==390 else '.dash-row').first.screenshot(path=f'daily-parity-screens/beholdningskort-{width}.png');
+      if width==390:
+       assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), 'Mobilt overblik har vandret overløb'
+       card=page.locator('.mobile-holding').first.bounding_box()
+       assert card and card['width']<=390 and card['height']<180, f'Beholdningskort ikke kompakt: {card}'
+       expect(page.locator('.mobile-holding-daily').first).to_contain_text('+2,00 %')
+       expect(page.locator('.mobile-holding-since-purchase').first).to_be_visible()
     page.close()
    browser.close()
  finally:server.shutdown();server.server_close();case.tearDown()

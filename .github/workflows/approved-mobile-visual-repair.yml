@@ -4,7 +4,7 @@ permissions:
   contents: read
 jobs:
   review:
-    if: contains(fromJSON('["codex/approved-mobile-visual-fix","codex/mobile-approved-parity-15nov"]'), github.event.pull_request.head.ref) || github.event.pull_request.head.ref == 'codex/data-and-notification-prep'
+    if: contains(fromJSON('["codex/approved-mobile-visual-fix","codex/mobile-approved-parity-15nov"]'), github.event.pull_request.head.ref) || contains(fromJSON('["codex/data-and-notification-prep","codex/mobile-five-view-acceptance"]'), github.event.pull_request.head.ref)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -33,7 +33,7 @@ jobs:
       - name: Require visual evidence for five mobile views
         run: |
           test -s daily-parity-screens/oversigt-390.png
-          test -s daily-parity-screens/position-390.png
+          test -s daily-parity-screens/beholdningskort-390.png
           test -s visual-review/position-390.png
           test -s visual-review/signal-buy-390.png
           test -s visual-review/signal-sell-390.png
