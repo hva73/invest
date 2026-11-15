@@ -48,3 +48,12 @@ class DuplicatesAndScopes(unittest.TestCase):
         result=project([direct],[('c1',buy),('c1',sale)])
         self.assertEqual(result['unresolved_sales'][0]['ticker'],'A')
         self.assertEqual(result['items'][0]['scope'],'collection:c1')
+
+class UnresolvedOrigin(unittest.TestCase):
+    def test_verified_sale_source_survives_missing_cost(self):
+        sale=order('KNOWN','SELL','12')
+        sale['asset']['id']='asset-1'
+        row=project([sale],signal_order_sides={sale['id']:('SELL','asset-1')})['unresolved_sales'][0]
+        self.assertEqual(row['sell_origin'],'signal')
+        self.assertEqual(row['buy_origin'],'unknown')
+        self.assertNotIn('gross',row)
