@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 625c17a1c38e34d973ecfebea956cc4fbb330e20
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
       - name: Archive, checksum-verify and replace 15 Nov uncompressed backup
         run: |
