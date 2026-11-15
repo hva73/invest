@@ -79,7 +79,7 @@ def main():
    assert page.evaluate("getComputedStyle(document.documentElement).overflowY")=='hidden'
    background=page.evaluate('window.scrollY');page.mouse.move(2,2);page.mouse.wheel(0,900);page.wait_for_timeout(150);assert page.evaluate('window.scrollY')==background
    shot=os.environ.get('ESCAPE_SCREENSHOTS');
-   expect(d.locator('.market-slot .market-price')).to_be_visible()
+   expect(d.locator('.market-slot .market-price')).to_be_visible();expect(d.locator('.market-signal-area')).to_have_count(1)
    assert page.evaluate("""() => [...document.querySelectorAll('#engine-dialog .market-quote .market-price,#engine-dialog .market-quote .market-change')].every(n => n.scrollWidth <= n.clientWidth + 1)"""), 'Signal quote must not overflow on iPhone'
    if shot:page.screenshot(path=f'{shot}/signal-sell-390.png')
    page.evaluate('state.dashboard.positions=[]')
