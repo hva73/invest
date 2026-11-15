@@ -1,4 +1,4 @@
-"""App navigation and display using synthetic statistics; no Pluto access."""
+"""Real app navigation with synthetic completed trades; all broker calls disabled."""
 import os,sys,threading
 from pathlib import Path
 from unittest.mock import patch
@@ -6,58 +6,45 @@ sys.path[:0]=['.','tests']
 import app
 from test_portfolio_value_chart import PortfolioValueChart
 from playwright.sync_api import sync_playwright,expect
-
 case=PortfolioValueChart();case.setUp()
 server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
-sample={'portfolios':[{'portfolio_id':1,'name':'Fiktivt depot','items':[{'ticker':'NOVA','name':'Fiktiv aktie','currency':'USD','gross':'12.35','gross_percent':'6.2','quantity':'2','buy_price':'100','sell_price':'106.175','note':'Foreløbigt bruttoresultat','sell_time':None},{'ticker':'ALFA','name':'Fiktiv aktie','currency':'USD','gross':'-4.1','gross_percent':'-2.4','quantity':'1','buy_price':'170','sell_price':'165.9','note':'Foreløbigt bruttoresultat','sell_time':None}]}], 'errors':[], 'history_complete':False}
+def item(ticker,currency,gross,dkk,origin):
+ return dict(ticker=ticker,name=ticker+' Fiktiv',currency=currency,gross=gross,display_gross_dkk=dkk,gross_percent='10' if float(gross)>0 else '-5',quantity='2',buy_price='10',sell_price='11',cost_basis='20',sale_proceeds='22',sell_origin=origin,buy_origin='own',display_fx={'rate':'6.8' if currency=='USD' else '7.46','source':'ECB','as_of':'2026-11-13'})
+sample={'portfolios':[{'portfolio_id':1,'name':'Fiktivt depot','items':[item('NOVA','USD','12.35','83.98','signal'),item('ALFA','USD','-4.1','-27.88','own')]},{'portfolio_id':2,'name':'Fiktiv Collection','items':[item('EURO','EUR','3','22.38','unknown')],'unresolved_sales':[dict(ticker='MISSING',name='Fiktivt salg uden kostpris',currency='USD',quantity='1',sell_price='4',sale_proceeds='4')]}],'errors':[]}
 try:
  with patch('mcp_client.MCP.request',side_effect=AssertionError('Live broker calls disabled')),sync_playwright() as pw:
-  browser=pw.chromium.launch(headless=True)
-  for width in (320,390,768,1280):
-   page=browser.new_page(viewport={'width':width,'height':900},is_mobile=width<700,has_touch=width<700)
-   mode={'value':'normal'}
-   def statistics_route(route):
-    if mode['value']=='failure':route.fulfill(status=503,json={'error':'Historik utilgængelig','diagnostic':'BROKER_CATALOG'})
-    elif mode['value']=='partial':route.fulfill(json={**sample,'errors':['incomplete'],'error_codes':['DIRECT_REQUEST_TIMEOUT']})
-    else:route.fulfill(json=sample)
-   page.route('**/api/realized-statistics',statistics_route)
+  launch={'headless':True}
+  if os.environ.get('ESCAPE_SYSTEM_CHROMIUM'):launch.update(executable_path='/usr/bin/chromium',args=['--no-sandbox'])
+  browser=pw.chromium.launch(**launch)
+  for width in (320,390,768,1280,1440):
+   page=browser.new_page(viewport={'width':width,'height':940},is_mobile=width<700,has_touch=width<700);errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+   mode={'failure':False}
+   def route(r):
+    if mode['failure']:r.fulfill(status=503,json={'error':'Historik utilgængelig','diagnostic':'BROKER_CATALOG'})
+    else:r.fulfill(json=sample)
+   page.route('**/api/realized-statistics',route)
    page.goto(f'http://127.0.0.1:{server.server_port}/');page.locator('#login-form [name=password]').fill('test-password-long-enough');page.locator('#login-form button').click();expect(page.locator('.dashboard-v1')).to_be_visible()
    if width<=900:page.locator('#mobile-more').click()
-   page.locator('nav [data-view=statistics]').click()
-   expect(page.locator('#statistics-title')).to_have_text('Hvordan står det til?')
-   assert page.locator('[data-statistics-reload]').evaluate('(e) => e.scrollWidth <= e.clientWidth'), width
-   expect(page.locator('.statistics-summary>div:first-child>strong')).to_contain_text('+8,25 USD')
-   expect(page.locator('.statistics-summary')).to_contain_text('omkostninger')
-   page.locator('[data-statistics-group=wins]').click();page.locator('.statistics-trade-button').first.click();expect(page.locator('dialog:modal .statistics-detail')).to_be_visible();page.locator('dialog:modal button[aria-label="Luk"]').click()
+   page.locator('nav [data-view=statistics]').click();expect(page.locator('#statistics-title')).to_have_text('Hvordan står det til?')
+   expect(page.locator('.st-total')).to_contain_text('+78,48 kr.');expect(page.locator('.st-subtitle')).to_have_text('3 af 4 salg · omregnet til DKK')
+   assert page.locator('[data-statistics-currency]').count()==0
+   assert page.locator('.statistics-dialog:modal').count()==0
+   page.locator('.st-gains [data-statistics-show-group=wins]').click();group=page.locator('dialog:modal');expect(group).to_contain_text('NOVA');expect(group).to_contain_text('EURO');expect(group).not_to_contain_text('ALFA')
+   group.locator('[data-statistics-trade]').first.click();detail=page.locator('dialog:modal').last;expect(detail).to_contain_text('Gns. købspris');expect(detail).to_contain_text('ESCAPE-signal');expect(detail).to_contain_text('referencekurs');detail.get_by_role('button',name='Luk',exact=True).click()
+   page.locator('dialog:modal').get_by_role('button',name='Luk',exact=True).click()
+   page.locator('.st-gains [data-statistics-show-group=losses]').click();expect(page.locator('dialog:modal')).to_contain_text('ALFA');expect(page.locator('dialog:modal')).not_to_contain_text('NOVA');page.locator('dialog:modal').get_by_role('button',name='Luk',exact=True).click()
+   page.locator('.st-source[data-statistics-show-group=signal]').click();expect(page.locator('dialog:modal')).to_contain_text('NOVA');page.locator('dialog:modal').get_by_role('button',name='Luk',exact=True).click()
+   page.locator('.st-coverage').click();expect(page.locator('dialog:modal')).to_contain_text('MISSING');page.locator('dialog:modal').get_by_role('button',name='Luk',exact=True).click()
    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1'),width
-   if width<=900:
-    page.locator('.statistics-trade-button').last.scroll_into_view_if_needed()
-    box=page.locator('.statistics-trade-button').last.bounding_box();nav=page.locator('body > aside nav').bounding_box()
-    assert box['y']+box['height']<=nav['y'] or box['y']>=nav['y']+nav['height'],(width,box,nav)
-   mode['value']='failure';page.locator('[data-statistics-reload]').click();expect(page.locator('#content')).to_contain_text('BROKER_CATALOG');expect(page.locator('[data-statistics-reload]')).to_be_visible()
-   mode['value']='partial';page.locator('[data-statistics-reload]').click();expect(page.locator('#content')).to_contain_text('DIRECT_REQUEST_TIMEOUT');expect(page.locator('#content')).to_contain_text('ufuldstændig')
-   mode['value']='normal';page.locator('[data-statistics-reload]').click();expect(page.locator('.statistics-summary>div:first-child>strong')).to_contain_text('+8,25 USD')
-   screenshots=os.environ.get('ESCAPE_SCREENSHOTS')
-   if screenshots:
-    page.evaluate("document.body.insertAdjacentHTML('afterbegin','<div style=\"background:#b37400;color:white;padding:6px;text-align:center\">DESIGNFORSLAG · FIKTIVE DATA</div>')")
-    page.screenshot(path=str(Path(screenshots)/f'statistik-integreret-fiktiv-{width}.png'),full_page=True)
-   # Default aggregate view must reveal other currencies and missing-cost sales.
-   previous=sample['portfolios']
-   sample['portfolios']=[previous[0],{'portfolio_id':2,'name':'Fiktiv Collection','items':[{'ticker':'EURO','name':'Fiktiv EUR','currency':'EUR','gross':'3','gross_percent':'5','quantity':'1','sell_origin':'signal'}], 'unresolved_sales':[{'ticker':'MISSING','name':'Fiktivt salg uden kostpris','currency':'USD','quantity':'1','sell_price':'4','sale_proceeds':'4','sell_origin':'signal'}]}]
-   page.locator('[data-statistics-reload]').click()
-   expect(page.locator('.statistics-total-sales')).to_contain_text('4 afsluttede salg')
-   expect(page.locator('[data-statistics-portfolio]')).to_have_value('all')
-   expect(page.locator('[data-statistics-currency]')).to_have_value('all')
-   expect(page.locator('.statistics-currency')).to_have_count(2)
-   expect(page.locator('.statistics-view')).to_contain_text('MISSING')
-   usd=page.locator('.statistics-currency').filter(has=page.get_by_role('heading',name='USD',exact=True))
-   usd.locator('[data-statistics-group=all]').click()
-   expect(page.locator('.statistics-view')).to_contain_text('Køb: Ikke afklaret')
-   expect(page.locator('.statistics-view')).to_contain_text('Hvem stod bag salgene?')
-   assert page.evaluate('document.documentElement.scrollWidth <= innerWidth+1'),width
-   if screenshots:page.screenshot(path=str(Path(screenshots)/f'statistik-alle-depoter-{width}.png'),full_page=True)
-   sample['portfolios']=previous
+   shots=os.environ.get('ESCAPE_SCREENSHOTS')
+   if shots:
+    Path(shots).mkdir(parents=True,exist_ok=True)
+    page.evaluate("document.body.insertAdjacentHTML('afterbegin','<div style=\"background:#253747;color:#cad8e2;padding:5px;text-align:center;font-size:11px\">DESIGNKONTROL · FIKTIVE DATA</div>')")
+    page.screenshot(path=str(Path(shots)/f'statistik-dkk-{width}.png'),full_page=True)
+   page.locator('[data-statistics-portfolio]').select_option('1');expect(page.locator('.st-total')).to_contain_text('+56,10 kr.');page.locator('[data-statistics-portfolio]').select_option('all')
+   mode['failure']=True;page.locator('[data-statistics-reload]').click();expect(page.locator('#content')).to_contain_text('BROKER_CATALOG');mode['failure']=False;page.locator('[data-statistics-reload]').click();expect(page.locator('.st-total')).to_contain_text('+78,48 kr.')
+   assert not errors,errors
    page.close()
   browser.close()
- print('PASS: statistics navigation and synthetic content at 320/390/768/1280')
+ print('PASS: compact DKK overview, gains/loss/source drilldown, trade details, missing basis, depot and retry at 320/390/768/1280/1440')
 finally:server.shutdown();server.server_close();case.tearDown()
