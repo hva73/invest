@@ -28,7 +28,15 @@ jobs:
       - run: mkdir -p visual-review
       - run: python tests/browser_daily_parity.py
       - run: python tests/browser_position_entry_regression.py
+      - run: python tests/browser_signal_push_detail.py
       - run: python tests/browser_sector_journey.py
+      - name: Require visual evidence for five mobile views
+        run: |
+          test -s daily-parity-screens/oversigt-390.png
+          test -s daily-parity-screens/position-390.png
+          test -s visual-review/position-390.png
+          test -s visual-review/signal-buy-390.png
+          test -s visual-review/signal-sell-390.png
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
