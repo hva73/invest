@@ -13,6 +13,7 @@ import tempfile
 import urllib.parse
 import urllib.request
 import urllib.error
+import time
 from datetime import datetime, timezone
 import sys
 
@@ -209,11 +210,22 @@ def transport_api():
             raise ValueError('reply_too_large')
         return json.loads(data)
     def uapi(operation, params, limit=2000000):
-        payload = request('execute/Fileman/' + operation, params, limit)
-        result = payload.get('result', payload)
-        if result.get('status') not in (1, '1'):
-            raise ValueError('file_api_rejected')
-        return result.get('data')
+        # Only read operations tolerate a transient 403/429 or 5xx.
+        # Never retry a write with an uncertain outcome.
+        attempts = 4 if operation in ('list_files', 'get_file_content') else 1
+        for index in range(attempts):
+            try:
+                payload = request('execute/Fileman/' + operation, params, limit)
+                result = payload.get('result', payload)
+                if result.get('status') in (1, '1'):
+                    return result.get('data')
+                if index == attempts - 1:
+                    raise ValueError('file_api_rejected')
+            except urllib.error.HTTPError as error:
+                if index == attempts - 1 or error.code not in (403, 429, 500, 502, 503, 504):
+                    raise
+            time.sleep(3 * (index + 1))
+        raise ValueError('file_api_rejected')
     def download(archive_name, destination, size):
         username = 'escapeverify' + secrets.token_hex(4)
         password = secrets.token_urlsafe(40)
