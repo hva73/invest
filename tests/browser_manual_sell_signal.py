@@ -25,6 +25,8 @@ def main():
    page.locator('#login-form [name=password]').fill('test-password-long-enough')
    page.locator('#login-form button').click()
    page.locator('.dashboard-v1').wait_for()
+   denied=page.evaluate("""async () => (await fetch('/api/admin/test-sell-signal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticker:'CABA'})})).status""")
+   assert denied==403, f'CSRF-less test signal creation must be denied, got {denied}'
    base=page.evaluate('structuredClone(state)')
    now=datetime.now(timezone.utc).isoformat()
    holding={'key':'manual-test','portfolio_id':case.root,'portfolio_name':'Root','portfolio_kind':'portfolio',
