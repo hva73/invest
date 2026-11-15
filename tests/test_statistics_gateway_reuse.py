@@ -1,6 +1,10 @@
 import concurrent.futures
 import threading
 import unittest
+import sqlite3
+import tempfile
+import os
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import hotwatch_adapters as adapters
@@ -72,3 +76,23 @@ class GatewayReuse(unittest.TestCase):
   self.assertEqual(self.calls.count('tools/call'),2)
 
 if __name__=='__main__':unittest.main()
+
+
+class InteractiveBudget(unittest.TestCase):
+ def test_full_scan_bucket_does_not_starve_readonly_statistics(self):
+  with tempfile.TemporaryDirectory() as root:
+   path=os.path.join(root,'budget.sqlite')
+   def connect():
+    db=sqlite3.connect(path);db.row_factory=sqlite3.Row;return db
+   with connect() as db:
+    db.execute('CREATE TABLE hw_request_budget(user_id INTEGER, source TEXT, window INTEGER, used INTEGER, PRIMARY KEY(user_id,source,window))')
+   now=datetime(2026,11,15,13,0,tzinfo=timezone.utc)
+   with patch('hotwatch_adapters.provider_request_limit',return_value=3):
+    for _ in range(3):adapters.reserve(connect,1,'pluto',now=now,purpose='scan')
+    with self.assertRaises(DataUnavailable):adapters.reserve(connect,1,'pluto',now=now,purpose='scan')
+    for _ in range(3):adapters.reserve(connect,1,'pluto',now=now,purpose='statistics')
+    with self.assertRaises(DataUnavailable):adapters.reserve(connect,1,'pluto',now=now,purpose='statistics')
+    adapters.reserve(connect,2,'pluto',now=now,purpose='statistics')
+   with connect() as db:
+    self.assertEqual(db.execute("SELECT used FROM hw_request_budget WHERE user_id=1 AND source='pluto'").fetchone()[0],3)
+    self.assertEqual(db.execute("SELECT used FROM hw_request_budget WHERE user_id=1 AND source='pluto:statistics'").fetchone()[0],3)
