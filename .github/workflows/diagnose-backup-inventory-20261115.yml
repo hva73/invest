@@ -43,7 +43,7 @@ jobs:
                       name=e.get('file','')
                       if not isinstance(name,str):continue
                       if folder.endswith('escape_app/var') and name!='escape.db':continue
-                      if folder.endswith('.escape_backups') and not (re.fullmatch(r'retained-\\d{8}-\\d{6}-[A-Za-z0-9_-]+\\.tar\\.gz',name) or re.fullmatch(r'\\d{8}-\\d{6}-[A-Za-z0-9_-]+',name) or name=='.escape_backups'):continue
+                      if folder.endswith('.escape_backups') and not (re.fullmatch(r'retained-[0-9]{8}-[0-9]{6}-[A-Za-z0-9_-]+[.]tar[.]gz',name) or re.fullmatch(r'[0-9]{8}-[0-9]{6}-[A-Za-z0-9_-]+',name) or name=='.escape_backups'):continue
                       safe.append({'kind':e.get('type'),'size':e.get('size'),'label':name[:40]})
                   print(json.dumps({'folder':'backups' if folder.endswith('.escape_backups') else 'database','items':safe},sort_keys=True))
               except urllib.error.HTTPError as e:
