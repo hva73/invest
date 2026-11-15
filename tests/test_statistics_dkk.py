@@ -31,6 +31,20 @@ class DkkDisplay(unittest.TestCase):
   item={'currency':'USD','gross':'2'};display_currency(self.connect,{'portfolios':[{'items':[item]}]},datetime(2026,11,15,tzinfo=timezone.utc))
   self.assertEqual(item['display_gross_dkk'],'13.6');self.assertEqual(item['display_fx']['source'],'EODHD')
 
+ def test_pluto_fx_is_fresh_owner_isolated_and_consistent(self):
+  with self.connect() as c:
+   c.execute('CREATE TABLE portfolio_snapshots(user_id INTEGER,observed TEXT,payload TEXT,last_error TEXT)')
+   payload=json.dumps({'positions_complete':True,'positions':[{'value':{'amount':'10','currency':'USD'},'value_in_portfolio_currency':{'amount':'68','currency':'DKK'}}]})
+   c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,NULL)',(1,'2026-11-15T08:00:00Z',payload))
+  for uid,expected in ((1,'13.6'),(2,None)):
+   item={'currency':'USD','gross':'2'}
+   display_currency(self.connect,{'portfolios':[{'items':[item]}]},datetime(2026,11,15,12,tzinfo=timezone.utc),user_id=uid)
+   self.assertEqual(item['display_gross_dkk'],expected)
+  with self.connect() as c:c.execute("UPDATE portfolio_snapshots SET observed='2026-11-01T08:00:00Z'")
+  item={'currency':'USD','gross':'2'}
+  display_currency(self.connect,{'portfolios':[{'items':[item]}]},datetime(2026,11,15,12,tzinfo=timezone.utc),user_id=1)
+  self.assertIsNone(item['display_gross_dkk'])
+
 class OrderEvidence(unittest.TestCase):
  def test_exact_manual_order_reference_without_provider_asset_id(self):
   with tempfile.TemporaryDirectory() as directory:
