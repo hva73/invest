@@ -14,7 +14,7 @@ def signal_order_sides(connect, user_id, portfolio_id):
     try:
         with connect() as db:
             proposals = db.execute("SELECT p.signal_event_id,p.intent_id,p.payload,p.response,e.event_type,s.request FROM broker_proposals p JOIN hw_events e ON e.event_id=p.signal_event_id JOIN hw_sessions s ON s.id=e.watch_row_id "
-                                   "WHERE p.user_id=? AND p.portfolio_id=? AND p.kind='direct' AND p.status='sent' AND p.report_id='@hotwatch' AND s.user_id=p.user_id AND s.candidate_id=p.candidate_id AND s.is_test=0",
+                                   "WHERE p.user_id=? AND p.portfolio_id=? AND p.kind='direct' AND p.status='sent' AND p.report_id='@hotwatch' AND s.user_id=p.user_id AND s.watch_id=p.candidate_id AND s.is_test=0",
                                    (user_id, portfolio_id)).fetchall()
     except sqlite3.OperationalError:
         return {}
