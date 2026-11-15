@@ -370,6 +370,19 @@ def extended_session(trade,schedule,now,max_age_s):
   return 'PRE' if local.time()<opening else 'AFTER' if local.time()>=closing else None
  except (KeyError,ValueError,TypeError,ZoneInfoNotFoundError):return None
 
+def crypto_session(schedule,event_time,now,max_age_s):
+ """Classify only a current CC feed session; this does not prove broker execution."""
+ from zoneinfo import ZoneInfo,ZoneInfoNotFoundError
+ try:
+  if schedule.get('status')!='OK' or schedule.get('exchange')!='CC' or schedule.get('exchange_open') is not True:return None
+  received=stamp(schedule['received_at']);at=stamp(event_time)
+  if not 0<=(now-received).total_seconds()<=max_age_s or not 0<=(now-at).total_seconds()<=max_age_s:return None
+  zone=ZoneInfo(schedule['timezone']);local=at.astimezone(zone);calendar=schedule['calendar']
+  opening=datetime.strptime(calendar['open'],'%H:%M:%S').time();closing=datetime.strptime(calendar['close'],'%H:%M:%S').time()
+  if opening>=closing or received.astimezone(zone).date()!=local.date() or local.strftime('%a') not in calendar['working_days'] or local.date().isoformat() in calendar['excluded_dates'] or not opening<=local.time()<closing:return None
+  return {'market_status':'REGULAR','session_key':local.date().isoformat()+':REGULAR','status_at':received.isoformat(),'status_feed':'eodhd_cc_exchange_details'}
+ except (KeyError,ValueError,TypeError,AttributeError,ZoneInfoNotFoundError):return None
+
 def realtime_symbol(symbol):
  """Translate only observed feed spellings; keep REST/security IDs unchanged."""
  # Direct trades, quotes and minute history verified 2026-11-09. The US
@@ -798,6 +811,15 @@ class EODHDAdapter:
     same=all(old_sample.get(k)==result.get(k) for k in ('source','ticker','asset_id','currency')) and stamp(old_sample['event_time'])==at and Decimal(old_sample['price'])==price
     if same:return dict(old_sample,context=context)
    except (KeyError,TypeError,ValueError,ArithmeticError):pass
+  # CC exchange status is independent provider evidence, not Pluto trading
+  # permission. Restrict it to the owner-verified BTC identity and retain all
+  # existing broker, freshness, spread and risk gates.
+  if r.get('asset_id')==BTC_PLUTO_ASSET_ID and symbol=='BTC-USD.CC' and cxe_valid is True:
+   try:
+    max_age=min(r['risk']['max_quote_age_s'],GLOBAL_RISK['max_quote_age_s']);schedule=self.market_status(self.feeds(r),'CC',max_age)
+    evidence=crypto_session(schedule,at.isoformat(),utc(),max_age)
+    if evidence:result.update(evidence)
+   except (KeyError,ValueError,TypeError,ArithmeticError,EngineError,DataUnavailable,urllib.error.URLError,TimeoutError,ConnectionError):pass
   previous=old_sample.get('previous_close') if old_sample else str(d.get('previousClose')) if type(d.get('previousClose')) in (int,str) else None
   if previous is not None and re.fullmatch(r'\d{1,18}(?:\.\d{1,12})?',previous) and Decimal(previous)>0:result['previous_close']=previous
   return result
