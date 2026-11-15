@@ -33,7 +33,8 @@ jobs:
               try:
                   with opener.open(req,timeout=20) as f: raw=f.read(150001)
                   if len(raw)>150000:raise RuntimeError('RESPONSE_TOO_LARGE')
-                  result=json.loads(raw).get('result',{})
+                  payload=json.loads(raw)
+                  result=payload.get('result',payload)
                   if result.get('status') not in (1,'1'):
                       errors=result.get('errors') or []
                       codes=[]
