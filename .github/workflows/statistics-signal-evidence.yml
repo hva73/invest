@@ -1,0 +1,20 @@
+name: Statistics signal evidence checks
+on:
+  pull_request:
+    branches: [codex/data-and-notification-prep]
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.event.pull_request.head.ref == 'codex/statistics-signal-origin-evidence'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -p 'test_statistics_origins.py'
+      - run: python -m unittest discover -s tests -p 'test_realized_statistics.py'
