@@ -803,23 +803,29 @@ class EODHDAdapter:
   interval=self.interval(r,profile)
   if old_sample:interval=old_sample['interval_s']
   result={'sample_id':sample_id,'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':venue,'currency':currency,'event_time':at.isoformat(),'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD REST real-time endpoint; entitlement/cadence unconfirmed; currency='+('provider' if d.get('currency') else 'explicit session instrument'),'documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':interval,'price':format(price,'f'),'bid':None,'ask':None,'volume':volume,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context}
-  # Repeated readings of the same price and event time retain their original
-  # market evidence across software upgrades; only broker context is current.
-  # A changed price remains a conflict, never a fabricated new observation.
-  if old_sample:
-   try:
-    same=all(old_sample.get(k)==result.get(k) for k in ('source','ticker','asset_id','currency')) and stamp(old_sample['event_time'])==at and Decimal(old_sample['price'])==price
-    if same:return dict(old_sample,context=context)
-   except (KeyError,TypeError,ValueError,ArithmeticError):pass
   # CC exchange status is independent provider evidence, not Pluto trading
   # permission. Restrict it to the owner-verified BTC identity and retain all
   # existing broker, freshness, spread and risk gates.
-  if r.get('asset_id')==BTC_PLUTO_ASSET_ID and symbol=='BTC-USD.CC' and cxe_valid is True:
+  crypto_verified=r.get('asset_id')==BTC_PLUTO_ASSET_ID and symbol=='BTC-USD.CC' and cxe_valid is True
+  evidence=None
+  if crypto_verified:
    try:
     max_age=min(r['risk']['max_quote_age_s'],GLOBAL_RISK['max_quote_age_s']);schedule=self.market_status(self.feeds(r),'CC',max_age)
     evidence=crypto_session(schedule,at.isoformat(),utc(),max_age)
-    if evidence:result.update(evidence)
    except (KeyError,ValueError,TypeError,ArithmeticError,EngineError,DataUnavailable,urllib.error.URLError,TimeoutError,ConnectionError):pass
+   if evidence:result.update(evidence)
+   elif old_sample:result.update(market_status='UNKNOWN',session_key=at.date().isoformat()+':UNKNOWN',status_at=utc().isoformat(),status_feed='eodhd_cc_status_unavailable')
+  # Preserve the immutable quote and renew only separately timestamped CC
+  # status. Other observations retain the original evidence unchanged.
+  if old_sample:
+   try:
+    same=all(old_sample.get(k)==result.get(k) for k in ('source','ticker','asset_id','currency')) and stamp(old_sample['event_time'])==at and Decimal(old_sample['price'])==price
+    if same:
+     prior=dict(old_sample,context=context)
+     if crypto_verified:
+      prior.update({k:result[k] for k in ('market_status','session_key','status_at','status_feed')})
+     return prior
+   except (KeyError,TypeError,ValueError,ArithmeticError):pass
   previous=old_sample.get('previous_close') if old_sample else str(d.get('previousClose')) if type(d.get('previousClose')) in (int,str) else None
   if previous is not None and re.fullmatch(r'\d{1,18}(?:\.\d{1,12})?',previous) and Decimal(previous)>0:result['previous_close']=previous
   return result
