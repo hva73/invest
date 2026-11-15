@@ -201,6 +201,33 @@ window.EngineUI=(()=>{
   const node=dialog(title,body);node.classList.add('signal-overview-dialog');window.MarketUI.mount();
  }
 
- return {openHoldingStatus,actionNotice,openNotification,async openDetail(wid){mode=false;await detail(wid,false,true);refreshExternal(wid)},setup(d){({api,escape:esc,formatAmount:money,formatTime:time,owner,editing,isAdmin,state:getState}=d)},mount(value){mode=value;load().catch(e=>{if(root())root().textContent='Motorstatus kunne ikke hentes: '+reason(e.details?.code||e.message)});schedule()},click,submit,change};
+
+ async function openManualTestSignal(){
+  const user=owner(),account=await api('state');if(owner()!==user)return;
+  const t=account.test_trade_signal;
+  if(!t||t.ticker!=='CABA'||t.side!=='SELL'||Number(t.expires)*1000<=Date.now()){
+   throw Error('Det fiktive CABA-salgssignal er udløbet eller findes ikke længere.');
+  }
+  const matches=(account.dashboard?.positions||[]).filter(p=>
+   String(p.portfolio_id)===String(t.portfolio_id)&&p.ticker==='CABA'&&
+   p.portfolio_kind==='portfolio'&&p.asset_id&&p.verification==='broker_snapshot'&&Number(p.quantity)>=1);
+  if(matches.length!==1)throw Error('Beholdningen er ikke entydigt bekræftet. Opdatér Pluto-data.');
+  const holding=matches[0],entry=holding.average_entry;
+  const chart=window.MarketUI.slot({
+   report_id:'',holding_portfolio_id:holding.portfolio_id,holding_asset_id:holding.asset_id,is_test:false,entry_scale:true,
+   markers:entry?.amount&&entry?.currency?[{kind:'entry',value:entry.amount,currency:entry.currency}]:[]
+  });
+  const body=`<section class="signal-overview">
+   <div class="signal-mobile-nav"><details class="signal-why"><summary>Hvorfor?</summary><p>Dette er et manuelt fiktivt testsignal, ikke en vurdering fra HOT WATCH.</p></details>
+    <strong>TEST · SALG</strong><button data-engine-close type="button">Ignorer</button></div>
+   <p class="muted signal-test-disclaimer" role="status"><strong>FIKTIVT TESTSIGNAL</strong> · Intet markedssignal er beregnet, og ingen ordre er sendt. Du vælger selv, om du vil oprette et rigtigt Pluto-forslag.</p>
+   <div class="signal-mobile-instrument"><strong>${esc(holding.ticker)}</strong><small>${esc(holding.name||'Cabaletta Bio')}</small></div>
+   <div class="signal-chart-main">${chart}</div>
+   <div class="signal-mobile-metrics signal-mobile-sell"><div class="signal-mobile-change"><small>Dagsændring</small><strong data-signal-daily>—</strong></div><div class="signal-mobile-month"><small>Måned</small><strong data-signal-month>—</strong></div><div class="signal-mobile-year"><small>År</small><strong data-signal-year>—</strong></div></div>
+   <div class="asset-trade-bar signal-action-bar"><button type="button" class="primary asset-sell" data-trade-test-buy>Sælg · test</button><button type="button" class="signal-ignore" data-engine-close>Ignorer</button></div>
+   </section>`;
+  const node=dialog('CABA · TEST · SALG',body);node.classList.add('signal-overview-dialog');window.MarketUI.mount();
+ }
+ return {openHoldingStatus,actionNotice,openNotification,openManualTestSignal,async openDetail(wid){mode=false;await detail(wid,false,true);refreshExternal(wid)},setup(d){({api,escape:esc,formatAmount:money,formatTime:time,owner,editing,isAdmin,state:getState}=d)},mount(value){mode=value;load().catch(e=>{if(root())root().textContent='Motorstatus kunne ikke hentes: '+reason(e.details?.code||e.message)});schedule()},click,submit,change};
 })();
 

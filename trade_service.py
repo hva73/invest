@@ -1,6 +1,6 @@
 """Explicit, user-reviewed Pluto proposals. No direct execution or background writes."""
 import hashlib,json,re,secrets,time
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from pathlib import Path
 import oauth,report_ingest
 from mcp_client import MCP,decode_result,normalize,compatible
@@ -24,8 +24,56 @@ def init(c):
     if 'side' not in {r[1] for r in c.execute('PRAGMA table_info(manual_test_signals)')}:c.execute("ALTER TABLE manual_test_signals ADD COLUMN side TEXT NOT NULL DEFAULT 'BUY'")
 
 def active_test_signal(c,user_id,now=None):
-    row=c.execute("SELECT t.portfolio_id,t.ticker,t.side,t.expires FROM manual_test_signals t JOIN portfolios p ON p.id=t.portfolio_id AND p.user_id=t.user_id WHERE t.user_id=? AND t.expires>? AND p.active=1 AND p.source='pluto' AND p.kind='portfolio'",(user_id,time.time() if now is None else now)).fetchone()
+    row=c.execute("SELECT t.portfolio_id,t.ticker,t.side,t.amount,t.expires FROM manual_test_signals t JOIN portfolios p ON p.id=t.portfolio_id AND p.user_id=t.user_id WHERE t.user_id=? AND t.expires>? AND p.active=1 AND p.source='pluto' AND p.kind='portfolio'",(user_id,time.time() if now is None else now)).fetchone()
     return dict(row) if row else None
+
+
+def start_manual_test_sell(connect,user_id,ticker):
+    """Create one short-lived owner-initiated UI test, never a HOT WATCH signal or order."""
+    if ticker != 'CABA':
+        raise TradeError('Denne afgrænsede test understøtter kun CABA.')
+    import portfolios, portfolio_data, dashboard_projection
+    with connect() as c:
+        owned=portfolios.list_owned(c,user_id)
+        snapshots=portfolio_data.snapshots(c,user_id)
+    state=dashboard_projection.build(connect,user_id,owned,snapshots)
+    def eligible(row):
+        if row.get('ticker')!='CABA' or row.get('portfolio_kind')!='portfolio' or row.get('verification')!='broker_snapshot' or not row.get('asset_id') or row.get('portfolio_id') is None:return False
+        try:return Decimal(str(row.get('quantity') or '0'))>=1
+        except (InvalidOperation,ValueError,TypeError):return False
+    matches=[row for row in state.get('positions',[]) if eligible(row)]
+    if len(matches)!=1:
+        raise TradeError('CABA skal findes i præcis ét verificeret direkte depot med mindst 1 aktie. Opdatér Pluto-data først.')
+    row=matches[0];now=time.time()
+    try:
+        from datetime import datetime
+        observed=datetime.fromisoformat(str(row['snapshot_at']).replace('Z','+00:00')).timestamp()
+    except (ValueError,TypeError,AttributeError):
+        observed=0
+    if not 0<=now-observed<=900:
+        raise TradeError('CABA-beholdningen er ikke hentet inden for de seneste 15 minutter. Opdatér depotet først.')
+    with connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        old=c.execute('SELECT expires FROM manual_test_signals WHERE user_id=?',(user_id,)).fetchone()
+        if old and old['expires']>now:
+            raise TradeError('Der findes allerede et aktivt testsignal. Lad det udløbe før et nyt forsøg.')
+        # A recently submitted ESCAPE proposal must not silently be duplicated.
+        pending=c.execute("SELECT payload FROM broker_proposals WHERE user_id=? AND portfolio_id=? AND created>? AND status IN ('estimated','sending','sent','uncertain')",
+                          (user_id,row['portfolio_id'],now-86400)).fetchall()
+        for item in pending:
+            try:orders=json.loads(item['payload']).get('orders',[])
+            except (ValueError,TypeError,AttributeError):continue
+            if isinstance(orders,list) and any(isinstance(o,dict) and o.get('side')=='SELL' and o.get('assetId')==row['asset_id'] for o in orders):
+                raise TradeError('ESCAPE har allerede et nyere CABA-salgsforslag. Kontrollér status inden ny test.')
+        expires=now+900
+        c.execute("""INSERT INTO manual_test_signals(user_id,portfolio_id,ticker,amount,expires,side)
+                     VALUES(?,?,?,?,?,'SELL')
+                     ON CONFLICT(user_id) DO UPDATE SET portfolio_id=excluded.portfolio_id,
+                     ticker=excluded.ticker,amount=excluded.amount,expires=excluded.expires,side='SELL'""",
+                  (user_id,row['portfolio_id'],'CABA','1',expires))
+    return {'ticker':'CABA','side':'SELL','portfolio_id':row['portfolio_id'],
+            'expires':expires,'quantity':'1','kind':'MANUAL_TEST','broker_order_created':False}
+
 
 def structural(v):
     if isinstance(v,dict):return {k:structural(x) for k,x in v.items() if k not in ['description','title','$schema','default','examples']}
@@ -113,7 +161,7 @@ def candidate(connect,user_id,report_id,candidate_id):
     return {**record['candidate'],'signal':signal}
 
 def signal_source(connect,user_id,report_id,candidate_id):
-    if report_id in ('@manual-buy','@manual-sell'):
+    if report_id in ('@manual-buy','@manual-sell','@manual-test-sell'):
         if not isinstance(candidate_id,str) or not 1<=len(candidate_id)<=200 or any(ord(x)<33 for x in candidate_id):raise TradeError('Vælg et gyldigt Pluto-aktiv.')
         return {'signal':'KØB' if report_id=='@manual-buy' else 'SÆLG','asset_id':candidate_id}
     if report_id!='@hotwatch':return candidate(connect,user_id,report_id,candidate_id)
@@ -169,6 +217,12 @@ def verify_proposal_source(connect,user_id,row):
         raise TradeError('Signalets aktiv er ændret. Hent et nyt estimat.')
     if row['kind']=='collection_buy' and expected!='BUY' or row['kind']=='collection_sell' and expected!='SELL':
         raise TradeError('Signalets retning er ændret. Hent et nyt estimat.')
+    if row['report_id']=='@manual-test-sell':
+        with connect() as db:t=active_test_signal(db,user_id)
+        if not t or t['ticker']!='CABA' or t['side']!='SELL' or str(t['portfolio_id'])!=str(row['portfolio_id']):
+            raise TradeError('CABA-testsignalet er udløbet. Opret ikke en ordre fra et udløbet signal.')
+        if row['kind']!='direct' or len(orders)!=1 or Decimal(str(orders[0].get('shares') or 0))!=Decimal('1'):
+            raise TradeError('CABA-testsignalet må kun oprette forslag for 1 aktie.')
     if row['report_id']=='@hotwatch':
         if expected=='BUY':
             import hotwatch_buy_plan
@@ -356,6 +410,12 @@ def estimate(connect,user_id,data,factory=None):
     if data.get('report_id')=='@manual-sell':
         if data.get('kind')!='direct' or data.get('size_mode')!='percent':raise TradeError('Et manuelt salg skal angives som procent af en direkte beholdning.')
         data={**data,'candidate_id':data.get('asset_id')}
+    if data.get('report_id')=='@manual-test-sell':
+        if data.get('kind')!='direct' or data.get('size_mode')!='percent':raise TradeError('CABA-testsalg skal være en direkte procentordre.')
+        with connect() as db: t=active_test_signal(db,user_id)
+        if not t or t['ticker']!='CABA' or t['side']!='SELL' or str(t['portfolio_id'])!=str(data.get('portfolio_id')):
+            raise TradeError('Testsalgssignalet er udløbet, eller depotet er ændret.')
+        data={**data,'candidate_id':data.get('asset_id')}
     if data.get('kind')=='direct' and data.get('size_mode')=='percent':
         c=signal_source(connect,user_id,str(data.get('report_id','')),str(data.get('candidate_id','')))
         verify_expected_side(data,c)
@@ -363,6 +423,8 @@ def estimate(connect,user_id,data,factory=None):
         try:portfolio_id=int(data.get('portfolio_id'))
         except (ValueError,TypeError):raise TradeError('Vælg et depot.')
         basis=direct_sell_basis(connect,user_id,portfolio_id,data.get('asset_id'),data.get('size'),factory)
+        if data.get('report_id')=='@manual-test-sell' and Decimal(basis['shares'])!=Decimal('1'):
+            raise TradeError('Fiktiv CABA-test er låst til præcis 1 aktie. Depotet er ændret; opdatér og start igen.')
         data={**data,'size_mode':'shares','size':basis['shares']}
     p,payload=build(connect,user_id,data);kind=data['kind']
     if basis is not None and (len(payload.get('orders') or [])!=1 or payload['orders'][0].get('side')!='SELL'):

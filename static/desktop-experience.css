@@ -483,3 +483,11 @@
  .mobile-holding-metrics .dash-profit-percent{font-size:14px!important}
  .mobile-holding.mobile-holding-card{padding-block:10px}
 }
+
+/* Keep optional source warnings below the chart in the isolated test.
+   Existing production signal layouts remain unchanged. */
+@media(max-width:700px){
+ .signal-overview:has(.signal-test-disclaimer) .market-slot>.market-warning{
+  order:4;display:block;margin-top:6px;max-width:100%;
+ }
+}
