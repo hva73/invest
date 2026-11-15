@@ -94,8 +94,8 @@
     const originRows=[['signal','ESCAPE-signal'],['own','Egen beslutning'],['unknown','Ikke afklaret']].map(([key,label])=>{
       const matched=rows.filter(item=>known(item.sell_origin)===key);
       const count=[...rows,...unresolved].filter(item=>known(item.sell_origin)===key).length;
-      const sum=totalGross(matched);
-      return `<div><span>${label}</span><strong>${count} salg</strong><span>${sum?sum.text+' '+esc(unit):'Resultat ikke afklaret'}</span></div>`;
+      const sum=matched.length?totalGross(matched):null;
+      return `<div><span>${label}</span><strong>${count} salg</strong><span>${sum?sum.text+' '+esc(unit):count?'Resultat ikke afklaret':'—'}</span></div>`;
     }).join('');
     const origins=allSales.length&&currency!=='all'?`<section class="statistics-origin-summary"><h3>Hvem stod bag salgene?</h3>${originRows}<p>Kun dokumenterede koblinger. Uafklaret oprindelse tæller hverken som algoritmens eller dine egne valg.</p></section>`:'';
     const allButton=rows.length?`<button type="button" data-statistics-group="all" aria-expanded="${group==='all'}">Se alle ${rows.length+unresolved.length} salg</button>`:'';
