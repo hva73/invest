@@ -1,5 +1,5 @@
 """Synthetic missing-cost sale must remain visible and openable at both sizes."""
-from pathlib import Path
+from pathlib import Path  # Resolve the checked-out UI under test.
 from playwright.sync_api import sync_playwright
 
 with sync_playwright() as playwright:
