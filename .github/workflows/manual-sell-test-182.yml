@@ -1,12 +1,12 @@
 name: Isolated CABA sell end-to-end test
 on:
   pull_request:
-    branches: [codex/data-and-notification-prep]
+    branches: [codex/data-and-notification-prep, codex/hotfix-combined-snapshot]
 permissions:
   contents: read
 jobs:
   tests:
-    if: github.event.pull_request.head.ref == 'codex/e2e-test-sell-182'
+    if: contains(fromJSON('["codex/e2e-test-sell-182","codex/data-and-notification-prep"]'), github.event.pull_request.head.ref)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
