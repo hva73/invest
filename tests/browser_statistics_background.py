@@ -12,7 +12,7 @@ payload={'portfolios':[{'portfolio_id':1,'name':'A','items':[{'ticker':'ONE','na
 try:
  with patch('mcp_client.MCP.request',side_effect=AssertionError('No broker')),sync_playwright() as pw:
   browser=pw.chromium.launch(headless=True);page=browser.new_page()
-  page.add_init_script("""(() => {const original=window.setInterval;window.testTimers=[];window.setInterval=(fn,ms,...args)=>{if(ms===30000)window.testTimers.push(()=>fn(...args));return original(fn,ms,...args)}})()""")
+  page.add_init_script("""(() => {const original=window.setInterval;window.testTimers=[];window.testDeskTimers=[];window.setInterval=(fn,ms,...args)=>{if(ms===30000)window.testTimers.push(()=>fn(...args));if(ms===90000)window.testDeskTimers.push(()=>fn(...args));return original(fn,ms,...args)}})()""")
   counts={'stats':0,'state':0}
   def stat(route):counts['stats']+=1;route.fulfill(json=payload)
   def state(route):
@@ -31,6 +31,15 @@ try:
   page.locator('nav [data-view=overview]').click();expect(page.locator('.dashboard-v1')).to_be_visible()
   page.locator('nav [data-view=statistics]').click();expect(page.locator('#statistics-title')).to_be_visible()
   assert counts['stats']==3,counts
+  page.locator('nav [data-view=overview]').click();expect(page.locator('.dashboard-v1')).to_be_visible()
+  pending=[]
+  page.route('**/api/reports/desk',lambda route:pending.append(route))
+  page.evaluate('() => { window.testDeskTimers[0](); }')
+  page.wait_for_timeout(300);assert len(pending)==1,'desk request did not start'
+  page.locator('nav [data-view=statistics]').click();expect(page.locator('#statistics-title')).to_be_visible()
+  assert counts['stats']==4,counts
+  pending[0].fulfill(json={'synthetic_changed':True});page.wait_for_timeout(300)
+  expect(page.locator('#statistics-title')).to_be_visible();assert counts['stats']==4,counts
   browser.close()
  print('PASS: background refresh, filters and explicit reload')
 finally:server.shutdown();server.server_close();case.tearDown()
