@@ -56,6 +56,10 @@ def reserve(connect,uid,source,now=None,purpose=None):
   except EngineError as error:raise DataUnavailable(error.code,error.status) from None
  uid=0 if source=='eodhd' else uid
  now=now or utc();window=int(now.timestamp()//60);limit=provider_request_limit(source)
+ # Interactive history reads must not compete with the background scan cap.
+ # This is a local engine throttle, not the broker's own HTTP rate limit.
+ # Keep an independently capped per-user bucket; provider 429 still propagates.
+ if source=='pluto' and purpose=='statistics':source='pluto:statistics'
  with connect() as c:
   c.execute('BEGIN IMMEDIATE');c.execute('DELETE FROM hw_request_budget WHERE window<?',(window-2,))
   row=c.execute('SELECT used FROM hw_request_budget WHERE user_id=? AND source=? AND window=?',(uid,source,window)).fetchone()
