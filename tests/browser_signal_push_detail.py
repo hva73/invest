@@ -98,6 +98,7 @@ def main():
    session['data_stale']=False
    session['last_action_signal']['reason']='Syntetisk exit'
    session['latest_calculation']={'reason_codes':['EXIT_RULES','TRAILING_EXIT']}
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')")
    assert page.evaluate("getComputedStyle(document.documentElement).overflowY")=='hidden'
    background=page.evaluate('window.scrollY');page.mouse.move(2,2);page.mouse.wheel(0,900);page.wait_for_timeout(150);assert page.evaluate('window.scrollY')==background
    shot=os.environ.get('ESCAPE_SCREENSHOTS');
