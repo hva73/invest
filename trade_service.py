@@ -27,6 +27,55 @@ def active_test_signal(c,user_id,now=None):
     row=c.execute("SELECT t.portfolio_id,t.ticker,t.side,t.expires FROM manual_test_signals t JOIN portfolios p ON p.id=t.portfolio_id AND p.user_id=t.user_id WHERE t.user_id=? AND t.expires>? AND p.active=1 AND p.source='pluto' AND p.kind='portfolio'",(user_id,time.time() if now is None else now)).fetchone()
     return dict(row) if row else None
 
+
+def start_manual_test_sell(connect,user_id,ticker):
+    """Create one short-lived owner-initiated UI test, never a HOT WATCH signal or order."""
+    if ticker != 'CABA':
+        raise TradeError('Denne afgrænsede test understøtter kun CABA.')
+    import portfolios, portfolio_data, dashboard_projection
+    with connect() as c:
+        owned=portfolios.list_owned(c,user_id)
+        snapshots=portfolio_data.snapshots(c,user_id)
+    state=dashboard_projection.build(connect,user_id,owned,snapshots)
+    matches=[row for row in state.get('positions',[]) if row.get('ticker')=='CABA'
+             and row.get('portfolio_kind')=='portfolio' and row.get('verification')=='broker_snapshot'
+             and row.get('asset_id') and row.get('portfolio_id') is not None
+             and Decimal(str(row.get('quantity') or '0'))>=1]
+    if len(matches)!=1:
+        raise TradeError('CABA skal findes i præcis ét verificeret direkte depot med mindst 1 aktie. Opdatér Pluto-data først.')
+    row=matches[0];now=time.time()
+    try:
+        from datetime import datetime
+        observed=datetime.fromisoformat(str(row['snapshot_at']).replace('Z','+00:00')).timestamp()
+    except (ValueError,TypeError,AttributeError):
+        observed=0
+    if not 0<=now-observed<=900:
+        raise TradeError('CABA-beholdningen er ikke hentet inden for de seneste 15 minutter. Opdatér depotet først.')
+    with connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        old=c.execute('SELECT expires FROM manual_test_signals WHERE user_id=?',(user_id,)).fetchone()
+        if old and old['expires']>now:
+            raise TradeError('Der findes allerede et aktivt testsignal. Lad det udløbe før et nyt forsøg.')
+        # A recently submitted ESCAPE proposal must not silently be duplicated.
+        pending=c.execute("SELECT payload FROM broker_proposals WHERE user_id=? AND portfolio_id=? AND created>? AND status IN ('estimated','sending','sent','uncertain')",
+                          (user_id,row['portfolio_id'],now-86400)).fetchall()
+        for item in pending:
+            try:
+                orders=json.loads(item['payload']).get('orders',[])
+                if any(o.get('side')=='SELL' and o.get('assetId')==row['asset_id'] for o in orders):
+                    raise TradeError('ESCAPE har allerede et nyere CABA-salgsforslag. Kontrollér status inden ny test.')
+            except (ValueError,TypeError,AttributeError):
+                continue
+        expires=now+900
+        c.execute("""INSERT INTO manual_test_signals(user_id,portfolio_id,ticker,amount,expires,side)
+                     VALUES(?,?,?,?,?,'SELL')
+                     ON CONFLICT(user_id) DO UPDATE SET portfolio_id=excluded.portfolio_id,
+                     ticker=excluded.ticker,amount=excluded.amount,expires=excluded.expires,side='SELL'""",
+                  (user_id,row['portfolio_id'],'CABA','1',expires))
+    return {'ticker':'CABA','side':'SELL','portfolio_id':row['portfolio_id'],
+            'expires':expires,'quantity':'1','kind':'MANUAL_TEST','broker_order_created':False}
+
+
 def structural(v):
     if isinstance(v,dict):return {k:structural(x) for k,x in v.items() if k not in ['description','title','$schema','default','examples']}
     if isinstance(v,list):return [structural(x) for x in v]
