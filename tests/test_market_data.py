@@ -137,6 +137,29 @@ class Quotes(unittest.TestCase):
     cached=market_data.enrich_intraday(app.connect,1,out,now,lambda:Feed());self.assertEqual(len(calls),1);self.assertEqual(cached['intraday_series'],out['intraday_series'])
    with patch('hotwatch_service.verified_existing_feed',return_value=None):
     revoked=market_data.enrich_intraday(app.connect,1,cached,now,lambda:Feed());self.assertEqual(revoked['intraday_status'],'IDENTITY_UNVERIFIED');self.assertNotIn('intraday_series',revoked)
+ def test_live_minute_bars_can_fill_sparse_day_chart_without_inventing_history(self):
+  now=self.fixed;calls=[]
+  class Feed:
+   def minute_bars(self,market,symbol):
+    calls.append(('realtime',market,symbol))
+    return {'status':'OK','bars':[{'bar_open_at':(now-timedelta(minutes=i)).isoformat(),'close':str(300+i/10)} for i in range(120,0,-1)]}
+   def intraday(self,*args,**kwargs):
+    calls.append(('rest',));return {'status':'SOURCE_UNAVAILABLE'}
+  data={'asset_id':'synthetic-chart-asset','ticker':'CHART','exchange':'NASDAQ','currency':'USD','price':'300','series':[{'epoch':(now-timedelta(minutes=i)).timestamp()} for i in (200,1)]}
+  with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_BARS_ENABLED':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1'}),patch('hotwatch_service.verified_existing_feed',return_value={'provider_symbol':'CHART.US'}):
+   result=market_data.enrich_intraday(app.connect,1,data,now,lambda:Feed())
+  self.assertEqual(result['intraday_status'],'SOURCE_INCOMPLETE')
+  self.assertEqual(len(result['intraday_series']),120)
+  self.assertIn('realtids-minutbarer',result['intraday_source'])
+  self.assertEqual(result['series'],data['series'])
+  self.assertEqual(calls,[('realtime','us','CHART')])
+  newer=dict(data,series=[{'epoch':(now-timedelta(minutes=i)).timestamp()} for i in (100,1)])
+  with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_BARS_ENABLED':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1'}),patch('hotwatch_service.verified_existing_feed',return_value={'provider_symbol':'CHART.US'}):
+   covered=market_data.enrich_intraday(app.connect,1,newer,now,lambda:Feed())
+  self.assertEqual(covered['intraday_status'],'OK')
+  self.assertEqual(len(covered['intraday_series']),120)
+  self.assertEqual(covered['price'],'300')
+
  def test_verified_history_periods_are_separate_and_never_replace_quote(self):
   now=self.fixed;calls=[]
   class Feed:
