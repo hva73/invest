@@ -4,9 +4,24 @@ const ui=ctx.window.DashboardUI;ui.setup({api:()=>{},escape:v=>String(v),formatT
 const row={key:'x',ticker:'TEST',name:'Test',portfolio_name:'Test depot',quantity:'2',critical:false,verification:'broker_snapshot',price:{amount:'10',currency:'DKK'},value:{amount:'20',currency:'DKK'},unrealized:{amount:'-2',currency:'DKK'},unrealized_percent:'-10',unrealized_estimated:true,conflicts:[],hot_watch:{},analysis_freshness:{}};
 const state={dashboard:{positions:[row],accounts:[],totals:[],warnings:[],orders:[],critical_sessions:[]},report_desk:null};
 state.dashboard.portfolio_value_history={periods:{day:[{at:'2026-11-06T10:00:00Z',amount:'100',reported_result:'-12',currency:'DKK'},{at:'2026-11-06T11:00:00Z',amount:'110',reported_result:'-2',currency:'DKK'}]},reported_result:{amount:'-2',currency:'DKK'}};
+// Currency-comparable sorting: total DKK profits descending, losses last;
+// a missing/unconverted P&L must not be ranked by an arbitrary FX rate.
+const r2={...row,key:'profit',ticker:'PROFIT',value:{amount:'400',currency:'DKK'},unrealized:{amount:'80',currency:'DKK'},unrealized_percent:'25'};
+const r3={...row,key:'loss',ticker:'LOSS',value:{amount:'100',currency:'DKK'},unrealized:{amount:'-50',currency:'DKK'},unrealized_percent:'-33.33'};
+const r4={...row,key:'fx',ticker:'FX',value:{amount:'150',currency:'EUR'},unrealized:{amount:'40',currency:'EUR'},unrealized_percent:'36.36'};
+const originalRows=state.dashboard.positions;
+state.dashboard.positions=[r3,r4,r2,row];
+const sortedHTML=ui.render(state);
+const mobileHTML=sortedHTML.split('class="mobile-holdings-list">')[1].split('</div>')[0];
+assert.ok(mobileHTML.indexOf('PROFIT')<mobileHTML.indexOf('TEST'));
+assert.ok(mobileHTML.indexOf('TEST')<mobileHTML.indexOf('LOSS'));
+assert.ok(mobileHTML.indexOf('LOSS')<mobileHTML.indexOf('FX'));
+assert.match(sortedHTML,/mobile-holding-total neutral/);
+assert.doesNotMatch(sortedHTML,/mobile-holding-total (?:positive|negative)/);
+state.dashboard.positions=originalRows;
 state.dashboard.accounts=[{kind:'portfolio',snapshot_at:new Date().toISOString()}];let updatedHtml=ui.render(state);assert.match(updatedHtml,/Opdateret i dag kl\. \d{2}\.\d{2}/);assert.doesNotMatch(updatedHtml,/Værditid:/);state.dashboard.accounts.push({kind:'portfolio',snapshot_at:null});updatedHtml=ui.render(state);assert.match(updatedHtml,/Opdateringstid ukendt/);state.dashboard.accounts=[];
 state.dashboard.totals=[{amount:'110',currency:'DKK'}];state.dashboard.portfolio_value_history.current_value={amount:'110',currency:'DKK'};
-let html=ui.render(state);row.value.currency='USD';assert.match(ui.render(state),/mobile-holding-total negative/);row.unrealized.amount='2';assert.match(ui.render(state),/mobile-holding-total positive/);row.unrealized.amount='-2';row.value.currency='DKK';assert.match(html,/mobile-holding-since">Siden sidst <span class="dash-neutral">—<\/span>/);for(const [value,tone,sign] of [['1.5','positive','↑'],['-1.5','negative','↓'],['0','neutral','→']]){row.since_last={percent:value,basis:'synthetic',from:'a',to:'b'};const h=ui.render(state);assert.ok(h.includes('mobile-holding-since">Siden sidst <span class="dash-change '+tone+'"'));assert.ok(h.includes(sign+' '+(Number(value)>0?'+':'')+Number(value).toFixed(2).replace('.',',')+' %'));}delete row.since_last;assert.match(html,/dash-total negative/);assert.match(html,/negativt/);assert.match(html,/>↓<\/span>/);
+let html=ui.render(state);row.value.currency='USD';assert.match(ui.render(state),/mobile-holding-total neutral/);row.unrealized.amount='2';assert.match(ui.render(state),/mobile-holding-total neutral/);row.unrealized.amount='-2';row.value.currency='DKK';assert.match(html,/mobile-holding-since">Siden sidst <span class="dash-neutral">—<\/span>/);for(const [value,tone,sign] of [['1.5','positive','↑'],['-1.5','negative','↓'],['0','neutral','→']]){row.since_last={percent:value,basis:'synthetic',from:'a',to:'b'};const h=ui.render(state);assert.ok(h.includes('mobile-holding-since">Siden sidst <span class="dash-change '+tone+'"'));assert.ok(h.includes(sign+' '+(Number(value)>0?'+':'')+Number(value).toFixed(2).replace('.',',')+' %'));}delete row.since_last;assert.match(html,/dash-total negative/);assert.match(html,/negativt/);assert.match(html,/>↓<\/span>/);
 state.dashboard.portfolio_value_history.reported_result.amount='2';html=ui.render(state);assert.match(html,/dash-total positive/);assert.match(html,/>↑<\/span>/);
 state.dashboard.portfolio_value_history.current_value.amount='109';html=ui.render(state);assert.match(html,/dash-total neutral/);assert.doesNotMatch(html,/dash-total positive/);
 state.dashboard.portfolio_value_history.current_value.amount=null;state.dashboard.totals[0].amount='0';html=ui.render(state);assert.match(html,/dash-total neutral/);state.dashboard.totals[0].amount='110';state.dashboard.portfolio_value_history.current_value.amount='110';state.dashboard.totals.push({amount:'5',currency:'USD'});html=ui.render(state);assert.doesNotMatch(html,/dash-total positive/);
