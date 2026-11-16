@@ -499,3 +499,17 @@
    live trading gate blocks execution. Manual depot trading remains in the
    normal portfolio screen; its shortcut stays available on desktop. */
 @media(max-width:700px){.signal-overview-dialog .signal-action-bar :is([data-signal-manual-portfolio],[data-signal-manual-list]){display:none}}
+
+/* Signal-chart evidence: mark real observed peak and the distinct average-entry reference. */
+.signal-overview .market-peak-marker{fill:#f0f7f8;stroke:#102632;stroke-width:1.15}
+.signal-overview .market-entry-marker{fill:#8cd9c5;stroke:#102632;stroke-width:1.1}
+@media(max-width:700px){.signal-overview .market-session{display:block;font-size:10px!important;color:#a5bdc4;margin:6px 0 0;line-height:1.4;letter-spacing:0!important}}
+
+/* Overview-only readability and safe-area adjustments; approved navigation stays fixed. */
+@media(max-width:900px){
+ .dashboard-v1 .mobile-holding-total.neutral{color:#dce8e9}
+ .dashboard-v1 .mobile-holding-daily{display:grid;gap:3px;line-height:1.35}
+ .dashboard-v1 .mobile-holding-daily>span{display:block;white-space:nowrap;overflow-wrap:normal}
+ .dashboard-v1 .mobile-holding-head{gap:8px}
+ .dashboard-v1 .mobile-holding-head .mobile-holding-total{font-variant-numeric:tabular-nums;max-width:54%;overflow-wrap:normal}
+}

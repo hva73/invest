@@ -6,6 +6,23 @@ import app,dashboard_projection as dashboard
 from test_design_v1_acceptance import DesignAcceptance
 
 class MobileProjection(unittest.TestCase):
+ def test_btc_position_retains_broker_daily_percent_and_dkk_values(self):
+  """Crypto is 24/7; a missing quote timestamp must not erase supplied Pluto data."""
+  from portfolio_data import normalize_positions
+  result=normalize_positions([{
+   'assetId':'synthetic-btc','asset':{'name':'Bitcoin','ticker':'BTC','currency':'USD'},
+   'quantity':'0.00047624','price':'65007.575','dailyChangePercent':'-0.2949774462844335',
+   'value':'30.96','unrealisedPnL':'-3.65','valueInPortfolioCurrency':'210.43',
+   'unrealisedPnLInPortfolioCurrency':'-22.57'
+  }],collection_currency='DKK')
+  assert len(result)==1
+  row=result[0]
+  self.assertIsNone(row['price_time'])
+  self.assertEqual(row['reported_daily']['basis'],'pluto_reported_daily_change')
+  self.assertAlmostEqual(float(row['reported_daily']['percent']),-0.2949774462844335)
+  self.assertEqual(row['value_in_portfolio_currency'],{'amount':'210.43','currency':'DKK'})
+  self.assertEqual(row['unrealized_in_portfolio_currency'],{'amount':'-22.57','currency':'DKK'})
+
  def test_current_signal_requires_matching_event_and_fresh_market_evidence(self):
   fixture=DesignAcceptance();fixture.setUp();self.addCleanup(fixture.tearDown)
   now=datetime.now(timezone.utc);port=fixture.root['id'];candidate='synthetic-mobile';asset='mobile-asset'
