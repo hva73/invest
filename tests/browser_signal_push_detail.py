@@ -83,7 +83,7 @@ def main():
    expect(popup.locator('h3')).to_have_text(['Årsag','Målinger','Datastatus'])
    expect(popup.locator('section:nth-of-type(1) p')).to_contain_text('Syntetisk exit')
    expect(popup.locator('section:nth-of-type(2) p')).to_contain_text('ingen verificerede signalmålinger')
-   expect(popup.locator('section:nth-of-type(3) p')).to_contain_text('Aktivt signal')
+   expect(popup.locator('section:nth-of-type(3) p')).to_contain_text('Signaldaten er frisk')
    after=page.evaluate("() => {const r=document.querySelector('#engine-dialog .signal-chart-main').getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}}")
    assert before==after, (before,after)
    popup.get_by_role('button',name='Luk forklaring').click()
@@ -102,6 +102,16 @@ def main():
    expect(popup.locator('section:nth-of-type(2) p')).to_contain_text('Kursændring i strategivinduet: -3,45 %')
    expect(popup.locator('section:nth-of-type(2) p')).to_contain_text('Relativ volumen: 2,1×')
    popup.get_by_role('button',name='Luk',exact=True).click()
+   session['last_action_signal']['reason']='Afventer de indikatorer, som den aktuelle regel kræver; særskilte exitregler vurderes uafhængigt; Kursen er faldet fra toppen i det analyserede kursvindue; dette er ikke afkast siden køb eller et broker-stop; extended hours execution unconfirmed'
+   session['data_status']['market_status']='CLOSED'
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')")
+   d.locator('[data-engine-why-open]').click()
+   expect(popup.locator('section:nth-of-type(1) p')).to_contain_text('trailing-exit')
+   expect(popup.locator('section:nth-of-type(1) p')).not_to_contain_text('Afventer de indikatorer')
+   expect(popup.locator('section:nth-of-type(3) p')).to_contain_text('Handelsmulighed er ikke bekræftet')
+   popup.get_by_role('button',name='Luk forklaring').click()
+   session['last_action_signal']['reason']='TRAILING_EXIT'
+   session['data_status']['market_status']='OPEN'
    session['data_stale']=True
    page.evaluate("window.EngineUI.openNotification('synthetic-push')")
    d.locator('[data-engine-why-open]').click()
@@ -172,10 +182,10 @@ def main():
    session.update(status='DEGRADED',signal='NO_DATA',display_status='DATA FOR GAMLE',data_stale=True,latest_context={})
    session['data_status']={'price':None,'price_status':'STALE','market_status':'UNKNOWN'}
    page.evaluate("window.EngineUI.openNotification('synthetic-push')")
-   expect(d).to_contain_text('ikke længere aktivt');expect(d.locator('[data-trade-watch]')).to_have_count(0);expect(d.get_by_role('button',name='Åbn depot for manuelt salg →')).to_be_visible()
+   expect(d).to_contain_text('ikke længere aktivt');expect(d.locator('[data-trade-watch]')).to_have_count(0);expect(d.get_by_role('button',name='Sælg',exact=True)).to_be_disabled();expect(d.get_by_role('button',name='Åbn depot for manuelt salg →')).to_be_visible()
    d.locator('[data-engine-close]:visible').first.click();expect(d).not_to_be_visible();assert page.evaluate("getComputedStyle(document.documentElement).overflowY")!='hidden'
    session.update(status='ACTIVE',signal='SELL',display_status='SÆLGSSIGNAL',data_stale=False,latest_context={'status':'verified','position':'held','tradability':'available','as_of':stamp,'orders':[]});session['data_status']={'price':'3.1','price_status':'FRESH','market_status':'UNKNOWN','identity_verification':'verified'}
-   page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_contain_text('Handelstid er lukket eller ikke bekræftet');expect(d.locator('[data-trade-watch]')).to_have_count(0);expect(d.get_by_role('button',name='Åbn depot for manuelt salg →')).to_be_visible();d.locator('[data-engine-close]:visible').first.click()
+   page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_contain_text('Handelstid er lukket eller ikke bekræftet');expect(d.locator('[data-trade-watch]')).to_have_count(0);expect(d.get_by_role('button',name='Sælg',exact=True)).to_be_disabled();expect(d.get_by_role('button',name='Åbn depot for manuelt salg →')).to_be_visible();d.locator('[data-engine-close]:visible').first.click()
    session['data_status']['market_status']='OPEN'
    for scope in ([],[case.root,999]):
     session['request']['portfolio_ids']=scope;page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('[data-trade-watch]')).to_have_count(0);expect(d).to_contain_text('Signalet er ikke knyttet til ét entydigt depot');expect(d.get_by_role('button',name='Vælg depot for manuelt salg →')).to_be_visible();d.locator('[data-engine-close]:visible').first.click()
