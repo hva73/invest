@@ -25,5 +25,6 @@ jobs:
       - run: node --check static/dashboard-ui.js
       - run: node tests/test_dashboard_data.js
       - run: python tests/browser_mobile_overview_consistency.py
+      - run: python tests/browser_position_chart_detail.py
       - run: python tests/browser_signal_push_detail.py
       - run: python tests/browser_portfolio_value_chart.py
