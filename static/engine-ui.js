@@ -24,7 +24,13 @@ window.EngineUI=(()=>{
   const cause=(eventCurrent?meaningful(a.reason):null)||(current?meaningful(c.human_readable_explanation):null);
   const codes=eventCurrent?a.current_reason_codes:(current?c.reason_codes:[]);
   const known=(Array.isArray(codes)?codes:[]).filter(x=>typeof x==='string'&&Object.prototype.hasOwnProperty.call(errors,x)&&!['NO_TRIGGER','ENTRY_RULES','EXIT_RULES'].includes(x));
-  const trigger=cause||known.map(x=>errors[x]).slice(0,2).join(' ')||'Motoren har ikke dokumenteret den udløsende regel.';
+  // An exit reason can contain indicator-warmup and execution warnings.
+  // Do not present those as the actual price-exit trigger.
+  const parts=(cause||'').split(';').map(x=>x.trim()).filter(Boolean);
+  const priceExit=parts.find(x=>/^Kursen er faldet fra toppen i det analyserede kursvindue/i.test(x));
+  const trigger=priceExit
+    ?'Kursen er faldet fra toppen i det analyserede kursvindue (trailing-exit). Det er hverken afkast siden køb eller en stopordre hos Pluto.'
+    :cause||known.map(x=>errors[x]).slice(0,2).join(' ')||'Motoren har ikke dokumenteret den udløsende regel.';
   const valid=v=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v));
   const fmt=v=>new Intl.NumberFormat('da-DK',{maximumFractionDigits:2}).format(Number(v));
   const measures=[];
@@ -37,7 +43,9 @@ window.EngineUI=(()=>{
   const quality=s.data_stale===true||d.price_status==='STALE'||s.display_freshness?.state==='stale'
     ?'Kursdata er for gamle til at bekræfte et aktuelt signal.'
     :d.identity_verification==='unverified'?'Instrumentidentiteten er ikke verificeret.'
-    :d.price_status==='FRESH'&&s.status==='ACTIVE'&&eventCurrent?'Aktivt signal; handel kræver fortsat de øvrige kontroller.'
+    :d.market_status!=='OPEN'?'Handelsmulighed er ikke bekræftet i den aktuelle handelssession. Ingen ordre kan sendes fra signalet.'
+    :!eventCurrent?'Det tidligere signal er ikke længere aktivt. En ny vurdering kræves.'
+    :d.price_status==='FRESH'&&s.status==='ACTIVE'?'Signaldaten er frisk, men depot, ordrestørrelse og handelsmulighed skal stadig kontrolleres.'
     :'Aktualitet eller datagrundlag er ikke fuldt bekræftet.';
   return 'Årsag: '+trigger+(measures.length?' Målinger: '+measures.join(' · ')+'.':' Målinger: ingen verificerede signalmålinger til visning.')+' Datastatus: '+quality;
  }
@@ -251,7 +259,8 @@ window.EngineUI=(()=>{
   const stop=req.risk?.stop_price,stopText=stop!=null?text(stop)+' '+esc(req.quote_currency||''):'—',stopDistance=Number(stop)>0&&Number(d.price)>0&&req.quote_currency===s.latest_currency&&!stale?movement((Number(stop)/Number(d.price)-1)*100,' %'):'—';
   const reasons=(s.display_reason_codes?.length?s.display_reason_codes:c.reason_codes||[]).slice(0,3).map(reason);
   const ack=a?.event_id&&!a.acknowledged_at&&!a.acknowledged?`<button type="button" data-engine-ack="${esc(wid)}" data-event-id="${esc(a.event_id)}" data-is-test="false">Markér beskeden som set</button>`:a?.event_id?'<span role="status">Kvitteret</span>':'';
-  const trade=canSell||canBuy?`<button type="button" class="primary ${canSell?'asset-sell':''}" data-trade-watch="${esc(wid)}" data-trade-signal="${esc(s.signal)}"${s.last_action_signal?.event_id?` data-trade-event="${esc(s.last_action_signal.event_id)}"`:""} data-signal-help-attached="true">${canSell?'Sælg':'Køb'}</button>`:'';
+  const signalSide=['SELL','REDUCE'].includes(s.signal)||(['SELL_SIGNAL','REDUCE_SIGNAL'].includes(a?.event_type)&&s.signal!=='BUY')?'SELL':s.signal==='BUY'?'BUY':null;
+  const trade=signalSide?`<button type="button" class="primary ${signalSide==='SELL'?'asset-sell':''}"${canSell||canBuy?` data-trade-watch="${esc(wid)}" data-trade-signal="${esc(s.signal)}"${s.last_action_signal?.event_id?` data-trade-event="${esc(s.last_action_signal.event_id)}"`:''}`:''} data-signal-help-attached="true"${canSell||canBuy?'':' disabled aria-disabled="true"'}>${signalSide==='SELL'?'Sælg':'Køb'}</button>`:'';
   const title=req.ticker||'Aktiv';
   const explanation=c.human_readable_explanation||((a?.reason&&!/^[-_A-Z0-9]+$/.test(a.reason))?a.reason:'');
   const understandable=reasons.filter(x=>!/^[-_A-Z0-9]+$/.test(x));
