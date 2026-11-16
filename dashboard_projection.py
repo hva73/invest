@@ -180,6 +180,17 @@ def position_hotwatch(c,uid,portfolio_id,asset_id,report_position):
    warmup={'count':analysis['count'],'required':analysis['required'],'remaining':analysis['remaining'],'analysis_only':True,'complete':analysis['state']=='WARMUP COMPLETE','data_stale':analysis['freshness']=='DATA STALE' or bool(current.get('last_data_at') and current.get('data_stale')),'data_missing':not current.get('last_data_at'),'data_error':bool(current.get('last_error') and current['last_error']!='DATA_STALE'),'market_status_unknown':quality.get('market_status')=='UNKNOWN' and not regular_closed,'regular_closed':regular_closed}
  return {'auto_status':dict(auto) if auto else None,'candidate_id':candidate_id,'trade_cycle_id':cycle,'lifecycle':dict(lifecycle) if lifecycle else None,'session':({'watch_id':current['watch_id'],'is_test':False,'status':current['status'],'last_data_at':current['last_data_at'],'signal':current['signal'],'display_status':current['display_status'],'last_calculation_at':current.get('last_calculation_at'),'last_action_signal':current.get('last_action_signal'),'data_stale':current.get('data_stale'),'display_freshness':policy.freshness('live_quote',current.get('last_data_at')),'data_status':{k:(current.get('data_status') or {}).get(k) for k in ('market_status','price_status','identity_verification')},'next_market_session':(current.get('data_status') or {}).get('next_market_session'),'market_observation':(current.get('data_status') or {}).get('market_observation'),'warmup':warmup} if current else None),'link_basis':'unique_asset_and_portfolio_scope' if asset_fallback else 'candidate_id+asset_id+portfolio' if report_position and report_position.get('candidate_id') else 'asset_id+portfolio+trade_cycle_id' if candidate_id and cycle else 'unique_asset_and_portfolio_scope' if session else None}
 
+def consistent_return_percent(value, pnl):
+ """Use one shared currency for displayed profit and percentage.
+ A broker result converted into DKK must not be divided by foreign-currency cost.
+ """
+ if not isinstance(value,dict) or not isinstance(pnl,dict):
+  return None
+ v=policy.decimal(value.get('amount'));result=policy.decimal(pnl.get('amount'))
+ if value.get('currency')!=pnl.get('currency') or v is None or result is None or v-result<=0:
+  return None
+ return str(result/(v-result)*100)
+
 def overview_positions(positions):
  """Group leaf holdings for display only; broker scopes remain authoritative."""
  groups={};output=[]
@@ -204,8 +215,8 @@ def overview_positions(positions):
   if quantity is not None and quantity>0 and all(e.get('currency') and policy.decimal(e.get('amount')) is not None for e in entries) and len({e['currency'] for e in entries})==1:
    average={'amount':str(sum((q*Decimal(e['amount']) for q,e in zip(quantities,entries)),Decimal(0))/quantity),'currency':entries[0]['currency']}
   value=summed(members,'value','original_value');pnl=summed(members,'unrealized','original_unrealized');cost=summed(members,'cost_basis')
-  original_pnl=summed(members,'original_unrealized');basis_pnl=pnl if pnl and cost and pnl['currency']==cost['currency'] else original_pnl
-  percent=str(Decimal(basis_pnl['amount'])/Decimal(cost['amount'])*100) if cost and basis_pnl and cost['currency']==basis_pnl['currency'] and Decimal(cost['amount'])>0 else None
+  original_pnl=summed(members,'original_unrealized')
+  percent=consistent_return_percent(value,pnl)
   latest=max(members,key=lambda r:r.get('snapshot_at') or '')
   times=[r.get('snapshot_at') for r in members]
   combined=dict(latest,key='asset:'+aid,portfolio_id=None,portfolio_name='Samlet · '+str(len(members))+' depoter',portfolio_kind='combined',external_id=None,
@@ -265,12 +276,8 @@ def build(connect,uid,owned,snapshots,now=None):
     estimated=row.get('unrealized_basis')=='calculated_value_cost' and pnl is raw_pnl
     if row.get('unrealized_basis') and pnl is raw_pnl and not estimated:pnl=None
     if pnl and policy.decimal(pnl.get('amount')) is None:pnl=None
-    cost=row.get('cost_basis') or {};pnl_percent=None
-    if pnl and pnl.get('currency')==cost.get('currency') and policy.decimal(cost.get('amount')) is not None and Decimal(cost['amount'])>0:pnl_percent=str(Decimal(pnl['amount'])/Decimal(cost['amount'])*100)
-    # Percentage uses the original-currency broker P/L and cost when the displayed
-    # DKK result has a different currency from the supplied cost basis.
-    if pnl_percent is None and (not row.get('unrealized_basis') or estimated) and raw_pnl.get('currency')==cost.get('currency') and policy.decimal(raw_pnl.get('amount')) is not None and policy.decimal(cost.get('amount')) is not None and Decimal(cost['amount'])>0:
-     pnl_percent=str(Decimal(raw_pnl['amount'])/Decimal(cost['amount'])*100)
+    cost=row.get('cost_basis') or {}
+    pnl_percent=consistent_return_percent(shown,pnl)
     obs=observation(row,position_data.get('observed'));since=None
     if aid and obs.get('received_at') and not failed and data.get('positions_complete'):
      previous=c.execute('SELECT payload FROM display_price_observations WHERE user_id=? AND portfolio_id=? AND asset_id=? ORDER BY id DESC LIMIT 120',(uid,p['id'],aid)).fetchall()
