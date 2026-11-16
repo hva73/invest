@@ -142,7 +142,9 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
     def unavailable(status):
         for key in ('intraday_series','intraday_source','intraday_symbol','intraday_cache','intraday_interval'):result.pop(key,None)
         result['intraday_period']=period;result['intraday_status']=status;result['intraday_checked_at']=now.timestamp();return result
-    if not os.environ.get('ESCAPE_EODHD_API_KEY','').strip() or os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1':
+    rest_enabled=os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')=='1'
+    live_bars_enabled=period=='day' and os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1'
+    if not os.environ.get('ESCAPE_EODHD_API_KEY','').strip() or not (rest_enabled or live_bars_enabled):
         return unavailable('EODHD_NOT_ENABLED')
     try:
         from hotwatch_service import verified_existing_feed
@@ -168,8 +170,19 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
         if period!='day' and result.get('series_from') and result.get('series_to'):
             start=stamp(result['series_from']).timestamp();end=min(stamp(result['series_to']).timestamp(),end)
             if start>=end:return unavailable('SOURCE_UNAVAILABLE')
-        response=feed_factory().intraday(symbol,interval=interval,start=int(start),end=int(end),max_points=None)
-        if response.get('status')!='OK' or not isinstance(response.get('bars'),list):
+        client=feed_factory()
+        response=None;source='EODHD'
+        # The live 1m service can contain verified, completed bars when the
+        # historical REST endpoint has not caught up. This affects graphs
+        # only: motor calculations and trading gates remain unchanged.
+        if live_bars_enabled and symbol.upper().endswith('.US') and hasattr(client,'minute_bars'):
+            from hotwatch_adapters import realtime_symbol
+            live=client.minute_bars('us',realtime_symbol(symbol))
+            if isinstance(live,dict) and live.get('status')=='OK' and isinstance(live.get('bars'),list) and len(live['bars'])>1:
+                response=live;source='EODHD · afsluttede realtids-minutbarer'
+        if response is None and rest_enabled:
+            response=client.intraday(symbol,interval=interval,start=int(start),end=int(end),max_points=None)
+        if not isinstance(response,dict) or response.get('status')!='OK' or not isinstance(response.get('bars'),list):
             result['intraday_status']='SOURCE_UNAVAILABLE'
             fields={k:result[k] for k in ('intraday_period','intraday_interval','intraday_checked_at','intraday_symbol','intraday_status')}
             cache[period]={'symbol':symbol,'checked_at':now.timestamp(),'pluto_fetched':result.get('fetched_at'),'fields':fields};result['intraday_cache']=cache
@@ -190,9 +203,9 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
         # A short, dense fragment must never replace a longer source interval.
         covers=not recent or bool(series) and series[0]['epoch']<=min(p['epoch'] for p in recent)+bar_seconds and series[-1]['epoch']>=max(p['epoch'] for p in recent)-bar_seconds
         if len(series)>len(recent) and len(series)>1 and covers:
-            result['intraday_series']=series;result['intraday_source']='EODHD';result['intraday_status']='OK'
+            result['intraday_series']=series;result['intraday_source']=source;result['intraday_status']='OK'
         elif len(series)>len(recent) and len(series)>1:
-            result['intraday_series']=series;result['intraday_source']='EODHD';result['intraday_status']='SOURCE_INCOMPLETE'
+            result['intraday_series']=series;result['intraday_source']=source;result['intraday_status']='SOURCE_INCOMPLETE'
         else:result['intraday_status']='PLUTO_AS_DETAILED'
         fields={k:result[k] for k in ('intraday_period','intraday_interval','intraday_checked_at','intraday_symbol','intraday_status','intraday_series','intraday_source') if k in result}
         cache[period]={'symbol':symbol,'checked_at':now.timestamp(),'pluto_fetched':result.get('fetched_at'),'fields':fields};result['intraday_cache']=cache
