@@ -71,6 +71,56 @@ def inspect(path, token):
         "changes": "none",
     }
 
+
+def deployment_gates(token):
+    """Read only filenames and public commit markers of the fixed deployment guard."""
+    opener = urllib.request.build_opener(NoRedirect())
+    bridge = "/home/nordicr4/.escape_deploy_bridge"
+    app = "/home/nordicr4/escape_app"
+    def call(operation, params):
+        query = urllib.parse.urlencode(params)
+        req = urllib.request.Request("https://cp14.nordicway.dk:2083/execute/Fileman/" + operation + "?" + query,
+            headers={"Authorization": "cpanel nordicr4:" + token, "Accept": "application/json"})
+        with opener.open(req, timeout=20) as response:
+            raw = response.read(100_001)
+        if len(raw) > 100_000:
+            raise ValueError("reply_too_large")
+        payload = json.loads(raw)
+        result = payload.get("result", payload)
+        if not isinstance(result, dict) or result.get("status") not in (1, "1"):
+            raise ValueError("api_unavailable")
+        return result.get("data")
+    def entries(path):
+        rows = call("list_files", {"dir": path, "show_hidden": 1})
+        if not isinstance(rows, list) or len(rows) > 500:
+            raise ValueError("invalid_list")
+        return {r["file"]: r for r in rows if isinstance(r, dict) and isinstance(r.get("file"), str)}
+    def commit_marker(directory, name):
+        result = call("get_file_content", {"dir": directory, "file": name,
+            "from_charset": "ISO-8859-1", "to_charset": "UTF-8",
+            "update_html_document_encoding": 0})
+        if not isinstance(result, dict) or not isinstance(result.get("content"), str):
+            return "unavailable"
+        value = result["content"].strip()
+        return value if re.fullmatch(r"[0-9a-f]{40}", value) else "invalid_or_unavailable"
+    out = {"status": "ok", "scope": "fixed_deployment_gate_metadata", "changes": "none"}
+    try:
+        bridge_files, app_files, var_files = entries(bridge), entries(app), entries(app + "/var")
+        out["deploy_enabled_present"] = "deploy-enabled" in bridge_files
+        out["recovery_marker_present"] = "deployment-incomplete.json" in bridge_files
+        out["approved_sha_present"] = "approved-sha" in bridge_files
+        out["build_commit_present"] = "BUILD_COMMIT" in app_files
+        if out["approved_sha_present"]:
+            out["approved_sha"] = commit_marker(bridge, "approved-sha")
+        if out["build_commit_present"]:
+            out["build_commit"] = commit_marker(app, "BUILD_COMMIT")
+        for name in ("escape.db", "escape.db-wal", "escape.db-journal"):
+            r = var_files.get(name, {})
+            out[name.replace(".", "_").replace("-", "_") + "_bytes"] = int(r["size"]) if r.get("type") == "file" and str(r.get("size", "")).isdigit() else None
+    except Exception as ex:
+        out = {"status": "unavailable", "scope": "fixed_deployment_gate_metadata", "reason": type(ex).__name__, "changes": "none"}
+    return out
+
 def main():
     token = os.environ.get("ESCAPE_CPANEL_API_TOKEN", "")
     if not re.fullmatch(r"[A-Za-z0-9_-]{10,256}", token):
@@ -81,6 +131,7 @@ def main():
         except Exception as ex:
             result = {"scope": path, "status": "unavailable", "reason": type(ex).__name__}
         print(json.dumps(result, sort_keys=True), flush=True)
+    print(json.dumps(deployment_gates(token), sort_keys=True), flush=True)
 
 if __name__ == "__main__":
     main()
