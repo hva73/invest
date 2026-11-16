@@ -119,13 +119,22 @@ class DesignAcceptance(unittest.TestCase):
   def dump():
    with app.connect() as c:return list(c.iterdump())
   before=dump();self.model();self.assertEqual(before,dump())
- def test_percentage_uses_original_currency_broker_profit_when_display_is_dkk(self):
+ def test_return_matches_displayed_dkk_result_not_original_currency_profit(self):
   with app.connect() as c:
    payload=portfolio_data.snapshots(c,1)[str(self.root['id'])]['data'];row=payload['positions'][0]
-   row['unrealized']={'amount':'10','currency':'USD'};row['cost_basis']={'amount':'100','currency':'USD'};row['unrealized_in_portfolio_currency']={'amount':'70','currency':'DKK'}
+   row['unrealized']={'amount':'-2','currency':'USD'}
+   row['cost_basis']={'amount':'100','currency':'USD'}
+   row['unrealized_in_portfolio_currency']={'amount':'7','currency':'DKK'}
+   row['value_in_portfolio_currency']={'amount':'707','currency':'DKK'}
    portfolio_data.save(c,1,self.root['id'],payload)
   result=next(r for r in self.model()['positions'] if r['portfolio_id']==self.root['id'] and r['asset_id']==row['asset_id'])
-  self.assertEqual(Decimal(result['unrealized_percent']),10);self.assertEqual(result['unrealized']['currency'],'DKK')
+  self.assertEqual(result['unrealized']['currency'],'DKK')
+  self.assertEqual(Decimal(result['unrealized_percent']),Decimal('1'))
+  self.assertGreater(Decimal(result['unrealized']['amount']),0)
+ def test_return_requires_value_and_profit_in_same_currency(self):
+  self.assertIsNone(dashboard.consistent_return_percent({'amount':'10','currency':'USD'},{'amount':'1','currency':'DKK'}))
+  self.assertIsNone(dashboard.consistent_return_percent({'amount':'5','currency':'DKK'},{'amount':'7','currency':'DKK'}))
+  self.assertEqual(Decimal(dashboard.consistent_return_percent({'amount':'200','currency':'DKK'},{'amount':'-10','currency':'DKK'})),Decimal('-10')/Decimal('210')*100)
  def test_snapshot_history_records_unknown_market_time_without_guessing(self):
   with app.connect() as c:rows=portfolio_data.snapshots(c,1)
   for port in [self.root,self.child]:
