@@ -18,7 +18,7 @@ PATHS = (
     "/home/nordicr4/escape_app",
     "/home/nordicr4/escape_deploy",
 )
-CANDIDATE = re.compile(r"^[A-Za-z0-9_.-]{1,140}(?:\\.log(?:\\.[0-9]+)?|\\.gz|\\.bak|\\.old|\\.zip|\\.tar)(?:\\.gz)?$", re.I)
+CANDIDATE = re.compile(r"^[A-Za-z0-9_.-]{1,140}$", re.I)
 SENSITIVE = re.compile(r"token|key|secret|pass|credential|vapid|private|auth", re.I)
 
 def inspect(path, token):
@@ -57,7 +57,7 @@ def inspect(path, token):
         if size < 0 or size > 100_000_000_000:
             continue
         total += size
-        if CANDIDATE.fullmatch(name) and not SENSITIVE.search(name) and size >= 5_000_000:
+        if (CANDIDATE.fullmatch(name) and not SENSITIVE.search(name) and size >= 5_000_000 and (name.endswith((".log", ".gz", ".bak", ".old", ".zip", ".tar")) or ".log." in name)):
             candidates.append({"name": name, "size_bytes": size, "mtime": r.get("mtime") if isinstance(r.get("mtime"), int) else None})
         if size > 50_000_000:
             largest.append(size)
