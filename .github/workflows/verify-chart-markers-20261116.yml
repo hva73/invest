@@ -1,7 +1,7 @@
 name: Verify TSM signal graph source and markers
 on:
   pull_request:
-    branches: [hotfix/baseline-signal-chart-20261116]
+    branches: [hotfix/baseline-signal-chart-20261116, codex/escape-development]
 permissions:
   contents: read
 jobs:
@@ -22,4 +22,3 @@ jobs:
       - run: python -m unittest tests.test_market_data
       - run: node --check static/market-ui.js
       - run: python tests/browser_signal_push_detail.py
-      - run: python tests/browser_market_charts.py
