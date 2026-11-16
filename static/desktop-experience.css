@@ -494,3 +494,8 @@
 .signal-why-modal section h3{font-size:12px;letter-spacing:.03em;margin:0 0 6px;color:#8fdfc9;font-weight:700}
 .signal-why-modal section p{margin:0;line-height:1.55;font-size:15px;color:#e0ebed;overflow-wrap:anywhere}
 .signal-why-modal .signal-why-modal-done{display:block;width:100%;min-height:43px;margin-top:15px;background:#1c4350;color:#e8f3f0;border:1px solid #537682;border-radius:11px;cursor:pointer}
+
+/* Preserve the approved single primary action on mobile even when the
+   live trading gate blocks execution. Manual depot trading remains in the
+   normal portfolio screen; its shortcut stays available on desktop. */
+@media(max-width:700px){.signal-overview-dialog .signal-action-bar :is([data-signal-manual-portfolio],[data-signal-manual-list]){display:none}}
