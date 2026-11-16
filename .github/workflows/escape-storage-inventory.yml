@@ -4,6 +4,7 @@ on:
     branches: [codex/escape-development]
 permissions:
   contents: read
+  actions: read
 jobs:
   inventory:
     if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue57-storage-cleanup' && github.event.pull_request.head.repo.full_name == github.repository
@@ -33,3 +34,7 @@ jobs:
         env:
           ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
         run: python tools/nordicway_uapi_probe.py
+      - name: Read latest deploy run metadata
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tools/nordicway_actions_readback.py
