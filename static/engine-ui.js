@@ -24,7 +24,13 @@ window.EngineUI=(()=>{
   const cause=(eventCurrent?meaningful(a.reason):null)||(current?meaningful(c.human_readable_explanation):null);
   const codes=eventCurrent?a.current_reason_codes:(current?c.reason_codes:[]);
   const known=(Array.isArray(codes)?codes:[]).filter(x=>typeof x==='string'&&Object.prototype.hasOwnProperty.call(errors,x)&&!['NO_TRIGGER','ENTRY_RULES','EXIT_RULES'].includes(x));
-  const trigger=cause||known.map(x=>errors[x]).slice(0,2).join(' ')||'Motoren har ikke dokumenteret den udløsende regel.';
+  // An exit reason can contain indicator-warmup and execution warnings.
+  // Do not present those as the actual price-exit trigger.
+  const parts=(cause||'').split(';').map(x=>x.trim()).filter(Boolean);
+  const priceExit=parts.find(x=>/^Kursen er faldet fra toppen i det analyserede kursvindue/i.test(x));
+  const trigger=priceExit
+    ?'Kursen er faldet fra toppen i det analyserede kursvindue (trailing-exit). Det er hverken afkast siden køb eller en stopordre hos Pluto.'
+    :cause||known.map(x=>errors[x]).slice(0,2).join(' ')||'Motoren har ikke dokumenteret den udløsende regel.';
   const valid=v=>v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v));
   const fmt=v=>new Intl.NumberFormat('da-DK',{maximumFractionDigits:2}).format(Number(v));
   const measures=[];
@@ -37,7 +43,9 @@ window.EngineUI=(()=>{
   const quality=s.data_stale===true||d.price_status==='STALE'||s.display_freshness?.state==='stale'
     ?'Kursdata er for gamle til at bekræfte et aktuelt signal.'
     :d.identity_verification==='unverified'?'Instrumentidentiteten er ikke verificeret.'
-    :d.price_status==='FRESH'&&s.status==='ACTIVE'&&eventCurrent?'Aktivt signal; handel kræver fortsat de øvrige kontroller.'
+    :d.market_status!=='OPEN'?'Handelsmulighed er ikke bekræftet i den aktuelle handelssession. Ingen ordre kan sendes fra signalet.'
+    :!eventCurrent?'Det tidligere signal er ikke længere aktivt. En ny vurdering kræves.'
+    :d.price_status==='FRESH'&&s.status==='ACTIVE'?'Signaldaten er frisk, men depot, ordrestørrelse og handelsmulighed skal stadig kontrolleres.'
     :'Aktualitet eller datagrundlag er ikke fuldt bekræftet.';
   return 'Årsag: '+trigger+(measures.length?' Målinger: '+measures.join(' · ')+'.':' Målinger: ingen verificerede signalmålinger til visning.')+' Datastatus: '+quality;
  }
