@@ -10,7 +10,7 @@ import urllib.request
 
 def main():
     token = os.environ.get("GITHUB_TOKEN", "")
-    if not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{20,300}", token):
+    if not isinstance(token, str) or not token.strip():
         raise ValueError("token_unavailable")
     base = "https://api.github.com/repos/hva73/invest/actions/workflows/escape-deploy-ping.yml/runs"
     url = base + "?" + urllib.parse.urlencode({"event": "issue_comment", "per_page": 25})
