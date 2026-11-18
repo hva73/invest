@@ -27,7 +27,8 @@ window.DashboardUI=(()=>{
    return {percent:Number(d.percent),amount:total?Number(total.amount):null,currency:total?.currency||null,estimated:Boolean(total?.estimated)};
   }
   const numeric=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:Number(v),change=numeric(d.amount),qty=numeric(r.quantity),p=numeric(d.percent),currency=typeof d.currency==='string'&&/^[A-Z]{3}$/.test(d.currency)&&d.currency===r.price?.currency?d.currency:null,total=change!==null&&qty!==null&&qty>=0&&currency?change*qty:null;
-  return {percent:p,amount:total,currency,estimated:false};
+  const fallback=total===null?mobileDailyAmount(r):null;
+   return {percent:p,amount:total===null?(fallback?Number(fallback.amount):null):total,currency:total===null?(fallback?.currency||currency):currency,estimated:Boolean(fallback?.estimated)};
  }
  function desktopDay(r){
   const d=desktopDailyData(r);if(!d||(d.amount===null&&d.percent===null))return '<span class="dash-neutral">—</span>';
