@@ -89,7 +89,7 @@ try:
                     expect(alfa.locator('.dash-price-time')).to_be_hidden()
                     expect(page.locator('.dash-hero')).not_to_contain_text('dansk tid')
                     expect(page.locator('.dash-total.positive')).to_contain_text('↑')
-                    expect(alfa.locator('.dash-day-desktop')).to_contain_text('estimat')
+                    expect(alfa.locator('.dash-day-desktop')).not_to_contain_text('estimat')  # Pluto supplied dailyChange directly
                     expect(alfa.locator('.dash-pnl')).to_contain_text('%')
                     intro = page.locator('.dash-hero-intro').bounding_box()
                     chart = page.locator('.dash-hero-top #dashboard-value-chart').bounding_box()
