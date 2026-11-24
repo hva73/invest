@@ -32,4 +32,24 @@ jobs:
       - name: Browser journeys
         run: |
           mkdir -p visual-review
-          for f in tests/browser_daily_parity.py tests/browser_position_entry_regression.py tests/browser_signal_push_detail.py tests/browser_sector_journey.py tests/browser_desktop_experience.py tests/browser_portfolio_value_chart.py tests/browser_statistics_ring_center.py tests/browser_demo_signal_parity.py tests/browser_statistics_integration.py; do python "$f" || exit 1; done
+          failed=0
+          for f in tests/browser_daily_parity.py tests/browser_position_entry_regression.py tests/browser_signal_push_detail.py tests/browser_sector_journey.py tests/browser_desktop_experience.py tests/browser_portfolio_value_chart.py tests/browser_statistics_ring_center.py tests/browser_demo_signal_parity.py tests/browser_statistics_integration.py; do python "$f" || failed=1; done
+          exit "$failed"
+  deployment_safety:
+    if: github.event.pull_request.head.ref == 'codex/issue57-combined-release-20261124'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: .:tests:tools
+      ESCAPE_HW_AUTOSUPERVISE: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - name: Isolated installer, rollback, approval, quota and recovery
+        run: python -m unittest test_updater test_release_approval test_nordicway_deploy_request test_nordicway_deploy_client test_nordicway_app_release test_nordicway_release_preflight test_nordicway_uapi_quota test_nordicway_server_guard test_nordicway_readonly_diagnostics test_nordicway_release_retention test_nordicway_maintenance_audit
