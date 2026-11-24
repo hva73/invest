@@ -5,7 +5,7 @@ permissions:
   contents: read
 jobs:
   statistics:
-    if: github.event.pull_request.head.ref == 'codex/data-and-notification-prep' || github.event.pull_request.head.ref == 'codex/statistics-budget-hotfix' || github.event.pull_request.head.ref == 'codex/statistics-all-sales' || github.event.pull_request.head.ref == 'codex/statistics-dkk' || github.event.pull_request.head.ref == 'hotfix/2026-11-15-statistics-origin-demo-parity'
+    if: github.event.pull_request.head.ref == 'codex/agent3-statistics-identity-20261124' || github.event.pull_request.head.ref == 'codex/data-and-notification-prep' || github.event.pull_request.head.ref == 'codex/statistics-budget-hotfix' || github.event.pull_request.head.ref == 'codex/statistics-all-sales' || github.event.pull_request.head.ref == 'codex/statistics-dkk' || github.event.pull_request.head.ref == 'hotfix/2026-11-15-statistics-origin-demo-parity'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
