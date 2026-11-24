@@ -10,13 +10,13 @@ from hotwatch_strategy import BASELINE,EARLY_CATALYST,EARLY_CATALYST_V1,validate
 # Only non-actionable, same-market context renewals may compact audit fields.
 # The full decision, timestamps, position context and metrics stay inline.
 # Independent compressed records avoid anchor/retention dependencies.
-_RENEWAL_AUDIT_FIELDS=('input_sample_ids','prior_signal_state','global_risk_limits','algorithm_constraints','risk_parameters','decision_diagnostics')
+_RENEWAL_AUDIT_FIELDS=('input_sample_ids','prior_signal_state','global_risk_limits','algorithm_constraints','decision_diagnostics')
 _RENEWAL_AUDIT_KEY='_renewal_audit_v1'
 _RENEWAL_AUDIT_MAX=1024*1024
 
 def calculation_payload(result,compact=False):
  full=canonical(result)
- if not compact or result.get('signal')!='NO_DATA' or result.get('new_market_observation') is not False or result.get('critical_override') or result.get('risk_level')=='critical':return full
+ if not compact or result.get('signal')!='NO_DATA' or result.get('new_market_observation') is not False or result.get('critical_override') or result.get('risk_level')=='critical' or set(result.get('reason_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE','TRAILING_EXIT','EXIT_RULES'}:return full
  audit={k:result[k] for k in _RENEWAL_AUDIT_FIELDS if k in result}
  raw=canonical(audit).encode('utf-8')
  if not audit or len(raw)>_RENEWAL_AUDIT_MAX:return full
@@ -1396,7 +1396,7 @@ def observe_context(connect,uid,wid,mode,context,now=None,lease=None,broker_sour
   cycle=request.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':wid})[:24]
   candidate_lifecycle.observe_pluto(c,uid,mode,request['candidate_id'],context,now.isoformat(),wid,cycle,'NO_DATA',synthetic=request['provider']=='synthetic')
   material=lambda value:{k:v for k,v in value.items() if k!='as_of'}
-  state=json.loads(row['state'])
+  state=json.loads(row['state']);original_state=canonical(state)
   from hotwatch_strategy import exit_context_key
   ids=request.get('portfolio_ids',[]);scope=checksum({'asset_id':request['asset_id'],'portfolio_id':ids[0],'watch_id':wid,'trade_cycle_id':request.get('trade_cycle_id')}) if len(ids)==1 else None
   latest=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
@@ -1415,7 +1415,7 @@ def observe_context(connect,uid,wid,mode,context,now=None,lease=None,broker_sour
     state.pop('push_critical_anchors',None);state.pop('push_trailing_anchor',None)
    if new_key is None:state.pop('exit_context_key',None)
    else:state['exit_context_key']=new_key
-   if old_key!=new_key or closed:c.execute('UPDATE hw_sessions SET state=? WHERE id=?',(canonical(state),row['id']))
+   if (old_key!=new_key or closed) and canonical(state)!=original_state:c.execute('UPDATE hw_sessions SET state=? WHERE id=?',(canonical(state),row['id']))
   if not previous or material(old)!=material(context):event(c,row,'BROKER_CONTEXT_UPDATED',now,'Verified broker context without usable market timestamp; no market signal calculated',data_time=context['as_of'])
   return {'ok':True,'duplicate':False}
 
