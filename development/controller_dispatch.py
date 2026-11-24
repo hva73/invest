@@ -11,8 +11,10 @@ import time
 from datetime import datetime, timezone
 try:
     from .controller_queue import plan
+    from . import controller_remote
 except ImportError:
     from controller_queue import plan
+    import controller_remote
 
 def save(path, value):
     temp = path.with_suffix(".tmp")
@@ -52,7 +54,16 @@ def run_task(root, script, row, allowance):
             "--issue", str(issue), "--task-file", str(taskfile), "--max-tokens",
             str(allowance), "--rounds", "3", "--minutes", "20", "--execute"],
             cwd=folder, stdout=out, stderr=subprocess.STDOUT).returncode
-    return "review_required" if rc == 0 else "blocked"
+    if rc != 0:
+        return "blocked"
+    changed = subprocess.check_output(["git", "status", "--porcelain"], cwd=folder)
+    if not changed:
+        return "no_changes"
+    # Export a reviewable patch locally. No automatic push to protected branches.
+    subprocess.run(["git", "add", "-N", "--", "."], cwd=folder, check=True)
+    patch = subprocess.check_output(["git", "diff", "--binary", "HEAD"], cwd=folder)
+    (root / ("issue-" + str(issue) + ".patch")).write_bytes(patch)
+    return "review_required"
 
 def main():
     p = argparse.ArgumentParser()
@@ -62,6 +73,7 @@ def main():
     p.add_argument("--per-task", type=int, default=60000)
     p.add_argument("--parallel", type=int, default=2, choices=(1,2))
     p.add_argument("--execute", action="store_true")
+    p.add_argument("--remote", action="store_true")
     a = p.parse_args()
     if not 0 < a.per_task <= a.daily_reservation:
         p.error("invalid budget")
@@ -78,6 +90,13 @@ def main():
         state = load(statefile, {})
         results = load(donefile, {})
         while not (root / "STOP").exists():
+            if a.remote:
+                try:
+                    controller_remote.refresh(root, a.queue)
+                except (OSError, ValueError) as exc:
+                    print("QUEUE_UNAVAILABLE:", type(exc).__name__, flush=True)
+                    time.sleep(60)
+                    continue
             rows = load(a.queue, [])
             # A completed local run is awaiting human/CI review, NOT a done dependency.
             rows = [dict(r, status="blocked") if str(r["issue"]) in results and r["status"] != "done" else r for r in rows]
