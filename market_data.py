@@ -157,7 +157,8 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
         symbol=link['provider_symbol'];cache=dict(result.get('intraday_cache') or {})
         cached=cache.get(period) or {}
         checked=cached.get('checked_at')
-        if cached.get('symbol')==symbol and cached.get('pluto_fetched')==result.get('fetched_at') and isinstance(checked,(int,float)) and 0<=now.timestamp()-checked<300:
+        same_day=period!='day' or isinstance(checked,(int,float)) and now.astimezone(COPENHAGEN).replace(hour=0,minute=0,second=0,microsecond=0).timestamp()<=checked
+        if same_day and cached.get('symbol')==symbol and cached.get('pluto_fetched')==result.get('fetched_at') and isinstance(checked,(int,float)) and 0<=now.timestamp()-checked<300:
             for key in ('intraday_series','intraday_source'):result.pop(key,None)
             result.update(cached['fields']);result['intraday_cache']=cache
             return result
@@ -284,6 +285,18 @@ def quote(connect,user_id,data,factory=None):
         if cl is None:cl,tools=trade_service.client(connect,user_id,factory)
         raw=trade_service.call(cl,tools,'get_asset',{'assetId':aid,'period':requested_period})
         result=normalized(raw,aid,expected_period=requested_period)
+        # A new Pluto quote need not mean a new underlying performance series.
+        # Reuse only the same identity/range/points and preserve the original
+        # EODHD observation time, so UI refreshes cannot extend its 5m TTL.
+        if cached and cached['payload'] and not data.get('is_test',False):
+            previous=json.loads(cached['payload'])
+            identity=('asset_id','ticker','exchange','currency','isin','asset_type','name','series_period','series_from','series_to','series','series_error')
+            if result.get('series_error') is None and all(previous.get(k)==result.get(k) for k in identity):
+                carried={}
+                for period,entry in (previous.get('intraday_cache') or {}).items():
+                    if isinstance(entry,dict) and entry.get('pluto_fetched')==previous.get('fetched_at'):
+                        carried[period]={**entry,'pluto_fetched':result.get('fetched_at')}
+                if carried:result['intraday_cache']=carried
         if chart_period and not data.get('is_test',False):result=enrich_intraday(connect,user_id,result,period=chart_period)
         with connect() as db:
             db.execute('INSERT INTO market_asset_links VALUES(?,?,?,?) ON CONFLICT(user_id,candidate_id) DO UPDATE SET expected_ticker=excluded.expected_ticker,asset_id=excluded.asset_id',(user_id,c['candidate_id'],ticker,aid))
