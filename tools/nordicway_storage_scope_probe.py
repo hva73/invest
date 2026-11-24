@@ -158,6 +158,7 @@ def deployment_gates(token):
             if not isinstance(result,dict) or not isinstance(result.get("content"),str):raise ValueError("source_unavailable")
             return result["content"]
         out["bridge_comparison"]=bridge_comparison(read_code)
+        out["updater_upgrade_gate_held"] = "deploy-enabled.updater-held" in bridge_files
         for name in ("escape.db", "escape.db-wal", "escape.db-journal", "escape.db-shm"):
             r = var_files.get(name, {})
             out[name.replace(".", "_").replace("-", "_") + "_bytes"] = int(r["size"]) if r.get("type") == "file" and str(r.get("size", "")).isdigit() else None
