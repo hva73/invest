@@ -1,5 +1,5 @@
 import unittest
-from development.controller_pilot import loop, codex_command, parse_events
+from development.controller_pilot import loop, codex_command, parse_events, usage_breakdown
 
 class LoopTest(unittest.TestCase):
     def run_case(self, snapshots, rounds=3, rc=0):
@@ -43,6 +43,15 @@ class OptimizationTests(unittest.TestCase):
         output = '\n'.join(['{"type":"thread.started","thread_id":"12345678-1234-1234-1234-123456789abc"}',
                             '{"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":100,"output_tokens":12}}'])
         self.assertEqual(parse_events(output),("12345678-1234-1234-1234-123456789abc",132,True))
+    def test_cache_metrics_distinguish_gross_and_uncached(self):
+        raw = '{"type":"turn.completed","usage":{"input_tokens":230000,"cached_input_tokens":220000,"output_tokens":4068}}'
+        self.assertEqual(usage_breakdown(raw),dict(input=230000,cached=220000,output=4068,gross=234068,uncached_plus_output=14068))
+
+    def test_missing_cache_is_unknown(self):
+        raw = '{"type":"turn.completed","usage":{"input_tokens":120,"output_tokens":12}}'
+        self.assertIsNone(usage_breakdown(raw)["uncached_plus_output"])
+        self.assertIsNone(usage_breakdown("invalid")["uncached_plus_output"])
+
     def test_missing_usage_or_session_not_invented(self):
         self.assertEqual(parse_events('not json'),(None,0,False))
 
