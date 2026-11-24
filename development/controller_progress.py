@@ -2,6 +2,9 @@
 import json
 import re
 import subprocess
+import threading
+
+FLUSH_LOCK=threading.Lock()
 from datetime import datetime, timezone
 
 REPO = "hva73/invest"
@@ -20,10 +23,27 @@ def record(root, issue, generation, phase):
     tmp.replace(path)
 
 def flush(root):
+    if not FLUSH_LOCK.acquire(blocking=False):
+        return
+    try:
+        _flush(root)
+    finally:
+        FLUSH_LOCK.release()
+
+def _flush(root):
     folder=root/"progress"
     if not folder.exists():
         return
-    for path in sorted(folder.glob("*.json")):
+    # Process pending events chronologically, not alphabetically by phase.
+    pending=[]
+    for path in folder.glob("*.json"):
+        try:
+            item=json.loads(path.read_text())
+            if not item["sent"]:
+                pending.append((item["at"],path))
+        except (OSError,ValueError,KeyError,TypeError):
+            print("PROGRESS_PENDING:",path.name,flush=True)
+    for _,path in sorted(pending)[:20]:
         try:
             item=json.loads(path.read_text())
             if item["sent"]:
