@@ -49,10 +49,10 @@ def compare(connect,uid,data):
     truncated=len(rows)>MAX_CALCULATIONS;rows=rows[:MAX_CALCULATIONS]
     outcomes=[{'strategy_id':s['strategy_id'],'version':s['version'],'checksum':checksum(s),'counts':{'BUY':0,'SELL':0,'REDUCE':0,'WAIT':0,'NO_DATA':0,'PAUSE':0},'missing_indicators':set(),'timeline':[],'early_watch':{'met':0,'not_met':0,'unknown':0,'first_met_at':None} if s['schema_version']==2 else None,'first_buy_at':None} for s in specs]
     states=[{} for _ in specs];window=[];previous_id=None;previous_time=None;skipped=0
-    from hotwatch_engine import sample_errors
+    from hotwatch_engine import sample_errors,calculation_read
     for r in rows:
         try:
-            calc=json.loads(r['calculation']);sample=json.loads(r['sample']);at=stamp(r['calculated'])
+            calc=calculation_read(r['calculation']);sample=json.loads(r['sample']);at=stamp(r['calculated'])
             if checksum(sample)!=r['sample_digest']:raise ValueError('Observation checksum mismatch')
             if not r['received'] or stamp(r['received'])>at or previous_time and at<previous_time:raise ValueError('Chronology unavailable')
             if not isinstance(calc.get('risk_parameters'),dict) or not isinstance(calc.get('position_context'),dict) or type(calc.get('new_market_observation')) is not bool:raise ValueError('Historical context unavailable')

@@ -1,11 +1,45 @@
 """Persistent HOT WATCH v1 session/signal engine. No trading capabilities."""
-import json,os,secrets,time,hashlib,re
+import json,os,secrets,time,hashlib,re,base64,zlib,binascii
 from contextlib import nullcontext
 from datetime import datetime,timezone,timedelta
 from decimal import Decimal
 from hotwatch_contract import SESSION,SAMPLE,CONTEXT,ACTIVATION_BATCH,EngineError,require,canonical,checksum,stamp,OPEN_STATES,PROFILES,GLOBAL_RISK,provider_floor
 from hotwatch_features import features,observation_status,verified_bar_samples
 from hotwatch_strategy import BASELINE,EARLY_CATALYST,EARLY_CATALYST_V1,validate_strategy,calculate
+
+# Only non-actionable, same-market context renewals may compact audit fields.
+# The full decision, timestamps, position context and metrics stay inline.
+# Independent compressed records avoid anchor/retention dependencies.
+_RENEWAL_AUDIT_FIELDS=('input_sample_ids','prior_signal_state','global_risk_limits','algorithm_constraints','decision_diagnostics')
+_RENEWAL_AUDIT_KEY='_renewal_audit_v1'
+_RENEWAL_AUDIT_MAX=1024*1024
+
+def calculation_payload(result,compact=False):
+ full=canonical(result)
+ if not compact or result.get('signal')!='NO_DATA' or result.get('new_market_observation') is not False or result.get('critical_override') or result.get('risk_level')=='critical' or set(result.get('reason_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE','TRAILING_EXIT','EXIT_RULES'}:return full
+ audit={k:result[k] for k in _RENEWAL_AUDIT_FIELDS if k in result}
+ raw=canonical(audit).encode('utf-8')
+ if not audit or len(raw)>_RENEWAL_AUDIT_MAX:return full
+ packed={k:v for k,v in result.items() if k not in audit}
+ packed[_RENEWAL_AUDIT_KEY]={'encoding':'zlib+base64','sha256':hashlib.sha256(raw).hexdigest(),'data':base64.b64encode(zlib.compress(raw,level=3)).decode('ascii')}
+ candidate=canonical(packed)
+ return candidate if len(candidate.encode('utf-8'))+128<len(full.encode('utf-8')) else full
+
+def calculation_read(payload):
+ result=json.loads(payload)
+ if _RENEWAL_AUDIT_KEY not in result:return result
+ marker=result.pop(_RENEWAL_AUDIT_KEY)
+ try:
+  if result.get('signal')!='NO_DATA' or result.get('new_market_observation') is not False or not isinstance(marker,dict) or marker.get('encoding')!='zlib+base64' or len(marker['data'])>2*_RENEWAL_AUDIT_MAX:raise ValueError('invalid compact calculation')
+  compressed=base64.b64decode(marker['data'],validate=True)
+  decoder=zlib.decompressobj();raw=decoder.decompress(compressed,_RENEWAL_AUDIT_MAX+1)
+  if len(raw)>_RENEWAL_AUDIT_MAX or not decoder.eof or decoder.unconsumed_tail or decoder.unused_data or hashlib.sha256(raw).hexdigest()!=marker['sha256']:raise ValueError('invalid compact audit')
+  audit=json.loads(raw)
+  if not isinstance(audit,dict) or not audit or set(audit)-set(_RENEWAL_AUDIT_FIELDS) or set(audit)&set(result):raise ValueError('invalid compact audit fields')
+ except (ValueError,TypeError,KeyError,zlib.error,binascii.Error) as exc:
+  raise EngineError('invalid_calculation_audit',500) from exc
+ result.update(audit)
+ return result
 
 def utc():return datetime.now(timezone.utc)
 
@@ -764,7 +798,7 @@ def view(c,row,now=None):
   acknowledged=c.execute("SELECT created FROM hw_events WHERE watch_row_id=? AND event_type='SIGNAL_ACKNOWLEDGED' AND json_extract(payload,'$.supporting_metrics.action_event_id')=? ORDER BY id DESC LIMIT 1",(row['id'],last_action['event_id'])).fetchone()
   action={k:last_action[k] for k in ('event_id','event_type','created','data_timestamp')}
   action.update(signal=side,reason=event_data.get('reason'),state='ACTIVE' if active else 'DATA_MISSING' if missing else 'WITHDRAWN',acknowledged_at=acknowledged['created'] if acknowledged else None,current_reason_codes=list(dict.fromkeys(display_reasons or calculation.get('reason_codes',[]))))
- return {'buy_plan':buy_plan,'last_action_signal':action,'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':json.loads(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':budget_interval,'interval_basis':interval_basis,'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
+ return {'buy_plan':buy_plan,'last_action_signal':action,'watch_id':row['watch_id'],'latest_currency':currency,'latest_context':context,'is_test':bool(row['is_test']),'status':row['status'],'request':request,'candidate_review':candidate_review,'strategy_checksum':checksum(json.loads(row['strategy'])),'minimum_required_samples':json.loads(row['strategy'])['parameters']['min_samples'],'signal':effective,'display_status':display_status,'display_reason_codes':list(dict.fromkeys(display_reasons)),'data_status':data_status,'last_computed_signal':json.loads(last['payload'])['signal'] if last else 'NO_DATA','data_stale':stale,'latest_calculation':calculation_read(last['payload']) if last else None,'last_data_at':row['last_data'],'last_calculation_at':row['last_calculation'],'updated_at':row['updated'],'last_error':row['last_error'],'adaptive_profile':profile,'target_interval_s':PROFILES[profile],'effective_min_interval_s':budget_interval,'interval_basis':interval_basis,'next_due_at':datetime.fromtimestamp(row['next_due'],timezone.utc).isoformat(),'failures':row['failures']}
 
 def sessions(connect,uid,mode=False,after=0,limit=50):
  with connect() as c:
@@ -994,7 +1028,7 @@ def history(connect,uid,wid,mode=False,kind='events',after=0,limit=50,order='asc
   rows=c.execute('SELECT * FROM '+table+' WHERE watch_row_id=?'+bound+' ORDER BY id '+order+' LIMIT ?',args).fetchall()
   result=[]
   for r in rows[:limit]:
-   data=dict(r);data['data']=json.loads(data.pop('payload'));result.append(data)
+   data=dict(r);payload=data.pop('payload');data['data']=calculation_read(payload) if table=='hw_calculations' else json.loads(payload);result.append(data)
   return {'items':result,'next_cursor':rows[limit-1]['id'] if len(rows)>limit else None,'watch_id':wid,'is_test':mode,'kind':kind}
 
 def sample_errors(sample,request,now):
@@ -1139,7 +1173,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   same_history=prepared_version==(row['request'],row['strategy'],(newest['id'],newest['digest']) if newest else None) and sample==prepared_samples[-1]
   old=c.execute('SELECT id,digest,payload,received FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(row['id'],sample['source'],sample['sample_id'])).fetchone()
   if old is None and row['last_data'] and stamp(sample['event_time'])==stamp(row['last_data']):old=c.execute('SELECT id,digest,payload,received FROM hw_samples WHERE watch_row_id=? AND source=? AND event_epoch=? ORDER BY id DESC LIMIT 1',(row['id'],sample['source'],stamp(sample['event_time']).timestamp())).fetchone()
-  new_market_event=True
+  new_market_event=True;pure_context_renewal=False
   if old:
    if row['last_data'] and stamp(json.loads(old['payload'])['event_time'])!=stamp(row['last_data']):raise EngineError('historical_sample_context_update',409)
    previous_sample=json.loads(old['payload']);incoming=sample
@@ -1168,6 +1202,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
     result={'ok':True,'duplicate':True}
     if include_session:result['session']=view(c,row,now)
     return result
+   pure_context_renewal=bool(renewed and not evidence_changed and material(prior_context)==material(current_context))
    if prior_context!=current_context:
     c.execute('INSERT INTO hw_context_events(watch_row_id,sample_row_id,observed,payload) VALUES(?,?,?,?)',(row['id'],old['id'],now.isoformat(),canonical(current_context)))
     if material(prior_context)!=material(current_context):event(c,row,'BROKER_CONTEXT_UPDATED',now,'Position/order context changed; no new market observation',data_time=current_context['as_of'])
@@ -1222,7 +1257,9 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   result['position_context']=risk_sample['context'];result['new_market_observation']=new_market_event
   result.update(engine_version='1.0-phase1-2',feature_version='1.3.0',risk_version='1.1.0',global_risk_limits=GLOBAL_RISK,algorithm_constraints={'max_volatility_pct':'5','max_price_gap_pct':'5','max_action_signals_hour':20,'max_context_age_s':300},risk_parameters=risk,prior_signal_state=state,input_sample_ids=[s['sample_id'] for s in samples])
   metrics['quote_age_s']=format(Decimal(str(now.timestamp()-stamp(sample['event_time']).timestamp())),'f');result['supporting_metrics']=metrics
-  c.execute('INSERT INTO hw_calculations(watch_row_id,sample_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?,?)',(row['id'],sample_row_id,now.isoformat(),canonical(result),result['strategy_checksum']))
+  # Opt-in until the release manager has verified every reader and rollback.
+  compact=pure_context_renewal and os.environ.get('ESCAPE_HW_COMPACT_RENEWAL_AUDIT')=='1'
+  c.execute('INSERT INTO hw_calculations(watch_row_id,sample_row_id,calculated,payload,strategy_checksum) VALUES(?,?,?,?,?)',(row['id'],sample_row_id,now.isoformat(),calculation_payload(result,compact),result['strategy_checksum']))
   cycle=request.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':wid})[:24]
   if result['signal']=='BUY' and state.get('signal')!='BUY':candidate_lifecycle.record(c,uid,mode,request['candidate_id'],'BUY_SIGNAL',now.isoformat(),'Deterministisk motor, ikke en udført handel',wid,cycle)
   if sample['source']!='report_inbox':candidate_lifecycle.observe_pluto(c,uid,mode,request['candidate_id'],sample['context'],now.isoformat(),wid,cycle,result['signal'],synthetic=sample['source']=='synthetic')
@@ -1359,7 +1396,7 @@ def observe_context(connect,uid,wid,mode,context,now=None,lease=None,broker_sour
   cycle=request.get('trade_cycle_id') or 'cycle:'+checksum({'watch_id':wid})[:24]
   candidate_lifecycle.observe_pluto(c,uid,mode,request['candidate_id'],context,now.isoformat(),wid,cycle,'NO_DATA',synthetic=request['provider']=='synthetic')
   material=lambda value:{k:v for k,v in value.items() if k!='as_of'}
-  state=json.loads(row['state'])
+  state=json.loads(row['state']);original_state=canonical(state)
   from hotwatch_strategy import exit_context_key
   ids=request.get('portfolio_ids',[]);scope=checksum({'asset_id':request['asset_id'],'portfolio_id':ids[0],'watch_id':wid,'trade_cycle_id':request.get('trade_cycle_id')}) if len(ids)==1 else None
   latest=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
@@ -1378,7 +1415,7 @@ def observe_context(connect,uid,wid,mode,context,now=None,lease=None,broker_sour
     state.pop('push_critical_anchors',None);state.pop('push_trailing_anchor',None)
    if new_key is None:state.pop('exit_context_key',None)
    else:state['exit_context_key']=new_key
-   if old_key!=new_key or closed:c.execute('UPDATE hw_sessions SET state=? WHERE id=?',(canonical(state),row['id']))
+   if (old_key!=new_key or closed) and canonical(state)!=original_state:c.execute('UPDATE hw_sessions SET state=? WHERE id=?',(canonical(state),row['id']))
   if not previous or material(old)!=material(context):event(c,row,'BROKER_CONTEXT_UPDATED',now,'Verified broker context without usable market timestamp; no market signal calculated',data_time=context['as_of'])
   return {'ok':True,'duplicate':False}
 
