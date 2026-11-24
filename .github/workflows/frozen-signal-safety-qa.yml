@@ -25,9 +25,16 @@ jobs:
         env:
           PYTHONPATH: ..
         run: python -m unittest -v test_review_signal_fixes test_web_push test_hotwatch_buy_plan test_pending_orders test_hotwatch_supervisor test_candidate_lifecycle
-      - name: Signal display and service worker boundaries
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: qa-contract
+          persist-credentials: false
+      - name: Signal display and service worker boundaries (corrected #209 test only)
         run: |
-          set -e
+          cp qa-contract/tests/test_signal_buy_context.cjs tests/test_signal_buy_context.cjs
+          failed=0
           for f in tests/test_engine_signal_colors.js tests/test_push_service_worker.js tests/test_signal_buy_context.cjs tests/test_signal_detail_context.cjs tests/test_signal_direction_guard.cjs tests/test_signal_explanation.js tests/test_signal_notice.js tests/test_statistics_missing_cost.cjs; do
-            node "$f"
+            node "$f" || failed=1
           done
+          exit "$failed"
