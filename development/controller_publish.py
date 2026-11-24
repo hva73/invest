@@ -8,15 +8,18 @@ class PublicationError(ValueError):
     """Fixed safe reason, never raw agent output."""
 
 REPO = "hva73/invest"
-BASES = {"codex/escape-development", "codex/development-controller-pilot"}
-def allowed(path, scopes):
+BASES = {"codex/escape-development", "codex/development-controller-pilot", "codex/issue57-combined-release-20261124"}
+# Review-only release fixes, explicitly enumerated. No workflows, runner provisioning,
+# credentials, arbitrary tools, or production access.
+RELEASE_TOOLS = {"tools/nordicway_app_release.py", "tools/nordicway_deploy_client.py", "tools/nordicway_release_preflight.py", "tools/nordicway_release_retention.py", "tests/test_nordicway_app_release.py", "tests/test_nordicway_deploy_client.py", "tests/test_nordicway_release_preflight.py", "tests/test_nordicway_release_retention.py"}
+def allowed(path, scopes, role=None):
     p=PurePosixPath(path)
     if p.is_absolute() or ".." in p.parts or not p.parts:
         return False
     if any(x.startswith(".") or x.lower() in ("secrets","credentials","id_rsa") or x.lower().endswith((".pem",".key",".db",".sqlite",".sqlite3")) for x in p.parts):
         return False
     if p.parts[0] in ("tools","scripts","deployment","development") or "deploy" in path.lower():
-        return False
+        return role=="release" and path in RELEASE_TOOLS and path in scopes
     return any(path==s.rstrip("/") or path.startswith(s.rstrip("/")+"/") for s in scopes)
 
 def git(folder,*args):
@@ -24,7 +27,7 @@ def git(folder,*args):
 
 def publish(folder,row,branch,base):
     target=row.get("base_branch")
-    if target not in BASES or not re.fullmatch(r"controller/local-[0-9]+-[0-9]+",branch):
+    if (target=="codex/issue57-combined-release-20261124" and row.get("role")!="release") or target not in BASES or not re.fullmatch(r"controller/local-[0-9]+-[0-9]+",branch):
         raise PublicationError("unapproved_branch")
     if git(folder,"rev-parse","HEAD").decode().strip()!=base:
         raise PublicationError("head_changed")
@@ -33,7 +36,7 @@ def publish(folder,row,branch,base):
     git(folder,"add","-A","--",".")
     names=git(folder,"diff","--cached","--no-renames","--name-only","-z").split(b"\0")
     paths=[os.fsdecode(p) for p in names if p]
-    if not paths or len(paths)>30 or not all(allowed(p,row["paths"]) for p in paths):
+    if not paths or len(paths)>30 or not all(allowed(p,row["paths"],row.get("role")) for p in paths):
         raise PublicationError("scope_violation")
     for entry in git(folder,"ls-files","-s","-z").split(b"\0"):
         if entry and entry.split(b" ",1)[0] in (b"120000",b"160000") and os.fsdecode(entry.split(b"\t",1)[1]) in paths:
