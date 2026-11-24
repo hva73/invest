@@ -1,0 +1,22 @@
+name: Polymarket synthetic Radar chain QA
+on: [pull_request]
+permissions:
+  contents: read
+jobs:
+  synthetic_chain:
+    if: github.event.pull_request.head.ref == 'test/polymarket-radar-chain-20261124'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: .:tests
+      ESCAPE_HW_AUTOSUPERVISE: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - run: python -m unittest -v test_polymarket_radar_chain test_polymarket_intelligence test_mcp_reports test_hotwatch_e2e_contract
