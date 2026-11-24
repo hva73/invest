@@ -620,6 +620,64 @@ class HotWatch(unittest.TestCase):
   from hotwatch_service import startup_diagnostics
   with patch.dict(os.environ,{},clear=True):info=startup_diagnostics(app.connect)
   self.assertFalse(info['startup_probe']['network_requests_made']);self.assertEqual(info['eodhd']['startup_status'],'blocked_feed_disabled');self.assertFalse(info['eodhd']['entitlements_verified'])
+ def test_exact_bar_dictionary_preserves_full_samples_and_replay(self):
+  from test_hotwatch_bar_evidence import BarEvidenceTests
+  import strategy_lab
+  fixture=BarEvidenceTests();fixture.setUp();base=fixture.now
+  req=copy.deepcopy(self.req);req.update(watch_id='exact-bar-dedupe',purpose='synthetic bar dictionary regression',provider='eodhd',provider_symbol='MERC.US')
+  engine.create(app.connect,1,req,base)
+  samples=[];results=[]
+  with patch.dict(os.environ,{'ESCAPE_HW_DEDUPE_BAR_HISTORY':'1'}):
+   for i in range(40):
+    at=base+timedelta(seconds=i);sample=copy.deepcopy(fixture.sample)
+    sample.update(sample_id='bar-dedupe-'+str(i),event_time=at.isoformat(),bid_at=at.isoformat(),ask_at=at.isoformat(),status_at=at.isoformat())
+    sample['context']['as_of']=at.isoformat();sample['bar_evidence']['schedule_received_at']=at.isoformat()
+    samples.append(sample)
+    result=engine.ingest(app.connect,1,req['watch_id'],True,sample,at,include_session=False)
+    results.append(result['calculation']);self.assertTrue(result['calculation']['analysis_uses_bars'])
+   # One actual bar value change must retain a distinct block.
+   at=base+timedelta(seconds=40);changed=copy.deepcopy(samples[-1]);changed.update(sample_id='bar-dedupe-40',event_time=at.isoformat(),bid_at=at.isoformat(),ask_at=at.isoformat(),status_at=at.isoformat())
+   changed['context']['as_of']=at.isoformat();changed['bar_evidence']['schedule_received_at']=at.isoformat();changed['bar_history'][-1]['volume']='900'
+   samples.append(changed);engine.ingest(app.connect,1,req['watch_id'],True,changed,at,include_session=False)
+   with app.connect() as c:
+    row=engine.row_for(c,1,req['watch_id'],True)
+    stored=c.execute('SELECT payload,digest FROM hw_samples WHERE watch_row_id=? ORDER BY id',(row['id'],)).fetchall()
+    blocks=c.execute('SELECT digest,payload FROM hw_bar_history_payloads WHERE watch_row_id=?',(row['id'],)).fetchall()
+    self.assertEqual(len(stored),41);self.assertEqual(len(blocks),2)
+    self.assertEqual([engine.sample_read(c,row['id'],r['payload']) for r in stored],samples)
+    self.assertEqual([r['digest'] for r in stored],[engine.checksum(s) for s in samples])
+    before=sum(len(engine.canonical(x).encode('utf-8')) for x in samples)
+    after=sum(len(r['payload'].encode('utf-8')) for r in stored)+sum(len(r['payload'].encode('utf-8')) for r in blocks)
+    print('HW_BAR_STORAGE samples_before=41 samples_after=41 dictionary_rows=2 bytes_before=%d bytes_after=%d'%(before,after))
+    self.assertLess(after,before*.5)
+    view=engine.view(c,row,at);self.assertEqual(view['latest_calculation']['analysis_uses_bars'],True)
+    # A missing or wrong-owner digest is never silently treated as no bars.
+    other=engine.row_for(c,1,self.req['watch_id'],True)
+    with self.assertRaisesRegex(EngineError,'invalid_bar_history_reference'):engine.sample_read(c,other['id'],stored[0]['payload'])
+   choices={'watch_id':req['watch_id'],'is_test':True,'strategies':[{'strategy_id':req['strategy_id'],'version':req['strategy_version']}]}
+   replay=strategy_lab.compare(app.connect,1,choices)
+   self.assertEqual(replay['evaluated'],41);self.assertEqual(replay['skipped'],0)
+   self.assertEqual([r['data'] for r in engine.history(app.connect,1,req['watch_id'],True,'samples',limit=50)['items']],samples)
+  # Disable new encoding without making old encoded samples unreadable.
+  with patch.dict(os.environ,{'ESCAPE_HW_DEDUPE_BAR_HISTORY':'0'}):
+   self.assertEqual([r['data'] for r in engine.history(app.connect,1,req['watch_id'],True,'samples',limit=50)['items']],samples)
+   later=at+timedelta(seconds=1);duplicate=copy.deepcopy(changed);duplicate['context']['as_of']=later.isoformat()
+   renewed=engine.ingest(app.connect,1,req['watch_id'],True,duplicate,later,include_session=False)
+   self.assertFalse(renewed['calculation']['new_market_observation'])
+   self.assertEqual(strategy_lab.compare(app.connect,1,choices)['skipped'],0)
+ def test_bar_dictionary_rejects_corrupt_payload_and_keeps_invalid_bars_inline(self):
+  from test_hotwatch_bar_evidence import BarEvidenceTests
+  fixture=BarEvidenceTests();fixture.setUp()
+  with patch.dict(os.environ,{'ESCAPE_HW_DEDUPE_BAR_HISTORY':'1'}),app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True)
+   sample=copy.deepcopy(fixture.sample);invalid=copy.deepcopy(sample);invalid['bar_evidence']['provider_symbol']='OTHER.US'
+   self.assertEqual(engine.sample_payload(c,row['id'],invalid,fixture.req,fixture.now),engine.canonical(invalid))
+   packed=engine.sample_payload(c,row['id'],sample,fixture.req,fixture.now)
+   digest=json.loads(packed)[engine._BAR_HISTORY_REF]
+   self.assertEqual(engine.sample_read(c,row['id'],packed),sample)
+   c.execute("UPDATE hw_bar_history_payloads SET payload='[]' WHERE watch_row_id=? AND digest=?",(row['id'],digest))
+   with self.assertRaisesRegex(EngineError,'invalid_bar_history_reference'):engine.sample_read(c,row['id'],packed)
+   with self.assertRaisesRegex(EngineError,'bar_history_storage_conflict'):engine.sample_payload(c,row['id'],sample,fixture.req,fixture.now)
  def test_duplicate_samples_not_new_market_events_and_conflicts_atomic(self):
   t=tick(self.now);self.put(t);before=self.counts();self.assertTrue(self.put(t)['duplicate']);self.assertEqual(before,self.counts());changed=copy.deepcopy(t);changed['volume']='101'
   with self.assertRaisesRegex(EngineError,'sample_id_conflict'):self.put(changed)
