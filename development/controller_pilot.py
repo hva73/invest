@@ -83,7 +83,7 @@ def smoke_verified():
     target = Path("controller_smoke.txt")
     return (not target.is_symlink() and target.is_file()
             and target.read_bytes() == b"ESCAPE ONLINE"
-            and git("status", "--porcelain", "--untracked-files=all") == b"?? controller_smoke.txt\\n")
+            and git("status", "--porcelain", "--untracked-files=all") == b"?? controller_smoke.txt\n")
 
 
 def main():
