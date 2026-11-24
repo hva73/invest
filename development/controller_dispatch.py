@@ -54,7 +54,7 @@ def run_task(root, script, row, allowance, publish=False):
     import re
     if not re.fullmatch(r"[0-9a-f]{40}", base):
         return "invalid_base"
-    if publish:
+    if row.get("base_branch"):
         target = row.get("base_branch")
         if target not in controller_publish.BASES:
             return "invalid_target"
@@ -65,9 +65,9 @@ def run_task(root, script, row, allowance, publish=False):
             return "stale_base"
     subprocess.run(["git", "worktree", "add", "-b", branch, str(folder), base],
                    cwd=script.parent.parent, check=True)
-    taskfile = root / ("task-" + str(issue) + ".txt")
+    taskfile = root / ("task-" + str(issue) + "-" + str(generation) + ".txt")
     taskfile.write_text(row["task"])
-    log = root / ("issue-" + str(issue) + ".log")
+    log = root / ("issue-" + str(issue) + "-" + str(generation) + ".log")
     with log.open("a") as out:
         rc = subprocess.run([sys.executable, str(script), "--role", row["role"],
             "--issue", str(issue), "--task-file", str(taskfile), "--max-tokens",
@@ -81,10 +81,10 @@ def run_task(root, script, row, allowance, publish=False):
     # Export a reviewable patch locally. No automatic push to protected branches.
     subprocess.run(["git", "add", "-N", "--", "."], cwd=folder, check=True)
     patch = subprocess.check_output(["git", "diff", "--binary", "HEAD"], cwd=folder)
-    (root / ("issue-" + str(issue) + ".patch")).write_bytes(patch)
+    (root / ("issue-" + str(issue) + "-" + str(generation) + ".patch")).write_bytes(patch)
     if publish and not (root / "STOP").exists():
         url = controller_publish.publish(folder, row, branch, base)
-        (root / ("issue-" + str(issue) + ".pr")).write_text(url + "\n")
+        (root / ("issue-" + str(issue) + "-" + str(generation) + ".pr")).write_text(url + "\n")
         return "draft_pr"
     return "review_required"
 
@@ -119,7 +119,7 @@ def main():
             if a.remote:
                 try:
                     controller_remote.refresh(root, a.queue)
-                except (OSError, ValueError) as exc:
+                except (OSError, ValueError, subprocess.SubprocessError) as exc:
                     print("QUEUE_UNAVAILABLE:", type(exc).__name__, flush=True)
                     time.sleep(120)
                     continue
