@@ -9,7 +9,10 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
-from controller_queue import plan
+try:
+    from .controller_queue import plan
+except ImportError:
+    from controller_queue import plan
 
 def save(path, value):
     temp = path.with_suffix(".tmp")
