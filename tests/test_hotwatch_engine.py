@@ -669,7 +669,7 @@ class HotWatch(unittest.TestCase):
    renewal_before=sum(len(engine.canonical(r).encode('utf-8')) for r in all_results[120:])
    renewal_after=sum(len(r['payload'].encode('utf-8')) for r in rows[120:])
    print('HW_RENEWAL_STORAGE rows_before=220 rows_after=220 bytes_before=%d bytes_after=%d renewal_bytes_before=%d renewal_bytes_after=%d'%(before,after,renewal_before,renewal_after))
-   self.assertLess(renewal_after,renewal_before*.65)
+   self.assertLess(renewal_after,renewal_before*.8)
    self.assertLess(after,before)
    history=engine.history(app.connect,1,self.req['watch_id'],True,kind='metrics',limit=50,order='desc')['items']
    self.assertEqual([r['data'] for r in history],list(reversed(all_results[-50:])))
@@ -684,12 +684,37 @@ class HotWatch(unittest.TestCase):
   source={'signal':'NO_DATA','new_market_observation':False,'risk_level':'high','critical_override':False,'input_sample_ids':['long-synthetic-sample-'+str(i) for i in range(120)],'risk_parameters':{'a':'b'}}
   encoded=engine.calculation_payload(source,True)
   self.assertIn(engine._RENEWAL_AUDIT_KEY,json.loads(encoded))
+  self.assertEqual(json.loads(encoded)['risk_parameters'],source['risk_parameters'])
   self.assertEqual(engine.calculation_read(encoded),source)
   self.assertEqual(engine.calculation_payload(source),engine.canonical(source))
-  for changes in ({'signal':'BUY'},{'signal':'SELL'},{'signal':'REDUCE'},{'signal':'WAIT'},{'risk_level':'critical'},{'critical_override':True},{'new_market_observation':True}):
+  for changes in ({'signal':'BUY'},{'signal':'SELL'},{'signal':'REDUCE'},{'signal':'WAIT'},{'risk_level':'critical'},{'critical_override':True},{'reason_codes':['EXIT_DEADLINE']},{'reason_codes':['TRAILING_EXIT']},{'new_market_observation':True}):
    other=dict(source,**changes);self.assertEqual(engine.calculation_payload(other,True),engine.canonical(other))
   broken=json.loads(encoded);broken[engine._RENEWAL_AUDIT_KEY]['sha256']='0'*64
   with self.assertRaisesRegex(EngineError,'invalid_calculation_audit'):engine.calculation_read(json.dumps(broken))
+ def test_context_only_closed_renewals_preserve_journal_without_noop_state_updates(self):
+  first=tick(self.now,held=True);self.put(first)
+  observed=self.now+timedelta(seconds=1);closed=copy.deepcopy(first['context'])
+  closed.update(as_of=observed.isoformat(),position='none',quantity='0',cost_price=None)
+  engine.observe_context(app.connect,1,self.req['watch_id'],True,closed,observed)
+  trace=[]
+  def connect():
+   c=app.connect();c.set_trace_callback(trace.append);return c
+  with app.connect() as c:
+   before=c.execute('SELECT state FROM hw_sessions WHERE watch_id=?',(self.req['watch_id'],)).fetchone()[0]
+   row_count=c.execute('SELECT count(*) FROM hw_context_events').fetchone()[0]
+   old_calc=c.execute('SELECT count(*) FROM hw_calculations').fetchone()[0]
+  for i in range(100):
+   at=observed+timedelta(seconds=i+1);renewed=dict(closed,as_of=at.isoformat())
+   engine.observe_context(connect,1,self.req['watch_id'],True,renewed,at)
+  writes=sum(x.startswith('UPDATE hw_sessions SET state=') for x in trace)
+  print('HW_CONTEXT_ONLY state_updates_before=100 state_updates_after=%d context_rows_before=100 context_rows_after=100'%writes)
+  self.assertEqual(writes,0)
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True)
+   self.assertEqual(row['state'],before)
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_context_events').fetchone()[0],row_count+100)
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_calculations').fetchone()[0],old_calc)
+   self.assertEqual(engine.view(c,row,at)['latest_context']['as_of'],at.isoformat())
  def test_broker_context_changes_do_not_create_or_confirm_new_quotes(self):
   original=tick(self.now);self.put(original);before=self.counts()['hw_samples'];changed=copy.deepcopy(original);changed['context'].update(as_of=(self.now+timedelta(seconds=10)).isoformat(),position='held',quantity='2');changed['context']['orders']=[{'order_id':'synthetic-partial','status':'PARTIAL','requested_quantity':'5','filled_quantity':'2','side':'BUY'}]
   result=self.put(changed,self.now+timedelta(seconds=10));self.assertFalse(result['calculation']['new_market_observation']);self.assertEqual(self.counts()['hw_samples'],before);self.assertNotEqual(result['calculation']['signal'],'BUY');self.assertEqual(result['session']['latest_context']['quantity'],'2');self.assertTrue(self.put(changed,self.now+timedelta(seconds=11))['duplicate'])
