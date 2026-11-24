@@ -25,5 +25,20 @@ async function call(payload){return window.fetch('/api/market/quote',{method:'PO
   {asset_id:'synthetic-asset-TSLA'},{}
  ])assert.equal((await call(bad)).status,404,JSON.stringify(bad));
  assert.equal((await window.fetch('https://external.invalid/api/market/quote')).status,403);
+ // The demo push-detail route must preserve the exact watch identity as live does.
+ const sessionPath='/api/v1/hotwatch/sessions/';
+ for(const [id,ticker,signal] of [['demo-NOVOB','NOVOB','BUY'],['demo-TSLA','TSLA','SELL'],['demo-TSM','TSM','WAIT']]){
+  const r=await window.fetch(sessionPath+id+'?is_test=false');assert.equal(r.status,200);
+  const {session}=await r.json();assert.equal(session.watch_id,id);assert.equal(session.request.ticker,ticker);assert.equal(session.signal,signal);
+  const events=await window.fetch(sessionPath+id+'/events?is_test=false');assert.equal(events.status,200);
+  assert.equal((await events.json()).items[0].event_type,signal+'_SIGNAL');
+  const samples=await window.fetch(sessionPath+id+'/samples?is_test=false');assert.equal(samples.status,200);
+  const expected=window.ESCAPE_DEMO_HISTORY.history(d.positions.find(p=>p.asset_id===session.request.asset_id)).at(-1);
+  assert.equal((await samples.json()).items[0].data.price,expected.price);
+ }
+ for(const suffix of ['unknown','unknown/events','unknown/samples','%ZZ','demo-TSLA/unknown','demo-TSLA/events/extra','']){
+  const r=await window.fetch(sessionPath+suffix);assert.equal(r.status,404,suffix);
+  const body=await r.json();assert(!body.session&&!body.items,suffix);
+ }
  console.log('PASS: demo calendar-day fixture, holding/position/candidate identity and no fallback to unrelated asset');
 })().catch(e=>{console.error(e);process.exitCode=1});

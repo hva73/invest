@@ -149,9 +149,16 @@ window.ESCAPE_DEMO_HISTORY=(()=>{
   }
   if(route==='reports/candidate-registry')return ok({candidates:[]});
   if(route==='v1/hotwatch/sessions')return ok({sessions:u.searchParams.get('view')==='history'?[]:sessions,kill_switch:{killed:false},worker:null,discovery_attempts:[],truncated:false});
-  if(route.startsWith('v1/hotwatch/sessions/')&&route.endsWith('/events')){const id=decodeURIComponent(route.split('/')[3]||''),s=sessions.find(x=>x.watch_id===id)||sessions[0];return ok({items:[{created:s.last_calculation_at,severity:'INFO',event_type:s.signal==='BUY'?'BUY_SIGNAL':s.signal==='SELL'?'SELL_SIGNAL':'WAIT_SIGNAL',data_timestamp:s.last_data_at,data:{reason:s.latest_calculation.reason_codes[0],strategy_version:'demo'}}],truncated:false})}
-  if(route.startsWith('v1/hotwatch/sessions/')&&route.endsWith('/samples')){const id=decodeURIComponent(route.split('/')[3]||''),s=sessions.find(x=>x.watch_id===id)||sessions[0],p=position(s.request.asset_id);return ok({items:window.ESCAPE_DEMO_HISTORY.history(p).slice(-100).reverse().map(x=>({data:{price:x.price,event_time:x.timestamp,currency:'DKK',interval_s:180,session_key:'demo'}})),truncated:false})}
-  if(route.startsWith('v1/hotwatch/sessions/')){const id=decodeURIComponent(route.split('/')[3]||'');return ok({session:sessions.find(s=>s.watch_id===id)||sessions[0]})}
+  // Match the full session route; never substitute another synthetic signal for a missing watch.
+  const sessionRoute=route.match(/^v1\/hotwatch\/sessions\/([^/]+)(?:\/(events|samples))?$/);
+  if(route.startsWith('v1/hotwatch/sessions/')){
+   let s=null;
+   try{if(sessionRoute)s=sessions.find(x=>x.watch_id===decodeURIComponent(sessionRoute[1]));}catch{}
+   if(!s)return new Response(JSON.stringify({error:'Demosessionen findes ikke.'}),{status:404,headers:{'Content-Type':'application/json'}});
+   if(sessionRoute[2]==='events'){return ok({items:[{created:s.last_calculation_at,severity:'INFO',event_type:s.signal==='BUY'?'BUY_SIGNAL':s.signal==='SELL'?'SELL_SIGNAL':'WAIT_SIGNAL',data_timestamp:s.last_data_at,data:{reason:s.latest_calculation.reason_codes[0],strategy_version:'demo'}}],truncated:false})}
+   if(sessionRoute[2]==='samples'){const p=position(s.request.asset_id);return ok({items:window.ESCAPE_DEMO_HISTORY.history(p).slice(-100).reverse().map(x=>({data:{price:x.price,event_time:x.timestamp,currency:'DKK',interval_s:180,session_key:'demo'}})),truncated:false})}
+   return ok({session:s});
+  }
   if(route==='market/quote'){
    let p=null;
    const holdings=demo.state.dashboard.positions;
