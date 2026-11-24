@@ -9,6 +9,11 @@ class DispatcherBudgetTests(unittest.TestCase):
         self.assertFalse(reserve(state, "2026-11-24", 120000, 1))
         self.assertEqual(state["reserved"], 120000)
 
+    def test_default_unlimited_reservation_preserves_accounting(self):
+        state = {"day": "2026-11-24", "reserved": 120000}
+        self.assertTrue(reserve(state, "2026-11-24", None, 60000))
+        self.assertEqual(state["reserved"], 180000)
+
     def test_daily_reset(self):
         state = {"day": "2026-11-24", "reserved": 120000}
         self.assertTrue(reserve(state, "2026-11-25", 120000, 60000))
