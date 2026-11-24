@@ -1,0 +1,91 @@
+name: ESCAPE controller bounded pilot
+on:
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: 'Existing issue number (one approved task)'
+        required: true
+        type: number
+      role:
+        description: 'Agent role'
+        required: true
+        type: choice
+        options: [mobile, desktop, motor, data, release]
+      task:
+        description: 'Reviewed task scope (no secrets)'
+        required: true
+        type: string
+      cli_version:
+        description: 'Exact approved @openai/codex package version'
+        required: true
+        type: string
+      execute:
+        description: 'Enable paid Codex calls (requires approved budget)'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: escape-controller-pilot
+  cancel-in-progress: false
+jobs:
+  pilot:
+    if: github.repository == 'hva73/invest'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate and test controller
+        env:
+          ISSUE: ${{ inputs.issue }}
+          ROLE: ${{ inputs.role }}
+          TASK: ${{ inputs.task }}
+          CLI_VERSION: ${{ inputs.cli_version }}
+        run: |
+          [[ "$ISSUE" =~ ^[1-9][0-9]*$ ]]
+          [[ "$CLI_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          printf '%s' "$TASK" > "$RUNNER_TEMP/controller-task.txt"
+          python -m unittest discover -s tests -p test_controller_pilot.py
+          git switch -c controller/pilot-${GITHUB_RUN_ID}
+          python development/controller_pilot.py --role "$ROLE" --issue "$ISSUE" --task-file "$RUNNER_TEMP/controller-task.txt"
+      - uses: actions/setup-node@v4
+        if: inputs.execute
+        with:
+          node-version: '22'
+      - name: Install approved CLI
+        if: inputs.execute
+        env:
+          CLI_VERSION: ${{ inputs.cli_version }}
+        run: |
+          npm install --global --ignore-scripts "@openai/codex@$CLI_VERSION"
+          codex --version
+          codex exec --help
+      - name: Execute bounded pilot
+        if: inputs.execute
+        env:
+          OPENAI_API_KEY: ${{ secrets.ESCAPE_CONTROLLER_OPENAI_API_KEY }}
+          ISSUE: ${{ inputs.issue }}
+          ROLE: ${{ inputs.role }}
+          APPROVED: ${{ vars.ESCAPE_CONTROLLER_PILOT_APPROVED }}
+        run: |
+          test "$APPROVED" = 'true'
+          test -n "$OPENAI_API_KEY"
+          python development/controller_pilot.py --role "$ROLE" --issue "$ISSUE" --task-file "$RUNNER_TEMP/controller-task.txt" --rounds 3 --minutes 20 --execute
+      - name: Capture tracked and untracked changes for review
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/controller-output"
+          git add -N -- .
+          git diff --binary HEAD > "$RUNNER_TEMP/controller-output/changes.patch"
+          git status --short > "$RUNNER_TEMP/controller-output/status.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: controller-pilot-review
+          path: ${{ runner.temp }}/controller-output/
+          retention-days: 3
