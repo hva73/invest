@@ -47,6 +47,15 @@ Den logiske kæde er **DISCOVERY → NÅLEØJET → PLUTO GATE → RAPPORT/JOURN
 
 **Accept af denne arbejdsmåde:** Bedøm agenternes aktivitet på implementerede rettelser, reproducerbare tests, verificerede effekter og lukkede opgaver — ikke antal statuskommentarer.
 
+## 2.2. Agent 1's arbejdsmodel — forskudt genoptagelse og én releaseejer (ejerbeslutning 24. november 2026)
+
+- **Selvstændig genoptagelse:** Når en agent starter en autoriseret arbejdssession — manuelt eller via en faktisk oprettet automation — læser agenten seneste Issue, relevante kommentarer, åbne PR'er og branch-head først, og fortsætter direkte med *én konkret implementerbar næste handling*. Ingen gentagen analyse uden ny evidens. En automation kan kun udføre arbejde, når dens planlagte kørsel faktisk finder sted; ingen løfter om aktivitet imellem kørsler.
+- **Forskudte vagter:** Eksisterende agentautomations kan tilrettelægges forskudt for at reducere samtidige ændringer og konflikter. Respektér platformens grænse (højst én kørsel i timen pr. opgave); opret ikke dubletter eller omplanlæg andres vagter uden mandat. Før ny automation oprettes, verificér eksisterende aktive opgaver og koordinatorens plan. Samtidig manuel og automatisk session skal tjekke seneste GitHub-head og undgå at udføre samme ændring to gange.
+- **GitHub er overdragelsen:** Den faktiske kodegren, PR/SHA, testresultat og næste nødvendige tekniske handling i det *eksisterende* Issue er grundlaget for fortsættelse. Undlad generiske dagbøger, statusbeskeder og unødige nye Issues. Ved overlappende filer: aftal kort komponentansvar, og arbejd på ikke-overlappende dele imens.
+- **Én integrations- og releaseejer:** Agent 1 samler kun konkrete godkendte, testede produkt-PR'er i én versionslåst kandidat, laver integrations-/referencekontrol og håndterer den eksisterende ejer-/appgodkendte deploymentvej. Agent 2 (mobil), 3 (HOT WATCH/statistik), 4 (performance/data) og 5 (desktop) færdiggør deres egne fejlrettelser og tests; de stopper ikke fordi Agent 1 endnu ikke har samlet en release.
+- **Koordinatorens rolle:** Undersøg nye afhængigheder, fjern konkrete konflikter og flyt beslutninger til korrekt ejer; overtag ikke en agents opgave uden behov. Hold Polymarket-read-only research (#208) adskilt fra næste DB/mobil/desktop-hotfix, indtil review og eget release-scope er dokumenteret. Kun faktisk implementeret/testet/installeret/verificeret må kaldes det respektive.
+- **Eskalering:** Kontakt kun ejeren ved en virkelig mandat-/produktions-/handelsbeslutning, manglende nødvendig adgang eller en målt sikkerhedsblokering; gennemfør alle øvrige autoriserede trin først. Eksisterende versionsbundet GO, beskyttelse af data og godkendt layout må aldrig omgås.
+
 ## 2a. Grundværdi: Skyd ikke gråspurve med kanoner (ejerbeslutning 11. november 2026)
 
 **ESCAPE er lige nu til få brugere. Vi skal først bevise, at strategien kan skabe positivt nettoafkast efter omkostninger.** Kode, agenter og infrastruktur er midler, ikke målet.
