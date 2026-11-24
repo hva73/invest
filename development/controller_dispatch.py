@@ -11,10 +11,10 @@ import time
 from datetime import datetime, timezone
 try:
     from .controller_queue import plan
-    from . import controller_remote
+    from . import controller_remote, controller_publish
 except ImportError:
     from controller_queue import plan
-    import controller_remote
+    import controller_remote, controller_publish
 
 def save(path, value):
     temp = path.with_suffix(".tmp")
@@ -33,7 +33,7 @@ def reserve(state, day, budget, amount):
     state["reserved"] += amount
     return True
 
-def run_task(root, script, row, allowance):
+def run_task(root, script, row, allowance, publish=False):
     issue = row["issue"]
     folder = root / ("issue-" + str(issue))
     # Never overwrite an existing checkout or retry an unchanged task blindly.
@@ -44,6 +44,14 @@ def run_task(root, script, row, allowance):
     import re
     if not re.fullmatch(r"[0-9a-f]{40}", base):
         return "invalid_base"
+    if publish:
+        target = row.get("base_branch")
+        if target not in controller_publish.BASES:
+            return "invalid_target"
+        subprocess.run(["git", "fetch", "--no-tags", "https://github.com/hva73/invest.git", target], cwd=script.parent.parent, check=True, timeout=90)
+        actual = subprocess.check_output(["git", "rev-parse", "FETCH_HEAD"], cwd=script.parent.parent).decode().strip()
+        if actual != base:
+            return "stale_base"
     subprocess.run(["git", "worktree", "add", "-b", branch, str(folder), base],
                    cwd=script.parent.parent, check=True)
     taskfile = root / ("task-" + str(issue) + ".txt")
@@ -63,6 +71,10 @@ def run_task(root, script, row, allowance):
     subprocess.run(["git", "add", "-N", "--", "."], cwd=folder, check=True)
     patch = subprocess.check_output(["git", "diff", "--binary", "HEAD"], cwd=folder)
     (root / ("issue-" + str(issue) + ".patch")).write_bytes(patch)
+    if publish and not (root / "STOP").exists():
+        url = controller_publish.publish(folder, row, branch, base)
+        (root / ("issue-" + str(issue) + ".pr")).write_text(url + "\n")
+        return "draft_pr"
     return "review_required"
 
 def main():
@@ -74,12 +86,15 @@ def main():
     p.add_argument("--parallel", type=int, default=2, choices=(1,2))
     p.add_argument("--execute", action="store_true")
     p.add_argument("--remote", action="store_true")
+    p.add_argument("--publish", action="store_true")
     a = p.parse_args()
     if not 0 < a.per_task <= a.daily_reservation:
         p.error("invalid budget")
     if not a.execute:
         print([t.issue for t in plan(load(a.queue, []), max_parallel=a.parallel)])
         return
+    if a.publish:
+        subprocess.run(["gh", "auth", "status", "--hostname", "github.com"], check=True, timeout=30)
     root = a.root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     script = Path(__file__).resolve().with_name("controller_pilot.py")
@@ -95,7 +110,7 @@ def main():
                     controller_remote.refresh(root, a.queue)
                 except (OSError, ValueError) as exc:
                     print("QUEUE_UNAVAILABLE:", type(exc).__name__, flush=True)
-                    time.sleep(60)
+                    time.sleep(120)
                     continue
             rows = load(a.queue, [])
             # A completed local run is awaiting human/CI review, NOT a done dependency.
@@ -112,10 +127,10 @@ def main():
                 results[str(task.issue)] = "reserved"
                 save(donefile, results)
             if not ready:
-                time.sleep(30)
+                time.sleep(120)
                 continue
             with concurrent.futures.ThreadPoolExecutor(max_workers=a.parallel) as pool:
-                futures = {pool.submit(run_task, root, script, row, a.per_task): row for row in ready}
+                futures = {pool.submit(run_task, root, script, row, a.per_task, a.publish): row for row in ready}
                 for future in concurrent.futures.as_completed(futures):
                     row = futures[future]
                     try:
