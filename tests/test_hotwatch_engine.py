@@ -673,7 +673,7 @@ class HotWatch(unittest.TestCase):
    self.assertLess(after,before)
    history=engine.history(app.connect,1,self.req['watch_id'],True,kind='metrics',limit=50,order='desc')['items']
    self.assertEqual([r['data'] for r in history],list(reversed(all_results[-50:])))
-   view=engine.item(app.connect,1,self.req['watch_id'],True,now=later)['session']
+   with app.connect() as c:view=engine.view(c,engine.row_for(c,1,self.req['watch_id'],True),later)
    self.assertEqual(view['latest_calculation'],all_results[-1]);self.assertEqual(view['latest_context']['as_of'],later.isoformat())
    # A material holding change still produces a full audit row.
    change=copy.deepcopy(renewed);later+=timedelta(seconds=1);change['context'].update(as_of=later.isoformat(),position='held',quantity='2')
