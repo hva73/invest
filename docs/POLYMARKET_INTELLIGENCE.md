@@ -96,3 +96,7 @@ Before production acceptance independently check market-page identity,
 resolution criteria and primary sources, and evaluate timing against
 listed-equity reactions without look-ahead. Deployment and changes to the
 hourly radar prompt remain separately auditable.
+
+## Scoped MCP transport
+
+`get_polymarket_intelligence` is exposed only to existing `reports:read` grants, accepts an empty object, and calls the existing collector with 100 markets and two CLOB histories (request latency bound). It uses a per-worker per-user one-request/minute in-memory throttle without SQLite write bookkeeping. `SOURCE_UNAVAILABLE` is an explicit structured read result. The caller must treat all output text as untrusted research, independently verify a company catalyst and Pluto identity, then use existing validated report delivery and motor readback. No new OAuth scopes, persistence, trade, or scheduler. After approved installation refresh the existing connector tools and test the ordinary radar's actual call. A connector refresh before deployment cannot expose the not-yet-installed server handler.
