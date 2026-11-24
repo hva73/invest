@@ -30,9 +30,11 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           path: qa-contract
           persist-credentials: false
-      - name: Signal display and service worker boundaries (corrected #209 test only)
+      - name: Signal display and service worker boundaries (three corrected test contracts only)
         run: |
-          cp qa-contract/tests/test_signal_buy_context.cjs tests/test_signal_buy_context.cjs
+          for f in test_signal_buy_context.cjs test_signal_notice.js test_statistics_missing_cost.cjs; do
+            cp "qa-contract/tests/$f" "tests/$f"
+          done
           failed=0
           for f in tests/test_engine_signal_colors.js tests/test_push_service_worker.js tests/test_signal_buy_context.cjs tests/test_signal_detail_context.cjs tests/test_signal_direction_guard.cjs tests/test_signal_explanation.js tests/test_signal_notice.js tests/test_statistics_missing_cost.cjs; do
             node "$f" || failed=1
