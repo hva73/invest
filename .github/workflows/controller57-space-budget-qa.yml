@@ -1,4 +1,4 @@
-name: Controller #57 generation 1 independent QA (offline only)
+name: Controller #57 generation 4 independent QA (offline only)
 on:
   pull_request:
 permissions:
@@ -10,12 +10,12 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: e148fe4cb67826a67719e65821afe52d8a94b658
+          ref: ee271a39257d3f8259a42f2d196db55b302162c7
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
       - run: |
-          test "$(git rev-parse HEAD)" = "e148fe4cb67826a67719e65821afe52d8a94b658"
-          python -m unittest -v tests.test_release_space_budget
-          python -m compileall -q release_space_budget.py
+          test "$(git rev-parse HEAD)" = "ee271a39257d3f8259a42f2d196db55b302162c7"
+          python -B -m unittest -v tests.test_nordicway_release_retention tests.test_nordicway_uapi_quota
+          python -m py_compile tools/nordicway_release_retention.py
