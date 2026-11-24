@@ -18,7 +18,7 @@ KEYWORDS = ("fed", "interest rate", "inflation", "recession", "merger",
             "acquisition", "fda", "approval", "bitcoin", "ethereum",
             "oil", "tariff", "earnings", "sec", "regulation")
 # Entire words/phrases only: SEC must not match "second", oil not "boiler".
-TOPIC_RE = re.compile(r"(?<!\\w)(?:" + "|".join(re.escape(word) for word in KEYWORDS) + r")(?!\\w)", re.I)
+TOPIC_RE = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(word) for word in KEYWORDS) + r")(?!\w)", re.I)
 HISTORY_WINDOW_SECONDS = 24 * 3600
 MAX_HISTORY_AGE_SECONDS = 3 * 3600
 
