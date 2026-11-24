@@ -121,7 +121,7 @@ class AdapterTests(unittest.TestCase):
             {"timestamp": (now-timedelta(minutes=40)).isoformat(), "yes_price": .3},
             {"timestamp": (now-timedelta(minutes=2)).isoformat(), "yes_price": .52},
         ]
-        with patch.object(poly, "fetch_markets", return_value=raw) as fetch, \\
+        with patch.object(poly, "fetch_markets", return_value=raw) as fetch, \
              patch.object(poly, "price_history", return_value=bars) as history:
             report = discovery.collect(limit=30, max_histories=8, now=now)
         fetch.assert_called_once_with(limit=30, now=now)
@@ -137,7 +137,7 @@ class AdapterTests(unittest.TestCase):
         from scripts import polymarket_discovery as discovery
         now = datetime.fromtimestamp(1795400600, timezone.utc) + timedelta(minutes=3)
         sample = poly.normalize_market(market(), now.isoformat())
-        with patch.object(poly, "fetch_markets", return_value=[sample]), \\
+        with patch.object(poly, "fetch_markets", return_value=[sample]), \
              patch.object(poly, "price_history", side_effect=poly.PolymarketUnavailable("network")):
             result = discovery.collect(now=now)
         self.assertEqual(result["histories_attempted"], 1)
