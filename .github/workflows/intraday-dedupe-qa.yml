@@ -1,0 +1,19 @@
+name: Exact intraday dedupe regression
+on:
+  pull_request:
+    branches: [codex/issue14-empty-history-budget]
+permissions:
+  contents: read
+jobs:
+  feed-tests:
+    if: github.event.pull_request.head.ref == 'codex/issue14-intraday-exact-qa'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - run: PYTHONPATH=.:tests python -m unittest test_feed_intraday_exact_dedupe test_feed_empty_history_cache test_eodhd_feeds test_hotwatch_engine test_hotwatch_holdings_auto test_hotwatch_agreement test_hotwatch_bar_evidence test_hotwatch_warmup test_signal_readiness
