@@ -1,0 +1,37 @@
+name: ESCAPE daily maintenance audit
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+jobs:
+  audit:
+    if: >-
+      github.repository == 'hva73/invest' &&
+      github.ref == 'refs/heads/codex/escape-development' &&
+      (github.event_name == 'schedule' ||
+       (github.event_name == 'workflow_dispatch' && github.actor_id == '351122234') ||
+       (github.event_name == 'issue_comment' && github.event.issue.number == 16 &&
+        github.event.comment.user.id == 351122234 &&
+        github.event.comment.body == '/escape-maintenance-audit'))
+    concurrency:
+      group: escape-production-deployment
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    environment: ESCAPE_NORDICWAY_DEPLOY
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Read quota and backup inventory (no writes)
+        env:
+          ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
+        run: python tools/nordicway_maintenance_audit.py
