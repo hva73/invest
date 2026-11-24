@@ -79,3 +79,33 @@ state.dashboard.accounts=[{kind:'portfolio',snapshot_at:new Date(Date.now()-6000
 state.dashboard.accounts=[{kind:'portfolio',snapshot_at:new Date(Date.now()-2*86400000).toISOString()}];html=ui.render(state);assert.match(html,/Opdateret \d\d\.\d\d\.\d{4} kl\./);assert.doesNotMatch(html,/Opdateret i dag kl\./);
 state.dashboard.accounts=[{kind:'portfolio',snapshot_at:null}];html=ui.render(state);assert.match(html,/Opdateringstid ukendt/);
 state.dashboard.accounts=[{kind:'portfolio',snapshot_at:new Date(Date.now()+60000).toISOString()}];html=ui.render(state);assert.match(html,/Opdateringstid ukendt/);
+
+ // Desktop must not drop the same valid percentage-only daily amount that mobile derives.
+ row.verification='broker_snapshot';row.price_freshness={state:'fresh'};row.price={amount:'100',currency:'DKK'};row.quantity='3';
+ row.daily={percent:'2',amount:null,currency:'DKK',basis:'pluto_reported_daily_change',to:new Date().toISOString()};
+ html=ui.render(state);
+ assert.match(html,/<span class="dash-day-desktop"><span class="dash-change positive">\+5,88\s*kr\.<\/span><small class="dash-profit-percent positive">\+2,00 % · estimat/);
+ row.daily.currency='USD';html=ui.render(state);
+ assert.match(html,/<span class="dash-day-desktop"><span class="dash-neutral">—<\/span><small class="dash-profit-percent positive">\+2,00 %/);
+ row.daily.currency='DKK';row.daily.percent='-100';html=ui.render(state);
+ assert.match(html,/<span class="dash-day-desktop"><span class="dash-neutral">—<\/span><small class="dash-profit-percent negative">-100,00 %/);
+ console.log('PASS: desktop daily estimate parity and currency/invalid reference guards');
+
+ // Reconciliation with #207: a supplied unit movement is not an estimate;
+ // derived currency amount gets one estimate marker, never twice.
+ const desktopBlock=()=>ui.render(state).split('<span class="dash-day-desktop">')[1].split('</button>')[0];
+ row.daily.percent='2';row.daily.amount='1.5';
+ assert.match(desktopBlock(),/\+4,50\s*kr\./);
+ assert.doesNotMatch(desktopBlock(),/estimat/);
+ row.daily.amount=null;
+ assert.equal((desktopBlock().match(/estimat/g)||[]).length,1);
+ row.price_freshness={state:'session_close'};
+ assert.match(desktopBlock(),/\+5,88\s*kr\./);
+ row.price_time=null;row.price_freshness={state:'unknown'};
+ assert.match(desktopBlock(),/\+5,88\s*kr\./);
+ assert.equal((desktopBlock().match(/estimat/g)||[]).length,1);
+ row.daily.amount='1.5';assert.doesNotMatch(desktopBlock(),/estimat/);
+ row.quantity='0';assert.match(desktopBlock(),/dash-neutral/);
+ row.quantity='3';row.daily.to=new Date(Date.now()-301000).toISOString();
+ assert.doesNotMatch(desktopBlock(),/dash-change|estimat/);
+ console.log('PASS: desktop reconciled direct versus estimated amount and freshness gates');

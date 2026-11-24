@@ -24,14 +24,17 @@ window.DashboardUI=(()=>{
   if(!valid){
    if(r.price_freshness?.state!=='unknown'||mobileDaily(r).endsWith('—'))return null;
    const total=mobileDailyAmount(r);
-   return {percent:Number(d.percent),amount:total?Number(total.amount):null,currency:total?.currency||null};
+   return {percent:Number(d.percent),amount:total?Number(total.amount):null,currency:total?.currency||null,estimated:Boolean(total?.estimated)};
   }
-  const numeric=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:Number(v),change=numeric(d.amount),qty=numeric(r.quantity),p=numeric(d.percent),currency=typeof d.currency==='string'&&/^[A-Z]{3}$/.test(d.currency)&&d.currency===r.price?.currency?d.currency:null,total=change!==null&&qty!==null&&qty>=0&&currency?change*qty:null;
-  return {percent:p,amount:total,currency};
+  const numeric=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:Number(v),change=numeric(d.amount),qty=numeric(r.quantity),p=numeric(d.percent),currency=typeof d.currency==='string'&&/^[A-Z]{3}$/.test(d.currency)&&d.currency===r.price?.currency?d.currency:null;
+  const direct=change!==null&&qty!==null&&qty>0&&currency?change*qty:null;
+  if(direct!==null&&Number.isFinite(direct))return {percent:p,amount:direct,currency,estimated:false};
+  const fallback=currency?mobileDailyAmount(r):null,total=fallback?numeric(fallback.amount):null;
+  return {percent:p,amount:total,currency:total!==null?fallback.currency:currency,estimated:total!==null&&Boolean(fallback.estimated)};
  }
  function desktopDay(r){
   const d=desktopDailyData(r);if(!d||(d.amount===null&&d.percent===null))return '<span class="dash-neutral">—</span>';
-  return `${d.amount===null?'<span class="dash-neutral">—</span>':`<span class="dash-change ${tone(d.amount)}">${d.amount>0?'+':''}${amount({amount:String(d.amount),currency:d.currency})}</span>`}${d.percent===null?'':`<small class="dash-profit-percent ${tone(d.percent)}">${percent(d.percent)}${d.amount!==null?' · estimat':''}</small>`}`;
+  return `${d.amount===null?'<span class="dash-neutral">—</span>':`<span class="dash-change ${tone(d.amount)}">${d.amount>0?'+':''}${amount({amount:String(d.amount),currency:d.currency})}</span>`}${d.percent===null?'':`<small class="dash-profit-percent ${tone(d.percent)}">${percent(d.percent)}${d.amount!==null&&d.estimated?' · estimat':''}</small>`}`;
  }
  function age(r){const f=r.price_freshness,state=f?.state||'unknown',label={fresh:'Aktuel',stale:'Forældet',unknown:'Kurstid ukendt',error:'Kilde fejl',session_close:'Seneste session'}[state]||'Ukendt';return `<span class="dash-age ${state}" title="${time(r.price_time)} · hentet ${time(r.snapshot_at)}">${esc(label)}</span>`}
  function comparablePnl(r){const v=r.unrealized;return v?.currency==='DKK'&&v.amount!==null&&v.amount!==undefined&&v.amount!==''&&Number.isFinite(Number(v.amount))?Number(v.amount):null}
