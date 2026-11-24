@@ -21,6 +21,12 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(loop(lambda *_: self.fail(),lambda:"a",3,0,lambda:0),"time_limit")
 
 class OptimizationTests(unittest.TestCase):
+    def test_token_ceiling_preserves_successful_round(self):
+        calls = []
+        result = loop(lambda i,t: calls.append(i) or 0, lambda: "initial", 3, 100,
+                      lambda: 0, exhausted=lambda: bool(calls))
+        self.assertEqual((result,calls),("token_limit",[0]))
+
     def test_verified_after_first_round(self):
         calls = []
         result = loop(lambda i,t: calls.append(i) or 0, lambda: "initial", 3, 100,
