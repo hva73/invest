@@ -50,6 +50,7 @@ def main():
     p.add_argument("--rounds", type=int, default=3, choices=range(1, 6))
     p.add_argument("--minutes", type=int, default=20, choices=range(1, 46))
     p.add_argument("--execute", action="store_true")
+    p.add_argument("--auth", choices=("chatgpt", "api"), default="chatgpt")
     a = p.parse_args()
     task = a.task_file.read_text()[:20000]
     if a.issue <= 0 or not task.strip():
@@ -62,10 +63,16 @@ def main():
         p.error("use a dedicated controller/ branch in an isolated checkout")
     if git("status", "--porcelain"):
         p.error("start with a clean checkout")
-    if not os.environ.get("OPENAI_API_KEY"):
-        p.error("OPENAI_API_KEY required; do not store it in the repository")
-    # Never pass broker/deploy credentials or GitHub token to Codex.
-    env = {k: os.environ[k] for k in ("PATH", "HOME", "TMPDIR", "LANG", "OPENAI_API_KEY") if k in os.environ}
+    # Existing local ChatGPT login; API credentials only in explicit API mode.
+    env = {k: os.environ[k] for k in ("PATH", "HOME", "TMPDIR", "LANG", "CODEX_HOME") if k in os.environ}
+    if a.auth == "api":
+        if not os.environ.get("OPENAI_API_KEY"):
+            p.error("OPENAI_API_KEY required in explicit API mode")
+        env["OPENAI_API_KEY"] = os.environ["OPENAI_API_KEY"]
+    else:
+        check = subprocess.run(["codex", "login", "status"], env=env, capture_output=True, text=True, timeout=30)
+        if check.returncode or "logged in using chatgpt" not in (check.stdout + check.stderr).lower():
+            p.error("existing ChatGPT login required; run codex login locally")
     def step(i, remaining):
         prompt = f"""ESCAPE issue #{a.issue}; role {a.role}: {ROLES[a.role]}
 Read AGENTS.md and inspect actual code and current worktree changes.
@@ -76,8 +83,7 @@ Round {i+1}: if already completed or genuinely blocked, leave files unchanged.
 Task: {task}
 """
         try:
-            return subprocess.run(["codex", "exec", "--sandbox", "workspace-write",
-                "--ask-for-approval", "never", "-"], input=prompt, text=True,
+            return subprocess.run(["codex", "--ask-for-approval", "never", "exec", "--sandbox", "workspace-write", "-"], input=prompt, text=True,
                 env=env, timeout=remaining, check=False).returncode
         except subprocess.TimeoutExpired:
             return 124
