@@ -4,9 +4,24 @@ const ui=ctx.window.DashboardUI;ui.setup({api:()=>{},escape:v=>String(v),formatT
 const row={key:'x',ticker:'TEST',name:'Test',portfolio_name:'Test depot',quantity:'2',critical:false,verification:'broker_snapshot',price:{amount:'10',currency:'DKK'},value:{amount:'20',currency:'DKK'},unrealized:{amount:'-2',currency:'DKK'},unrealized_percent:'-10',unrealized_estimated:true,conflicts:[],hot_watch:{},analysis_freshness:{}};
 const state={dashboard:{positions:[row],accounts:[],totals:[],warnings:[],orders:[],critical_sessions:[]},report_desk:null};
 state.dashboard.portfolio_value_history={periods:{day:[{at:'2026-11-06T10:00:00Z',amount:'100',reported_result:'-12',currency:'DKK'},{at:'2026-11-06T11:00:00Z',amount:'110',reported_result:'-2',currency:'DKK'}]},reported_result:{amount:'-2',currency:'DKK'}};
+// Currency-comparable sorting: total DKK profits descending, losses last;
+// a missing/unconverted P&L must not be ranked by an arbitrary FX rate.
+const r2={...row,key:'profit',ticker:'PROFIT',value:{amount:'400',currency:'DKK'},unrealized:{amount:'80',currency:'DKK'},unrealized_percent:'25'};
+const r3={...row,key:'loss',ticker:'LOSS',value:{amount:'100',currency:'DKK'},unrealized:{amount:'-50',currency:'DKK'},unrealized_percent:'-33.33'};
+const r4={...row,key:'fx',ticker:'FX',value:{amount:'150',currency:'EUR'},unrealized:{amount:'40',currency:'EUR'},unrealized_percent:'36.36'};
+const originalRows=state.dashboard.positions;
+state.dashboard.positions=[r3,r4,r2,row];
+const sortedHTML=ui.render(state);
+const mobileHTML=sortedHTML.split('class="mobile-holdings-list">')[1].split('</div>')[0];
+assert.ok(mobileHTML.indexOf('PROFIT')<mobileHTML.indexOf('TEST'));
+assert.ok(mobileHTML.indexOf('TEST')<mobileHTML.indexOf('LOSS'));
+assert.ok(mobileHTML.indexOf('LOSS')<mobileHTML.indexOf('FX'));
+assert.match(sortedHTML,/mobile-holding-total neutral/);
+assert.doesNotMatch(sortedHTML,/mobile-holding-total (?:positive|negative)/);
+state.dashboard.positions=originalRows;
 state.dashboard.accounts=[{kind:'portfolio',snapshot_at:new Date().toISOString()}];let updatedHtml=ui.render(state);assert.match(updatedHtml,/Opdateret i dag kl\. \d{2}\.\d{2}/);assert.doesNotMatch(updatedHtml,/Værditid:/);state.dashboard.accounts.push({kind:'portfolio',snapshot_at:null});updatedHtml=ui.render(state);assert.match(updatedHtml,/Opdateringstid ukendt/);state.dashboard.accounts=[];
 state.dashboard.totals=[{amount:'110',currency:'DKK'}];state.dashboard.portfolio_value_history.current_value={amount:'110',currency:'DKK'};
-let html=ui.render(state);row.value.currency='USD';assert.match(ui.render(state),/mobile-holding-total negative/);row.unrealized.amount='2';assert.match(ui.render(state),/mobile-holding-total positive/);row.unrealized.amount='-2';row.value.currency='DKK';assert.match(html,/mobile-holding-since">Siden sidst <span class="dash-neutral">—<\/span>/);for(const [value,tone,sign] of [['1.5','positive','↑'],['-1.5','negative','↓'],['0','neutral','→']]){row.since_last={percent:value,basis:'synthetic',from:'a',to:'b'};const h=ui.render(state);assert.ok(h.includes('mobile-holding-since">Siden sidst <span class="dash-change '+tone+'"'));assert.ok(h.includes(sign+' '+(Number(value)>0?'+':'')+Number(value).toFixed(2).replace('.',',')+' %'));}delete row.since_last;assert.match(html,/dash-total negative/);assert.match(html,/negativt/);assert.match(html,/>↓<\/span>/);
+let html=ui.render(state);row.value.currency='USD';assert.match(ui.render(state),/mobile-holding-total neutral/);row.unrealized.amount='2';assert.match(ui.render(state),/mobile-holding-total neutral/);row.unrealized.amount='-2';row.value.currency='DKK';assert.match(html,/mobile-holding-since">Siden sidst <span class="dash-neutral">—<\/span>/);for(const [value,tone,sign] of [['1.5','positive','↑'],['-1.5','negative','↓'],['0','neutral','→']]){row.since_last={percent:value,basis:'synthetic',from:'a',to:'b'};const h=ui.render(state);assert.ok(h.includes('mobile-holding-since">Siden sidst <span class="dash-change '+tone+'"'));assert.ok(h.includes(sign+' '+(Number(value)>0?'+':'')+Number(value).toFixed(2).replace('.',',')+' %'));}delete row.since_last;assert.match(html,/dash-total negative/);assert.match(html,/negativt/);assert.match(html,/>↓<\/span>/);
 state.dashboard.portfolio_value_history.reported_result.amount='2';html=ui.render(state);assert.match(html,/dash-total positive/);assert.match(html,/>↑<\/span>/);
 state.dashboard.portfolio_value_history.current_value.amount='109';html=ui.render(state);assert.match(html,/dash-total neutral/);assert.doesNotMatch(html,/dash-total positive/);
 state.dashboard.portfolio_value_history.current_value.amount=null;state.dashboard.totals[0].amount='0';html=ui.render(state);assert.match(html,/dash-total neutral/);state.dashboard.totals[0].amount='110';state.dashboard.portfolio_value_history.current_value.amount='110';state.dashboard.totals.push({amount:'5',currency:'USD'});html=ui.render(state);assert.doesNotMatch(html,/dash-total positive/);
@@ -15,8 +30,8 @@ const chartProbe=(value,currency,result)=>ui.portfolioChart({portfolio_value_his
 assert.match(html,/data-chart-share="-12,00 %"/);assert.match(html,/data-chart-tone="negative"/);assert.match(html,/Dagens udvikling/);assert.match(html,/data-dashboard-range="day"/);assert.match(html,/data-dashboard-range="year"/);assert.match(html,/dash-chart-change positive/);assert.match(html,/\+10,00\s*kr/);assert.doesNotMatch(html,/dash-chart-note/);assert.match(html,/ikke nødvendigvis periodens samlede afkast/);assert.match(html,/Samlet resultat/);assert.doesNotMatch(html,/Samlet resultat oplyst af Pluto/);
 state.dashboard.portfolio_value_history.periods.day[1].reported_result='-22';html=ui.render(state);assert.match(html,/dash-chart-change negative/);assert.match(html,/-10,00\s*kr/);assert.doesNotMatch(html,/Værdiændring siden første måling/);state.dashboard.portfolio_value_history.periods.week=[{at:'2026-11-01T10:00:00Z',amount:'100',reported_result:'-42',currency:'DKK'},{at:'2026-11-06T11:00:00Z',amount:'90',reported_result:'-22',currency:'DKK'}];ui.click({dataset:{dashboardRange:'week'}});html=ui.render(state);assert.match(html,/Udvikling i valgt periode/);assert.doesNotMatch(html,/Dagens udvikling/);assert.match(html,/\+20,00\s*kr/);assert.match(html,/data-dashboard-range="week" aria-pressed="true"/);state.dashboard.portfolio_value_history.periods.week[0].reported_result=null;html=ui.render(state);assert.match(html,/Ikke nok historik/);
 row.daily={percent:'2',amount:'1',currency:'DKK',basis:'pluto_reported_daily_change',from:null,to:'2026-11-05T12:00:00Z'};html=ui.render(state);assert.match(html,/data-dashboard-sort="daily"/);assert.match(html,/dash-change positive/);
-row.price_freshness={state:'stale'};html=ui.render(state);assert.match(html,/mobile-holding-daily neutral\">—/);row.daily.to=new Date().toISOString();row.price_freshness={state:'fresh'};html=ui.render(state);assert.match(html,/mobile-holding-daily positive\"><span class="signed-positive">↑ \+2,00\s*kr\.<\/span> · <span class="signed-positive">↑ \+2,00 %/);row.price_freshness={state:'session_close'};html=ui.render(state);assert.match(html,/mobile-holding-daily positive\"><span class="signed-positive">↑ \+2,00\s*kr\.<\/span> · <span class="signed-positive">↑ \+2,00 %/);row.daily.to='2026-01-01T12:00:00Z';html=ui.render(state);assert.match(html,/mobile-holding-daily neutral\">—/);row.daily.to='2026-11-05T12:00:00Z';
-row.price_time=null;row.daily.to=new Date(Date.now()-1000).toISOString();row.price_freshness={state:'unknown'};html=ui.render(state);assert.match(html,/<span class="dash-change positive">\+2,00\s*kr\.<\/span><small class="dash-profit-percent positive">\+2,00 %/);assert.match(html,/I dag<\/small><span class="mobile-holding-daily positive"><span class="signed-positive">↑ \+2,00\s*kr\.<\/span> · <span class="signed-positive">↑ \+2,00 %<\/span>/);row.daily.to=new Date(Date.now()-301000).toISOString();html=ui.render(state);assert.match(html,/mobile-holding-daily neutral\">—/);row.daily.to='2026-11-05T12:00:00Z';
+row.price_freshness={state:'stale'};html=ui.render(state);assert.match(html,/mobile-holding-daily neutral\">—/);row.daily.to=new Date().toISOString();row.price_freshness={state:'fresh'};html=ui.render(state);assert.match(html,/mobile-holding-daily positive\"><span class="signed-positive">\+2,00\s*kr\.<\/span><span class="signed-positive">↑ \+2,00 %/);row.price_freshness={state:'session_close'};html=ui.render(state);assert.match(html,/mobile-holding-daily positive\"><span class="signed-positive">\+2,00\s*kr\.<\/span><span class="signed-positive">↑ \+2,00 %/);row.daily.to='2026-01-01T12:00:00Z';html=ui.render(state);assert.match(html,/mobile-holding-daily neutral\">—/);row.daily.to='2026-11-05T12:00:00Z';
+row.price_time=null;row.daily.to=new Date(Date.now()-1000).toISOString();row.price_freshness={state:'unknown'};html=ui.render(state);assert.match(html,/<span class="dash-change positive">\+2,00\s*kr\.<\/span><small class="dash-profit-percent positive">\+2,00 %/);assert.match(html,/I dag<\/small><span class="mobile-holding-daily positive"><span class="signed-positive">\+2,00\s*kr\.<\/span><span class="signed-positive">↑ \+2,00 %<\/span>/);row.daily.to=new Date(Date.now()-301000).toISOString();html=ui.render(state);assert.match(html,/mobile-holding-daily neutral\">—/);row.daily.to='2026-11-05T12:00:00Z';
 for(const [freshness,offset,basis] of [['unknown',-301000,'pluto_reported_daily_change'],['stale',-1000,'pluto_reported_daily_change'],['error',-1000,'pluto_reported_daily_change'],['unrecognised',-1000,'pluto_reported_daily_change'],['unknown',60000,'pluto_reported_daily_change'],['unknown',-1000,'other']]){row.price_freshness={state:freshness};row.daily.to=new Date(Date.now()+offset).toISOString();row.daily.basis=basis;const checked=ui.render(state);assert.match(checked,/<span class="dash-day-desktop"><span class="dash-neutral">—<\/span><\/span>/);assert.match(checked,/mobile-holding-daily neutral\">—/);}
 row.price_freshness={state:'unknown'};row.daily.basis='pluto_reported_daily_change';row.daily.to=new Date(Date.now()-1000).toISOString();row.daily.currency='USD';const mismatch=ui.render(state);assert.match(mismatch,/<span class="dash-day-desktop"><span class="dash-neutral">—<\/span><small class="dash-profit-percent positive">\+2,00 %/);row.daily.currency='DKK';
 row.price_freshness={state:'unknown'};row.daily.basis='pluto_reported_daily_change';row.daily.to='2026-11-05T12:00:00Z';
@@ -54,13 +69,43 @@ for(const label of ['RISIKODATA MANGLER','EARLY WATCH','HANDEL STANDSET']){row.h
 // A day's currency amount is a price movement of the current quantity, not a
 // broker-reported cash profit. Never combine a different quote currency.
 row.hot_watch={};row.price={amount:'100',currency:'EUR'};row.quantity='3';row.verification='broker_snapshot';row.price_freshness={state:'fresh'};row.daily={percent:'2',amount:'1.5',currency:'EUR',basis:'pluto_reported_daily_change',to:new Date().toISOString()};row.unrealized={amount:'10',currency:'DKK'};row.unrealized_percent='5';
-html=ui.render(state);assert.match(html,/I dag<\/small><span class="mobile-holding-daily positive"><span class="signed-positive">↑ \+4,50\s*€<\/span> · <span class="signed-positive">↑ \+2,00 %/);assert.match(html,/Siden køb[\s\S]*?\+10,00\s*kr\.[\s\S]*?\+5,00 %/);
-row.daily.amount=null;html=ui.render(state);assert.match(html,/I dag<\/small><span class="mobile-holding-daily positive"><span class="signed-positive">↑ ≈ \+5,88\s*€<\/span> · <span class="signed-positive">↑ \+2,00 %/);
-row.daily.currency='USD';html=ui.render(state);assert.match(html,/I dag<\/small><span class="mobile-holding-daily positive">— · <span class="signed-positive">↑ \+2,00 %/);
-row.verification='last_known';html=ui.render(state);assert.match(html,/I dag<\/small><span class="mobile-holding-daily neutral">— · — %/);
+html=ui.render(state);assert.match(html,/I dag<\/small><span class="mobile-holding-daily positive"><span class="signed-positive">\+4,50\s*€<\/span><span class="signed-positive">↑ \+2,00 %/);const sinceBlock=(html.match(/<span class="mobile-holding-since-purchase">([\s\S]*?)<\/span><span class="mobile-holding-day">/)||[])[1];assert(sinceBlock);assert.strictEqual((sinceBlock.match(/[↑↓→]/g)||[]).length,1,'Only one P/L direction arrow for amount and percent');assert.match(html,/Siden køb[\s\S]*?\+10,00\s*kr\.[\s\S]*?\+5,00 %/);
+row.daily.amount=null;html=ui.render(state);assert.match(html,/I dag<\/small><span class="mobile-holding-daily positive"><span class="signed-positive">≈ \+5,88\s*€<\/span><span class="signed-positive">↑ \+2,00 %/);
+row.daily.currency='USD';html=ui.render(state);assert.match(html,/I dag<\/small><span class="mobile-holding-daily positive"><span class="dash-neutral">—<\/span><span class="signed-positive">↑ \+2,00 %/);
+row.verification='last_known';html=ui.render(state);assert.match(html,/I dag<\/small><span class="mobile-holding-daily neutral">—/);
 console.log('PASS: current quantity, quote currency, estimated/missing daily amount and since-purchase percent');
 ui.click({dataset:{dashboardRange:'day'}});state.dashboard.portfolio_value_history.periods.day=[{at:'2026-11-06T10:00:00Z',reported_result:'10',currency:'DKK'},{at:'2026-11-06T11:00:00Z',reported_result:'25',currency:'DKK'}];state.dashboard.daily_result={amount:'15',currency:'DKK'};html=ui.render(state);assert.match(html,/dash-day-total dash-day-duplicate/);state.dashboard.daily_result.amount='16';html=ui.render(state);assert.doesNotMatch(html,/dash-day-duplicate/);state.dashboard.daily_result.amount='15';state.dashboard.daily_result.currency='EUR';html=ui.render(state);assert.doesNotMatch(html,/dash-day-duplicate/);
 state.dashboard.accounts=[{kind:'portfolio',snapshot_at:new Date(Date.now()-60000).toISOString()}];html=ui.render(state);assert.match(html,/Opdateret i dag kl\. \d\d\.\d\d/);
 state.dashboard.accounts=[{kind:'portfolio',snapshot_at:new Date(Date.now()-2*86400000).toISOString()}];html=ui.render(state);assert.match(html,/Opdateret \d\d\.\d\d\.\d{4} kl\./);assert.doesNotMatch(html,/Opdateret i dag kl\./);
 state.dashboard.accounts=[{kind:'portfolio',snapshot_at:null}];html=ui.render(state);assert.match(html,/Opdateringstid ukendt/);
 state.dashboard.accounts=[{kind:'portfolio',snapshot_at:new Date(Date.now()+60000).toISOString()}];html=ui.render(state);assert.match(html,/Opdateringstid ukendt/);
+
+ // Desktop must not drop the same valid percentage-only daily amount that mobile derives.
+ row.verification='broker_snapshot';row.price_freshness={state:'fresh'};row.price={amount:'100',currency:'DKK'};row.quantity='3';
+ row.daily={percent:'2',amount:null,currency:'DKK',basis:'pluto_reported_daily_change',to:new Date().toISOString()};
+ html=ui.render(state);
+ assert.match(html,/<span class="dash-day-desktop"><span class="dash-change positive">\+5,88\s*kr\.<\/span><small class="dash-profit-percent positive">\+2,00 % · estimat/);
+ row.daily.currency='USD';html=ui.render(state);
+ assert.match(html,/<span class="dash-day-desktop"><span class="dash-neutral">—<\/span><small class="dash-profit-percent positive">\+2,00 %/);
+ row.daily.currency='DKK';row.daily.percent='-100';html=ui.render(state);
+ assert.match(html,/<span class="dash-day-desktop"><span class="dash-neutral">—<\/span><small class="dash-profit-percent negative">-100,00 %/);
+ console.log('PASS: desktop daily estimate parity and currency/invalid reference guards');
+
+ // Reconciliation with #207: a supplied unit movement is not an estimate;
+ // derived currency amount gets one estimate marker, never twice.
+ const desktopBlock=()=>ui.render(state).split('<span class="dash-day-desktop">')[1].split('</button>')[0];
+ row.daily.percent='2';row.daily.amount='1.5';
+ assert.match(desktopBlock(),/\+4,50\s*kr\./);
+ assert.doesNotMatch(desktopBlock(),/estimat/);
+ row.daily.amount=null;
+ assert.equal((desktopBlock().match(/estimat/g)||[]).length,1);
+ row.price_freshness={state:'session_close'};
+ assert.match(desktopBlock(),/\+5,88\s*kr\./);
+ row.price_time=null;row.price_freshness={state:'unknown'};
+ assert.match(desktopBlock(),/\+5,88\s*kr\./);
+ assert.equal((desktopBlock().match(/estimat/g)||[]).length,1);
+ row.daily.amount='1.5';assert.doesNotMatch(desktopBlock(),/estimat/);
+ row.quantity='0';assert.match(desktopBlock(),/dash-neutral/);
+ row.quantity='3';row.daily.to=new Date(Date.now()-301000).toISOString();
+ assert.doesNotMatch(desktopBlock(),/dash-change|estimat/);
+ console.log('PASS: desktop reconciled direct versus estimated amount and freshness gates');
