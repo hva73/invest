@@ -1,9 +1,15 @@
 """Read aggregate storage statistics from a stable SQLite backup copy only."""
 import argparse
+import hashlib
 import json
+import re
+import shutil
 import sqlite3
+import tarfile
+import tempfile
 import time
-from pathlib import Path
+from contextlib import closing
+from pathlib import Path, PurePosixPath
 
 
 def inspect_backup(path, now=None):
@@ -18,7 +24,7 @@ def inspect_backup(path, now=None):
         raise ValueError('backup_has_journal_use_consistent_standalone_copy')
     original=path.stat()
     now = time.time() if now is None else now
-    with sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True, timeout=1) as db:
+    with closing(sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True, timeout=1)) as db:
         db.execute('PRAGMA query_only=ON')
         value = lambda name: db.execute('PRAGMA ' + name).fetchone()[0]
         data = {'file_bytes':path.stat().st_size,'page_count':value('page_count'),
@@ -53,6 +59,63 @@ def inspect_backup(path, now=None):
         if any(Path(str(path)+suffix).exists() for suffix in ('-wal','-journal')):
             raise ValueError('backup_journal_created_during_inspection')
         return data
+
+
+def inspect_archive_database(archive_path, backup_name, expected_sha256, expected_bytes, now=None):
+    """Inspect only the verified DB member of a locally held private backup archive.
+
+    The caller supplies the SHA256 and size from the independently retrieved
+    manifest/inventory. Never trust a hash supplied solely by the archive.
+    This creates no server files and never extracts archive paths.
+    """
+    if not isinstance(backup_name,str) or not re.fullmatch(r'\d{8}-\d{6}-[A-Za-z0-9_-]+',backup_name):
+        raise ValueError('invalid_backup_name')
+    if not isinstance(expected_sha256,str) or not re.fullmatch(r'[0-9a-f]{64}',expected_sha256):
+        raise ValueError('invalid_database_sha256')
+    if type(expected_bytes) is not int or not 512 < expected_bytes <= 10000000000:
+        raise ValueError('invalid_database_size')
+    archive_path=Path(archive_path).resolve(strict=True)
+    if not archive_path.is_file():
+        raise ValueError('archive_not_file')
+    with tempfile.TemporaryDirectory(prefix='escape-private-dbstat-') as directory:
+        # This is runner capacity, not the production quota.
+        if shutil.disk_usage(directory).free < expected_bytes + 256*1024*1024:
+            raise ValueError('insufficient_local_inspection_space')
+        target=Path(directory)/'copy.sqlite'
+        found=False
+        with tarfile.open(archive_path,'r|gz') as archive:
+            for member in archive:
+                path=PurePosixPath(member.name)
+                if '..' in path.parts or member.issym() or member.islnk():
+                    raise ValueError('unsafe_archive_member')
+                if member.isdir():
+                    continue
+                if not member.isfile():
+                    raise ValueError('unsafe_archive_member')
+                if path.parts.count(backup_name)!=1:
+                    raise ValueError('unexpected_archive_member')
+                relative=path.parts[path.parts.index(backup_name)+1:]
+                if relative!=('escape.db',):
+                    continue
+                if found or member.size!=expected_bytes:
+                    raise ValueError('database_member_mismatch')
+                digest=hashlib.sha256()
+                count=0
+                with archive.extractfile(member) as source, target.open('xb') as output:
+                    while block:=source.read(1024*1024):
+                        count+=len(block)
+                        if count>expected_bytes:
+                            raise ValueError('database_member_mismatch')
+                        digest.update(block)
+                        output.write(block)
+                if count!=expected_bytes or digest.hexdigest()!=expected_sha256:
+                    raise ValueError('database_hash_mismatch')
+                found=True
+        if not found:
+            raise ValueError('database_member_missing')
+        report=inspect_backup(target,now)
+        report['source']='verified_archive_database_member'
+        return report
 
 
 def main():
