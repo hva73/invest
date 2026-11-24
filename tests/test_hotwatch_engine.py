@@ -639,6 +639,57 @@ class HotWatch(unittest.TestCase):
   changed=copy.deepcopy(refreshed);changed['context'].update(as_of=(at+timedelta(seconds=1)).isoformat(),position='held',quantity='2')
   self.put(changed,at+timedelta(seconds=1))
   with app.connect() as c:self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE event_type='BROKER_CONTEXT_UPDATED'").fetchone()[0],1)
+ def test_compact_renewal_audit_roundtrip_and_same_feed_storage(self):
+  # Real ingest path, 120 observations then 100 pure as_of renewals.
+  # Baseline is the exact canonical result that the old INSERT wrote.
+  # No synthetic price or calculation is dropped and all context rows stay.
+  all_results=[]
+  def ingest(sample,at):
+   output=engine.ingest(app.connect,1,self.req['watch_id'],True,sample,at,include_session=False)
+   all_results.append(output['calculation']);return output['calculation']
+  with patch.dict(os.environ,{'ESCAPE_HW_COMPACT_RENEWAL_AUDIT':'1'}):
+   for i in range(120):
+    at=self.now+timedelta(seconds=i*60);sample=tick(at,i);ingest(sample,at)
+   final=copy.deepcopy(sample)
+   for i in range(100):
+    later=at+timedelta(seconds=121+i*10);renewed=copy.deepcopy(final);renewed['context']['as_of']=later.isoformat()
+    result=ingest(renewed,later)
+    self.assertEqual(result['signal'],'NO_DATA');self.assertFalse(result['new_market_observation'])
+   with app.connect() as c:
+    rows=c.execute('SELECT payload FROM hw_calculations ORDER BY id').fetchall()
+    self.assertEqual(c.execute('SELECT count(*) FROM hw_samples').fetchone()[0],120)
+    self.assertEqual(c.execute('SELECT count(*) FROM hw_context_events').fetchone()[0],100)
+    self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE event_type='BROKER_CONTEXT_UPDATED'").fetchone()[0],0)
+   self.assertEqual(len(rows),220)
+   self.assertEqual([engine.calculation_read(r['payload']) for r in rows],all_results)
+   self.assertTrue(all(engine._RENEWAL_AUDIT_KEY not in json.loads(r['payload']) for r in rows[:120]))
+   self.assertTrue(all(engine._RENEWAL_AUDIT_KEY in json.loads(r['payload']) for r in rows[120:]))
+   before=sum(len(engine.canonical(r).encode('utf-8')) for r in all_results)
+   after=sum(len(r['payload'].encode('utf-8')) for r in rows)
+   renewal_before=sum(len(engine.canonical(r).encode('utf-8')) for r in all_results[120:])
+   renewal_after=sum(len(r['payload'].encode('utf-8')) for r in rows[120:])
+   print('HW_RENEWAL_STORAGE rows_before=220 rows_after=220 bytes_before=%d bytes_after=%d renewal_bytes_before=%d renewal_bytes_after=%d'%(before,after,renewal_before,renewal_after))
+   self.assertLess(renewal_after,renewal_before*.65)
+   self.assertLess(after,before)
+   history=engine.history(app.connect,1,self.req['watch_id'],True,kind='metrics',limit=50,order='desc')['items']
+   self.assertEqual([r['data'] for r in history],list(reversed(all_results[-50:])))
+   view=engine.item(app.connect,1,self.req['watch_id'],True,now=later)['session']
+   self.assertEqual(view['latest_calculation'],all_results[-1]);self.assertEqual(view['latest_context']['as_of'],later.isoformat())
+   # A material holding change still produces a full audit row.
+   change=copy.deepcopy(renewed);later+=timedelta(seconds=1);change['context'].update(as_of=later.isoformat(),position='held',quantity='2')
+   ingest(change,later)
+   with app.connect() as c:
+    self.assertNotIn(engine._RENEWAL_AUDIT_KEY,json.loads(c.execute('SELECT payload FROM hw_calculations ORDER BY id DESC LIMIT 1').fetchone()[0]))
+ def test_compact_renewal_audit_excludes_action_critical_and_invalid_encoding(self):
+  source={'signal':'NO_DATA','new_market_observation':False,'risk_level':'high','critical_override':False,'input_sample_ids':['long-synthetic-sample-'+str(i) for i in range(120)],'risk_parameters':{'a':'b'}}
+  encoded=engine.calculation_payload(source,True)
+  self.assertIn(engine._RENEWAL_AUDIT_KEY,json.loads(encoded))
+  self.assertEqual(engine.calculation_read(encoded),source)
+  self.assertEqual(engine.calculation_payload(source),engine.canonical(source))
+  for changes in ({'signal':'BUY'},{'signal':'SELL'},{'signal':'REDUCE'},{'signal':'WAIT'},{'risk_level':'critical'},{'critical_override':True},{'new_market_observation':True}):
+   other=dict(source,**changes);self.assertEqual(engine.calculation_payload(other,True),engine.canonical(other))
+  broken=json.loads(encoded);broken[engine._RENEWAL_AUDIT_KEY]['sha256']='0'*64
+  with self.assertRaisesRegex(EngineError,'invalid_calculation_audit'):engine.calculation_read(json.dumps(broken))
  def test_broker_context_changes_do_not_create_or_confirm_new_quotes(self):
   original=tick(self.now);self.put(original);before=self.counts()['hw_samples'];changed=copy.deepcopy(original);changed['context'].update(as_of=(self.now+timedelta(seconds=10)).isoformat(),position='held',quantity='2');changed['context']['orders']=[{'order_id':'synthetic-partial','status':'PARTIAL','requested_quantity':'5','filled_quantity':'2','side':'BUY'}]
   result=self.put(changed,self.now+timedelta(seconds=10));self.assertFalse(result['calculation']['new_market_observation']);self.assertEqual(self.counts()['hw_samples'],before);self.assertNotEqual(result['calculation']['signal'],'BUY');self.assertEqual(result['session']['latest_context']['quantity'],'2');self.assertTrue(self.put(changed,self.now+timedelta(seconds=11))['duplicate'])
