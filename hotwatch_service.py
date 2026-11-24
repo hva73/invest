@@ -1309,7 +1309,11 @@ class Runner:
      # A stale quote cannot produce an actionable signal. When other live
      # scans are already substantially overdue, defer this auxiliary history
      # fetch to a later scan so it does not occupy a worker ahead of them.
-     if stale_duplicate or scan_log and scan_log[0]=='degraded' and scan_log[1]=='DATA_STALE':
+     if scan_log and scan_log[0]=='degraded' and scan_log[1] in ('EODHD_DAILY_BUDGET','PROVIDER_RATE_BUDGET','EODHD_RATE_LIMIT'):
+      # Analysis-only history uses the same constrained HTTP transport.
+      # Leave capacity to live scans and retry on the next normal scan.
+      warmup_deferred=True
+     elif stale_duplicate or scan_log and scan_log[0]=='degraded' and scan_log[1]=='DATA_STALE':
       now_due=engine.utc().timestamp()
       with self.connect() as c:
        warmup_deferred=bool(c.execute("SELECT 1 FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.id!=? AND s.next_due<=? AND s.lease_until<=? AND COALESCE(k.killed,0)=0 LIMIT 1",(job['id'],now_due-15,now_due)).fetchone())
