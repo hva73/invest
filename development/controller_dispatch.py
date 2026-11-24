@@ -31,7 +31,7 @@ def reserve(state, day, budget, amount):
     if state.get("day") != day:
         state.clear()
         state.update(day=day, reserved=0)
-    if state["reserved"] + amount > budget:
+    if budget is not None and state["reserved"] + amount > budget:
         return False
     state["reserved"] += amount
     return True
@@ -92,14 +92,14 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--queue", required=True, type=Path)
     p.add_argument("--root", required=True, type=Path)
-    p.add_argument("--daily-reservation", type=int, default=120000)
+    p.add_argument("--daily-reservation", type=int, default=None)
     p.add_argument("--per-task", type=int, default=60000)
     p.add_argument("--parallel", type=int, default=2, choices=(1,2))
     p.add_argument("--execute", action="store_true")
     p.add_argument("--remote", action="store_true")
     p.add_argument("--publish", action="store_true")
     a = p.parse_args()
-    if not 0 < a.per_task <= a.daily_reservation:
+    if a.per_task <= 0 or (a.daily_reservation is not None and a.daily_reservation < a.per_task):
         p.error("invalid budget")
     if not a.execute:
         print([t.issue for t in plan(load(a.queue, []), max_parallel=a.parallel)])
