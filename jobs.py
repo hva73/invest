@@ -13,6 +13,8 @@ def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS news_refresh(id INTEGER PRIMARY KEY CHECK(id=1),attempted REAL NOT NULL,succeeded REAL,error TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS jobs(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id), dedupe TEXT NOT NULL UNIQUE, status TEXT NOT NULL, available REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, lease TEXT, lease_until REAL, result TEXT, created REAL NOT NULL)')
     if 'portfolio_id' not in {r['name'] for r in c.execute('PRAGMA table_info(jobs)')}:c.execute('ALTER TABLE jobs ADD COLUMN portfolio_id INTEGER REFERENCES portfolios(id)')
+    if 'completed' not in {r['name'] for r in c.execute('PRAGMA table_info(jobs)')}:c.execute('ALTER TABLE jobs ADD COLUMN completed REAL')
+    c.execute('CREATE TABLE IF NOT EXISTS job_retention_state(id INTEGER PRIMARY KEY CHECK(id=1), last_run REAL NOT NULL)')
     c.execute('CREATE TABLE IF NOT EXISTS fx_snapshots(id INTEGER PRIMARY KEY, source_date TEXT NOT NULL, observed TEXT NOT NULL, payload TEXT NOT NULL, digest TEXT NOT NULL UNIQUE)')
     c.execute('CREATE TABLE IF NOT EXISTS reports(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), slot TEXT NOT NULL, created TEXT NOT NULL, body TEXT NOT NULL, UNIQUE(user_id,slot))')
     c.execute('CREATE TABLE IF NOT EXISTS news_items(id INTEGER PRIMARY KEY,title TEXT NOT NULL,url TEXT NOT NULL,published TEXT NOT NULL,summary TEXT NOT NULL,observed TEXT NOT NULL,digest TEXT NOT NULL UNIQUE)')
@@ -42,17 +44,49 @@ def enqueue(c,kind,user_id,dedupe,when=None,portfolio_id=None):
     when=time.time() if when is None else when
     c.execute("INSERT INTO jobs(kind,user_id,dedupe,status,available,created,portfolio_id) VALUES(?,?,?,'queued',?,?,?) ON CONFLICT(dedupe) DO NOTHING",(kind,user_id,dedupe,when,when,portfolio_id))
 
-def cleanup_completed_jobs(c, now, dry_run=True, limit=500):
-    """Bounded cleanup of old completed scheduling metadata; never touch work in flight."""
-    cutoff=now-30*86400
-    rows=c.execute("""WITH ranked AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY id DESC) AS position FROM jobs)
-        SELECT j.id, length(CAST(COALESCE(j.result,'') AS BLOB)) AS result_bytes
-        FROM jobs j WHERE j.status='done' AND j.created<?
-        AND j.id NOT IN (SELECT id FROM ranked WHERE position<=20)
-        ORDER BY j.id LIMIT ?""",(cutoff,limit)).fetchall()
+JOB_RETENTION_DAYS = 30
+JOB_RETENTION_BATCH = 500
+JOB_RETENTION_CANDIDATES = """WITH ranked AS (
+    SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY id DESC) AS position FROM jobs
+    )
+    SELECT j.id, length(CAST(COALESCE(j.result,'') AS BLOB)) AS result_bytes
+    FROM jobs j WHERE j.status='done' AND j.completed IS NOT NULL
+    AND j.completed < ? AND j.created < ?
+    AND j.kind IN ('ecb','news','report','pluto_data')
+    AND j.lease IS NULL AND j.lease_until IS NULL
+    AND j.id NOT IN (SELECT id FROM ranked WHERE position<=20)
+    ORDER BY j.id"""
+
+
+def cleanup_completed_jobs(c, now, dry_run=True, limit=JOB_RETENTION_BATCH):
+    """Retain recent, legacy-unknown, leased and nonterminal jobs; bounded batch."""
+    if type(limit) is not int or not 1 <= limit <= JOB_RETENTION_BATCH:
+        raise ValueError('invalid_retention_limit')
+    if not math.isfinite(now):
+        raise ValueError('invalid_retention_time')
+    cutoff=now-JOB_RETENTION_DAYS*86400
+    rows=c.execute(JOB_RETENTION_CANDIDATES+' LIMIT ?',(cutoff,cutoff,limit)).fetchall()
     if rows and not dry_run:
         c.executemany("DELETE FROM jobs WHERE id=? AND status='done'",[(r[0],) for r in rows])
     return {'rows':len(rows),'result_bytes':sum(r[1] for r in rows)}
+
+
+def maintain_completed_jobs(connect, now=None, *, enabled=False):
+    """Run at most one approved batch/day, outside the critical scheduler transaction."""
+    if not enabled:
+        return None
+    now=time.time() if now is None else now
+    if not math.isfinite(now):
+        raise ValueError('invalid_retention_time')
+    with connect() as c:
+        c.execute('BEGIN IMMEDIATE')
+        previous=c.execute('SELECT last_run FROM job_retention_state WHERE id=1').fetchone()
+        if previous is not None and now-previous[0]<86400:
+            return None
+        result=cleanup_completed_jobs(c,now,dry_run=False)
+        c.execute('INSERT INTO job_retention_state VALUES(1,?) ON CONFLICT(id) DO UPDATE SET last_run=excluded.last_run',(now,))
+        return result
+
 
 def schedule(connect,at=None):
     at=at or datetime.now(timezone.utc)
@@ -69,7 +103,6 @@ def schedule(connect,at=None):
         if local.hour in (8,14,22):
             slot=local.strftime('%Y-%m-%dT%H:%z')
             for user in c.execute('SELECT id FROM users WHERE active=1').fetchall():enqueue(c,'report',user['id'],'report:'+str(user['id'])+':'+slot,stamp)
-        cleanup_completed_jobs(c,stamp,dry_run=False)
         c.execute('INSERT INTO worker_state VALUES(1,?) ON CONFLICT(id) DO UPDATE SET heartbeat=excluded.heartbeat',(stamp,))
 
 def run_one(connect,fetcher=None,at=None):
@@ -123,7 +156,7 @@ def run_one(connect,fetcher=None,at=None):
                 c.execute('INSERT INTO reports(user_id,slot,created,body) VALUES(?,?,?,?) ON CONFLICT(user_id,slot) DO NOTHING',(uid,job['dedupe'],datetime.fromtimestamp(stamp,timezone.utc).isoformat(),body))
                 result='Datastatusrapport gemt'
             else:raise ValueError('unknown job')
-            c.execute("UPDATE jobs SET status='done',result=?,lease=NULL,lease_until=NULL WHERE id=? AND lease=?",(result,job['id'],lease))
+            c.execute("UPDATE jobs SET status='done',result=?,lease=NULL,lease_until=NULL,completed=? WHERE id=? AND lease=?",(result,stamp,job['id'],lease))
     except Exception:
         # Never persist exception text: network/library errors may include credentials.
         with connect() as c:
