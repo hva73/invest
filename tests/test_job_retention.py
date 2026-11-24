@@ -50,4 +50,21 @@ class CompletedJobRetention(unittest.TestCase):
   self.assertIsNone(jobs.maintain_completed_jobs(lambda:self.c,self.now+3600,enabled=True))
   self.assertEqual(jobs.maintain_completed_jobs(lambda:self.c,self.now+86400,enabled=True)['rows'],0)
 
+class CompletionMigration(unittest.TestCase):
+ def test_legacy_schema_migration_and_real_job_completion(self):
+  c=sqlite3.connect(':memory:')
+  self.addCleanup(c.close)
+  c.row_factory=sqlite3.Row
+  c.execute('CREATE TABLE jobs(id INTEGER PRIMARY KEY,kind TEXT NOT NULL,user_id INTEGER NOT NULL,dedupe TEXT NOT NULL UNIQUE,status TEXT NOT NULL,available REAL NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,lease TEXT,lease_until REAL,result TEXT,created REAL NOT NULL)')
+  c.execute("INSERT INTO jobs(kind,user_id,dedupe,status,available,created,result) VALUES('ecb',1,'legacy','done',0,0,'preserve')")
+  jobs.init(c);jobs.init(c)
+  c.commit()
+  self.assertIsNone(c.execute("SELECT completed FROM jobs WHERE dedupe='legacy'").fetchone()[0])
+  jobs.enqueue(c,'ecb',1,'new',0)
+  c.commit()
+  payload={'source_url':jobs.ECB_URL,'base':'EUR','rates':{'DKK':7.5},'source_date':'2026-01-01','observed':'2026-01-01T00:00:00+00:00'}
+  self.assertTrue(jobs.run_one(lambda:c,lambda:payload,at=120))
+  self.assertEqual(tuple(c.execute("SELECT status,completed FROM jobs WHERE dedupe='new'").fetchone()),('done',120))
+  self.assertIsNone(c.execute("SELECT completed FROM jobs WHERE dedupe='legacy'").fetchone()[0])
+
 if __name__=='__main__':unittest.main()
