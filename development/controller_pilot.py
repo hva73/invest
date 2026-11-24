@@ -57,6 +57,37 @@ def codex_command(session=None):
     return cmd + ["--json", "-"]
 
 
+def usage_breakdown(output):
+    total = dict(input=0, cached=0, output=0)
+    known = True
+    seen = False
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict) or event.get('type') != 'turn.completed':
+            continue
+        seen = True
+        u = event.get('usage', {})
+        if not isinstance(u, dict):
+            known = False
+            continue
+        i, c, o = (u.get(k) for k in ('input_tokens','cached_input_tokens','output_tokens'))
+        if type(i) is not int or i < 0 or type(o) is not int or o < 0:
+            known = False
+            continue
+        total['input'] += i
+        total['output'] += o
+        if type(c) is not int or not 0 <= c <= i:
+            known = False
+        else:
+            total['cached'] += c
+    total['gross'] = total['input'] + total['output']
+    total['uncached_plus_output'] = total['gross'] - total['cached'] if known and seen else None
+    return total
+
+
 def parse_events(output):
     session = None
     usage = 0
@@ -146,7 +177,9 @@ Task: {task}
             new_session, tokens, completed = parse_events(result.stdout)
             session = new_session or session
             usage += tokens
+            detail = usage_breakdown(result.stdout)
             print(f"ROUND {i+1}: tokens={tokens}, total={usage}, completed={completed}", flush=True)
+            print("USAGE_DETAIL:", json.dumps(detail, sort_keys=True), flush=True)
             if result.returncode or not completed or not tokens:
                 return result.returncode or 1
             if not session:
