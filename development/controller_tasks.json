@@ -5,12 +5,12 @@
     "priority": 1,
     "status": "ready",
     "paths": [
-      "docs/controller-live-smoke.md"
+      "docs/controller-autonomous-smoke.md"
     ],
     "dependencies": [],
-    "generation": 1,
+    "generation": 2,
     "base_branch": "codex/escape-development",
     "base_sha": "adb2cc6e4529ace96d137bfa42df95e0ef4b51b2",
-    "task": "Isolated controller acceptance smoke only. Create docs/controller-live-smoke.md with exactly one line: ESCAPE CONTROLLER LIVE SMOKE followed by a newline. Verify exact file content and git diff scope. No other changes, no network, no production or broker access. Do not commit or push; trusted dispatcher publishes a draft PR. On subsequent round if the file already matches, do not change anything. This QA-only PR must never be merged."
+    "task": "QA-only acceptance, no product edits. Create docs/controller-autonomous-smoke.md with exactly the line ESCAPE AUTONOMOUS DELIVERY VERIFIED followed by newline. Use a direct write and verify content and git status; no broad repository analysis. Do not change any other file, commit, push, use network or access credentials. If already correct leave unchanged. Trusted controller handles draft PR; never merge this QA PR."
   }
 ]
