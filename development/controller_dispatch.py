@@ -154,7 +154,7 @@ def main():
             ready = []
             day = datetime.now(timezone.utc).date().isoformat()
             for task in selected:
-                row = next(r for r in rows if r["issue"] == task.issue)
+                row = next(r for r in rows if (r["issue"],r.get("generation",1)) == task.key)
                 if not reserve(state, day, a.daily_reservation, a.per_task):
                     break
                 save(statefile, state)
