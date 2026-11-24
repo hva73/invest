@@ -1,0 +1,19 @@
+name: Pinned private bridge updater QA (no production)
+on: [pull_request]
+permissions:
+  contents: read
+jobs:
+  offline:
+    if: github.event.pull_request.head.ref == 'codex/issue57-pinned-bridge-updater-81'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -B -m unittest tests.test_nordicway_upgrade_updater -v
