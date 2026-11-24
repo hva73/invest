@@ -626,6 +626,19 @@ class HotWatch(unittest.TestCase):
   self.assertEqual(before,self.counts())
   older=tick(self.now-timedelta(seconds=1),99)
   with self.assertRaisesRegex(EngineError,'out_of_order_market_data'):self.put(older)
+ def test_context_timestamp_refresh_preserves_evidence_without_false_change_event(self):
+  first=tick(self.now);self.put(first)
+  refreshed=copy.deepcopy(first);at=self.now+timedelta(seconds=10);refreshed['context']['as_of']=at.isoformat()
+  result=self.put(refreshed,at)
+  self.assertFalse(result['calculation']['new_market_observation'])
+  self.assertEqual(result['session']['latest_context']['as_of'],at.isoformat())
+  with app.connect() as c:
+   self.assertEqual(c.execute("SELECT count(*) FROM hw_context_events").fetchone()[0],1)
+   self.assertEqual(c.execute("SELECT count(*) FROM hw_calculations").fetchone()[0],2)
+   self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE event_type='BROKER_CONTEXT_UPDATED'").fetchone()[0],0)
+  changed=copy.deepcopy(refreshed);changed['context'].update(as_of=(at+timedelta(seconds=1)).isoformat(),position='held',quantity='2')
+  self.put(changed,at+timedelta(seconds=1))
+  with app.connect() as c:self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE event_type='BROKER_CONTEXT_UPDATED'").fetchone()[0],1)
  def test_broker_context_changes_do_not_create_or_confirm_new_quotes(self):
   original=tick(self.now);self.put(original);before=self.counts()['hw_samples'];changed=copy.deepcopy(original);changed['context'].update(as_of=(self.now+timedelta(seconds=10)).isoformat(),position='held',quantity='2');changed['context']['orders']=[{'order_id':'synthetic-partial','status':'PARTIAL','requested_quantity':'5','filled_quantity':'2','side':'BUY'}]
   result=self.put(changed,self.now+timedelta(seconds=10));self.assertFalse(result['calculation']['new_market_observation']);self.assertEqual(self.counts()['hw_samples'],before);self.assertNotEqual(result['calculation']['signal'],'BUY');self.assertEqual(result['session']['latest_context']['quantity'],'2');self.assertTrue(self.put(changed,self.now+timedelta(seconds=11))['duplicate'])

@@ -1164,7 +1164,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
     return result
    if prior_context!=current_context:
     c.execute('INSERT INTO hw_context_events(watch_row_id,sample_row_id,observed,payload) VALUES(?,?,?,?)',(row['id'],old['id'],now.isoformat(),canonical(current_context)))
-    event(c,row,'BROKER_CONTEXT_UPDATED',now,'Position/order context changed; no new market observation',data_time=current_context['as_of'])
+    if material(prior_context)!=material(current_context):event(c,row,'BROKER_CONTEXT_UPDATED',now,'Position/order context changed; no new market observation',data_time=current_context['as_of'])
    if evidence_changed:
     c.execute('UPDATE hw_samples SET payload=?,digest=? WHERE id=?',(canonical(sample),checksum(sample),old['id']))
     event(c,row,'MARKET_EVIDENCE_UPDATED',now,'Quote/calendar evidence renewed; original trade time unchanged',metrics={'previous_digest':old['digest'],'current_digest':checksum(sample),'bid_at':sample.get('bid_at'),'ask_at':sample.get('ask_at'),'status_at':sample.get('status_at')},data_time=sample['event_time'])
