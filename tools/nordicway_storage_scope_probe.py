@@ -27,12 +27,16 @@ def manifest_tuple(source):
 def bridge_comparison(read_code):
     out={"candidate_sha":CANDIDATE_SHA,"candidate_manifest_count":len(CANDIDATE_FILES)}
     try:
-        files=manifest_tuple(read_code("apply_update.py"))
+        source=read_code("apply_update.py")
+        files=manifest_tuple(source)
+        out["bridge_updater_sha256"]=hashlib.sha256(source.encode("utf-8")).hexdigest()
         out.update(bridge_manifest_count=len(files),bridge_manifest_matches=(files==CANDIDATE_FILES),missing_candidate_files=sorted(set(CANDIDATE_FILES)-set(files)))
     except (ValueError,TypeError,SyntaxError,OSError):
         out["bridge_manifest_matches"]="unknown"
     try:
-        adapter=ast.parse(read_code("nordicway_deploy_adapter.py"))
+        source=read_code("nordicway_deploy_adapter.py")
+        out["bridge_adapter_sha256"]=hashlib.sha256(source.encode("utf-8")).hexdigest()
+        adapter=ast.parse(source)
         estimator=[n for n in adapter.body if isinstance(n,ast.FunctionDef) and n.name=="estimate_required_bytes"]
         reference=ast.parse(REFERENCE_ESTIMATOR).body[0]
         out["legacy_two_copy_estimator_matches"]=len(estimator)==1 and ast.dump(estimator[0])==ast.dump(reference)
