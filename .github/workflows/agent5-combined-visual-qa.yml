@@ -53,3 +53,42 @@ jobs:
             visual-review/product-sha.txt
           if-no-files-found: error
           retention-days: 14
+
+  warning_desktop_regression:
+    if: github.event.pull_request.head.ref == 'codex/agent5-combined-232-visual-qa'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .:tests
+      ESCAPE_PLAYWRIGHT_MANAGED: '1'
+      ESCAPE_SCREENSHOTS: warning-review
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 94b5045fae711fae8cf2d4c78a3b21b2c19fcd72
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt playwright==1.56.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Verify exact mobile patch candidate and desktop scope
+        run: |
+          test "$(git rev-parse HEAD)" = 94b5045fae711fae8cf2d4c78a3b21b2c19fcd72
+          test "$(git hash-object static/desktop-experience.css)" = 9b5c22ea7cf9fb82c84525c47ddcfcb741bdf117
+      - name: Independent desktop and sector acceptance after mobile patch
+        run: |
+          mkdir -p warning-review
+          python tests/browser_desktop_experience.py
+          python tests/browser_sector_journey.py
+          python tests/browser_daily_parity.py
+          git rev-parse HEAD > warning-review/product-sha.txt
+          for f in overview-after-1440.png overview-after-1920.png sektor-oversigt-1440.png sektor-positioner-1440.png; do
+            test -s "warning-review/$f"
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: escape-94b5045f-desktop-warning-regression
+          path: warning-review/
+          if-no-files-found: error
+          retention-days: 14
