@@ -134,6 +134,39 @@ def notify_result(root,row,status,publish):
     except (OSError,ValueError):
         print("RECEIPT_PENDING:",task_key(row),flush=True)
 
+def provider_pause_active(root,now=None):
+    now=time.time() if now is None else now
+    path=root/"provider-pause.json"
+    if not path.exists():
+        return False
+    try:
+        value=load(path,{})
+        stamp=value.get("reset_at")
+        return type(stamp) not in (int,float) or not (0<stamp<=now)
+    except (OSError,ValueError,TypeError,AttributeError):
+        return True
+
+def record_provider_pause(root,row,now=None):
+    now=time.time() if now is None else now
+    stamp=None
+    try:
+        checkpoint=load(root/("checkpoint-"+str(row["issue"])+"-"+str(row.get("generation",1))+".json"),{})
+        reported=checkpoint.get("provider_reset_at")
+        if (checkpoint.get("issue")==row["issue"] and checkpoint.get("generation")==row.get("generation",1)
+                and checkpoint.get("provider_limit") is True and type(reported) in (int,float) and now<reported<=now+604800):
+            stamp=reported
+    except (OSError,ValueError,TypeError,AttributeError):
+        pass
+    path=root/"provider-pause.json"
+    if path.exists() and provider_pause_active(root,now):
+        try:
+            previous=load(path,{}).get("reset_at")
+            stamp=max(previous,stamp) if type(previous) in (int,float) and stamp is not None else None
+        except (OSError,ValueError,TypeError,AttributeError):
+            stamp=None
+    save(path,{"task":task_key(row),"observed_at":now,"reset_at":stamp})
+    print("PROVIDER_PAUSE:", "until reported reset" if stamp is not None else "awaiting confirmed reset",flush=True)
+
 def run_queue(a,root,script,statefile,donefile,state,results):
     # A process restart cannot assume a previously reserved generation is idle.
     # Preserve its checkout and explicitly expose the interrupted state.
@@ -154,6 +187,8 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                     status="blocked:"+str(exc)
                 except Exception as exc:
                     status="blocked:"+type(exc).__name__
+                if status=="blocked:provider_limit":
+                    record_provider_pause(root,row)
                 results[task_key(row)]=status
                 save(donefile,results)
                 del active[future]
@@ -175,7 +210,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                         notify_result(root,row,"blocked:interrupted",a.publish)
                         interrupted.remove(key)
                 rows=effective_rows(rows,results,active.values())
-                selected=plan(rows,max_parallel=a.parallel)
+                selected=[] if provider_pause_active(root) else plan(rows,max_parallel=a.parallel)
             except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as exc:
                 print("QUEUE_UNAVAILABLE:",type(exc).__name__,flush=True)
                 selected=[]
