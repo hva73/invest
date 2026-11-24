@@ -14,13 +14,15 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: c13336a257c0378d5d8f2b4ec8a23183e7487fbd
+          ref: 3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
       - run: python -m pip install -r requirements.txt playwright==1.56.0
       - run: python -m playwright install --with-deps chromium
+      - name: Assert exact frozen product
+        run: test "$(git rev-parse HEAD)" = 3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65
       - name: Combined desktop and mobile frontend regression
         run: |
           set -e
@@ -34,3 +36,20 @@ jobs:
             python "$f" || failed=1
           done
           exit "$failed"
+      - name: Verify synthetic visual evidence
+        run: |
+          set -e
+          for f in overview-after-1440.png overview-after-1920.png overview-tooltip-1440.png sektor-oversigt-1440.png sektor-positioner-1440.png signal-buy-390.png signal-sell-390.png demo-signal-buy-390.png demo-signal-sell-390.png; do
+            test -s "visual-review/$f"
+          done
+          printf '%s\n' '3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65' > visual-review/product-sha.txt
+          find visual-review -maxdepth 1 -type f -printf '%f\n' | sort
+      - name: Upload synthetic browser screenshots (not live data)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: escape-3cc0c7be-synthetic-visual-review
+          path: |
+            visual-review/*.png
+            visual-review/product-sha.txt
+          if-no-files-found: error
+          retention-days: 14
