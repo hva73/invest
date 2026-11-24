@@ -153,5 +153,48 @@ class AdapterTests(unittest.TestCase):
 
 
 
+class ReviewEvidenceTests(unittest.TestCase):
+    def test_event_identity_not_market_slug(self):
+        item = poly.normalize_market(market(events=[{"id":"55","slug":"fed-event"}],
+            conditionId="0x"+"a"*64, description="Resolve according to Fed release",
+            resolutionSource="https://www.federalreserve.gov/"), "now")
+        self.assertTrue(item["identity_complete"])
+        self.assertEqual(item["url"], "https://polymarket.com/event/fed-event")
+        self.assertEqual(item["no_token_id"], "789012")
+        self.assertIsNone(poly.normalize_market(market(), "now")["url"])
+        self.assertIsNone(poly.normalize_market(market(clobTokenIds='["1","1"]'), "now"))
+        self.assertFalse(poly.normalize_market(market(events=[{"id":"55","slug":"fed-event"}]), "now")["identity_complete"])
+
+    def test_conflicting_history_fails_closed(self):
+        now = datetime(2026,11,24,tzinfo=timezone.utc)
+        opener = Mock()
+        t = int(now.timestamp())-60
+        opener.open.return_value = FakeResponse({"history":[{"t":t,"p":.2},{"t":t,"p":.8}]})
+        with self.assertRaises(poly.PolymarketUnavailable):
+            poly.price_history({"yes_token_id":"123"}, opener=opener, now=now)
+
+    def test_bad_endpoint_prices_do_not_promote(self):
+        now = datetime(2026,11,24,tzinfo=timezone.utc)
+        item = poly.normalize_market(market(), now.isoformat())
+        for bad in (float("nan"), 2, True, None):
+            bars = [{"timestamp":(now-timedelta(hours=1)).isoformat(),"yes_price":bad},
+                    {"timestamp":now.isoformat(),"yes_price":.8}]
+            self.assertEqual(poly.triage(item,bars,now=now)["research_priority"],"CONTEXT_ONLY")
+
+    def test_rotation_and_duplicate_conflicts(self):
+        from scripts import polymarket_discovery as discovery
+        now = datetime(2026,11,24,tzinfo=timezone.utc)
+        raw = [poly.normalize_market(market(id=str(100+i), volume24hr=str(20000-i*100)),now.isoformat()) for i in range(20)]
+        conflict = dict(raw[0], question="different resolution question")
+        with patch.object(poly,"fetch_markets",return_value=raw+[raw[1],conflict]), patch.object(poly,"price_history",return_value=[]):
+            a = discovery.collect(now=now)
+            b = discovery.collect(now=now+timedelta(hours=1))
+        self.assertEqual(a["unique_markets"],19)
+        self.assertEqual(a["duplicate_conflicts"],1)
+        self.assertEqual(a["status"],"PARTIAL")
+        self.assertEqual(a["histories_attempted"],8)
+        self.assertNotEqual({x["market_id"] for x in a["observations"]},{x["market_id"] for x in b["observations"]})
+        self.assertTrue(all(not x["candidate_eligible"] for x in a["observations"]))
+
 if __name__ == "__main__":
     unittest.main()
