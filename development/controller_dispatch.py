@@ -64,7 +64,7 @@ def run_task(root, script, row, allowance, publish=False):
         return "invalid_base"
     if row.get("base_branch"):
         target = row.get("base_branch")
-        if target not in controller_publish.BASES:
+        if target not in controller_publish.BASES or (target=="codex/issue57-combined-release-20261124" and row["role"]!="release"):
             return "invalid_target"
         with FETCH_LOCK:
             subprocess.run(["git", "fetch", "--no-tags", "https://github.com/hva73/invest.git", target], cwd=script.parent.parent, check=True, timeout=90)
@@ -89,11 +89,13 @@ def run_task(root, script, row, allowance, publish=False):
             rc = subprocess.run([sys.executable, str(script), "--role", row["role"],
             "--issue", str(issue), "--task-file", str(taskfile), "--max-tokens",
             str(allowance), "--rounds", "3", "--minutes", "20", "--generation", str(generation),
-            "--progress-root", str(root), "--checkpoint", str(root / ("checkpoint-"+str(issue)+"-"+str(generation)+".json")), "--execute"],
+            "--allowed-paths-json", json.dumps(row["paths"]), "--progress-root", str(root), "--checkpoint", str(root / ("checkpoint-"+str(issue)+"-"+str(generation)+".json")), "--execute"],
             cwd=folder, stdout=out, stderr=subprocess.STDOUT).returncode
     finally:
         finished.set()
         reporter.join()
+    if rc == 75:
+        return "blocked:provider_limit"
     if rc != 0:
         return "blocked"
     changed = subprocess.check_output(["git", "status", "--porcelain"], cwd=folder)
@@ -108,6 +110,91 @@ def run_task(root, script, row, allowance, publish=False):
         (root / ("issue-" + str(issue) + "-" + str(generation) + ".pr")).write_text(url + "\n")
         return "draft_pr"
     return "review_required"
+
+def effective_rows(rows,results,running):
+    # Keep the actual running scope reserved even if the remote queue changes.
+    active={task_key(row):row for row in running}
+    out=[]
+    for row in rows:
+        key=task_key(row)
+        if key in active:
+            continue
+        out.append(dict(row,status="blocked") if key in results and row["status"]!="done" else row)
+    out.extend(dict(row,status="active") for row in active.values())
+    return out
+
+def notify_result(root,row,status,publish):
+    if not publish:
+        return
+    try:
+        phase="REVIEW_REQUIRED" if status in ("draft_pr","review_required","no_changes") else "BLOCKED"
+        progress(root,row,phase,True)
+        controller_receipts.record(root,task_key(row),status)
+        controller_receipts.flush(root)
+    except (OSError,ValueError):
+        print("RECEIPT_PENDING:",task_key(row),flush=True)
+
+def run_queue(a,root,script,statefile,donefile,state,results):
+    # A process restart cannot assume a previously reserved generation is idle.
+    # Preserve its checkout and explicitly expose the interrupted state.
+    interrupted={key for key,status in results.items() if status=="reserved"}
+    for key in interrupted:
+        results[key]="blocked:interrupted"
+    if interrupted:
+        save(donefile,results)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=a.parallel) as pool:
+        active={}
+        while active or not (root/"STOP").exists():
+            for future,row in list(active.items()):
+                if not future.done():
+                    continue
+                try:
+                    status=future.result()
+                except controller_publish.PublicationError as exc:
+                    status="blocked:"+str(exc)
+                except Exception as exc:
+                    status="blocked:"+type(exc).__name__
+                results[task_key(row)]=status
+                save(donefile,results)
+                del active[future]
+                notify_result(root,row,status,a.publish)
+            if a.publish:
+                controller_receipts.flush(root)
+                controller_progress.flush(root)
+            if (root/"STOP").exists():
+                if active:
+                    concurrent.futures.wait(active,timeout=15,return_when=concurrent.futures.FIRST_COMPLETED)
+                continue
+            try:
+                if a.remote:
+                    controller_remote.refresh(root,a.queue)
+                rows=load(a.queue,[])
+                for row in rows:
+                    key=task_key(row)
+                    if key in interrupted:
+                        notify_result(root,row,"blocked:interrupted",a.publish)
+                        interrupted.remove(key)
+                rows=effective_rows(rows,results,active.values())
+                selected=plan(rows,max_parallel=a.parallel)
+            except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as exc:
+                print("QUEUE_UNAVAILABLE:",type(exc).__name__,flush=True)
+                selected=[]
+                rows=[]
+            day=datetime.now(timezone.utc).date().isoformat()
+            for task in selected:
+                if (root/"STOP").exists():
+                    break
+                row=next(r for r in rows if (r["issue"],r.get("generation",1))==task.key)
+                if not reserve(state,day,a.daily_reservation,a.per_task):
+                    break
+                save(statefile,state)
+                results[task_key(row)]="reserved"
+                save(donefile,results)
+                active[pool.submit(run_task,root,script,row,a.per_task,a.publish)]=row
+            if active:
+                concurrent.futures.wait(active,timeout=15,return_when=concurrent.futures.FIRST_COMPLETED)
+            elif not (root/"STOP").exists():
+                time.sleep(120)
 
 def main():
     p = argparse.ArgumentParser()
@@ -136,53 +223,7 @@ def main():
         donefile = root / "results.json"
         state = load(statefile, {})
         results = load(donefile, {})
-        while not (root / "STOP").exists():
-            if a.publish:
-                controller_receipts.flush(root)
-                controller_progress.flush(root)
-            if a.remote:
-                try:
-                    controller_remote.refresh(root, a.queue)
-                except (OSError, ValueError, subprocess.SubprocessError) as exc:
-                    print("QUEUE_UNAVAILABLE:", type(exc).__name__, flush=True)
-                    time.sleep(120)
-                    continue
-            rows = load(a.queue, [])
-            # A completed local run is awaiting human/CI review, NOT a done dependency.
-            rows = [dict(r, status="blocked") if task_key(r) in results and r["status"] != "done" else r for r in rows]
-            selected = plan(rows, max_parallel=a.parallel)
-            ready = []
-            day = datetime.now(timezone.utc).date().isoformat()
-            for task in selected:
-                row = next(r for r in rows if (r["issue"],r.get("generation",1)) == task.key)
-                if not reserve(state, day, a.daily_reservation, a.per_task):
-                    break
-                save(statefile, state)
-                ready.append(row)
-                results[task_key(row)] = "reserved"
-                save(donefile, results)
-            if not ready:
-                time.sleep(120)
-                continue
-            with concurrent.futures.ThreadPoolExecutor(max_workers=a.parallel) as pool:
-                futures = {pool.submit(run_task, root, script, row, a.per_task, a.publish): row for row in ready}
-                for future in concurrent.futures.as_completed(futures):
-                    row = futures[future]
-                    try:
-                        status = future.result()
-                    except controller_publish.PublicationError as exc:
-                        status = "blocked:" + str(exc)
-                    except Exception as exc:
-                        status = "blocked:" + type(exc).__name__
-                    results[task_key(row)] = status
-                    save(donefile, results)
-                    if a.publish:
-                        try:
-                            progress(root,row,"REVIEW_REQUIRED" if status in ("draft_pr","review_required") else "BLOCKED",True)
-                            controller_receipts.record(root, task_key(row), status)
-                            controller_receipts.flush(root)
-                        except (OSError, ValueError) as exc:
-                            print("RECEIPT_PENDING:", task_key(row), type(exc).__name__, flush=True)
+        run_queue(a,root,script,statefile,donefile,state,results)
 
 if __name__ == "__main__":
     main()
