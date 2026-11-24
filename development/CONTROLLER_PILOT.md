@@ -1,23 +1,35 @@
-# ESCAPE Development Controller — pilot (#225)
+# ESCAPE Development Controller
 
-Purpose: execute the next repair round immediately, without waiting for a ChatGPT hourly task. This is an isolated, manually launched pilot, not a production service or a remote control of existing conversations.
+## Installation on the existing Mac clone
 
-## Local dry run and tests (no API)
-From a fresh clone on a disposable controller/ branch:
-```sh
-python -m unittest discover -s tests -p test_controller_pilot.py
-python development/controller_pilot.py --role mobile --issue 54 --task-file /tmp/escape-task.txt
-```
-The task file must contain a reviewed, specific issue scope. A dry run makes no model call.
-
-## Paid pilot (not yet authorized with a budget)
-Install the official Codex CLI, use a fresh isolated OS/container environment and clone with no broker/production secrets, no SSH agent, no stored GitHub credentials, no shared HOME. Disable network for agent shell commands using the Codex sandbox; permit required model access. Put a dedicated, restricted API key in the environment through a secret manager. Do not paste it in a chat or commit. Set an externally enforced spending limit or monitor and cancel; the script's call/time ceilings are not a dollar limit. Pause the existing corresponding hourly agent for the selected issue before running.
+Requires macOS, Python 3.9+, existing Codex ChatGPT login, GitHub CLI (gh) authenticated for hva73/invest. No API key required. Use a dedicated development machine/account without production or broker credentials.
 
 ```sh
-git switch -c controller/mobile-54
-python development/controller_pilot.py --role mobile --issue 54 --task-file /tmp/escape-task.txt --rounds 3 --minutes 20 --execute
+cd ~/ESCAPE-Development/controller
+git fetch origin codex/development-controller-pilot
+git switch --detach origin/codex/development-controller-pilot
+python3 -m unittest discover -s tests -p 'test_controller_*.py'
+python3 development/controller_mac.py install --publish
 ```
-Each successful invocation with changed worktree starts the next immediately. No changes, repeated state, execution error, time or round limit stops the pilot. Fresh calls inspect the same worktree; no promise of existing chat session continuity. No automatic commits, PR, merges, deployment or trade. Inspect diff and independently run targeted tests before publishing.
 
-## Next acceptance gate
-Verify actual CLI syntax/version, sandbox isolation and API authentication in the intended runner. Measure token/cost, useful changes and repeated states on one issue. Then add trusted issue queue, per-role isolated checkouts and locks, independent tests and controlled PR publishing. Only after pilot acceptance replace hourly agents. Do not run on Nordicway production or add production secrets. GitHub Actions runner integration and autonomous queue are not implemented in this pilot.
+If gh is missing install it from https://cli.github.com/ and run gh auth login. Installer checks authentication, reads the trusted queue, runs offline tests and installs a per-user LaunchAgent. Runs after login, restarts on failure. No root privileges. The Mac must remain awake and logged in.
+
+## Operations
+
+```sh
+python3 development/controller_mac.py status
+tail -n 50 ~/ESCAPE-Development/runtime/service.log
+python3 development/controller_mac.py stop
+```
+
+Stop creates STOP sentinel and unloads the LaunchAgent. Inspect results.json, budget.json, generation-specific .log/.patch/.pr files in runtime. Do not remove old checkouts blindly. Install without --publish for local patches only.
+
+## Queue
+
+Coordinator edits development/controller_tasks.json on codex/development-controller-pilot via GitHub. Queue initially empty. Each task specifies issue (open issue), role (release/mobile/motor/data/desktop), priority (integer; lower first), status (ready/active/done/blocked), paths (explicit allowed files), dependencies (issue IDs), generation (positive integer), base_branch (codex/escape-development), base_sha (exact 40-character current branch head), and task (reviewed scope). Increment generation for a new attempt after review. Mark done only after independent verification. No automatic retries of failed generations. Do not assign the same issue to hourly agents and controller simultaneously.
+
+The dispatcher uses two concurrent workers, one per role, nonoverlapping paths and dependency checks. Polls every 120 seconds when idle without model calls. Uses existing Codex ChatGPT session and bounded continuation. 120000 daily reserved tokens, 60000 per task, three rounds/20 minutes; reservation and measured token ceilings are soft and do not guarantee actual provider usage limits. No automatic merge, production deployment, trades or deletion. Draft PR publication checks scope, branch, base and file types. Draft PRs require independent review.
+
+## Acceptance
+
+Offline acceptance includes mocked GitHub/Codex flow and plist round-trip. Actual Mac launchd, authenticated GitHub push and real task-to-draft-PR readback must be confirmed before replacing existing hourly agents. Activate one reviewed task first, then transition other roles. No claim of live activation from CI alone.
