@@ -1,5 +1,5 @@
 import unittest
-from development.controller_pilot import loop, codex_command, parse_events, usage_breakdown
+from development.controller_pilot import loop, codex_command, parse_events, usage_breakdown, context_exhausted
 
 class LoopTest(unittest.TestCase):
     def run_case(self, snapshots, rounds=3, rc=0):
@@ -51,6 +51,11 @@ class OptimizationTests(unittest.TestCase):
         raw = '{"type":"turn.completed","usage":{"input_tokens":120,"output_tokens":12}}'
         self.assertIsNone(usage_breakdown(raw)["uncached_plus_output"])
         self.assertIsNone(usage_breakdown("invalid")["uncached_plus_output"])
+
+    def test_context_exhaustion_is_explicit_and_not_generic_error(self):
+        self.assertTrue(context_exhausted('{"type":"turn.failed","error":{"message":"context_length_exceeded"}}'))
+        self.assertFalse(context_exhausted('{"type":"turn.failed","error":{"message":"usage limit reached"}}'))
+        self.assertFalse(context_exhausted('{"type":"item.completed","message":"context window exceeded"}'))
 
     def test_missing_usage_or_session_not_invented(self):
         self.assertEqual(parse_events('not json'),(None,0,False))
