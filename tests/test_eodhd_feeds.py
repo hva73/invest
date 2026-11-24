@@ -381,7 +381,7 @@ class FeedTests(unittest.TestCase):
  def test_closed_bar_uses_actual_bar_open_time_without_inventing_trade_time(self):
   from test_hotwatch_engine import request
   import hotwatch_engine
-  req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0);adapter=EODHDAdapter(None,1,Opener({}));at=(now-timedelta(minutes=3)).isoformat()
+  req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0);adapter=EODHDAdapter(None,1,Opener({}));at=(now-timedelta(minutes=1)).isoformat()
   class Feeds:
    def minute_bars(self,*args):return {'status':'OK','bars':[{'bar_open_at':at,'open':'10','high':'12','low':'9','close':'11','volume':'50'}]}
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
@@ -407,3 +407,15 @@ class FeedTests(unittest.TestCase):
    for last in (None,(now-timedelta(hours=25)).isoformat()):
     sample=adapter.poll({'request_data':req,'last_data':last})
     self.assertEqual(feed.window,(int(now.timestamp())-86400,int(now.timestamp())));self.assertEqual(sample['event_time'],new.isoformat())
+
+ def test_stale_jdzg_bar_does_not_mask_newer_rest_quote(self):
+  from test_hotwatch_engine import request
+  req=request();req.update(provider='eodhd',provider_symbol='JDZG.US',ticker='JDZG');now=datetime(2026,11,24,18,30,tzinfo=timezone.utc);old=now-timedelta(minutes=5)
+  opener=Opener({'code':'JDZG.US','timestamp':int(now.timestamp()),'close':'1.50','currency':'USD'});adapter=EODHDAdapter(None,1,opener)
+  class Feeds:
+   def minute_bars(self,*args):return {'status':'OK','bars':[{'bar_open_at':old.isoformat(),'open':'1','high':'2','low':'1','close':'1.25','volume':'50'}]}
+  env={'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'1'}
+  from contextlib import nullcontext
+  with patch.dict(os.environ,env),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.utc',return_value=now),patch.object(adapter.pluto,'safe_context',return_value=unknown_context()),patch('hotwatch_adapters.Capacity.open',return_value=nullcontext(Response(opener.payload))):
+   sample=adapter.poll({'request_data':req,'last_data':old.isoformat()})
+  self.assertEqual(sample['event_time'],now.isoformat());self.assertEqual(sample['price'],'1.50');self.assertEqual(sample['market_status'],'UNKNOWN');self.assertIsNone(sample['bid']);self.assertEqual(adapter.last_feed_diagnostics['bar_history_status'],'STALE_FALLBACK_TO_REST')
