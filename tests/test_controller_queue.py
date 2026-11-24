@@ -27,3 +27,15 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(plan(rows,max_parallel=1),[])
         for bad in (0,6,True):
             with self.assertRaises(ValueError): plan(rows,max_parallel=bad)
+
+    def test_multiple_generations_same_issue_and_review_gate(self):
+        first=dict(task(57,role="release"),generation=1)
+        second=dict(task(57,role="release",dependencies=("57:1",)),generation=2)
+        self.assertEqual([t.key for t in plan([first,second])],[(57,1)])
+        self.assertEqual(plan([dict(first,status="blocked"),second]),[])
+        self.assertEqual([t.key for t in plan([dict(first,status="done"),second])],[(57,2)])
+
+    def test_independent_approved_next_generation(self):
+        first=dict(task(57,role="release"),generation=1,status="blocked")
+        second=dict(task(57,role="release"),generation=2)
+        self.assertEqual([t.key for t in plan([first,second])],[(57,2)])
