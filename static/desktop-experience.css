@@ -273,7 +273,7 @@
  .signal-overview .market-period-title{display:none}
 }
 
-@media(max-width:700px){.signal-overview :is(.market-sample-change,.market-scale,.market-axis,.market-marker-legend){display:none}}
+@media(max-width:700px){.signal-overview :is(.market-sample-change,.market-scale,.market-marker-legend){display:none}}
 
 @media(max-width:700px){.signal-overview .signal-trade-ready-hint{display:none}.signal-mobile-nav .signal-why-trigger{margin:0;line-height:1.4}.signal-mobile-nav>button{line-height:1.4}}
 
