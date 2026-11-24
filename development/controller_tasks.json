@@ -1,1 +1,16 @@
-[]
+[
+  {
+    "issue": 225,
+    "role": "release",
+    "priority": 1,
+    "status": "ready",
+    "paths": [
+      "docs/controller-live-smoke.md"
+    ],
+    "dependencies": [],
+    "generation": 1,
+    "base_branch": "codex/escape-development",
+    "base_sha": "adb2cc6e4529ace96d137bfa42df95e0ef4b51b2",
+    "task": "Isolated controller acceptance smoke only. Create docs/controller-live-smoke.md with exactly one line: ESCAPE CONTROLLER LIVE SMOKE followed by a newline. Verify exact file content and git diff scope. No other changes, no network, no production or broker access. Do not commit or push; trusted dispatcher publishes a draft PR. On subsequent round if the file already matches, do not change anything. This QA-only PR must never be merged."
+  }
+]
