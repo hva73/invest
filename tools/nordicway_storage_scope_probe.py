@@ -2,12 +2,44 @@
 
 Never prints secrets or file content; never deletes, compresses, or modifies files.
 """
+import ast
+import hashlib
 import json
 import os
 import re
 import urllib.parse
 import urllib.request
 from nordicway_storage_inventory import NoRedirect
+
+CANDIDATE_SHA = "3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65"
+CANDIDATE_FILES = ('polymarket_intelligence.py','scripts/polymarket_discovery.py','scripts/polymarket_smoke.py','docs/POLYMARKET_INTELLIGENCE.md','static/statistics-ui.js','static/statistics.css','realized_statistics.py','BUILD_COMMIT','release_approval.py','web_push.py','strategy_center.py','strategy_lab.py','data/dk_postcodes.json','user_profile.py','sector_intelligence.py','ssga_holdings.py','ishares_holdings.py','tasks/pepe_test_signal.py','tasks/pluto_readonly_risk_probe.py','static/sector-ui.js','static/journal-ui.js','journal_projection.py','dashboard_projection.py','display_policy.py','static/dashboard-ui.js','candidate_lifecycle.py','static/candidate-ui.js','hotwatch_api.py','hotwatch_buy_plan.py','hotwatch_contract.py','hotwatch_engine.py','hotwatch_warmup.py','hotwatch_features.py','hotwatch_strategy.py','hotwatch_adapters.py','eodhd_capacity.py','eodhd_feeds.py','cxe_reference.py','eodhd_us_reference.py','instrument_resolver.py','hotwatch_service.py','hotwatch_supervisor.py','static/engine-ui.js','intel_workflows.py','intel_contract.py','static/intel-ui.js','app.py','static/overview-ui.js','market_data.py','static/market-ui.js','trade_service.py','pluto_trade_contract.json','static/trade-ui.js','report_ingest.py','report_v2.py','report_validation.py','position_reports.py','static/position-ui.js','mcp_reports.py','asset_quotes.py','pending_orders.py','portfolio_data.py','portfolios.py','mcp_client.py','pluto.py','oauth.py','jobs.py','news.py','worker.py','setup_runtime.py','requirements.txt','passenger_wsgi.py','static/app.js','static/report-ui.js','static/index.html','static/demo-data.js','static/style.css','static/desktop-experience.css','static/manifest.json','static/sw.js','static/icon.svg')
+REFERENCE_ESTIMATOR = "def estimate_required_bytes(checkout, target):\n    \"\"\"Conservative reservation for DB backup/journal, code and two stages.\"\"\"\n    checkout, target = Path(checkout), Path(target)\n    database = target / 'var' / 'escape.db'\n    if database.is_symlink() or not database.is_file():\n        raise ValueError('database_unavailable')\n    sidecar_total = 0\n    for suffix in ('-wal', '-journal'):\n        path = Path(str(database) + suffix)\n        try:\n            info = path.lstat()\n        except FileNotFoundError:\n            continue\n        if not stat.S_ISREG(info.st_mode):\n            raise ValueError('database_unavailable')\n        sidecar_total += info.st_size\n    names = nordicway_release_preflight.manifest(checkout)\n    source_total = 0\n    existing_total = 0\n    for name in names:\n        source = checkout / name\n        installed = target / name\n        if source.is_symlink() or not source.is_file() or installed.is_symlink():\n            raise ValueError('unsafe_manifest_file')\n        source_total += source.stat().st_size\n        if installed.exists():\n            if not installed.is_file():\n                raise ValueError('unsafe_manifest_file')\n            existing_total += installed.stat().st_size\n    base = (database.stat().st_size + sidecar_total) * 2 + source_total * 2 + existing_total\n    return base + max(256 * 1024 * 1024, (base + 9) // 10)\n"
+
+def manifest_tuple(source):
+    tree=ast.parse(source)
+    entries=[node.value for node in tree.body if isinstance(node,ast.Assign) and len(node.targets)==1 and isinstance(node.targets[0],ast.Name) and node.targets[0].id=="FILES"]
+    if len(entries)!=1: raise ValueError("manifest_invalid")
+    value=ast.literal_eval(entries[0])
+    if not isinstance(value,tuple) or not value or len(value)>500 or any(not isinstance(x,str) for x in value) or len(set(value))!=len(value):
+        raise ValueError("manifest_invalid")
+    return value
+
+def bridge_comparison(read_code):
+    out={"candidate_sha":CANDIDATE_SHA,"candidate_manifest_count":len(CANDIDATE_FILES)}
+    try:
+        files=manifest_tuple(read_code("apply_update.py"))
+        out.update(bridge_manifest_count=len(files),bridge_manifest_matches=(files==CANDIDATE_FILES),missing_candidate_files=sorted(set(CANDIDATE_FILES)-set(files)))
+    except (ValueError,TypeError,SyntaxError,OSError):
+        out["bridge_manifest_matches"]="unknown"
+    try:
+        adapter=ast.parse(read_code("nordicway_deploy_adapter.py"))
+        estimator=[n for n in adapter.body if isinstance(n,ast.FunctionDef) and n.name=="estimate_required_bytes"]
+        reference=ast.parse(REFERENCE_ESTIMATOR).body[0]
+        out["legacy_two_copy_estimator_matches"]=len(estimator)==1 and ast.dump(estimator[0])==ast.dump(reference)
+        out["manifest_mismatch_guard_present"]=any(isinstance(n,ast.Constant) and n.value=="updater_manifest_mismatch" for n in ast.walk(adapter))
+    except (ValueError,TypeError,SyntaxError,OSError):
+        out["legacy_two_copy_estimator_matches"]="unknown"
+    return out
 
 PATHS = (
     "/home/nordicr4/logs",
@@ -114,7 +146,15 @@ def deployment_gates(token):
             out["approved_sha"] = commit_marker(bridge, "approved-sha")
         if out["build_commit_present"]:
             out["build_commit"] = commit_marker(app, "BUILD_COMMIT")
-        for name in ("escape.db", "escape.db-wal", "escape.db-journal"):
+        # Only two fixed source modules, never keys, configuration, DB or arbitrary paths.
+        def read_code(name):
+            if name not in ("apply_update.py","nordicway_deploy_adapter.py") or bridge_files.get(name,{}).get("type")!="file":
+                raise ValueError("source_unavailable")
+            result=call("get_file_content",{"dir":bridge,"file":name,"from_charset":"UTF-8","to_charset":"UTF-8","update_html_document_encoding":0})
+            if not isinstance(result,dict) or not isinstance(result.get("content"),str):raise ValueError("source_unavailable")
+            return result["content"]
+        out["bridge_comparison"]=bridge_comparison(read_code)
+        for name in ("escape.db", "escape.db-wal", "escape.db-journal", "escape.db-shm"):
             r = var_files.get(name, {})
             out[name.replace(".", "_").replace("-", "_") + "_bytes"] = int(r["size"]) if r.get("type") == "file" and str(r.get("size", "")).isdigit() else None
     except Exception as ex:
