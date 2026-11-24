@@ -104,9 +104,30 @@ def normalize_market(raw, observed_at):
         return None
     if not all(isinstance(x, str) and x.isdigit() for x in tokens):
         return None
+    events = raw.get("events")
+    event = events[0] if isinstance(events, list) and len(events) == 1 and isinstance(events[0], dict) else {}
+    event_slug = event.get("slug")
+    event_id = str(event.get("id", ""))
+    condition_id = raw.get("conditionId")
+    resolution = raw.get("description")
+    valid_event = (isinstance(event_slug, str) and bool(re.fullmatch(r"[a-zA-Z0-9-]{1,200}", event_slug))
+                   and event_id.isdigit())
+    valid_condition = isinstance(condition_id, str) and bool(re.fullmatch(r"0x[0-9a-fA-F]{64}", condition_id))
+    identity_complete = bool(valid_event and valid_condition and isinstance(resolution, str) and resolution.strip())
+    if tokens[0] == tokens[1]:
+        return None
     return {
+        "event_id": event_id if valid_event else None,
+        "event_slug": event_slug if valid_event else None,
+        "market_slug": slug,
+        "condition_id": condition_id if valid_condition else None,
+        "resolution_rules": resolution if isinstance(resolution, str) else None,
+        "resolution_source": raw.get("resolutionSource") if isinstance(raw.get("resolutionSource"), str) else None,
+        "identity_complete": identity_complete,
+        "no_token_id": tokens[1],
         "provider": "Polymarket", "market_id": market_id, "question": question[:500],
-        "url": "https://polymarket.com/event/" + urllib.parse.quote(slug, safe="-"),
+        "url": "https://polymarket.com/event/" + urllib.parse.quote(event_slug, safe="-") if valid_event else None,
+        "market_api_url": GAMMA + "/markets/" + market_id,
         "yes_token_id": tokens[0], "yes_price": yes, "no_price": no,
         "volume_24h_usd": volume if volume is not None and volume >= 0 else None,
         "liquidity_usd": liquidity if liquidity is not None and liquidity >= 0 else None,
@@ -120,7 +141,7 @@ def normalize_market(raw, observed_at):
 
 def fetch_markets(limit=100, opener=None, now=None):
     """Fetch only public market metadata, with no persistent write or side effects."""
-    if not isinstance(limit, int) or not 1 <= limit <= 100:
+    if type(limit) is not int or not 1 <= limit <= 100:
         raise ValueError("limit must be between 1 and 100")
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
@@ -131,7 +152,7 @@ def fetch_markets(limit=100, opener=None, now=None):
                  "order": "volume24hr", "ascending": "false"}, opener=opener)
     if not isinstance(data, list):
         raise PolymarketUnavailable("invalid markets response")
-    return [item for raw in data if (item := normalize_market(raw, stamp))]
+    return [item for raw in data[:limit] if (item := normalize_market(raw, stamp))]
 
 
 def price_history(market, opener=None, now=None):
@@ -156,8 +177,13 @@ def price_history(market, opener=None, now=None):
         if type(t) is int and cutoff <= t <= ceiling and p is not None and 0 <= p <= 1:
             samples.append({"timestamp": datetime.fromtimestamp(t, timezone.utc).isoformat(),
                             "yes_price": p})
-    return sorted({sample["timestamp"]: sample for sample in samples}.values(),
-                  key=lambda sample: sample["timestamp"])
+    unique = {}
+    for sample in samples:
+        key = sample["timestamp"]
+        if key in unique and unique[key]["yes_price"] != sample["yes_price"]:
+            raise PolymarketUnavailable("conflicting history samples")
+        unique[key] = sample
+    return sorted(unique.values(), key=lambda sample: sample["timestamp"])
 
 
 def triage(market, history=None, min_liquidity_usd=10_000, min_volume_24h_usd=5_000, now=None):
@@ -182,13 +208,17 @@ def triage(market, history=None, min_liquidity_usd=10_000, min_volume_24h_usd=5_
             duration = (last_at - first_at).total_seconds()
             in_window = 0 < duration <= HISTORY_WINDOW_SECONDS and 0 <= seconds_since_last <= MAX_HISTORY_AGE_SECONDS
             in_window = in_window and 0 <= (now - first_at).total_seconds() <= HISTORY_WINDOW_SECONDS
-            if in_window:
-                delta = round((history[-1]["yes_price"] - history[0]["yes_price"]) * 100, 2)
+            first_price = _finite_number(history[0]["yes_price"])
+            last_price = _finite_number(history[-1]["yes_price"])
+            if in_window and first_price is not None and last_price is not None and 0 <= first_price <= 1 and 0 <= last_price <= 1:
+                delta = round((last_price - first_price) * 100, 2)
         except (KeyError, TypeError, ValueError, OverflowError):
             pass
     return {
         **market, "relevant_topic": relevant, "liquidity_gate": liquid,
         "history_first_at": first_at.isoformat() if delta is not None else None,
+        "history_first_yes_price": first_price if delta is not None else None,
+        "history_last_yes_price": last_price if delta is not None else None,
         "history_last_at": last_at.isoformat() if delta is not None else None,
         "history_coverage": "RECENT_24H" if delta is not None else "UNVERIFIED",
         "change_percentage_points": delta,
