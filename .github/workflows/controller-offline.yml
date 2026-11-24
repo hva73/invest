@@ -2,7 +2,9 @@ name: ESCAPE controller offline tests
 on:
   pull_request:
     paths:
-      - 'development/controller_pilot.py'
+      - 'development/controller_*.py'
+      - 'development/controller_tasks.json'
+      - 'tests/test_controller_*.py'
       - 'tests/test_controller_pilot.py'
       - 'development/controller_queue.py'
       - 'tests/test_controller_queue.py'
