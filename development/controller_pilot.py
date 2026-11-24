@@ -144,6 +144,9 @@ def main():
     p.add_argument("--execute", action="store_true")
     p.add_argument("--verify-smoke", action="store_true")
     p.add_argument("--max-tokens", type=int, default=60000)
+    p.add_argument("--generation",type=int,default=1)
+    p.add_argument("--progress-root",type=Path)
+    p.add_argument("--checkpoint",type=Path)
     p.add_argument("--auth", choices=("chatgpt", "api"), default="chatgpt")
     a = p.parse_args()
     task = a.task_file.read_text()[:20000]
@@ -172,8 +175,22 @@ def main():
     session = None
     usage = 0
     handed_over = False
+    def phase(name):
+        if a.progress_root:
+            try:
+                from controller_progress import record
+                record(a.progress_root,a.issue,a.generation,name)
+            except (OSError,ValueError):
+                print("PROGRESS_PENDING:",name,flush=True)
+    def checkpoint(round_number, detail, completed):
+        if a.checkpoint:
+            tmp=a.checkpoint.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"issue":a.issue,"generation":a.generation,"role":a.role,"round":round_number,"session":session,"usage":detail,"completed_turn":completed,"worktree_fingerprint":fingerprint()}))
+            tmp.replace(a.checkpoint)
     def step(i, remaining):
         nonlocal session, usage, handed_over
+        if remaining <= 0:
+            return 124
         if usage >= a.max_tokens:
             print("TOKEN_LIMIT: no further calls", flush=True)
             return 75
@@ -187,20 +204,23 @@ Task: {task}
 """
         if session:
             prompt = "Continue the same task. Inspect current diff, fix remaining issues and run targeted tests. Do not reread unchanged onboarding. If finished, leave files unchanged."
+        phase("WORKING" if i==0 else "CONTINUING")
         try:
             result = subprocess.run(codex_command(session), input=prompt, text=True,
                 stdout=subprocess.PIPE, env=env, timeout=remaining, check=False)
-            if context_exhausted(result.stdout) and session and not handed_over:
-                handed_over = True
-                session = None
-                print("HANDOVER: context exhausted; restarting same scoped task on preserved worktree",flush=True)
-                return step(i, max(0, deadline-time.monotonic()))
             new_session, tokens, completed = parse_events(result.stdout)
             session = new_session or session
             usage += tokens
             detail = usage_breakdown(result.stdout)
             print(f"ROUND {i+1}: tokens={tokens}, total={usage}, completed={completed}", flush=True)
             print("USAGE_DETAIL:", json.dumps(detail, sort_keys=True), flush=True)
+            checkpoint(i+1,detail,completed)
+            if context_exhausted(result.stdout) and not handed_over:
+                handed_over=True
+                session=None
+                phase("HANDOVER")
+                print("HANDOVER: explicit context exhaustion; preserving worktree and original scope",flush=True)
+                return step(i,deadline-time.monotonic())
             if result.returncode or not completed or not tokens:
                 return result.returncode or 1
             if not session:
