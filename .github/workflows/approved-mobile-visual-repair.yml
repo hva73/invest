@@ -20,6 +20,7 @@ jobs:
       - run: python -m playwright install --with-deps chromium
       - run: python -m unittest discover -s tests -p test_mobile_projection.py
       - run: python -m unittest discover -s tests -p test_market_data.py
+      - run: python -m unittest discover -s tests -p test_trade_service.py
       - run: node tests/test_dashboard_data.js
       - run: node tests/test_combined_holdings.js
       - run: node tests/test_sidebar_scope.js
