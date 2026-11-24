@@ -4,7 +4,7 @@ permissions:
   contents: read
 jobs:
   review:
-    if: contains(fromJSON('["codex/mobile-position-consistency-20261124","codex/mobile-kpi-final","codex/approved-mobile-visual-fix","codex/mobile-approved-parity-15nov"]'), github.event.pull_request.head.ref) || contains(fromJSON('["codex/data-and-notification-prep","codex/mobile-five-view-acceptance","codex/mobile-approved-layout-correction","codex/position-proposal4-approved","codex/mobile-signal-area-release","codex/release-mobile-independent-qa","codex/release-final-approved-layout-qa"]'), github.event.pull_request.head.ref)
+    if: contains(fromJSON('["codex/mobile-demo-parity-20261124","codex/mobile-position-consistency-20261124","codex/mobile-kpi-final","codex/approved-mobile-visual-fix","codex/mobile-approved-parity-15nov"]'), github.event.pull_request.head.ref) || contains(fromJSON('["codex/data-and-notification-prep","codex/mobile-five-view-acceptance","codex/mobile-approved-layout-correction","codex/position-proposal4-approved","codex/mobile-signal-area-release","codex/release-mobile-independent-qa","codex/release-final-approved-layout-qa"]'), github.event.pull_request.head.ref)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
@@ -21,6 +21,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_mobile_projection.py
       - run: python -m unittest discover -s tests -p test_market_data.py
       - run: python -m unittest discover -s tests -p test_trade_service.py
+      - run: node tests/test_demo_chart_identity.cjs
       - run: node tests/test_dashboard_data.js
       - run: node tests/test_combined_holdings.js
       - run: node tests/test_sidebar_scope.js
