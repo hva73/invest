@@ -4,6 +4,9 @@ on:
     paths:
       - 'development/controller_pilot.py'
       - 'tests/test_controller_pilot.py'
+      - 'development/controller_queue.py'
+      - 'tests/test_controller_queue.py'
+      - '.github/workflows/controller-pilot.yml'
       - '.github/workflows/controller-offline.yml'
 permissions:
   contents: read
@@ -18,7 +21,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: python -m unittest discover -s tests -p test_controller_pilot.py
+      - run: python -m unittest discover -s tests -p 'test_controller_*.py'
       - run: |
           printf 'Offline smoke test\n' > "$RUNNER_TEMP/controller-task.txt"
           python development/controller_pilot.py --role mobile --issue 54 --task-file "$RUNNER_TEMP/controller-task.txt"
