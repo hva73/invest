@@ -41,10 +41,13 @@ class Acceptance(unittest.TestCase):
                     Path(args[-2]).mkdir()
                 from subprocess import CompletedProcess
                 return CompletedProcess(args,0)
-            with patch.object(dispatch.subprocess,"run",side_effect=run),patch.object(dispatch.subprocess,"check_output",side_effect=[b"a"*40+b"\n",b" M static/mobile.js\n",b"diff fixture"]),patch.object(dispatch.controller_publish,"publish",return_value="https://github.com/hva73/invest/pull/999") as pub:
+            # Progress delivery has its own transport boundary; isolate it from git fixtures.
+            with patch.object(dispatch,"progress") as progress,patch.object(dispatch.subprocess,"run",side_effect=run),patch.object(dispatch.subprocess,"check_output",side_effect=[b"a"*40+b"\n",b" M static/mobile.js\n",b"diff fixture"]) as git_output,patch.object(dispatch.controller_publish,"publish",return_value="https://github.com/hva73/invest/pull/999") as pub:
                 result=dispatch.run_task(root,root/"development/controller_pilot.py",row(),60000,True)
                 self.assertEqual(result,"draft_pr")
                 pub.assert_called_once()
+                progress.assert_called_once_with(root,row(),"STARTED",True)
+                self.assertEqual(git_output.call_count,3)
                 self.assertEqual((root/"issue-54-1.patch").read_bytes(),b"diff fixture")
                 self.assertTrue((root/"issue-54-1.pr").exists())
                 self.assertEqual(dispatch.run_task(root,root/"development/controller_pilot.py",row(),60000,True),"existing_checkout")
