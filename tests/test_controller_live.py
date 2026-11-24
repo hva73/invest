@@ -108,3 +108,18 @@ class LiveControllerTests(unittest.TestCase):
                 self.assertIn("WORKING",messages[1])
                 progress.flush(root)
                 self.assertEqual(gh.call_count,4)
+
+    def test_provider_pause_uses_only_reported_reset(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);item=row(57,"release",4,"a.py")
+            raw='{"type":"turn.failed","error":{"code":"usage_limit_reached","retry_after_seconds":120}}'
+            self.assertEqual(pilot.provider_reset_at(raw,1000),1120)
+            self.assertIsNone(pilot.provider_reset_at('{"type":"turn.failed","error":{"code":"usage_limit_reached"}}',1000))
+            checkpoint={"issue":57,"generation":4,"provider_limit":True,"provider_reset_at":1120}
+            (root/"checkpoint-57-4.json").write_text(json.dumps(checkpoint))
+            dispatch.record_provider_pause(root,item,1000)
+            self.assertTrue(dispatch.provider_pause_active(root,1119))
+            self.assertFalse(dispatch.provider_pause_active(root,1120))
+            (root/"checkpoint-57-4.json").write_text(json.dumps(dict(checkpoint,provider_reset_at=None)))
+            dispatch.record_provider_pause(root,item,1200)
+            self.assertTrue(dispatch.provider_pause_active(root,10000000))
