@@ -680,6 +680,26 @@ class HotWatch(unittest.TestCase):
    ingest(change,later)
    with app.connect() as c:
     self.assertNotIn(engine._RENEWAL_AUDIT_KEY,json.loads(c.execute('SELECT payload FROM hw_calculations ORDER BY id DESC LIMIT 1').fetchone()[0]))
+ def test_entry_funnel_compact_audit_integrity_and_no_historical_fallback(self):
+  from hotwatch_service import entry_funnel
+  now=self.now
+  def row(at,signal,codes,compact=False):
+   sample=tick(at);sample['source']='eodhd'
+   calculation={'signal':signal,'reason_codes':codes,'data_timestamp':at.isoformat(),'new_market_observation':not compact,'risk_level':'high','input_sample_ids':['synthetic-observation-'+str(i) for i in range(120)],'supporting_metrics':{}}
+   return {'watch_id':self.req['watch_id'],'request':engine.canonical(self.req),'strategy':engine.canonical(BASELINE),'strategy_checksum':engine.checksum(BASELINE),'calculated':at.isoformat(),'sample':engine.canonical(sample),'calculation':engine.calculation_payload(calculation,compact)}
+  prior=row(now-timedelta(seconds=20),'WAIT',['CONFIRMATION_PENDING'])
+  latest=row(now-timedelta(seconds=10),'NO_DATA',['POSITION_CONTEXT_UNKNOWN'],True)
+  packed=json.loads(latest['calculation']);self.assertIn(engine._RENEWAL_AUDIT_KEY,packed)
+  inline=dict(latest,calculation=engine.canonical(engine.calculation_read(latest['calculation'])))
+  original=entry_funnel([inline,prior],now)
+  self.assertEqual(original,entry_funnel([latest,prior],now));self.assertEqual(original['candidate_count'],1);self.assertEqual(original['missing_or_unverified'],0)
+  packed[engine._RENEWAL_AUDIT_KEY]['sha256']='0'*64
+  corrupt=dict(latest,calculation=json.dumps(packed))
+  missing=entry_funnel([corrupt,prior],now)
+  self.assertEqual(missing['candidate_count'],1);self.assertEqual(missing['missing_or_unverified'],1);self.assertEqual(missing['strategies'],{})
+  buy=row(now,'BUY',[])
+  self.assertEqual(entry_funnel([buy,prior],now)['confirmation_movement']['confirmed_sequences'],1)
+  self.assertEqual(entry_funnel([buy,corrupt,prior],now)['confirmation_movement']['confirmed_sequences'],0)
  def test_compact_renewal_audit_excludes_action_critical_and_invalid_encoding(self):
   source={'signal':'NO_DATA','new_market_observation':False,'risk_level':'high','critical_override':False,'input_sample_ids':['long-synthetic-sample-'+str(i) for i in range(120)],'risk_parameters':{'a':'b'}}
   encoded=engine.calculation_payload(source,True)
