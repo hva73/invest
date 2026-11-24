@@ -77,10 +77,39 @@ def inspect(path=LIVE, seconds=8, table=None, now=None):
             if table is None:
                 # dbstat aggregate mode emits one row per b-tree; avoid a
                 # temporary GROUP BY over millions of page rows on a full host.
-                rows=db.execute("SELECT name,pgsize,pageno FROM dbstat WHERE aggregate=TRUE").fetchall()
+                schema={name:(kind,owner) for name,kind,owner in db.execute(
+                    "SELECT name,type,tbl_name FROM sqlite_schema WHERE type IN ('table','index')")}
+                rows=db.execute("SELECT name,pgsize,pageno,payload,unused FROM dbstat WHERE aggregate=TRUE").fetchall()
                 rows.sort(key=lambda row:row[1],reverse=True)
-                report["objects"]=[{"name":name,"bytes":size,"pages":pages} for name,size,pages in rows]
-                report["status"]="ok"
+                objects=[]
+                tables={}
+                for name,size,pages,payload,unused in rows:
+                    kind,owner=schema.get(name,("internal",name))
+                    objects.append({"name":name,"bytes":size,"pages":pages,
+                                    "payload_bytes":payload,"unused_bytes":unused,
+                                    "kind":kind,"table":owner})
+                    if kind in ("table","index"):
+                        totals=tables.setdefault(owner,{"table_bytes":0,"index_bytes":0,
+                            "payload_bytes":0,"unused_bytes":0})
+                        totals[kind+"_bytes"]+=size
+                        totals["payload_bytes"]+=payload
+                        totals["unused_bytes"]+=unused
+                report["objects"]=objects
+                report["tables"]={name:dict(t,total_bytes=t["table_bytes"]+t["index_bytes"])
+                                  for name,t in tables.items()}
+                # Pointer-map/lock-byte pages and SQLite internals are not
+                # necessarily enumerated by dbstat. Never count the residual
+                # or unused bytes inside allocated b-trees as reclaimable.
+                allocated=sum(o["bytes"] for o in objects)
+                snapshot_bytes=report["page_count"]*report["page_size"]
+                residual=snapshot_bytes-allocated-report["freelist_bytes"]
+                report["page_accounting"]={"snapshot_bytes":snapshot_bytes,
+                    "btree_bytes":allocated,"freelist_bytes":report["freelist_bytes"],
+                    "unattributed_bytes":residual}
+                if residual<0:
+                    report["reason"]="inconsistent_page_accounting"
+                else:
+                    report["status"]="ok"
             else:
                 report["table_totals"]=table_totals(db,table,now)
                 report["status"]=report["table_totals"]["status"]
