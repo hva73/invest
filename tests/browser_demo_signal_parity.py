@@ -35,6 +35,24 @@ def main():
      action=dialog.get_by_role('button',name='Køb' if side=='BUY' else 'Sælg',exact=True)
      expect(action).to_be_visible();expect(action).to_be_enabled()
      assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+     if width<=700:
+      # Use the actual data warning when present; exercise the same real DOM
+      # with deterministic warning evidence even when fixture freshness changes.
+      injected=dialog.evaluate("""d=>{
+       const slot=d.querySelector('.market-slot');
+       if(slot.querySelector('.market-warning'))return false;
+       const warning=document.createElement('small');warning.className='market-warning';
+       warning.textContent='Forældede data (syntetisk QA)';
+       slot.append(warning);return true;
+      }""")
+      warning=dialog.locator('.market-slot > .market-warning')
+      expect(warning).to_be_visible()
+      ticker=dialog.locator('.signal-mobile-instrument > strong').bounding_box()
+      quote=dialog.locator('.market-quote').bounding_box()
+      notice=warning.bounding_box()
+      assert ticker and quote and notice and notice['y']>=max(ticker['y']+ticker['height'],quote['y']+quote['height'])-1,('mobile warning overlaps quote/ticker',width,side,ticker,quote,notice)
+      assert warning.inner_text().strip(), 'data-quality warning must remain legible'
+      if injected:warning.evaluate('e=>e.remove()')
      shot=os.environ.get('ESCAPE_SCREENSHOTS')
      if shot:page.screenshot(path=f'{shot}/demo-signal-{side.lower()}-{width}.png')
      dialog.locator('[data-engine-close]:visible').first.click()
