@@ -7,6 +7,38 @@ from hotwatch_contract import SESSION,SAMPLE,CONTEXT,ACTIVATION_BATCH,EngineErro
 from hotwatch_features import features,observation_status,verified_bar_samples
 from hotwatch_strategy import BASELINE,EARLY_CATALYST,EARLY_CATALYST_V1,validate_strategy,calculate
 
+# New storage is explicitly opt-in. Readers always understand both formats,
+# so turning off future compaction does not erase existing evidence.
+_BAR_HISTORY_REF='_bar_history_ref_v1'
+
+def sample_payload(c,watch_row_id,sample,request,now):
+ """Share only byte-identical, currently verified bar arrays within one watch."""
+ full=canonical(sample)
+ if os.environ.get('ESCAPE_HW_DEDUPE_BAR_HISTORY')!='1' or not sample.get('bar_history') or verified_bar_samples(sample,request,now) is None:return full
+ bars=sample['bar_history'];body=canonical(bars);digest=checksum(bars)
+ packed={k:v for k,v in sample.items() if k!='bar_history'};packed[_BAR_HISTORY_REF]=digest
+ compact=canonical(packed)
+ if len(compact.encode('utf-8'))+128>=len(full.encode('utf-8')):return full
+ existing=c.execute('SELECT payload FROM hw_bar_history_payloads WHERE watch_row_id=? AND digest=?',(watch_row_id,digest)).fetchone()
+ if existing:
+  if existing['payload']!=body:raise EngineError('bar_history_storage_conflict',500)
+ else:c.execute('INSERT INTO hw_bar_history_payloads(watch_row_id,digest,payload) VALUES(?,?,?)',(watch_row_id,digest,body))
+ return compact
+
+def sample_read(c,watch_row_id,payload):
+ """Reconstruct the original sample before validation, checksum or replay."""
+ result=json.loads(payload)
+ if _BAR_HISTORY_REF not in result:return result
+ digest=result.pop(_BAR_HISTORY_REF)
+ if 'bar_history' in result or not isinstance(digest,str) or not re.fullmatch(r'[0-9a-f]{64}',digest):raise EngineError('invalid_bar_history_reference',500)
+ row=c.execute('SELECT payload FROM hw_bar_history_payloads WHERE watch_row_id=? AND digest=?',(watch_row_id,digest)).fetchone()
+ try:
+  bars=json.loads(row['payload']) if row else None
+  if not isinstance(bars,list) or not 1<=len(bars)<=120 or checksum(bars)!=digest:raise ValueError('missing or corrupt bar history')
+ except (ValueError,TypeError,KeyError,ArithmeticError) as exc:raise EngineError('invalid_bar_history_reference',500) from exc
+ result['bar_history']=bars
+ return result
+
 def utc():return datetime.now(timezone.utc)
 
 # Last whole UTC day representable by Python's datetime, safely below year 10000.
@@ -173,6 +205,7 @@ def init(c):
   c.execute('CREATE TABLE hw_context_events(id INTEGER PRIMARY KEY,watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),sample_row_id INTEGER REFERENCES hw_samples(id),observed TEXT NOT NULL,payload TEXT NOT NULL)')
   c.execute('INSERT INTO hw_context_events SELECT * FROM hw_context_events_legacy')
   c.execute('DROP TABLE hw_context_events_legacy')
+ c.execute('CREATE TABLE IF NOT EXISTS hw_bar_history_payloads(watch_row_id INTEGER NOT NULL REFERENCES hw_sessions(id),digest TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(watch_row_id,digest)) WITHOUT ROWID')
  c.execute('CREATE INDEX IF NOT EXISTS hw_samples_time ON hw_samples(watch_row_id,event_epoch,id)')
  c.execute('CREATE INDEX IF NOT EXISTS hw_samples_latest ON hw_samples(watch_row_id,id)')
  c.execute('CREATE INDEX IF NOT EXISTS hw_context_latest ON hw_context_events(watch_row_id,id)')
@@ -568,7 +601,7 @@ def view(c,row,now=None):
     effective='NO_DATA';display_reasons.append('POSITION_CONTEXT_CHANGED')
  if effective not in ('NO_DATA','PAUSE') and (not context or context.get('status')!='verified' or not context.get('as_of') or not 0<=(now-stamp(context['as_of'])).total_seconds()<=300):effective='NO_DATA';display_reasons.append('POSITION_CONTEXT_UNKNOWN')
  if sample and effective not in ('NO_DATA','PAUSE'):
-  latest_sample=json.loads(sample['payload']);max_age=request['risk']['max_quote_age_s']
+  latest_sample=sample_read(c,row['id'],sample['payload']);max_age=request['risk']['max_quote_age_s']
   if latest_sample['source']=='eodhd' and latest_sample['market_status']!='UNKNOWN':
    fields=['status_at']+(['bid_at','ask_at'] if effective=='BUY' else [])
    if any(not latest_sample.get(k) or not 0<=(now-stamp(latest_sample[k])).total_seconds()<=max_age for k in fields):effective='NO_DATA';display_reasons.append('MARKET_EVIDENCE_STALE')
@@ -606,13 +639,13 @@ def view(c,row,now=None):
  interval_basis='worker_schedule'
  if type(budget_interval) not in (int,float) or not 0<budget_interval<=86400:
   budget_interval=effective_poll_interval(c,request,profile);interval_basis='reader_estimate'
- latest_payload=json.loads(sample['payload']) if sample else None
+ latest_payload=sample_read(c,row['id'],sample['payload']) if sample else None
  if latest_payload and latest_payload.get('bar_history'):
   # Older bar arrays are not needed for quote-to-quote comparisons; omit them
   # so each dashboard refresh does not deserialize thousands of old bars.
-  previous=c.execute("SELECT json_remove(payload,'$.bar_history','$.bar_evidence') AS payload FROM hw_samples WHERE watch_row_id=? AND event_epoch<? ORDER BY event_epoch DESC,id DESC LIMIT 119",(row['id'],stamp(latest_payload['event_time']).timestamp())).fetchall()
+  previous=c.execute("SELECT json_remove(payload,'$.bar_history','$.bar_evidence','$._bar_history_ref_v1') AS payload FROM hw_samples WHERE watch_row_id=? AND event_epoch<? ORDER BY event_epoch DESC,id DESC LIMIT 119",(row['id'],stamp(latest_payload['event_time']).timestamp())).fetchall()
   history=[json.loads(x['payload']) for x in reversed(previous)]+[latest_payload]
- else:history=[json.loads(x['payload']) for x in reversed(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 120',(row['id'],)).fetchall())]
+ else:history=[sample_read(c,row['id'],x['payload']) for x in reversed(c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY event_epoch DESC,id DESC LIMIT 120',(row['id'],)).fetchall())]
  if latest_payload and latest_payload.get('bar_history') and verified_bar_samples(latest_payload,request,now) is None:
   history[-1]={k:v for k,v in latest_payload.items() if k not in ('bar_history','bar_evidence')}
  data_status=observation_status(history,now,request['risk']['max_quote_age_s'],effective,row['status'])
@@ -994,7 +1027,7 @@ def history(connect,uid,wid,mode=False,kind='events',after=0,limit=50,order='asc
   rows=c.execute('SELECT * FROM '+table+' WHERE watch_row_id=?'+bound+' ORDER BY id '+order+' LIMIT ?',args).fetchall()
   result=[]
   for r in rows[:limit]:
-   data=dict(r);data['data']=json.loads(data.pop('payload'));result.append(data)
+   data=dict(r);payload=data.pop('payload');data['data']=sample_read(c,row['id'],payload) if table=='hw_samples' else json.loads(payload);result.append(data)
   return {'items':result,'next_cursor':rows[limit-1]['id'] if len(rows)>limit else None,'watch_id':wid,'is_test':mode,'kind':kind}
 
 def sample_errors(sample,request,now):
@@ -1031,7 +1064,7 @@ def analysis_snapshot(c,row,sample,request,now):
  if bars is not None:samples=[sample]
  else:
   prior=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND event_epoch<? ORDER BY event_epoch DESC,id DESC LIMIT 119',(row['id'],stamp(sample['event_time']).timestamp())).fetchall()
-  samples=[json.loads(r['payload']) for r in reversed(prior)]+[sample]
+  samples=[sample_read(c,row['id'],r['payload']) for r in reversed(prior)]+[sample]
  return version,bars,samples
 
 def sample_conflict(previous,current,keys):
@@ -1142,7 +1175,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   new_market_event=True
   if old:
    if row['last_data'] and stamp(json.loads(old['payload'])['event_time'])!=stamp(row['last_data']):raise EngineError('historical_sample_context_update',409)
-   previous_sample=json.loads(old['payload']);incoming=sample
+   previous_sample=sample_read(c,row['id'],old['payload']);incoming=sample
    try:sample=refreshed_trade_evidence(previous_sample,sample,request,now)
    except EngineError as error:
     if error.code=='sample_id_conflict' and getattr(error,'market_conflict',None):error.market_conflict.update(previous_journal_received_at=old['received'],ingest_attempt_at=now.isoformat())
@@ -1172,12 +1205,12 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
     c.execute('INSERT INTO hw_context_events(watch_row_id,sample_row_id,observed,payload) VALUES(?,?,?,?)',(row['id'],old['id'],now.isoformat(),canonical(current_context)))
     if material(prior_context)!=material(current_context):event(c,row,'BROKER_CONTEXT_UPDATED',now,'Position/order context changed; no new market observation',data_time=current_context['as_of'])
    if evidence_changed:
-    c.execute('UPDATE hw_samples SET payload=?,digest=? WHERE id=?',(canonical(sample),checksum(sample),old['id']))
+    c.execute('UPDATE hw_samples SET payload=?,digest=? WHERE id=?',(sample_payload(c,row['id'],sample,request,now),checksum(sample),old['id']))
     event(c,row,'MARKET_EVIDENCE_UPDATED',now,'Quote/calendar evidence renewed; original trade time unchanged',metrics={'previous_digest':old['digest'],'current_digest':checksum(sample),'bid_at':sample.get('bid_at'),'ask_at':sample.get('ask_at'),'status_at':sample.get('status_at')},data_time=sample['event_time'])
    sample_row_id=old['id'];new_market_event=False
   else:
    if row['last_data'] and stamp(sample['event_time'])<=stamp(row['last_data']):raise EngineError('out_of_order_market_data',409)
-   cur=c.execute('INSERT INTO hw_samples(watch_row_id,source,sample_id,event_epoch,received,payload,digest) VALUES(?,?,?,?,?,?,?)',(row['id'],sample['source'],sample['sample_id'],stamp(sample['event_time']).timestamp(),now.isoformat(),canonical(sample),checksum(sample)))
+   cur=c.execute('INSERT INTO hw_samples(watch_row_id,source,sample_id,event_epoch,received,payload,digest) VALUES(?,?,?,?,?,?,?)',(row['id'],sample['source'],sample['sample_id'],stamp(sample['event_time']).timestamp(),now.isoformat(),sample_payload(c,row['id'],sample,request,now),checksum(sample)))
    sample_row_id=cur.lastrowid
   strategy_data=json.loads(row['strategy']);state=json.loads(row['state'])
   if same_history:
