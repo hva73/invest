@@ -12,7 +12,7 @@ python -m unittest tests.test_polymarket_intelligence -v
 ```
 
 The runner scans up to 100 public active Gamma markets and requests 24-hour
-YES-price history for at most eight liquid topic matches. It writes JSON to
+YES-price history for at most eight liquid topic matches. Half the history slots retain the volume leaders, the remainder rotate hourly through other eligible markets in the same bounded Gamma response. This does not claim coverage outside those 100 markets. Identical market IDs are deduplicated; conflicting records are excluded. It writes JSON to
 standard output only; no database, report, automation or broker writes.
 
 ## Data contract
@@ -41,8 +41,7 @@ standard output only; no database, report, automation or broker writes.
 This PR supplies the first safe, executable data adapter and research output.
 It does **not** wire in scheduled ingestion, persistence, UI, report-v2 fields,
 motor activation, or production deployment. Those require existing owner-approved
-Codex integration and release controls. Keep the existing hourly Radar automation
-unchanged. Before promotion: run unit tests, an authorized outbound API smoke test,
+Codex integration and release controls. Keep the existing hourly Radar schedule and trading mandate unchanged. Before promotion: run unit tests, an authorized outbound API smoke test,
 verify topic precision and pricing against actual Polymarket market pages, compare
 timestamped signals against subsequent stock reactions without look-ahead, and
 confirm the user never sees a prediction contract as a Pluto-tradable asset.
@@ -83,6 +82,10 @@ If the external source is unavailable, continue the rest of the radar,
 show a bounded `SOURCE_UNAVAILABLE` state and do not alter existing
 candidate continuity. The adapter never uses wallets, private credentials,
 broker writes or public guessing of company identity.
+
+## Identity and evidence
+
+Market slug and event slug are distinct; use an event link only when Gamma supplies a unique event identity. Preserve market API link, condition ID, event ID, both token IDs, resolution rules and resolution source separately. Missing or conflicting identity is not independently verified; research priority alone is never permission to hand off. History endpoints include prices and timestamps; contradictory samples at one timestamp fail closed. Collector explicitly distinguishes RETRIEVED, PARTIAL and SOURCE_UNAVAILABLE.
 
 ## CI and acceptance
 
