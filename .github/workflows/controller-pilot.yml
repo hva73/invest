@@ -75,7 +75,7 @@ jobs:
         run: |
           test "$APPROVED" = 'true'
           test -n "$OPENAI_API_KEY"
-          python development/controller_pilot.py --role "$ROLE" --issue "$ISSUE" --task-file "$RUNNER_TEMP/controller-task.txt" --rounds 3 --minutes 20 --execute
+          python development/controller_pilot.py --role "$ROLE" --issue "$ISSUE" --task-file "$RUNNER_TEMP/controller-task.txt" --rounds 3 --minutes 20 --auth api --execute
       - name: Capture tracked and untracked changes for review
         if: always()
         run: |
