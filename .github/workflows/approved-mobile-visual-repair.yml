@@ -32,6 +32,7 @@ jobs:
       - run: python tests/browser_daily_parity.py
       - run: python tests/browser_position_entry_regression.py
       - run: python tests/browser_signal_push_detail.py
+      - run: python tests/browser_demo_signal_parity.py
       - run: python tests/browser_sector_journey.py
       - name: Require visual evidence for five mobile views
         run: |
