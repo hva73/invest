@@ -20,3 +20,40 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest -v test_polymarket_radar_chain test_polymarket_intelligence test_mcp_reports test_hotwatch_e2e_contract
+
+  exact_release_visual_evidence:
+    if: github.event.pull_request.head.ref == 'test/polymarket-radar-chain-20261124'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .:tests
+      ESCAPE_HW_AUTOSUPERVISE: '0'
+      ESCAPE_PLAYWRIGHT_MANAGED: '1'
+      ESCAPE_SCREENSHOTS: visual-review
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65
+          persist-credentials: false
+      - run: test "$(git rev-parse HEAD)" = 3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt playwright==1.56.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Synthetic browser visual evidence on frozen product SHA
+        run: |
+          mkdir -p visual-review
+          for f in tests/browser_daily_parity.py tests/browser_position_entry_regression.py tests/browser_signal_push_detail.py tests/browser_sector_journey.py tests/browser_desktop_experience.py tests/browser_portfolio_value_chart.py tests/browser_statistics_ring_center.py tests/browser_demo_signal_parity.py tests/browser_statistics_integration.py; do python "$f" || exit 1; done
+          for f in daily-parity-screens/oversigt-390.png daily-parity-screens/oversigt-healthy-390.png daily-parity-screens/beholdningskort-390.png visual-review/position-390.png visual-review/signal-buy-390.png visual-review/signal-sell-390.png visual-review/overview-before-1440.png visual-review/demo-signal-buy-390.png visual-review/demo-signal-sell-390.png; do test -s "$f" || exit 1; done
+          printf '%s\n' "$(git rev-parse HEAD)" > visual-review/PRODUCT_SHA.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: synthetic-visual-evidence-3cc0c7b
+          path: |
+            visual-review/*.png
+            visual-review/PRODUCT_SHA.txt
+            daily-parity-screens/*.png
+          if-no-files-found: error
+          retention-days: 7
