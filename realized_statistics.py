@@ -240,19 +240,27 @@ def _project(direct_orders, collection_orders=(), signal_order_sides=None, order
             except (InvalidOperation, ValueError): zero = False
             if not (zero and row.get('status') in ('CANCELED','CANCELLED','EXPIRED','REJECTED')): taint(row, scope)
             return
-        if (scope == 'direct' and isinstance(row.get('asset'), dict)
-                and isinstance(row['asset'].get('id'), str) and row['asset']['id']
-                and (signal_order_sides or {}).get(record['id']) == (record['side'], row['asset']['id'])):
-            record['origin'] = 'signal'
-        proof = (order_origins or {}).get(record['id'])
-        if scope == 'direct' and isinstance(proof, dict):
-            asset_id = row['asset'].get('id')
-            same_identity = (asset_id == proof['asset_id'] if asset_id else
-                             record['name'] == proof['name'] and record['currency'] == proof['currency']
-                             and (not proof.get('ticker') or record['ticker'] == proof['ticker']))
-            if same_identity and record['side'] == proof['side']:
-                record['origin'] = proof['origin']
-                record['origin_evidence'] = proof['evidence']
+        if scope == 'direct':
+            # Some list_orders responses omit the asset ID; when supplied, all
+            # explicit IDs must agree. Never let a matching display name or
+            # one matching ID override a contradictory instrument reference.
+            asset = row['asset']
+            ids = [asset[k] for k in ('id', 'assetId') if asset.get(k) is not None]
+            valid_ids = all(isinstance(value, str) and value for value in ids) and len(set(ids)) <= 1
+            asset_id = ids[0] if valid_ids and ids else None
+            signal = (signal_order_sides or {}).get(record['id'])
+            proof = (order_origins or {}).get(record['id'])
+            if isinstance(proof, dict):
+                same_identity = (valid_ids and (not ids or asset_id == proof['asset_id'])
+                                 and record['name'] == proof['name']
+                                 and record['currency'] == proof['currency']
+                                 and (not proof.get('ticker') or record['ticker'] == proof['ticker']))
+                compatible = not signal or (proof['origin'] == 'signal' and signal == (record['side'], proof['asset_id']))
+                if same_identity and compatible and record['side'] == proof['side']:
+                    record['origin'] = proof['origin']
+                    record['origin_evidence'] = proof['evidence']
+            elif asset_id and signal == (record['side'], asset_id):
+                record['origin'] = 'signal'
         key = (scope, record['id'])
         if key in seen:
             if seen[key] != record:
@@ -466,6 +474,12 @@ def read(connect, user_id, client_factory=None):
                 data = decode_result(client.request('tools/call', {'name':'list_orders', 'arguments':{
                     'portfolioId':identifier, 'scope':'DIRECT', 'statusGroup':'INACTIVE', 'limit':50}}), 'list_orders')
                 rows = list_data(data, ['orders','items','data'])
+                # The current Pluto response includes portfolioId. Reject a
+                # contradictory explicit owner scope before pairing any fills.
+                if any(isinstance(row, dict) and row.get('portfolioId') is not None
+                       and row['portfolioId'] != identifier for row in rows):
+                    stage = 'DIRECT_SCOPE_MISMATCH'
+                    raise ValueError('Order portfolio mismatch')
                 stage = 'DIRECT_PROJECTION'
                 result = project(rows, signal_order_sides=signal_order_sides(connect, user_id, portfolio['id']), order_origins=documented_order_origins(connect,user_id,portfolio['id']))
             elif portfolio['kind'] == 'collection' and namespace == 'collections':
