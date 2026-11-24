@@ -127,6 +127,30 @@ def continuation_usage(detail, gross):
     value=detail.get("uncached_plus_output")
     return value if type(value) is int and value>=0 else gross
 
+def provider_reset_at(output,now=None):
+    # Only accept a reset explicitly supplied in a structured provider error.
+    # Missing or unrecognized reset information is not a guessed retry time.
+    now=time.time() if now is None else now
+    if not provider_limited(output):
+        return None
+    for line in output.splitlines():
+        try:
+            event=json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event,dict) or event.get("type") not in ("error","turn.failed"):
+            continue
+        error=event.get("error",{})
+        if not isinstance(error,dict):
+            continue
+        delay=error.get("retry_after_seconds")
+        stamp=error.get("reset_at")
+        if type(delay) in (int,float) and 0<delay<=604800:
+            return now+delay
+        if type(stamp) in (int,float) and now<stamp<=now+604800:
+            return stamp
+    return None
+
 def provider_limited(output):
     for line in output.splitlines():
         try:
@@ -222,10 +246,10 @@ def main():
                 record(a.progress_root,a.issue,a.generation,name)
             except (OSError,ValueError):
                 print("PROGRESS_PENDING:",name,flush=True)
-    def checkpoint(round_number, detail, completed):
+    def checkpoint(round_number, detail, completed, limit=False, reset_at=None):
         if a.checkpoint:
             tmp=a.checkpoint.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"issue":a.issue,"generation":a.generation,"role":a.role,"round":round_number,"session":session,"usage":detail,"completed_turn":completed,"worktree_fingerprint":fingerprint()}))
+            tmp.write_text(json.dumps({"issue":a.issue,"generation":a.generation,"role":a.role,"round":round_number,"session":session,"usage":detail,"completed_turn":completed,"provider_limit":limit,"provider_reset_at":reset_at,"worktree_fingerprint":fingerprint()}))
             tmp.replace(a.checkpoint)
     def step(i, remaining):
         nonlocal session, usage, gross_usage, draft_ready, provider_limit, handed_over
@@ -253,8 +277,9 @@ Approved paths: {json.dumps(paths)} (if supplied, modify only these paths).\nTas
             usage += continuation_usage(detail,tokens)
             print(f"ROUND {i+1}: tokens={tokens}, total={gross_usage}, continuation_usage={usage}, completed={completed}", flush=True)
             print("USAGE_DETAIL:", json.dumps(detail, sort_keys=True), flush=True)
-            checkpoint(i+1,detail,completed)
-            if provider_limited(result.stdout):
+            limited=provider_limited(result.stdout)
+            checkpoint(i+1,detail,completed,limited,provider_reset_at(result.stdout) if limited else None)
+            if limited:
                 provider_limit=True
                 return 75
             if context_exhausted(result.stdout) and not handed_over:
