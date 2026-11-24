@@ -8,6 +8,9 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import threading
+
+FETCH_LOCK = threading.Lock()
 from datetime import datetime, timezone
 try:
     from .controller_queue import plan
@@ -33,13 +36,20 @@ def reserve(state, day, budget, amount):
     state["reserved"] += amount
     return True
 
+def task_key(row):
+    generation = row.get("generation", 1)
+    if type(generation) is not int or generation < 1:
+        raise ValueError("invalid generation")
+    return str(row["issue"]) + ":" + str(generation)
+
 def run_task(root, script, row, allowance, publish=False):
     issue = row["issue"]
-    folder = root / ("issue-" + str(issue))
+    generation = row.get("generation", 1)
+    folder = root / ("issue-" + str(issue) + "-" + str(generation))
     # Never overwrite an existing checkout or retry an unchanged task blindly.
     if folder.exists():
         return "existing_checkout"
-    branch = "controller/local-" + str(issue) + "-" + str(int(time.time()))
+    branch = "controller/local-" + str(issue) + "-" + str(time.time_ns())
     base = row["base_sha"]
     import re
     if not re.fullmatch(r"[0-9a-f]{40}", base):
@@ -48,8 +58,9 @@ def run_task(root, script, row, allowance, publish=False):
         target = row.get("base_branch")
         if target not in controller_publish.BASES:
             return "invalid_target"
-        subprocess.run(["git", "fetch", "--no-tags", "https://github.com/hva73/invest.git", target], cwd=script.parent.parent, check=True, timeout=90)
-        actual = subprocess.check_output(["git", "rev-parse", "FETCH_HEAD"], cwd=script.parent.parent).decode().strip()
+        with FETCH_LOCK:
+            subprocess.run(["git", "fetch", "--no-tags", "https://github.com/hva73/invest.git", target], cwd=script.parent.parent, check=True, timeout=90)
+            actual = subprocess.check_output(["git", "rev-parse", "FETCH_HEAD"], cwd=script.parent.parent).decode().strip()
         if actual != base:
             return "stale_base"
     subprocess.run(["git", "worktree", "add", "-b", branch, str(folder), base],
@@ -114,7 +125,7 @@ def main():
                     continue
             rows = load(a.queue, [])
             # A completed local run is awaiting human/CI review, NOT a done dependency.
-            rows = [dict(r, status="blocked") if str(r["issue"]) in results and r["status"] != "done" else r for r in rows]
+            rows = [dict(r, status="blocked") if task_key(r) in results and r["status"] != "done" else r for r in rows]
             selected = plan(rows, max_parallel=a.parallel)
             ready = []
             day = datetime.now(timezone.utc).date().isoformat()
@@ -124,7 +135,7 @@ def main():
                     break
                 save(statefile, state)
                 ready.append(row)
-                results[str(task.issue)] = "reserved"
+                results[task_key(row)] = "reserved"
                 save(donefile, results)
             if not ready:
                 time.sleep(120)
@@ -137,7 +148,7 @@ def main():
                         status = future.result()
                     except Exception as exc:
                         status = "blocked:" + type(exc).__name__
-                    results[str(row["issue"])] = status
+                    results[task_key(row)] = status
                     save(donefile, results)
 
 if __name__ == "__main__":
