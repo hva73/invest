@@ -1062,11 +1062,15 @@ def sample_conflict(previous,current,keys):
 
 def refreshed_trade_evidence(previous,current,request,now):
  """Renew separately timestamped evidence, never the trade or confirmations."""
+ from instrument_resolver import BTC_PLUTO_ASSET_ID
+ cc_rest=(request.get('asset_id')==BTC_PLUTO_ASSET_ID and request.get('provider_symbol')=='BTC-USD.CC' and previous.get('source')=='eodhd' and str(previous.get('feed_type','')).startswith('EODHD REST real-time endpoint'))
  groups=[('bid_at',('bid','ask','bid_at','ask_at','quote_feed')),
          ('status_at',('market_status','session_key','status_at','status_feed')),
          ('bar_evidence',('bar_history','bar_evidence'))]
  auxiliary={'context','sample_id','interval_s'}|{k for _,keys in groups for k in keys}
- if previous.get('source')!='eodhd' or previous.get('price_time_kind')!='trade':return current
+ if previous.get('source')!='eodhd' or (previous.get('price_time_kind')!='trade' and not cc_rest):return current
+ if cc_rest:groups=[('status_at',('market_status','session_key','status_at','status_feed'))]
+ auxiliary={'context','sample_id','interval_s'}|{k for _,keys in groups for k in keys}
  if {k:v for k,v in previous.items() if k not in auxiliary}!={k:v for k,v in current.items() if k not in auxiliary}:raise sample_conflict(previous,current,(set(previous)|set(current))-auxiliary)
  merged=dict(previous,context=current['context'])
  for time_key,keys in groups:
@@ -1147,7 +1151,9 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
     same_history=False;sample_errors(sample,request,now)
    previous_market={k:v for k,v in previous_sample.items() if k not in ['context','sample_id']};current_market={k:v for k,v in sample.items() if k not in ['context','sample_id']}
    evidence_changed=previous_market!=current_market
-   if evidence_changed and not (sample['source']=='eodhd' and sample.get('price_time_kind')=='trade'):
+   from instrument_resolver import BTC_PLUTO_ASSET_ID
+   cc_rest=(request.get('asset_id')==BTC_PLUTO_ASSET_ID and request.get('provider_symbol')=='BTC-USD.CC' and sample['source']=='eodhd' and str(sample.get('feed_type','')).startswith('EODHD REST real-time endpoint'))
+   if evidence_changed and not (sample['source']=='eodhd' and (sample.get('price_time_kind')=='trade' or cc_rest)):
     error=sample_conflict(previous_sample,sample,set(previous_market)|set(current_market))
     error.market_conflict.update(previous_journal_received_at=old['received'],ingest_attempt_at=now.isoformat())
     raise error

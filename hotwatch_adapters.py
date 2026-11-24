@@ -395,6 +395,20 @@ def extended_session(trade,schedule,now,max_age_s):
   return 'PRE' if local.time()<opening else 'AFTER' if local.time()>=closing else None
  except (KeyError,ValueError,TypeError,ZoneInfoNotFoundError):return None
 
+def crypto_session(schedule,event_time,now,max_age_s):
+ """Classify only a current CC feed session; this does not prove broker execution."""
+ from zoneinfo import ZoneInfo,ZoneInfoNotFoundError
+ try:
+  if schedule.get('status')!='OK' or schedule.get('exchange')!='CC' or schedule.get('exchange_open') is not True:return None
+  received=stamp(schedule['received_at']);at=stamp(event_time)
+  if not 0<=(now-received).total_seconds()<=max_age_s or not 0<=(now-at).total_seconds()<=max_age_s:return None
+  zone=ZoneInfo(schedule['timezone']);local=at.astimezone(zone);calendar=schedule['calendar']
+  opening=datetime.strptime(calendar['open'],'%H:%M:%S').time();closing=datetime.strptime(calendar['close'],'%H:%M:%S').time()
+  received_local=received.astimezone(zone);now_local=now.astimezone(zone)
+  if opening>=closing or received_local.date()!=local.date() or now_local.date()!=local.date() or local.strftime('%a') not in calendar['working_days'] or local.date().isoformat() in calendar['excluded_dates'] or not all(opening<=v.time()<closing for v in (local,received_local,now_local)):return None
+  return {'market_status':'REGULAR','session_key':local.date().isoformat()+':REGULAR','status_at':received.isoformat(),'status_feed':'eodhd_cc_exchange_details'}
+ except (KeyError,ValueError,TypeError,AttributeError,ZoneInfoNotFoundError):return None
+
 def realtime_symbol(symbol):
  """Translate only observed feed spellings; keep REST/security IDs unchanged."""
  # Direct trades, quotes and minute history verified 2026-11-09. The US
@@ -738,8 +752,13 @@ class EODHDAdapter:
      failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=bars.get('retry_after_s') or retry_seconds(None);raise failure
    if bars['status']=='OK':
     closed=[b for b in bars.get('bars',[]) if b.get('bar_open_at') and stamp(b['bar_open_at'])+timedelta(seconds=60)<=utc() and b.get('close') and Decimal(b['close'])>0 and (not session.get('last_data') or stamp(b['bar_open_at'])>=stamp(session['last_data']))]
-    if closed:
-     bar=max(closed,key=lambda b:stamp(b['bar_open_at']));at=stamp(bar['bar_open_at']);currency=r.get('quote_currency')
+    # An old bar must not prevent a newer timestamped REST quote from
+    # being read (especially on thinly traded holdings). Retain the true
+    # bar-open timestamp and never manufacture market status or a spread.
+    fresh_closed=[b for b in closed if 0<=(utc()-stamp(b['bar_open_at'])).total_seconds()<=min(r['risk']['max_quote_age_s'],GLOBAL_RISK['max_quote_age_s'])]
+    if closed and not fresh_closed:self.last_feed_diagnostics['bar_history_status']='STALE_FALLBACK_TO_REST'
+    if fresh_closed:
+     bar=max(fresh_closed,key=lambda b:stamp(b['bar_open_at']));at=stamp(bar['bar_open_at']);currency=r.get('quote_currency')
      if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):raise DataUnavailable('EODHD_CURRENCY_UNCONFIRMED')
      sample_id='eodhd-bar-'+hashlib.sha256((kind+symbol+bar['bar_open_at']).encode()).hexdigest()[:27];old=None
      if session.get('id') is not None:
@@ -815,13 +834,28 @@ class EODHDAdapter:
   interval=self.interval(r,profile)
   if old_sample:interval=old_sample['interval_s']
   result={'sample_id':sample_id,'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':venue,'currency':currency,'event_time':at.isoformat(),'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD REST real-time endpoint; entitlement/cadence unconfirmed; currency='+('provider' if d.get('currency') else 'explicit session instrument'),'documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':interval,'price':format(price,'f'),'bid':None,'ask':None,'volume':volume,'volume_type':'unknown','open':None,'high':None,'low':None,'close':None,'context':context}
-  # Repeated readings of the same price and event time retain their original
-  # market evidence across software upgrades; only broker context is current.
-  # A changed price remains a conflict, never a fabricated new observation.
+  # CC exchange status is independent provider evidence, not Pluto trading
+  # permission. Restrict it to the owner-verified BTC identity and retain all
+  # existing broker, freshness, spread and risk gates.
+  crypto_verified=r.get('asset_id')==BTC_PLUTO_ASSET_ID and symbol=='BTC-USD.CC' and cxe_valid is True
+  evidence=None
+  if crypto_verified:
+   try:
+    max_age=min(r['risk']['max_quote_age_s'],GLOBAL_RISK['max_quote_age_s']);schedule=self.market_status(self.feeds(r),'CC',max_age)
+    evidence=crypto_session(schedule,at.isoformat(),utc(),max_age)
+   except (KeyError,ValueError,TypeError,ArithmeticError,EngineError,DataUnavailable,urllib.error.URLError,TimeoutError,ConnectionError):pass
+   if evidence:result.update(evidence)
+   elif old_sample:result.update(market_status='UNKNOWN',session_key=at.date().isoformat()+':UNKNOWN',status_at=utc().isoformat(),status_feed='eodhd_cc_status_unavailable')
+  # Preserve the immutable quote and renew only separately timestamped CC
+  # status. Other observations retain the original evidence unchanged.
   if old_sample:
    try:
     same=all(old_sample.get(k)==result.get(k) for k in ('source','ticker','asset_id','currency')) and stamp(old_sample['event_time'])==at and Decimal(old_sample['price'])==price
-    if same:return dict(old_sample,context=context)
+    if same:
+     prior=dict(old_sample,context=context)
+     if crypto_verified:
+      prior.update({k:result[k] for k in ('market_status','session_key','status_at','status_feed')})
+     return prior
    except (KeyError,TypeError,ValueError,ArithmeticError):pass
   previous=old_sample.get('previous_close') if old_sample else str(d.get('previousClose')) if type(d.get('previousClose')) in (int,str) else None
   if previous is not None and re.fullmatch(r'\d{1,18}(?:\.\d{1,12})?',previous) and Decimal(previous)>0:result['previous_close']=previous
