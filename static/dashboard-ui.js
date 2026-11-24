@@ -26,7 +26,7 @@ window.DashboardUI=(()=>{
    const total=mobileDailyAmount(r);
    return {percent:Number(d.percent),amount:total?Number(total.amount):null,currency:total?.currency||null};
   }
-  const numeric=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:Number(v),change=numeric(d.amount),qty=numeric(r.quantity),p=numeric(d.percent),currency=typeof d.currency==='string'&&/^[A-Z]{3}$/.test(d.currency)&&d.currency===r.price?.currency?d.currency:null,total=change!==null&&qty!==null&&qty>=0&&currency?change*qty:null;
+  const numeric=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:Number(v),change=numeric(d.amount),qty=numeric(r.quantity),p=numeric(d.percent),currency=typeof d.currency==='string'&&/^[A-Z]{3}$/.test(d.currency)&&d.currency===r.price?.currency?d.currency:null,price=numeric(r.price?.amount),delta=change!==null?change:p!==null&&p>-100&&price!==null&&price>0?price*p/(100+p):null,total=delta!==null&&qty!==null&&qty>0&&currency?delta*qty:null;
   return {percent:p,amount:total,currency};
  }
  function desktopDay(r){
