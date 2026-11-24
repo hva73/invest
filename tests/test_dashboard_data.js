@@ -79,3 +79,14 @@ state.dashboard.accounts=[{kind:'portfolio',snapshot_at:new Date(Date.now()-6000
 state.dashboard.accounts=[{kind:'portfolio',snapshot_at:new Date(Date.now()-2*86400000).toISOString()}];html=ui.render(state);assert.match(html,/Opdateret \d\d\.\d\d\.\d{4} kl\./);assert.doesNotMatch(html,/Opdateret i dag kl\./);
 state.dashboard.accounts=[{kind:'portfolio',snapshot_at:null}];html=ui.render(state);assert.match(html,/Opdateringstid ukendt/);
 state.dashboard.accounts=[{kind:'portfolio',snapshot_at:new Date(Date.now()+60000).toISOString()}];html=ui.render(state);assert.match(html,/Opdateringstid ukendt/);
+
+ // Desktop must not drop the same valid percentage-only daily amount that mobile derives.
+ row.verification='broker_snapshot';row.price_freshness={state:'fresh'};row.price={amount:'100',currency:'DKK'};row.quantity='3';
+ row.daily={percent:'2',amount:null,currency:'DKK',basis:'pluto_reported_daily_change',to:new Date().toISOString()};
+ html=ui.render(state);
+ assert.match(html,/<span class="dash-day-desktop"><span class="dash-change positive">\+5,88\s*kr\.<\/span><small class="dash-profit-percent positive">\+2,00 % · estimat/);
+ row.daily.currency='USD';html=ui.render(state);
+ assert.match(html,/<span class="dash-day-desktop"><span class="dash-neutral">—<\/span><small class="dash-profit-percent positive">\+2,00 %/);
+ row.daily.currency='DKK';row.daily.percent='-100';html=ui.render(state);
+ assert.match(html,/<span class="dash-day-desktop"><span class="dash-neutral">—<\/span><small class="dash-profit-percent negative">-100,00 %/);
+ console.log('PASS: desktop daily estimate parity and currency/invalid reference guards');
