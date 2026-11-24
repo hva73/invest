@@ -43,10 +43,11 @@ def main():
     if not shutil.which("codex"):
         p.error("Codex CLI missing")
     subprocess.run(["codex","login","status"],check=True,timeout=30)
-    if a.publish:
-        if not shutil.which("gh"):
-            p.error("GitHub CLI missing")
-        subprocess.run(["gh","auth","status","--hostname","github.com"],check=True,timeout=30)
+    if not shutil.which("gh"):
+        p.error("GitHub CLI missing")
+    subprocess.run(["gh","auth","status","--hostname","github.com"],check=True,timeout=30)
+    from controller_remote import fetch_queue
+    fetch_queue()
     subprocess.run([sys.executable,"-m","unittest","discover","-s","tests","-p","test_controller_*.py"],cwd=repo,check=True)
     root.mkdir(parents=True,exist_ok=True,mode=0o700)
     plist.parent.mkdir(parents=True,exist_ok=True)
