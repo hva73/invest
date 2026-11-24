@@ -280,7 +280,25 @@ def main():
    session.update(signal='BUY',display_status='KØBSSIGNAL');session['last_action_signal'].update(state='ACTIVE',event_type='BUY_SIGNAL');session['buy_plan']={'fresh':True,'portfolio_id':case.root,'quantity':'2','budget_dkk':'500','limit_price':'20','stop_price':'18'}
    desktop.evaluate("window.EngineUI.openNotification('synthetic-push')");signal.get_by_role('button',name='Køb').click();expect(form).to_contain_text('Køb · TSM');expect(form.locator('[name=portfolio_id]')).to_have_value(str(case.root));form.locator('[data-quick-close]').click()
    session.update(status='DEGRADED',signal='NO_DATA',display_status='DATA FOR GAMLE',data_stale=True);session['last_action_signal'].update(state='DATA_MISSING',event_type='SELL_SIGNAL');desktop.evaluate("window.EngineUI.openNotification('synthetic-push')");signal.get_by_role('button',name='Åbn depot for manuelt salg →').click();desktop.wait_for_function("() => view==='portfolio-detail'");assert desktop.evaluate('selectedPortfolio')==case.root
-   assert not orders,orders;desktop.close();browser.close()
+   assert not orders,orders;desktop.close()
+   # Same synthetic authenticated signal UI at the two additional mobile widths.
+   for width in (320,768):
+    page.set_viewport_size({'width':width,'height':850})
+    for side in ('BUY','SELL'):
+     session.update(status='ACTIVE',signal=side,display_status='KØBSSIGNAL' if side=='BUY' else 'SÆLGSSIGNAL',data_stale=False,latest_context={'status':'verified','position':'held','tradability':'available','as_of':stamp,'orders':[]})
+     session['last_action_signal'].update(state='ACTIVE',event_type=side+'_SIGNAL')
+     session['data_status']={'price':'3.1','price_status':'FRESH','market_status':'OPEN','identity_verification':'verified'}
+     session['buy_plan']={'fresh':True,'portfolio_id':case.root,'quantity':'2','budget_dkk':'500','limit_price':'20','stop_price':'18'}
+     page.evaluate("window.EngineUI.openNotification('synthetic-push')")
+     expect(d.locator('.market-peak-marker')).to_have_count(1)
+     expect(d.locator('.market-axis span').first).to_have_text('00:00')
+     expect(d.locator('.market-entry-marker')).to_have_count(1 if side=='SELL' else 0)
+     expect(d.get_by_role('button',name='Køb' if side=='BUY' else 'Sælg',exact=True)).to_be_visible()
+     expect(d.get_by_role('button',name='Ignorér og luk signalet')).to_be_visible()
+     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+     if shot:page.screenshot(path=f'{shot}/signal-{side.lower()}-{width}.png')
+     d.locator('[data-engine-close]:visible').first.click()
+   assert not orders,orders;assert not errors,errors;browser.close()
   print('PASS: synthetic push → mobile detail, four periods, Pluto identity, real-point high, sticky actions and explicit simulated BUY/SELL proposals; no real broker order')
  finally:server.shutdown();server.server_close();case.tearDown()
 if __name__=='__main__':main()
