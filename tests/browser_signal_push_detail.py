@@ -129,9 +129,53 @@ def main():
    assert page.evaluate("""() => [...document.querySelectorAll('#engine-dialog .market-quote .market-price,#engine-dialog .market-quote .market-change')].every(n => n.scrollWidth <= n.clientWidth + 1)"""), 'Signal quote must not overflow on iPhone'
    sell_action=d.get_by_role('button',name='Sælg').bounding_box();assert sell_action and 0<=sell_action['y'] and sell_action['y']+sell_action['height']<=page.viewport_size['height'], 'SELL action must be visible without scrolling on phone'
    if shot:page.screenshot(path=f'{shot}/signal-sell-390.png')
+   # Explicitly traverse the UI estimate/review/send boundary for both directions.
+   # Intercept these two endpoints only; never contact a real broker in browser CI.
+   # Backend broker-adapter contract is exercised separately by test_trade_service.
+   def verify_proposal(page,quick,side):
+    captured=[];proposal_id=901 if side=='BUY' else 902;token='synthetic-review-'+side
+    def estimate(route):
+     v=route.request.post_data_json
+     assert v['expected_side']==side and v['asset_id']=='synthetic-asset' and int(v['portfolio_id'])==case.root,v
+     assert v['report_id']=='@hotwatch' and v['candidate_id']=='synthetic-push',v
+     assert v['signal_event_id']=='hw-'+'a'*24,v
+     assert v['size_mode']==('shares' if side=='BUY' else 'percent'),v
+     assert v['order_type']==('LIMIT' if side=='BUY' else 'MARKET'),v
+     order={'assetId':v['asset_id'],'side':side,'shares':'2','currency':v['currency'],'orderType':v['order_type'],'timeInForce':'DAY'}
+     if side=='BUY':
+      assert v['size']=='2' and v['limit_price']=='20',v
+      order['limitPrice']='20'
+     else:assert v['size']=='100',v
+     captured.append(('estimate',v))
+     route.fulfill(json={'proposal':{'id':proposal_id,'review_token':token,'status':'estimated','portfolio_id':case.root,'payload':{'orders':[order]},'estimate':{'quote':{'commission':'0'},'active_orders':[]},'sell_basis':{'quantity':'2','percentage':'100','shares':'2'}}})
+    def send(route):
+     v=route.request.post_data_json;assert v=={'id':proposal_id,'review_token':token,'confirm':True},v
+     assert len(captured)==1,captured
+     captured.append(('send',v))
+     route.fulfill(json={'proposal':{'id':proposal_id,'status':'sent','intent_id':'synthetic-intent-'+side,'response':{'status':'PENDING'}}})
+    page.route('**/api/trade/estimate',estimate);page.route('**/api/trade/send',send)
+    if side=='SELL':
+     quick.locator('[name=currency]').select_option('USD')
+    quick.locator('#quick-trade-form button.primary').click()
+    expect(quick.locator('[data-quick-send]')).to_be_visible()
+    assert len(captured)==1,captured
+    quick.locator('[data-quick-send]').click()
+    expect(quick.locator('#quick-trade-status')).to_contain_text('Bekræft først')
+    assert len(captured)==1,captured
+    quick.locator('#quick-trade-confirm').check()
+    quick.locator('[data-quick-send]').click()
+    expect(quick.locator('#quick-trade-review')).to_contain_text('Åbn Pluto for at gennemgå og godkende forslaget.')
+    assert [x[0] for x in captured]==['estimate','send'],captured
+    if shot:page.screenshot(path=f'{shot}/signal-{side.lower()}-sent-390.png')
+    page.unroute('**/api/trade/estimate',estimate);page.unroute('**/api/trade/send',send)
+    # The existing no-unexpected-order assertion still checks all other interactions.
+    assert all('/api/trade/estimate' in url or '/api/trade/send' in url for url in orders),orders
+    assert len(orders)==2,orders
+    orders.clear()
    page.evaluate('state.dashboard.positions=[]')
    d.get_by_role('button',name='Sælg').click()
    quick=page.locator('#quick-trade-dialog');expect(quick).to_contain_text('Sælg · TSM');expect(quick.locator('[name=portfolio_id]')).to_have_value(str(case.root));expect(quick.locator('[name=asset_id]')).to_have_value('synthetic-asset')
+   verify_proposal(page,quick,'SELL')
    quick.locator('[data-quick-close]').click();page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d).to_be_visible()
    slot=d.locator('.market-slot');expect(slot.locator('.market-price')).to_be_visible();expect(slot.locator('[data-market-period=day]')).to_have_attribute('aria-pressed','true')
    expect(slot.locator('.signal-chart-peak')).to_contain_text('højeste viste punkt');expect(slot.locator('.market-peak-marker')).to_have_count(1);expect(slot.locator('.market-entry-marker')).to_have_count(1);expect(slot.locator('.market-marker-entry')).to_have_count(1);expect(slot.locator('.market-marker-signal')).to_have_count(0);assert 5<=float(slot.locator('.market-marker-entry').get_attribute('y1'))<=57;expect(slot.locator('.market-entry-label')).to_have_text('Gns. købskurs 3,55 USD');expect(slot.locator('.market-peak-label')).to_have_text('Top 3,41 USD')
@@ -199,7 +243,7 @@ def main():
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.get_by_role('button',name='Køb')).to_be_visible();expect(d.locator('[data-trade-watch]')).to_have_attribute('data-trade-signal','BUY');expect(d.locator('.market-slot .market-price')).to_be_visible();expect(d.locator('.market-marker-entry')).to_have_count(0);expect(d.locator('.market-entry-marker')).to_have_count(0);expect(d.locator('.market-peak-marker')).to_have_count(1);expect(d.locator('.market-entry-label')).to_have_count(0)
    expect(d.locator('.signal-mobile-metrics > div small')).to_have_text(['År','Måned','Dag']);buy_action=d.get_by_role('button',name='Køb').bounding_box();assert buy_action and 0<=buy_action['y'] and buy_action['y']+buy_action['height']<=page.viewport_size['height'], 'BUY action must be visible without scrolling on phone'
    if shot:page.screenshot(path=f'{shot}/signal-buy-390.png')
-   d.get_by_role('button',name='Køb').click();expect(quick).to_contain_text('Køb · TSM');expect(quick.locator('[name=portfolio_id]')).to_have_value(str(case.root));expect(quick.locator('[name=asset_id]')).to_have_value('synthetic-asset');quick.locator('[data-quick-close]').click()
+   d.get_by_role('button',name='Køb').click();expect(quick).to_contain_text('Køb · TSM');expect(quick.locator('[name=portfolio_id]')).to_have_value(str(case.root));expect(quick.locator('[name=asset_id]')).to_have_value('synthetic-asset');verify_proposal(page,quick,'BUY');quick.locator('[data-quick-close]').click()
    account['dashboard']['positions']=[];session['latest_context']['position']='none';session['request']['report_id']='synthetic-report';session['request']['candidate_id']='synthetic-candidate'
    page.evaluate("window.EngineUI.openNotification('synthetic-push')");expect(d.locator('.market-slot .market-price')).to_be_visible();expect(d.locator('.market-marker-entry')).to_have_count(0);expect(d.locator('.market-entry-marker')).to_have_count(0);expect(d.locator('.market-peak-marker')).to_have_count(1);expect(d.locator('.market-entry-label')).to_have_count(0);expect(d.locator('.market-marker-signal')).to_have_count(0);expect(d.locator('.market-peak-label')).to_have_text('Top 3,41 USD');expect(d.get_by_role('button',name='Køb')).to_be_visible()
    expect(d.locator('[data-market-choose]')).to_have_count(0)
@@ -237,6 +281,6 @@ def main():
    desktop.evaluate("window.EngineUI.openNotification('synthetic-push')");signal.get_by_role('button',name='Køb').click();expect(form).to_contain_text('Køb · TSM');expect(form.locator('[name=portfolio_id]')).to_have_value(str(case.root));form.locator('[data-quick-close]').click()
    session.update(status='DEGRADED',signal='NO_DATA',display_status='DATA FOR GAMLE',data_stale=True);session['last_action_signal'].update(state='DATA_MISSING',event_type='SELL_SIGNAL');desktop.evaluate("window.EngineUI.openNotification('synthetic-push')");signal.get_by_role('button',name='Åbn depot for manuelt salg →').click();desktop.wait_for_function("() => view==='portfolio-detail'");assert desktop.evaluate('selectedPortfolio')==case.root
    assert not orders,orders;desktop.close();browser.close()
-  print('PASS: synthetic push → mobile detail, four periods, Pluto identity, real-point high, sticky actions and no order')
+  print('PASS: synthetic push → mobile detail, four periods, Pluto identity, real-point high, sticky actions and explicit simulated BUY/SELL proposals; no real broker order')
  finally:server.shutdown();server.server_close();case.tearDown()
 if __name__=='__main__':main()
