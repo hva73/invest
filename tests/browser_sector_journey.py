@@ -74,7 +74,7 @@ try:
    expect(root).to_be_enabled();expect(child).to_be_enabled()
    details=root.locator('.si-desktop-position')
    if width >= 901:
-    expect(details).to_be_visible();expect(details).to_contain_text('Gns. køb');expect(details).not_to_contain_text('stk.');expect(details).to_contain_text('270,30');expect(details).to_contain_text('247,80');expect(details).to_contain_text('+31,50');expect(details).to_contain_text('estimat')
+    expect(details).to_be_visible();expect(details).to_contain_text('Gns. køb');expect(details).not_to_contain_text('stk.');expect(details).to_contain_text('270,30');expect(details).to_contain_text('247,80');expect(details).to_contain_text('+31,50');expect(details.locator('.si-desktop-day')).not_to_contain_text('estimat')
     expect(journey.locator('.si-desktop-columns')).to_be_visible()
     expect(root).to_contain_text('I dag · kurs pr. stk.')
     expect(root).to_contain_text('+6,30')
@@ -112,6 +112,18 @@ try:
     expect(stale.locator('.mobile-holding-daily')).to_contain_text('—')
    expect(stale).to_contain_text('+45,00')
    child_row['price_freshness']=original_freshness
+   original_daily=dict(child_row['daily'])
+   for mismatch in (False, True):
+    child_row['daily']={**original_daily,'amount':None,'currency':'USD' if mismatch else 'DKK'}
+    page.reload();page.locator('nav [data-view=sectors]').click();page.locator('.sector-row').filter(has_text='Sundhed').click()
+    daily_row=page.locator('#sector-journey [data-sector-position]').filter(has_text='AI').filter(has_text='NOVO-B')
+    daily_cell=daily_row.locator('.si-desktop-day' if width >= 901 else '.mobile-holding-daily')
+    expect(daily_cell).to_contain_text('+2,39 %')
+    if mismatch:
+     expect(daily_cell).to_contain_text('—');expect(daily_cell).not_to_contain_text('+12,62')
+    else:
+     expect(daily_cell).to_contain_text('+12,62');expect(daily_cell).to_contain_text('estimat' if width >= 901 else '≈')
+   child_row['daily']=original_daily
    if width >= 901:
     page.locator('[data-sector-journey-close]').first.click()
     heat=page.locator('[data-sector-market="SYNTH-TECH.US"]').first;heat.scroll_into_view_if_needed();page.wait_for_timeout(300);page.mouse.move(0,0);heat.hover();expect(heat.locator('.dash-chart-tooltip')).to_be_visible()
