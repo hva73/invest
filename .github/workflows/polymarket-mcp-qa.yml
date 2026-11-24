@@ -1,0 +1,46 @@
+name: Polymarket MCP acceptance QA
+on:
+  pull_request:
+    branches: [codex/polymarket-prediction-intelligence]
+permissions:
+  contents: read
+jobs:
+  offline:
+    if: github.repository == 'hva73/invest'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m compileall -q polymarket_intelligence.py scripts/polymarket_discovery.py scripts/polymarket_smoke.py
+      - run: python -m unittest tests.test_polymarket_intelligence tests.test_mcp_reports -v
+  live_public_smoke:
+    needs: offline
+    if: github.repository == 'hva73/invest'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python scripts/polymarket_smoke.py
+      - name: Verify bounded live research discovery
+        run: |
+          python - <<'PY'
+          import json
+          from scripts.polymarket_discovery import collect
+          r=collect(limit=100,max_histories=8)
+          assert r['orders']==0 and r['handoffs']==0 and not r['persistent_backlog']
+          assert r['markets_scanned']<=100 and r['histories_attempted']<=8
+          # Bounded public metadata, no token IDs or portfolio details.
+          reviews=[{'question':x['question'][:160],'market_url':x['url'],'yes_contract_price':x['yes_price'],'change_pp':x['change_percentage_points'],'history_first_at':x['history_first_at'],'history_last_at':x['history_last_at'],'candidate_eligible':x['candidate_eligible']} for x in r['observations'] if x['research_priority']=='REVIEW'][:3]
+          print(json.dumps({'external_reviews':reviews},ensure_ascii=False))
+          print(json.dumps({'status':'PASS','markets_scanned':r['markets_scanned'],'liquid_relevant_markets':r['liquid_relevant_markets'],'histories_attempted':r['histories_attempted'],'research_reviews':sum(x['research_priority']=='REVIEW' for x in r['observations']),'source_errors':len(r['errors']),'orders':0,'handoffs':0},sort_keys=True))
+          PY
