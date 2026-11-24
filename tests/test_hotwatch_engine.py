@@ -1486,6 +1486,17 @@ class HotWatch(unittest.TestCase):
   with app.connect() as c:
    self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
    health=json.loads(c.execute("SELECT payload FROM hw_provider_health WHERE user_id=1 AND is_test=1 AND source='eodhd'").fetchone()['payload']);self.assertEqual(health['bar_history_status'],'VERIFIED')
+ def test_budget_failure_does_not_request_optional_history_or_rearm_stale_signal(self):
+  from hotwatch_service import Runner
+  from unittest.mock import Mock
+  now=self.now;req=copy.deepcopy(self.req);req.update(watch_id='budget-warmup',purpose='budget warmup regression',provider='eodhd',provider_symbol='MERC.US')
+  engine.control(app.connect,1,self.req['watch_id'],True,'pause',now);engine.create(app.connect,1,req,now)
+  with app.connect() as c:c.execute('UPDATE hw_sessions SET is_test=0 WHERE watch_id=?',(req['watch_id'],))
+  runner=Runner(app.connect);adapter=Mock();adapter.poll.side_effect=DataUnavailable('EODHD_DAILY_BUDGET',429);adapter.last_partial_observations=[];adapter.capture_metrics=[];adapter.last_feed_diagnostics={};runner.adapters[(1,'eodhd')]=adapter
+  with patch('hotwatch_engine.utc',return_value=now),patch('hotwatch_warmup.refresh') as warmup:
+   self.assertTrue(runner.once(now,watch_id=req['watch_id']));warmup.assert_not_called()
+  with patch('hotwatch_engine.utc',return_value=now):view=engine.item(app.connect,1,req['watch_id'],False)['session']
+  self.assertEqual(view['signal'],'NO_DATA');self.assertEqual(view['last_error'],'EODHD_DAILY_BUDGET');self.assertEqual(view['status'],'DEGRADED')
  def test_worker_keeps_fresh_trade_if_local_budget_runs_out_mid_scan(self):
   from hotwatch_service import Runner
   now=engine.utc().replace(microsecond=0);r=copy.deepcopy(self.req);r.update(watch_id='budget-live',purpose='local budget integration',provider='eodhd',provider_symbol='MERC.US')
