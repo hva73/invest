@@ -77,11 +77,23 @@ def run_task(root, script, row, allowance, publish=False):
     taskfile.write_text(row["task"])
     log = root / ("issue-" + str(issue) + "-" + str(generation) + ".log")
     progress(root,row,"STARTED",publish)
-    with log.open("a") as out:
-        rc = subprocess.run([sys.executable, str(script), "--role", row["role"],
+    finished=threading.Event()
+    def report():
+        while not finished.wait(15):
+            if publish:
+                controller_progress.flush(root)
+    reporter=threading.Thread(target=report,daemon=True)
+    reporter.start()
+    try:
+        with log.open("a") as out:
+            rc = subprocess.run([sys.executable, str(script), "--role", row["role"],
             "--issue", str(issue), "--task-file", str(taskfile), "--max-tokens",
-            str(allowance), "--rounds", "3", "--minutes", "20", "--execute"],
+            str(allowance), "--rounds", "3", "--minutes", "20", "--generation", str(generation),
+            "--progress-root", str(root), "--checkpoint", str(root / ("checkpoint-"+str(issue)+"-"+str(generation)+".json")), "--execute"],
             cwd=folder, stdout=out, stderr=subprocess.STDOUT).returncode
+    finally:
+        finished.set()
+        reporter.join()
     if rc != 0:
         return "blocked"
     changed = subprocess.check_output(["git", "status", "--porcelain"], cwd=folder)
