@@ -4,7 +4,7 @@ from datetime import datetime,timedelta,timezone
 from decimal import Decimal,InvalidOperation
 from urllib.parse import quote,urlencode
 from hotwatch_contract import EngineError,checksum,stamp,provider_floor,PROFILES,GLOBAL_RISK
-from hotwatch_engine import utc,effective_poll_interval,valid_cxe_evidence,provider_request_limit
+from hotwatch_engine import utc,effective_poll_interval,valid_cxe_evidence,provider_request_limit,sample_read
 from eodhd_capacity import Capacity,retry_seconds
 
 class DataUnavailable(EngineError):pass
@@ -762,9 +762,11 @@ class EODHDAdapter:
      if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):raise DataUnavailable('EODHD_CURRENCY_UNCONFIRMED')
      sample_id='eodhd-bar-'+hashlib.sha256((kind+symbol+bar['bar_open_at']).encode()).hexdigest()[:27];old=None
      if session.get('id') is not None:
-      with self.connect() as c:old=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(session['id'],'eodhd',sample_id)).fetchone()
+      with self.connect() as c:
+       old=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(session['id'],'eodhd',sample_id)).fetchone()
+       if old:previous=sample_read(c,session['id'],old['payload'])
      if old:
-      previous=json.loads(old['payload']);previous['context']=self.pluto.safe_context(r,currency);return previous
+      previous['context']=self.pluto.safe_context(r,currency);return previous
      if not session.get('last_data') or at>stamp(session['last_data']):
       context=self.pluto.safe_context(r,currency)
       return {'sample_id':sample_id,'source':'eodhd','ticker':r['ticker'],'asset_id':r['asset_id'],'venue':None,'currency':currency,'event_time':bar['bar_open_at'],'session_key':at.date().isoformat()+':UNKNOWN','market_status':'UNKNOWN','feed_type':'EODHD '+kind+' closed 1m bar; time is bar open','documented_delay_s':None,'verification':'verified','error_code':None,'interval_s':60,'price':bar['close'],'bid':None,'ask':None,'volume':bar.get('volume'),'volume_type':'interval','open':bar['open'],'high':bar['high'],'low':bar['low'],'close':bar['close'],'context':context,'price_time_kind':'bar_open'}
@@ -827,7 +829,7 @@ class EODHDAdapter:
     old=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?',(session['id'],'eodhd',sample_id)).fetchone()
     if not old and session.get('last_data') and stamp(session['last_data'])==at:
      old=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND event_epoch=? ORDER BY id DESC LIMIT 1',(session['id'],'eodhd',at.timestamp())).fetchone()
-   if old:old_sample=json.loads(old['payload']);volume=old_sample.get('volume')
+    if old:old_sample=sample_read(c,session['id'],old['payload']);volume=old_sample.get('volume')
   context_started=time.perf_counter();context=self.pluto.safe_context(r,currency);context_ms=(time.perf_counter()-context_started)*1000
   self.last_telemetry={'eodhd_http_ms':round(http_ms,3),'pluto_context_ms':round(context_ms,3),'event_to_http_receive_ms':round((received-at).total_seconds()*1000,3)}
   state=json.loads(session.get('state') or '{}');profile=state.get('adaptive_profile') or r['profile']
