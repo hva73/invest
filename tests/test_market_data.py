@@ -137,6 +137,45 @@ class Quotes(unittest.TestCase):
     cached=market_data.enrich_intraday(app.connect,1,out,now,lambda:Feed());self.assertEqual(len(calls),1);self.assertEqual(cached['intraday_series'],out['intraday_series'])
    with patch('hotwatch_service.verified_existing_feed',return_value=None):
     revoked=market_data.enrich_intraday(app.connect,1,cached,now,lambda:Feed());self.assertEqual(revoked['intraday_status'],'IDENTITY_UNVERIFIED');self.assertNotIn('intraday_series',revoked)
+ def test_refresh_identical_pluto_series_reuses_chart_cache_without_extending_ttl(self):
+  clock=[self.fixed];calls=[]
+  normalize=market_data.normalized;enrich=market_data.enrich_intraday
+  class Feed:
+   def intraday(self,symbol,**kwargs):
+    calls.append((symbol,kwargs))
+    return {'status':'OK','bars':[
+     {'bar_open_at':(clock[0]-timedelta(minutes=i)).isoformat(),'close':'10'} for i in (180,120,60,1)]}
+  def normalized(raw,aid,**kwargs):
+   return normalize(raw,aid,clock[0],**kwargs)
+  def enriched(connect,user_id,result,period='day'):
+   return enrich(connect,user_id,result,clock[0],lambda:Feed(),period)
+  request=dict(self.request,include_intraday='day',refresh=True)
+  def fresh():
+   with app.connect() as c:c.execute('UPDATE market_asset_cache SET attempted=0')
+   return market_data.quote(app.connect,1,request,self.factory)
+  with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}),patch('hotwatch_service.verified_existing_feed',return_value={'provider_symbol':'CHART.US'}),patch('market_data.normalized',side_effect=normalized),patch('market_data.enrich_intraday',side_effect=enriched):
+   first=fresh();self.assertEqual(len(calls),1);self.assertEqual(first['intraday_status'],'OK')
+   clock[0]+=timedelta(seconds=60);self.raw['price']['dailyChange']='0.3'
+   second=fresh();self.assertNotEqual(first['fetched_at'],second['fetched_at']);self.assertEqual(len(calls),1)
+   self.assertEqual(first['intraday_checked_at'],second['intraday_checked_at'])
+   self.assertEqual(first['intraday_series'],second['intraday_series'])
+   clock[0]+=timedelta(seconds=241);third=fresh();self.assertEqual(len(calls),2)
+   self.assertGreater(third['intraday_checked_at'],first['intraday_checked_at'])
+   self.raw['performance']['series'][-1]['close']='19.1';clock[0]+=timedelta(seconds=1)
+   changed=fresh();self.assertEqual(len(calls),3);self.assertNotEqual(changed['series'],third['series'])
+ def test_day_cache_expires_at_copenhagen_midnight_even_with_same_pluto_fetch(self):
+  now=datetime(2026,11,2,22,59,tzinfo=timezone.utc);calls=[]
+  class Feed:
+   def intraday(self,symbol,**kwargs):
+    calls.append(kwargs);return {'status':'OK','bars':[
+     {'bar_open_at':(now-timedelta(minutes=i)).isoformat(),'close':'10'} for i in (2,1)]}
+  data={'asset_id':'synthetic-chart-asset','ticker':'CHART','exchange':'NASDAQ','currency':'USD','series':[],'fetched_at':now.isoformat()}
+  with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_HW_EODHD_BARS_ENABLED':'0'}),patch('hotwatch_service.verified_existing_feed',return_value={'provider_symbol':'CHART.US'}):
+   first=market_data.enrich_intraday(app.connect,1,data,now,lambda:Feed())
+   self.assertEqual(first['intraday_status'],'OK')
+   next_day=market_data.enrich_intraday(app.connect,1,first,now+timedelta(minutes=2),lambda:Feed())
+   self.assertEqual(len(calls),2);self.assertEqual(calls[-1]['start'],int((now+timedelta(minutes=1)).timestamp()))
+   self.assertEqual(next_day['intraday_status'],'PLUTO_AS_DETAILED');self.assertNotIn('intraday_series',next_day)
  def test_live_minute_bars_can_fill_sparse_day_chart_without_inventing_history(self):
   now=self.fixed;calls=[]
   class Feed:
