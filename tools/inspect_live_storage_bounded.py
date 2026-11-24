@@ -75,7 +75,10 @@ def inspect(path=LIVE, seconds=8, table=None, now=None):
                           freelist_count=db.execute("PRAGMA freelist_count").fetchone()[0])
             report["freelist_bytes"]=report["page_size"]*report["freelist_count"]
             if table is None:
-                rows=db.execute("SELECT name,sum(pgsize),count(*) FROM dbstat GROUP BY name ORDER BY sum(pgsize) DESC").fetchall()
+                # dbstat aggregate mode emits one row per b-tree; avoid a
+                # temporary GROUP BY over millions of page rows on a full host.
+                rows=db.execute("SELECT name,pgsize,pageno FROM dbstat WHERE aggregate=TRUE").fetchall()
+                rows.sort(key=lambda row:row[1],reverse=True)
                 report["objects"]=[{"name":name,"bytes":size,"pages":pages} for name,size,pages in rows]
                 report["status"]="ok"
             else:
@@ -95,7 +98,10 @@ if __name__=="__main__":
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--table",choices=sorted(TABLES),help="one bounded payload/age scan instead of dbstat")
     args=parser.parse_args()
-    try:print(json.dumps(inspect(table=args.table),sort_keys=True))
+    try:
+        result=inspect(table=args.table)
+        print(json.dumps(result,sort_keys=True))
+        if result["status"]!="ok":raise SystemExit(2)
     except (OSError,ValueError,sqlite3.Error) as e:
         print(json.dumps({"status":"unavailable","category":type(e).__name__}))
         raise SystemExit(1) from None
