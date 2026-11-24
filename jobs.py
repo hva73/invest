@@ -42,6 +42,17 @@ def enqueue(c,kind,user_id,dedupe,when=None,portfolio_id=None):
     when=time.time() if when is None else when
     c.execute("INSERT INTO jobs(kind,user_id,dedupe,status,available,created,portfolio_id) VALUES(?,?,?,'queued',?,?,?) ON CONFLICT(dedupe) DO NOTHING",(kind,user_id,dedupe,when,when,portfolio_id))
 
+def cleanup_completed_jobs(c, now, dry_run=True, limit=500):
+    """Bounded cleanup of old completed scheduling metadata; never touch work in flight."""
+    cutoff=now-30*86400
+    rows=c.execute("""SELECT j.id, length(CAST(COALESCE(j.result,'') AS BLOB)) AS result_bytes
+        FROM jobs j WHERE j.status='done' AND j.created<?
+        AND j.id NOT IN (SELECT recent.id FROM jobs recent WHERE recent.user_id=j.user_id ORDER BY recent.id DESC LIMIT 20)
+        ORDER BY j.id LIMIT ?""",(cutoff,limit)).fetchall()
+    if rows and not dry_run:
+        c.executemany("DELETE FROM jobs WHERE id=? AND status='done'",[(r[0],) for r in rows])
+    return {'rows':len(rows),'result_bytes':sum(r[1] for r in rows)}
+
 def schedule(connect,at=None):
     at=at or datetime.now(timezone.utc)
     utc=at.astimezone(timezone.utc);local=at.astimezone(ZoneInfo('Europe/Copenhagen'));stamp=utc.timestamp()
@@ -57,6 +68,7 @@ def schedule(connect,at=None):
         if local.hour in (8,14,22):
             slot=local.strftime('%Y-%m-%dT%H:%z')
             for user in c.execute('SELECT id FROM users WHERE active=1').fetchall():enqueue(c,'report',user['id'],'report:'+str(user['id'])+':'+slot,stamp)
+        cleanup_completed_jobs(c,stamp,dry_run=False)
         c.execute('INSERT INTO worker_state VALUES(1,?) ON CONFLICT(id) DO UPDATE SET heartbeat=excluded.heartbeat',(stamp,))
 
 def run_one(connect,fetcher=None,at=None):
