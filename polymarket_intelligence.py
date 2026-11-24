@@ -1,0 +1,230 @@
+"""Read-only Polymarket intelligence adapter for ESCAPE discovery.
+
+No broker operations, trading signals, Pluto identities or HOT WATCH activation.
+Data from prediction markets is hypothesis-level evidence, never issuer verification.
+"""
+import json
+import math
+import re
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
+
+GAMMA = "https://gamma-api.polymarket.com"
+CLOB = "https://clob.polymarket.com"
+MAX_BYTES = 2_000_000
+USER_AGENT = "ESCAPE-Research/1.0"
+KEYWORDS = ("fed", "interest rate", "inflation", "recession", "merger",
+            "acquisition", "fda", "approval", "bitcoin", "ethereum",
+            "oil", "tariff", "earnings", "sec", "regulation")
+# Entire words/phrases only: SEC must not match "second", oil not "boiler".
+TOPIC_RE = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(word) for word in KEYWORDS) + r")(?!\w)", re.I)
+HISTORY_WINDOW_SECONDS = 24 * 3600
+MAX_HISTORY_AGE_SECONDS = 3 * 3600
+
+
+class PolymarketUnavailable(RuntimeError):
+    pass
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        raise PolymarketUnavailable("redirect refused")
+
+
+def _get(base, path, params, opener=None):
+    url = base + path + "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"Accept": "application/json",
+                                                 "User-Agent": USER_AGENT})
+    try:
+        with (opener or urllib.request.build_opener(NoRedirect())).open(req, timeout=8) as response:
+            if response.status != 200:
+                raise PolymarketUnavailable("upstream HTTP error")
+            raw = response.read(MAX_BYTES + 1)
+    except (OSError, ValueError) as exc:
+        raise PolymarketUnavailable("upstream unavailable") from exc
+    if len(raw) > MAX_BYTES:
+        raise PolymarketUnavailable("response too large")
+    try:
+        return json.loads(raw)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise PolymarketUnavailable("invalid JSON") from exc
+
+
+def _array(value):
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+    return value if isinstance(value, list) else []
+
+
+def _finite_number(value):
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def _stamp(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return timestamp.astimezone(timezone.utc).isoformat() if timestamp.tzinfo else None
+    except ValueError:
+        return None
+
+
+def normalize_market(raw, observed_at):
+    """Return strictly sourced metadata, not an implied fair-value estimate."""
+    if not isinstance(raw, dict) or raw.get("closed") is not False or raw.get("active") is not True:
+        return None
+    market_id = str(raw.get("id", ""))
+    question = raw.get("question")
+    slug = raw.get("slug")
+    outcomes, prices, tokens = (_array(raw.get(k)) for k in ("outcomes", "outcomePrices", "clobTokenIds"))
+    if not market_id.isdigit() or not isinstance(question, str) or not question.strip():
+        return None
+    if not isinstance(slug, str) or not re.fullmatch(r"[a-zA-Z0-9-]{1,200}", slug):
+        return None
+    if len(outcomes) != 2 or len(prices) != 2 or len(tokens) != 2:
+        return None
+    if [str(x).casefold() for x in outcomes] != ["yes", "no"]:
+        return None
+    yes = _finite_number(prices[0])
+    no = _finite_number(prices[1])
+    volume = _finite_number(raw.get("volume24hr"))
+    liquidity = _finite_number(raw.get("liquidityNum", raw.get("liquidity")))
+    if yes is None or no is None or not (0 <= yes <= 1 and 0 <= no <= 1):
+        return None
+    if not all(isinstance(x, str) and x.isdigit() for x in tokens):
+        return None
+    events = raw.get("events")
+    event = events[0] if isinstance(events, list) and len(events) == 1 and isinstance(events[0], dict) else {}
+    event_slug = event.get("slug")
+    event_id = str(event.get("id", ""))
+    condition_id = raw.get("conditionId")
+    resolution = raw.get("description")
+    valid_event = (isinstance(event_slug, str) and bool(re.fullmatch(r"[a-zA-Z0-9-]{1,200}", event_slug))
+                   and event_id.isdigit())
+    valid_condition = isinstance(condition_id, str) and bool(re.fullmatch(r"0x[0-9a-fA-F]{64}", condition_id))
+    identity_complete = bool(valid_event and valid_condition and isinstance(resolution, str) and resolution.strip())
+    if tokens[0] == tokens[1]:
+        return None
+    return {
+        "event_id": event_id if valid_event else None,
+        "event_slug": event_slug if valid_event else None,
+        "market_slug": slug,
+        "condition_id": condition_id if valid_condition else None,
+        "resolution_rules": resolution if isinstance(resolution, str) else None,
+        "resolution_source": raw.get("resolutionSource") if isinstance(raw.get("resolutionSource"), str) else None,
+        "identity_complete": identity_complete,
+        "no_token_id": tokens[1],
+        "provider": "Polymarket", "market_id": market_id, "question": question[:500],
+        "url": "https://polymarket.com/event/" + urllib.parse.quote(event_slug, safe="-") if valid_event else None,
+        "market_api_url": GAMMA + "/markets/" + market_id,
+        "yes_token_id": tokens[0], "yes_price": yes, "no_price": no,
+        "volume_24h_usd": volume if volume is not None and volume >= 0 else None,
+        "liquidity_usd": liquidity if liquidity is not None and liquidity >= 0 else None,
+        "event_end_at": _stamp(raw.get("endDate")),
+        "provider_updated_at": _stamp(raw.get("updatedAt")),
+        "retrieved_at": observed_at,
+        "classification": "MARKET_EXPECTATION_UNVERIFIED",
+        "pluto_verified": False, "candidate_eligible": False,
+    }
+
+
+def fetch_markets(limit=100, opener=None, now=None):
+    """Fetch only public market metadata, with no persistent write or side effects."""
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise ValueError("limit must be between 1 and 100")
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone aware")
+    stamp = now.astimezone(timezone.utc).isoformat()
+    data = _get(GAMMA, "/markets",
+                {"active": "true", "closed": "false", "limit": limit,
+                 "order": "volume24hr", "ascending": "false"}, opener=opener)
+    if not isinstance(data, list):
+        raise PolymarketUnavailable("invalid markets response")
+    return [item for raw in data[:limit] if (item := normalize_market(raw, stamp))]
+
+
+def price_history(market, opener=None, now=None):
+    """Sample YES price history; returns source timestamps, never synthetic prices."""
+    token = market["yes_token_id"]
+    if not isinstance(token, str) or not token.isdigit():
+        raise ValueError("invalid token")
+    data = _get(CLOB, "/prices-history",
+                {"market": token, "interval": "1d", "fidelity": 10}, opener=opener)
+    if not isinstance(data, dict) or not isinstance(data.get("history"), list):
+        raise PolymarketUnavailable("invalid history response")
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone aware")
+    cutoff = now.astimezone(timezone.utc).timestamp() - HISTORY_WINDOW_SECONDS
+    ceiling = now.astimezone(timezone.utc).timestamp()
+    samples = []
+    for item in data["history"]:
+        if not isinstance(item, dict):
+            continue
+        t, p = item.get("t"), _finite_number(item.get("p"))
+        if type(t) is int and cutoff <= t <= ceiling and p is not None and 0 <= p <= 1:
+            samples.append({"timestamp": datetime.fromtimestamp(t, timezone.utc).isoformat(),
+                            "yes_price": p})
+    unique = {}
+    for sample in samples:
+        key = sample["timestamp"]
+        if key in unique and unique[key]["yes_price"] != sample["yes_price"]:
+            raise PolymarketUnavailable("conflicting history samples")
+        unique[key] = sample
+    return sorted(unique.values(), key=lambda sample: sample["timestamp"])
+
+
+def triage(market, history=None, min_liquidity_usd=10_000, min_volume_24h_usd=5_000, now=None):
+    """Source-only discovery triage; never returns BUY or ESCAPE candidate payload."""
+    relevant = bool(TOPIC_RE.search(market["question"]))
+    liquid = (market["liquidity_usd"] is not None and
+              market["liquidity_usd"] >= min_liquidity_usd and
+              market["volume_24h_usd"] is not None and
+              market["volume_24h_usd"] >= min_volume_24h_usd)
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone aware")
+    # Reject a historical jump as a new catalyst: both endpoints must be
+    # observed inside the past day, the final sample no older than three hours.
+    delta = None
+    first_at = last_at = None
+    if history and len(history) >= 2:
+        try:
+            first_at = datetime.fromisoformat(history[0]["timestamp"])
+            last_at = datetime.fromisoformat(history[-1]["timestamp"])
+            seconds_since_last = (now - last_at).total_seconds()
+            duration = (last_at - first_at).total_seconds()
+            in_window = 0 < duration <= HISTORY_WINDOW_SECONDS and 0 <= seconds_since_last <= MAX_HISTORY_AGE_SECONDS
+            in_window = in_window and 0 <= (now - first_at).total_seconds() <= HISTORY_WINDOW_SECONDS
+            first_price = _finite_number(history[0]["yes_price"])
+            last_price = _finite_number(history[-1]["yes_price"])
+            if in_window and first_price is not None and last_price is not None and 0 <= first_price <= 1 and 0 <= last_price <= 1:
+                delta = round((last_price - first_price) * 100, 2)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            pass
+    return {
+        **market, "relevant_topic": relevant, "liquidity_gate": liquid,
+        "history_first_at": first_at.isoformat() if delta is not None else None,
+        "history_first_yes_price": first_price if delta is not None else None,
+        "history_last_yes_price": last_price if delta is not None else None,
+        "history_last_at": last_at.isoformat() if delta is not None else None,
+        "history_coverage": "RECENT_24H" if delta is not None else "UNVERIFIED",
+        "change_percentage_points": delta,
+        "research_priority": ("REVIEW" if relevant and liquid and delta is not None
+                              and abs(delta) >= 10 else "CONTEXT_ONLY"),
+        "status": "AFVENT_KILDEVERIFIKATION",
+        "allowed_in_escape_candidate_payload": False,
+        "note": "Prediction-market price is not an issuer announcement, broker quote or buy signal.",
+    }

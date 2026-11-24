@@ -22,20 +22,21 @@ def main():
     page.set_viewport_size({'width':1440,'height':1000})
     page.evaluate('''() => {
      const points=[{at:'2026-11-07T23:04:00Z',amount:'2830',reported_result:'-169.44',currency:'DKK'},{at:'2026-11-07T23:10:00Z',amount:'2830',reported_result:'-169.25',currency:'DKK'}];
-     const chart=p=>new DOMParser().parseFromString(window.DashboardUI.portfolioChart({portfolio_value_history:{day_start:'2026-11-07T23:00:00Z',day_end:'2026-11-08T23:00:00Z',periods:{day:p}}}),'text/html');
+     const chart=p=>new DOMParser().parseFromString(window.DashboardUI.portfolioChart({portfolio_value_history:{day_start:'2026-11-07T23:00:00Z',day_end:'2026-11-08T23:00:00Z',as_of:'2026-11-08T19:00:00Z',periods:{day:p}}}),'text/html');
      const doc=chart(points),dots=doc.querySelectorAll('.dash-chart-point');
-     if(dots.length!==2||Number(dots[1].getAttribute('cx'))>5)throw Error('Day chart does not use full-day axis');
+     if(dots.length!==2||Math.abs(Number(dots[1].getAttribute('cx'))-5)>0.1)throw Error('Day chart does not use midnight-to-now axis');
      if(Math.abs(Number(dots[0].getAttribute('cy'))-Number(dots[1].getAttribute('cy')))>12)throw Error('Small changes are exaggerated');
-     if(!doc.querySelector('.dash-chart-scale')||!doc.querySelector('.dash-chart-dates').textContent.includes('24.00'))throw Error('Day scale is missing');
+     if(!doc.querySelector('.dash-chart-scale')||!doc.querySelector('.dash-chart-dates').textContent.includes('20.00'))throw Error('Day scale is missing');
      const negative=new DOMParser().parseFromString(window.DashboardUI.resultShare({amount:'-163.94',currency:'DKK'},{amount:'2836.06',currency:'DKK'}),'text/html').body.firstElementChild;if(!negative||!negative.classList.contains('negative')||!negative.textContent.includes('-5,78 %'))throw Error('Negative result share incorrect');if(window.DashboardUI.resultShare({amount:'1',currency:'EUR'},{amount:'100',currency:'DKK'})||window.DashboardUI.resultShare({amount:'1',currency:'DKK'},{amount:'0',currency:'DKK'}))throw Error('Invalid comparison shown');
      const marker=doc.querySelector('.dash-chart-latest-time');if(!marker||!marker.textContent.includes('00.10')||marker.textContent.includes('00.10.00'))throw Error('Last timestamp is not shown in hours and minutes');
      if(marker.tagName!=='SPAN'||!marker.hasAttribute('data-chart-left')||!marker.hasAttribute('data-chart-top'))throw Error('Last timestamp is not positioned as readable text');
      const later=chart([points[0],{...points[1],at:'2026-11-08T17:00:00Z'}]);if(later.querySelector('.dash-chart-latest-time').dataset.chartLeft===marker.dataset.chartLeft)throw Error('Time does not follow later chart point');
+     if(chart([{...points[0],at:'2026-11-07T22:59:00Z'},...points,{...points[1],at:'2026-11-08T19:01:00Z'}]).querySelectorAll('.dash-chart-point').length!==2)throw Error('Out-of-day or future observations leaked');
      if(chart(points.slice(0,1)).querySelectorAll('.dash-chart-point').length!==1)throw Error('First daily observation not displayed');
     }''')
     page.evaluate('''() => {
      const points=[{at:'2026-11-08T08:00:00Z',reported_result:'-169',currency:'DKK'},{at:'2026-11-08T14:00:00Z',reported_result:'-168',currency:'DKK'}];
-     document.querySelector('#dashboard-value-chart').innerHTML=window.DashboardUI.portfolioChart({portfolio_value_history:{day_start:'2026-11-07T23:00:00Z',day_end:'2026-11-08T23:00:00Z',periods:{day:points}}});
+     document.querySelector('#dashboard-value-chart').innerHTML=window.DashboardUI.portfolioChart({portfolio_value_history:{day_start:'2026-11-07T23:00:00Z',day_end:'2026-11-08T23:00:00Z',as_of:'2026-11-08T19:00:00Z',periods:{day:points}}});
     }''')
     page.wait_for_function("document.querySelector('.dash-chart-latest-time').style.left !== ''")
     page.evaluate('''() => {

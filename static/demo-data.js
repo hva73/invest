@@ -87,7 +87,10 @@ window.ESCAPE_DEMO_HISTORY=(()=>{
  const positions=window.ESCAPE_DEMO_DATA.state.dashboard.positions,d=window.ESCAPE_DEMO_DATA.state.dashboard;
  const source=positions.find(p=>p.ticker==='BTC');
  function at(rows,epoch){let lo=0,hi=rows.length;while(lo<hi){const mid=(lo+hi)>>1;if(rows[mid].epoch<=epoch)lo=mid+1;else hi=mid}return rows[Math.max(0,lo-1)]}
- const histories=positions.map(history), daySource=period(source,'ONE_WEEK').filter(x=>x.epoch>history(source).at(-1).epoch-86400),dayStart=daySource[0].epoch;
+ // The fixed demo date is 6 November 2026 in Copenhagen (CET), not a rolling 24h window.
+ const midnight=Date.parse('2026-11-05T23:00:00Z'),nextMidnight=Date.parse('2026-11-06T23:00:00Z');
+ Object.assign(d.portfolio_value_history,{day_start:new Date(midnight).toISOString(),day_end:new Date(nextMidnight).toISOString(),as_of:new Date(end).toISOString()});
+ const histories=positions.map(history),daySource=period(source,'ONE_WEEK').filter(x=>x.epoch>=midnight/1000&&x.epoch<=end/1000),dayStart=midnight/1000;
  positions.forEach((p,i)=>{const last=histories[i].at(-1),first=at(histories[i],dayStart),change=(Number(last.price)-Number(first.price))*Number(p.quantity);p.price_time=last.timestamp;p.daily={...p.daily,amount:change.toFixed(2),percent:String((Number(last.price)/Number(first.price)-1)*100),to:p.price_time};if(p.raw)p.raw.price_time=p.price_time;});
  d.daily_result=money(positions.reduce((n,p)=>n+Number(p.daily.amount),0));
  for(const [name,which] of [['day','ONE_WEEK'],['week','ONE_WEEK'],['month','ONE_MONTH'],['year','ONE_YEAR']]){
@@ -146,14 +149,36 @@ window.ESCAPE_DEMO_HISTORY=(()=>{
   }
   if(route==='reports/candidate-registry')return ok({candidates:[]});
   if(route==='v1/hotwatch/sessions')return ok({sessions:u.searchParams.get('view')==='history'?[]:sessions,kill_switch:{killed:false},worker:null,discovery_attempts:[],truncated:false});
-  if(route.startsWith('v1/hotwatch/sessions/')&&route.endsWith('/events')){const id=decodeURIComponent(route.split('/')[3]||''),s=sessions.find(x=>x.watch_id===id)||sessions[0];return ok({items:[{created:s.last_calculation_at,severity:'INFO',event_type:s.signal==='BUY'?'BUY_SIGNAL':s.signal==='SELL'?'SELL_SIGNAL':'WAIT_SIGNAL',data_timestamp:s.last_data_at,data:{reason:s.latest_calculation.reason_codes[0],strategy_version:'demo'}}],truncated:false})}
-  if(route.startsWith('v1/hotwatch/sessions/')&&route.endsWith('/samples')){const id=decodeURIComponent(route.split('/')[3]||''),s=sessions.find(x=>x.watch_id===id)||sessions[0],p=position(s.request.asset_id);return ok({items:window.ESCAPE_DEMO_HISTORY.history(p).slice(-100).reverse().map(x=>({data:{price:x.price,event_time:x.timestamp,currency:'DKK',interval_s:180,session_key:'demo'}})),truncated:false})}
-  if(route.startsWith('v1/hotwatch/sessions/')){const id=decodeURIComponent(route.split('/')[3]||'');return ok({session:sessions.find(s=>s.watch_id===id)||sessions[0]})}
+  // Match the full session route; never substitute another synthetic signal for a missing watch.
+  const sessionRoute=route.match(/^v1\/hotwatch\/sessions\/([^/]+)(?:\/(events|samples))?$/);
+  if(route.startsWith('v1/hotwatch/sessions/')){
+   let s=null;
+   try{if(sessionRoute)s=sessions.find(x=>x.watch_id===decodeURIComponent(sessionRoute[1]));}catch{}
+   if(!s)return new Response(JSON.stringify({error:'Demosessionen findes ikke.'}),{status:404,headers:{'Content-Type':'application/json'}});
+   if(sessionRoute[2]==='events'){return ok({items:[{created:s.last_calculation_at,severity:'INFO',event_type:s.signal==='BUY'?'BUY_SIGNAL':s.signal==='SELL'?'SELL_SIGNAL':'WAIT_SIGNAL',data_timestamp:s.last_data_at,data:{reason:s.latest_calculation.reason_codes[0],strategy_version:'demo'}}],truncated:false})}
+   if(sessionRoute[2]==='samples'){const p=position(s.request.asset_id);return ok({items:window.ESCAPE_DEMO_HISTORY.history(p).slice(-100).reverse().map(x=>({data:{price:x.price,event_time:x.timestamp,currency:'DKK',interval_s:180,session_key:'demo'}})),truncated:false})}
+   return ok({session:s});
+  }
   if(route==='market/quote'){
-   const id=payload.holding_asset_id||payload.asset_id||'synthetic-asset-TSLA',p=position(id)||position('synthetic-asset-TSLA');
-   const series=window.ESCAPE_DEMO_HISTORY.period(p,payload.period||'ONE_WEEK'),day=series.filter(x=>x.epoch>series.at(-1).epoch-86400),first=Number(day[0].price),last=Number(day.at(-1).price),week=window.ESCAPE_DEMO_HISTORY.period(p,'ONE_WEEK');
-   const isCrypto=['BTC','PEPE'].includes(p.ticker);
-   return ok({asset_id:p.asset_id,ticker:p.ticker,name:p.name,exchange:isCrypto?'DEMO CRYPTO':'DEMO AKTIE',asset_type:isCrypto?'CRYPTO':'CS',currency:'DKK',price:p.price.amount,price_time:p.price_time,fetched_at:now(),daily_change_percent:p.daily.percent,daily_change:String(Number(p.daily.amount)/Number(p.quantity)),daily_note:null,week_change_percent:String((last/Number(week[0].price)-1)*100),series});
+   let p=null;
+   const holdings=demo.state.dashboard.positions;
+   if(payload.holding_portfolio_id!=null||payload.holding_asset_id!=null){
+    p=holdings.find(x=>String(x.portfolio_id)===String(payload.holding_portfolio_id)&&x.asset_id===payload.holding_asset_id);
+   }else if(payload.position_id!=null){
+    if(payload.report_id===demo.desk.positions.report_id)p=holdings.find(x=>x.reported_position?.position_id===payload.position_id&&x.reported_position?.portfolio_id===payload.portfolio_id);
+   }else if(payload.candidate_id!=null){
+    const index=demo.desk.candidates.findIndex(x=>x.report_id===payload.report_id&&x.candidate.candidate_id===payload.candidate_id);
+    if(index>=0){
+     const c=demo.desk.candidates[index].candidate;
+     p=holdings.find(x=>x.asset_id===(c.asset_id||'synthetic-asset-'+c.ticker));
+     // Standalone candidate fixtures are fictional quotes, never another holding.
+     if(!p)p={asset_id:c.asset_id||'synthetic-asset-'+c.ticker,ticker:c.ticker,name:c.company_name,price:{amount:String(demo.desk.candidates[index].decision?.buy_plan?.limit_price||100+index*25),currency:'DKK'},quantity:'1'};
+    }
+   }
+   if(!p||payload.choose===true||payload.asset_id&&payload.asset_id!==p.asset_id)return new Response(JSON.stringify({error:'Demografen mangler et entydigt aktiv.'}),{status:404,headers:{'Content-Type':'application/json'}});
+   const series=window.ESCAPE_DEMO_HISTORY.period(p,payload.period||'ONE_WEEK'),week=window.ESCAPE_DEMO_HISTORY.period(p,'ONE_WEEK'),day=week.filter(x=>x.epoch>=Date.parse('2026-11-05T23:00:00Z')/1000),last=Number(week.at(-1).price),first=Number(day[0]?.price);
+   const isCrypto=['BTC','PEPE'].includes(p.ticker),daily=p.daily?Number(p.daily.amount)/Number(p.quantity):last-first,pct=p.daily?.percent??(first>0?String((last/first-1)*100):null);
+   return ok({asset_id:p.asset_id,ticker:p.ticker,name:p.name,exchange:isCrypto?'DEMO CRYPTO':'DEMO AKTIE',asset_type:isCrypto?'CRYPTO':'CS',currency:'DKK',price:p.price.amount,price_time:p.price_time||week.at(-1).timestamp,fetched_at:now(),daily_change_percent:pct,daily_change:Number.isFinite(daily)?String(daily):null,daily_note:null,week_change_percent:String((last/Number(week[0].price)-1)*100),series});
   }
   if(route==='trade/preview')return ok({read_only:true,estimate:{quote:{message:'Simuleret estimat'},buying_power_checked:true,accounts:[]},asset:{},payload:{orders:[]}});
   if(route==='trade/search')return ok({assets:demo.state.dashboard.positions.map(p=>({asset_id:p.asset_id,name:p.name,ticker:p.ticker,currency:p.price?.currency||'DKK',isin:'TEST'}))});

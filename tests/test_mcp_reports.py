@@ -45,6 +45,37 @@ class McpReports(unittest.TestCase):
   status,tokens,_=self.request('/oauth/token',params,form=True);self.assertEqual(status,200,(status,tokens))
   return client,tokens,params
  def call(self,token,name,args):return self.request('/mcp',{'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':name,'arguments':args}},{'Authorization':'Bearer '+token})
+ def test_polymarket_readonly_scope_and_rate_limit(self):
+  _,tokens,_=self.granted('reports:read')
+  with app.connect() as c:before=list(c.iterdump())
+  sample={'status':'RETRIEVED','observations':[],'handoffs':0,'orders':0}
+  with patch('scripts.polymarket_discovery.collect',return_value=sample) as collect:
+   status,response,_=self.call(tokens['access_token'],'get_polymarket_intelligence',{})
+   self.assertEqual(status,200);self.assertFalse(response['result']['isError'])
+   self.assertEqual(response['result']['structuredContent'],sample)
+   collect.assert_called_once_with(limit=100,max_histories=2)
+   self.assertEqual(self.call(tokens['access_token'],'get_polymarket_intelligence',{})[0],429)
+   collect.assert_called_once()
+  with app.connect() as c:self.assertEqual(before,list(c.iterdump()))
+ def test_polymarket_unavailable_and_unauthorized(self):
+  from polymarket_intelligence import PolymarketUnavailable
+  _,tokens,_=self.granted('reports:write')
+  with patch('scripts.polymarket_discovery.collect') as collect:
+   self.assertIn('error',self.call(tokens['access_token'],'get_polymarket_intelligence',{})[1])
+   collect.assert_not_called()
+  mcp_reports._MEMORY_LIMITS.clear()
+  _,tokens,_=self.granted('reports:read')
+  with patch('scripts.polymarket_discovery.collect',side_effect=PolymarketUnavailable('private upstream error')):
+   status,response,_=self.call(tokens['access_token'],'get_polymarket_intelligence',{})
+   self.assertEqual(status,200);result=response['result']['structuredContent']
+   self.assertEqual(result['status'],'SOURCE_UNAVAILABLE')
+   self.assertEqual(result['orders'],0);self.assertEqual(result['handoffs'],0)
+   self.assertNotIn('private',str(result))
+ def test_polymarket_rejects_arbitrary_arguments(self):
+  _,tokens,_=self.granted('reports:read')
+  with patch('scripts.polymarket_discovery.collect') as collect:
+   response=self.call(tokens['access_token'],'get_polymarket_intelligence',{'url':'https://example.com'})[1]
+   self.assertTrue(response['result']['isError']);collect.assert_not_called()
  def test_transport_database_failure_is_logged_before_tool_dispatch(self):
   import sqlite3
   _,tokens,_=self.granted()
@@ -86,7 +117,7 @@ class McpReports(unittest.TestCase):
   self.assertEqual(result['result']['protocolVersion'],'2025-06-18')
   self.assertEqual(self.request('/mcp',{'jsonrpc':'2.0','method':'notifications/initialized'},auth)[0],202)
   status,result,_=self.request('/mcp',{'jsonrpc':'2.0','id':2,'method':'tools/list'},auth)
-  self.assertEqual({x['name'] for x in result['result']['tools']},{'send_report','validate_report','get_latest_report','record_hot_watch','get_hot_watch','sync_hot_watch','get_strategy_catalog'})
+  self.assertEqual({x['name'] for x in result['result']['tools']},{'send_report','validate_report','get_latest_report','record_hot_watch','get_hot_watch','sync_hot_watch','get_strategy_catalog','get_polymarket_intelligence'})
   self.assertTrue(next(x for x in result['result']['tools'] if x['name']=='sync_hot_watch')['annotations']['readOnlyHint'])
   review_tool=next(x for x in result['result']['tools'] if x['name']=='get_hot_watch')
   self.assertIn('review_queue',review_tool['description']);self.assertTrue(review_tool['annotations']['readOnlyHint'])

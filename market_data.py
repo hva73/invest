@@ -157,7 +157,8 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
         symbol=link['provider_symbol'];cache=dict(result.get('intraday_cache') or {})
         cached=cache.get(period) or {}
         checked=cached.get('checked_at')
-        if cached.get('symbol')==symbol and cached.get('pluto_fetched')==result.get('fetched_at') and isinstance(checked,(int,float)) and 0<=now.timestamp()-checked<300:
+        same_day=period!='day' or isinstance(checked,(int,float)) and now.astimezone(COPENHAGEN).replace(hour=0,minute=0,second=0,microsecond=0).timestamp()<=checked
+        if same_day and cached.get('symbol')==symbol and cached.get('pluto_fetched')==result.get('fetched_at') and isinstance(checked,(int,float)) and 0<=now.timestamp()-checked<300:
             for key in ('intraday_series','intraday_source'):result.pop(key,None)
             result.update(cached['fields']);result['intraday_cache']=cache
             return result
@@ -167,6 +168,7 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
             from hotwatch_adapters import EODHDAdapter
             feed_factory=lambda:EODHDAdapter(connect,user_id).feeds()
         start=now.timestamp()-window;end=now.timestamp()
+        if period=='day':start=now.astimezone(COPENHAGEN).replace(hour=0,minute=0,second=0,microsecond=0).timestamp()
         if period!='day' and result.get('series_from') and result.get('series_to'):
             start=stamp(result['series_from']).timestamp();end=min(stamp(result['series_to']).timestamp(),end)
             if start>=end:return unavailable('SOURCE_UNAVAILABLE')
@@ -180,8 +182,23 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
             live=client.minute_bars('us',realtime_symbol(symbol))
             if isinstance(live,dict) and live.get('status')=='OK' and isinstance(live.get('bars'),list) and len(live['bars'])>1:
                 response=live;source='EODHD · afsluttede realtids-minutbarer'
-        if response is None and rest_enabled:
-            response=client.intraday(symbol,interval=interval,start=int(start),end=int(end),max_points=None)
+        if rest_enabled:
+            history=client.intraday(symbol,interval=interval,start=int(start),end=int(end),max_points=None)
+            if isinstance(history,dict) and history.get('status')=='OK' and isinstance(history.get('bars'),list):
+                if response is None:
+                    response=history
+                else:
+                    # Same verified symbol and closed 1m bars; combine only non-conflicting observations.
+                    merged={};conflict=False
+                    for bar in history['bars']+response['bars']:
+                        at=stamp(bar.get('bar_open_at')).timestamp();close=decimal(bar.get('close'),positive=True)
+                        if at<start or at+bar_seconds>end or close is None:continue
+                        if at in merged and decimal(merged[at].get('close'),positive=True)!=close:conflict=True;break
+                        merged[at]=bar
+                    if not conflict:
+                        response={'status':'OK','bars':list(merged.values())};source='EODHD · historiske og afsluttede realtids-minutbarer'
+                    elif len(history['bars'])>len(response['bars']):
+                        response=history;source='EODHD'
         if not isinstance(response,dict) or response.get('status')!='OK' or not isinstance(response.get('bars'),list):
             result['intraday_status']='SOURCE_UNAVAILABLE'
             fields={k:result[k] for k in ('intraday_period','intraday_interval','intraday_checked_at','intraday_symbol','intraday_status')}
@@ -197,8 +214,7 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
             result['intraday_status']='SOURCE_INCONSISTENT';return result
         pluto=result.get('series') or []
         recent=[p for p in pluto if isinstance(p,dict) and isinstance(p.get('epoch'),(int,float)) and p['epoch']<=now.timestamp()]
-        if period=='day' and recent:
-            cutoff=max(p['epoch'] for p in recent)-86400;recent=[p for p in recent if p['epoch']>cutoff]
+        if period=='day':recent=[p for p in recent if p['epoch']>=start]
         # More bars are useful only if they also cover the actual Pluto observations.
         # A short, dense fragment must never replace a longer source interval.
         covers=not recent or bool(series) and series[0]['epoch']<=min(p['epoch'] for p in recent)+bar_seconds and series[-1]['epoch']>=max(p['epoch'] for p in recent)-bar_seconds
@@ -269,6 +285,18 @@ def quote(connect,user_id,data,factory=None):
         if cl is None:cl,tools=trade_service.client(connect,user_id,factory)
         raw=trade_service.call(cl,tools,'get_asset',{'assetId':aid,'period':requested_period})
         result=normalized(raw,aid,expected_period=requested_period)
+        # A new Pluto quote need not mean a new underlying performance series.
+        # Reuse only the same identity/range/points and preserve the original
+        # EODHD observation time, so UI refreshes cannot extend its 5m TTL.
+        if cached and cached['payload'] and not data.get('is_test',False):
+            previous=json.loads(cached['payload'])
+            identity=('asset_id','ticker','exchange','currency','isin','asset_type','name','series_period','series_from','series_to','series','series_error')
+            if result.get('series_error') is None and all(previous.get(k)==result.get(k) for k in identity):
+                carried={}
+                for period,entry in (previous.get('intraday_cache') or {}).items():
+                    if isinstance(entry,dict) and entry.get('pluto_fetched')==previous.get('fetched_at'):
+                        carried[period]={**entry,'pluto_fetched':result.get('fetched_at')}
+                if carried:result['intraday_cache']=carried
         if chart_period and not data.get('is_test',False):result=enrich_intraday(connect,user_id,result,period=chart_period)
         with connect() as db:
             db.execute('INSERT INTO market_asset_links VALUES(?,?,?,?) ON CONFLICT(user_id,candidate_id) DO UPDATE SET expected_ticker=excluded.expected_ticker,asset_id=excluded.asset_id',(user_id,c['candidate_id'],ticker,aid))

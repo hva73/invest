@@ -84,3 +84,12 @@ class OrderEvidence(unittest.TestCase):
    self.assertEqual(project([bad],order_origins=evidence)['unresolved_sales'][0]['sell_origin'],'unknown')
    with connect() as c:c.execute('INSERT INTO broker_proposals VALUES(?,?,?,?,?,?,?,?,?)',args)
    self.assertEqual(documented_order_origins(connect,1,1),{})
+
+ def test_explicit_identity_and_proof_conflicts_fail_closed(self):
+  proof={'ASELL':{'side':'SELL','asset_id':'asset-1','name':'A','currency':'USD','ticker':'A','origin':'own','evidence':'fixture'}}
+  for identity,expected in (({'assetId':'asset-1'},'own'),({'assetId':'different'},'unknown'),({'id':'asset-1','assetId':'different'},'unknown'),({'id':'asset-1','name':'Different'},'unknown'),({'id':'asset-1','currency':'EUR'},'unknown')):
+   bad=order('A','SELL','12');bad['asset'].update(identity)
+   result=project([bad],order_origins=proof)['unresolved_sales'][0]
+   self.assertEqual(result['sell_origin'],expected)
+  sell=order('A','SELL','12');sell['asset']['id']='asset-1'
+  self.assertEqual(project([sell],signal_order_sides={'ASELL':('SELL','asset-1')},order_origins=proof)['unresolved_sales'][0]['sell_origin'],'unknown')
