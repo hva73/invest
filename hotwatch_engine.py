@@ -14,7 +14,7 @@ _BAR_HISTORY_REF='_bar_history_ref_v1'
 def sample_payload(c,watch_row_id,sample,request,now):
  """Share only byte-identical, currently verified bar arrays within one watch."""
  full=canonical(sample)
- if os.environ.get('ESCAPE_HW_DEDUPE_BAR_HISTORY')!='1' or not sample.get('bar_history') or verified_bar_samples(sample,request,now) is None:return full
+ if os.environ.get('ESCAPE_HW_DEDUPE_BAR_HISTORY')!='1' or sample.get('verification')!='verified' or not sample.get('bar_history') or verified_bar_samples(sample,request,now) is None:return full
  bars=sample['bar_history'];body=canonical(bars);digest=checksum(bars)
  packed={k:v for k,v in sample.items() if k!='bar_history'};packed[_BAR_HISTORY_REF]=digest
  compact=canonical(packed)
