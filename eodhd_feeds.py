@@ -10,6 +10,8 @@ REALTIME_BASE='https://ws.eodhistoricaldata.com'
 WS_BASE='wss://ws.eodhistoricaldata.com/ws'
 _history_cache={}
 _history_locks=[threading.Lock() for _ in range(32)]
+_intraday_cache={}
+_intraday_locks=[threading.Lock() for _ in range(32)]
 _snapshot_cache={}
 _snapshot_locks=[threading.Lock() for _ in range(32)]
 _status_cache={}
@@ -123,6 +125,7 @@ class EODHDFeeds:
    if ts and all(values[k] is not None for k in ('o','h','l','c')):out.append({'symbol':symbol,'bar_open_at':ts,'interval_s':60,'open':values['o'],'high':values['h'],'low':values['l'],'close':values['c'],'volume':values['v'],'volume_type':'interval'})
   out=_unique_bars(out)
   if out is None:return _result('INVALID_RESPONSE','/history')
+  if rows and not out:return _result('INVALID_RESPONSE','/history')
   return {**res,'status':'OK' if out else 'NO_DATA','bars':out}
  def snapshot(self,symbol):
   if not _valid_symbol(symbol):return _result('INVALID_INPUT','/real-time')
@@ -146,6 +149,20 @@ class EODHDFeeds:
   return {**res,'status':'OK' if price is not None and Decimal(price)>0 and at else 'NO_DATA','price':price,'event_time':at,'volume':_number(data.get('volume')),'volume_type':'unknown'}
  def intraday(self,symbol,interval='1m',start=None,end=None,max_points=1000):
   if not _valid_symbol(symbol) or interval not in ('1m','5m','1h') or any(x is not None and (type(x) is not int or x<0) for x in (start,end)) or start is not None and end is not None and start>end or max_points is not None and (type(max_points) is not int or max_points<1):return _result('INVALID_INPUT','/intraday')
+  # Coalesce only identical bounded requests, never widen the requested window
+  # or reuse data from a different account, symbol or interval.
+  if not self._shared_status or not self._key or start is None or end is None or max_points is None or max_points>1000:
+   return self._intraday_uncached(symbol,interval,start,end,max_points)
+  key=(hashlib.sha256(self._key.encode()).digest(),symbol,interval,start,end,max_points)
+  with _intraday_locks[hash(key)%len(_intraday_locks)]:
+   cached=_intraday_cache.get(key);now=time.monotonic()
+   if cached and 0<=now-cached[0]<1:return copy.deepcopy(cached[1])
+   result=self._intraday_uncached(symbol,interval,start,end,max_points)
+   if result.get('status') in ('OK','NO_DATA'):
+    if len(_intraday_cache)>=128:_intraday_cache.clear()
+    _intraday_cache[key]=(time.monotonic(),copy.deepcopy(result))
+   return result
+ def _intraday_uncached(self,symbol,interval,start,end,max_points):
   params={'interval':interval,'fmt':'json'}
   if start is not None:params['from']=start
   if end is not None:params['to']=end
@@ -161,6 +178,7 @@ class EODHDFeeds:
    if ts and all(values[k] is not None for k in ('open','high','low','close')):out.append({'symbol':symbol,'bar_open_at':ts,**values,'volume_type':'interval'})
   out=_unique_bars(out)
   if out is None:return _result('INVALID_RESPONSE','/intraday/{symbol}')
+  if rows and not out:return _result('INVALID_RESPONSE','/intraday/{symbol}')
   return {**res,'status':'OK' if out else 'NO_DATA','bars':out}
  def us_quotes(self,symbol):
   if not _valid_symbol(symbol) or not symbol.endswith('.US'):return _result('INVALID_INPUT','/us-quote-delayed')
