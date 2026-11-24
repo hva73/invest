@@ -152,7 +152,7 @@ class Quotes(unittest.TestCase):
   self.assertEqual(len(result['intraday_series']),120)
   self.assertIn('realtids-minutbarer',result['intraday_source'])
   self.assertEqual(result['series'],data['series'])
-  self.assertEqual(calls,[('realtime','us','CHART')])
+  self.assertEqual(calls,[('realtime','us','CHART'),('rest',)])
   newer=dict(data,series=[{'epoch':(now-timedelta(minutes=i)).timestamp()} for i in (100,1)])
   with patch.dict('os.environ',{'ESCAPE_EODHD_API_KEY':'synthetic','ESCAPE_HW_EODHD_BARS_ENABLED':'1','ESCAPE_HW_EODHD_REST_ENABLED':'1'}),patch('hotwatch_service.verified_existing_feed',return_value={'provider_symbol':'CHART.US'}):
    covered=market_data.enrich_intraday(app.connect,1,newer,now,lambda:Feed())

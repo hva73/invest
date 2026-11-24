@@ -79,3 +79,9 @@ state.dashboard.accounts=[{kind:'portfolio',snapshot_at:new Date(Date.now()-6000
 state.dashboard.accounts=[{kind:'portfolio',snapshot_at:new Date(Date.now()-2*86400000).toISOString()}];html=ui.render(state);assert.match(html,/Opdateret \d\d\.\d\d\.\d{4} kl\./);assert.doesNotMatch(html,/Opdateret i dag kl\./);
 state.dashboard.accounts=[{kind:'portfolio',snapshot_at:null}];html=ui.render(state);assert.match(html,/Opdateringstid ukendt/);
 state.dashboard.accounts=[{kind:'portfolio',snapshot_at:new Date(Date.now()+60000).toISOString()}];html=ui.render(state);assert.match(html,/Opdateringstid ukendt/);
+
+// Pluto's reported daily change remains available with a recent receipt and unknown quote time.
+row.verification='broker_snapshot';row.price_time=null;row.price_freshness={state:'unknown'};row.daily={percent:'2',amount:null,currency:'EUR',basis:'pluto_reported_daily_change',to:new Date().toISOString()};
+html=ui.render(state);assert.match(html,/I dag<\/small><span class="mobile-holding-daily positive"><span class="signed-positive">≈ \+5,88\s*€<\/span>/);
+row.daily.to=new Date(Date.now()-600000).toISOString();html=ui.render(state);assert.match(html,/I dag<\/small><span class="mobile-holding-daily neutral">—/);
+console.log('PASS: recent unknown-time Pluto daily observation and expired receipt');

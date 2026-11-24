@@ -167,6 +167,7 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
             from hotwatch_adapters import EODHDAdapter
             feed_factory=lambda:EODHDAdapter(connect,user_id).feeds()
         start=now.timestamp()-window;end=now.timestamp()
+        if period=='day':start=now.astimezone(COPENHAGEN).replace(hour=0,minute=0,second=0,microsecond=0).timestamp()
         if period!='day' and result.get('series_from') and result.get('series_to'):
             start=stamp(result['series_from']).timestamp();end=min(stamp(result['series_to']).timestamp(),end)
             if start>=end:return unavailable('SOURCE_UNAVAILABLE')
@@ -180,8 +181,23 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
             live=client.minute_bars('us',realtime_symbol(symbol))
             if isinstance(live,dict) and live.get('status')=='OK' and isinstance(live.get('bars'),list) and len(live['bars'])>1:
                 response=live;source='EODHD · afsluttede realtids-minutbarer'
-        if response is None and rest_enabled:
-            response=client.intraday(symbol,interval=interval,start=int(start),end=int(end),max_points=None)
+        if rest_enabled:
+            history=client.intraday(symbol,interval=interval,start=int(start),end=int(end),max_points=None)
+            if isinstance(history,dict) and history.get('status')=='OK' and isinstance(history.get('bars'),list):
+                if response is None:
+                    response=history
+                else:
+                    # Same verified symbol and closed 1m bars; combine only non-conflicting observations.
+                    merged={};conflict=False
+                    for bar in history['bars']+response['bars']:
+                        at=stamp(bar.get('bar_open_at')).timestamp();close=decimal(bar.get('close'),positive=True)
+                        if at<start or at+bar_seconds>end or close is None:continue
+                        if at in merged and decimal(merged[at].get('close'),positive=True)!=close:conflict=True;break
+                        merged[at]=bar
+                    if not conflict:
+                        response={'status':'OK','bars':list(merged.values())};source='EODHD · historiske og afsluttede realtids-minutbarer'
+                    elif len(history['bars'])>len(response['bars']):
+                        response=history;source='EODHD'
         if not isinstance(response,dict) or response.get('status')!='OK' or not isinstance(response.get('bars'),list):
             result['intraday_status']='SOURCE_UNAVAILABLE'
             fields={k:result[k] for k in ('intraday_period','intraday_interval','intraday_checked_at','intraday_symbol','intraday_status')}
@@ -197,8 +213,7 @@ def enrich_intraday(connect,user_id,result,now=None,feed_factory=None,period='da
             result['intraday_status']='SOURCE_INCONSISTENT';return result
         pluto=result.get('series') or []
         recent=[p for p in pluto if isinstance(p,dict) and isinstance(p.get('epoch'),(int,float)) and p['epoch']<=now.timestamp()]
-        if period=='day' and recent:
-            cutoff=max(p['epoch'] for p in recent)-86400;recent=[p for p in recent if p['epoch']>cutoff]
+        if period=='day':recent=[p for p in recent if p['epoch']>=start]
         # More bars are useful only if they also cover the actual Pluto observations.
         # A short, dense fragment must never replace a longer source interval.
         covers=not recent or bool(series) and series[0]['epoch']<=min(p['epoch'] for p in recent)+bar_seconds and series[-1]['epoch']>=max(p['epoch'] for p in recent)-bar_seconds
