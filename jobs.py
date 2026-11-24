@@ -45,9 +45,10 @@ def enqueue(c,kind,user_id,dedupe,when=None,portfolio_id=None):
 def cleanup_completed_jobs(c, now, dry_run=True, limit=500):
     """Bounded cleanup of old completed scheduling metadata; never touch work in flight."""
     cutoff=now-30*86400
-    rows=c.execute("""SELECT j.id, length(CAST(COALESCE(j.result,'') AS BLOB)) AS result_bytes
+    rows=c.execute("""WITH ranked AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY id DESC) AS position FROM jobs)
+        SELECT j.id, length(CAST(COALESCE(j.result,'') AS BLOB)) AS result_bytes
         FROM jobs j WHERE j.status='done' AND j.created<?
-        AND j.id NOT IN (SELECT recent.id FROM jobs recent WHERE recent.user_id=j.user_id ORDER BY recent.id DESC LIMIT 20)
+        AND j.id NOT IN (SELECT id FROM ranked WHERE position<=20)
         ORDER BY j.id LIMIT ?""",(cutoff,limit)).fetchall()
     if rows and not dry_run:
         c.executemany("DELETE FROM jobs WHERE id=? AND status='done'",[(r[0],) for r in rows])
