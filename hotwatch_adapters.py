@@ -752,8 +752,13 @@ class EODHDAdapter:
      failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=bars.get('retry_after_s') or retry_seconds(None);raise failure
    if bars['status']=='OK':
     closed=[b for b in bars.get('bars',[]) if b.get('bar_open_at') and stamp(b['bar_open_at'])+timedelta(seconds=60)<=utc() and b.get('close') and Decimal(b['close'])>0 and (not session.get('last_data') or stamp(b['bar_open_at'])>=stamp(session['last_data']))]
-    if closed:
-     bar=max(closed,key=lambda b:stamp(b['bar_open_at']));at=stamp(bar['bar_open_at']);currency=r.get('quote_currency')
+    # An old bar must not prevent a newer timestamped REST quote from
+    # being read (especially on thinly traded holdings). Retain the true
+    # bar-open timestamp and never manufacture market status or a spread.
+    fresh_closed=[b for b in closed if 0<=(utc()-stamp(b['bar_open_at'])).total_seconds()<=min(r['risk']['max_quote_age_s'],GLOBAL_RISK['max_quote_age_s'])]
+    if closed and not fresh_closed:self.last_feed_diagnostics['bar_history_status']='STALE_FALLBACK_TO_REST'
+    if fresh_closed:
+     bar=max(fresh_closed,key=lambda b:stamp(b['bar_open_at']));at=stamp(bar['bar_open_at']);currency=r.get('quote_currency')
      if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):raise DataUnavailable('EODHD_CURRENCY_UNCONFIRMED')
      sample_id='eodhd-bar-'+hashlib.sha256((kind+symbol+bar['bar_open_at']).encode()).hexdigest()[:27];old=None
      if session.get('id') is not None:
