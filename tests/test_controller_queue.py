@@ -20,3 +20,10 @@ class QueueTests(unittest.TestCase):
         with self.assertRaises(ValueError): plan([task(1),task(1)])
     def test_unsafe_path(self):
         with self.assertRaises(ValueError): plan([task(1,paths=("../x",))])
+    def test_parallel_limit_counts_existing_active_workers(self):
+        rows = [task(1,status="active"),task(2,"motor",paths=("motor.py",)),task(3,"data",paths=("feed.py",))]
+        self.assertEqual([t.issue for t in plan(rows)],[2])
+        self.assertEqual([t.issue for t in plan(rows,max_parallel=3)],[2,3])
+        self.assertEqual(plan(rows,max_parallel=1),[])
+        for bad in (0,6,True):
+            with self.assertRaises(ValueError): plan(rows,max_parallel=bad)
