@@ -4,6 +4,9 @@ import re
 import subprocess
 from pathlib import PurePosixPath
 
+class PublicationError(ValueError):
+    """Fixed safe reason, never raw agent output."""
+
 REPO = "hva73/invest"
 BASES = {"codex/escape-development", "codex/development-controller-pilot"}
 def allowed(path, scopes):
@@ -22,21 +25,21 @@ def git(folder,*args):
 def publish(folder,row,branch,base):
     target=row.get("base_branch")
     if target not in BASES or not re.fullmatch(r"controller/local-[0-9]+-[0-9]+",branch):
-        raise ValueError("unapproved branch")
+        raise PublicationError("unapproved_branch")
     if git(folder,"rev-parse","HEAD").decode().strip()!=base:
-        raise ValueError("agent changed HEAD")
+        raise PublicationError("head_changed")
     if git(folder,"branch","--show-current").decode().strip()!=branch:
-        raise ValueError("agent changed branch")
+        raise PublicationError("branch_changed")
     git(folder,"add","-A","--",".")
     names=git(folder,"diff","--cached","--no-renames","--name-only","-z").split(b"\0")
     paths=[os.fsdecode(p) for p in names if p]
     if not paths or len(paths)>30 or not all(allowed(p,row["paths"]) for p in paths):
-        raise ValueError("diff outside allowed scope")
+        raise PublicationError("scope_violation")
     for entry in git(folder,"ls-files","-s","-z").split(b"\0"):
         if entry and entry.split(b" ",1)[0] in (b"120000",b"160000") and os.fsdecode(entry.split(b"\t",1)[1]) in paths:
-            raise ValueError("symlink or submodule")
+            raise PublicationError("unsafe_file_type")
     if len(git(folder,"diff","--cached","--binary"))>500000:
-        raise ValueError("patch too large")
+        raise PublicationError("patch_too_large")
     # Explicit approved destination, no remote configured by agent.
     git(folder,"-c","user.name=ESCAPE Controller","-c","user.email=controller@users.noreply.github.com","commit","-m",f"Controller draft for #{row['issue']}")
     git(folder,"-c","credential.helper=","-c","credential.helper=!gh auth git-credential","push","https://github.com/"+REPO+".git","HEAD:refs/heads/"+branch)
