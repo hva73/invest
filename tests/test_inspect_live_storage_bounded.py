@@ -27,6 +27,41 @@ class LiveStorageTests(unittest.TestCase):
             self.assertNotIn("sensitive fixture",str(result))
             self.assertEqual(before,p.read_bytes())
             self.assertEqual(list(Path(d).iterdir()),[p])
+    def test_index_attribution_and_physical_page_accounting(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/"escape.db"
+            with sqlite3.connect(p) as db:
+                db.execute("PRAGMA auto_vacuum=INCREMENTAL")
+                db.execute("CREATE TABLE hw_samples(id INTEGER PRIMARY KEY, payload TEXT UNIQUE)")
+                db.execute("CREATE INDEX explicit_payload ON hw_samples(payload)")
+                db.executemany("INSERT INTO hw_samples(payload) VALUES (?)",
+                               [(str(i)+"x"*3000,) for i in range(90)])
+                db.execute("DELETE FROM hw_samples WHERE id<40")
+            before=p.read_bytes()
+            result=inspect(p)
+            self.assertEqual(result["status"],"ok")
+            by_name={o["name"]:o for o in result["objects"]}
+            owners=[o for o in result["objects"] if o["table"]=="hw_samples"]
+            indexes=[o for o in owners if o["kind"]=="index"]
+            self.assertEqual(len(indexes),2)
+            self.assertIn("explicit_payload",by_name)
+            with sqlite3.connect(p.as_uri()+"?mode=ro",uri=True) as db:
+                physical={name:(payload,unused) for name,payload,unused in db.execute(
+                    "SELECT name,sum(payload),sum(unused) FROM dbstat GROUP BY name")}
+            self.assertEqual({o["name"]:(o["payload_bytes"],o["unused_bytes"])
+                              for o in result["objects"]},physical)
+            totals=result["tables"]["hw_samples"]
+            self.assertEqual(totals["table_bytes"],by_name["hw_samples"]["bytes"])
+            self.assertEqual(totals["index_bytes"],sum(o["bytes"] for o in indexes))
+            self.assertEqual(totals["total_bytes"],sum(o["bytes"] for o in owners))
+            accounting=result["page_accounting"]
+            self.assertEqual(accounting["snapshot_bytes"],len(before))
+            self.assertGreater(accounting["unattributed_bytes"],0)
+            self.assertGreater(accounting["freelist_bytes"],0)
+            self.assertEqual(accounting["snapshot_bytes"],accounting["btree_bytes"]+
+                             accounting["freelist_bytes"]+accounting["unattributed_bytes"])
+            self.assertEqual(before,p.read_bytes())
+
     def test_sidecar_and_symlink_denied(self):
         with tempfile.TemporaryDirectory() as d:
             p=Path(d)/"escape.db"
