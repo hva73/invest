@@ -170,6 +170,8 @@ def main():
                     row = futures[future]
                     try:
                         status = future.result()
+                    except controller_publish.PublicationError as exc:
+                        status = "blocked:" + str(exc)
                     except Exception as exc:
                         status = "blocked:" + type(exc).__name__
                     results[task_key(row)] = status
