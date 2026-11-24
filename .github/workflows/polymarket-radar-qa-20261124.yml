@@ -39,5 +39,8 @@ jobs:
           r=collect(limit=100,max_histories=8)
           assert r['orders']==0 and r['handoffs']==0 and not r['persistent_backlog']
           assert r['markets_scanned']<=100 and r['histories_attempted']<=8
+          # Bounded public metadata, no token IDs or portfolio details.
+          reviews=[{'question':x['question'][:160],'market_url':x['url'],'yes_contract_price':x['yes_price'],'change_pp':x['change_percentage_points'],'history_first_at':x['history_first_at'],'history_last_at':x['history_last_at'],'candidate_eligible':x['candidate_eligible']} for x in r['observations'] if x['research_priority']=='REVIEW'][:3]
+          print(json.dumps({'external_reviews':reviews},ensure_ascii=False))
           print(json.dumps({'status':'PASS','markets_scanned':r['markets_scanned'],'liquid_relevant_markets':r['liquid_relevant_markets'],'histories_attempted':r['histories_attempted'],'research_reviews':sum(x['research_priority']=='REVIEW' for x in r['observations']),'source_errors':len(r['errors']),'orders':0,'handoffs':0},sort_keys=True))
           PY
