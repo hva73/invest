@@ -14,10 +14,10 @@ FETCH_LOCK = threading.Lock()
 from datetime import datetime, timezone
 try:
     from .controller_queue import plan
-    from . import controller_remote, controller_publish
+    from . import controller_remote, controller_publish, controller_receipts
 except ImportError:
     from controller_queue import plan
-    import controller_remote, controller_publish
+    import controller_remote, controller_publish, controller_receipts
 
 def save(path, value):
     temp = path.with_suffix(".tmp")
@@ -116,6 +116,8 @@ def main():
         state = load(statefile, {})
         results = load(donefile, {})
         while not (root / "STOP").exists():
+            if a.publish:
+                controller_receipts.flush(root)
             if a.remote:
                 try:
                     controller_remote.refresh(root, a.queue)
@@ -150,6 +152,12 @@ def main():
                         status = "blocked:" + type(exc).__name__
                     results[task_key(row)] = status
                     save(donefile, results)
+                    if a.publish:
+                        try:
+                            controller_receipts.record(root, task_key(row), status)
+                            controller_receipts.flush(root)
+                        except (OSError, ValueError) as exc:
+                            print("RECEIPT_PENDING:", task_key(row), type(exc).__name__, flush=True)
 
 if __name__ == "__main__":
     main()
