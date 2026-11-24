@@ -55,6 +55,10 @@ window.MarketUI=(()=>{
   // usable. Never leave it looking current after an error or expired refresh.
   const dailyBox=node.closest('#dashboard-detail')?.querySelector('[data-position-daily] dd');
   const headerQuote=node.closest('#dashboard-detail')?.querySelector('[data-position-live-price]');if(headerQuote)headerQuote.textContent='—';
+  if(dailyBox&&dailyBox.dataset.positionDailyOriginal===undefined){
+   dailyBox.dataset.positionDailyOriginal=dailyBox.innerHTML;
+   dailyBox.dataset.positionDailyUntil=dailyBox.closest('[data-position-daily]')?.dataset.positionDailyUntil||'';
+  }
   if(dailyBox?.dataset.marketOverride==='true'){
    dailyBox.textContent='— · — %';delete dailyBox.dataset.marketOverride;
    const original=dailyBox.dataset.positionDailyOriginal,until=Number(dailyBox.dataset.positionDailyUntil);
