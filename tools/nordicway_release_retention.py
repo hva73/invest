@@ -10,11 +10,14 @@ from pathlib import PurePosixPath
 import re
 import tarfile
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
 import sys
+
+import nordicway_uapi_quota as quota
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
@@ -93,13 +96,93 @@ def validate_result(result, sha):
         raise ValueError('release_mismatch')
 
 
-def maintain(api, sha, started, *, redundant_only=False, before_delete=None):
+ARCHIVE_HEADROOM = 256 * 1024 * 1024
+ACCOUNT_BUDGET = 20_000_000_000
+
+
+def archive_inventory(listing, root, manifest, db_bytes):
+    expected = json.loads(manifest)
+    if not isinstance(expected, dict) or expected.get('format') != 1:
+        raise ValueError('invalid_backup_inventory')
+    files = {'escape.db', 'manifest.json'}
+    for field, prefix in (('files', 'code/'), ('keys', '')):
+        members = expected.get(field)
+        if not isinstance(members, dict) or len(members) > 500:
+            raise ValueError('invalid_backup_inventory')
+        for name, digest in members.items():
+            if digest is None:
+                continue
+            path = prefix + name
+            if (path in files or not isinstance(digest, str) or not re.fullmatch('[0-9a-f]{64}', digest)
+                    or any(part in ('.', '..') or not re.fullmatch('[A-Za-z0-9_.-]{1,255}', part)
+                           for part in path.split('/')) or path.count('/') > 10):
+                raise ValueError('invalid_backup_inventory')
+            files.add(path)
+    if not re.fullmatch('[0-9a-f]{64}', str(expected.get('database_sha256'))):
+        raise ValueError('invalid_backup_inventory')
+    directories = {str(parent) for name in files for parent in PurePosixPath(name).parents} - {'.'}
+    if files & directories or len(files) + len(directories) >= 500:
+        raise ValueError('invalid_backup_inventory')
+
+    snapshot = {}
+    padded = 0
+    for directory in sorted(directories | {''}):
+        base = root + '/' + directory if directory else root
+        for name, row in listing(base).items():
+            relative = directory + '/' + name if directory else name
+            kind = 'file' if relative in files else 'dir' if relative in directories else None
+            size = row.get('size')
+            if isinstance(size, str) and re.fullmatch('[0-9]{1,11}', size):
+                size = int(size)
+            if (kind is None or row.get('type') != kind
+                    or type(size) is not int or not 0 <= size <= 10_000_000_000
+                    or row.get('mtime') is None or row.get('mode') is None
+                    or row.get('link') or row.get('islink') not in (None, False, 0, '0')):
+                raise ValueError('invalid_backup_inventory')
+            snapshot[relative] = (kind, size, row['mtime'], row['mode'])
+            if kind == 'file':
+                padded += ((size + 511) // 512) * 512
+        if directory and directory not in snapshot:
+            raise ValueError('invalid_backup_inventory')
+    if (snapshot.keys() != files | directories or snapshot['escape.db'][1] != db_bytes
+            or snapshot['manifest.json'][1] != len(manifest.encode('utf-8'))):
+        raise ValueError('invalid_backup_inventory')
+
+    # Include the root, extended tar headers, block padding and end records.
+    # Allow 12.5% DEFLATE expansion plus gzip framing, above stored-block overhead.
+    tar_upper = padded + (len(snapshot) + 2) * 65536
+    gzip_upper = tar_upper + (tar_upper + 7) // 8 + 65536
+    return snapshot, gzip_upper + ARCHIVE_HEADROOM
+
+
+def measured_quota(reader):
+    try:
+        values = reader()
+        capacity = tuple(values[key] for key in ('used_upper_bytes', 'limit_lower_bytes', 'free_lower_bytes'))
+        used, limit, free = capacity
+        if (any(type(value) is not int or value < 0 for value in capacity)
+                or limit <= 0 or limit - used != free):
+            raise ValueError('quota_unavailable')
+        return capacity
+    except (OSError, ValueError, TypeError, KeyError):
+        raise ValueError('quota_unavailable') from None
+
+
+def maintain(api, sha, started, *, redundant_only=False, before_delete=None, quota_reader=None):
     uapi, request, download = api
     def listing(path):
         data = uapi('list_files', {'dir': path, 'show_hidden': 1})
         if not isinstance(data, list) or len(data) > 500:
             raise ValueError('invalid_inventory')
-        return {r['file']: r for r in data if isinstance(r, dict) and r.get('file') not in ('.', '..')}
+        rows = {}
+        for row in data:
+            name = row.get('file') if isinstance(row, dict) else None
+            if name in ('.', '..'):
+                continue
+            if not isinstance(name, str) or not name or '/' in name or name in rows:
+                raise ValueError('invalid_inventory')
+            rows[name] = row
+        return rows
     def content(directory, filename):
         data = uapi('get_file_content', {'dir': directory, 'file': filename,
             'from_charset': 'ISO-8859-1', 'to_charset': 'UTF-8', 'update_html_document_encoding': 0})
@@ -132,7 +215,33 @@ def maintain(api, sha, started, *, redundant_only=False, before_delete=None):
             if not listing(ROOT + '/.escape_backups'):
                 uapi('delete_file', {'path': ROOT + '/.escape_backups'})
             top = listing(ROOT)
+    raw_path = ROOT + '/' + NAME
+    reserved = None
     if ARCHIVE not in top:
+        if quota_reader is None:
+            quota_reader = lambda: quota.read(os.environ.get('ESCAPE_CPANEL_API_TOKEN', ''))
+        try:
+            reserved = archive_inventory(listing, raw_path, manifest, DB_BYTES)
+            checked_at = time.monotonic()
+            capacity = measured_quota(quota_reader)
+            used, _, free = capacity
+            if min(free, ACCOUNT_BUDGET - used) < reserved[1]:
+                raise ValueError('archive_reserve_insufficient')
+            current()
+            if (content(raw_path, 'manifest.json') != manifest
+                    or archive_inventory(listing, raw_path, manifest, DB_BYTES) != reserved
+                    or listing(ROOT) != top):
+                raise ValueError('archive_inventory_changed')
+            if measured_quota(quota_reader) != capacity or time.monotonic() - checked_at > 60:
+                raise ValueError('archive_quota_changed')
+        except (OSError, ValueError) as exc:
+            categories = {'invalid_backup_inventory', 'invalid_inventory', 'quota_unavailable',
+                          'archive_reserve_insufficient', 'archive_inventory_changed',
+                          'archive_quota_changed', 'installed_release_changed'}
+            category = str(exc) if str(exc) in categories else 'archive_preflight_unavailable'
+            deferred = {'status': 'maintenance_deferred', 'category': category}
+            print(json.dumps(deferred), flush=True)
+            return deferred
         params = {'cpanel_jsonapi_user': 'nordicr4', 'cpanel_jsonapi_apiversion': 2,
             'cpanel_jsonapi_module': 'Fileman', 'cpanel_jsonapi_func': 'fileop',
             'op': 'compress', 'sourcefiles': ROOT + '/' + NAME,
@@ -154,6 +263,8 @@ def maintain(api, sha, started, *, redundant_only=False, before_delete=None):
     after = listing(ROOT + '/' + NAME)
     metadata = lambda rows: {name: {k: row.get(k) for k in ('file','type','mode','size','mtime')} for name,row in rows.items()}
     if metadata(before) != metadata(after) or manifest != content(ROOT + '/' + NAME, 'manifest.json'):
+        raise ValueError('original_backup_changed')
+    if reserved is not None and archive_inventory(listing, raw_path, manifest, DB_BYTES) != reserved:
         raise ValueError('original_backup_changed')
     # The archive is verified against the original per-file and DB SHA256s.
     # This deletes only the now-redundant uncompressed form, never production.
