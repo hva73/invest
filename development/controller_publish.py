@@ -17,7 +17,7 @@ def allowed(path, scopes):
     return any(path==s.rstrip("/") or path.startswith(s.rstrip("/")+"/") for s in scopes)
 
 def git(folder,*args):
-    return subprocess.check_output(["git","-c","core.hooksPath=/dev/null",*args],cwd=folder)
+    return subprocess.check_output(["git","-c","core.hooksPath=/dev/null",*args],cwd=folder,timeout=90)
 
 def publish(folder,row,branch,base):
     target=row.get("base_branch")
@@ -39,5 +39,5 @@ def publish(folder,row,branch,base):
         raise ValueError("patch too large")
     # Explicit approved destination, no remote configured by agent.
     git(folder,"-c","user.name=ESCAPE Controller","-c","user.email=controller@users.noreply.github.com","commit","-m",f"Controller draft for #{row['issue']}")
-    git(folder,"push","https://github.com/"+REPO+".git","HEAD:refs/heads/"+branch)
+    git(folder,"-c","credential.helper=","-c","credential.helper=!gh auth git-credential","push","https://github.com/"+REPO+".git","HEAD:refs/heads/"+branch)
     return subprocess.check_output(["gh","pr","create","--repo",REPO,"--draft","--base",target,"--head",branch,"--title",f"Controller draft #{row['issue']}","--body",f"Refs #{row['issue']}. Local agent changes; independent review and CI required. No deployment approval."],cwd=folder,text=True,timeout=60).strip()
