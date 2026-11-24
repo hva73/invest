@@ -1,8 +1,8 @@
 """Contract tests for the read-only Polymarket research adapter."""
 import json
 import unittest
-from datetime import datetime, timezone
-from unittest.mock import Mock
+from datetime import datetime, timezone, timedelta
+from unittest.mock import Mock, patch
 
 import polymarket_intelligence as poly
 
@@ -64,16 +64,93 @@ class AdapterTests(unittest.TestCase):
             {"t": 1795400600, "p": .55},
         ]})
         item = poly.normalize_market(market(), "now")
-        history = poly.price_history(item, opener=opener)
+        now = datetime.fromtimestamp(1795400600, timezone.utc) + timedelta(minutes=3)
+        history = poly.price_history(item, opener=opener, now=now)
         self.assertEqual(len(history), 2)
-        result = poly.triage(item, history)
+        result = poly.triage(item, history, now=now)
         self.assertEqual(result["change_percentage_points"], 20.0)
         self.assertEqual(result["research_priority"], "REVIEW")
         self.assertEqual(result["status"], "AFVENT_KILDEVERIFIKATION")
 
+    def test_topic_word_boundaries_and_closed_market(self):
+        odd = poly.normalize_market(market(question="Will a second boiler win a secret contest?"), "now")
+        self.assertFalse(poly.triage(odd)["relevant_topic"])
+        self.assertIsNone(poly.normalize_market(market(active=None), "now"))
+        self.assertIsNone(poly.normalize_market(market(closed=None), "now"))
+        self.assertIsNone(poly.normalize_market(market(slug="https://invalid.example"), "now"))
+
+    def test_stale_and_future_history_never_raise_research_priority(self):
+        observed = datetime.fromtimestamp(1795400600, timezone.utc) + timedelta(minutes=3)
+        sample = poly.normalize_market(market(), observed.isoformat())
+        history = [{"timestamp": (observed-timedelta(hours=25)).isoformat(), "yes_price": .2},
+                   {"timestamp": (observed-timedelta(hours=4)).isoformat(), "yes_price": .6}]
+        stale = poly.triage(sample, history, now=observed)
+        self.assertEqual(stale["research_priority"], "CONTEXT_ONLY")
+        self.assertIsNone(stale["change_percentage_points"])
+        self.assertEqual(stale["history_coverage"], "UNVERIFIED")
+        future = [{"timestamp": observed.isoformat(), "yes_price": .2},
+                  {"timestamp": (observed+timedelta(minutes=5)).isoformat(), "yes_price": .8}]
+        self.assertIsNone(poly.triage(sample, future, now=observed)["change_percentage_points"])
+
+    def test_history_filters_future_and_outside_last_day(self):
+        now = datetime.fromtimestamp(1795400600, timezone.utc) + timedelta(minutes=3)
+        opener = Mock()
+        opener.open.return_value = FakeResponse({"history": [
+            {"t": int(now.timestamp()) - 90000, "p": .01},
+            {"t": int(now.timestamp()) - 600, "p": .35},
+            {"t": int(now.timestamp()) - 60, "p": .55},
+            {"t": int(now.timestamp()) + 500, "p": .99},
+        ]})
+        history = poly.price_history({"yes_token_id": "123456"}, opener=opener, now=now)
+        self.assertEqual(len(history), 2)
+        self.assertEqual(poly.triage(poly.normalize_market(market(), now.isoformat()), history, now=now)["research_priority"], "REVIEW")
+
     def test_no_inferred_change_without_history(self):
         item = poly.normalize_market(market(), "now")
         self.assertIsNone(poly.triage(item)["change_percentage_points"])
+
+    def test_collector_limits_calls_and_never_creates_candidates(self):
+        from scripts import polymarket_discovery as discovery
+        now = datetime.fromtimestamp(1795400600, timezone.utc) + timedelta(minutes=3)
+        raw = [
+            poly.normalize_market(market(id=str(100+i), slug="market-"+str(i),
+                question="Will the Fed cut rates in December?", volume24hr="9000",
+                liquidityNum="30000"), now.isoformat()) for i in range(14)
+        ]
+        bars = [
+            {"timestamp": (now-timedelta(minutes=40)).isoformat(), "yes_price": .3},
+            {"timestamp": (now-timedelta(minutes=2)).isoformat(), "yes_price": .52},
+        ]
+        with patch.object(poly, "fetch_markets", return_value=raw) as fetch, \
+             patch.object(poly, "price_history", return_value=bars) as history:
+            report = discovery.collect(limit=30, max_histories=8, now=now)
+        fetch.assert_called_once_with(limit=30, now=now)
+        self.assertEqual(history.call_count, 8)
+        self.assertEqual(report["markets_scanned"], 14)
+        self.assertEqual(report["histories_attempted"], 8)
+        self.assertEqual(len(report["observations"]), 8)
+        self.assertTrue(all(x["research_priority"] == "REVIEW" for x in report["observations"]))
+        self.assertTrue(all(not x["allowed_in_escape_candidate_payload"] for x in report["observations"]))
+        self.assertEqual((report["handoffs"], report["orders"], report["persistent_backlog"]), (0, 0, False))
+
+    def test_collector_does_not_promote_partial_or_failed_history(self):
+        from scripts import polymarket_discovery as discovery
+        now = datetime.fromtimestamp(1795400600, timezone.utc) + timedelta(minutes=3)
+        sample = poly.normalize_market(market(), now.isoformat())
+        with patch.object(poly, "fetch_markets", return_value=[sample]), \
+             patch.object(poly, "price_history", side_effect=poly.PolymarketUnavailable("network")):
+            result = discovery.collect(now=now)
+        self.assertEqual(result["histories_attempted"], 1)
+        self.assertEqual(result["observations"][0]["research_priority"], "CONTEXT_ONLY")
+        self.assertEqual(result["errors"], [{"market_id": "123", "reason": "HISTORY_UNAVAILABLE"}])
+        self.assertEqual(result["handoffs"], 0)
+
+    def test_history_budget_is_bounded(self):
+        from scripts import polymarket_discovery as discovery
+        for budget in (True, -1, 9, 1.5, "8"):
+            with self.subTest(budget=budget), self.assertRaises(ValueError):
+                discovery.collect(max_histories=budget)
+
 
 
 if __name__ == "__main__":

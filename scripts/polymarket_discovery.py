@@ -7,14 +7,21 @@ A separate Radar run must verify official sources + exact Pluto instrument ident
 import json
 import pathlib
 import sys
+from datetime import datetime, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import polymarket_intelligence as poly
 
 
-def collect(limit=100, max_histories=8):
-    markets = poly.fetch_markets(limit=limit)
-    prelim = [poly.triage(item) for item in markets]
+def collect(limit=100, max_histories=8, now=None):
+    """Ephemeral read-only context; not an ESCAPE report candidate list."""
+    if type(max_histories) is not int or not 0 <= max_histories <= 8:
+        raise ValueError("invalid history budget")
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone aware")
+    markets = poly.fetch_markets(limit=limit, now=now)
+    prelim = [poly.triage(item, now=now) for item in markets]
     eligible = [item for item in prelim if item["relevant_topic"] and item["liquidity_gate"]]
     eligible.sort(key=lambda item: (item["volume_24h_usd"] or 0), reverse=True)
     selected = eligible[:max_histories]
@@ -22,8 +29,8 @@ def collect(limit=100, max_histories=8):
     errors = []
     for item in selected:
         try:
-            history = poly.price_history(item)
-            results.append(poly.triage(item, history))
+            history = poly.price_history(item, now=now)
+            results.append(poly.triage(item, history, now=now))
         except poly.PolymarketUnavailable:
             results.append(item)
             errors.append({"market_id": item["market_id"], "reason": "HISTORY_UNAVAILABLE"})
@@ -31,6 +38,7 @@ def collect(limit=100, max_histories=8):
                                    -abs(item["change_percentage_points"] or 0)))
     return {"source": "Polymarket public Gamma/CLOB",
             "classification": "UNVERIFIED_PREDICTION_MARKET_CONTEXT",
+            "retrieved_at": now.astimezone(timezone.utc).isoformat(),
             "markets_scanned": len(markets),
             "liquid_relevant_markets": len(eligible),
             "histories_attempted": len(selected),
