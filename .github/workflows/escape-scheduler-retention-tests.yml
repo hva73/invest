@@ -1,0 +1,32 @@
+name: ESCAPE scheduler retention regressions
+on:
+  pull_request:
+    branches: [codex/escape-development]
+    paths:
+      - jobs.py
+      - worker.py
+      - tools/inspect_sqlite_storage.py
+      - tests/test_job_retention.py
+      - tests/test_sqlite_storage_inspection.py
+      - .github/workflows/escape-scheduler-retention-tests.yml
+permissions:
+  contents: read
+jobs:
+  retention:
+    if: github.repository == 'hva73/invest'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - name: Synthetic scheduler and retention regressions (no production secrets)
+        env:
+          PYTHONPATH: .:tests
+          ESCAPE_JOB_RETENTION_ENABLED: '0'
+        run: python -m unittest tests.test_job_retention tests.test_sqlite_storage_inspection tests.test_jobs tests.test_worker_database_contention
