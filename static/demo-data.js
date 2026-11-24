@@ -165,7 +165,7 @@ window.ESCAPE_DEMO_HISTORY=(()=>{
      const c=demo.desk.candidates[index].candidate;
      p=holdings.find(x=>x.asset_id===(c.asset_id||'synthetic-asset-'+c.ticker));
      // Standalone candidate fixtures are fictional quotes, never another holding.
-     if(!p)p={asset_id:c.asset_id||'synthetic-asset-'+c.ticker,ticker:c.ticker,name:c.company_name,price:{amount:String(100+index*25),currency:'DKK'},quantity:'1'};
+     if(!p)p={asset_id:c.asset_id||'synthetic-asset-'+c.ticker,ticker:c.ticker,name:c.company_name,price:{amount:String(demo.desk.candidates[index].decision?.buy_plan?.limit_price||100+index*25),currency:'DKK'},quantity:'1'};
     }
    }
    if(!p||payload.choose===true||payload.asset_id&&payload.asset_id!==p.asset_id)return new Response(JSON.stringify({error:'Demografen mangler et entydigt aktiv.'}),{status:404,headers:{'Content-Type':'application/json'}});
