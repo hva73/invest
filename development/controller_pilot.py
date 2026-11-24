@@ -30,7 +30,7 @@ def fingerprint():
                 h.update(p.read_bytes())
     return h.hexdigest()
 
-def loop(step, snapshot, rounds, deadline, clock=time.monotonic, verify=None):
+def loop(step, snapshot, rounds, deadline, clock=time.monotonic, verify=None, exhausted=None):
     if verify is not None and verify():
         return "verified"
     history = {snapshot()}
@@ -42,6 +42,8 @@ def loop(step, snapshot, rounds, deadline, clock=time.monotonic, verify=None):
             return "execution_failed"
         if verify is not None and verify():
             return "verified"
+        if exhausted is not None and exhausted():
+            return "token_limit"
         current = snapshot()
         if current in history:
             return "no_progress"
@@ -153,7 +155,8 @@ Task: {task}
         except subprocess.TimeoutExpired:
             return 124
     result = loop(step, fingerprint, a.rounds, time.monotonic()+60*a.minutes,
-                  verify=smoke_verified if a.verify_smoke else None)
+                  verify=smoke_verified if a.verify_smoke else None,
+                  exhausted=lambda: usage >= a.max_tokens)
     print("STOP:", result, "- inspect diff and test independently; not release approval")
     if result == "execution_failed":
         raise SystemExit(1)
