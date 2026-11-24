@@ -672,6 +672,8 @@ class HotWatch(unittest.TestCase):
    row=engine.row_for(c,1,self.req['watch_id'],True)
    sample=copy.deepcopy(fixture.sample);invalid=copy.deepcopy(sample);invalid['bar_evidence']['provider_symbol']='OTHER.US'
    self.assertEqual(engine.sample_payload(c,row['id'],invalid,fixture.req,fixture.now),engine.canonical(invalid))
+   unverified=dict(sample,verification='unverified')
+   self.assertEqual(engine.sample_payload(c,row['id'],unverified,fixture.req,fixture.now),engine.canonical(unverified))
    packed=engine.sample_payload(c,row['id'],sample,fixture.req,fixture.now)
    digest=json.loads(packed)[engine._BAR_HISTORY_REF]
    self.assertEqual(engine.sample_read(c,row['id'],packed),sample)
