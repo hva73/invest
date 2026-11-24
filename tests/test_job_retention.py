@@ -5,10 +5,18 @@ import jobs
 class CompletedJobRetention(unittest.TestCase):
  def setUp(self):
   self.c=sqlite3.connect(':memory:')
-  self.c.execute('CREATE TABLE jobs(id INTEGER PRIMARY KEY,user_id INTEGER,status TEXT,created REAL,result TEXT)')
+  self.c.execute('CREATE TABLE jobs(id INTEGER PRIMARY KEY,user_id INTEGER,status TEXT,created REAL,result TEXT,completed REAL,kind TEXT,lease TEXT,lease_until REAL)')
+  self.c.execute('CREATE TABLE job_retention_state(id INTEGER PRIMARY KEY,last_run REAL NOT NULL)')
   self.now=100*86400
-  self.c.executemany('INSERT INTO jobs VALUES(?,?,?,?,?)',[(i,1,'done',self.now-40*86400,'ok') for i in range(1,26)])
-  self.c.executemany('INSERT INTO jobs VALUES(?,?,?,?,?)',[(30,1,'queued',0,'q'),(31,1,'running',0,'r'),(32,1,'failed',0,'f'),(33,2,'done',0,'last'),(34,1,'done',self.now-86400,'recent')])
+  self.old=self.now-40*86400
+  self.c.executemany('INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?)',[(i,1,'done',self.old,'ok',self.old,'ecb',None,None) for i in range(1,26)])
+  self.c.executemany('INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?)',[
+   (30,1,'queued',0,'q',None,'ecb',None,None),
+   (31,1,'running',0,'r',None,'ecb','lease',1),
+   (32,1,'failed',0,'f',None,'ecb',None,None),
+   (33,2,'done',0,'last',0,'ecb',None,None),
+   (34,1,'done',self.now-86400,'recent',self.now-86400,'ecb',None,None)])
+  self.c.commit()
  def tearDown(self):self.c.close()
  def test_dry_run_and_retention_preserve_pending_failed_recent_and_last_20(self):
   before=self.c.execute('SELECT * FROM jobs ORDER BY id').fetchall()
@@ -24,5 +32,22 @@ class CompletedJobRetention(unittest.TestCase):
   result=jobs.cleanup_completed_jobs(self.c,self.now,dry_run=False,limit=2)
   self.assertEqual(result['rows'],2)
   self.assertEqual(self.c.execute('SELECT count(*) FROM jobs').fetchone()[0],28)
+  for n in (0,-1,501,True):
+   with self.assertRaises(ValueError):jobs.cleanup_completed_jobs(self.c,self.now,limit=n)
+ def test_legacy_recent_completion_unknown_kind_and_lease_preserved(self):
+  self.c.execute('UPDATE jobs SET completed=NULL WHERE id=1')
+  self.c.execute('UPDATE jobs SET completed=? WHERE id=2',(self.now-1,))
+  self.c.execute("UPDATE jobs SET kind='unknown' WHERE id=3")
+  self.c.execute("UPDATE jobs SET lease='stale' WHERE id=4")
+  self.c.execute("UPDATE jobs SET lease_until=1 WHERE id=5")
+  result=jobs.cleanup_completed_jobs(self.c,self.now,dry_run=False)
+  self.assertEqual(result['rows'],4)
+  self.assertEqual(self.c.execute('SELECT id FROM jobs WHERE id<=9 ORDER BY id').fetchall(),[(i,) for i in range(1,6)])
+ def test_daily_maintenance_is_disabled_by_default_and_serialized(self):
+  self.assertIsNone(jobs.maintain_completed_jobs(lambda:self.c,self.now))
+  self.assertEqual(self.c.execute('SELECT count(*) FROM jobs').fetchone()[0],30)
+  self.assertEqual(jobs.maintain_completed_jobs(lambda:self.c,self.now,enabled=True)['rows'],9)
+  self.assertIsNone(jobs.maintain_completed_jobs(lambda:self.c,self.now+3600,enabled=True))
+  self.assertEqual(jobs.maintain_completed_jobs(lambda:self.c,self.now+86400,enabled=True)['rows'],0)
 
 if __name__=='__main__':unittest.main()
