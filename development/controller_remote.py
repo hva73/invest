@@ -1,34 +1,46 @@
-"""Trusted queue from a dedicated GitHub branch, with no AI polling."""
+"""Authenticated, bounded queue retrieval; no model calls."""
 import json
+import re
 import subprocess
-from pathlib import Path
-from urllib.request import Request, urlopen
-from urllib.error import URLError
+try:
+    from .controller_queue import plan
+except ImportError:
+    from controller_queue import plan
 
-URL = "https://raw.githubusercontent.com/hva73/invest/codex/development-controller-pilot/development/controller_tasks.json"
+REPO="hva73/invest"
+REF="codex/development-controller-pilot"
+
+def api(endpoint):
+    raw=subprocess.check_output(["gh","api",endpoint],timeout=30)
+    if len(raw)>262144:
+        raise ValueError("response too large")
+    return json.loads(raw)
 
 def fetch_queue():
-    req = Request(URL, headers={"Accept":"application/json", "User-Agent":"ESCAPE-Controller"})
-    with urlopen(req, timeout=10) as response:
-        raw = response.read(131073)
-    if len(raw)>131072:
-        raise ValueError("queue too large")
-    rows = json.loads(raw)
+    import base64
+    data=api("repos/"+REPO+"/contents/development/controller_tasks.json?ref="+REF)
+    if data.get("encoding")!="base64":
+        raise ValueError("invalid queue encoding")
+    rows=json.loads(base64.b64decode(data["content"]))
     if not isinstance(rows,list) or len(rows)>100:
         raise ValueError("invalid queue")
+    plan(rows)
+    for row in rows:
+        if row["status"]!="ready":
+            continue
+        if not re.fullmatch(r"[0-9a-f]{40}",row.get("base_sha","")) or not isinstance(row.get("task"),str) or not 0<len(row["task"])<=20000:
+            raise ValueError("invalid task")
+        generation=row.get("generation",1)
+        if type(generation) is not int or generation<1:
+            raise ValueError("invalid generation")
     return rows
 
 def issue_open(issue):
-    req = Request("https://api.github.com/repos/hva73/invest/issues/"+str(issue),
-                  headers={"Accept":"application/vnd.github+json","User-Agent":"ESCAPE-Controller"})
-    with urlopen(req,timeout=10) as response:
-        data=json.load(response)
+    data=api("repos/"+REPO+"/issues/"+str(issue))
     return data.get("state")=="open" and "pull_request" not in data
 
-def refresh(root, path):
+def refresh(root,path):
     rows=fetch_queue()
-    from controller_queue import plan
-    plan(rows)
     for row in rows:
         if row["status"]=="ready" and not issue_open(row["issue"]):
             row["status"]="blocked"
