@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   btc-session:
-    if: github.event.pull_request.head.ref == 'codex/agent3-btc-release-20261124'
+    if: github.event.pull_request.head.ref == 'codex/agent3-hotwatch-feed-combined-qa-20261124'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -16,4 +16,4 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install -r requirements.txt
-      - run: PYTHONPATH=.:tests python -m unittest test_btc_market_session test_eodhd_feeds test_hotwatch_engine test_hotwatch_holdings_auto test_hotwatch_agreement test_hotwatch_bar_evidence test_hotwatch_warmup test_signal_readiness
+      - run: PYTHONPATH=.:tests python -m unittest test_feed_empty_history_cache test_btc_market_session test_eodhd_feeds test_hotwatch_engine test_hotwatch_holdings_auto test_hotwatch_agreement test_hotwatch_bar_evidence test_hotwatch_warmup test_signal_readiness
