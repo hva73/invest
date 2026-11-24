@@ -103,6 +103,9 @@ jobs:
         run: python tools/nordicway_uapi_probe.py
 
   deploy:
+    concurrency:
+      group: escape-production-deployment
+      cancel-in-progress: false
     if: >-
       ((github.event_name == 'workflow_dispatch' &&
         (inputs.operation == 'write-probe' || inputs.operation == 'deploy' || inputs.operation == 'resume')) ||
@@ -114,7 +117,7 @@ jobs:
       github.ref == 'refs/heads/codex/escape-development'
     runs-on: ubuntu-latest
     environment: ESCAPE_NORDICWAY_DEPLOY
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -124,12 +127,15 @@ jobs:
         id: release_request
         run: python tools/nordicway_deploy_request.py
       - name: Install approved release
+        id: install
         env:
           ESCAPE_RELEASE_SHA: ${{ steps.release_request.outputs.sha }}
           ESCAPE_DEPLOY_OPERATION: ${{ steps.release_request.outputs.operation }}
           ESCAPE_DEPLOY_AUTHORIZED: ${{ vars.ESCAPE_DEPLOY_AUTHORIZED }}
           ESCAPE_WRITE_PROBE_AUTHORIZED: ${{ vars.ESCAPE_WRITE_PROBE_AUTHORIZED }}
           ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
+          ESCAPE_OWNER_APPROVAL_PROOF: ${{ steps.release_request.outputs.approval }}
+          ESCAPE_RELEASE_SUMMARY: ${{ steps.release_request.outputs.summary }}
           NORDICWAY_VERIFIED_FINGERPRINT: 'SHA256:U8MQZwyzMoDmDyRnBIqFqN14BVifmGKNSi+7B8OACDI'
           NORDICWAY_PRIVATE_KEY: ${{ secrets.ESCAPE_NORDICWAY_DEPLOY_PRIVATE_KEY }}
           NORDICWAY_KEY_PASSPHRASE: ${{ secrets.ESCAPE_NORDICWAY_DEPLOY_PASSPHRASE }}
@@ -168,4 +174,18 @@ jobs:
             exit 1
           fi
           unset NORDICWAY_PRIVATE_KEY NORDICWAY_KEY_PASSPHRASE
-          python tools/nordicway_deploy_client.py
+          printf 'started_at=%s\n' "$(date +%s)" >> "$GITHUB_OUTPUT"
+          if python tools/nordicway_deploy_client.py > "$RUNNER_TEMP/escape-deploy-result.json"; then
+            cat "$RUNNER_TEMP/escape-deploy-result.json"
+          else
+            cat "$RUNNER_TEMP/escape-deploy-result.json"
+            exit 1
+          fi
+      - name: Compress verified backup and remove older release files
+        if: success() && (steps.release_request.outputs.operation == 'deploy' || steps.release_request.outputs.operation == 'app-deploy')
+        env:
+          ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
+          ESCAPE_RELEASE_SHA: ${{ steps.release_request.outputs.sha }}
+          ESCAPE_RELEASE_STARTED_AT: ${{ steps.install.outputs.started_at }}
+          ESCAPE_DEPLOY_RESULT_FILE: ${{ runner.temp }}/escape-deploy-result.json
+        run: python tools/nordicway_release_retention.py
