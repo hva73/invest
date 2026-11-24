@@ -14,10 +14,10 @@ FETCH_LOCK = threading.Lock()
 from datetime import datetime, timezone
 try:
     from .controller_queue import plan
-    from . import controller_remote, controller_publish, controller_receipts
+    from . import controller_remote, controller_publish, controller_receipts, controller_progress
 except ImportError:
     from controller_queue import plan
-    import controller_remote, controller_publish, controller_receipts
+    import controller_remote, controller_publish, controller_receipts, controller_progress
 
 def save(path, value):
     temp = path.with_suffix(".tmp")
@@ -41,6 +41,14 @@ def task_key(row):
     if type(generation) is not int or generation < 1:
         raise ValueError("invalid generation")
     return str(row["issue"]) + ":" + str(generation)
+
+def progress(root, row, phase, publish):
+    if publish:
+        try:
+            controller_progress.record(root,row["issue"],row.get("generation",1),phase)
+            controller_progress.flush(root)
+        except (OSError,ValueError):
+            print("PROGRESS_PENDING:",task_key(row),phase,flush=True)
 
 def run_task(root, script, row, allowance, publish=False):
     issue = row["issue"]
@@ -68,6 +76,7 @@ def run_task(root, script, row, allowance, publish=False):
     taskfile = root / ("task-" + str(issue) + "-" + str(generation) + ".txt")
     taskfile.write_text(row["task"])
     log = root / ("issue-" + str(issue) + "-" + str(generation) + ".log")
+    progress(root,row,"STARTED",publish)
     with log.open("a") as out:
         rc = subprocess.run([sys.executable, str(script), "--role", row["role"],
             "--issue", str(issue), "--task-file", str(taskfile), "--max-tokens",
@@ -118,6 +127,7 @@ def main():
         while not (root / "STOP").exists():
             if a.publish:
                 controller_receipts.flush(root)
+                controller_progress.flush(root)
             if a.remote:
                 try:
                     controller_remote.refresh(root, a.queue)
@@ -154,6 +164,7 @@ def main():
                     save(donefile, results)
                     if a.publish:
                         try:
+                            progress(root,row,"REVIEW_REQUIRED" if status in ("draft_pr","review_required") else "BLOCKED",True)
                             controller_receipts.record(root, task_key(row), status)
                             controller_receipts.flush(root)
                         except (OSError, ValueError) as exc:
