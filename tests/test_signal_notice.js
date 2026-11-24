@@ -11,7 +11,7 @@ const s={watch_id:'synthetic-watch',is_test:false,status:'ACTIVE',signal:'SELL',
 const row={key:'one',portfolio_id:1,portfolio_name:'Test',ticker:'JDZG',name:'SYNTHETIC',quantity:'10',price:{amount:'0.3',currency:'USD'},value:{amount:'3',currency:'USD'},conflicts:[],hot_watch:{session:s}};
 const state={dashboard:{positions:[row],accounts:[],totals:[],issues:[],warnings:[],orders:[],critical_sessions:[]},portfolios:[],test_trade_signal:null};
 ctx.window.DashboardUI.setup({escape:esc,formatTime:String,formatQuantity:String,state:()=>state});
-const iconOf=html=>({dataset:{engineNotice:decode(html.match(/data-engine-notice="([^"]+)"/)[1])},className:'signal-alert signal-alert--unread',setAttribute(k,v){this[k]=v}});
+const iconOf=html=>({dataset:{engineNotice:decode(html.match(/data-engine-notice="([^"]+)"/)[1])},className:'signal-alert signal-alert--unread',hasAttribute(k){const attr=k.startsWith('data-')?k.slice(5).replace(/-([a-z])/g,(_,v)=>v.toUpperCase()):k;return k.startsWith('data-')?Object.hasOwn(this.dataset,attr):Object.hasOwn(this,k)},setAttribute(k,v){this[k]=v}});
 (async()=>{
  for(const [signal,label,phase] of [['SELL','SÆLGSSIGNAL','ACTIVE'],['WAIT','AFVENT','WITHDRAWN'],['NO_DATA','DATA FOR GAMLE','DATA_MISSING']]){
   s.signal=signal;s.display_status=label;s.status=signal==='NO_DATA'?'DEGRADED':'ACTIVE';s.last_action_signal.state=phase;
@@ -28,7 +28,7 @@ const iconOf=html=>({dataset:{engineNotice:decode(html.match(/data-engine-notice
  assert.equal(calls.length,0,'Opening the warning is not an acknowledgement or order');
  const icon=iconOf(ctx.window.EngineUI.actionNotice(s));icons.push(icon,iconOf(ctx.window.EngineUI.actionNotice(s)));
  const other=JSON.parse(JSON.stringify(s));other.last_action_signal.event_id='hw-'+'b'.repeat(24);icons.push(iconOf(ctx.window.EngineUI.actionNotice(other)));
- const b={dataset:{engineAck:s.watch_id,eventId:s.last_action_signal.event_id,isTest:'false'},disabled:false,setAttribute(k,v){this[k]=v}};
+ const b={dataset:{engineAck:s.watch_id,eventId:s.last_action_signal.event_id,isTest:'false'},disabled:false,hasAttribute(k){const attr=k.startsWith('data-')?k.slice(5).replace(/-([a-z])/g,(_,v)=>v.toUpperCase()):k;return k.startsWith('data-')?Object.hasOwn(this.dataset,attr):Object.hasOwn(this,k)},setAttribute(k,v){this[k]=v}};
  fail=true;await assert.rejects(()=>ctx.window.EngineUI.click(b),/offline/);assert.equal(b.disabled,false);assert.match(icon.className,/--unread/);
  fail=false;await ctx.window.EngineUI.click(b);
  assert.equal(calls.at(-1)[0],'v1/hotwatch/sessions/synthetic-watch/ack-signal');assert.equal(calls.at(-1)[1].event_id,'hw-'+'a'.repeat(24));assert.equal(calls.at(-1)[1].is_test,false);
