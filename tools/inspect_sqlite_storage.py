@@ -10,8 +10,13 @@ def inspect_backup(path, now=None):
     path = Path(path).resolve(strict=True)
     if not path.is_file():
         raise ValueError('backup_not_file')
+    if path == Path('/home/nordicr4/escape_app/var/escape.db'):
+        raise ValueError('live_database_forbidden')
     if Path(str(path) + '-wal').exists():
         raise ValueError('backup_has_wal_use_consistent_standalone_copy')
+    if Path(str(path) + '-journal').exists():
+        raise ValueError('backup_has_journal_use_consistent_standalone_copy')
+    original=path.stat()
     now = time.time() if now is None else now
     with sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True, timeout=1) as db:
         db.execute('PRAGMA query_only=ON')
@@ -26,12 +31,27 @@ def inspect_backup(path, now=None):
             data['objects']=None
         tables={r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if 'jobs' in tables:
-            query="""WITH ranked AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY id DESC) AS position FROM jobs)
-                     SELECT count(*),coalesce(sum(length(CAST(coalesce(j.result,'') AS BLOB))),0)
-                     FROM jobs j WHERE j.status='done' AND j.created<?
-                     AND j.id NOT IN (SELECT id FROM ranked WHERE position<=20)"""
-            count,result_bytes=db.execute(query,(now-30*86400,)).fetchone()
-            data['completed_jobs_eligible']={'rows':count,'result_bytes':result_bytes}
+            columns={r[1] for r in db.execute('PRAGMA table_info(jobs)')}
+            data['completed_jobs_legacy_unknown']=db.execute("SELECT count(*) FROM jobs WHERE status='done'" + (" AND completed IS NULL" if 'completed' in columns else "")).fetchone()[0]
+            data['completed_jobs_eligible']={'rows':0,'result_bytes':0}
+            if {'completed','kind','lease','lease_until'}.issubset(columns):
+                query="""WITH ranked AS (SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY id DESC) AS position FROM jobs)
+                         SELECT count(*),coalesce(sum(length(CAST(coalesce(j.result,'') AS BLOB))),0)
+                         FROM jobs j WHERE j.status='done' AND j.completed IS NOT NULL
+                         AND j.completed < ? AND j.created < ?
+                         AND j.kind IN ('ecb','news','report','pluto_data')
+                         AND j.lease IS NULL AND j.lease_until IS NULL
+                         AND j.id NOT IN (SELECT id FROM ranked WHERE position<=20)"""
+                cutoff=now-30*86400
+                count,result_bytes=db.execute(query,(cutoff,cutoff)).fetchone()
+                data['completed_jobs_eligible']={'rows':count,'result_bytes':result_bytes}
+        data['freelist_bytes']=data['freelist_count']*data['page_size']
+        data['unallocated_file_bytes']=data['file_bytes']-data['page_count']*data['page_size']
+        after=path.stat()
+        if (original.st_dev,original.st_ino,original.st_size,original.st_mtime_ns)!=(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns):
+            raise ValueError('backup_changed_during_inspection')
+        if any(Path(str(path)+suffix).exists() for suffix in ('-wal','-journal')):
+            raise ValueError('backup_journal_created_during_inspection')
         return data
 
 
