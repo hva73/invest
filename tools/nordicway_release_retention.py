@@ -93,7 +93,7 @@ def validate_result(result, sha):
         raise ValueError('release_mismatch')
 
 
-def maintain(api, sha, started):
+def maintain(api, sha, started, *, redundant_only=False, before_delete=None):
     uapi, request, download = api
     def listing(path):
         data = uapi('list_files', {'dir': path, 'show_hidden': 1})
@@ -125,7 +125,7 @@ def maintain(api, sha, started):
     if before.get('escape.db', {}).get('type') != 'file' or int(before['escape.db']['size']) != DB_BYTES:
         raise ValueError('original_backup_changed')
     manifest = content(ROOT + '/' + NAME, 'manifest.json')
-    if ARCHIVE not in top and '.escape_backups' in top:
+    if not redundant_only and ARCHIVE not in top and '.escape_backups' in top:
         nested = listing(ROOT + '/.escape_backups')
         if ARCHIVE in nested:
             uapi('move_file', {'source': ROOT + '/.escape_backups/' + ARCHIVE, 'destination': ROOT + '/' + ARCHIVE})
@@ -160,10 +160,15 @@ def maintain(api, sha, started):
     current()
     if choose_backup(listing(ROOT), started) != NAME:
         raise ValueError('backup_changed_during_verification')
+    if before_delete is not None:
+        before_delete(NAME, ARCHIVE, size)
     uapi('delete_file', {'path': ROOT + '/' + NAME})
     final = listing(ROOT)
     if NAME in final or ARCHIVE not in final or int(final[ARCHIVE]['size']) != size:
         raise ValueError('backup_replacement_unverified')
+    if redundant_only:
+        print(json.dumps({'status': 'verified', 'removed_redundant_raw': 1, **result}), flush=True)
+        return result
     removed = 0
     for old, row in listing(ROOT).items():
         match = re.fullmatch(r'retained-(\d{8}-\d{6}-[A-Za-z0-9_-]+)\.tar\.gz', old)
