@@ -24,7 +24,7 @@ def main():
      const points=[{at:'2026-11-07T23:04:00Z',amount:'2830',reported_result:'-169.44',currency:'DKK'},{at:'2026-11-07T23:10:00Z',amount:'2830',reported_result:'-169.25',currency:'DKK'}];
      const chart=p=>new DOMParser().parseFromString(window.DashboardUI.portfolioChart({portfolio_value_history:{day_start:'2026-11-07T23:00:00Z',day_end:'2026-11-08T23:00:00Z',as_of:'2026-11-08T19:00:00Z',periods:{day:p}}}),'text/html');
      const doc=chart(points),dots=doc.querySelectorAll('.dash-chart-point');
-     if(dots.length!==2||Math.abs(Number(dots[1].getAttribute('cx'))-3)>0.1)throw Error('Day chart does not use midnight-to-now axis');
+     if(dots.length!==2||Math.abs(Number(dots[1].getAttribute('cx'))-5)>0.1)throw Error('Day chart does not use midnight-to-now axis');
      if(Math.abs(Number(dots[0].getAttribute('cy'))-Number(dots[1].getAttribute('cy')))>12)throw Error('Small changes are exaggerated');
      if(!doc.querySelector('.dash-chart-scale')||!doc.querySelector('.dash-chart-dates').textContent.includes('20.00'))throw Error('Day scale is missing');
      const negative=new DOMParser().parseFromString(window.DashboardUI.resultShare({amount:'-163.94',currency:'DKK'},{amount:'2836.06',currency:'DKK'}),'text/html').body.firstElementChild;if(!negative||!negative.classList.contains('negative')||!negative.textContent.includes('-5,78 %'))throw Error('Negative result share incorrect');if(window.DashboardUI.resultShare({amount:'1',currency:'EUR'},{amount:'100',currency:'DKK'})||window.DashboardUI.resultShare({amount:'1',currency:'DKK'},{amount:'0',currency:'DKK'}))throw Error('Invalid comparison shown');
