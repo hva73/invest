@@ -24,7 +24,7 @@ jobs:
       - name: HOT WATCH, provider, signals and statistics
         run: python -m unittest test_btc_market_session test_eodhd_feeds test_hotwatch_engine test_hotwatch_holdings_auto test_hotwatch_agreement test_hotwatch_bar_evidence test_hotwatch_warmup test_signal_readiness test_feed_empty_history_cache test_feed_intraday_exact_dedupe test_trade_service test_realized_statistics test_statistics_missing_cost test_statistics_origins test_statistics_gateway_reuse test_statistics_diagnostic test_statistics_dkk
       - name: Retention and research
-        run: python -m unittest test_job_retention test_sqlite_storage_inspection test_nordicway_release_retention test_nordicway_maintenance_audit test_polymarket_intelligence
+        run: python -m unittest test_job_retention test_sqlite_storage_inspection test_nordicway_release_retention test_nordicway_maintenance_audit test_polymarket_intelligence test_mcp_reports
       - run: python -m unittest test_mobile_projection test_market_data
       - name: Frontend regressions
         run: |
