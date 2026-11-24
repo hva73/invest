@@ -5,13 +5,13 @@
     "priority": 1,
     "status": "ready",
     "paths": [
-      "release_space_budget.py",
-      "tests/test_release_space_budget.py"
+      "release_failure_diagnostics.py",
+      "tests/test_release_failure_diagnostics.py"
     ],
     "dependencies": [],
-    "generation": 1,
+    "generation": 2,
     "base_branch": "codex/escape-development",
     "base_sha": "adb2cc6e4529ace96d137bfa42df95e0ef4b51b2",
-    "task": "Resolve concrete offline release capacity proof blocker for frozen #232 3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65, without editing frozen branch. Implement a standalone pure Python phase-based peak-space calculator release_space_budget.py and targeted tests/test_release_space_budget.py only. Inputs must explicitly distinguish measured conservative account free bytes and filesystem free bytes, raw locked DB snapshot, archive upper bound (assume uncompressed + overhead unless separately proven), old code/keys, candidate staging sets, WAL/journal/sidecars, allocation overhead and safety margin, and whether raw snapshot and archive overlap. Fail closed on missing evidence/invalid values; never substitute filesystem free for account quota, historical compression ratio for bound, or assume a phase cannot overlap without evidence. Output phase peak, headroom, blockers and diagnostic-only outcome; never GO. Regression with measured DB 6712553472, account free lower bound 12775112128, candidate source bytes 2215894, two stages; overlapping two DB-size copies already exceed free; one snapshot alone is not proof because remaining inputs unknown. Test exact boundaries, unknowns, overlap, no network/credentials/database mutation/deletion/production access. Run targeted unittest; do not claim actual bridge compatibility or release authorization. No broad onboarding reads; finish minimal implementation and tests, no other files. Draft PR only. Controller publisher cannot modify tools/deployment paths; coordinator will independently review and integrate only if warranted."
+    "task": "Agent 1 objective: unblock actual frozen release #232, not more abstract planning. Work within these two files only because the installed controller permits only scoped draft delivery. Implement and test a pure offline diagnostic parser for the existing app-deploy response contract in tools/nordicway_deploy_client.py and server app-release code. Inspect relevant server source to identify every path returning generic failed, and produce a concise mapping of actual failure stages to safe allowlisted diagnostic codes, including approval, quota, manifest, drain, backup, restart and transport as applicable. Preserve unknown if no evidence; never infer quota is the actual cause. Include regression tests of valid legacy failed result and proposed stage/reason contract, reject arbitrary log text/secrets, mismatch SHA and success with recovery. No changes to release branch, production, credentials, workflows or tools. Fix test failures immediately in same run. Do not repeat broad repository reading. Deliver scoped draft for coordinator integration; not deployment approval. Continue concrete coding and tests until resolved or a genuine scoped blocker."
   }
 ]
