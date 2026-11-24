@@ -44,6 +44,15 @@ def compare(connect,uid,data):
         rows=c.execute('''SELECT c.id,c.calculated,c.payload AS calculation,s.id AS sample_row_id,s.received,s.digest AS sample_digest,s.payload AS sample
             FROM hw_calculations c LEFT JOIN hw_samples s ON s.id=c.sample_row_id AND s.watch_row_id=c.watch_row_id
             WHERE c.watch_row_id=? ORDER BY c.id LIMIT ?''',(row['id'],MAX_CALCULATIONS+1)).fetchall()
+        from hotwatch_engine import sample_read
+        # Hydrate within the same connection; replay still checks full sample checksum.
+        hydrated=[]
+        for item in rows:
+            item=dict(item)
+            try:item['sample']=json.dumps(sample_read(c,row['id'],item['sample'])) if item['sample'] else None
+            except (ValueError,TypeError,KeyError,ArithmeticError):item['sample']=None
+            hydrated.append(item)
+        rows=hydrated
         request=json.loads(row['request'])
     if not rows:raise ValueError('Der er endnu ingen gemte observationer at sammenligne.')
     truncated=len(rows)>MAX_CALCULATIONS;rows=rows[:MAX_CALCULATIONS]
