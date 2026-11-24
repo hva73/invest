@@ -14,7 +14,9 @@ class Task:
     dependencies: tuple
     paths: tuple
 
-def plan(rows):
+def plan(rows, max_parallel=2):
+    if type(max_parallel) is not int or not 1 <= max_parallel <= len(ROLES):
+        raise ValueError('invalid parallel limit')
     tasks = {}
     for row in rows:
         t = Task(row["issue"], row["role"], row["priority"], row["status"],
@@ -32,6 +34,8 @@ def plan(rows):
     active = [t for t in tasks.values() if t.status == "active"]
     result = []
     for t in sorted(tasks.values(), key=lambda t:(t.priority,t.issue)):
+        if len(active) + len(result) >= max_parallel:
+            break
         if t.status != "ready" or any(d not in tasks or tasks[d].status != "done" for d in t.dependencies):
             continue
         if any(t.role == other.role or any(overlap(a,b) for a in t.paths for b in other.paths)
