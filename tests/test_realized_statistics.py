@@ -239,3 +239,25 @@ class HttpTest(unittest.TestCase):
             self.assertTrue(response[0].startswith('200'));self.assertFalse(body['history_complete'])
             self.assertEqual(reader.call_args.args[1],1)
 
+
+class ExplicitPortfolioScopeTest(unittest.TestCase):
+    def test_mismatched_provider_portfolio_rejects_entire_depot(self):
+        import sqlite3
+        from contextlib import contextmanager
+        from unittest.mock import patch
+        from realized_statistics import read
+        db=sqlite3.connect(':memory:');db.row_factory=sqlite3.Row
+        db.execute('CREATE TABLE portfolios(user_id INTEGER,external_id TEXT,kind TEXT,parent_external_id TEXT,source TEXT,active INTEGER,id INTEGER,name TEXT)')
+        db.execute("INSERT INTO portfolios VALUES(1,'portfolios:mine','portfolio',NULL,'pluto',1,10,'Mine')")
+        @contextmanager
+        def connect(): yield db
+        class Client:
+            def __init__(self, token): pass
+            def tools(self):
+                return [{'name':'list_orders','annotations':{'readOnlyHint':True},'inputSchema':{'type':'object','properties':{'portfolioId':{'type':'string'}},'required':['portfolioId']}}]
+            def request(self,method,params):
+                return {'structuredContent':{'orders':[order('BUY','1','10','2026-01-01T00:00:00Z','b',portfolioId='mine'),order('SELL','1','11','2026-01-02T00:00:00Z','s',portfolioId='foreign')]}}
+        with patch('oauth.access_token',return_value='test'):
+            result=read(connect,1,Client)
+        self.assertEqual(result['portfolios'],[])
+        self.assertEqual(result['error_codes'],['DIRECT_SCOPE_MISMATCH'])
