@@ -16,6 +16,14 @@ class LiveStorageTests(unittest.TestCase):
             self.assertEqual(result["status"],"ok")
             self.assertGreater(result["freelist_bytes"],0)
             self.assertIn("hw_samples",[x["name"] for x in result["objects"]])
+            # Verify aggregate-mode page counts and bytes against the old
+            # page-by-page query on the disposable fixture only.
+            with sqlite3.connect(p.as_uri()+"?mode=ro",uri=True) as db:
+                expected={name:(size,pages) for name,size,pages in db.execute(
+                    "SELECT name,sum(pgsize),count(*) FROM dbstat GROUP BY name")}
+            self.assertEqual({x["name"]:(x["bytes"],x["pages"]) for x in result["objects"]},expected)
+            self.assertEqual(sum(x["bytes"] for x in result["objects"])+result["freelist_bytes"],
+                             result["page_count"]*result["page_size"])
             self.assertNotIn("sensitive fixture",str(result))
             self.assertEqual(before,p.read_bytes())
             self.assertEqual(list(Path(d).iterdir()),[p])
