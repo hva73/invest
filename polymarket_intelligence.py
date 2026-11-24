@@ -5,6 +5,7 @@ Data from prediction markets is hypothesis-level evidence, never issuer verifica
 """
 import json
 import math
+import re
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -16,6 +17,10 @@ USER_AGENT = "ESCAPE-Research/1.0"
 KEYWORDS = ("fed", "interest rate", "inflation", "recession", "merger",
             "acquisition", "fda", "approval", "bitcoin", "ethereum",
             "oil", "tariff", "earnings", "sec", "regulation")
+# Entire words/phrases only: SEC must not match "second", oil not "boiler".
+TOPIC_RE = re.compile(r"(?<!\\w)(?:" + "|".join(re.escape(word) for word in KEYWORDS) + r")(?!\\w)", re.I)
+HISTORY_WINDOW_SECONDS = 24 * 3600
+MAX_HISTORY_AGE_SECONDS = 3 * 3600
 
 
 class PolymarketUnavailable(RuntimeError):
@@ -77,7 +82,7 @@ def _stamp(value):
 
 def normalize_market(raw, observed_at):
     """Return strictly sourced metadata, not an implied fair-value estimate."""
-    if not isinstance(raw, dict) or raw.get("closed") is True or raw.get("active") is False:
+    if not isinstance(raw, dict) or raw.get("closed") is not False or raw.get("active") is not True:
         return None
     market_id = str(raw.get("id", ""))
     question = raw.get("question")
@@ -85,7 +90,7 @@ def normalize_market(raw, observed_at):
     outcomes, prices, tokens = (_array(raw.get(k)) for k in ("outcomes", "outcomePrices", "clobTokenIds"))
     if not market_id.isdigit() or not isinstance(question, str) or not question.strip():
         return None
-    if not isinstance(slug, str) or not slug or len(slug) > 200:
+    if not isinstance(slug, str) or not re.fullmatch(r"[a-zA-Z0-9-]{1,200}", slug):
         return None
     if len(outcomes) != 2 or len(prices) != 2 or len(tokens) != 2:
         return None
@@ -129,7 +134,7 @@ def fetch_markets(limit=100, opener=None, now=None):
     return [item for raw in data if (item := normalize_market(raw, stamp))]
 
 
-def price_history(market, opener=None):
+def price_history(market, opener=None, now=None):
     """Sample YES price history; returns source timestamps, never synthetic prices."""
     token = market["yes_token_id"]
     if not isinstance(token, str) or not token.isdigit():
@@ -138,30 +143,54 @@ def price_history(market, opener=None):
                 {"market": token, "interval": "1d", "fidelity": 10}, opener=opener)
     if not isinstance(data, dict) or not isinstance(data.get("history"), list):
         raise PolymarketUnavailable("invalid history response")
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone aware")
+    cutoff = now.astimezone(timezone.utc).timestamp() - HISTORY_WINDOW_SECONDS
+    ceiling = now.astimezone(timezone.utc).timestamp()
     samples = []
     for item in data["history"]:
         if not isinstance(item, dict):
             continue
         t, p = item.get("t"), _finite_number(item.get("p"))
-        if isinstance(t, int) and t > 0 and p is not None and 0 <= p <= 1:
+        if type(t) is int and cutoff <= t <= ceiling and p is not None and 0 <= p <= 1:
             samples.append({"timestamp": datetime.fromtimestamp(t, timezone.utc).isoformat(),
                             "yes_price": p})
     return sorted({sample["timestamp"]: sample for sample in samples}.values(),
                   key=lambda sample: sample["timestamp"])
 
 
-def triage(market, history=None, min_liquidity_usd=10_000, min_volume_24h_usd=5_000):
+def triage(market, history=None, min_liquidity_usd=10_000, min_volume_24h_usd=5_000, now=None):
     """Source-only discovery triage; never returns BUY or ESCAPE candidate payload."""
-    relevant = any(word in market["question"].casefold() for word in KEYWORDS)
+    relevant = bool(TOPIC_RE.search(market["question"]))
     liquid = (market["liquidity_usd"] is not None and
               market["liquidity_usd"] >= min_liquidity_usd and
               market["volume_24h_usd"] is not None and
               market["volume_24h_usd"] >= min_volume_24h_usd)
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone aware")
+    # Reject a historical jump as a new catalyst: both endpoints must be
+    # observed inside the past day, the final sample no older than three hours.
     delta = None
+    first_at = last_at = None
     if history and len(history) >= 2:
-        delta = round((history[-1]["yes_price"] - history[0]["yes_price"]) * 100, 2)
+        try:
+            first_at = datetime.fromisoformat(history[0]["timestamp"])
+            last_at = datetime.fromisoformat(history[-1]["timestamp"])
+            seconds_since_last = (now - last_at).total_seconds()
+            duration = (last_at - first_at).total_seconds()
+            in_window = 0 < duration <= HISTORY_WINDOW_SECONDS and 0 <= seconds_since_last <= MAX_HISTORY_AGE_SECONDS
+            in_window = in_window and 0 <= (now - first_at).total_seconds() <= HISTORY_WINDOW_SECONDS
+            if in_window:
+                delta = round((history[-1]["yes_price"] - history[0]["yes_price"]) * 100, 2)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            pass
     return {
         **market, "relevant_topic": relevant, "liquidity_gate": liquid,
+        "history_first_at": first_at.isoformat() if delta is not None else None,
+        "history_last_at": last_at.isoformat() if delta is not None else None,
+        "history_coverage": "RECENT_24H" if delta is not None else "UNVERIFIED",
         "change_percentage_points": delta,
         "research_priority": ("REVIEW" if relevant and liquid and delta is not None
                               and abs(delta) >= 10 else "CONTEXT_ONLY"),
