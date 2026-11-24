@@ -156,7 +156,7 @@ def run_one(connect,fetcher=None,at=None):
                 c.execute('INSERT INTO reports(user_id,slot,created,body) VALUES(?,?,?,?) ON CONFLICT(user_id,slot) DO NOTHING',(uid,job['dedupe'],datetime.fromtimestamp(stamp,timezone.utc).isoformat(),body))
                 result='Datastatusrapport gemt'
             else:raise ValueError('unknown job')
-            c.execute("UPDATE jobs SET status='done',result=?,lease=NULL,lease_until=NULL,completed=? WHERE id=? AND lease=?",(result,stamp,job['id'],lease))
+            c.execute("UPDATE jobs SET status='done',result=?,lease=NULL,lease_until=NULL,completed=? WHERE id=? AND lease=?",(result,time.time() if at is None else stamp,job['id'],lease))
     except Exception:
         # Never persist exception text: network/library errors may include credentials.
         with connect() as c:
