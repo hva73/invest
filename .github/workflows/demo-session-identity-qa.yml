@@ -1,0 +1,27 @@
+name: Demo session identity QA
+on: [pull_request]
+permissions:
+  contents: read
+jobs:
+  demo:
+    if: github.event.pull_request.head.ref == 'codex/issue54-demo-session-identity'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      PYTHONPATH: .:tests
+      ESCAPE_PLAYWRIGHT_MANAGED: '1'
+      ESCAPE_HW_AUTOSUPERVISE: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - run: node --check static/demo-data.js
+      - run: node tests/test_demo_chart_identity.cjs
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt playwright==1.56.0
+      - run: python -m playwright install --with-deps chromium
+      - run: python tests/browser_demo_signal_parity.py
+      - run: python tests/browser_signal_push_detail.py
