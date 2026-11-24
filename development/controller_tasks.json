@@ -3,7 +3,7 @@
     "issue": 57,
     "role": "release",
     "priority": 1,
-    "status": "ready",
+    "status": "blocked",
     "paths": [
       "tools/nordicway_release_retention.py",
       "tests/test_nordicway_release_retention.py"
