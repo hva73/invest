@@ -366,5 +366,29 @@
       "docs/TRADING_ENGINE_V2_INTERFACE.md"
     ],
     "task": "Implement actual read-only vertical #273 replay adapter using accepted v2 evaluate at exact base 9a75db14. Extend existing strategy_lab.compare or a narrow explicit v2 comparison function in that module (no live route/schema/DB writes, no duplicate ledger). Reuse recorded hw_calculations/hw_samples, checksum, historical calculated/received timestamps, scope and strategy catalog; compare original recorded decision and new simulated decision on identical bounded chronological input, retain existing compare API behavior. Do not infer availability of inputs from later records or invent source IDs/positions; explicitly skip unverifiable historical data, count and explain coverage/first blocking reason. Reuse captured historical metrics/risk and context only with provenance, not current data. Show positive/negative causal examples using real persisted-schema test fixtures, multiple strategies same snapshot, no provider calls, tenant/test isolation, deterministic results, no brokerwrites. Report counts, latency and coverage; no fictional P/L without execution data. Keep bounded existing MAX_CALCULATIONS and avoid new disk/API load. Preserve existing legacy replay tests. Run actual tests, deliver draft on this separate integration base. Do not edit P0 live engine/chart files or add a production endpoint."
+  },
+  {
+    "issue": 8,
+    "generation": 3,
+    "role": "motor",
+    "priority": 0,
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "dbe9eda0880a9fdbcf73cd2f674abe6f20e28f91",
+    "dependencies": [],
+    "paths": [
+      "eodhd_feeds.py",
+      "hotwatch_adapters.py",
+      "hotwatch_engine.py",
+      "hotwatch_features.py",
+      "hotwatch_service.py",
+      "tests/test_eodhd_feeds.py",
+      "tests/test_feed_reuse.py",
+      "tests/test_signal_readiness.py",
+      "tests/test_sparse_feed_recovery.py",
+      "tests/test_hotwatch_bar_evidence.py",
+      "tests/test_hotwatch_engine.py"
+    ],
+    "task": "P0 repair combined motor/data regression from #281 exact 970646980bdb03188c34ce56e8a2adbb13e3944e, CI 45618461629 job 139219933640: 374 tests, 3 failures 2 errors. Work on current main development base dbe9eda0. Read exact #281 source for motor/data files, import only scoped #269/#270 changes (no charts, workflows or new infrastructure), then fix concrete regressions: test_closed_bar_uses_actual_bar_open_time_without_inventing_trade_time EODHD_READ_OR_CONTRACT_ERROR; test_sparse_bars_support_period_indicators_without_inventing_minutes None; test_real_capture_limit_does_not_cache_missing_batch_symbol OK vs INCOMPLETE; test_earliest_required_evidence_schedules_refresh_without_extending_freshness calendar 60 vs 15; test_sparse_history_reaches_real_exit_evaluation_without_entry_warmup NO_DATA vs WAIT. Read existing contracts; determine root cause, not merely modify assertions. Prefer remove redundant checks or revert faulty individual hunks over extra guards. Preserve genuine data freshness, no invented bars/trades, no extra API load, no changing trade thresholds. Run full existing motor/data CI suite plus focused tests; publish a superseding draft including only scoped motor/data changes. Coordinator will combine with existing chart files after exact test pass. No production changes."
   }
 ]
