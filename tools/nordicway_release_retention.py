@@ -23,7 +23,70 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 BACKUP_NAME = re.compile(r'\d{8}-\d{6}-[A-Za-z0-9_-]+\Z')
 APP = '/home/nordicr4/escape_app'
 ROOT = '/home/nordicr4/.escape_backups'
+MAX_MANIFEST_BYTES = 100_000
+MAX_COMPRESSED_BACKUP_BYTES = 20_000_000_000
 
+
+def backup_metadata(rows):
+    return {name: tuple(row.get(key) for key in ('type', 'mode', 'size', 'mtime'))
+            for name, row in rows.items()}
+
+
+def inventory_size(row):
+    size = row.get('size')
+    if type(size) is int:
+        return size
+    if isinstance(size, str) and re.fullmatch(r'[0-9]{1,12}', size):
+        return int(size)
+    raise ValueError('invalid_backup_size')
+
+
+def compressed_inventory(manifest):
+    def unique_fields(pairs):
+        fields = dict(pairs)
+        if len(fields) != len(pairs):
+            raise ValueError('invalid_backup_manifest')
+        return fields
+
+    try:
+        expected = json.loads(manifest, object_pairs_hook=unique_fields)
+    except (json.JSONDecodeError, RecursionError):
+        raise ValueError('invalid_backup_manifest') from None
+
+    def valid_hash(value):
+        return isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value)
+
+    if (not isinstance(expected, dict) or type(expected.get('format')) is not int
+            or expected['format'] != 1 or expected.get('database_encoding') != 'gzip'
+            or not valid_hash(expected.get('database_sha256'))
+            or type(expected.get('database_bytes')) is not int
+            or not 512 < expected['database_bytes'] <= MAX_COMPRESSED_BACKUP_BYTES):
+        raise ValueError('invalid_backup_manifest')
+    tree = {'': {'escape.db.gz': 'file', 'manifest.json': 'file'}}
+    for field, prefix in (('files', 'code/'), ('keys', '')):
+        entries = expected.get(field)
+        if not isinstance(entries, dict) or len(entries) > 500:
+            raise ValueError('invalid_backup_manifest')
+        for name, digest in entries.items():
+            parts = name.split('/')
+            if (len(parts) > 16
+                    or any(part in ('.', '..') or not re.fullmatch(r'[A-Za-z0-9_.-]+', part)
+                           for part in parts)
+                    or (field == 'keys' and name not in ('token.key', 'push_vapid.pem'))
+                    or (digest is not None and not valid_hash(digest))):
+                raise ValueError('invalid_backup_manifest')
+            if digest is None:
+                continue
+            path = ''
+            relative = (prefix + name).split('/')
+            for index, part in enumerate(relative):
+                kind = 'file' if index == len(relative) - 1 else 'dir'
+                if tree.setdefault(path, {}).setdefault(part, kind) != kind:
+                    raise ValueError('invalid_backup_manifest')
+                path = path + '/' + part if path else part
+    if len(tree) > 500 or sum(map(len, tree.values())) > 1000:
+        raise ValueError('invalid_backup_manifest')
+    return expected['database_bytes'], tree
 
 
 def verify_archive(data, manifest_content, expected_size, name):
@@ -99,7 +162,17 @@ def maintain(api, sha, started, *, redundant_only=False, before_delete=None):
         data = uapi('list_files', {'dir': path, 'show_hidden': 1})
         if not isinstance(data, list) or len(data) > 500:
             raise ValueError('invalid_inventory')
-        return {r['file']: r for r in data if isinstance(r, dict) and r.get('file') not in ('.', '..')}
+        rows = {}
+        for row in data:
+            if not isinstance(row, dict) or not isinstance(row.get('file'), str):
+                raise ValueError('invalid_inventory')
+            name = row['file']
+            if name in ('.', '..'):
+                continue
+            if name in rows:
+                raise ValueError('invalid_inventory')
+            rows[name] = row
+        return rows
     def content(directory, filename):
         data = uapi('get_file_content', {'dir': directory, 'file': filename,
             'from_charset': 'ISO-8859-1', 'to_charset': 'UTF-8', 'update_html_document_encoding': 0})
@@ -113,7 +186,52 @@ def maintain(api, sha, started, *, redundant_only=False, before_delete=None):
     top = listing(ROOT)
     NAME = choose_backup(top, started)
     ARCHIVE = 'retained-' + NAME + '.tar.gz'
-    before = listing(ROOT + '/' + NAME)
+    directory = ROOT + '/' + NAME
+    before = listing(directory)
+    if 'escape.db.gz' in before:
+        if 'escape.db' in before:
+            raise ValueError('ambiguous_backup_database')
+        manifest_row = before.get('manifest.json', {})
+        if manifest_row.get('type') != 'file':
+            raise ValueError('invalid_backup_manifest')
+        manifest_size = inventory_size(manifest_row)
+        if not 0 < manifest_size <= MAX_MANIFEST_BYTES:
+            raise ValueError('invalid_backup_manifest')
+        manifest = content(directory, 'manifest.json')
+        if len(manifest.encode('utf-8')) != manifest_size:
+            raise ValueError('invalid_backup_manifest')
+        database_bytes, tree = compressed_inventory(manifest)
+
+        def inventory(root_rows):
+            snapshot = {}
+            for path, expected in tree.items():
+                rows = listing(directory + '/' + path) if path else root_rows
+                if {name: row.get('type') for name, row in rows.items()} != expected:
+                    raise ValueError('compressed_inventory_mismatch')
+                for name, kind in expected.items():
+                    if kind == 'file' and inventory_size(rows[name]) < 0:
+                        raise ValueError('invalid_backup_size')
+                snapshot[path] = backup_metadata(rows)
+            return snapshot
+
+        first = inventory(before)
+        compressed_bytes = inventory_size(before['escape.db.gz'])
+        if not 18 < compressed_bytes <= MAX_COMPRESSED_BACKUP_BYTES:
+            raise ValueError('invalid_backup_size')
+        if first != inventory(listing(directory)) or manifest != content(directory, 'manifest.json'):
+            raise ValueError('original_backup_changed')
+        final = listing(ROOT)
+        if (choose_backup(final, started) != NAME
+                or backup_metadata({NAME: final[NAME]}) != backup_metadata({NAME: top[NAME]})):
+            raise ValueError('backup_changed_during_verification')
+        current()
+        # The release bridge verifies the backup bytes. Retention checks only Fileman metadata.
+        result = {'status': 'compressed_directory_retained', 'retained_directory': NAME,
+                  'verification': 'external_metadata_only', 'database_bytes': database_bytes,
+                  'compressed_database_bytes': compressed_bytes}
+        print(json.dumps(result), flush=True)
+        return result
+
     DB_BYTES = int(before.get('escape.db', {}).get('size', 0))
     if not 512 < DB_BYTES <= 10_000_000_000:
         raise ValueError('invalid_backup_size')
@@ -122,9 +240,12 @@ def maintain(api, sha, started, *, redundant_only=False, before_delete=None):
     if NAME not in top:
         raise ValueError('original_backup_unavailable')
     before = listing(ROOT + '/' + NAME)
-    if before.get('escape.db', {}).get('type') != 'file' or int(before['escape.db']['size']) != DB_BYTES:
+    if ('escape.db.gz' in before or before.get('escape.db', {}).get('type') != 'file'
+            or int(before['escape.db']['size']) != DB_BYTES):
         raise ValueError('original_backup_changed')
     manifest = content(ROOT + '/' + NAME, 'manifest.json')
+    if json.loads(manifest).get('database_encoding') == 'gzip':
+        raise ValueError('compressed_inventory_mismatch')
     if not redundant_only and ARCHIVE not in top and '.escape_backups' in top:
         nested = listing(ROOT + '/.escape_backups')
         if ARCHIVE in nested:
@@ -152,8 +273,7 @@ def maintain(api, sha, started, *, redundant_only=False, before_delete=None):
     result['archive_bytes'] = size
     print(json.dumps({'status': 'archive_hashes_verified', **result}), flush=True)
     after = listing(ROOT + '/' + NAME)
-    metadata = lambda rows: {name: {k: row.get(k) for k in ('file','type','mode','size','mtime')} for name,row in rows.items()}
-    if metadata(before) != metadata(after) or manifest != content(ROOT + '/' + NAME, 'manifest.json'):
+    if backup_metadata(before) != backup_metadata(after) or manifest != content(ROOT + '/' + NAME, 'manifest.json'):
         raise ValueError('original_backup_changed')
     # The archive is verified against the original per-file and DB SHA256s.
     # This deletes only the now-redundant uncompressed form, never production.
