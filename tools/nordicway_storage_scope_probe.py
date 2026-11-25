@@ -152,12 +152,20 @@ def deployment_gates(token):
             out["build_commit"] = commit_marker(app, "BUILD_COMMIT")
         # Only two fixed source modules, never keys, configuration, DB or arbitrary paths.
         def read_code(name):
-            if name not in ("apply_update.py","nordicway_deploy_adapter.py") or bridge_files.get(name,{}).get("type")!="file":
+            if name not in ("apply_update.py","nordicway_deploy_adapter.py","nordicway_uapi_quota.py") or bridge_files.get(name,{}).get("type")!="file":
                 raise ValueError("source_unavailable")
             result=call("get_file_content",{"dir":bridge,"file":name,"from_charset":"UTF-8","to_charset":"UTF-8","update_html_document_encoding":0})
             if not isinstance(result,dict) or not isinstance(result.get("content"),str):raise ValueError("source_unavailable")
             return result["content"]
         out["bridge_comparison"]=bridge_comparison(read_code)
+        out["maintenance_gate_held"] = "deploy-enabled.maintenance-held" in bridge_files
+        out["maintenance_contract"] = {}
+        for filename, wanted in (("nordicway_deploy_adapter.py", {"__init__","lock","service_status","quiescence"}), ("nordicway_uapi_quota.py", {"parse"})):
+            try:
+                source = ast.parse(read_code(filename))
+                out["maintenance_contract"][filename] = [{"name": n.name, "positional": [a.arg for a in n.args.posonlyargs+n.args.args], "required_positional": len(n.args.posonlyargs+n.args.args)-len(n.args.defaults), "keyword_only": [a.arg for a in n.args.kwonlyargs], "required_keyword_only": [a.arg for a,d in zip(n.args.kwonlyargs,n.args.kw_defaults) if d is None]} for n in ast.walk(source) if isinstance(n, ast.FunctionDef) and n.name in wanted]
+            except Exception as exc:
+                out["maintenance_contract"][filename] = {"status":"unavailable","category":type(exc).__name__}
         out["updater_upgrade_gate_held"] = "deploy-enabled.updater-held" in bridge_files
         for name in ("escape.db", "escape.db-wal", "escape.db-journal", "escape.db-shm"):
             r = var_files.get(name, {})
