@@ -270,8 +270,13 @@ def integrate(row,number,p,files,run,decision,root):
         raise Hold("Integreret kodetræ kunne ikke verificeres")
     return accept_queue(row,merged["sha"])
 
-def publish_status(root, ident, state, detail):
-    save(root/"coordinator-status.json",{"id":ident,"state":state,"at":now(),"detail":detail[:600]})
+def publish_status(root, ident, state, detail, request=None):
+    value={"id":ident,"state":state,"at":now(),"detail":detail[:600]}
+    # Keep the owner's last receipt separate from automatic heartbeat/reviews.
+    if request:
+        value["requests"]=request["requests"]
+        save(root/"coordinator-manual-status.json",value)
+    save(root/"coordinator-status.json",value)
 
 def due(root, rows, results, current_time=None):
     if trigger(root):
@@ -288,12 +293,13 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
     request=trigger(root)
     ident=request["id"] if request else secrets.token_hex(16)
     if provider_pause:
-        publish_status(root,ident,"blocked","Codex-kapacitetsgrænse; ingen omgåelse")
+        publish_status(root,ident,"blocked","Codex-kapacitetsgrænse; ingen omgåelse",request)
         return False
-    publish_status(root,ident,"running","Kontrollerer aktuelle leverancer og anmodninger")
+    publish_status(root,ident,"running","Kontrollerer aktuelle leverancer og anmodninger",request)
     journal=read(root/"coordinator-review.json",{})
     detail="Ingen reviewklar leverance; kvalificerede køopgaver starter automatisk."
     handled=False
+    held=False
     requests={}
     outcomes={}
     try:
@@ -310,6 +316,7 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
                 sha=p["head"]["sha"]
                 if last.get("state")=="hold" and last.get("sha")==sha:
                     entry.update(last)
+                    held=True
                     detail=last.get("detail","Uændret reviewblokering")
                     continue
                 entry["sha"]=sha
@@ -328,7 +335,7 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
                     if not reserve_review():
                         detail="Review afventer den konfigurerede dagsgrænse"
                         break
-                    publish_status(root,ident,"running","Uafhængigt review af PR #"+str(number))
+                    publish_status(root,ident,"running","Uafhængigt review af PR #"+str(number),request)
                     decision=independent_review(repo_dir,root,row,number,sha,run)
                     if decision["verdict"]=="provider_pause":
                         save(root/"provider-pause.json",{"task":key(row),"observed_at":time.time(),"reset_at":decision["reset_at"]})
@@ -343,6 +350,7 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
                     entry.update(state="accepted",sha=sha)
                     handled=True
             except Hold as exc:
+                held=True
                 detail="PR #"+str(number)+": "+str(exc)
                 entry.update(state="hold",detail=detail[:600])
             finally:
@@ -369,10 +377,13 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
                 else:
                     outcome="Opgaven er i godkendt kø; faktisk start afhænger af ledig plads og afhængigheder."
             comment(225,"<!-- escape-dev-action:"+rid+":processed -->\nLokal gennemgang af "+target+". "+outcome)
-        publish_status(root,ident,"completed",detail)
+        # A receipt only means that the request was examined; no merge or
+        # successor is implied unless actual integration was verified.
+        state="completed" if handled else "blocked" if held else "waiting"
+        publish_status(root,ident,state,detail,request)
         return handled
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
-        publish_status(root,ident,"blocked","Lokal gennemgang afbrudt: "+type(exc).__name__)
+        publish_status(root,ident,"blocked","Lokal gennemgang afbrudt: "+type(exc).__name__,request)
         return False
     finally:
         if request and trigger(root)==request:
