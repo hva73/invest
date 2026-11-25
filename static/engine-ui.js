@@ -225,9 +225,9 @@ window.EngineUI=(()=>{
   if(!current())return;
   if(slot)slot.textContent='Søger hos EODHD …';item.eodhd_error=null;
   try{
-   if(item.eodhd_lookup?.ticket!==ticket){
+   if(!item.eodhd_lookup?.current()){
     const request=api('market/eodhd-symbols',{report_id:item.report_id,candidate_id:item.candidate.candidate_id,is_test:test,quote_currency:item.instrument?.currency||f.elements.quote_currency.value||null});
-    item.eodhd_lookup={ticket,request};
+    item.eodhd_lookup={current,request};
    }
    const r=await item.eodhd_lookup.request;
    if(!current())return;

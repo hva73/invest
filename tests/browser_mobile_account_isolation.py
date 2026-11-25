@@ -37,7 +37,7 @@ const assert = (condition, message) => { if (!condition) throw Error(message); }
 const byId = id => document.getElementById(id);
 const api = (path, args) => {
     const user = username;
-    if (path === 'market/quote' || path === 'state' || path.includes('&before=') || path.endsWith('/pause') || path.endsWith('/ack-signal') || path.includes('/buy-plan?') || /manual-(search|start)/.test(path) || /sessions\/notification-/.test(path) || (holdCurrentLoad&&path.includes('view=current'))) {
+    if (path === 'market/quote' || path === 'market/eodhd-symbols' || path === 'state' || path.includes('&before=') || path.endsWith('/pause') || path.endsWith('/ack-signal') || path.includes('/buy-plan?') || /manual-(search|start)/.test(path) || /sessions\/notification-/.test(path) || (holdCurrentLoad&&path.includes('view=current'))) {
         return new Promise((resolve, reject) => pending.push({path, args, user, resolve, reject}));
     }
     if (path.includes('/start-candidates')) return Promise.resolve({candidates: [0, 1].map(i => ({
@@ -149,6 +149,54 @@ const run = async () => {
     outdatedModeQuote.resolve(quote('beta-previous-mode'));
     await beforeModeChange;
     assert(form.elements.asset_id.value === 'beta-latest', 'Quote survived a live/test round trip');
+
+    const findEodhd = () => EngineUI.click(form.querySelector('[data-engine-eodhd-search]'));
+    const takeEodhd = () => take('market/eodhd-symbols', 'beta');
+    const noEodhdPending = () => !pending.some(request => request.path === 'market/eodhd-symbols');
+    const symbol = name => ({choices: [{symbol: name, name, isin: 'DK0000000001', currency: 'DKK'}]});
+    for (const [index, interrupt, outcome] of [
+        [0, 'logout', 'success'], [1, 'logout', 'error'], [0, 'mode', 'success']
+    ]) {
+        const selection = select(index);
+        take('market/quote', 'beta').resolve({...quote(), isin: 'DK0000000001'});
+        await selection;
+        const providerSymbol = form.elements.provider_symbol;
+        providerSymbol.value = '';
+        await EngineUI.change({target: providerSymbol});
+        const obsolete = findEodhd();
+        const oldRequest = takeEodhd();
+        if (interrupt === 'logout') {
+            const transition = beginLogout();
+            await findEodhd();
+            assert(noEodhdPending(), 'EODHD lookup started during logout');
+            await finishFailedLogout(transition);
+        } else {
+            EngineUI.mount(true);
+            EngineUI.mount(false);
+        }
+        assert(byId('engine-create') === form && form.closest('dialog').open, 'Candidate form was replaced');
+
+        const retry = findEodhd();
+        const currentRequest = takeEodhd();
+        assert(currentRequest.args.candidate_id === oldRequest.args.candidate_id, 'Retry used a different candidate');
+        const slot = byId('engine-eodhd-choice');
+        if (outcome === 'success') {
+            oldRequest.resolve(symbol('OBSOLETE.CO'));
+            await obsolete;
+            assert(slot.textContent === 'Søger hos EODHD …' && !form.elements.provider_symbol.value,
+                'Obsolete EODHD response changed the pending retry');
+        }
+        const concurrent = findEodhd();
+        assert(noEodhdPending(), 'Concurrent lookups sent duplicate requests for the current selection');
+        currentRequest.resolve(symbol('FRESH.CO'));
+        await Promise.all([retry, concurrent]);
+        if (outcome === 'error') {
+            oldRequest.reject(Error('Prior-session EODHD error'));
+            await obsolete;
+        }
+        assert(byId('engine-eodhd-select').value === 'FRESH.CO' && form.elements.provider_symbol.value === 'FRESH.CO' &&
+            byId('engine-form-status').textContent.includes('FRESH.CO'), 'Current EODHD result was lost or overwritten');
+    }
 
     // Exercise the production manual-search/start and notification entry points.
     const newButton=()=>byId('engine-root').querySelector('[data-engine-new]');
