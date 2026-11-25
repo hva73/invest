@@ -479,5 +479,24 @@
       "tests/test_feed_reuse.py"
     ],
     "task": "Concrete follow-up to integrated #285: shared WS capture on verified instrument now works for 100 persisted synthetic tenant sessions, but on quiet/empty streams the shared mode only caches positive messages, causing potentially N repeat upstream captures per cadence. Implement bounded market-only negative availability/coalescing for a verified entitlement+instrument+feed, using existing TTL and cache; distinguish no messages/partial/failed entitlement, never refresh source timestamps or reuse stale data as fresh, no retry storm, no negative result across distinct credential/instrument/test scope, no cache of private broker context. Ensure subscribers with stricter freshness or newer last_data can obtain genuinely newer observation without global starvation; actual persisted sessions. Add EU exchange/symbol collision and expiry/quiet/failed capture counts for 1/10/100 overlap+disjoint; measure actual capture count and bounded cache, not live claim. Keep cross-user flag default-off pending license and final integrated accept. No new service, schema, risk, live enable, broker/network or production edits. Run relevant tests. Draft only."
+  },
+  {
+    "issue": 14,
+    "generation": 5,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "a26ab93f4d83b617ee49bf091506d0284f5a09db",
+    "dependencies": [
+      "14:3"
+    ],
+    "paths": [
+      "hotwatch_supervisor.py",
+      "hotwatch_service.py",
+      "tests/test_hotwatch_supervisor.py",
+      "tests/test_admin_diagnostics.py"
+    ],
+    "task": "Owner requests resource measurement now, #14/#273. Actual current admin_diagnostics returns unavailable external CPU/memory; already tracks queue, leases, API and DB/disk. Implement low-overhead periodic CPU/RAM sampling in existing singleton supervisor (not every request, not per user, no new daemon/dependency). Use actual monotonic elapsed process CPU deltas for owned worker/supervisor where verifiable, Linux proc/cgroup/account quota evidence if available; distinguish host-wide from ESCAPE-process/account utilization and effective CPU quota/cpuset; never label host capacity as account entitlement. Include CPU seconds/elapsed and cores or explicitly unavailable denominator, memory RSS and actual limit if verified, timestamps, bounded recent history (e.g. one sample/minute, 24h cap; reuse existing bounded mechanism or compact atomic file, no DB write per scan). Handle restart/PID reuse, counter reset, missing/denied /proc/cgroup, stale measurements, no process scan of other users, no raw paths/PIDs/secrets returned, admin-only existing /api/admin/diagnostics, no change to public/tenant routes. Expose compact resource snapshot and 5m/1h/24h aggregate or honest missing coverage, no request sleeps, no provider calls. Compare measured overhead in tests; synthetic tests for two samples, quota/host distinction, unavailable/reset/stale, bounded history and read-only API. Preserve existing diagnostics tests. Keep code lean and avoid creating a new monitoring platform. No live server change. Scope backend only; coordinator queues small UI integration after exact contract; coordinate shared hotwatch_service.py with next #268 scope before dispatch/rebase. Deliver actual code and tests."
   }
 ]
