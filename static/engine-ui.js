@@ -103,10 +103,12 @@ window.EngineUI=(()=>{
   const a=s.last_action_signal,acknowledged=noticeAcknowledged(s);
   dialog((s.ticker?s.ticker+' · ':'')+'Signaladvarsel',`<section class="signal-notice-details"><strong>${a.state==='ACTIVE'?'Seneste signal':'Tidligere advarsel'}: ${esc(noticeSide(a))} · ${noticeState(a)}</strong><small>${date(a.created)}</small><p>${esc(a.reason||'Begrundelse ikke registreret')}</p><small>${a.state==='ACTIVE'?'Status ved seneste opdatering.':'Historisk advarsel · ikke et aktuelt handelssignal.'}</small>${acknowledged?'<p role="status">Kvitteret</p>':`<button type="button" data-engine-ack="${esc(s.watch_id)}" data-event-id="${esc(a.event_id)}" data-is-test="${s.is_test===true}">Kvittér advarsel</button>`}</section>`);
  }
+ const pendingAcknowledgements=new WeakMap();
  async function acknowledgeNotice(b){
   const session=captureSession(),eventId=b.dataset.eventId,wid=b.dataset.engineAck,test=b.dataset.isTest==='true',noticeDialog=b.closest?.('dialog');
-  if(!session()||b.disabled)return;
-  const view=captureView(),mounted=()=>view()&&b.isConnected&&(!noticeDialog||noticeDialog.open);
+  const view=captureView(),mounted=()=>view()&&b.isConnected!==false&&(!noticeDialog||noticeDialog.open);
+  if(!session()||!mounted()||pendingAcknowledgements.get(b)?.())return;
+  pendingAcknowledgements.set(b,session);
   const release=lockAction(b,mounted);
   try{
    await api(base+'/sessions/'+encodeURIComponent(wid)+'/ack-signal',{is_test:test,event_id:eventId});
@@ -129,7 +131,10 @@ window.EngineUI=(()=>{
     noticeDialog?.close();
    }
   }catch(error){if(session()&&mounted()){b.disabled=false;throw error}}
-  finally{release()}
+  finally{
+   if(pendingAcknowledgements.get(b)===session)pendingAcknowledgements.delete(b);
+   release();
+  }
  }
  function signalTiming(s){const live=s.status==='ACTIVE'&&['KØBSSIGNAL','SÆLGSSIGNAL','EXIT WATCH'].includes(s.display_status),last=s.last_action_signal||{},labels={BUY_SIGNAL:'Køb',SELL_SIGNAL:'Salg',REDUCE_SIGNAL:'Reducér'};if(live)return `<small class="signal-timing">${window.ESCAPE_DEMO?'Simuleret':'Aktuelt'} · beregnet ${date(s.last_calculation_at)}</small>`;if(labels[last.event_type]&&last.created)return `<small class="signal-timing">Tidligere ${esc(labels[last.event_type])} · ${date(last.created)} · ikke aktuelt</small>`;return ''}
  function signalCategory(s){if(!['CREATED','VALIDATING','ACTIVE','DEGRADED'].includes(s.status))return '';if(s.status==='ACTIVE'&&s.signal==='BUY'&&s.display_status==='KØBSSIGNAL')return 'BUY';if(s.status==='ACTIVE'&&['SELL','REDUCE'].includes(s.signal)&&['SÆLGSSIGNAL','EXIT WATCH'].includes(s.display_status))return 'SELL';if(s.status==='ACTIVE'&&s.signal==='WAIT'&&['AFVENT','VENT'].includes(s.display_status))return 'WAIT';return 'NO_DATA'}
@@ -158,6 +163,7 @@ window.EngineUI=(()=>{
  }
  const isArchived=s=>['EXPIRED','COMPLETED'].includes(s.status);
  const historyPath=(limit,before)=>base+'/sessions'+query()+'&limit='+limit+'&view=history'+(before?'&before='+before:'');
+ const archiveRecheckMs=30000;
  async function archiveTailChanged(cursor,rows,end,current){
   let offset=0;
   while(cursor&&offset<rows.length){
@@ -184,18 +190,23 @@ window.EngineUI=(()=>{
   let previous=listData(user,epoch);
   const ids=new Set([...r.sessions,...h.sessions].map(s=>s.watch_id));
   const archiveTail=list=>list?.sessions.filter(s=>isArchived(s)&&!ids.has(s.watch_id))||[];
-  // History is ordered by creation, so a newly closed watch can land inside a page already read.
-  let historyChanged=previous?.sessions.some(s=>!isArchived(s)&&!ids.has(s.watch_id));
-  const mayHaveHiddenArchives=r.truncated||previous?.current_truncated||previous?.historyRequestOverlappedCap;
-  if(!historyChanged&&mayHaveHiddenArchives){
-   // The capped current list can miss an archive transition entirely. Check the loaded history
-   // range and its end cursor so an insertion outside the first page becomes reachable.
+  // A watch that disappears from a capped current list may still be open.
+  const headCursor=h.next_cursor??null;
+  let historyChanged=previous&&(previous.historyHeadCursor!==headCursor||
+   !r.truncated&&previous.sessions.some(s=>!isArchived(s)&&!ids.has(s.watch_id)));
+  const capEnded=previous?.current_truncated&&!r.truncated;
+  const checkAfterPage=capEnded||previous?.historyRequestOverlappedCap;
+  let historyCheckedAt=previous?.historyCheckedAt;
+  // A watch hidden by the cap can close anywhere in creation-ordered history.
+  // The paginated API has no archive revision, so check the loaded range less often than current data.
+  if(!historyChanged&&(checkAfterPage||r.truncated&&Date.now()-historyCheckedAt>=archiveRecheckMs)){
    let checked;
    while(previous?.historyPage&&previous.historyPage!==checked){
     checked=previous.historyPage;
     try{historyChanged=await archiveTailChanged(h.next_cursor,archiveTail(previous),checked.next_cursor,current)}
     catch(error){if(current())throw error;return}
     if(!current())return;
+    historyCheckedAt=Date.now();
     previous=listData(user,epoch);
     if(historyChanged)break;
    }
@@ -204,9 +215,10 @@ window.EngineUI=(()=>{
   const page=historyChanged?null:previous?.historyPage;
   const cached=historyChanged?[]:archiveTail(previous);
   data={...r,sessions:[...r.sessions,...h.sessions,...cached],candidates:registry.candidates||[],historyPage:page,
-   history_cursor:page?page.next_cursor:h.next_cursor,history_truncated:page?page.truncated:h.truncated,
+   historyHeadCursor:headCursor,historyCheckedAt:page?historyCheckedAt:undefined,
+   history_cursor:page?page.next_cursor:headCursor,history_truncated:page?page.truncated:h.truncated,
    // Recheck a pending page even if the current list has dropped below the cap by then.
-   historyRequestOverlappedCap:mayHaveHiddenArchives&&pendingHistory?.(),
+   historyRequestOverlappedCap:checkAfterPage&&pendingHistory?.(),
    current_truncated:r.truncated,_owner:user,_mode:mode,_epoch:epoch};
   paint();
  }
@@ -361,6 +373,7 @@ window.EngineUI=(()=>{
   if(!list)return;
   const ids=new Set(list.sessions.map(s=>s.watch_id));
   list.sessions.push(...history.sessions.filter(s=>!ids.has(s.watch_id)));
+  list.historyCheckedAt??=Date.now();
   list.historyPage={next_cursor:history.next_cursor,truncated:history.truncated};
   list.history_cursor=history.next_cursor;
   list.history_truncated=history.truncated;

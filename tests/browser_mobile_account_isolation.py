@@ -14,6 +14,8 @@ const pending = [];
 const userIds = {alpha: 11, beta: 22};
 let username,epoch=0,failLogout;
 let holdCurrentLoad=false,omitHistory=false,poll,pollSchedules=0,archiveFixture;
+let archiveReads=0,clock=Date.now();
+Date.now=()=>clock;
 const logout = document.getElementById('logout');
 // app.js advances the epoch synchronously and leaves the view mounted on failure.
 logout.onclick = async () => {
@@ -26,7 +28,7 @@ const finishFailedLogout = async transition => { failLogout(); await transition;
 Object.defineProperty(document, 'hidden', {value: false});
 const realTimeout = window.setTimeout;
 window.setTimeout = (callback, delay) => {
-    if (delay === 15000) { poll = callback; pollSchedules++; return null; }
+    if (delay === 15000) { poll = () => { clock += delay; return callback(); }; pollSchedules++; return null; }
     return realTimeout(callback, delay);
 };
 const session = (watch_id, status = 'ACTIVE') => ({
@@ -38,6 +40,7 @@ const byId = id => document.getElementById(id);
 const api = (path, args) => {
     const user = username;
     if (archiveFixture?.autoHistory && path.includes('view=history')) {
+        if (path.includes('&before=')) archiveReads++;
         return Promise.resolve(archiveFixture.autoHistory(new URLSearchParams(path.split('?')[1])));
     }
     if (path === 'market/quote' || path === 'market/eodhd-symbols' || path === 'state' || path.includes('&before=') || path.endsWith('/pause') || path.endsWith('/ack-signal') || path.includes('/buy-plan?') || /manual-(search|start)/.test(path) || /sessions\/notification-/.test(path) || (holdCurrentLoad&&path.includes('view=current'))) {
@@ -394,6 +397,29 @@ const run = async () => {
     };
     const unread = icon => icon.classList.contains('signal-alert--unread');
     switchAccount('alpha');
+    const [firstNotice, secondNotice] = showSignals(signal('first-ack'), signal('second-ack'));
+    await EngineUI.click(firstNotice);
+    const firstButton = button('[data-engine-ack]');
+    const confirmFirst = click('[data-engine-ack]');
+    take('/ack-signal', 'alpha').resolve({acknowledged: true});
+    await confirmFirst;
+    await EngineUI.click(secondNotice);
+    const secondButton = button('[data-engine-ack]');
+    check(secondButton.isConnected && secondButton !== firstButton && !secondButton.disabled,
+        'Opening another warning did not mount a fresh acknowledgement button');
+    const confirmSecond = click('[data-engine-ack]');
+    const duplicateAck = EngineUI.click(secondButton);
+    take('/ack-signal', 'alpha').reject(Error('Current signal acknowledgement failed'));
+    assert(!pending.some(request => request.path.endsWith('/ack-signal')), 'Concurrent acknowledgement issued a duplicate request');
+    await Promise.all([confirmSecond, duplicateAck]);
+    check(byId('engine-dialog').open && !secondButton.disabled && unread(secondNotice) &&
+        byId('notice').textContent === 'Current signal acknowledgement failed', 'Current failure did not keep the alert open and retryable');
+    const retrySecond = click('[data-engine-ack]');
+    take('/ack-signal', 'alpha').resolve({acknowledged: true});
+    await retrySecond;
+    check(!byId('engine-dialog').open && !unread(secondNotice), 'Acknowledgement retry did not clear the alert');
+
+    switchAccount('alpha');
     await flush();
     const obsoleteAcknowledgement = await startAcknowledgement();
     switchAccount(null);
@@ -717,6 +743,31 @@ const run = async () => {
         check(button(archived) && !button(history), 'Poll lost the newly archived watch or reset pagination');
     }
     archiveFixture = null;
+
+    const cappedCurrent = Array.from({length: 101}, (_, index) => session('current-' + index));
+    const stableArchive = Array.from({length: 21}, (_, index) => session('archived-' + index, 'COMPLETED'));
+    archiveFixture = {
+        current: cappedCurrent,
+        autoHistory: params => params.has('before')
+            ? {sessions: stableArchive.slice(20), next_cursor: null, truncated: false}
+            : {sessions: stableArchive.slice(0, 20), next_cursor: 150, truncated: true}
+    };
+    switchAccount('alpha');
+    await flush();
+    await click(history);
+    const loadedArchiveRow = '[data-engine-detail="archived-20"]';
+    const readsAfterPaging = archiveReads;
+    await poll();
+    check(archiveReads === readsAfterPaging, 'An unchanged capped poll refetched the loaded archive tail');
+    cappedCurrent.unshift(session('new-current'));
+    await poll();
+    check(button('[data-engine-detail="new-current"]') && !button('[data-engine-detail="current-99"]'),
+        'The capped fixture did not displace an open watch');
+    check(button(loadedArchiveRow) && !button(history), 'A cap displacement reset unchanged archive pagination');
+    const readsAfterDisplacement = archiveReads;
+    await poll();
+    check(archiveReads === readsAfterDisplacement && button(loadedArchiveRow),
+        'Regular polling did not reuse the paginated archive');
 
     for (const [currentCount, archiveCount, delayPage] of [[101, 21, false], [102, 141, false], [101, 21, true]]) {
         const current = Array.from({length: currentCount}, (_, index) => ({
