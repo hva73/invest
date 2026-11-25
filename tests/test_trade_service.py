@@ -375,6 +375,28 @@ class Trading(unittest.TestCase):
      self.assertEqual(checked['response'],self.intent_result)
      self.assertEqual(checked['status'],'sent')
 
+ def test_check_rejects_all_conflicting_historical_identity_fields(self):
+  proposal=self.estimate()
+  pid=self.send(proposal)['id']
+  intent={'orderIntentId':'synthetic-intent','orderId':'original-order'}
+  order=proposal['payload']['orders'][0]
+  conflicts={'portfolioId':'other-depot','collectionId':'other-collection',
+             'assetId':'other-asset','side':'SELL','orderType':'invalid-type',
+             'timeInForce':'invalid-tif'}
+  self.intent_result=dict(intent,status='ACCEPTED')
+  for field,value in conflicts.items():
+   for nested in (False,True):
+    with self.subTest(field=field,nested=nested):
+     response=dict(intent,status='PENDING')
+     if nested:response['orderIntents']=[dict(intent,**{field:value})]
+     else:response[field]=value
+     with app.connect() as c:
+      c.execute('UPDATE broker_proposals SET response=? WHERE id=?',(json.dumps(response),pid))
+     prior=dict(trade.get(app.connect,1,pid))
+     with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+      trade.check(app.connect,1,pid,self.factory)
+     self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+
  def test_check_cannot_bind_a_new_order_id(self):
   self.write_result['status']='PENDING'
   pid=self.send(self.estimate())['id'];prior=dict(trade.get(app.connect,1,pid))
