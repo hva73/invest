@@ -100,3 +100,27 @@ class LocalCoordinatorTests(unittest.TestCase):
         with patch.object(c,"owner_requests",side_effect=OSError("offline")):
             self.assertFalse(c.run_once(self.root,self.root,[],{}))
         self.assertEqual(c.read(self.root/"coordinator-manual-status.json",{})["state"],"blocked")
+
+    def test_held_review_is_rechecked_after_cooldown_without_repeat_model(self):
+        old="d"*40
+        c.save(self.root/"coordinator-review.json",{"501":{"at":1,"state":"hold","sha":old,"detail":"Concrete review failure"}})
+        self.assertTrue(c.due(self.root,[self.row],self.results,current_time=62))
+        with patch.object(c,"verify_pr",return_value=({"head":{"sha":old}},[],"open")),patch.object(c,"independent_review") as model:
+            self.assertFalse(c.run_once(self.root,self.root,[self.row],self.results))
+            model.assert_not_called()
+        self.assertFalse(c.due(self.root,[self.row],self.results))
+        journal=c.read(self.root/"coordinator-review.json",{})
+        journal["501"]["at"]=1
+        c.save(self.root/"coordinator-review.json",journal)
+        with patch.object(c,"verify_pr",return_value=({"head":{"sha":"e"*40}},[],"open")),patch.object(c,"verified_ci",return_value=8),patch.object(c,"independent_review",return_value={"verdict":"accept","reason":"Fix confirmed"}) as model,patch.object(c,"integrate",return_value="Accepted"):
+            self.assertTrue(c.run_once(self.root,self.root,[self.row],self.results))
+            model.assert_called_once()
+        self.assertFalse(c.due(self.root,[self.row],self.results))
+
+    def test_one_lookup_failure_does_not_starve_independent_review(self):
+        other=dict(self.row,issue=14,generation=6,priority=2)
+        c.save(self.root/"receipts"/"14-6.json",{"issue":14,"generation":6,"status":"draft_pr","pr":"https://github.com/hva73/invest/pull/502"})
+        results=dict(self.results,**{"14:6":"draft_pr"})
+        with patch.object(c,"verify_pr",side_effect=[OSError("temporary"),({"head":{"sha":"e"*40}},[],"open")]),patch.object(c,"verified_ci",return_value=8),patch.object(c,"independent_review",return_value={"verdict":"accept","reason":"Independent task passed"}),patch.object(c,"integrate",return_value="Accepted") as merge:
+            self.assertTrue(c.run_once(self.root,self.root,[self.row,other],results))
+            self.assertEqual(merge.call_args.args[0],other)
