@@ -536,12 +536,13 @@ def recover_automatic_feeds(connect,now=None,identity_cache=None):
  now=now or engine.utc();changed=0;lookup_attempted=False
  with connect() as c:
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return 0
-  rows=c.execute("SELECT s.* FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id LEFT JOIN hw_feed_recovery f ON f.watch_row_id=s.id WHERE s.is_test=0 AND COALESCE(k.killed,0)=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.lease_until<=? AND json_extract(s.request,'$.provider')='pluto' AND s.purpose IN ('automatic discovery','automatic holding watch') AND (NOT EXISTS (SELECT 1 FROM hw_samples p WHERE p.watch_row_id=s.id) OR (s.purpose='automatic holding watch' AND json_extract(s.request,'$.asset_id') IN (?,?))) ORDER BY COALESCE(f.next_attempt,0), CASE WHEN s.purpose='automatic holding watch' THEN 0 ELSE 1 END, s.id LIMIT ?",(now.timestamp(),*CRYPTO_REFERENCES,engine.capacity())).fetchall()
+  rows=c.execute("SELECT s.*,EXISTS (SELECT 1 FROM hw_samples p WHERE p.watch_row_id=s.id) AS has_samples FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id LEFT JOIN hw_feed_recovery f ON f.watch_row_id=s.id WHERE s.is_test=0 AND COALESCE(k.killed,0)=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.lease_until<=? AND json_extract(s.request,'$.provider')='pluto' AND s.purpose IN ('automatic discovery','automatic holding watch') AND (NOT EXISTS (SELECT 1 FROM hw_samples p WHERE p.watch_row_id=s.id) OR (s.purpose='automatic holding watch' AND json_extract(s.request,'$.asset_id') IN (?,?)) OR (s.last_error='PLUTO_QUOTE_TIME_UNKNOWN' AND EXISTS (SELECT 1 FROM hw_verified_feed_links l WHERE l.user_id=s.user_id AND l.asset_id=json_extract(s.request,'$.asset_id') AND l.verified_epoch BETWEEN ? AND ?))) ORDER BY COALESCE(f.next_attempt,0), CASE WHEN s.purpose='automatic holding watch' THEN 0 ELSE 1 END, s.id LIMIT ?",(now.timestamp(),*CRYPTO_REFERENCES,now.timestamp()-7*86400,now.timestamp(),engine.capacity())).fetchall()
  for row in rows:
   try:
-   req=json.loads(row['request']);holding={'asset_id':req['asset_id'],'ticker':req['ticker'],'currency':req['quote_currency']}
+   req=json.loads(row['request']);holding={'asset_id':req['asset_id'],'ticker':req['ticker'],'currency':req['quote_currency'],'exchange':req.get('exchange')}
    known=verified_existing_feed(connect,row['user_id'],holding,now);reason='EODHD-match genbrugt fra en nylig kontrol af ISIN og valuta'
    if known and holding['asset_id']=='54368e0b-2d53-401e-bf68-1033a5b84b08':reason='Brugerbekræftet BTC-kursmapping genbrugt for denne beholdning'
+   if not known and row['has_samples'] and holding['asset_id'] not in CRYPTO_REFERENCES:continue
    if not known and not lookup_attempted:
     with connect() as c:retry=c.execute('SELECT next_attempt FROM hw_feed_recovery WHERE watch_row_id=?',(row['id'],)).fetchone()
     if retry and retry['next_attempt']>now.timestamp():continue
@@ -619,7 +620,8 @@ def recover_automatic_feeds(connect,now=None,identity_cache=None):
    updated=dict(req,provider='eodhd',provider_symbol=known['provider_symbol'])
    with connect() as c:
     c.execute('BEGIN IMMEDIATE')
-    result=c.execute("UPDATE hw_sessions SET request=?,next_due=? WHERE id=? AND request=? AND lease_until<=? AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND (NOT EXISTS (SELECT 1 FROM hw_samples p WHERE p.watch_row_id=hw_sessions.id) OR (purpose='automatic holding watch' AND json_extract(request,'$.asset_id')=?)) AND NOT EXISTS (SELECT 1 FROM hw_system_control g WHERE g.id=1 AND g.killed=1) AND NOT EXISTS (SELECT 1 FROM hw_control k WHERE k.user_id=hw_sessions.user_id AND k.killed=1)",(json.dumps(updated),now.timestamp(),row['id'],row['request'],now.timestamp(),'54368e0b-2d53-401e-bf68-1033a5b84b08'))
+    verified_fallback=row['last_error']=='PLUTO_QUOTE_TIME_UNKNOWN' and not known.get('provisional') and engine.verified_automatic_feed(c,row['user_id'],updated,now)
+    result=c.execute("UPDATE hw_sessions SET request=?,next_due=? WHERE id=? AND request=? AND lease_until<=? AND status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND (NOT EXISTS (SELECT 1 FROM hw_samples p WHERE p.watch_row_id=hw_sessions.id) OR (purpose='automatic holding watch' AND json_extract(request,'$.asset_id')=?) OR (last_error='PLUTO_QUOTE_TIME_UNKNOWN' AND ?)) AND NOT EXISTS (SELECT 1 FROM hw_system_control g WHERE g.id=1 AND g.killed=1) AND NOT EXISTS (SELECT 1 FROM hw_control k WHERE k.user_id=hw_sessions.user_id AND k.killed=1)",(json.dumps(updated),now.timestamp(),row['id'],row['request'],now.timestamp(),'54368e0b-2d53-401e-bf68-1033a5b84b08',verified_fallback))
     if result.rowcount:
      if known.get('provisional'):c.execute('INSERT INTO hw_provisional_feed_links VALUES(?,?,?,?)',(row['id'],known['provider_symbol'],json.dumps(known['provisional']),now.isoformat()))
      engine.event(c,row,'PROVIDER_CHANGED',now,reason);changed+=1
@@ -730,6 +732,17 @@ def verify_cxe_feeds(connect,now=None):
   control=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(row['user_id'],)).fetchone()
   if control and control['killed']:return 0
   if status is None:
+   prior=c.execute('SELECT payload FROM hw_cxe_feed_evidence WHERE user_id=? AND asset_id=? AND symbol=?',(row['user_id'],row['asset_id'],row['symbol'])).fetchone()
+   link=c.execute('SELECT * FROM hw_verified_feed_links WHERE user_id=? AND asset_id=?',(row['user_id'],row['asset_id'])).fetchone()
+   # Renewing the same continuously verified identity does not invalidate
+   # samples received under it. Any lapse or changed instrument starts anew.
+   if prior and link and engine.verified_automatic_feed(c,row['user_id'],request,now):
+    previous=json.loads(prior['payload'])
+    proof_keys=('basis','isin','symbol','currency','primary_ticker','primary_mic','catalog_ticker','catalog_exchange','cxe_asset_class')
+    broker_keys=('asset_id','ticker','exchange','currency','type')
+    if all(previous.get(k)==evidence.get(k) for k in proof_keys) and all(previous['pluto'].get(k)==evidence['pluto'].get(k) for k in broker_keys):
+     since=previous.get('continuous_since_epoch')
+     evidence['continuous_since_epoch']=since if type(since) in (int,float) and 0<=since<=link['verified_epoch'] else link['verified_epoch']
    c.execute("UPDATE hw_cxe_feed_evidence SET payload=?,verified_epoch=?,next_attempt=?,status='MATCHED' WHERE user_id=? AND asset_id=? AND symbol=?",(json.dumps(evidence),now.timestamp(),now.timestamp()+43200,row['user_id'],row['asset_id'],row['symbol']))
    c.execute('UPDATE hw_verified_feed_links SET ticker=?,currency=?,exchange=?,isin=?,verified_epoch=? WHERE user_id=? AND asset_id=? AND symbol=?',(instrument['ticker'],instrument['currency'],instrument['exchange'],evidence['isin'],now.timestamp(),row['user_id'],row['asset_id'],row['symbol']))
   elif status=='CONFLICT':c.execute("UPDATE hw_cxe_feed_evidence SET status='CONFLICT',next_attempt=?,payload=json_set(payload,'$.last_revalidation_error','IDENTITY_CONFLICT') WHERE user_id=? AND asset_id=? AND symbol=?",(now.timestamp()+900,row['user_id'],row['asset_id'],row['symbol']))
@@ -1309,7 +1322,9 @@ class Runner:
      # A stale quote cannot produce an actionable signal. When other live
      # scans are already substantially overdue, defer this auxiliary history
      # fetch to a later scan so it does not occupy a worker ahead of them.
-     if stale_duplicate or scan_log and scan_log[0]=='degraded' and scan_log[1]=='DATA_STALE':
+     if scan_log and scan_log[0]=='degraded' and scan_log[1] in ('EODHD_DAILY_BUDGET','PROVIDER_RATE_BUDGET','EODHD_RATE_LIMIT'):
+      warmup_deferred=True
+     elif stale_duplicate or scan_log and scan_log[0]=='degraded' and scan_log[1]=='DATA_STALE':
       now_due=engine.utc().timestamp()
       with self.connect() as c:
        warmup_deferred=bool(c.execute("SELECT 1 FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.id!=? AND s.next_due<=? AND s.lease_until<=? AND COALESCE(k.killed,0)=0 LIMIT 1",(job['id'],now_due-15,now_due)).fetchone())
