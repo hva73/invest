@@ -86,8 +86,12 @@ def patch(old,helper):
             return result
         plan=phase.phase_budget(self.checkout,self.target,self.cpanel_token,
                                nordicway_release_preflight.manifest(self.checkout))
-        if phase.available(self.target,self.cpanel_token)<max(self.required_bytes,plan['required_bytes']):
+        fresh=phase.available(self.target,self.cpanel_token)
+        # Leave a further 64MiB allowance for normal quota read drift.
+        ceiling=min(plan['archive_cap'],fresh-plan['restart_reserve']-64*1024*1024)
+        if ceiling<phase.HEADROOM or fresh<self.required_bytes:
             raise ValueError('insufficient_phase_space')
+        plan=dict(plan,archive_cap=ceiling,required_bytes=plan['restart_reserve']+ceiling)
         self.phase_plan=plan
         return plan''')
     s=replace(s,"    def backup_and_apply(self, release):\n        names = apply_update.FILES",
@@ -109,6 +113,10 @@ def patch(old,helper):
     s=replace(s,"    def verify_installed(self, sha):\n        report",
               "    def verify_installed(self, sha):\n        if getattr(self,'phase_plan',None) is not None:\n            phase.restart_check(self.target,self.cpanel_token,self.phase_plan['restart_reserve'])\n        report")
     result["nordicway_deploy_adapter.py"]=s.encode()
+    s=old["nordicway_deploy_sequence.py"].decode()
+    s=replace(s,"                reason = None\n                if stage == 'service_state':",
+              "                reason = None\n                if stage == 'backup_and_apply' and isinstance(exc, BackupVerificationFailure):\n                    reason = 'backup_verification_failed_before_replace'\n                elif stage == 'service_state':")
+    result["nordicway_deploy_sequence.py"]=s.encode()
     s=old["nordicway_deploy_runner.py"].decode()
     s=replace(s,"import nordicway_release_backup","import nordicway_release_backup\nimport nordicway_phase_backup as phase")
     s=replace(s,'''            digest = hashlib.sha256()
@@ -125,6 +133,8 @@ def patch(old,helper):
                     raise ValueError('invalid_backup')''')
     s=replace(s,"            if state == 'stopped':\n                with adapter.quiescence():",
               "            if state == 'stopped':\n                if manifest.get('database_encoding')=='gzip':\n                    phase.restart_check(target)\n                with adapter.quiescence():")
+    s=replace(s,"        if ((result.status in ('ok', 'updated_stopped') and result.stage == 'complete')",
+              "        safe_snapshot_rejection = (result.status == 'failed' and result.stage == 'backup_and_apply'\n                                   and result.reason == 'backup_verification_failed_before_replace'\n                                   and result.service_restored is True\n                                   and 'backup' not in _read_marker(marker, sha))\n        if (safe_snapshot_rejection or (result.status in ('ok', 'updated_stopped') and result.stage == 'complete')")
     result["nordicway_deploy_runner.py"]=s.encode()
     result[HELPER]=helper
     for name,data in result.items():compile(data,name,"exec")
