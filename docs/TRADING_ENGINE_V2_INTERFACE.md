@@ -149,11 +149,18 @@ kæde kan kun opdages med en uafhængig reference til den forventede historik.
 Adapteren har ingen UI eller live-rute.
 
 `evaluate_test_position_exit(connect, scope, snapshot_id, as_of, entry_origin,
-catalog, sample, metrics, risk)` bruger samme SQLite-adapter til exit i
-simulation. Kaldet leverer den oprindelige entry og aktuel positionsevidens
-med matchende scope og entry-digest. Hele den gemte kæde verificeres før
-tidsafgrænsningen. Det seneste skift med `effective_at <= as_of` gælder.
-Før første skift eller ved tom historik bruges entry-strategien. Den valgte
+catalog, sample, metrics, risk, expected_head_digest=...)` bruger samme
+SQLite-adapter til exit i simulation. Kalderen skal desuden levere det
+uafhængigt attesterede seneste overgangsdigest for det autoriserede scope
+(eller eksplicit None ved verificeret fravær af skift). Referencen må ikke
+udledes af den journal, der kontrolleres; uden uafhængigt grundlag må
+evalueringen ikke kaldes. Intet nyt skema eller lager indføres.
+Kaldet leverer den oprindelige entry og aktuel positionsevidens med
+matchende scope og entry-digest. Hele kæden og forventet kædespids
+verificeres før tidsafgrænsningen; afkortning eller sletning afvises.
+Det seneste skift med `effective_at <= as_of` gælder. Før første skift
+eller ved attesteret tom historik bruges entry-strategien. En senere
+kædespids bruges kun til integritetskontrol, ikke som historisk signalinput. Den valgte
 strategis ID, version og checksum skal matche kataloget eksakt med samme
 ejerprioritet som ved skrivning. Scopefejl, ugyldig kæde og manglende
 strategimatch afbryder kaldet med `ValueError`.

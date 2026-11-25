@@ -739,6 +739,7 @@ class TradingEngineV2Tests(unittest.TestCase):
             arguments = dict(
                 connect=connect, scope=scope, snapshot_id="exit", as_of=at, entry_origin=entry,
                 catalog=catalog, sample=sample, risk=self.risk,
+                expected_head_digest=future.digest,
                 metrics={"return_3_pct": self.evidence("-.6"), "breakdown": self.evidence(True)},
             )
             return evaluate_test_position_exit(**(arguments | overrides))
@@ -777,6 +778,32 @@ class TradingEngineV2Tests(unittest.TestCase):
             exit_at(self.later, catalog=inputs["catalog"])
         with self.assertRaisesRegex(ValueError, "STRATEGY_UNVERIFIED"):
             exit_at(self.later, catalog={})
+        # The independent head must detect valid-looking prefixes and empty
+        # chains, even when evaluating before the first recorded switch.
+        for sql in ("DELETE FROM test_position_switch_history_v1 WHERE sequence = 2",
+                    "DELETE FROM test_position_switch_history_v1"):
+            with connect() as connection:
+                connection.execute(sql)
+            with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
+                exit_at(self.at)
+            with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
+                exit_at(self.later)
+            with connect() as connection:
+                connection.execute("DELETE FROM test_position_switch_history_v1")
+                for seq, item in enumerate((first, future), 1):
+                    connection.execute("""
+                        INSERT INTO test_position_switch_history_v1 VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (scope.user_id, scope.portfolio_id, scope.position_id, scope.trade_cycle_id,
+                          seq, item.digest, canonical(asdict(item))))
+        # Explicit, independently attested empty history is still valid.
+        empty_connect = self.position_switch_database()
+        self.assertEqual(exit_at(self.at, connect=empty_connect, expected_head_digest=None).origin.strategy_checksum,
+                         entry.strategy_checksum)
+        with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
+            exit_at(self.at, connect=empty_connect, expected_head_digest=first.digest)
+        with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
+            exit_at(self.at, expected_head_digest=None)
+
         # A missing predecessor leaves a detectable gap in the existing journal.
         with connect() as connection:
             connection.execute("DELETE FROM test_position_switch_history_v1 WHERE sequence = 1")

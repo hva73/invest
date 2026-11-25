@@ -545,14 +545,25 @@ def evaluate_test_position_exit(
     sample: Evidence,
     metrics: dict[str, Evidence],
     risk: Evidence,
+    *,
+    expected_head_digest: str | None,
 ) -> Decision:
-    """Evaluate a scoped simulation exit using the persisted strategy at as_of."""
+    """Evaluate a simulation exit against a caller-attested journal head.
+
+    The head must come from independent trusted simulation state, not this
+    journal read. Explicit None attests that there has never been a switch.
+    The full head validates integrity only; future switches cannot affect
+    the strategy selected at as_of.
+    """
     as_of = _utc(as_of)
     history = read_test_position_switch_history(connect, scope)
     if (entry_origin.purpose != "entry" or not entry_origin.snapshot_checksum
             or entry_origin.scope_digest not in (scope.digest, replace(scope, position_id=None).digest)
             or (history and history[0].entry_origin != entry_origin)):
         raise ValueError("POSITION_SCOPE_MISMATCH")
+    actual_head = history[-1].digest if history else None
+    if expected_head_digest != actual_head:
+        raise ValueError("POSITION_SWITCH_HISTORY_INVALID")
     context = sample.value.get("context") if isinstance(sample.value, dict) else None
     if (not isinstance(context, dict) or context.get("scope_digest") != scope.digest
             or context.get("entry_digest") != entry_origin.digest):
