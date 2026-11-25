@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-25T17:18:56.735Z",
+  "updated_at": "2026-11-25T17:43:00Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -243,7 +243,7 @@
       "title": "Position Watch og strategiskift",
       "status": "in_progress",
       "issue": 273,
-      "evidence": "PR #286 integreret på v2-gren, simulation af strategiskift testet. Faktisk persistence og UI udestår.",
+      "evidence": "#298 test-only SQLite historik integreret 33416f77; exitintegration #299 HOLD c1847c70: uafhængigt vedvarende journalanker mangler.",
       "subgoals": [
         {
           "id": "switch",
@@ -255,9 +255,10 @@
         {
           "id": "storage",
           "title": "Vedvarende positionstilstand",
-          "status": "review",
-          "evidence": "PR #298, exact a98eea82, CI 45657292352 bestået. Vedvarende SQLite-historik for strategiskift i simulation; uafhængigt review/integration og live-kobling udestår.",
-          "owner_role": "data"
+          "status": "verified",
+          "evidence": "#298 integreret 33416f77; CI 45657292352 og uafhængigt review: SQLite append, reopen, scope og digest; afkortningssikker exitintegration er separat og udestår.",
+          "owner_role": "data",
+          "updated_at": "2026-11-25T17:43:00Z"
         },
         {
           "id": "ui",
@@ -269,11 +270,13 @@
         {
           "id": "e2e",
           "title": "Integreret positionsbeskyttelse",
-          "status": "pending",
-          "evidence": "Udestår.",
-          "owner_role": "motor"
+          "status": "review",
+          "evidence": "#299 c1847c70 CI 45664780097 PASS, uafhængigt HOLD: ingen faktisk genstartssikker attesteret kædespids.",
+          "owner_role": "motor",
+          "updated_at": "2026-11-25T17:43:00Z"
         }
-      ]
+      ],
+      "updated_at": "2026-11-25T17:43:00Z"
     },
     {
       "id": "longterm",
@@ -329,14 +332,15 @@
       "title": "Trading Lab, læring og faktisk dækning",
       "status": "in_progress",
       "issue": 273,
-      "evidence": "Replay-fundament på plads; virkelige data, shadow og målinger udestår.",
+      "evidence": "#297 integreret f7a0861a: fælles historik i faktisk Strategy Lab replay, CI 45655349632; 36→24 featurekald i regression. Faktisk historisk dækning, shadow og afkast udestår.",
       "subgoals": [
         {
           "id": "replay",
           "title": "Replay-fundament",
           "status": "verified",
-          "evidence": "PR #283/#284 integreret på v2-gren.",
-          "owner_role": "data"
+          "evidence": "#283/#284/#297 integreret; #297 f7a0861a, CI 45655349632, autoriseret causal SQLite replay og 36→24 kald; begrænset historisk dækning.",
+          "owner_role": "data",
+          "updated_at": "2026-11-25T17:43:00Z"
         },
         {
           "id": "coverage",
@@ -359,22 +363,24 @@
           "evidence": "Udestår.",
           "owner_role": "data"
         }
-      ]
+      ],
+      "updated_at": "2026-11-25T17:43:00Z"
     },
     {
       "id": "statistics",
       "phase": 3,
       "title": "Hvordan står det til? – herkomst og statistik",
-      "status": "pending",
+      "status": "in_progress",
       "issue": 114,
-      "evidence": "Verificeret entry/exit/fill-kæde og sammenligning udestår.",
+      "evidence": "#303 f81d749e CI 45666550924 PASS, review HOLD på legitim collection-sell statusreadback uden tidligere portfolioId.",
       "subgoals": [
         {
           "id": "provenance",
           "title": "Entry/exit-herkomst",
-          "status": "pending",
-          "evidence": "Samlet verificeret kæde udestår.",
-          "owner_role": "motor"
+          "status": "review",
+          "evidence": "#303 f81d749e konkret kode, CI PASS, review HOLD: collection-sell med matchende collectionId/orderIntentId og første portfolioId må ikke afvises.",
+          "owner_role": "motor",
+          "updated_at": "2026-11-25T17:43:00Z"
         },
         {
           "id": "fills",
@@ -390,15 +396,16 @@
           "evidence": "Samlet 2.0-accept udestår.",
           "owner_role": "desktop"
         }
-      ]
+      ],
+      "updated_at": "2026-11-25T17:43:00Z"
     },
     {
       "id": "ui",
       "phase": 3,
       "title": "Samlet mobil/desktop 2.0",
-      "status": "pending",
+      "status": "in_progress",
       "issue": 54,
-      "evidence": "Godkendte eksisterende grafer bevares; nye 2.0-visninger udestår.",
+      "evidence": "Mobil #300 752c3a06 review HOLD på forsinket privat state/error; desktop #305 8dc16d65 draft med CI 45667433871 i gang. Ingen ny UI-liveaccept.",
       "subgoals": [
         {
           "id": "reuse",
@@ -410,16 +417,18 @@
         {
           "id": "mobile",
           "title": "Mobil 2.0",
-          "status": "pending",
-          "evidence": "Udestår.",
-          "owner_role": "mobile"
+          "status": "review",
+          "evidence": "#300 752c3a06 CI 45663404430 PASS, uafhængigt HOLD på session-epoch og stale kill/holding continuations.",
+          "owner_role": "mobile",
+          "updated_at": "2026-11-25T17:43:00Z"
         },
         {
           "id": "desktop",
           "title": "Desktop 2.0",
-          "status": "pending",
-          "evidence": "Udestår.",
-          "owner_role": "desktop"
+          "status": "review",
+          "evidence": "#305 8dc16d65 publiceret efter #67:2 STARTED/WORKING/TESTING; CI 45667433871 i gang.",
+          "owner_role": "desktop",
+          "updated_at": "2026-11-25T17:43:00Z"
         },
         {
           "id": "test",
@@ -428,15 +437,16 @@
           "evidence": "Udestår.",
           "owner_role": "mobile"
         }
-      ]
+      ],
+      "updated_at": "2026-11-25T17:43:00Z"
     },
     {
       "id": "load",
       "phase": 4,
       "title": "100 brugere og skaleringsmåling",
-      "status": "pending",
+      "status": "in_progress",
       "issue": 14,
-      "evidence": "Samme-symbol adaptertest bestået; fuld scheduler-, CPU/RAM-, DB- og API-belastningstest udestår.",
+      "evidence": "#302 integreret 99ba8ef6 efter lokalt uafhængigt review; SQLite discovery med 1/10/100 brugere og én attempt-query pr. bruger. #304 holdingbatch under review; samlet hostmåling udestår.",
       "subgoals": [
         {
           "id": "adapter",
@@ -448,9 +458,10 @@
         {
           "id": "queue",
           "title": "100 brugere og fair køer",
-          "status": "pending",
-          "evidence": "Udestår.",
-          "owner_role": "data"
+          "status": "in_progress",
+          "evidence": "#302 CI 45665177195, integreret 99ba8ef6: scoped discovery query og bevaret cursor/selection. #304 93a7859a CI 45667321404 PASS afventer review. Ikke fuld fairness/workeraccept.",
+          "owner_role": "data",
+          "updated_at": "2026-11-25T17:43:00Z"
         },
         {
           "id": "resources",
@@ -466,7 +477,8 @@
           "evidence": "Arkitekturhorisont, ikke separat livekrav.",
           "owner_role": "data"
         }
-      ]
+      ],
+      "updated_at": "2026-11-25T17:43:00Z"
     },
     {
       "id": "release",
