@@ -104,6 +104,33 @@ class ParallelReviewTests(unittest.TestCase):
             self.assertEqual(results["268:4"],"draft_pr")
             self.assertFalse(d.can_resume_delivery(root,work,{"268:4":"review_required"}))
 
+    def test_two_developer_repairs_use_development_slots_not_coordinator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);q=root/"queue.json"
+            rows=[dict(self.row(14,"data","codex/escape-development","hotwatch_service.py"),local_review=True,local_repair=True),dict(self.row(67,"desktop","codex/trading-engine-v2-integration","static/market-ui.js"),local_review=True,local_repair=True)]
+            d.save(q,rows)
+            results={"14:1":"draft_pr","67:1":"draft_pr"}
+            (root/"receipts").mkdir()
+            journal={}
+            for row,number in zip(rows,(304,306)):
+                d.save(root/("receipts/"+str(row["issue"])+"-1.json"),{"issue":row["issue"],"generation":1,"status":"draft_pr","pr":"https://github.com/hva73/invest/pull/"+str(number)})
+                journal[str(number)]={"state":"hold","sha":"a"*40,"repair_reason":"Concrete defect","at":0}
+            d.save(root/"coordinator-review.json",journal)
+            barrier=threading.Barrier(2)
+            seen=[]
+            def repair(root,repo,row,number,sha,reason,allowance):
+                seen.append(row["issue"])
+                barrier.wait(3)
+                (root/"STOP").touch()
+                return "published"
+            args=SimpleNamespace(parallel=2,publish=True,remote=True,queue=q,daily_reservation=None,per_task=60000)
+            with patch.object(d.controller_remote,"refresh"),patch.object(d.controller_receipts,"flush"),patch.object(d.controller_progress,"flush"),patch.object(d.controller_coordinator,"run_developer_repair",side_effect=repair),patch.object(d.controller_coordinator,"run_once") as coordinator,patch.object(d,"write_status",wraps=d.write_status) as status:
+                d.run_queue(args,root,root/"pilot.py",root/"budget.json",root/"results.json",{},results)
+                coordinator.assert_not_called()
+                self.assertTrue(any(len(list(call.args[2]))==2 and not call.args[6] for call in status.call_args_list if len(call.args)>6))
+            self.assertEqual(set(seen),{14,67})
+            self.assertEqual(results,{"14:1":"draft_pr","67:1":"draft_pr"})
+
     def test_capacity_includes_coordinator_without_false_agent_activity(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
