@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-25T15:22:56.827Z",
+  "updated_at": "2026-11-25T15:32:05.700Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -17,7 +17,7 @@
       "title": "Fælles datamotor",
       "status": "in_progress",
       "issue": 14,
-      "evidence": "PR #285 og #287 integreret (default-off), CI bestået. Genbrug af fælles beregninger frigivet som #273:8; fuld scheduler og belastningstest udestår."
+      "evidence": "PR #285/#287 og v2 #289 integreret, testet fælles featureberegning. #273:9 frigivet; fuld scheduler og belastningstest udestår."
     },
     {
       "id": "candidate_rotation",
@@ -25,7 +25,7 @@
       "title": "Dynamisk HOT WATCH",
       "status": "in_progress",
       "issue": 268,
-      "evidence": "Gen1 procesfejl bevaret; ny afgrænset gen2 er frigivet til controller, endnu ikke bekræftet startet."
+      "evidence": "PR #290 integreret: test-only udløb af eksplicit vurderingsfrist. #268:3 frigivet til report-only og NO_DATA-lifecycle; ingen live aktivering."
     },
     {
       "id": "resources",
