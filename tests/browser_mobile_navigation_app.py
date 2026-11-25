@@ -6,6 +6,9 @@ sys.path[:0]=[str(Path(__file__).resolve().parents[1]),str(Path(__file__).resolv
 import app
 from test_portfolio_value_chart import PortfolioValueChart
 from playwright.sync_api import sync_playwright,expect
+from browser_mobile_account_isolation import run_account_isolation
+
+run_account_isolation()
 case=PortfolioValueChart();case.setUp()
 server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler)
 threading.Thread(target=server.serve_forever,daemon=True).start()

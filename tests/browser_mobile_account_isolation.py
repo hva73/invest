@@ -7,17 +7,26 @@ def browser_fixture():
     # Exercise the retained report-candidate form without adding a production entry point.
     source = source.replace("return {openHoldingStatus,", "return {legacyCreation,openHoldingStatus,", 1)
     return """<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">
-<div id="content"></div>
+<p id="notice"></p><div id="content"></div>
 <script>""" + source + """
 const content = document.getElementById('content');
 const pending = [];
 const userIds = {alpha: 11, beta: 22};
-let username,holdCurrentLoad=false;
+let username,holdCurrentLoad=false,poll;
+const realTimeout = window.setTimeout;
+window.setTimeout = (callback, delay) => {
+    if (delay === 15000) { poll = callback; return null; }
+    return realTimeout(callback, delay);
+};
+const session = (watch_id, status = 'ACTIVE') => ({
+    watch_id, status, signal: 'WAIT',
+    request: {ticker: watch_id, watch_mode: 'entry', portfolio_ids: []}
+});
 const assert = (condition, message) => { if (!condition) throw Error(message); };
 const byId = id => document.getElementById(id);
 const api = (path, args) => {
     const user = username;
-    if (path === 'market/quote' || path === 'state' || /manual-(search|start)/.test(path) || /sessions\/notification-/.test(path) || (holdCurrentLoad&&path.includes('view=current'))) {
+    if (path === 'market/quote' || path === 'state' || path.includes('&before=') || path.endsWith('/pause') || /manual-(search|start)/.test(path) || /sessions\/notification-/.test(path) || (holdCurrentLoad&&path.includes('view=current'))) {
         return new Promise((resolve, reject) => pending.push({path, args, user, resolve, reject}));
     }
     if (path.includes('/start-candidates')) return Promise.resolve({candidates: [0, 1].map(i => ({
@@ -28,6 +37,12 @@ const api = (path, args) => {
     if (/\\/sessions\\//.test(path)) return Promise.resolve({session: {
         status: 'ACTIVE', signal: 'WAIT', request: {ticker: user, watch_mode: 'entry', portfolio_ids: []}
     }});
+    if (path.includes('view=current')) return Promise.resolve({
+        sessions: [session(user + '-watch'), session(user + '-next')], kill_switch: {}
+    });
+    if (path.includes('view=history')) return Promise.resolve({
+        sessions: [session(user + '-closed', 'COMPLETED')], next_cursor: user + '-cursor'
+    });
     if (path.startsWith('reports/')) return Promise.resolve({candidates: []});
     return Promise.resolve({sessions: [], kill_switch: {}});
 };
@@ -146,10 +161,60 @@ const run = async () => {
     const loadRequest=take('view=current','beta');
     holdCurrentLoad=false;
     await EngineUI.click(newButton());
-    loadRequest.resolve({sessions:[],kill_switch:{}});
+    loadRequest.resolve({sessions: [session('beta-watch'), session('beta-next')], kill_switch: {}});
     await start;
     assert(byId('engine-manual-search'), 'Old manual start replaced a newer dialog');
 
+    // Poll the currently open dialog while a newer detail is waiting for account data.
+    const button = selector => content.querySelector(selector);
+    const open = wid => EngineUI.click(button('[data-engine-detail="' + wid + '"]'));
+    const previous = open('beta-watch');
+    take('state', 'beta').resolve(account('beta'));
+    await previous;
+    const next = open('beta-next');
+    const nextState = take('state', 'beta');
+    holdCurrentLoad = true;
+    const cycle = poll();
+    const pollLoad = take('view=current', 'beta');
+    holdCurrentLoad = false;
+    pollLoad.resolve({sessions: [session('beta-watch'), session('beta-next')], kill_switch: {}});
+    await new Promise(resolve => setTimeout(resolve, 0));
+    nextState.resolve(account('beta'));
+    await next;
+    assert(byId('engine-dialog').dataset.watchId === 'beta-next', 'Old poll invalidated newer detail');
+    await cycle;
+
+    // Mirror the global click error handler and keep ordinary current-account errors visible.
+    const click = async selector => {
+        try { await EngineUI.click(button(selector)); }
+        catch (error) { byId('notice').textContent = error.message; }
+    };
+    const control = '[data-engine-control="pause"]';
+    const history = '[data-engine-history-more]';
+    const currentError = click(control);
+    take('/pause', 'beta').reject(Error('current control error'));
+    await currentError;
+    assert(byId('notice').textContent === 'current control error', 'Current control error was hidden');
+    const currentHistoryError = click(history);
+    take('&before=', 'beta').reject(Error('current history error'));
+    await currentHistoryError;
+    assert(byId('notice').textContent === 'current history error', 'Current history error was hidden');
+
+    const staleHistory = click(history);
+    const staleHistoryRequest = take('&before=', 'beta');
+    const staleControl = click(control);
+    const staleControlRequest = take('/pause', 'beta');
+    switchAccount(null);
+    switchAccount('alpha');
+    byId('notice').textContent = 'alpha notice';
+    staleHistoryRequest.reject(Error('private beta history error'));
+    await staleHistory;
+    assert(byId('notice').textContent === 'alpha notice', 'Stale history error reached global notice');
+    staleControlRequest.reject(Error('private beta control error'));
+    await staleControl;
+    assert(byId('notice').textContent === 'alpha notice', 'Stale control error reached global notice');
+
+    switchAccount('beta');
     // Confirm the ordinary detail entry point still displays the current account's depot.
     const detail = EngineUI.openDetail('beta-watch');
     take('state', 'beta').resolve(account('beta'));
@@ -161,7 +226,7 @@ window.testResult = run().then(() => 'PASS', error => String(error) + '\\n' + (e
 """
 
 
-if __name__ == "__main__":
+def run_account_isolation():
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as playwright:
@@ -175,3 +240,7 @@ if __name__ == "__main__":
             print("PASS: 390px HOT WATCH account isolation")
         finally:
             browser.close()
+
+
+if __name__ == "__main__":
+    run_account_isolation()
