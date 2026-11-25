@@ -46,6 +46,11 @@ class AdminDiagnostics(unittest.TestCase):
   with app.connect() as c:before=c.total_changes
   result=hotwatch_service.admin_diagnostics(app.connect,1,self.now)
   self.assertEqual(result['log_files_read'],0);self.assertEqual(result['recent'],[]);self.assertIsNone(result['windows']['5m']['queue'])
+  resources=result['resources']
+  self.assertEqual(resources['status'],'unavailable')
+  self.assertIsNone(resources['sample'])
+  self.assertEqual(resources['windows']['24h']['worker']['covered_s'],0)
+  self.assertIsNone(resources['windows']['24h']['worker']['cpu_s'])
   with app.connect() as c:self.assertEqual(c.total_changes,before)
  def test_missing_websocket_observations_are_not_counted_as_zero_wait(self):
   ref=hashlib.sha256(self.f.req['watch_id'].encode()).hexdigest()[:16]
@@ -78,3 +83,41 @@ class AdminDiagnostics(unittest.TestCase):
   result=hotwatch_service.admin_diagnostics(app.connect,1,self.now)
   self.assertEqual(result['push']['last_24h']['pending'],1);self.assertEqual(result['push']['oldest_pending_age_s'],10)
   self.assertIsNotNone(result['scheduled_jobs']['worker_last_seen']);self.assertNotIn('private-device',json.dumps(result));self.assertNotIn('synthetic-private-endpoint',json.dumps(result))
+ def test_resource_snapshot_is_admin_only_read_only_and_sanitized(self):
+  from unittest.mock import patch
+  import hotwatch_supervisor
+
+  epoch=self.now.timestamp()
+  path=Path(app.DB).with_name('hotwatch-resources.json')
+  payload=json.dumps([{'epoch':epoch,'elapsed_s':60,'worker_cpu_s':15,'worker_rss_bytes':4096,
+                       'host_logical_cpus':32,'cgroup_cpu_ceiling_cores':.5,
+                       'pid':98765,'raw_path':'DO_NOT_EXPOSE'}])
+  path.write_text(payload)
+  handler=object.__new__(app.Handler)
+  handler.path='/api/admin/diagnostics'
+  connect=app.connect
+  def read_only_connect():
+   connection=connect()
+   connection.execute('PRAGMA query_only=ON')
+   return connection
+
+  with patch.object(handler,'session',return_value={'user_id':1,'role':'user'}) as session, \
+       patch.object(handler,'send') as send, patch.object(app,'connect',read_only_connect), \
+       patch.object(hotwatch_supervisor.ResourceSampler,'tick',side_effect=AssertionError('sampled from request')), \
+       patch.object(hotwatch_service.engine,'utc',return_value=self.now):
+   with patch.object(hotwatch_supervisor,'resource_snapshot',wraps=hotwatch_supervisor.resource_snapshot) as read:
+    handler.do_GET()
+    self.assertEqual(send.call_args.args[0],403)
+    read.assert_not_called()
+    session.return_value={'user_id':1,'role':'admin'}
+    handler.do_GET()
+    self.assertEqual(send.call_args.args[0],200)
+    read.assert_called_once_with(path.resolve(),epoch)
+   resources=send.call_args.args[1]['resources']
+  self.assertEqual(resources['status'],'fresh')
+  self.assertEqual(resources['sample']['worker_average_cores'],.25)
+  self.assertEqual(resources['sample']['cgroup_cpu_ceiling_cores'],.5)
+  self.assertEqual(resources['windows']['5m']['worker']['covered_s'],60)
+  self.assertNotIn('DO_NOT_EXPOSE',json.dumps(resources))
+  self.assertNotIn('98765',json.dumps(resources))
+  self.assertEqual(path.read_text(),payload)

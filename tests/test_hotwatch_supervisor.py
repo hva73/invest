@@ -1,8 +1,10 @@
 import os
 import tempfile
+import time
 import unittest
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import app
@@ -10,6 +12,11 @@ import hotwatch_supervisor as supervisor
 
 
 class WatchdogTests(unittest.TestCase):
+    def setUp(self):
+        sampler = patch.object(supervisor.ResourceSampler, 'tick')
+        self.sample = sampler.start()
+        self.addCleanup(sampler.stop)
+
     def test_long_lived_worker_failure_gets_new_bounded_restart_window(self):
         from unittest.mock import Mock
         first=Mock();first.poll.side_effect=[None,1];first.returncode=1
@@ -37,6 +44,7 @@ class WatchdogTests(unittest.TestCase):
             supervisor.run()
         running=[call for call in report.call_args_list if call.args[0]=='running']
         self.assertEqual(len(running),2)
+        self.assertEqual(self.sample.call_count, 8)
         self.assertEqual(report.call_args.args[:2],('stopped','disabled'))
 
     def test_late_transient_heartbeat_loss_does_not_kill_healthy_worker(self):
@@ -272,3 +280,105 @@ class WatchdogTests(unittest.TestCase):
         with patch.object(supervisor, 'lock', return_value=os.open(os.devnull, os.O_RDONLY)), patch.object(supervisor, 'enabled', return_value=True), patch.object(supervisor, 'heartbeat', return_value=False), patch.object(supervisor, 'report') as report, patch.object(supervisor.time, 'monotonic', side_effect=lambda: next(clock)), patch.object(supervisor.time, 'sleep'), patch.object(supervisor.subprocess, 'Popen', side_effect=OSError), patch.object(supervisor.signal, 'signal'):
             supervisor.run(timeout=5)
         self.assertEqual(report.call_args.args[:2], ('timeout', 'restart_timeout'))
+
+class ResourceSamplingTests(unittest.TestCase):
+    def test_samples_use_cpu_deltas_and_invalidate_worker_reuse_counter_reset_and_restart(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(app, 'DB', Path(tmp) / 'db'):
+            path = Path(tmp) / 'hotwatch-resources.json'
+            sampler = supervisor.ResourceSampler()
+            child = SimpleNamespace(pid=432)
+            capture = 0
+            def process(pid, parent=None):
+                if parent is None:
+                    return 1, 0, 8192
+                return (1 if capture < 2 else 2), [10, 22, 35, 4, 12][capture], 4096
+
+            with patch.object(supervisor, 'process_resources', side_effect=process) as reads, \
+                 patch.object(supervisor, 'cgroup_resources', return_value={}), \
+                 patch.object(supervisor.os, 'cpu_count', return_value=32), \
+                 patch.object(supervisor.time, 'monotonic', side_effect=lambda: 100 + 60 * capture), \
+                 patch.object(supervisor.time, 'time', side_effect=lambda: 1000 + 60 * capture), \
+                 patch.object(supervisor.time, 'process_time', side_effect=lambda: 1 + capture * .25):
+                for capture in range(2):
+                    sampler.tick(100 + 60 * capture, child)
+                    for seconds in range(2, 60, 2):
+                        sampler.tick(100 + 60 * capture + seconds, child)
+                self.assertEqual(reads.call_count, 4)
+                result = supervisor.resource_snapshot(path, 1060)
+                self.assertEqual(result['sample']['worker_average_cores'], .2)
+                self.assertEqual(result['sample']['worker_rss_bytes'], 4096)
+                self.assertEqual(result['sample']['host_logical_cpus'], 32)
+                self.assertIsNone(result['sample']['cgroup_cpu_ceiling_cores'])
+                self.assertIsNone(result['scope']['account_entitlement'])
+                self.assertEqual(result['windows']['5m']['worker']['covered_s'], 60)
+                self.assertEqual(result['windows']['1h']['worker']['cpu_s'], 12)
+                self.assertEqual(result['sample']['supervisor_cpu_s'], .25)
+                for capture in (2, 3):
+                    sampler.tick(100 + 60 * capture, child)
+                    self.assertIsNone(supervisor.resource_snapshot(path, 1000 + 60 * capture)['sample']['worker_cpu_s'])
+                capture = 4
+                supervisor.ResourceSampler().tick(340, child)
+                restarted = supervisor.resource_snapshot(path, 1240)
+                self.assertIsNone(restarted['sample']['supervisor_cpu_s'])
+                self.assertEqual(restarted['windows']['24h']['worker']['cpu_s'], 12)
+            stale = supervisor.resource_snapshot(path, 1361)
+            self.assertEqual(stale['status'], 'stale')
+            self.assertIsNone(stale['sample'])
+            self.assertIsNotNone(stale['sampled_at'])
+
+    def test_proc_fields_and_visible_hierarchical_cgroup_limits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            proc = Path(tmp) / 'proc'
+            root = Path(tmp) / 'cgroup'
+            parent = root / 'parent'
+            group = parent / 'job'
+            group.mkdir(parents=True)
+            (proc / 'self').mkdir(parents=True)
+            (proc / 'self/cgroup').write_text('0::/parent/job\n')
+            (proc / 'self/mountinfo').write_text(f'1 2 0:1 / {root} rw - cgroup2 cgroup rw\n')
+            for folder, cpu, memory in ((parent, '150000 100000', '2048'), (group, 'max 100000', '4096')):
+                (folder / 'cpu.max').write_text(cpu)
+                (folder / 'memory.max').write_text(memory)
+            (group / 'cpuset.cpus.effective').write_text('2,4-6')
+            limits = supervisor.cgroup_resources(proc, root)
+            self.assertEqual(limits, {'cgroup_cpu_quota_cores': 1.5, 'cgroup_cpuset_cpus': 4,
+                                     'cgroup_cpu_ceiling_cores': 1.5, 'cgroup_memory_limit_bytes': 2048})
+            (group / 'cpuset.cpus.effective').write_text('2')
+            self.assertEqual(supervisor.cgroup_resources(proc, root)['cgroup_cpu_ceiling_cores'], 1)
+            (parent / 'cpu.max').unlink()
+            self.assertIsNone(supervisor.cgroup_resources(proc, root)['cgroup_cpu_ceiling_cores'])
+            (proc / 'self/cgroup').write_text('7:cpu:/parent/job')
+            self.assertEqual(supervisor.cgroup_resources(proc, root), {})
+
+            fields = ['0'] * 22
+            fields[0], fields[1], fields[11], fields[12], fields[19], fields[21] = 'S', '52', '40', '10', '80', '3'
+            (proc / '123').mkdir()
+            (proc / '123/stat').write_text('123 (worker ) name) ' + ' '.join(fields))
+            with patch.object(supervisor.os, 'sysconf', side_effect=[100, 4096]):
+                self.assertEqual(supervisor.process_resources(123, 52, proc), (80, .5, 12288))
+            self.assertEqual(supervisor.process_resources(123, 53, proc), (None, None, None))
+            self.assertEqual(supervisor.process_resources(777, 52, proc), (None, None, None))
+
+    def test_bounded_atomic_history_and_measured_sampling_cost(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp, patch.object(app, 'DB', Path(tmp) / 'db'):
+            path = Path(tmp) / 'hotwatch-resources.json'
+            epoch = 100000
+            path.write_text(json.dumps([{'epoch': epoch - i * 60} for i in range(1450, 0, -1)]))
+            sampler = supervisor.ResourceSampler()
+            with patch.object(supervisor.time, 'time', return_value=epoch):
+                start = time.perf_counter()
+                sampler.tick(time.monotonic(), None)
+                sampled = time.perf_counter() - start
+            start = time.perf_counter()
+            for _ in range(10000):
+                sampler.tick(sampler.next_sample - 1, None)
+            skipped_average = (time.perf_counter() - start) / 10000
+            history = supervisor.read_resource_history(path)
+            self.assertEqual(len(history), 1440)
+            self.assertEqual(history[0]['epoch'], epoch - 1439 * 60)
+            self.assertLessEqual(path.stat().st_size, 1024 * 1024)
+            self.assertEqual(list(Path(tmp).iterdir()), [path])
+            self.assertGreater(sampled, skipped_average)
+            self.assertLess(sampled, .5, f'full sample took {sampled:.4f}s')
+            self.assertLess(skipped_average, .001)
