@@ -9,7 +9,7 @@ import app,market_data,report_ingest,trade_service
 SAMPLE=Path(__file__).parent/'fixtures/pluto-series-synthetic.json'
 class Quotes(unittest.TestCase):
  def setUp(self):
-  self.case=fixtures.Trading();self.case.setUp();self.raw=json.loads(SAMPLE.read_text());self.fixed=datetime(2026,11,2,12,tzinfo=timezone.utc);self.calls=[];self.fail=False;self.multiple=False
+  self.case=fixtures.Trading();self.case.setUp();self.raw=json.loads(SAMPLE.read_text());self.fixed=datetime(2026,11,2,12,tzinfo=timezone.utc);self.calls=[];self.fail_read=False;self.multiple=False
   report=copy.deepcopy(self.case.report);report.update(report_id='market-report',generated_at='2027-01-01T00:00:00Z');report['candidates'][0].update(ticker='CHART',signal='AFVENT');report_ingest.save(app.connect,1,report);self.cid=report['candidates'][0]['candidate_id'];self.request={'report_id':'market-report','candidate_id':self.cid,'is_test':False}
   case=self
   class Client:
@@ -23,7 +23,7 @@ class Quotes(unittest.TestCase):
      return {'structuredContent':{'assets':rows}}
     if name=='get_asset':
      assert params['arguments']=={'assetId':'synthetic-chart-asset','period':'ONE_WEEK'}
-     if case.fail:raise TimeoutError('Synthetic read outage')
+     if case.fail_read:raise TimeoutError('Synthetic read outage')
      return {'structuredContent':case.raw}
     raise AssertionError('Only market reads are permitted')
   self.factory=Client
@@ -80,14 +80,98 @@ class Quotes(unittest.TestCase):
  def test_cache_preserves_fetch_time_and_reads_only_once(self):
   one=market_data.quote(app.connect,1,self.request,self.factory);two=market_data.quote(app.connect,1,self.request,self.factory)
   self.assertEqual(one['fetched_at'],two['fetched_at']);self.assertTrue(two['cached']);self.assertEqual([c['name'] for c in self.calls],['search_assets','get_asset'])
-  with app.connect() as c:self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
+  self.assertEqual(two['series'],one['series'])
+  self.assertEqual(two['chart_domain']['history_latest_at'],one['series'][-1]['timestamp'])
+  self.assertEqual(two['chart_domain']['quote_freshness']['state'],'unknown')
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM broker_proposals').fetchone()[0],0)
+   cached=c.execute('SELECT payload FROM market_asset_cache').fetchall()
+   self.assertEqual(len(cached),1)
+   self.assertNotIn('chart_domain',json.loads(cached[0]['payload']))
+ def domain(self,now,ticker,venue,kind,calendar=None):
+  raw=copy.deepcopy(self.raw)
+  raw['asset'].update(ticker=ticker,exchange=venue,type=kind)
+  result=market_data.normalized(raw,'synthetic-chart-asset',now)
+  with app.connect() as c:
+   if calendar:
+    exchange,zone,received,schedule=calendar
+    c.execute('INSERT OR REPLACE INTO hw_exchange_calendar VALUES(?,?,?,?)',
+              (exchange,received.isoformat(),zone,json.dumps(schedule)))
+   return market_data.chart_response(result,now,c)['chart_domain']
+ def test_market_domains_at_1140_use_verified_venue_and_full_us_window(self):
+  now=datetime(2026,11,10,10,40,tzinfo=timezone.utc)
+  for ticker,venue,exchange,zone,opening,closing,start,end,phase in [
+   ('NOVOB','XCSE','CO','Europe/Copenhagen','09:00','17:00',8,16,'regular'),
+   ('ASMDEE','XAMS','AS','Europe/Amsterdam','09:00','17:30',8,16.5,'regular'),
+   ('ORCL','NYSE','US','America/New_York','09:30','16:00',9,25,'pre'),
+   ('JDZG','NASDAQ','US','America/New_York','09:30','16:00',9,25,'pre'),
+  ]:
+   with self.subTest(ticker=ticker):
+    schedule={'working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[],
+              'open':opening,'close':closing}
+    domain=self.domain(now,ticker,venue,'CS',(exchange,zone,now,schedule))
+    midnight=now.replace(hour=0,minute=0)
+    self.assertEqual(domain['start'],(midnight+timedelta(hours=start)).isoformat())
+    self.assertEqual(domain['end'],(midnight+timedelta(hours=end)).isoformat())
+    self.assertEqual(domain['phase'],phase)
+    self.assertEqual(domain['session_source_time'],now.isoformat())
+  self.assertEqual(self.domain(now,'ASMDEE','CHIX','CS')['phase'],'unknown')
+ def test_hype_uses_copenhagen_calendar_on_weekend_and_both_dst_transitions(self):
+  for month,day,hours in [(3,29,23),(10,25,25),(11,14,24)]:
+   now=datetime(2026,month,day,10,40,tzinfo=timezone.utc)
+   domain=self.domain(now,'HYPE','CRYPTO','CRYPTO')
+   start,end=(datetime.fromisoformat(domain[key]) for key in ('start','end'))
+   self.assertEqual(end-start,timedelta(hours=hours))
+   self.assertEqual(domain['phase'],'continuous')
+ def test_calendar_does_not_guess_holiday_early_close_or_stale_schedule(self):
+  holiday=datetime(2026,11,26,10,40,tzinfo=timezone.utc)
+  days=['Mon','Tue','Wed','Thu','Fri']
+  for date,received,excluded,expected in [
+   (26,26,['2026-11-26'],'unknown'),(27,27,['2026-11-27'],'unknown'),
+   (28,28,[],'closed'),(30,27,[],'unknown'),(26,27,[],'unknown'),
+  ]:
+   with self.subTest(date=date,received=received):
+    now=holiday.replace(day=date)
+    schedule={'working_days':days,'excluded_dates':excluded,'open':'09:30','close':'16:00'}
+    domain=self.domain(now,'ORCL','NYSE','CS',('US','America/New_York',holiday.replace(day=received),schedule))
+    self.assertEqual(domain['phase'],expected)
+    self.assertIsNone(domain['start']);self.assertIsNone(domain['end'])
+ def test_future_history_point_inside_clock_skew_window_is_rejected(self):
+  raw=copy.deepcopy(self.raw)
+  future=(self.fixed+timedelta(seconds=1)).isoformat()
+  raw['performance']['to']=future
+  raw['performance']['series'].append({'timestamp':future,'close':'100'})
+  result=market_data.normalized(raw,'synthetic-chart-asset',self.fixed)
+  self.assertEqual(result['series'],[])
+  self.assertIn('fremtidige',result['series_error'])
+ def test_cached_response_recomputes_phase_and_filters_legacy_future_point(self):
+  now=datetime(2026,11,10,14,30,tzinfo=timezone.utc)
+  self.raw['price']['timestamp']=(now-timedelta(seconds=35)).isoformat()
+  schedule={'working_days':['Mon','Tue','Wed','Thu','Fri'],'excluded_dates':[],
+            'open':'09:30','close':'16:00'}
+  with app.connect() as c:
+   c.execute('INSERT INTO hw_exchange_calendar VALUES(?,?,?,?)',
+             ('US',(now-timedelta(seconds=25)).isoformat(),'America/New_York',json.dumps(schedule)))
+  with patch('market_data.datetime',wraps=datetime) as clock:
+   clock.now.return_value=now-timedelta(seconds=20)
+   first=market_data.quote(app.connect,1,self.request,self.factory)
+   with app.connect() as c:
+    old=json.loads(c.execute('SELECT payload FROM market_asset_cache').fetchone()['payload'])
+    old['series'].append(dict(old['series'][-1],epoch=(now+timedelta(seconds=1)).timestamp()))
+    c.execute('UPDATE market_asset_cache SET payload=?',(json.dumps(old),))
+   clock.now.return_value=now
+   second=market_data.quote(app.connect,1,self.request,self.factory)
+  self.assertEqual((first['chart_domain']['phase'],second['chart_domain']['phase']),('pre','regular'))
+  self.assertEqual(second['chart_domain']['quote_freshness']['age_s'],35)
+  self.assertEqual(second['series'],first['series'])
+  self.assertEqual([call['name'] for call in self.calls],['search_assets','get_asset'])
  def test_ambiguous_asset_requires_explicit_selection(self):
   self.multiple=True;result=market_data.quote(app.connect,1,self.request,self.factory)
   self.assertTrue(result['selection_required']);self.assertEqual(len(result['choices']),2);self.assertNotIn('get_asset',[c['name'] for c in self.calls])
   result=market_data.quote(app.connect,1,dict(self.request,asset_id='synthetic-chart-asset'),self.factory);self.assertEqual(result['ticker'],'CHART')
   with self.assertRaises(market_data.MarketError):market_data.quote(app.connect,1,dict(self.request,asset_id='not-in-search'),self.factory)
  def test_error_preserves_old_data_and_old_fetch_time(self):
-  one=market_data.quote(app.connect,1,self.request,self.factory);self.fail=True
+  one=market_data.quote(app.connect,1,self.request,self.factory);self.fail_read=True
   with app.connect() as c:c.execute('UPDATE market_asset_cache SET attempted=0')
   old=market_data.quote(app.connect,1,self.request,self.factory);self.assertEqual(old['fetched_at'],one['fetched_at']);self.assertIn('fejlede',old['last_error'])
  def test_future_quote_does_not_overwrite_last_known_cache(self):
