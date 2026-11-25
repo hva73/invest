@@ -19,7 +19,12 @@ def verified_bar_samples(sample,request,now):
   if received.astimezone(zone).date()!=date:return None
   if opening.tzinfo or closing.tzinfo or opening>=closing or e['session_date']!=date.isoformat() or date.isoformat() in e['excluded_dates'] or ('Mon','Tue','Wed','Thu','Fri','Sat','Sun')[date.weekday()] not in e['working_days']:return None
   in_phase=lambda t:(opening<=t<closing) if phase=='REGULAR' else (t<opening if phase=='PRE' else t>=closing)
-  if not in_phase(local.time()):return None
+  # Existing regular trades use UTC dates when no calendar was attached.
+  # Bars use the verified exchange date and must still identify this phase.
+  session_key=date.isoformat()+':'+phase
+  accepted_keys={session_key}
+  if phase=='REGULAR':accepted_keys.add(trade_at.date().isoformat()+':REGULAR')
+  if sample['session_key'] not in accepted_keys or not in_phase(local.time()):return None
   output=[];previous=None
   for bar in bars:
    at=stamp(bar['bar_open_at']);end=at+timedelta(seconds=60);start_local=at.astimezone(zone);end_local=end.astimezone(zone)
@@ -27,7 +32,7 @@ def verified_bar_samples(sample,request,now):
    if start_local.date()!=date or end_local.date()!=date or not in_phase(start_local.time()) or not in_phase((end-timedelta(microseconds=1)).astimezone(zone).time()) or end>trade_at:return None
    values=[number(bar[k]) for k in ('open','high','low','close')]
    if any(v is None or v<=0 for v in values) or values[1]<max(values[0],values[3]) or values[2]>min(values[0],values[3]) or values[2]>values[1] or (bar['volume'] is not None and number(bar['volume'])<0):return None
-   output.append({**sample,'bar_history':None,'bar_evidence':None,'event_time':bar['bar_open_at'],'interval_s':60,'feed_type':'EODHD verified real-time closed 1m bars','price_time_kind':'bar_open','price':bar['close'],'open':bar['open'],'high':bar['high'],'low':bar['low'],'close':bar['close'],'volume':bar['volume'],'volume_type':'interval','bid':None,'ask':None})
+   output.append({**sample,'bar_history':None,'bar_evidence':None,'event_time':bar['bar_open_at'],'session_key':session_key,'interval_s':60,'feed_type':'EODHD verified real-time closed 1m bars','price_time_kind':'bar_open','price':bar['close'],'open':bar['open'],'high':bar['high'],'low':bar['low'],'close':bar['close'],'volume':bar['volume'],'volume_type':'interval','bid':None,'ask':None})
    previous=at
   if not output:return None
   bar_end=stamp(output[-1]['event_time'])+timedelta(seconds=60)

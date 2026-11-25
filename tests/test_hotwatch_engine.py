@@ -1433,6 +1433,7 @@ class HotWatch(unittest.TestCase):
   with patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()),patch.object(adapter,'feeds',return_value=Feeds()),patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'TEST-ONLY','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1'}):
    self.assertTrue(runner.once(at+timedelta(milliseconds=1),watch_id=r['watch_id']))
   view=engine.item(app.connect,1,r['watch_id'],True)['session'];self.assertEqual(view['data_status']['price'],'12.34');self.assertEqual(view['last_data_at'],at.isoformat());self.assertEqual(view['display_status'],'AFVENTER SIGNALDATA')
+  self.assertIn('MARKET_STATUS_UNKNOWN',view['display_reason_codes'])
   with app.connect() as c:health=json.loads(c.execute("SELECT payload FROM hw_provider_health WHERE user_id=1 AND is_test=1 AND source='eodhd'").fetchone()['payload'])
   self.assertEqual(health['websocket_trade_status'],'ENTITLEMENT_UNVERIFIED')
  def test_runner_ingests_real_source_time_from_mocked_ws_without_changing_risk(self):
