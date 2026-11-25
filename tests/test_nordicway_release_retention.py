@@ -1,9 +1,12 @@
+import gzip
 import hashlib
 import io
 import json
+import random
 from pathlib import Path
 import sys
 import tarfile
+import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
@@ -114,5 +117,120 @@ class Retention(unittest.TestCase):
         self.assertIn("if: success() && (steps.release_request.outputs.operation == 'deploy'", workflow)
         self.assertIn('group: escape-production-deployment', workflow)
         self.assertLess(workflow.index('python tools/nordicway_deploy_client.py'), workflow.index('python tools/nordicway_release_retention.py'))
+
+class LocalCompression(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.raw = self.root / NAME
+        (self.raw / 'code').mkdir(parents=True)
+        self.destination = self.root / ('retained-' + NAME + '.tar.gz')
+        self.previous = self.root / 'previous.tar.gz'
+        self.previous.write_bytes(b'previous')
+        self.make_raw(b'SQLite format 3\0' + b'x' * 16384)
+
+    def make_raw(self, database):
+        self.files = {'escape.db': database, 'code/BUILD_COMMIT': SHA.encode(),
+                      'token.key': b'synthetic'}
+        hashes = {name: hashlib.sha256(data).hexdigest() for name, data in self.files.items()}
+        self.manifest = json.dumps({'format': 1, 'database_sha256': hashes['escape.db'],
+                                    'files': {'BUILD_COMMIT': hashes['code/BUILD_COMMIT']},
+                                    'keys': {'token.key': hashes['token.key'], 'push_vapid.pem': None}})
+        self.files['manifest.json'] = self.manifest.encode()
+        for name, data in self.files.items():
+            (self.raw / name).write_bytes(data)
+
+    def compress(self, limit=100000):
+        return r.compress_verified_raw_backup(
+            self.raw, self.destination, manifest_content=self.manifest,
+            expected_size=len(self.files['escape.db']), available_bytes=limit)
+
+    def assert_preserved(self):
+        self.assertEqual(self.previous.read_bytes(), b'previous')
+        self.assertEqual(list(self.root.glob('.backup-*')), [])
+        for name, data in self.files.items():
+            self.assertEqual((self.raw / name).read_bytes(), data)
+
+    def test_recovery_hashes_and_exact_cap(self):
+        result = self.compress()
+        size = result['archive_bytes']
+        self.assertEqual(size, self.destination.stat().st_size)
+        self.destination.unlink()
+        with self.assertRaisesRegex(ValueError, 'backup_output_cap_exceeded'):
+            self.compress(size - 1)
+        self.assertFalse(self.destination.exists())
+        self.assertEqual(self.compress(size), result)
+        with tarfile.open(self.destination, 'r:gz') as archive:
+            actual = {member.name: hashlib.sha256(archive.extractfile(member).read()).hexdigest()
+                      for member in archive}
+        self.assertEqual(actual, {NAME + '/' + name: hashlib.sha256(data).hexdigest()
+                                  for name, data in self.files.items()})
+        archive_bytes = self.destination.read_bytes()
+        with self.assertRaises(FileExistsError):
+            self.compress(size)
+        self.assertEqual(self.destination.read_bytes(), archive_bytes)
+        self.assert_preserved()
+
+    def test_incompressible_input_aborts_at_cap(self):
+        self.make_raw(random.Random(57).randbytes(256 * 1024))
+        with self.assertRaisesRegex(ValueError, 'backup_output_cap_exceeded'):
+            self.compress(1024)
+        self.assertFalse(self.destination.exists())
+        self.assert_preserved()
+
+    def test_corrupt_gzip_trailer_prevents_publication(self):
+        verify = r.verify_local_backup_archive
+
+        def corrupt(path, *args):
+            with open(path, 'r+b') as stream:
+                stream.seek(-8, io.SEEK_END)
+                byte = stream.read(1)
+                stream.seek(-1, io.SEEK_CUR)
+                stream.write(bytes([byte[0] ^ 1]))
+            return verify(path, *args)
+
+        with patch.object(r, 'verify_local_backup_archive', side_effect=corrupt):
+            with self.assertRaises(gzip.BadGzipFile):
+                self.compress()
+        self.assertFalse(self.destination.exists())
+        self.assert_preserved()
+
+    def test_unexpected_member_prevents_publication(self):
+        addfile = tarfile.TarFile.addfile
+
+        def add_extra(archive, info, stream=None):
+            addfile(archive, info, stream)
+            if info.name.endswith('/token.key'):
+                addfile(archive, tarfile.TarInfo(NAME + '/extra'))
+
+        with patch.object(tarfile.TarFile, 'addfile', add_extra):
+            with self.assertRaisesRegex(ValueError, 'unexpected_archive_member'):
+                self.compress()
+        self.assertFalse(self.destination.exists())
+        self.assert_preserved()
+
+    def test_changed_source_hash_prevents_publication(self):
+        self.files['escape.db'] = b'z' * len(self.files['escape.db'])
+        (self.raw / 'escape.db').write_bytes(self.files['escape.db'])
+        with self.assertRaisesRegex(ValueError, 'backup_hash_mismatch'):
+            self.compress()
+        self.assertFalse(self.destination.exists())
+        self.assert_preserved()
+
+    def test_source_change_after_compression_prevents_publication(self):
+        verify = r.verify_local_backup_archive
+
+        def change_source(*args):
+            self.files['escape.db'] += b'changed'
+            (self.raw / 'escape.db').write_bytes(self.files['escape.db'])
+            return verify(*args)
+
+        with patch.object(r, 'verify_local_backup_archive', side_effect=change_source):
+            with self.assertRaisesRegex(ValueError, 'original_backup_changed'):
+                self.compress()
+        self.assertFalse(self.destination.exists())
+        self.assert_preserved()
+
 
 if __name__ == '__main__': unittest.main()
