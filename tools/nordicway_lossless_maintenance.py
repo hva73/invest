@@ -124,11 +124,33 @@ def verify_compact(source, candidate):
     if logical_digest(source) != logical_digest(candidate):
         raise ValueError("logical_content_changed")
 
-def compact(source, candidate):
+def compact(source, candidate, workspace_cap=None):
     no_sidecars(source)
     before = identity(source)
-    with closing(ro(source)) as db:
-        db.execute("VACUUM INTO ?", (str(candidate),))
+    if workspace_cap is None:
+        workspace_cap = before[2] + MARGIN
+    if type(workspace_cap) is not int or workspace_cap <= 0:
+        raise ValueError("invalid_compaction_cap")
+    # A separate child bounds output and memory. MEMORY temp store avoids
+    # an unbounded on-disk temp sort during VACUUM INTO.
+    script = """import resource,signal,sqlite3,sys
+signal.signal(signal.SIGXFSZ,signal.SIG_IGN)
+cap=int(sys.argv[3])
+resource.setrlimit(resource.RLIMIT_FSIZE,(cap,cap))
+mem=768*1024*1024
+resource.setrlimit(resource.RLIMIT_AS,(mem,mem))
+with sqlite3.connect(sys.argv[1],uri=True,timeout=2) as c:
+ c.execute('PRAGMA temp_store=MEMORY')
+ c.execute('PRAGMA cache_size=-32768')
+ c.execute('VACUUM INTO ?',(sys.argv[2],))
+"""
+    result = subprocess.run([sys.executable,"-I","-S","-c",script,
+                             source.resolve().as_uri()+"?mode=ro",str(candidate),str(workspace_cap)],
+                            capture_output=True,timeout=1800,check=False)
+    if result.returncode:
+        raise ValueError("bounded_compaction_failed")
+    if candidate.stat().st_size > workspace_cap:
+        raise ValueError("compaction_cap_exceeded")
     no_sidecars(source)
     if identity(source) != before:
         raise ValueError("source_changed")
@@ -275,7 +297,7 @@ def main():
                     work = pathlib.Path(td)
                     candidate = work / "candidate.sqlite"
                     emit(status="compacting", old_bytes=old_size)
-                    before = compact(source,candidate)
+                    before = compact(source,candidate,min(old_size+MARGIN,quota()-2*MARGIN))
                     new_size = candidate.stat().st_size
                     required = release_required(new_size) + MARGIN
                     reclaim = min(source.stat().st_blocks*512, old_size)
@@ -310,9 +332,20 @@ def main():
                     os.chmod(candidate,stat.S_IMODE(source.stat().st_mode))
                     if identity(source)!=before:
                         raise ValueError("source_changed")
-                    os.replace(candidate,source)
-                    swapped=True
-                    sync_dir(source.parent)
+                    # Re-acquire an exclusive SQLite lock and recheck the
+                    # exact source while all known writers remain drained.
+                    # Any external writer/sidecar causes a fail-closed stop.
+                    with closing(sqlite3.connect(str(source),timeout=2,isolation_level=None)) as locked:
+                        locked.execute("BEGIN EXCLUSIVE")
+                        try:
+                            no_sidecars(source)
+                            if identity(source)!=before:
+                                raise ValueError("source_changed")
+                            os.replace(candidate,source)
+                            swapped=True
+                            sync_dir(source.parent)
+                        finally:
+                            locked.rollback()
                     emit(status="compacted", old_bytes=old_size, compact_bytes=new_size,
                          recovery_archive=dest.name)
             adapter.start_service()
@@ -375,6 +408,11 @@ if __name__=="__main__":
     mode.add_argument("--apply-maintenance",action="store_true")
     args=p.parse_args()
     try:
+        if args.apply_maintenance:
+            import signal
+            def interrupt(signum, frame):
+                raise KeyboardInterrupt()
+            signal.signal(signal.SIGTERM, interrupt)
         self_test() if args.self_test else main()
     except Exception as exc:
         reason=str(exc)
