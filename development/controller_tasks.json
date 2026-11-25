@@ -92,7 +92,7 @@
     "issue": 57,
     "role": "release",
     "priority": 1,
-    "status": "ready",
+    "status": "blocked",
     "generation": 6,
     "base_branch": "codex/issue57-combined-release-20261124",
     "base_sha": "3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65",
