@@ -13,7 +13,7 @@ const content = document.getElementById('content');
 const pending = [];
 const userIds = {alpha: 11, beta: 22};
 let username,epoch=0,failLogout;
-let holdCurrentLoad=false,omitHistory=false,poll,pollSchedules=0;
+let holdCurrentLoad=false,omitHistory=false,poll,pollSchedules=0,archiveFixture;
 const logout = document.getElementById('logout');
 // app.js advances the epoch synchronously and leaves the view mounted on failure.
 logout.onclick = async () => {
@@ -49,6 +49,10 @@ const api = (path, args) => {
         watch_id: path.slice(path.lastIndexOf('/') + 1).split('?')[0],
         status: 'ACTIVE', signal: 'WAIT', request: {ticker: user, watch_mode: 'entry', portfolio_ids: []}
     }});
+    if (archiveFixture && path.includes('view=current')) return Promise.resolve({
+        sessions: archiveFixture.current, kill_switch: {}
+    });
+    if (archiveFixture && path.includes('view=history')) return Promise.resolve(archiveFixture.page());
     if (path.includes('view=current')) return Promise.resolve({
         sessions: [session(user + '-watch'), session(user + '-next')], kill_switch: {}
     });
@@ -90,7 +94,9 @@ const select = index => {
 const run = async () => {
     assert(innerWidth === 390, 'Expected 390px viewport');
     EngineUI.setup({api, owner: () => username, session: () => epoch, isAdmin: () => false, editing: () => false,
-        escape: value => String(value ?? ''), formatTime: String});
+        escape: value => String(value ?? '').replace(/[&<>"']/g, ch => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[ch]), formatTime: String});
     switchAccount('alpha');
     const alpha = await create('alpha');
     const staleDetail = EngineUI.openDetail('alpha-watch');
@@ -366,6 +372,54 @@ const run = async () => {
         assert(!modal.open, 'The browser did not dismiss the dialog');
     };
 
+    const signal = (event = 'event', is_test = false) => ({...session('alpha-watch'), is_test,
+        last_action_signal: {event_id: event, event_type: 'BUY_SIGNAL', state: 'ACTIVE'}});
+    const showSignals = (...sessions) => {
+        content.innerHTML = sessions.map(EngineUI.actionNotice).join('');
+        return [...content.querySelectorAll('[data-engine-notice]')];
+    };
+    const startAcknowledgement = async () => {
+        const engine = byId('engine-root');
+        const event = document.createElement('div');
+        event.innerHTML = EngineUI.actionNotice(signal());
+        engine.append(event);
+        await EngineUI.click(event.firstElementChild);
+        const confirmation = click('[data-engine-ack]');
+        const request = take('/ack-signal', 'alpha');
+        dismiss(byId('engine-dialog'));
+        return {confirmation, request};
+    };
+    const unread = icon => icon.classList.contains('signal-alert--unread');
+    switchAccount('alpha');
+    await flush();
+    const obsoleteAcknowledgement = await startAcknowledgement();
+    switchAccount(null);
+    switchAccount('alpha');
+    const [newSessionIcon] = showSignals(signal());
+    obsoleteAcknowledgement.request.resolve({acknowledged: true});
+    await obsoleteAcknowledgement.confirmation;
+    check(unread(newSessionIcon), 'Acknowledgement crossed a same-user session change');
+
+    switchAccount('alpha');
+    await flush();
+    const navigatingAcknowledgement = await startAcknowledgement();
+    const [matchingIcon, newerIcon, testIcon] = showSignals(signal(), signal('newer-event'), signal('event', true));
+    await EngineUI.click(newerIcon);
+    navigatingAcknowledgement.request.resolve({acknowledged: true});
+    await navigatingAcknowledgement.confirmation;
+    check(!unread(matchingIcon) && unread(newerIcon) && unread(testIcon),
+        'Acknowledgement after navigation did not update only the matching Overview event');
+    check(byId('engine-dialog').open && byId('engine-dialog').querySelector('[data-event-id="newer-event"]'),
+        'Acknowledgement after navigation closed a newer dialog');
+    await EngineUI.click(matchingIcon);
+    check(byId('engine-dialog').querySelector('[role=status]')?.textContent === 'Kvitteret',
+        'Reopened Overview warning did not show confirmation');
+    const [repaintedIcon] = showSignals(signal());
+    check(!unread(repaintedIcon), 'An overlapping unread snapshot restored a confirmed acknowledgement');
+    switchAccount('alpha');
+    const [reloginIcon] = showSignals(signal());
+    check(unread(reloginIcon), 'Same-user relogin reused the prior acknowledgement');
+
     for (const entry of ['HOT WATCH', 'dashboard']) {
         switchAccount('alpha');
         await flush();
@@ -617,6 +671,49 @@ const run = async () => {
     await lastPage;
     await poll();
     check(!button(history), 'Refresh restored pagination after the last page');
+
+    const oldest = session('alpha-oldest');
+    const secondOldest = session('alpha-older-active');
+    const closed = Array.from({length: 21}, (_, index) => session('alpha-archive-' + (22 - index), 'COMPLETED'));
+    archiveFixture = {
+        current: [oldest, secondOldest],
+        page(offset = 0) {
+            const next = offset + 20;
+            return {sessions: closed.slice(offset, next), next_cursor: next < closed.length ? 3 - offset : null};
+        }
+    };
+    switchAccount('alpha');
+    await flush();
+    const readArchivePage = async () => {
+        const paging = click(history);
+        take('&before=3', 'alpha').resolve(archiveFixture.page(20));
+        await paging;
+    };
+    await readArchivePage();
+    await poll();
+    check(!button(history), 'Unchanged archive exposed an exhausted cursor');
+    archiveFixture.current = [secondOldest];
+    closed.push({...oldest, status: 'COMPLETED'});
+    await poll();
+    check(button(history), 'Archiving an older watch did not restore history pagination');
+    if (button(history)) {
+        const obsoletePage = click(history);
+        const obsoleteRequest = take('&before=3', 'alpha');
+        const obsoleteResult = archiveFixture.page(20);
+        archiveFixture.current = [];
+        closed.splice(-1, 0, {...secondOldest, status: 'EXPIRED'});
+        await poll();
+        obsoleteRequest.resolve(obsoleteResult);
+        await obsoletePage;
+        check(button(history), 'An in-flight page restored the exhausted cursor after a new archive');
+        if (button(history)) await readArchivePage();
+        const archived = '[data-engine-group=history] [data-engine-detail="alpha-oldest"]';
+        check(button(archived) && button('[data-engine-group=history] [data-engine-detail="alpha-older-active"]') &&
+            !button(history), 'Newly archived watches were missing from the last page');
+        await poll();
+        check(button(archived) && !button(history), 'Poll lost the newly archived watch or reset pagination');
+    }
+    archiveFixture = null;
 
     omitHistory = true;
     switchAccount(null);

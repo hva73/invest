@@ -10,9 +10,13 @@ window.EngineUI=(()=>{
   const user=owner(),node=root(),version=modeGeneration;
   return ()=>Boolean(user)&&user===owner()&&node===root()&&(!node||node.isConnected)&&version===modeGeneration;
  }
+ function captureSession(){
+  const user=owner(),epoch=sessionEpoch(),authenticated=Boolean(user)&&!logoutRequests;
+  return ()=>authenticated&&user===owner()&&!logoutRequests&&epoch===sessionEpoch();
+ }
  function captureScope(){
-  const mounted=captureView(),epoch=sessionEpoch(),authenticated=!logoutRequests;
-  return ()=>authenticated&&mounted()&&!logoutRequests&&epoch===sessionEpoch();
+  const mounted=captureView(),session=captureSession();
+  return ()=>session()&&mounted();
  }
  function captureDialog(modal=document.getElementById('engine-dialog')){
   // Native dismissal changes open synchronously, even before the close event.
@@ -80,30 +84,51 @@ window.EngineUI=(()=>{
  function card(s){const r=s.request,c=s.latest_calculation,m=c?.supporting_metrics||{},d=s.data_status||{},warm=s.signal==='NO_DATA'&&!s.data_stale&&!s.last_error&&s.display_freshness?.state!=='stale'&&s.display_status==='WARMUP'&&c?.reason_codes?.includes('WARMUP')&&Number.isInteger(m.sample_count)&&Number.isInteger(s.minimum_required_samples),remaining=warm?Math.max(0,s.minimum_required_samples-m.sample_count):null,supervisorAge=data?.supervisor?(Date.now()-Date.parse(data.supervisor.updated))/1000:NaN,supervisorFresh=supervisorAge>=0&&supervisorAge<30,beatAge=data?.worker?(Date.now()-Date.parse(data.worker.updated))/1000:NaN,workerRunning=data?.worker?.status==='running'&&beatAge>=0&&beatAge<15;return `<article class="engine-card attention-card attention-${tone(s.signal)}" data-engine-signal="${esc(s.signal)}" data-engine-state="${esc(s.status)}" data-engine-critical="${s.status==='ERROR'||s.latest_calculation?.risk_level==='critical'}"><div class="section-heading"><button class="engine-title" data-engine-detail="${esc(s.watch_id)}">${esc(r.ticker)} <small>${esc(r.exchange)}</small> →</button>${!mode&&s.status==='ACTIVE'&&['KØBSSIGNAL','SÆLGSSIGNAL','EXIT WATCH'].includes(s.display_status)?`<button class="position-badge attention-${tone(s.signal)}" data-trade-watch="${esc(s.watch_id)}" data-trade-signal="${esc(s.signal)}"${s.last_action_signal?.event_id?` data-trade-event="${esc(s.last_action_signal.event_id)}"`:""}>${esc(s.display_status)}</button>`:`<span class="position-badge attention-${tone(s.signal)}">${esc(warm&&d.price!=null?'WARMUP':s.display_status||labels[s.signal])}</span>`}</div>${actionNotice(s)}${partialQuote(d)}${decisionBadge(s)}<p class="muted">${esc(labels[s.status])} · ${r.is_test?'TESTDATA · ':''}${esc(r.provider)}${r.provider==='eodhd'&&r.provider_symbol?' · '+esc(r.provider_symbol):''}</p>${d.identity_verification==='unverified'?`<p class="dash-warning">Foreløbigt datakildematch: Pluto-børs ${esc(d.identity_evidence?.pluto_venue||'ukendt')} · EODHD-børs ${esc(d.identity_evidence?.eodhd_venue||'ukendt')}. Identiteten er ikke bekræftet; kurserne bruges ikke til signaler.</p>`:''}${!workerRunning?`<p class="dash-warning">Ingen frisk heartbeat fra en kørende motor. ${data?.supervisor?.status==='timeout'?'Automatisk genstart er stoppet efter tidsgrænsen.':supervisorFresh&&data?.supervisor?.status==='restarting'?'Automatisk genstart forsøges (forsøg '+esc(data.supervisor.attempts)+').':'Planlagte scanninger kræver en aktiv serviceproces.'}</p>`:''}${s.last_data_at?`<p class="${s.data_stale?'dash-warning':'muted'}">Observation modtaget · kildetid ${date(s.last_data_at)}${s.data_stale?' · for gammel til signal':''}</p>`:''}${s.display_freshness?.state==='stale'?(d.regular_session?.status==='CLOSED'?'<p class="dash-warning">Den ordinære handel er lukket. Seneste kurs er for gammel til et nyt signal; før- eller eftermarked kan have særskilte kurser.</p>':'<p class="dash-warning">Data er ældre end visningsgrænsen på 60 sekunder. Seneste beregning og motorens risikoregler er bevaret.</p>'):''}<button class="engine-price" data-engine-detail="${esc(s.watch_id)}"><strong>${(r.is_test||d.identity_verification!=='unverified')&&(d.price||m.price)&&s.last_data_at&&s.latest_currency?money({amount:d.price||m.price,currency:s.latest_currency}):'Kurs ikke verificeret'}</strong><span>Se observationer →</span></button><p>${esc((s.display_reason_codes?.length?s.display_reason_codes:(c?.reason_codes||[s.last_error||'Ingen beregning endnu'])).map(code=>code==='WARMUP'&&Number.isInteger(m.sample_count)&&s.minimum_required_samples?'Afventer sammenlignelige observationer ('+m.sample_count+' af '+s.minimum_required_samples+').':reason(code)).join(' · '))}</p>${warm?`<div class="engine-warmup" aria-label="Warmup for signalberegning"><strong>${d.price!=null&&!s.data_stale?'Markedsdata modtages':'Tendensberegning afventer data'} · warmup</strong><p>${text(m.sample_count)} af ${text(s.minimum_required_samples)} sammenlignelige observationer · mangler ${text(remaining)}</p><progress max="${s.minimum_required_samples}" value="${Math.min(m.sample_count,s.minimum_required_samples)}">${text(m.sample_count)} / ${text(s.minimum_required_samples)}</progress><small>Opdateres, når nye brugbare observationer modtages. Antallet kan falde ved huller eller skift af handelssession.</small></div>`:''}<p class="engine-next-trigger"><small>Næste matematiske trigger</small>${esc(c?.next_trigger||'Afventer første verificerede beregning')}</p>${facts([['I dag (kildens forrige luk)',movement(d.daily_change_pct,' %')],['Siden sidst',movement(d.since_last_pct,' %')],['Volumenudvikling',movement(m.volume_acceleration)],['Aftagende momentum',m.rising_price_falling_volume===true?'Ja':'—'],['Kursstatus',text(d.price_status==='FRESH'&&s.display_freshness?.state==='stale'?'Ældre end 60 sekunder':({FRESH:'Frisk',DELAYED:'Dokumenteret forsinket',STALE:'For gammel',MISSING:'Mangler',UNVERIFIED:'Kurskilde ikke bekræftet'})[d.price_status]||'Ukendt')],['Ordinær handel',text(({OPEN:'Åben',CLOSED:'Lukket',UNKNOWN:'Ukendt'})[d.regular_session?.status]||'Ukendt')+(d.regular_session?.received_at?'<small>EODHD '+esc(d.regular_session.exchange||'')+' · oplyst '+esc(date(d.regular_session.received_at))+'</small>':'')],['Marked',text(({OPEN:'Åbent',PREMARKET:'Førmarked',AFTERHOURS:'Eftermarked',CLOSED:'Lukket',HALTED:'Handel standset',UNKNOWN:'Ukendt'})[d.market_status]||'Ukendt')],['Momentum',text(({READY:'Klar',INSUFFICIENT_HISTORY:'For lidt historik',STALE:'For gamle data',UNAVAILABLE:'Ikke tilgængeligt'})[d.momentum_status]||'Ukendt')],['Bid/ask',text(({FRESH:'Frisk',STALE:'For gammel',UNAVAILABLE:'Ikke tilgængelig'})[d.quote_status]||'Ukendt')],['Signalgrundlag',text(({READY:'Klar',WAITING_FOR_DATA:'Afventer data',BLOCKED:'Blokeret',NOT_APPLICABLE:'Ikke relevant'})[d.signal_status]||'Ukendt')],...([1,5,15,30].map(n=>['Kursændring '+n+' min.',movement(d.momentum_pct?.[n],' %')])),['Relativ volumen',text(m.relative_volume)],['Spread',m.spread_pct===null||m.spread_pct===undefined?'Ukendt':text(m.spread_pct)+' %'],['Seneste data',date(s.last_data_at)],['Næste planlagte scanning',date(s.next_due_at)]])}<small>${esc(r.strategy_id)} v${esc(r.strategy_version)} · mål ${s.target_interval_s} sek. / planlagt mindst ${s.effective_min_interval_s} sek.</small><div class="actions"><button data-engine-detail="${esc(s.watch_id)}">Detaljer →</button>${['CREATED','VALIDATING','ACTIVE','DEGRADED'].includes(s.status)?`<button data-engine-control="pause" data-engine-id="${esc(s.watch_id)}">Pause</button>`:s.status==='PAUSED'?`<button data-engine-control="resume" data-engine-id="${esc(s.watch_id)}">Genoptag</button>`:''}${!['COMPLETED','EXPIRED','ERROR'].includes(s.status)?`<button data-engine-control="stop" data-engine-id="${esc(s.watch_id)}">Afslut</button>`:''}</div></article>`}
  function noticeState(a){return {ACTIVE:'AKTIVT',WITHDRAWN:'BORTFALDET',DATA_MISSING:'DATA MANGLER'}[a.state]||'DATA MANGLER'}
  function noticeSide(a){return {BUY_SIGNAL:'Køb',SELL_SIGNAL:'Salg',REDUCE_SIGNAL:'Reducér'}[a.event_type]||'Handling'}
+ // A list or detail read may have started before the acknowledgement was saved.
+ let acknowledgedNotices;
+ const noticeKey=(wid,eventId,test)=>JSON.stringify([wid,eventId,test]);
+ function noticeAcknowledged(s){
+  const a=s.last_action_signal;
+  return Boolean(a?.acknowledged_at||a?.acknowledged||acknowledgedNotices?.session()&&
+   acknowledgedNotices.keys.has(noticeKey(s.watch_id,a?.event_id,s.is_test===true)));
+ }
  function actionNotice(s){
   const a=s?.last_action_signal;if(!a?.event_id)return '';
-  const acknowledged=Boolean(a.acknowledged_at||a.acknowledged),label=(acknowledged?'Vis kvitteret advarsel':'Vis advarsel')+' · '+noticeSide(a)+' · '+noticeState(a);
-  const payload={watch_id:s.watch_id,is_test:s.is_test===true,ticker:s.request?.ticker||s.ticker||'',last_action_signal:a};
+  const acknowledged=noticeAcknowledged(s),label=(acknowledged?'Vis kvitteret advarsel':'Vis advarsel')+' · '+noticeSide(a)+' · '+noticeState(a);
+  const payload={watch_id:s.watch_id,is_test:s.is_test===true,ticker:s.request?.ticker||s.ticker||'',last_action_signal:acknowledged?{...a,acknowledged:true}:a};
   const color=acknowledged?'read':a.state==='ACTIVE'?a.event_type==='BUY_SIGNAL'?'buy':'sell':'history';
   return `<button type="button" class="signal-alert signal-alert--${color}${acknowledged?'':' signal-alert--unread'}" data-engine-notice="${esc(JSON.stringify(payload))}" aria-haspopup="dialog" aria-label="${esc(label)}" title="${esc(label)}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/><path d="M12 7v4m0 3h.01"/></svg></button>`;
  }
  function openNotice(s){
-  const a=s.last_action_signal,acknowledged=Boolean(a.acknowledged_at||a.acknowledged);
+  const a=s.last_action_signal,acknowledged=noticeAcknowledged(s);
   dialog((s.ticker?s.ticker+' · ':'')+'Signaladvarsel',`<section class="signal-notice-details"><strong>${a.state==='ACTIVE'?'Seneste signal':'Tidligere advarsel'}: ${esc(noticeSide(a))} · ${noticeState(a)}</strong><small>${date(a.created)}</small><p>${esc(a.reason||'Begrundelse ikke registreret')}</p><small>${a.state==='ACTIVE'?'Status ved seneste opdatering.':'Historisk advarsel · ikke et aktuelt handelssignal.'}</small>${acknowledged?'<p role="status">Kvitteret</p>':`<button type="button" data-engine-ack="${esc(s.watch_id)}" data-event-id="${esc(a.event_id)}" data-is-test="${s.is_test===true}">Kvittér advarsel</button>`}</section>`);
  }
  async function acknowledgeNotice(b){
-  const scope=captureScope(),eventId=b.dataset.eventId,wid=b.dataset.engineAck,test=b.dataset.isTest==='true',noticeDialog=b.closest?.('dialog');
-  if(!scope()||b.disabled)return;
-  const mounted=captureView();
-  const release=lockAction(b,()=>mounted()&&(!noticeDialog||noticeDialog.open));
+  const session=captureSession(),eventId=b.dataset.eventId,wid=b.dataset.engineAck,test=b.dataset.isTest==='true',noticeDialog=b.closest?.('dialog');
+  if(!session()||b.disabled)return;
+  const view=captureView(),mounted=()=>view()&&b.isConnected&&(!noticeDialog||noticeDialog.open);
+  const release=lockAction(b,mounted);
   try{
-   await api(base+'/sessions/'+encodeURIComponent(wid)+'/ack-signal',{is_test:test,event_id:eventId});if(!scope())return;
-   const mark=s=>{if(s?.watch_id===wid&&(s.is_test===true)===test&&s.last_action_signal?.event_id===eventId)s.last_action_signal.acknowledged=true};
-   (data?.sessions||[]).forEach(mark);window.DashboardUI?.acknowledgeSignal?.(wid,eventId,test);
-   document.querySelectorAll('[data-engine-notice]').forEach(icon=>{const s=JSON.parse(icon.dataset.engineNotice);mark(s);if(s.last_action_signal.acknowledged){icon.dataset.engineNotice=JSON.stringify(s);icon.className='signal-alert signal-alert--read';const label='Vis kvitteret advarsel · '+noticeSide(s.last_action_signal)+' · '+noticeState(s.last_action_signal);icon.setAttribute('aria-label',label);icon.title=label}});
-   b.textContent='Kvitteret';b.setAttribute('aria-label','Advarslen er kvitteret');
-   if(noticeDialog?.open&&b.isConnected&&noticeDialog.contains(b))noticeDialog.close();
-  }catch(error){if(scope()){b.disabled=false;throw error}}
+   await api(base+'/sessions/'+encodeURIComponent(wid)+'/ack-signal',{is_test:test,event_id:eventId});
+   if(!session())return;
+   const key=noticeKey(wid,eventId,test);
+   if(!acknowledgedNotices?.session())acknowledgedNotices={session,keys:new Set()};
+   acknowledgedNotices.keys.add(key);
+   window.DashboardUI?.acknowledgeSignal?.(wid,eventId,test);
+   for(const icon of document.querySelectorAll('[data-engine-notice]')){
+    const s=JSON.parse(icon.dataset.engineNotice),a=s.last_action_signal;
+    if(noticeKey(s.watch_id,a?.event_id,s.is_test===true)!==key)continue;
+    a.acknowledged=true;
+    icon.dataset.engineNotice=JSON.stringify(s);
+    icon.className='signal-alert signal-alert--read';
+    const label='Vis kvitteret advarsel · '+noticeSide(a)+' · '+noticeState(a);
+    icon.setAttribute('aria-label',label);icon.title=label;
+   }
+   if(mounted()){
+    b.textContent='Kvitteret';b.setAttribute('aria-label','Advarslen er kvitteret');
+    noticeDialog?.close();
+   }
+  }catch(error){if(session()&&mounted()){b.disabled=false;throw error}}
   finally{release()}
  }
  function signalTiming(s){const live=s.status==='ACTIVE'&&['KØBSSIGNAL','SÆLGSSIGNAL','EXIT WATCH'].includes(s.display_status),last=s.last_action_signal||{},labels={BUY_SIGNAL:'Køb',SELL_SIGNAL:'Salg',REDUCE_SIGNAL:'Reducér'};if(live)return `<small class="signal-timing">${window.ESCAPE_DEMO?'Simuleret':'Aktuelt'} · beregnet ${date(s.last_calculation_at)}</small>`;if(labels[last.event_type]&&last.created)return `<small class="signal-timing">Tidligere ${esc(labels[last.event_type])} · ${date(last.created)} · ikke aktuelt</small>`;return ''}
@@ -131,6 +156,8 @@ window.EngineUI=(()=>{
  function listData(user=owner(),epoch=sessionEpoch()){
   return data?._owner===user&&data._mode===mode&&data._epoch===epoch?data:null;
  }
+ const isArchived=s=>['EXPIRED','COMPLETED'].includes(s.status);
+ let pendingHistory=null;
  async function load(){
   if(!root())return;
   const ticket=++generation,user=owner(),epoch=sessionEpoch(),scope=captureScope();
@@ -141,9 +168,13 @@ window.EngineUI=(()=>{
   try{[r,h,registry]=await Promise.all([api(base+'/sessions'+query()+'&limit=100&view=current'),api(base+'/sessions'+query()+'&limit=20&view=history'),api('reports/candidate-registry?is_test='+mode)])}
   catch(error){if(current())throw error;return}
   if(!current())return;
-  const previous=listData(user,epoch),page=previous?.historyPage;
+  const previous=listData(user,epoch);
   const ids=new Set([...r.sessions,...h.sessions].map(s=>s.watch_id));
-  const cached=previous?.sessions.filter(s=>['EXPIRED','COMPLETED'].includes(s.status)&&!ids.has(s.watch_id))||[];
+  // History is ordered by creation, so a newly closed watch can land inside a page already read.
+  const historyChanged=previous?.sessions.some(s=>!isArchived(s)&&!ids.has(s.watch_id));
+  if(historyChanged)pendingHistory=null;
+  const page=historyChanged?null:previous?.historyPage;
+  const cached=historyChanged?[]:previous?.sessions.filter(s=>isArchived(s)&&!ids.has(s.watch_id))||[];
   data={...r,sessions:[...r.sessions,...h.sessions,...cached],candidates:registry.candidates||[],historyPage:page,
    history_cursor:page?page.next_cursor:h.next_cursor,history_truncated:page?page.truncated:h.truncated,
    current_truncated:r.truncated,_owner:user,_mode:mode,_epoch:epoch};
@@ -285,17 +316,19 @@ window.EngineUI=(()=>{
  if(f.get('provider')==='eodhd'&&items.some(x=>!x.provider_symbol&&!x.instrument?.provider_symbol)){formStatus(selected.eodhd_error||'Vælg det korrekte EODHD-instrument på listen før start.');(document.getElementById('engine-eodhd-select')||form.elements.provider_symbol)?.focus();return true;}let selection;try{({selection}=await api('strategy-center'))}catch(error){if(current())throw error;return true}if(!current())return true;const common={is_test:mode,purpose:f.get('purpose'),profile:f.get('profile'),priority:f.get('profile')==='CRITICAL'?'CRITICAL':'NORMAL',provider:f.get('provider'),end_at:f.get('end_at')?new Date(f.get('end_at')).toISOString():null,activation_reason:String(f.get('activation_reason')||'')+' · '+selection.reason,strategy_id:selection.strategy_id,strategy_version:selection.version,risk:{max_notional_dkk:f.get('max_notional')||'1000',max_loss_dkk:f.get('max_loss')||'100',max_spread_pct:'1',max_quote_age_s:120,max_position_fraction_pct:'20',proposed_quantity:f.get('quantity')||null,stop_price:f.get('stop')||null,exit_deadline:null}};const sessions=items.map(item=>{const instrument=item.instrument||{asset_id:f.get('asset_id'),exchange:f.get('exchange'),currency:f.get('quote_currency'),provider_symbol:f.get('provider_symbol')||null};if(!instrument.asset_id||!instrument.exchange||!instrument.currency)throw Error('Aktiv-ID, børs og valuta skal være verificeret før start.');return {...common,watch_id:item.watch_id||(item.watch_id='hw-'+crypto.randomUUID()),report_id:item.report_id,candidate_id:item.candidate.candidate_id,ticker:item.candidate.ticker,exchange:instrument.exchange,asset_id:instrument.asset_id,quote_currency:instrument.currency,provider_symbol:item.provider_symbol||instrument.provider_symbol||null,portfolio_ids:item.portfolio_ids||f.getAll('portfolios').map(Number),watch_mode:item.portfolios_verified&&!item.portfolio_ids.length?'entry':f.get('watch_mode'),reactivation_reason:f.get('reactivation_reason')||null}});const signature=JSON.stringify({is_test:mode,sessions});if(!pending||pending.signature!==signature)pending={signature,id:'hwa-'+crypto.randomUUID()};const request={request_id:pending.id,is_test:mode,sessions};const button=form.querySelector('.primary');button.disabled=true;try{const result=sessions.length>1?await api(base+'/activation-requests',request,{'Idempotency-Key':request.request_id}):await api(base+'/sessions',sessions[0]);if(!current())return true;formStatus(`${result.created_count??1} session(er) oprettet. Feedforbindelse og første observation kontrolleres separat.`);document.getElementById('engine-dialog').close();pending=null;batchCandidates=[];await load()}catch(error){if(!current())return true;formStatus(reason(error.details?.code||error.message)+(error.details?.errors||[]).map(e=>' '+e.path+': '+e.message).join(''));throw error}finally{button.disabled=false}return true}
  function applyFilter(filter){const scope=root();if(!scope)return;let visible=0;scope.querySelectorAll('.engine-list-row').forEach(n=>{const state=n.dataset.engineState,open=['CREATED','VALIDATING','ACTIVE','DEGRADED'].includes(state),match=filter==='all'||filter==='critical'&&n.dataset.engineCritical==='true'||filter==='active'&&open||open&&n.dataset.engineCategory===filter;n.hidden=!match;if(match)visible++});scope.querySelectorAll('[data-engine-group]').forEach(group=>{group.hidden=!group.querySelector('.engine-list-row:not([hidden])');if(!group.hidden&&filter!=='all'&&group.tagName==='DETAILS')group.open=true});scope.querySelectorAll('[data-engine-filter]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.engineFilter===filter)));const empty=scope.querySelector('.engine-filter-empty');if(empty)empty.hidden=visible>0||!scope.querySelector('.engine-list-row')&&filter==='all'}
 
- let pendingHistory=null;
  async function moreHistory(){
   const scope=captureScope(),cursor=listData()?.history_cursor;
   if(!scope()||!cursor||pendingHistory?.())return;
   pendingHistory=scope;
+  const current=()=>pendingHistory===scope&&scope();
   let history;
-  try{history=await api(base+'/sessions'+query()+'&limit=20&view=history&before='+cursor)}
-  catch(error){if(scope())throw error;return}
+  try{
+   history=await api(base+'/sessions'+query()+'&limit=20&view=history&before='+cursor);
+   if(!current())return;
+  }catch(error){if(current())throw error;return}
   finally{if(pendingHistory===scope)pendingHistory=null}
   const list=listData();
-  if(!scope()||!list)return;
+  if(!list)return;
   const ids=new Set(list.sessions.map(s=>s.watch_id));
   list.sessions.push(...history.sessions.filter(s=>!ids.has(s.watch_id)));
   list.historyPage={next_cursor:history.next_cursor,truncated:history.truncated};
@@ -404,7 +437,7 @@ window.EngineUI=(()=>{
   const pnl=holding?.unrealized?.currency==='DKK'&&holding.unrealized.amount!=null?money(holding.unrealized):'—',pnlPct=holding?.unrealized_percent!=null?movement(holding.unrealized_percent,' %'):'';
   const stop=req.risk?.stop_price,stopText=stop!=null?text(stop)+' '+esc(req.quote_currency||''):'—',stopDistance=Number(stop)>0&&Number(d.price)>0&&req.quote_currency===s.latest_currency&&!stale?movement((Number(stop)/Number(d.price)-1)*100,' %'):'—';
   const reasons=(s.display_reason_codes?.length?s.display_reason_codes:c.reason_codes||[]).slice(0,3).map(reason);
-  const ack=a?.event_id&&!a.acknowledged_at&&!a.acknowledged?`<button type="button" data-engine-ack="${esc(wid)}" data-event-id="${esc(a.event_id)}" data-is-test="false">Markér beskeden som set</button>`:a?.event_id?'<span role="status">Kvitteret</span>':'';
+  const ack=a?.event_id&&!noticeAcknowledged(s)?`<button type="button" data-engine-ack="${esc(wid)}" data-event-id="${esc(a.event_id)}" data-is-test="false">Markér beskeden som set</button>`:a?.event_id?'<span role="status">Kvitteret</span>':'';
   const trade=canSell||canBuy?`<button type="button" class="primary ${canSell?'asset-sell':''}" data-trade-watch="${esc(wid)}" data-trade-signal="${esc(s.signal)}"${s.last_action_signal?.event_id?` data-trade-event="${esc(s.last_action_signal.event_id)}"`:""} data-signal-help-attached="true">Gennemgå ${canSell?'salg':'køb'} →</button>`:'';
   const title=(req.ticker||'Aktiv')+' · '+(s.display_status||'Signal');
   const explanation=c.human_readable_explanation||((a?.reason&&!/^[-_A-Z0-9]+$/.test(a.reason))?a.reason:'');
