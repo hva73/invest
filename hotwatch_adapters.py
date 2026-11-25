@@ -447,16 +447,23 @@ class EODHDAdapter:
     key=('shared',credential,feed,shared_identity)
     group=key
   def reusable(cached,request,profile,allow_older=False):
-   if not cached:return False
+   if not cached:return None
    value=cached[1];age=time.monotonic()-cached[0]
    max_age=min(request['risk']['max_quote_age_s'],GLOBAL_RISK['max_quote_age_s'])
    interval=PROFILES.get(profile,60)
+   negative_ttl=min(30,interval) if feed.endswith('_quotes') else min(20,interval)
    if shared_identity:
     last_data=stamp(request['last_data']) if request.get('last_data') else None
     now=utc()
-    return (value.get('status')=='OK' and 0<=age<interval
-            and any(0<=(now-stamp(m['event_time'])).total_seconds()<=max_age
-                    and (last_data is None or stamp(m['event_time'])>=last_data) for m in value['messages']))
+    if value and 0<=age<interval and any(
+        0<=(now-stamp(m['event_time'])).total_seconds()<=max_age
+        and (last_data is None or stamp(m['event_time'])>=last_data) for m in value['messages']):
+     return value
+    # Availability has its own capture clock. A quiet probe must not renew
+    # the cadence or source freshness of the last market observation.
+    availability=cached[2]
+    if availability and 0<=time.monotonic()-availability[0]<negative_ttl:return availability[1]
+    return None
    fresh=any(m.get('event_time') and 0<=(utc()-stamp(m['event_time'])).total_seconds()<=max_age for m in value.get('messages',[]))
    # A capture that already returned only old trades/quotes is also a recent
    # availability check. Share that negative result like NO_MESSAGES. Data
@@ -468,18 +475,25 @@ class EODHDAdapter:
    # duration nor reuse changes a market event's original timestamp.
    # Trade refresh cadence is unchanged, including in extended hours. Only
    # repeat empty/stale quote lookups less often on slower profiles.
-   negative_ttl=min(30,interval) if feed.endswith('_quotes') else min(20,interval)
-   return (fresh and 0<=age<interval) or (0<=age<negative_ttl and (already_stale or value.get('status')=='NO_MESSAGES' or feed.endswith('_status') and value.get('status')=='OK')) or (allow_older and age>=0 and fresh)
+   if (fresh and 0<=age<interval) or (0<=age<negative_ttl and (already_stale or value.get('status')=='NO_MESSAGES' or feed.endswith('_status') and value.get('status')=='OK')) or (allow_older and age>=0 and fresh):
+    return value
   request={**req,'last_data':session.get('last_data')} if shared_identity and feed.endswith('_trades') else req
   with _ws_batch_lock:
    cached=_ws_batch_cache.get(key);collecting=group in _ws_batch_inflight
    # A running capture must not tie up both workers. A still-fresh observation
    # can be analysed immediately, with its original source/receive timestamps.
-   if reusable(cached,request,profile,allow_older=collecting):return record(copy.deepcopy(cached[1]),0,True)
+   reused=reusable(cached,request,profile,allow_older=collecting)
+   if reused:return record(copy.deepcopy(reused),0,True)
    if collecting:
     self.pending_feed=_ws_batch_inflight[group]
     return record({'status':'COLLECTING','messages':[]},0,True)
    completed=threading.Event();_ws_batch_inflight[group]=completed
+  def save_shared(item_key,observed_at,observation,availability):
+   # Evict one entry at a time so a full cache does not invalidate every
+   # overlapping subscription's cooldown.
+   _ws_batch_cache.pop(item_key,None)
+   if len(_ws_batch_cache)>=512:_ws_batch_cache.pop(next(iter(_ws_batch_cache)))
+   _ws_batch_cache[item_key]=(observed_at,copy.deepcopy(observation),copy.deepcopy(availability))
   item_keys={symbol:key}
   try:
    # Fill the existing batch with due watches that lack a reusable response.
@@ -489,7 +503,7 @@ class EODHDAdapter:
    from hotwatch_engine import verified_automatic_feed,capacity
    with self.connect() as c:
     if shared_identity and not c.in_transaction:c.execute('BEGIN')
-    rows=c.execute("SELECT s.id,s.request,s.state FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND s.next_due<=? AND json_extract(s.request,'$.provider')='eodhd' ORDER BY s.next_due,CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,s.id LIMIT ?",(self.uid,utc().timestamp()+15,capacity())).fetchall()
+    rows=c.execute("SELECT s.id,s.request,s.state,s.last_data FROM hw_sessions s LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND s.next_due<=? AND json_extract(s.request,'$.provider')='eodhd' ORDER BY s.next_due,CASE WHEN json_extract(s.request,'$.watch_mode')='exit' THEN 0 ELSE 1 END,s.id LIMIT ?",(self.uid,utc().timestamp()+15,capacity())).fetchall()
     for row in rows:
      candidate=json.loads(row['request']);full=candidate.get('provider_symbol') or ''
      if not isinstance(full,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',full):continue
@@ -503,7 +517,8 @@ class EODHDAdapter:
       if not identity:continue
       item_key=('shared',credential,feed,identity)
      with _ws_batch_lock:
-      if reusable(_ws_batch_cache.get(item_key),candidate,candidate_profile):continue
+      lookup=dict(candidate,last_data=row['last_data']) if shared_identity and feed.endswith('_trades') else candidate
+      if reusable(_ws_batch_cache.get(item_key),lookup,candidate_profile):continue
       if shared_identity:
        if item_key in _ws_batch_inflight:continue
        _ws_batch_inflight[item_key]=completed
@@ -513,22 +528,25 @@ class EODHDAdapter:
      if len(symbols)>=10:break
 
    result=client.capture(feed,symbols if len(symbols)>1 else symbol,duration=2,max_messages=250 if len(symbols)>1 else 50)
-   if shared_identity and result.get('status')=='ENTITLEMENT_UNVERIFIED':
+   if shared_identity and result.get('status') in ('ENTITLEMENT_UNVERIFIED','NETWORK_OR_RESPONSE_ERROR'):
     with _ws_batch_lock:
-     for item_key in item_keys.values():_ws_batch_cache.pop(item_key,None)
+     saved=time.monotonic()
+     for item_key in item_keys.values():
+      save_shared(item_key,saved,None,(saved,{'status':result['status'],'messages':[]}))
    if result.get('status') not in ('OK','NO_MESSAGES'):return record(result,len(symbols),False)
    with _ws_batch_lock:
-    if len(_ws_batch_cache)>=512 or len(_ws_batch_cache)+sum(k not in _ws_batch_cache for k in item_keys.values())>512:_ws_batch_cache.clear()
+    if not shared_identity and len(_ws_batch_cache)+sum(k not in _ws_batch_cache for k in item_keys.values())>512:_ws_batch_cache.clear()
     saved=time.monotonic();captured_at=utc().isoformat();requested=None
     for item in symbols:
      messages=[m for m in result.get('messages',[]) if m.get('symbol')==item]
+     received_messages=bool(messages)
      # A quiet capture must not erase a more recent, still-valid observation
      # from another batch. Keep original event/receive times and feed identity;
      # the requesting session applies its own freshness limit in poll().
      item_key=item_keys[item]
      prior=_ws_batch_cache.get(item_key)
      observation_saved=saved
-     if prior:
+     if prior and prior[1]:
       retained=[m for m in prior[1].get('messages',[]) if m.get('event_time') and 0<=(utc()-stamp(m['event_time'])).total_seconds()<=GLOBAL_RISK['max_quote_age_s']]
       if retained:
        latest=max(retained,key=lambda m:stamp(m['event_time']))
@@ -561,15 +579,20 @@ class EODHDAdapter:
         if not messages:messages=candidates[-1:]
      partial=[m for m in result.get('partial_messages',[]) if m.get('symbol')==item]
      # A saturated batch cannot establish that a missing symbol was quiet.
-     # Preserve any still-fresh prior evidence; never negative-cache an
-     # incomplete result. The ordinary next scan remains budgeted as before.
      incomplete=not messages and result.get('batch_limit_reached') is True
      value={**result,'status':'OK' if messages else 'INCOMPLETE' if incomplete else 'NO_MESSAGES','messages':messages,'message_count':len(messages),'partial_messages':partial,'captured_at':captured_at}
-     if incomplete:_ws_batch_cache.pop(item_key,None)
-     elif shared_identity:
-      if messages:
-       # Include only the requested instrument's timestamped observations.
-       _ws_batch_cache[item_key]=(observation_saved,copy.deepcopy({'status':'OK','messages':messages}))
+     if shared_identity:
+      observation={'status':'OK','messages':messages} if messages else None
+      availability=None
+      if not received_messages:
+       status='INCOMPLETE' if partial or result.get('batch_limit_reached') is True else 'NO_MESSAGES'
+       outcome={'status':status,'messages':[],'partial_messages':partial}
+       availability=(saved,outcome)
+      save_shared(item_key,observation_saved,observation,availability)
+      if item==symbol and availability:
+       value.update(reusable(_ws_batch_cache[item_key],request,profile) or outcome)
+       value['message_count']=len(value['messages'])
+     elif incomplete:_ws_batch_cache.pop(item_key,None)
      else:_ws_batch_cache[item_key]=(saved,copy.deepcopy(value))
      if item==symbol:requested=value
     # Diagnose the requested symbol, not the newest unrelated trade in its
