@@ -19,6 +19,27 @@ class PortfolioValueChart(unittest.TestCase):
    with app.connect() as c:history=dashboard.portfolio_value_history(c,1,now)
    start=datetime.fromisoformat(history['day_start']);end=datetime.fromisoformat(history['day_end'])
    self.assertEqual((end-start).total_seconds(),hours*3600)
+   self.assertEqual(history['chart_domain']['kind'],'calendar_day')
+   self.assertEqual(history['chart_domain']['start'],history['day_start'])
+   self.assertEqual(history['chart_domain']['end'],history['day_end'])
+   self.assertEqual(history['chart_domain']['value_freshness']['state'],'fresh')
+ def test_day_reuses_recorded_points_without_future_or_previous_day_values(self):
+  midnight=datetime(2026,11,14,23,tzinfo=timezone.utc)
+  now=midnight+timedelta(hours=11,minutes=40)
+  for at,value in [(midnight-timedelta(seconds=1),'900'),(midnight,'1000'),
+                   (now,'1100'),(now+timedelta(seconds=1),'1200')]:
+   self.save(self.root,value,at)
+  with app.connect() as c:
+   history=dashboard.portfolio_value_history(c,1,now)
+   self.assertEqual(c.execute('SELECT count(*) FROM display_portfolio_values').fetchone()[0],4)
+  self.assertEqual([p['amount'] for p in history['periods']['day']],['1000','1100'])
+  self.assertEqual(history['chart_domain']['history_latest_at'],now.isoformat())
+  self.assertIsNone(history['current_value'])
+ def test_empty_history_still_has_the_full_calendar_axis(self):
+  with app.connect() as c:history=dashboard.portfolio_value_history(c,1,self.now)
+  self.assertEqual(history['periods'],{})
+  self.assertEqual(history['chart_domain']['value_freshness']['state'],'unknown')
+  self.assertIsNone(history['chart_domain']['history_source'])
  def test_root_history_does_not_double_count_collection_and_reports_real_points(self):
   self.save(self.root,'1000',self.now-timedelta(minutes=10),result='20');self.save(self.child,'300',self.now-timedelta(minutes=9));self.save(self.root,'1100',self.now,result='30')
   with app.connect() as c:

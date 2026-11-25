@@ -392,7 +392,7 @@ class EODHDAdapter:
     row=c.execute('SELECT s.received,s.is_open,c.received AS calendar_received,c.timezone,c.calendar FROM hw_exchange_status s JOIN hw_exchange_calendar c ON c.exchange=s.exchange WHERE s.exchange=?',(exchange,)).fetchone()
    if row and row['received']==row['calendar_received'] and row['is_open'] in (0,1):
     try:
-     if 0<=(utc()-stamp(row['received'])).total_seconds()<=max_age:
+     if 0<=(utc()-stamp(row['received'])).total_seconds()<=max_age/2:
       calendar=json.loads(row['calendar'])
       if isinstance(calendar,dict) and isinstance(row['timezone'],str):return {'status':'OK','exchange':exchange,'exchange_open':bool(row['is_open']),'received_at':row['received'],'timezone':row['timezone'],'calendar':calendar}
     except (ValueError,TypeError,KeyError):pass
@@ -562,6 +562,9 @@ class EODHDAdapter:
   # Explicit opt-in: one bounded live trade capture. If unavailable, use the
   # unchanged REST adapter. No inferred venue/session or fabricated bid/ask.
   exchange=symbol.rsplit('.',1)[1].upper() if '.' in symbol else ''
+  max_age=min(r['risk']['max_quote_age_s'],GLOBAL_RISK['max_quote_age_s'])
+  last_at=stamp(session['last_data']) if session.get('last_data') else None
+  ambiguous_at=None
   eu_exchanges={x.strip().upper() for x in os.environ.get('ESCAPE_HW_EODHD_WS_EU_EXCHANGES','CO,XETRA,AS,ST,OL').split(',') if re.fullmatch(r'[A-Za-z0-9_-]{1,16}',x.strip())}
   # CC is EODHD's virtual crypto market, not a supported EU equity stream.
   eu_exchanges.discard('CC')
@@ -581,7 +584,13 @@ class EODHDAdapter:
    if feed['status']=='LOCAL_BUDGET_EXHAUSTED':raise local_budget_error(feed)
    if feed['status']=='RATE_LIMIT':
     failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=feed.get('retry_after_s') or retry_seconds(None);raise failure
-   valid=[x for x in feed.get('messages',[]) if stamp(x['event_time'])<=utc() and (utc()-stamp(x['event_time'])).total_seconds()<=r['risk']['max_quote_age_s']] if feed['status']=='OK' else []
+   now=utc()
+   valid=[x for x in feed.get('messages',[]) if 0<=(now-stamp(x['event_time'])).total_seconds()<=max_age and (last_at is None or stamp(x['event_time'])>=last_at)] if feed['status']=='OK' else []
+   if valid:
+    latest=max(stamp(x['event_time']) for x in valid)
+    if len({Decimal(str(x['price'])) for x in valid if stamp(x['event_time'])==latest})>1:
+     ambiguous_at=latest
+     valid=[]
    if feed['status'] in ('OK','NO_MESSAGES','INCOMPLETE') and not valid and os.environ.get('ESCAPE_HW_EODHD_FUSE_ENABLED')=='1':
     standalone=self.capture(client,market+'_quotes',stream_symbol,session)
     self.last_feed_diagnostics['websocket_quote_status']=standalone.get('status')
@@ -596,13 +605,9 @@ class EODHDAdapter:
     elif partial_quotes:
      item=partial_quotes[-1];self.last_partial_observations.append({'source':'eodhd','price':None,'currency':r.get('quote_currency'),'source_time':None,'received_at':item.get('received_at'),'quality':'TIME_UNKNOWN','bid':item.get('bid'),'ask':item.get('ask')})
    if feed['status']=='OK':
-    if not valid:self.last_feed_diagnostics['websocket_trade_status']='STALE_OR_FUTURE'
+    if not valid:self.last_feed_diagnostics['websocket_trade_status']='AMBIGUOUS_SAME_TIMESTAMP' if ambiguous_at else 'STALE_OR_FUTURE'
     if valid:
      trade=max(valid,key=lambda x:stamp(x['event_time']));at=stamp(trade['event_time']);currency=r.get('quote_currency')
-     same_time=[x for x in valid if stamp(x['event_time'])==at]
-     if len({Decimal(str(x['price'])) for x in same_time})>1:
-      self.last_feed_diagnostics['websocket_trade_status']='AMBIGUOUS_SAME_TIMESTAMP'
-      failure=DataUnavailable('EODHD_AMBIGUOUS_TRADE');failure.position_context=context;raise failure
      if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):raise DataUnavailable('EODHD_CURRENCY_UNCONFIRMED')
      self.last_telemetry={'websocket_capture_ms':round(stream_ms,3),'pluto_context_ms':round(context_ms,3),'event_to_websocket_receive_ms':round((stamp(trade['received_at'])-at).total_seconds()*1000,3) if trade.get('received_at') else None}
      state=json.loads(session.get('state') or '{}');profile=state.get('adaptive_profile') or r['profile']
@@ -619,7 +624,7 @@ class EODHDAdapter:
        self.last_feed_diagnostics['websocket_quote_status']='LOCAL_BUDGET_EXHAUSTED';return sample
       status_feed=self.capture(client,market+'_status',stream_symbol,session) if quote_feed['status'] not in ('RATE_LIMIT','COLLECTING') else {'status':quote_feed['status']}
       self.last_feed_diagnostics.update(websocket_quote_status=quote_feed['status'],websocket_status_status=status_feed['status'])
-      now=utc();max_age=r['risk']['max_quote_age_s']
+      now=utc()
       fresh=lambda item:bool(item.get('event_time') and 0<=(now-stamp(item['event_time'])).total_seconds()<=max_age)
       quotes=[x for x in quote_feed.get('messages',[]) if fresh(x) and x.get('bid') and x.get('ask') and Decimal(x['bid'])>0 and Decimal(x['ask'])>=Decimal(x['bid'])]
       if quotes:
@@ -639,6 +644,7 @@ class EODHDAdapter:
        status=max(statuses,key=lambda x:stamp(x['event_time']))
        if status['trading_status']=='T':sample.update(market_status='REGULAR',session_key=at.date().isoformat()+':REGULAR',status_at=status['event_time'],status_feed=market+'_status')
        else:sample.update(market_status='UNKNOWN',session_key=at.date().isoformat()+':UNKNOWN');sample.pop('status_at',None);sample.pop('status_feed',None)
+      schedule=None
       if sample['market_status']=='UNKNOWN' and trade.get('market_session') in ('extended-hours','extended hours') and (not statuses or max(statuses,key=lambda x:stamp(x['event_time']))['trading_status']=='T'):
        schedule=self.market_status(client,exchange,max_age);self.last_feed_diagnostics['exchange_status']=schedule['status']
        if schedule['status']=='RATE_LIMIT':return sample
@@ -650,7 +656,8 @@ class EODHDAdapter:
         local_day=at.astimezone(ZoneInfo(schedule['timezone'])).date().isoformat()
         sample.update(market_status=phase,session_key=local_day+':'+phase,status_at=trade['event_time'],status_feed=market+'_trades')
       if sample['market_status'] in ('REGULAR','PRE','AFTER') and os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1':
-       schedule=self.market_status(client,exchange,max_age);self.last_feed_diagnostics['exchange_status']=schedule['status']
+       if schedule is None:schedule=self.market_status(client,exchange,max_age)
+       self.last_feed_diagnostics['exchange_status']=schedule['status']
        if schedule['status']=='LOCAL_BUDGET_EXHAUSTED':return sample
        if schedule['status']=='RATE_LIMIT':return sample
        if schedule.get('status')=='OK' and schedule.get('exchange_open') is (sample['market_status']=='REGULAR') and schedule.get('calendar') and schedule.get('timezone'):
@@ -662,24 +669,30 @@ class EODHDAdapter:
           from zoneinfo import ZoneInfo
           from hotwatch_features import verified_bar_samples
           zone=ZoneInfo(schedule['timezone']);local=at.astimezone(zone);calendar=schedule['calendar'];start=datetime.strptime(calendar['open'],'%H:%M:%S').time();end=datetime.strptime(calendar['close'],'%H:%M:%S').time()
+          history_at=stamp(bars['received_at']) if bars.get('received_at') else utc()
+          closed_by=min(at,history_at)
           same_session=[]
           for bar in bars.get('bars',[]):
            opened=stamp(bar['bar_open_at']);closed=opened+timedelta(seconds=60);lo=opened.astimezone(zone);lc=closed.astimezone(zone)
            phase=sample['market_status'];in_phase=lambda t:(start<=t<end) if phase=='REGULAR' else (t<start if phase=='PRE' else t>=end)
-           if lo.date()==local.date()==lc.date() and in_phase(lo.time()) and in_phase((closed-timedelta(microseconds=1)).astimezone(zone).time()) and closed<=at:
+           if lo.date()==local.date()==lc.date() and in_phase(lo.time()) and in_phase((closed-timedelta(microseconds=1)).astimezone(zone).time()) and closed<=closed_by:
             same_session.append({k:bar[k] for k in ('bar_open_at','open','high','low','close','volume')})
           evidence={'provider_symbol':symbol,'market':market,'exchange':exchange,'timezone':schedule['timezone'],'session_date':local.date().isoformat(),'open':calendar['open'],'close':calendar['close'],'working_days':calendar['working_days'],'excluded_dates':calendar['excluded_dates'],'schedule_received_at':schedule['received_at'],'exchange_open':schedule['exchange_open'],'feed':'eodhd_realtime_history'}
           if same_session:
+           same_session.sort(key=lambda bar:stamp(bar['bar_open_at']))
            sample.update(bar_history=same_session[-120:],bar_evidence=evidence)
            if verified_bar_samples(sample,r,utc()) is None:self.last_feed_diagnostics['bar_history_status']='EVIDENCE_UNVERIFIED'
            else:self.last_feed_diagnostics['bar_history_status']='VERIFIED'
           else:self.last_feed_diagnostics['bar_history_status']='NO_COMPARABLE_BARS'
          except (KeyError,ValueError,TypeError,ArithmeticError):self.last_feed_diagnostics['bar_history_status']='EVIDENCE_UNVERIFIED'
        else:self.last_feed_diagnostics['bar_history_status']='SCHEDULE_UNVERIFIED'
-     return sample
+     if 0<=(utc()-at).total_seconds()<=max_age:return sample
+     self.last_feed_diagnostics['websocket_trade_status']='STALE_AFTER_FUSION'
+     if sample.get('quote_feed'):
+      self.last_partial_observations.append({'source':'eodhd','price':None,'currency':currency,'source_time':sample['bid_at'],'received_at':utc().isoformat(),'quality':'TRADE_MISSING','bid':sample['bid'],'ask':sample['ask']})
   # Bar open times and close prices are recorded as such; never pretend that
   # the bar timestamp is the timestamp of its final trade.
-  if os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1' and (exchange=='US' or exchange in eu_exchanges):
+  if ambiguous_at is None and os.environ.get('ESCAPE_HW_EODHD_BARS_ENABLED')=='1' and (exchange=='US' or exchange in eu_exchanges):
    market='us' if exchange=='US' else 'eu';stream_symbol=realtime_symbol(symbol);client=self.feeds(priority_request);bars=client.minute_bars(market,stream_symbol);kind='realtime'
    self.last_feed_diagnostics['minute_bars_status']=bars['status']
    if bars['status']=='LOCAL_BUDGET_EXHAUSTED':raise local_budget_error(bars)
@@ -711,9 +724,13 @@ class EODHDAdapter:
     if bars['status']=='RATE_LIMIT':
      failure=DataUnavailable('EODHD_RATE_LIMIT',429);failure.retry_after_s=bars.get('retry_after_s') or retry_seconds(None);raise failure
    if bars['status']=='OK':
-    closed=[b for b in bars.get('bars',[]) if b.get('bar_open_at') and stamp(b['bar_open_at'])+timedelta(seconds=60)<=utc() and b.get('close') and Decimal(b['close'])>0 and (not session.get('last_data') or stamp(b['bar_open_at'])>=stamp(session['last_data']))]
-    if closed:
-     bar=max(closed,key=lambda b:stamp(b['bar_open_at']));at=stamp(bar['bar_open_at']);currency=r.get('quote_currency')
+    observed=utc()
+    closed_by=min(observed,stamp(bars['received_at'])) if bars.get('received_at') else observed
+    closed=[b for b in bars.get('bars',[]) if b.get('bar_open_at') and stamp(b['bar_open_at'])+timedelta(seconds=60)<=closed_by and b.get('close') and Decimal(b['close'])>0 and (last_at is None or stamp(b['bar_open_at'])>=last_at)]
+    fresh_closed=[b for b in closed if 0<=(observed-stamp(b['bar_open_at'])).total_seconds()<=max_age]
+    if closed and not fresh_closed:self.last_feed_diagnostics['bar_history_status']='STALE_FALLBACK_TO_REST'
+    if fresh_closed:
+     bar=max(fresh_closed,key=lambda b:stamp(b['bar_open_at']));at=stamp(bar['bar_open_at']);currency=r.get('quote_currency')
      if not isinstance(currency,str) or not re.fullmatch('[A-Z]{3}',currency):raise DataUnavailable('EODHD_CURRENCY_UNCONFIRMED')
      sample_id='eodhd-bar-'+hashlib.sha256((kind+symbol+bar['bar_open_at']).encode()).hexdigest()[:27];old=None
      if session.get('id') is not None:
@@ -746,7 +763,12 @@ class EODHDAdapter:
     raise DataUnavailable('EODHD_ENTITLEMENT_REJECTED' if error.code in [401,403] else 'EODHD_READ_ERROR') from None
    except EngineError:raise
    except Exception:raise DataUnavailable('EODHD_READ_OR_CONTRACT_ERROR') from None
-  d,received,http_ms,at,price=shared_quote(key,symbol,fetch_quote,self._shared_quotes)
+  try:d,received,http_ms,at,price=shared_quote(key,symbol,fetch_quote,self._shared_quotes)
+  except DataUnavailable as error:
+   if ambiguous_at is None or error.code in ('EODHD_RATE_LIMIT','PROVIDER_RATE_BUDGET','EODHD_DAILY_BUDGET'):raise
+   failure=DataUnavailable('EODHD_AMBIGUOUS_TRADE');failure.position_context=context;raise failure from error
+  if ambiguous_at is not None and (at<=ambiguous_at or not 0<=(utc()-at).total_seconds()<=max_age):
+   failure=DataUnavailable('EODHD_AMBIGUOUS_TRADE');failure.position_context=context;raise failure
   permitted_codes=[symbol,symbol.rsplit('.',1)[0]]+([] if symbol.upper().endswith('.CC') else [r['ticker']])
   if d.get('code') not in permitted_codes:raise DataUnavailable('EODHD_READ_OR_CONTRACT_ERROR')
   # A fallback snapshot can be older than a trade or bar already journalled.

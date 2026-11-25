@@ -17,7 +17,7 @@ class SparseFeedRecovery(unittest.TestCase):
  def tearDown(self):adapters._ws_batch_cache.clear();self.f.tearDown()
  def sample(self,held=False):
   s=fixture.tick(self.now,held=held)
-  s.update(source='eodhd',price_time_kind='trade',status_at=self.now.isoformat(),status_feed='us_trades',bid_at=self.now.isoformat(),ask_at=self.now.isoformat(),quote_feed='us_quotes')
+  s.update(source='eodhd',session_key=self.now.date().isoformat()+':REGULAR',price_time_kind='trade',status_at=self.now.isoformat(),status_feed='us_trades',bid_at=self.now.isoformat(),ask_at=self.now.isoformat(),quote_feed='us_quotes')
   # Forty actual bars with several omitted minutes, including one near the
   # tail. Do not synthesize zero-volume candles for any absent minute.
   offsets=[i for i in range(1,48) if i not in (3,8,13,20,27,34,41)]

@@ -691,7 +691,11 @@ def view(c,row,now=None):
   try:
    stored_evidence=json.loads(cxe_link['payload']);evidence={key:stored_evidence.get(key) for key in ('basis','reference_source','reference_created_at','cxe_symbol','cxe_symbols','cxe_references','primary_ticker','primary_mic','cxe_asset_class','catalog_source','catalog_received_at','catalog_exchange','catalog_type','pluto_type','type_note','symbol','isin','currency','currency_basis','last_revalidation_error')};pluto_evidence=stored_evidence.get('pluto') or {};evidence['pluto']={key:pluto_evidence.get(key) for key in ('ticker','name','exchange','currency','type')}
   except (ValueError,TypeError,AttributeError):instrument_match_verified=False
- quote_feed_verified=bool(latest_payload and latest_payload.get('source')=='eodhd' and latest_payload.get('verification')=='verified' and instrument_match_verified and stamp(sample['received']).timestamp()>=link['verified_epoch'])
+ quote_identity_since=link['verified_epoch'] if link else None
+ if instrument_match_verified and cxe_link:
+  continuous_since=stored_evidence.get('continuous_since_epoch')
+  if type(continuous_since) in (int,float) and 0<=continuous_since<=quote_identity_since:quote_identity_since=continuous_since
+ quote_feed_verified=bool(latest_payload and latest_payload.get('source')=='eodhd' and latest_payload.get('verification')=='verified' and instrument_match_verified and stamp(sample['received']).timestamp()>=quote_identity_since)
  if request.get('provider')=='eodhd' and (cxe_link or not row['is_test'] and request.get('purpose') in ('automatic discovery','automatic holding watch')) and not quote_feed_verified:
   if row['status']!='PAUSED':effective='NO_DATA';display_status='KURSKILDE IKKE BEKRÆFTET' if not instrument_match_verified and (provisional or not cxe_link) else 'MARKED LUKKET (ORDINÆR HANDEL)' if instrument_match_verified and regular['status']=='CLOSED' else 'DATA MANGLER';data_status['signal_status']='WAITING_FOR_DATA'
   data_status.update(identity_verification='verified' if instrument_match_verified else 'unverified',price=None,bid=None,ask=None,daily_change_pct=None,since_last_pct=None,momentum_pct={str(n):None for n in (1,5,15,30)},price_status='UNVERIFIED')
@@ -750,6 +754,10 @@ def view(c,row,now=None):
  # for the latest observation can establish signal warmup; an independent
  # historical-analysis cache cannot override a decision or data/risk gate.
  calculation=json.loads(last['payload']) if last else {}
+ if effective=='NO_DATA' and not stale and calculation.get('signal')=='NO_DATA' and calculation.get('data_timestamp')==row['last_data']:
+  display_reasons.extend(calculation.get('reason_codes',[]))
+  if calculation.get('supporting_metrics',{}).get('bar_history_status')=='INVALID_OR_STALE':
+   display_reasons.append('BAR_EVIDENCE_UNAVAILABLE')
  if effective=='NO_DATA' and display_status=='AFVENTER SIGNALDATA' and not stale and not row['last_error'] and data_status.get('price') is not None and set(calculation.get('reason_codes',[]))=={'WARMUP'} and calculation.get('data_timestamp')==row['last_data']:
   display_status='WARMUP'
  display_status={'PAUSED':'PAUSERET','COMPLETED':'AFSLUTTET','EXPIRED':'UDLØBET','ERROR':'FEJL'}.get(row['status'],display_status)
