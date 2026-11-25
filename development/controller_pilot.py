@@ -84,8 +84,21 @@ marker. A report, partial implementation, or failed test is not readiness.
     }[mode]
     return common + f"\\nRound {round_number}: {guidance}\\n"
 
-def codex_command(session=None):
-    cmd = ["codex", "--ask-for-approval", "never", "exec", "--sandbox", "workspace-write"]
+MODEL_POLICY = {
+    "release": ("gpt-6.2-sol", "medium"),
+    "mobile": ("gpt-6.2-sol", "high"),
+    "motor": ("gpt-6.2-astra", "high"),
+    "data": ("gpt-6.2-astra", "high"),
+    "desktop": ("gpt-6.2-sol", "high"),
+    "coordinator": ("gpt-6.2-sol", "medium"),
+}
+
+def model_args(role):
+    model, effort = MODEL_POLICY[role]
+    return ["--model", model, "-c", 'model_reasoning_effort="'+effort+'"']
+
+def codex_command(session=None,role="mobile"):
+    cmd = ["codex", "--ask-for-approval", "never", "exec", "--sandbox", "workspace-write"] + model_args(role)
     if session:
         return cmd + ["resume", "--json", session, "-"]
     return cmd + ["--json", "-"]
@@ -262,6 +275,7 @@ def main():
             p.error("existing ChatGPT login required; run codex login locally")
     if a.max_tokens <= 0:
         p.error("positive token ceiling required")
+    print("MODEL_POLICY:", a.role, *MODEL_POLICY[a.role], flush=True)
     session = None
     usage = 0
     gross_usage = 0
@@ -282,7 +296,7 @@ def main():
     def checkpoint(round_number, detail, completed, limit=False, reset_at=None):
         if a.checkpoint:
             tmp=a.checkpoint.with_suffix(".tmp")
-            tmp.write_text(json.dumps({"issue":a.issue,"generation":a.generation,"role":a.role,"round":round_number,"session":session,"usage":detail,"completed_turn":completed,"provider_limit":limit,"provider_reset_at":reset_at,"worktree_fingerprint":fingerprint()}))
+            tmp.write_text(json.dumps({"issue":a.issue,"generation":a.generation,"role":a.role,"model":MODEL_POLICY[a.role][0],"reasoning_effort":MODEL_POLICY[a.role][1],"cumulative_usage":usage,"round":round_number,"session":session,"usage":detail,"completed_turn":completed,"provider_limit":limit,"provider_reset_at":reset_at,"worktree_fingerprint":fingerprint()}))
             tmp.replace(a.checkpoint)
     def step(i, remaining):
         nonlocal session, usage, gross_usage, draft_ready, provider_limit, handed_over, fresh_approach
@@ -296,7 +310,7 @@ def main():
         fresh_approach=False
         phase("WORKING" if i==0 else "CONTINUING")
         try:
-            result = controller_events.run(codex_command(session),prompt,env,remaining,phase)
+            result = controller_events.run(codex_command(session,a.role),prompt,env,remaining,phase)
             new_session, tokens, completed = parse_events(result.stdout)
             session = new_session or session
             detail = usage_breakdown(result.stdout)
