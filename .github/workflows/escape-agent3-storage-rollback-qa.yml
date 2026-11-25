@@ -1,0 +1,39 @@
+name: ESCAPE agent3 storage rollback QA
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [codex/agent3-storage-combined-qa-20261125]
+permissions:
+  contents: read
+jobs:
+  rollback:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/agent3-storage-rollback-qa-20261125'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65
+          path: frozen-reader
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - name: Offline restore and cardinality
+        env:
+          PYTHONPATH: .:tests
+          ESCAPE_QA_FROZEN_READER: frozen-reader/strategy_lab.py
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git -C frozen-reader rev-parse HEAD)" = "3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65"
+          python -m unittest -v tests.test_hotwatch_storage_rollback_qa.StorageRollbackQA
+      - name: Regression
+        env:
+          PYTHONPATH: .:tests
+        run: python -m unittest tests.test_hotwatch_engine tests.test_hotwatch_bar_evidence tests.test_candidate_lifecycle tests.test_hotwatch_buy_plan tests.test_web_push tests.test_strategy_lab tests.test_hotwatch_warmup tests.test_strategy_center tests.test_eodhd_feeds
