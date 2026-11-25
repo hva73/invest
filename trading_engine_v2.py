@@ -1,4 +1,4 @@
-"""Pure, simulation-only evaluation of versioned HOT WATCH rules."""
+"""Simulation-only evaluation of versioned HOT WATCH rules."""
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from json import loads
 from math import isfinite
 from types import MappingProxyType
 from typing import Literal
@@ -415,6 +416,114 @@ def switch_position_strategy(
         scope_digest, entry_origin, prior, target, at.isoformat(), observed.isoformat(), snapshot,
         previous.digest if previous is not None else None,
     )
+
+
+def setup_test_position_switch_history(connect):
+    """Explicitly initialize the v1 journal on the caller's simulation database."""
+    with connect() as connection:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS test_position_switch_history_v1 (
+                user_id INTEGER NOT NULL,
+                portfolio_id INTEGER NOT NULL,
+                position_id TEXT NOT NULL,
+                trade_cycle_id TEXT NOT NULL,
+                sequence INTEGER NOT NULL,
+                digest TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                PRIMARY KEY (user_id, portfolio_id, position_id, trade_cycle_id, sequence),
+                UNIQUE (user_id, portfolio_id, position_id, trade_cycle_id, digest)
+            )
+        """)
+
+
+def _position_switch_chain_key(scope):
+    if (scope.is_test is not True or type(scope.user_id) is not int or scope.user_id <= 0
+            or type(scope.portfolio_id) is not int or scope.portfolio_id <= 0
+            or not all(isinstance(value, str) and value.strip() for value in (
+                scope.position_id, scope.trade_cycle_id, scope.exchange, scope.asset_id,
+            ))):
+        raise ValueError("POSITION_SCOPE_MISMATCH")
+    return scope.user_id, scope.portfolio_id, scope.position_id, scope.trade_cycle_id
+
+
+def _read_position_switch_chain(connection, scope, key):
+    history = []
+    scope_digest = scope.digest
+    rows = connection.execute("""
+        SELECT sequence, digest, payload FROM test_position_switch_history_v1
+        WHERE user_id = ? AND portfolio_id = ? AND position_id = ? AND trade_cycle_id = ?
+        ORDER BY sequence
+    """, key)
+    for sequence, digest, payload in rows:
+        try:
+            fields = loads(payload)
+            origin = DecisionOrigin(**fields.pop("entry_origin"))
+            for name in ("prior_strategy", "new_strategy"):
+                fields[name] = tuple(fields[name])
+            transition = PositionStrategySwitch(entry_origin=origin, **fields)
+            previous = history[-1] if history else None
+            linked = (
+                transition.previous_digest == previous.digest
+                and origin == previous.entry_origin
+                and transition.prior_strategy == previous.new_strategy
+                and stamp(transition.effective_at) > stamp(previous.effective_at)
+                and stamp(transition.observed_at) >= stamp(previous.effective_at)
+                and stamp(transition.observed_at) > stamp(previous.observed_at)
+            ) if previous else (
+                transition.previous_digest is None
+                and transition.prior_strategy == (
+                    origin.strategy_id, origin.strategy_version, origin.strategy_checksum,
+                )
+            )
+            if (sequence != len(history) + 1 or not linked
+                    or canonical(asdict(transition)) != payload or transition.digest != digest):
+                raise ValueError("Invalid journal row")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("POSITION_SWITCH_HISTORY_INVALID") from exc
+        if transition.scope_digest != scope_digest:
+            raise ValueError("POSITION_SCOPE_MISMATCH")
+        history.append(transition)
+    return tuple(history)
+
+
+def read_test_position_switch_history(connect, scope: Scope) -> tuple[PositionStrategySwitch, ...]:
+    """Read the verified chain for a caller-authorized simulation scope."""
+    key = _position_switch_chain_key(scope)
+    with connect() as connection:
+        return _read_position_switch_chain(connection, scope, key)
+
+
+def append_test_position_strategy_switch(
+    connect,
+    scope: Scope,
+    entry_origin: DecisionOrigin,
+    held: Evidence,
+    effective_at: datetime,
+    strategy_id: str,
+    version: str,
+    catalog: dict[tuple[int, str, str], tuple[dict, str]],
+    previous: PositionStrategySwitch | None = None,
+) -> PositionStrategySwitch:
+    """Validate and append using the predecessor expected by the caller."""
+    key = _position_switch_chain_key(scope)
+    transition = switch_position_strategy(
+        scope, entry_origin, held, effective_at, strategy_id, version, catalog, previous,
+    )
+    digest = transition.digest
+    with connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        history = _read_position_switch_chain(connection, scope, key)
+        if transition in history:
+            return transition
+        head = history[-1] if history else None
+        if head != previous or transition is previous:
+            raise ValueError("POSITION_SWITCH_STALE")
+        connection.execute("""
+            INSERT INTO test_position_switch_history_v1
+                (user_id, portfolio_id, position_id, trade_cycle_id, sequence, digest, payload)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (*key, len(history) + 1, digest, canonical(asdict(transition))))
+    return transition
 
 
 def evaluate(

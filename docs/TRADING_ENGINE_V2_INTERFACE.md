@@ -126,7 +126,24 @@ og dens nye strategispec. Evalueringen kræver samme scope og en
 positionskontekst med matchende `scope_digest`, `entry_digest` og `as_of`
 fra eller efter skiftet. Exit-oprindelsen binder overgangens digest og bruger den gældende
 risikogate. Strategiskiftet har ingen ordre- eller stophandling.
-Grænsefladen er lokal simulation uden persistence, UI eller live-rute.
+
+For varig historik bruger den lokale testadapter det eksisterende
+`connect()`-interface, som åbner en SQLite-forbindelse pr. kald.
+Kalderen leverer en simulationsdatabase og et autoriseret `Scope`
+med `is_test=True`. `setup_test_position_switch_history(connect)` opretter
+versionslåst skema eksplicit. Skemaet er afgrænset til denne adapter og
+indgår ikke i produktionsmigrationer.
+
+`append_test_position_strategy_switch(connect, ...)` tager de samme
+input som det rene strategiskift. Den sammenholder `previous` med den
+gemte kædes seneste overgang i én SQLite-skrivetransaktion. Identiske
+gentagelser returnerer den oprindelige overgang, også efter senere skift.
+Afvigende gentagelser med en forældet forgænger afvises.
+`read_test_position_switch_history(connect, scope)` returnerer kæden
+i rækkefølge for bruger, depot, position og handelsforløb. Begge kald
+kontrollerer det fulde scope, rækkefølge, forgængerlinks og gemte digests.
+Hvert trin fastholder entry-oprindelse, strategiversioner og positions-
+evidens som et snapshot. Adapteren har ingen UI eller live-rute.
 
 ## Replay i Strategy Lab
 

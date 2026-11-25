@@ -1,8 +1,11 @@
 import json
+import sqlite3
 import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from hotwatch_contract import GLOBAL_RISK, checksum
@@ -12,8 +15,17 @@ import trading_engine_v2
 from trading_engine_v2 import (
     Evidence, MarketAccess, MarketFeatureInput, MarketHistory, MarketIdentity, MarketSubscriber,
     Scope, VerifiedExecution, evaluate, market_features_batch, shared_market_features_batch,
-    switch_position_strategy,
+    append_test_position_strategy_switch, read_test_position_switch_history,
+    setup_test_position_switch_history, switch_position_strategy,
 )
+
+
+class SimulationConnection(sqlite3.Connection):
+    def __exit__(self, *exc):
+        try:
+            return super().__exit__(*exc)
+        finally:
+            self.close()
 
 
 class TradingEngineV2Tests(unittest.TestCase):
@@ -613,6 +625,69 @@ class TradingEngineV2Tests(unittest.TestCase):
         self.assertEqual(second.previous_digest, first.digest)
         self.assertEqual(second.prior_strategy, first.new_strategy)
         self.assertEqual(second.entry_origin, first.entry_origin)
+
+    def position_switch_database(self):
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "simulation.sqlite"
+
+        def connect():
+            connection = sqlite3.connect(path, factory=SimulationConnection)
+            connection.row_factory = sqlite3.Row
+            return connection
+
+        setup_test_position_switch_history(connect)
+        return connect
+
+    def test_position_switch_history_reopens_and_rejects_stale_writes(self):
+        connect = self.position_switch_database()
+        inputs = self.position_switch_inputs()
+        scope, held = inputs["scope"], inputs["held"]
+        first = append_test_position_strategy_switch(connect, **inputs)
+        next_at = self.later + timedelta(seconds=1)
+        refresh = replace(held, event_time=next_at, available_at=next_at,
+                          value=held.value | {"as_of": next_at.isoformat(), "cost_price": "101"})
+        next_inputs = inputs | {
+            "previous": first, "effective_at": next_at, "held": refresh,
+            "strategy_id": EARLY_CATALYST_V1["strategy_id"],
+        }
+        second = append_test_position_strategy_switch(connect, **next_inputs)
+        self.assertEqual(append_test_position_strategy_switch(connect, **inputs), first)
+        self.assertEqual(append_test_position_strategy_switch(connect, **next_inputs), second)
+        competing = next_inputs | {"held": replace(refresh, value=refresh.value | {"cost_price": "99"})}
+        with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_STALE"):
+            append_test_position_strategy_switch(connect, **competing)
+        setup_test_position_switch_history(connect)
+        history = read_test_position_switch_history(connect, scope)
+        self.assertEqual(history, (first, second))
+        self.assertEqual(history[1].previous_digest, history[0].digest)
+        self.assertEqual(history[1].entry_origin, inputs["entry_origin"])
+        self.assertEqual(json.loads(history[0].held_evidence)["value"], held.value)
+        self.assertEqual(json.loads(history[1].held_evidence)["value"], refresh.value)
+
+    def test_position_switch_history_isolates_scopes_and_detects_corruption(self):
+        connect = self.position_switch_database()
+        inputs = self.position_switch_inputs()
+        scope = inputs["scope"]
+        first = append_test_position_strategy_switch(connect, **inputs)
+        for change in ({"user_id": 8}, {"portfolio_id": 4}, {"position_id": "other"},
+                       {"trade_cycle_id": "other"}):
+            other = replace(scope, **change)
+            self.assertEqual(read_test_position_switch_history(connect, other), ())
+            with self.assertRaisesRegex(ValueError, "POSITION_SCOPE_MISMATCH|POSITION_EVIDENCE_UNVERIFIED"):
+                append_test_position_strategy_switch(connect, **(inputs | {"scope": other}))
+        for other in (replace(scope, is_test=False), replace(scope, asset_id="other")):
+            with self.assertRaisesRegex(ValueError, "POSITION_SCOPE_MISMATCH"):
+                read_test_position_switch_history(connect, other)
+        with self.assertRaisesRegex(ValueError, "POSITION_SCOPE_MISMATCH"):
+            append_test_position_strategy_switch(connect, **(inputs | {"scope": replace(scope, is_test=False)}))
+        self.assertEqual(read_test_position_switch_history(connect, scope), (first,))
+        with connect() as connection:
+            connection.execute("UPDATE test_position_switch_history_v1 SET digest = 'corrupt'")
+        with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
+            read_test_position_switch_history(connect, scope)
+        with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
+            append_test_position_strategy_switch(connect, **inputs)
 
 
 if __name__ == "__main__":
