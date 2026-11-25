@@ -120,3 +120,73 @@ class LiveStorageTests(unittest.TestCase):
             result=inspect(p,seconds=.000001,table="hw_reference_cache")
             self.assertEqual(result["status"],"partial")
             self.assertNotIn("table_totals",result)
+
+    def test_backup_scope_date_and_age_reference(self):
+        from unittest.mock import patch
+        from tools import inspect_live_storage_bounded as census
+        with tempfile.TemporaryDirectory() as d:
+            live=Path(d)/"live.db"
+            backup=Path(d)/"backup.db"
+            captured=1700000000
+            for p in (live,backup):
+                with sqlite3.connect(p) as db:
+                    db.execute("CREATE TABLE hw_samples(payload TEXT,event_epoch REAL)")
+                    db.execute("INSERT INTO hw_samples VALUES (?,?)",("private",captured-60))
+            with patch.object(census,"LIVE",live):
+                self.assertEqual(inspect(live)["scope"],"live_read_only_aggregate")
+                self.assertEqual(inspect(backup)["scope"],"offline_unclassified_read_only_aggregate")
+                before=backup.read_bytes()
+                result=inspect(backup,table="hw_samples",backup_epoch=captured)
+                self.assertEqual(result["scope"],"operator_dated_backup_read_only_aggregate")
+                self.assertEqual(result["backup_epoch"],captured)
+                self.assertEqual(result["age_reference_epoch"],captured)
+                self.assertGreater(result["observed_epoch"],captured)
+                self.assertEqual(result["table_totals"]["age_buckets"]["under_1d"]["rows"],1)
+                self.assertEqual(backup.read_bytes(),before)
+                self.assertNotIn("private",str(result))
+                for epoch in (0,float("nan"),float("inf"),-1,99999999999):
+                    with self.assertRaisesRegex(ValueError,"invalid_backup_epoch"):
+                        inspect(backup,backup_epoch=epoch)
+                with self.assertRaisesRegex(ValueError,"backup_age_reference_mismatch"):
+                    inspect(backup,backup_epoch=captured,now=captured+1)
+                with self.assertRaisesRegex(ValueError,"live_not_backup"):
+                    inspect(live,backup_epoch=captured)
+                alias=Path(d)/"alias.db"
+                alias.hardlink_to(live)
+                with self.assertRaisesRegex(ValueError,"live_not_backup"):
+                    inspect(alias,backup_epoch=captured)
+
+    def test_offline_compaction_fixture_preserves_evidence(self):
+        # Synthetic only: no operator path, no live VACUUM, no retention
+        # of trading, learning or journal rows. The source stays byte-identical.
+        from contextlib import closing
+        with tempfile.TemporaryDirectory() as d:
+            source=Path(d)/"fixture.db"
+            candidate=Path(d)/"compacted.db"
+            with closing(sqlite3.connect(source)) as db:
+                db.execute("PRAGMA foreign_keys=ON")
+                db.executescript("""
+                    CREATE TABLE hw_samples(id INTEGER PRIMARY KEY,payload BLOB);
+                    CREATE TABLE hw_calculations(id INTEGER PRIMARY KEY,
+                        sample_id INTEGER REFERENCES hw_samples(id),payload TEXT);
+                    CREATE TABLE trade_journal(id INTEGER PRIMARY KEY,payload TEXT);
+                    CREATE TABLE scratch(id INTEGER PRIMARY KEY,payload BLOB);
+                """)
+                db.execute("INSERT INTO hw_samples VALUES(7,?)",(b"sample",))
+                db.execute("INSERT INTO hw_calculations VALUES(19,7,'calculation')")
+                db.execute("INSERT INTO trade_journal VALUES(33,'trade')")
+                db.executemany("INSERT INTO scratch(payload) VALUES(?)",[(b"x"*4000,)]*150)
+                db.execute("DELETE FROM scratch")
+                db.commit()
+            before=source.read_bytes()
+            with closing(sqlite3.connect(source.as_uri()+"?mode=ro",uri=True)) as db:
+                db.execute("VACUUM INTO ?",(str(candidate),))
+            self.assertEqual(source.read_bytes(),before)
+            self.assertLess(candidate.stat().st_size,source.stat().st_size)
+            with closing(sqlite3.connect(candidate.as_uri()+"?mode=ro",uri=True)) as db:
+                self.assertEqual(db.execute("PRAGMA integrity_check").fetchall(),[("ok",)])
+                self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(),[])
+                self.assertEqual(db.execute("SELECT * FROM hw_samples").fetchall(),[(7,b"sample")])
+                self.assertEqual(db.execute("SELECT * FROM hw_calculations").fetchall(),[(19,7,"calculation")])
+                self.assertEqual(db.execute("SELECT * FROM trade_journal").fetchall(),[(33,"trade")])
+                self.assertEqual(db.execute("SELECT count(*) FROM scratch").fetchone(),(0,))

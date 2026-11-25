@@ -1,6 +1,7 @@
 """Owner-run bounded read-only SQLite storage census; no copies or mutations."""
 import argparse
 import json
+import math
 import os
 import sqlite3
 import stat
@@ -50,8 +51,23 @@ def table_totals(db, table, now):
             "age_buckets":{label:{"rows":row[2+2*i],"payload_bytes":row[3+2*i]}
                            for i,label in enumerate(AGE_BUCKETS)}}
 
-def inspect(path=LIVE, seconds=8, table=None, now=None):
+def inspect(path=LIVE, seconds=8, table=None, now=None, backup_epoch=None):
     path=Path(path)
+    observed=time.time()
+    # Never label a non-live path as production. A backup date is supplied by
+    # the operator from the verified archive manifest, not inferred from mtime.
+    live=path.absolute()==LIVE
+    if backup_epoch is not None:
+        if live or (LIVE.exists() and path.exists() and path.samefile(LIVE)):
+            raise ValueError("live_not_backup")
+        if not math.isfinite(backup_epoch) or not 0<backup_epoch<=observed:
+            raise ValueError("invalid_backup_epoch")
+        if now is not None and now!=backup_epoch:
+            raise ValueError("backup_age_reference_mismatch")
+        now=backup_epoch
+    scope=("live_read_only_aggregate" if live else
+           "operator_dated_backup_read_only_aggregate" if backup_epoch is not None else
+           "offline_unclassified_read_only_aggregate")
     if table is not None and table not in TABLES:raise ValueError("unknown_table")
     now=time.time() if now is None else now
     if not 0<seconds<=15:raise ValueError("invalid_deadline")
@@ -64,7 +80,7 @@ def inspect(path=LIVE, seconds=8, table=None, now=None):
     if header[:16]!=b"SQLite format 3\0" or header[18:20]!=b"\x01\x01":
         raise ValueError("unsupported_journal_mode")
     deadline=time.monotonic()+seconds
-    report={"status":"partial","file_bytes":initial.st_size,"objects":None,"observed_epoch":now,"table":table}
+    report={"status":"partial","file_bytes":initial.st_size,"objects":None,"observed_epoch":observed,"age_reference_epoch":now,"table":table}
     with closing(sqlite3.connect(path.absolute().as_uri()+"?mode=ro",uri=True,timeout=.15,isolation_level=None)) as db:
         db.execute("PRAGMA query_only=ON")
         db.set_progress_handler(lambda: int(time.monotonic()>=deadline),1000)
@@ -119,7 +135,12 @@ def inspect(path=LIVE, seconds=8, table=None, now=None):
             if db.in_transaction:db.rollback()
     current=path.stat()
     if (initial.st_dev,initial.st_ino)!=(current.st_dev,current.st_ino):raise ValueError("database_replaced")
-    report["scope"]="live_read_only_aggregate"
+    if backup_epoch is not None:
+        if (initial.st_size,initial.st_mtime_ns,initial.st_ctime_ns)!=(current.st_size,current.st_mtime_ns,current.st_ctime_ns):
+            raise ValueError("backup_changed")
+        report["backup_epoch"]=backup_epoch
+        report["backup_provenance"]="operator_supplied_not_independently_verified"
+    report["scope"]=scope
     report["elapsed_seconds"]=round(seconds-max(0,deadline-time.monotonic()),3)
     return report
 
