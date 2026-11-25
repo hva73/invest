@@ -223,7 +223,7 @@ def write_status(root, reason, active, waiting=(), review=(), coordinator_capabl
     except OSError as exc:
         print("STATUS_UNAVAILABLE:",type(exc).__name__,flush=True)
 
-def coordinate(root, repo_dir, rows, results, waiting, review, reserve_review=lambda: True):
+def coordinate(root, repo_dir, rows, results, waiting, review, reserve_review=lambda: True, repair_allowance=60000):
     stopped=threading.Event()
     def heartbeat():
         while not stopped.is_set():
@@ -232,7 +232,7 @@ def coordinate(root, repo_dir, rows, results, waiting, review, reserve_review=la
     reporter=threading.Thread(target=heartbeat,daemon=True)
     reporter.start()
     try:
-        return controller_coordinator.run_once(root,repo_dir,rows,results,reserve_review=reserve_review)
+        return controller_coordinator.run_once(root,repo_dir,rows,results,reserve_review=reserve_review,repair_allowance=repair_allowance)
     finally:
         stopped.set(); reporter.join()
 
@@ -297,7 +297,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                             return False
                         save(statefile,state)
                         return True
-                    if coordinate(root,script.parent.parent,rows_before_effective,results,waiting,review,reserve_review):
+                    if coordinate(root,script.parent.parent,rows_before_effective,results,waiting,review,reserve_review,a.per_task):
                         continue
                     paused=provider_pause_active(root)
                 selected=[] if paused else plan(rows,max_parallel=a.parallel)
