@@ -396,7 +396,7 @@
     "generation": 5,
     "role": "data",
     "priority": 1,
-    "status": "blocked",
+    "status": "ready",
     "base_branch": "codex/trading-engine-v2-integration",
     "base_sha": "677789559f8b0bc84b98c0694df9947c99181f49",
     "dependencies": [
