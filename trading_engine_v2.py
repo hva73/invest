@@ -6,9 +6,11 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from math import isfinite
+from types import MappingProxyType
 from typing import Literal
 
-from hotwatch_contract import canonical, checksum
+from hotwatch_contract import GLOBAL_RISK, canonical, checksum
 from hotwatch_features import features
 from hotwatch_strategy import exit_context_key, risk_gate, rule_state, validate_strategy
 from report_validation import stamp
@@ -72,6 +74,43 @@ class MarketFeatureInput:
     parameters: dict
 
 
+@dataclass(frozen=True)
+class MarketIdentity:
+    exchange: str
+    asset_id: str
+    currency: str
+    provider: str
+    feed: str
+    timeframe: str
+    revision: str
+    entitlement: str
+    feature_version: str
+    is_test: bool
+
+
+@dataclass(frozen=True)
+class MarketHistory:
+    identity: MarketIdentity
+    as_of: datetime
+    samples: tuple[Evidence, ...]
+
+
+@dataclass(frozen=True)
+class MarketAccess:
+    """Value of locally verified entitlement evidence supplied by the caller."""
+
+    user_id: int
+    identity: MarketIdentity
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class MarketSubscriber:
+    scope: Scope
+    access: Evidence
+    parameters: dict
+
+
 # Fields read by features(), plus timestamps that establish availability.
 _MARKET_FIELDS = (
     "source", "asset_id", "currency", "venue", "session_key", "market_status",
@@ -81,6 +120,79 @@ _MARKET_FIELDS = (
 )
 _FEATURE_PERIODS = ("short_period", "long_period", "rsi_period", "atr_period", "breakout_window")
 _MARKET_BATCH_CACHE_LIMIT = 128
+
+
+_INVALID_MARKET_INPUT = (AttributeError, KeyError, TypeError, ValueError, ArithmeticError)
+
+
+def _feature_parameters(parameters):
+    periods = {name: int(parameters[name]) for name in _FEATURE_PERIODS}
+    periods["momentum_window_minutes"] = int(parameters.get("momentum_window_minutes", 3))
+    if min(periods.values()) < 1:
+        raise ValueError("Feature periods must be positive")
+    return periods
+
+
+def _has_sources(evidence):
+    return (bool(evidence.source_ids) and all(isinstance(source, str) and source.strip() for source in evidence.source_ids))
+
+
+def _market_rows(samples, as_of, asset_id, identity=None):
+    rows, provenance = [], []
+    previous = bar_interval = None
+    for sample in samples:
+        event, available = _utc(sample.event_time), _utc(sample.available_at)
+        row = {name: sample.value[name] for name in _MARKET_FIELDS if name in sample.value}
+        end = event
+        if row.get("price_time_kind") == "bar_open":
+            if row["interval_s"] <= 0:
+                raise ValueError("Invalid market bar interval")
+            end += timedelta(seconds=row["interval_s"])
+        if (not _has_sources(sample) or not end <= available <= as_of
+                or row["asset_id"] != asset_id or stamp(row["event_time"]) != event
+                or any(row.get(name) and stamp(row[name]) > available
+                       for name in ("bid_at", "ask_at", "status_at"))):
+            raise ValueError("Market feature evidence unavailable")
+        if identity is not None:
+            price = Decimal(str(row["price"]))
+            if (not isinstance(sample.source_ids, tuple)
+                    or any(type(value) not in (str, int, float, bool, type(None))
+                           or (type(value) is float and not isfinite(value)) for value in row.values())
+                    or row["verification"] != "verified" or sample.value.get("error_code") is not None
+                    or (row["source"], row["feed_type"], row["venue"], row["currency"])
+                    != (identity.provider, identity.feed, identity.exchange, identity.currency)
+                    or row.get("price_time_kind") not in ("trade", "bar_open", "snapshot")
+                    or (previous is not None and event <= previous)
+                    or not price.is_finite() or price <= 0):
+                raise ValueError("Unverified or mismatched market observation")
+            if row["price_time_kind"] == "bar_open":
+                if bar_interval is None:
+                    unit_seconds = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+                    bar_interval = int(identity.timeframe[:-1]) * unit_seconds[identity.timeframe[-1]]
+                if type(row["interval_s"]) is not int or bar_interval != row["interval_s"]:
+                    raise ValueError("Market bar timeframe mismatch")
+        rows.append(row)
+        provenance.append((event, available, sample.source_ids))
+        previous = event
+    if not rows:
+        raise ValueError("Market history is empty")
+    if identity is not None:
+        oldest = as_of - timedelta(seconds=GLOBAL_RISK["max_quote_age_s"])
+        if end < oldest or any(row.get(name) and stamp(row[name]) < oldest
+                               for name in ("bid_at", "ask_at", "status_at")):
+            raise ValueError("Market history is stale")
+    return rows, provenance
+
+
+def _market_facts(rows, parameters, event, available, sources):
+    return {name: Evidence(value, event, available, sources)
+            for name, value in features(rows, parameters).items()}
+
+
+def _market_provenance(provenance):
+    return (max(event for event, _, _ in provenance),
+            max(available for _, available, _ in provenance),
+            tuple(dict.fromkeys(source for _, _, sources in provenance for source in sources)))
 
 
 def market_features_batch(requests: Iterable[MarketFeatureInput]) -> list[dict[str, Evidence]]:
@@ -94,44 +206,71 @@ def market_features_batch(requests: Iterable[MarketFeatureInput]) -> list[dict[s
                         request.feed, request.timeframe, request.revision, request.entitlement,
                         request.feature_version)
             if (not all(isinstance(value, str) and value.strip() for value in identity)
-                    or type(request.scope.is_test) is not bool or not request.samples):
+                    or type(request.scope.is_test) is not bool):
                 raise ValueError("Market feature identity is required")
-            parameters = {name: int(request.parameters[name]) for name in _FEATURE_PERIODS}
-            parameters["momentum_window_minutes"] = int(request.parameters.get("momentum_window_minutes", 3))
-            if min(parameters.values()) < 1:
-                raise ValueError("Feature periods must be positive")
-            rows, provenance = [], []
-            for sample in request.samples:
-                event, available = _utc(sample.event_time), _utc(sample.available_at)
-                row = {name: sample.value[name] for name in _MARKET_FIELDS if name in sample.value}
-                if (not sample.visible(as_of)
-                        or not all(isinstance(source, str) and source.strip() for source in sample.source_ids)
-                        or row["asset_id"] != request.scope.asset_id
-                        or stamp(row["event_time"]) != event
-                        or (row.get("price_time_kind") == "bar_open"
-                            and (row["interval_s"] <= 0
-                                 or event + timedelta(seconds=row["interval_s"]) > available))
-                        or any(row.get(name) and stamp(row[name]) > available
-                               for name in ("bid_at", "ask_at", "status_at"))):
-                    raise ValueError("Market feature evidence unavailable")
-                rows.append(row)
-                provenance.append((event.isoformat(), available.isoformat(), sample.source_ids))
-            key = checksum((identity, request.scope.is_test, as_of.isoformat(),
-                            parameters, rows, provenance))
+            parameters = _feature_parameters(request.parameters)
+            rows, provenance = _market_rows(request.samples, as_of, request.scope.asset_id)
+            key = checksum((identity, request.scope.is_test, as_of.isoformat(), parameters, rows,
+                            [(event.isoformat(), available.isoformat(), sources)
+                             for event, available, sources in provenance]))
             facts = cache.get(key)
             if facts is None:
-                computed = features(rows, parameters)
-                event = max(_utc(sample.event_time) for sample in request.samples)
-                available = max(_utc(sample.available_at) for sample in request.samples)
-                sources = tuple(dict.fromkeys(source for sample in request.samples
-                                              for source in sample.source_ids))
-                facts = {name: Evidence(value, event, available, sources)
-                         for name, value in computed.items()}
+                facts = _market_facts(rows, parameters, *_market_provenance(provenance))
                 if len(cache) < _MARKET_BATCH_CACHE_LIMIT:
                     cache[key] = facts
-        except (AttributeError, KeyError, TypeError, ValueError, ArithmeticError):
+        except _INVALID_MARKET_INPUT:
             facts = {}
         results.append(dict(facts))
+    return results
+
+
+def shared_market_features_batch(
+    history: MarketHistory, subscribers: Iterable[MarketSubscriber],
+) -> list[dict[str, Evidence]]:
+    """Resolve one local market capture and fan out features to its entitled subscribers."""
+    subscribers = tuple(subscribers)
+    results = [{} for _ in subscribers]
+    try:
+        identity = history.identity
+        as_of = _utc(history.as_of)
+        fields = asdict(identity)
+        fields.pop("is_test")
+        if (not all(isinstance(value, str) and value.strip() for value in fields.values())
+                or identity.is_test is not True or identity.provider not in ("eodhd", "pluto")):
+            raise ValueError("Verified simulation market identity is required")
+        rows, provenance = _market_rows(history.samples, as_of, identity.asset_id, identity)
+        capture = tuple(MappingProxyType(row) for row in rows)
+        metadata = _market_provenance(provenance)
+    except _INVALID_MARKET_INPUT:
+        return results
+
+    groups = {}
+    for index, subscriber in enumerate(subscribers):
+        try:
+            scope, access = subscriber.scope, subscriber.access
+            grant = access.value
+            if (scope.is_test is not identity.is_test
+                    or (scope.exchange, scope.asset_id) != (identity.exchange, identity.asset_id)
+                    or not isinstance(grant, MarketAccess)
+                    or type(scope.user_id) is not int or scope.user_id <= 0
+                    or type(grant.user_id) is not int or grant.user_id != scope.user_id
+                    or grant.identity.is_test is not identity.is_test or grant.identity != identity
+                    or not isinstance(access.source_ids, tuple) or not _has_sources(access)
+                    or not access.visible(as_of)
+                    or _utc(grant.expires_at) <= as_of):
+                continue
+            key = tuple(_feature_parameters(subscriber.parameters).items())
+            groups.setdefault(key, []).append(index)
+        except _INVALID_MARKET_INPUT:
+            continue
+
+    for key, indexes in groups.items():
+        try:
+            facts = _market_facts(capture, dict(key), *metadata)
+        except _INVALID_MARKET_INPUT:
+            continue
+        for index in indexes:
+            results[index] = dict(facts)
     return results
 
 
