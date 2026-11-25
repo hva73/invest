@@ -4,6 +4,7 @@ from contextlib import closing
 from unittest.mock import patch
 from datetime import datetime,timedelta,timezone
 import app,report_ingest,hotwatch_engine as engine,strategy_lab
+import long_term_watch as watch
 from hotwatch_contract import checksum
 from hotwatch_strategy import EARLY_CATALYST_V1
 from test_intel_workflows import merc_report
@@ -398,6 +399,110 @@ class V2Replay(unittest.TestCase):
   self.assertIsNotNone(baseline['snapshot_checksum'])
   for alternative in (short, long):
    self.assertEqual(alternative['reason_codes'], ['FEATURE_BAR_REVISION_UNVERIFIED'])
+
+
+class LongTermWatch(unittest.TestCase):
+ def setUp(self):
+  temp = tempfile.TemporaryDirectory()
+  self.addCleanup(temp.cleanup)
+  self.addCleanup(setattr, app, 'DB', app.DB)
+  app.DB = temp.name + '/db'
+  self.at = '2026-11-24T21:00:00+00:00'
+  self.identity = dict(asset_id='pluto-fixture-001', ticker='FIX', name='Fixture',
+                       exchange='NASDAQ', currency='USD')
+  self.asset_id = self.identity['asset_id']
+  epoch = datetime.fromisoformat(self.at).timestamp()
+  import candidate_lifecycle, market_data, portfolio_data, portfolios
+  with app.connect() as c:
+   c.execute('CREATE TABLE users(id INTEGER PRIMARY KEY, username TEXT, role TEXT, active INTEGER)')
+   c.execute('CREATE TABLE proposals(id INTEGER PRIMARY KEY, user_id INTEGER, portfolio TEXT)')
+   portfolios.init(c)
+   portfolio_data.init(c)
+   report_ingest.init(c)
+   candidate_lifecycle.init(c)
+   market_data.init(c)
+   watch.init(c)
+   watch.init(c)
+  fixture_users()
+  with app.connect() as c:
+   portfolio = c.execute("""
+    INSERT INTO portfolios(user_id,name,source,updated) VALUES(1,'Fixture','pluto',0)
+   """).lastrowid
+   c.execute("""
+    INSERT INTO portfolio_snapshots(portfolio_id,user_id,observed,payload,last_attempt)
+    VALUES(?,1,?,?,?)
+   """, (portfolio, self.at, json.dumps({'holdings': [{'assetId': self.asset_id}]}), self.at))
+   c.execute("""
+    INSERT INTO candidate_execution_events
+    (user_id,is_test,candidate_id,order_id,event_key,status,occurred,occurred_at,origin,verification,payload)
+    VALUES(1,0,'fixture','sell-1','fill-1','FILLED',?,?,'pluto','verified',?)
+   """, (epoch, self.at,
+         json.dumps({'assetId': self.asset_id, 'side': 'SELL'})))
+   c.execute("""
+    INSERT INTO market_asset_period_cache (user_id,asset_id,period,payload,fetched,attempted)
+    VALUES(1,?,'1M',?,?,?)
+   """, (self.asset_id, json.dumps({'close': '10.25', 'at': self.at}), epoch, epoch))
+
+ def history(self):
+  with app.connect() as c:
+   return [line for line in c.iterdump() if 'long_term_observations' not in line]
+
+ def test_user_scope_and_missing_reference(self):
+  before = self.history()
+  first = watch.add(app.connect, 1, verified_identity=self.identity)
+  self.assertIsNone(first['reference_price'])
+  self.assertIsNone(first['reference_at'])
+  self.assertIsNone(first['reference_source'])
+  self.assertFalse(watch.remove(app.connect, 2, self.asset_id))
+  self.assertFalse(watch.reopen(app.connect, 2, self.asset_id))
+  self.assertFalse(watch.set_status(app.connect, 2, self.asset_id, watch.REASSESS))
+  second = watch.add(app.connect, 2, verified_identity=self.identity)
+  self.assertEqual(second['status'], watch.OBSERVER)
+  self.assertTrue(watch.set_status(app.connect, 1, self.asset_id, watch.INTERESTING))
+  self.assertEqual(watch.list_observations(app.connect, 1)[0]['status'], watch.INTERESTING)
+  self.assertEqual(watch.list_observations(app.connect, 2), [second])
+  self.assertTrue(watch.remove(app.connect, 1, self.asset_id))
+  self.assertEqual(watch.list_observations(app.connect, 1), [])
+  self.assertEqual(watch.list_observations(app.connect, 2), [second])
+  self.assertEqual(self.history(), before)
+
+ def test_idempotency_and_reopen_preserve_original_reference(self):
+  before = self.history()
+  original = watch.add(app.connect, 1, verified_identity=self.identity,
+                       reference_price='10.25', reference_at=self.at, reference_source='pluto')
+  self.assertEqual(original['reference_price'], '10.25')
+  self.assertEqual(original['reference_at'], self.at)
+  self.assertEqual(original['reference_source'], 'pluto')
+  self.assertEqual(watch.add(app.connect, 1, verified_identity=self.identity), original)
+  self.assertTrue(watch.set_status(app.connect, 1, self.asset_id, watch.REASSESS))
+  self.assertTrue(watch.remove(app.connect, 1, self.asset_id))
+  self.assertFalse(watch.remove(app.connect, 1, self.asset_id))
+  self.assertFalse(watch.set_status(app.connect, 1, self.asset_id, watch.OBSERVER))
+  archived = dict(original, status=watch.REASSESS, active=0)
+  self.assertEqual(watch.list_observations(app.connect, 1, include_inactive=True), [archived])
+  self.assertEqual(watch.add(app.connect, 1, verified_identity=dict(self.identity, ticker='NEW'),
+                             reference_price='13', reference_at=self.at, reference_source='eodhd'),
+                   archived)
+  self.assertTrue(watch.reopen(app.connect, 1, self.asset_id))
+  self.assertFalse(watch.reopen(app.connect, 1, self.asset_id))
+  self.assertEqual(watch.list_observations(app.connect, 1), [dict(archived, active=1)])
+  self.assertEqual(self.history(), before)
+
+ def test_invalid_identity_and_reference_do_not_create_observations(self):
+  for identity in (None, {}, {'asset_id': self.asset_id},
+                   dict(self.identity, asset_id=' '), dict(self.identity, asset_id=1),
+                   dict(self.identity, currency=''), dict(self.identity, ticker=' ')):
+   with self.subTest(identity=identity), self.assertRaises(ValueError):
+    watch.add(app.connect, 1, verified_identity=identity)
+  for price in ('NaN', 'Infinity', '0', '-1', 'invalid'):
+   with self.subTest(price=price), self.assertRaises(ValueError):
+    watch.add(app.connect, 1, verified_identity=self.identity, reference_price=price,
+              reference_at=self.at, reference_source='pluto')
+  with self.assertRaises(ValueError):
+   watch.add(app.connect, 1, verified_identity=self.identity, reference_price='10')
+  with self.assertRaises(ValueError):
+   watch.set_status(app.connect, 1, self.asset_id, 'KØB')
+  self.assertEqual(watch.list_observations(app.connect, 1, include_inactive=True), [])
 
 
 if __name__=='__main__':unittest.main()
