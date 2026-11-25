@@ -308,6 +308,38 @@ class HoldingAutowatch(unittest.TestCase):
    self.assertEqual(dict(c.execute('SELECT watch_id,status FROM hw_sessions').fetchall()),
                     {**dict.fromkeys(assets[:-1],'PAUSED'),assets[-1]:'COMPLETED'})
 
+ def test_repeated_unrelated_commits_do_not_starve_next_tenant(self):
+  at=self.now.isoformat();aid=self.holding['asset_id']
+  with app.connect() as c:
+   c.execute("INSERT INTO users(id,username,active) VALUES(2,'second',1)")
+   pid2=c.execute("INSERT INTO portfolios(user_id,name,source,updated) VALUES(2,'Second','pluto',?)",(self.now.timestamp(),)).lastrowid
+   payload=json.dumps({'positions_complete':True,'observed':at,'positions':[self.holding]})
+   c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?)',(pid2,2,at,payload,at))
+   request=json.dumps({'asset_id':aid,'portfolio_ids':[self.pid],'watch_mode':'exit'})
+   c.execute("""INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due)
+    VALUES(1,'first-idle',0,?,'manual holding','PAUSED',?,'synthetic','{}','{}',?,?,0)""",(aid,request,at,at))
+   c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(1,self.pid,aid,'LINKED','first-idle',0,at))
+  execute=app.DatabaseConnection.execute;commits=0
+  def race(connection,sql,*args):
+   nonlocal commits
+   cursor=execute(connection,sql,*args)
+   if 'FROM json_each(?) k CROSS JOIN hw_holding_autowatch' in sql and args and args[0][1]==1 and not connection.in_transaction:
+    rows=cursor.fetchall()
+    commits+=1
+    self.assertLessEqual(commits,2,'idle tenant retried without bound')
+    with app.connect() as other:
+     other.execute("UPDATE users SET username=? WHERE id=2",(f'second-{commits}',))
+    return iter(rows)
+   return cursor
+  verified=[]
+  def verify(_,uid,holding):
+   verified.append(uid)
+   return self.instrument
+  with patch.object(app.DatabaseConnection,'execute',race),patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_CAPACITY':'40','ESCAPE_HW_EODHD_REST_ENABLED':'0'}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=verify,now=self.now),'LINKED')
+  self.assertEqual(commits,2)
+  self.assertEqual(verified,[2])
+
  def test_concurrent_link_refresh_releases_unused_writer_before_next_tenant(self):
   at=self.now.isoformat();aid=self.holding['asset_id']
   with app.connect() as c:
