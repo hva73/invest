@@ -64,7 +64,8 @@ class StorageRollbackQA(unittest.TestCase):
     @staticmethod
     def inline_copy(c):
         # A transaction on a disposable copy only. Retain dictionary evidence.
-        with c:
+        c.execute('SAVEPOINT synthetic_inline_restore')
+        try:
             for row in c.execute('SELECT * FROM hw_samples ORDER BY id').fetchall():
                 sample = engine.sample_read(c, row['watch_row_id'], row['payload'])
                 if engine.checksum(sample) != row['digest']:
@@ -75,6 +76,11 @@ class StorageRollbackQA(unittest.TestCase):
                 calc = engine.calculation_read(row['payload'])
                 c.execute('UPDATE hw_calculations SET payload=? WHERE id=?',
                           (engine.canonical(calc), row['id']))
+        except BaseException:
+            c.execute('ROLLBACK TO synthetic_inline_restore')
+            raise
+        finally:
+            c.execute('RELEASE synthetic_inline_restore')
 
     def test_legacy_reader_negative_and_isolated_inline_restore(self):
         with patch.dict(os.environ, {'ESCAPE_HW_DEDUPE_BAR_HISTORY':'1',
