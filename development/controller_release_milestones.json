@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-25T17:45:30Z",
+  "updated_at": "2026-11-25T18:35:10Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -405,7 +405,7 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "in_progress",
       "issue": 54,
-      "evidence": "Mobil #300 752c3a06 HOLD; desktop #305 8dc16d65 CI 45667433871, job 139393284194 chart/UI PASS, uafhængigt review udestår.",
+      "evidence": "#305 integreret 6e82e175 efter uafhængigt review af 8dc16d65 og chart/UI CI 45667433871/job 139393284194. Automatisk #67:3 publicerede #306, fortsat review/reparation af refresh/visibility-race. Mobil #300 HOLD; samlet browseraccept udestår.",
       "subgoals": [
         {
           "id": "reuse",
@@ -426,9 +426,9 @@
           "id": "desktop",
           "title": "Desktop 2.0",
           "status": "review",
-          "evidence": "#305 8dc16d65 CI 45667433871/job 139393284194 chart/UI PASS; afventer uafhængigt review, ingen liveaccept.",
+          "evidence": "#305 accepteret på 6e82e175; #67:3 automatisk STARTED/WORKING/TESTING og PR #306. Nyere reparation 0f2b1a87; ingen samlet eller live accept.",
           "owner_role": "desktop",
-          "updated_at": "2026-11-25T17:45:30Z"
+          "updated_at": "2026-11-25T18:35:10Z"
         },
         {
           "id": "test",
@@ -438,7 +438,7 @@
           "owner_role": "mobile"
         }
       ],
-      "updated_at": "2026-11-25T17:45:30Z"
+      "updated_at": "2026-11-25T18:35:10Z"
     },
     {
       "id": "load",
@@ -446,7 +446,7 @@
       "title": "100 brugere og skaleringsmåling",
       "status": "in_progress",
       "issue": 14,
-      "evidence": "#302 integreret 99ba8ef6 efter lokalt uafhængigt review; SQLite discovery 1/10/100 og én attempt-query pr. bruger. #304 exact 93a7859a CI 45667321404 PASS, lokal HOLD: stale retry/session state før write lock.",
+      "evidence": "#302 integreret 99ba8ef6; SQLite discovery 1/10/100. #304 e7c25b85 CI 45668034113 PASS, HOLD: BEGIN IMMEDIATE fastholdes over øvrige tenants selv uden writes efter refresh; fuld 100-brugeraccept udestår.",
       "subgoals": [
         {
           "id": "adapter",
@@ -459,9 +459,9 @@
           "id": "queue",
           "title": "100 brugere og fair køer",
           "status": "in_progress",
-          "evidence": "#302 CI 45665177195, integreret 99ba8ef6. #304 HOLD: test mangler samtidig POSITION_CLOSED-reconciliation før første upsert. Ingen fuld fairness/workeraccept.",
+          "evidence": "#304 e7c25b85: kræver regression for refreshed no-write batch uden fastholdt writer-lock; ingen fuld fairness/workeraccept.",
           "owner_role": "data",
-          "updated_at": "2026-11-25T17:45:30Z"
+          "updated_at": "2026-11-25T18:35:10Z"
         },
         {
           "id": "resources",
@@ -478,7 +478,7 @@
           "owner_role": "data"
         }
       ],
-      "updated_at": "2026-11-25T17:45:30Z"
+      "updated_at": "2026-11-25T18:35:10Z"
     },
     {
       "id": "release",
