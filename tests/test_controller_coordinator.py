@@ -232,7 +232,19 @@ class LocalCoordinatorTests(unittest.TestCase):
         self.assertIsNone(c.repair_attempt(self.root,501,old))
         self.assertEqual(c.repair_attempt(self.root,501,new),2)
         c.save(self.root/"coordinator-repair-501-2.json",{"state":"held","head":new})
-        self.assertIsNone(c.repair_attempt(self.root,501,"f"*40))
+        self.assertIsNone(c.repair_attempt(self.root,501,new))
+        self.assertEqual(c.repair_attempt(self.root,501,"f"*40),3)
+
+    def test_actual_stalled_queue_historical_holds_do_not_block_new_heads(self):
+        for number in (299,300,303,304,306):
+            path=self.root/("coordinator-repair-"+str(number)+".json")
+            old={"state":"held","head":"a"*40,"key":"273:12"}
+            c.save(path,old)
+            self.assertEqual(c.repair_attempt(self.root,number,"b"*40),2)
+            self.assertIsNone(c.repair_attempt(self.root,number,"a"*40))
+            self.assertEqual(c.read(path,{}),old)
+            c.save(path,dict(old,state="reserved"))
+            self.assertIsNone(c.repair_attempt(self.root,number,"b"*40))
 
     def test_fourth_repair_is_allowed_after_three_distinct_publications(self):
         heads=[str(i)*40 for i in range(1,5)]
