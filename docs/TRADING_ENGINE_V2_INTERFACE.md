@@ -46,6 +46,36 @@ fill-readback. Kaldet, der leverer linket, har ansvaret for kildens verifikation
 Entry og exit kan dermed spores til hver sin versionslåste oprindelse.
 Evalueringen producerer alene beslutningsoprindelsen og gemmer ingen data.
 
+## Strategiskift i Position Watch
+
+`switch_position_strategy` returnerer en uforanderlig overgang for en
+eksisterende, verificeret beholdning i testkategorien. Kaldet bruger
+positionens fulde `Scope`, den oprindelige `DecisionOrigin` for entry og et
+positions-readback som `Evidence`. Kalderen attesterer readbackets kilde og
+leverer `scope_digest`, `entry_digest` samt HOT WATCH-felterne `status`,
+`position`, `quantity`, `cost_price` og `as_of`. Readbackets hændelsestid
+skal matche `as_of`, være tilgængelig på skiftetidspunktet og højst være
+300 sekunder gammel, som i HOT WATCHs positionsgate. Hele evidensen
+fastholdes med kilder og tider, inklusive eventuelle P/L-input og native
+stop-oplysninger, præcis som leveret.
+
+Kaldet leverer et allerede læst katalog med nøglerne
+`(owner_id, strategy_id, version)` og værdierne `(spec, checksum)`.
+Ejerens post har forrang for den fælles post med `owner_id=0`. Motoren
+validerer begge strategier og deres checksums. Overgangen binder scope,
+entry-oprindelsen, forrige og ny strategi samt det effektive tidspunkt.
+Ved efterfølgende skift leverer kaldet seneste overgang som `previous`.
+Det nye readback skal være nyere end det foregående og fra eller efter
+den forrige overgang. En identisk gentagelse returnerer samme overgang.
+Hver ny overgang peger på digest for den foregående.
+
+Ved exit-evaluering leverer kaldet seneste overgang som `position_switch`
+og dens nye strategispec. Evalueringen kræver samme scope og en
+positionskontekst med matchende `scope_digest`, `entry_digest` og `as_of`
+fra eller efter skiftet. Exit-oprindelsen binder overgangens digest og bruger den gældende
+risikogate. Strategiskiftet har ingen ordre- eller stophandling.
+Grænsefladen er lokal simulation uden persistence, UI eller live-rute.
+
 ## Replay i Strategy Lab
 
 `strategy_lab.compare_v2(connect, uid, data)` bruger samme valg af watch,
