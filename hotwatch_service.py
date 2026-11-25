@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor,wait,FIRST_COMPLETED
 from contextlib import contextmanager,nullcontext
 import app,hotwatch_engine as engine
 from hotwatch_adapters import PlutoAdapter,EODHDAdapter,InboxAdapter,DataUnavailable,local_budget_error
-from hotwatch_contract import EngineError,stamp
+from hotwatch_contract import EngineError,OPEN_STATES,stamp
 from cxe_reference import ReferenceUnavailable as CXEReferenceUnavailable
 from eodhd_us_reference import ReferenceUnavailable as USReferenceUnavailable
 
@@ -781,6 +781,36 @@ def refresh_holding_origin(connect,uid,pid,asset_id):
  try:trade_service.check(connect,uid,matches[0])
  except Exception:pass  # No proof remains no link; the ordinary holding monitor still runs.
 
+def _holding_watch_id(uid,pid,aid,generation):
+ identity=f'{uid}|{pid}|{aid}'
+ if generation is not None:identity+='|'+generation
+ return 'hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
+
+_HOLDING_SCAN_LIMIT=32
+_HOLDING_OPEN="('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')"
+# Sample a bounded slice of the user index. A large book of open watches can
+# use the same short query as a small book; separate history seeks add no value.
+_HOLDING_ARCHIVE_SAMPLE=f"""SELECT 1 FROM
+ (SELECT status FROM hw_sessions WHERE user_id=? LIMIT {_HOLDING_SCAN_LIMIT} OFFSET {_HOLDING_SCAN_LIMIT})
+ WHERE status NOT IN {_HOLDING_OPEN} LIMIT 1"""
+_HOLDING_ATTEMPT="""SELECT watch_id,status,NULL AS request,next_attempt,updated
+ FROM hw_holding_autowatch WHERE user_id=:uid AND portfolio_id=:pid AND asset_id=:aid"""
+_HOLDING_SCAN=_HOLDING_ATTEMPT+"""
+ UNION ALL SELECT watch_id,status,request,NULL,NULL FROM hw_sessions
+ WHERE user_id=:uid AND is_test=0 AND json_extract(request,'$.asset_id')=:aid"""
+# Only open sessions, the prior link, and the exact automatic watch generation
+# can affect the decision. Resolve all three in the same statement as the retry.
+# LIMIT 1 keeps SQLite from flattening the unique attempt lookup into each arm.
+_HOLDING_INDEXED_SCAN=f"""WITH attempt AS ({_HOLDING_ATTEMPT} LIMIT 1)
+ SELECT * FROM attempt
+ UNION ALL SELECT watch_id,status,request,NULL,NULL FROM hw_sessions INDEXED BY hw_active_identity
+ WHERE user_id=:uid AND is_test=0 AND status IN {_HOLDING_OPEN} AND json_extract(request,'$.asset_id')=:aid
+ UNION ALL SELECT watch_id,status,request,NULL,NULL FROM hw_sessions
+ WHERE user_id=:uid AND watch_id IN (
+    (SELECT watch_id FROM attempt WHERE status!='POSITION_CLOSED'),
+    COALESCE((SELECT holding_watch_id(:uid,:pid,:aid,updated) FROM attempt WHERE status='POSITION_CLOSED'),:watch))
+ AND is_test=0 AND status NOT IN {_HOLDING_OPEN} AND json_extract(request,'$.asset_id')=:aid"""
+
 def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
  """Activate at most one owned position per tick, with persistent bounded retries."""
  from decimal import Decimal,InvalidOperation
@@ -803,17 +833,36 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
     try:valid=holding.get('kind')=='holding' and isinstance(aid,str) and bool(aid) and Decimal(str(holding.get('quantity')))>0
     except (InvalidOperation,ValueError,TypeError):valid=False
     if valid:choices.append((snap['user_id'],snap['id'],holding))
-  for uid,pid,holding in choices:
+  c.create_function('holding_watch_id',4,_holding_watch_id)
+  previous_user=None
+  for index,(uid,pid,holding) in enumerate(choices):
    aid=holding['asset_id']
    control=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
    if control and control['killed']:continue
-   existing=c.execute("SELECT watch_id,status,request FROM hw_sessions WHERE user_id=? AND is_test=0 AND json_extract(request,'$.asset_id')=? ORDER BY id DESC",(uid,aid)).fetchall()
-   matches=[row for row in existing if json.loads(row['request']).get('watch_mode','both')!='entry' and (not json.loads(row['request']).get('portfolio_ids') or pid in json.loads(row['request'])['portfolio_ids'])]
-   active=[row for row in matches if row['status'] in ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')]
-   prior=c.execute('SELECT status,watch_id,next_attempt FROM hw_holding_autowatch WHERE user_id=? AND portfolio_id=? AND asset_id=?',(uid,pid,aid)).fetchone()
-   generation=c.execute('SELECT updated FROM hw_holding_autowatch WHERE user_id=? AND portfolio_id=? AND asset_id=?',(uid,pid,aid)).fetchone() if prior and prior['status']=='POSITION_CLOSED' else None
-   identity=str(uid)+'|'+str(pid)+'|'+aid+('|'+generation['updated'] if generation else '')
-   watch='hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
+   if uid!=previous_user:
+    # Only the access path survives a position. Both paths read current rows.
+    repeated=index+1<len(choices) and choices[index+1][0]==uid
+    indexed=repeated and c.execute(_HOLDING_ARCHIVE_SAMPLE,(uid,)).fetchone() is not None
+    previous_user=uid
+   watch=_holding_watch_id(uid,pid,aid,None)
+   params={'uid':uid,'pid':pid,'aid':aid,'watch':watch}
+   if not indexed:
+    cursor=c.execute(_HOLDING_SCAN,params)
+    rows=cursor.fetchmany(_HOLDING_SCAN_LIMIT+2)
+    cursor.close()
+    indexed=len(rows)==_HOLDING_SCAN_LIMIT+2
+   if indexed:rows=c.execute(_HOLDING_INDEXED_SCAN,params).fetchall()
+   prior=rows.pop(0) if rows and rows[0]['request'] is None else None
+   if prior and prior['status']=='POSITION_CLOSED':
+    watch=_holding_watch_id(uid,pid,aid,prior['updated'])
+   previous_watch=prior['watch_id'] if prior and prior['status']!='POSITION_CLOSED' else None
+   matches=[]
+   for row in rows:
+    if row['status'] not in OPEN_STATES and row['watch_id'] not in (previous_watch,watch):continue
+    request=json.loads(row['request'])
+    if request.get('watch_mode','both')!='entry' and (not request.get('portfolio_ids') or pid in request['portfolio_ids']):
+     matches.append(row)
+   active=[row for row in matches if row['status'] in OPEN_STATES]
    if len(active)==1:status='LINKED';linked=active[0]['watch_id']
    elif len(active)>1:status='AMBIGUOUS';linked=None
    elif prior and prior['status']=='STOPPED':status='STOPPED';linked=prior['watch_id']
