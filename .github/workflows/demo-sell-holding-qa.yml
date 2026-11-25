@@ -27,7 +27,8 @@ jobs:
             exit 1
           fi
           cat /tmp/demo-negative.log
-          grep -F "'9' !== '2'" /tmp/demo-negative.log
+          grep -F "actual: '9'," /tmp/demo-negative.log
+          grep -F "expected: '0.008895955369595537'," /tmp/demo-negative.log
           cp /tmp/demo-fixed.js static/demo-data.js
           node tests/test_demo_chart_identity.cjs
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
