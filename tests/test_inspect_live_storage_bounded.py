@@ -190,3 +190,33 @@ class LiveStorageTests(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT * FROM hw_calculations").fetchall(),[(19,7,"calculation")])
                 self.assertEqual(db.execute("SELECT * FROM trade_journal").fetchall(),[(33,"trade")])
                 self.assertEqual(db.execute("SELECT count(*) FROM scratch").fetchone(),(0,))
+
+    def test_targeted_physical_census_matches_full_without_other_tables(self):
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d)/"escape.db"
+            with sqlite3.connect(p) as db:
+                db.execute("CREATE TABLE hw_samples(id INTEGER PRIMARY KEY,payload TEXT UNIQUE)")
+                db.execute("CREATE INDEX samples_extra ON hw_samples(payload)")
+                db.execute("CREATE TABLE hw_events(id INTEGER PRIMARY KEY,payload TEXT)")
+                db.execute("CREATE INDEX event_extra ON hw_events(payload)")
+                db.executemany("INSERT INTO hw_samples(payload) VALUES (?)",
+                               [(str(i)+"x"*3000,) for i in range(50)])
+                db.executemany("INSERT INTO hw_events(payload) VALUES (?)",
+                               [("other"*1000,)]*100)
+            before=p.read_bytes()
+            full=inspect(p)
+            selected=inspect(p,physical_table="hw_samples")
+            self.assertEqual(selected["status"],"ok")
+            self.assertEqual(selected["coverage"],"selected_table_and_indexes_only")
+            self.assertNotIn("page_accounting",selected)
+            self.assertEqual(selected["objects"],[o for o in full["objects"] if o["table"]=="hw_samples"])
+            self.assertEqual(selected["tables"],{"hw_samples":full["tables"]["hw_samples"]})
+            self.assertEqual(len(selected["objects"]),3)
+            self.assertEqual(selected["freelist_bytes"],full["freelist_bytes"])
+            self.assertEqual(inspect(p,physical_table="hw_calculations")["status"],"schema_unavailable")
+            with self.assertRaisesRegex(ValueError,"conflicting_scan_modes"):
+                inspect(p,table="hw_samples",physical_table="hw_samples")
+            with self.assertRaisesRegex(ValueError,"unknown_table"):
+                inspect(p,physical_table="hw_samples; DROP TABLE hw_events")
+            self.assertEqual(before,p.read_bytes())
+            self.assertEqual(list(Path(d).iterdir()),[p])
