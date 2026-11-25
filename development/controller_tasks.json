@@ -504,7 +504,7 @@
     "generation": 2,
     "role": "motor",
     "priority": 0,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/escape-development",
     "base_sha": "f8bdc17bd0a05ccf0ecef910b0333ce750e90650",
     "dependencies": [
@@ -523,7 +523,7 @@
     "generation": 8,
     "role": "data",
     "priority": 1,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/trading-engine-v2-integration",
     "base_sha": "72733de5f79b77f20d23dfd519d68a2b7a6f4c20",
     "dependencies": [
@@ -535,5 +535,42 @@
       "docs/TRADING_ENGINE_V2_INTERFACE.md"
     ],
     "task": "Next concrete #273 market-only reuse slice on accepted v2 72733de5: demonstrate that identical causal market evidence, instrument/provider/feed/timeframe and feature parameters/version/entitlement can feed many individual strategy/position evaluations without repeating feature computation. Reuse existing features() and existing Evidence/Scope/Decision, thin bounded in-memory per-batch reuse (no persistent cache service, no second strategy registry). Keep actual user/depot position/risk/context and decision origin outside shared market evidence. Never reuse across incompatible feature params, revision/time, entitlement, or test/live scope; no new universal data gate. Tests with actual existing feature inputs and 1/10/100 simulated subscribers, different holdings/risks/strategies, count actual features invocations, cache bounded to a batch, identical decisions with/without reuse, no provider or broker calls. Keep pure simulation; actual scheduler wiring separate. No production changes. Deliver small runnable implementation/tests, not speculative abstraction."
+  },
+  {
+    "issue": 268,
+    "generation": 3,
+    "role": "motor",
+    "priority": 0,
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "bb356440186cbdb282dd8ff8b445064fcf4dc76e",
+    "dependencies": [
+      "268:2"
+    ],
+    "paths": [
+      "hotwatch_engine.py",
+      "intel_workflows.py",
+      "tests/test_hotwatch_engine.py",
+      "tests/test_hotwatch_e2e_contract.py"
+    ],
+    "task": "Continue tested #290 candidate lifecycle on exact bb356440. Implement narrow simulation/test-only bounded report-only eligibility/expiry and no-data dormancy/backoff using existing lifecycle/reconcile/scheduling paths; preserve history and allow fresh genuine evidence to reactivate, duplicate reports do not extend eligibility, protect held positions/exit/active orders/manual/leased and tenant/test scope. Keep explicit deadlines correct. If precise policy TTL needs owner approval, use explicit test configuration and document proposal, not live defaults. Avoid repetitive scans of stale candidates; measure deterministic before/after count. No new DB/daemon, no hotwatch_service.py overlap, no network/orders or live activation. Actual code and regression tests."
+  },
+  {
+    "issue": 273,
+    "generation": 9,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/trading-engine-v2-integration",
+    "base_sha": "ee85efe735002ae6149a9488274f4935be6d2a0c",
+    "dependencies": [
+      "273:8"
+    ],
+    "paths": [
+      "trading_engine_v2.py",
+      "tests/test_trading_engine_v2.py",
+      "docs/TRADING_ENGINE_V2_INTERFACE.md"
+    ],
+    "task": "Build next lean simulation batch slice on exact ee85efe7: resolve one immutable verified canonical market history/identity/entitlement snapshot once per instrument, reuse existing features() per distinct parameter set; separate per-user subscribers and individual decision context. #289 works but repeats history serialization/validation for every subscriber. Avoid repeated checksum of same immutable shared capture by accepting shared market input with separate subscriber scopes (no duplicate registry, avoid unbounded cache). Enforce actual verified observation/source and instrument/market scope, reject wrong tenant entitlement/test and stale or future input at trust boundary; preserve existing API and decision origin semantics. Benchmark 1/10/100 overlap and disjoint cases, count validation/hash and features calls; equivalent decisions, isolated risk and no broker actions. No network, persistence or live authority. Deliver actual tests and code."
   }
 ]
