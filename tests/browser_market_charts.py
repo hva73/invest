@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 
 def account_isolation(page):
  page.add_script_tag(content="""
-  window.IntersectionObserver = class { observe() {} disconnect() {} };
+  window.IntersectionObserver = class { constructor(callback) { window.testChartObserver=callback; } observe() {} disconnect() {} };
  """)
  page.add_script_tag(path=str(Path(__file__).resolve().parents[1]/'static/market-ui.js'))
  page.evaluate(ACCOUNT_ISOLATION)
@@ -18,7 +18,8 @@ def account_isolation(page):
 ACCOUNT_ISOLATION = r"""
 async () => {
  const assert = (condition, message) => { if (!condition) throw new Error(message); };
- Object.defineProperty(document, 'hidden', {value: false});
+ let hidden=false;
+ Object.defineProperty(document, 'hidden', {get:()=>hidden});
  const requests = [], timers = [];
  const realTimeout = window.setTimeout;
  window.setTimeout = (callback, delay) => timers.push({callback, delay});
@@ -107,6 +108,152 @@ async () => {
         'Current refresh did not update both charts');
  assert(root.querySelectorAll('.signal-chart-peak').length === 2, 'Chart peak was lost');
  assert(root.querySelectorAll('.market-marker-entry').length === 2, 'Purchase markers were lost');
+
+ const select = period => MarketUI.click(slot('main').querySelector('[data-market-period="' + period + '"]'));
+ const selected = period => {
+  const buttons = [...root.querySelectorAll('[aria-pressed="true"]')];
+  return buttons.length === 2 && buttons.every(button => button.dataset.marketPeriod === period);
+ };
+ await click('main', 'refresh');
+ await select('week');
+ await select('month');
+ await finish(requests[8], quote(23));
+ const followup = timers.shift();
+ assert(followup?.delay === 0 && selected('month'), 'Week response discarded the selected month');
+ assert(!root.querySelector('.market-line'), 'Week series appeared under the month tab');
+
+ // A visible refresh can load the missing period before the deferred follow-up runs.
+ const refreshing = MarketUI.refreshVisible();
+ assert(requests.length === 10 && requests[9].period === 'ONE_MONTH', 'Visible refresh did not coalesce');
+ await finish(requests[9], quote(24));
+ await refreshing;
+ followup.callback();
+ await flush();
+ assert(requests.length === 10 && selected('month'), 'Deferred follow-up duplicated the month request');
+
+ await select('day');
+ await click('main', 'refresh');
+ await finish(requests[10], {pending: true});
+ await select('month');
+ await retry();
+ assert(requests.length === 11 && selected('month'), 'Week retry refreshed the selected month');
+
+ await select('day');
+ await click('main', 'refresh');
+ await select('year');
+ await finish(requests[11], {pending: true});
+ const yearFollowup = timers.shift();
+ assert(yearFollowup?.delay === 0 && !root.querySelector('.market-warning'),
+        'Obsolete week response blocked or marked the selected year');
+ yearFollowup.callback();
+ assert(requests[12]?.period === 'ONE_YEAR', 'Latest uncached period was not requested');
+ await finish(requests[12], quote(25));
+ assert(requests.length === 13 && selected('year'), 'Year view was lost');
+ await select('day');
+ const firstTick = slot('main').querySelector('.market-axis span').textContent;
+ assert(selected('day') && /^11[.:]00$/.test(firstTick),
+        'Day axis lost Copenhagen time');
+ assert(root.querySelectorAll('.signal-chart-peak strong').length === 2, 'Peak display was lost');
+ assert(root.querySelectorAll('.market-marker-entry').length === 2, 'Average cost markers were lost');
+
+ await click('main', 'refresh');
+ await select('month');
+ let refreshed = false;
+ const cachedRefresh = MarketUI.refreshVisible().then(() => { refreshed = true; });
+ assert(requests.length === 14, 'Cached month refresh overlapped the active week request');
+ await finish(requests[13], quote(26));
+ assert(selected('month') && [...root.querySelectorAll('.market-price')].every(n => n.textContent === '24'),
+        'Week response overwrote the cached month');
+ assert(requests.length === 15 && requests[14].period === 'ONE_MONTH' && requests[14].refresh,
+        'Cached month refresh was lost or duplicated');
+ assert(!refreshed, 'Visible refresh completed before the month response');
+ await finish(requests[14], quote(27));
+ await cachedRefresh;
+ assert(requests.length === 15 && selected('month') &&
+        [...root.querySelectorAll('.market-price')].every(n => n.textContent === '27'),
+        'Refreshed month did not update both charts');
+
+ // A pending retry must not start hidden work, but visibility must release it.
+ await click('main','refresh');
+ await finish(requests[15],{pending:true});
+ hidden=true;
+ await retry();
+ assert(requests.length===16,'Hidden retry initiated a request');
+ hidden=false;
+ document.dispatchEvent(new Event('visibilitychange'));
+ await flush();
+ assert(requests.length===17 && requests[16].period==='ONE_MONTH','Visible chart remained throttled');
+ await finish(requests[16],quote(28));
+
+ // The same rule applies when the chart was offscreen at the retry deadline.
+ mount('main');
+ await click('main','refresh');
+ await finish(requests[17],{pending:true});
+ const offscreen=slot('main');
+ offscreen.style.position='absolute';offscreen.style.top='10000px';
+ await retry();
+ assert(requests.length===18,'Offscreen retry initiated a request');
+ offscreen.style.position='';offscreen.style.top='';
+ window.testChartObserver([{target:offscreen,isIntersecting:true}]);
+ await flush();
+ assert(requests.length===19,'Returning chart remained throttled');
+ await finish(requests[18],quote(29));
+
+ // Fresh chart with no cached month. The visible refresh must await that
+ // month, not just the previous day request.
+ mount('uncached');
+ const uncached=slot('uncached');
+ await click('uncached');
+ await finish(requests[19],quote(30));
+ await click('uncached','refresh');
+ await MarketUI.click(uncached.querySelector('[data-market-period="month"]'));
+ let completed=false;
+ const pendingRefresh=MarketUI.refreshVisible().then(()=>{completed=true});
+ assert(requests.length===21,'Uncached refresh overlapped day request');
+ await finish(requests[20],quote(30));
+ assert(!completed && requests.length===22 && requests[21].period==='ONE_MONTH',
+        'Uncached refresh completed before selected period');
+ await finish(requests[21],quote(31));
+ await pendingRefresh;
+ const delayed=timers.shift();
+ assert(delayed?.delay===0,'Missing guarded automatic follow-up');
+ delayed.callback();
+ await flush();
+ assert(requests.length===22 && completed,'Uncached month duplicated or failed to complete');
+
+ // Cover pending responses on both sides of the switch to a cached period.
+ mount('main','main');
+ for (const switchBeforePending of [false,true]) {
+  await select('day');
+  const before = requests.length;
+  await click('main','refresh');
+  if(switchBeforePending)await select('month');
+  await finish(requests[before],{pending:true});
+  if(!switchBeforePending){
+   await select('month');
+   await retry();
+  }
+  window.testChartObserver([{target:slot('main'),isIntersecting:true}]);
+  document.dispatchEvent(new Event('visibilitychange'));
+  await flush();
+  assert(requests.length===before+1 && selected('month') &&
+         !root.querySelector('.market-warning') &&
+         [...root.querySelectorAll('.market-price')].every(n=>n.textContent==='29'),
+         'Pending day disturbed cached month');
+  await select('day');
+  assert(requests.length===before+2 && requests[before+1].period==='ONE_WEEK' &&
+         !requests[before+1].refresh,
+         'Returning to cached day did not resume its pending request (switch first: '+switchBeforePending+')');
+  await select('week');
+  document.dispatchEvent(new Event('visibilitychange'));
+  const refreshedPrice = switchBeforePending ? 33 : 32;
+  await finish(requests[before+1],quote(refreshedPrice));
+  assert(requests.length===before+2 && selected('week'),'Shared day/week retry duplicated or lost selection');
+  await select('day');
+  assert(requests.length===before+2 && selected('day') &&
+         [...root.querySelectorAll('.market-price')].every(n=>n.textContent===String(refreshedPrice)),
+         'Completed retry did not refresh cached day or was repeated');
+ }
 }
 """
 
@@ -160,7 +307,7 @@ def main():
    isolation_page=browser.new_page(viewport={'width':1440,'height':1000})
    account_isolation(isolation_page)
    browser.close()
-  print('PASS: A→B→A chart isolation, stale queue and pending retries, shared cache and current refresh')
+  print('PASS: chart isolation, shared cache, and period/refresh races')
   print('PASS: actual-shape hourly series, day defaults to 2 points, optional week has 82 points, rolling 24h crosses midnight with 24 samples; sparse decline stays small/red while daily remains green; yellow AFVENT unchanged, premarket and unknown quote time, full report/Radar and 320–1920px')
  finally:server.shutdown();server.server_close();case.tearDown()
 if __name__=='__main__':main()
