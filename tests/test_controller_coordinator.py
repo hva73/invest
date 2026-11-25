@@ -51,6 +51,24 @@ class LocalCoordinatorTests(unittest.TestCase):
             review.assert_called_once()
             repair.assert_called_once()
 
+    def test_adaptive_repair_preserves_scope_and_reuses_only_matching_findings(self):
+        row=dict(self.row,role="data")
+        first=c.adaptive_repair_task(self.root,row,501,"d"*40,"current defect",1)
+        self.assertIn("ROOT_CAUSE",first)
+        c.save(self.root/"coordinator-repair-501.json",{"key":c.key(row),"reason":"old lock regression"})
+        second=c.adaptive_repair_task(self.root,row,501,"e"*40,"current defect",2)
+        self.assertIn("FUNCTION_REASSESSMENT",second)
+        self.assertIn("old lock regression",second)
+        c.save(self.root/"coordinator-repair-501-2.json",{"key":"999:1","reason":"unrelated task"})
+        third=c.adaptive_repair_task(self.root,row,501,"f"*40,"current defect",3)
+        self.assertIn("FRESH_APPROACH",third)
+        self.assertIn("old lock regression",third)
+        self.assertNotIn("unrelated task",third)
+        self.assertIn(row["task"],third)
+        self.assertIn("current defect",third)
+        self.assertIn("SQLite",third)
+        self.assertIn("untrusted evidence",third)
+
     def test_coordinator_defers_repair_to_developer_scheduler(self):
         row=dict(self.row,local_repair=True)
         p={"head":{"sha":"d"*40}}
