@@ -4,6 +4,7 @@ Not a migration CLI: do not import this test as a production restore tool.
 """
 import copy
 import hashlib
+import importlib.util
 import json
 import os
 import sqlite3
@@ -88,12 +89,20 @@ class StorageRollbackQA(unittest.TestCase):
             req, samples, results = self.populate()
         choices = {'watch_id':req['watch_id'], 'is_test':True,
                    'strategies':[{'strategy_id':req['strategy_id'],'version':req['strategy_version']}]}
+        legacy = None
+        if os.environ.get('ESCAPE_QA_FROZEN_READER'):
+            spec = importlib.util.spec_from_file_location('frozen_strategy_lab', os.environ['ESCAPE_QA_FROZEN_READER'])
+            legacy = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(legacy)
         source = Path(app.DB)
         clone = source.with_name('isolated-rollback.db')
         with patch.dict(os.environ, {'ESCAPE_HW_DEDUPE_BAR_HISTORY':'0',
                                      'ESCAPE_HW_COMPACT_RENEWAL_AUDIT':'0'}):
             replay = strategy_lab.compare(app.connect,1,choices)
             self.assertEqual((replay['evaluated'], replay['skipped']), (121,0))
+            if legacy:
+                incompatible = legacy.compare(app.connect,1,choices)
+                self.assertEqual((incompatible['evaluated'],incompatible['skipped']),(0,121))
             with app.connect() as c:
                 before = self.snapshot(c)
                 sr = c.execute('SELECT * FROM hw_samples ORDER BY id').fetchall()
@@ -140,6 +149,9 @@ class StorageRollbackQA(unittest.TestCase):
                     self.assertEqual(c.execute('PRAGMA integrity_check').fetchone()[0],'ok')
                     self.assertEqual(c.execute('PRAGMA foreign_key_check').fetchall(),[])
                 self.assertEqual(strategy_lab.compare(app.connect,1,choices),replay)
+                if legacy:
+                    self.assertEqual(legacy.compare(app.connect,1,choices),replay)
+                    print('HW_FROZEN_READER replay_before=0/121 replay_after=121/121 exact_result=1')
             self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),original_bytes)
             with app.connect() as c:
                 self.assertEqual(self.snapshot(c),before)
