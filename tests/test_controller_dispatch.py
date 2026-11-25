@@ -107,7 +107,7 @@ class ParallelReviewTests(unittest.TestCase):
     def test_two_developer_repairs_use_development_slots_not_coordinator(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);q=root/"queue.json"
-            rows=[dict(self.row(14,"data","codex/escape-development","hotwatch_service.py"),local_review=True,local_repair=True),dict(self.row(67,"desktop","codex/trading-engine-v2-integration","static/market-ui.js"),local_review=True,local_repair=True)]
+            rows=[dict(self.row(14,"data","codex/escape-development","hotwatch_service.py"),local_review=True,local_repair=True),dict(self.row(67,"desktop","codex/escape-development","static/market-ui.js"),local_review=True,local_repair=True)]
             d.save(q,rows)
             results={"14:1":"draft_pr","67:1":"draft_pr"}
             (root/"receipts").mkdir()
