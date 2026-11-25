@@ -129,12 +129,39 @@ class ParallelReviewTests(unittest.TestCase):
             def status(*args,**kwargs):
                 original_status(*args,**kwargs)
                 snapshots.append(d.load(root/"status.json",{}))
-            with patch.object(d.controller_remote,"refresh"),patch.object(d.controller_receipts,"flush"),patch.object(d.controller_progress,"flush"),patch.object(d.controller_coordinator,"run_developer_repair",side_effect=repair),patch.object(d.controller_coordinator,"run_once") as coordinator,patch.object(d,"write_status",side_effect=status):
+            with patch.object(d.controller_remote,"refresh"),patch.object(d.controller_receipts,"flush"),patch.object(d.controller_progress,"flush"),patch.object(d,"remote_draft_head",return_value="a"*40),patch.object(d.controller_coordinator,"run_developer_repair",side_effect=repair),patch.object(d.controller_coordinator,"run_once") as coordinator,patch.object(d,"write_status",side_effect=status):
                 d.run_queue(args,root,root/"pilot.py",root/"budget.json",root/"results.json",{},results)
                 coordinator.assert_not_called()
                 self.assertTrue(any(len(x["active"])==2 and not x["coordinator_running"] for x in snapshots))
             self.assertEqual(set(seen),{14,67})
             self.assertEqual(results,{"14:1":"draft_pr","67:1":"draft_pr"})
+
+    def test_known_defect_is_never_scheduled_as_review_on_unchanged_head(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            row=dict(self.row(114,"motor","codex/trading-engine-v2-integration","trade_service.py"),local_review=True,local_repair=True)
+            results={"114:1":"draft_pr"}
+            (root/"receipts").mkdir()
+            d.save(root/"receipts/114-1.json",{"issue":114,"generation":1,"status":"draft_pr","pr":"https://github.com/hva73/invest/pull/303"})
+            head="b"*40
+            d.save(root/"coordinator-review.json",{"303":{"state":"hold","sha":head,"repair_reason":"Concrete defect","at":0}})
+            actions=list(d.draft_actions(root,[row],results,[],probe=lambda _:head))
+            self.assertEqual([x[2] for x in actions],["repair"])
+            self.assertIsNone(d.choose_review(root,[row],results,[],actions=actions))
+            self.assertEqual(list(d.repair_candidates(root,[row],results,[],actions=actions)),[(row,303,head,"Concrete defect")])
+            d.save(root/"coordinator-repair-303.json",{"key":"114:1","head":head,"state":"held"})
+            actions=list(d.draft_actions(root,[row],results,[],probe=lambda _:head))
+            self.assertEqual([x[2] for x in actions],["blocked_repair"])
+            self.assertIsNone(d.choose_review(root,[row],results,[],actions=actions))
+            self.assertEqual(list(d.repair_candidates(root,[row],results,[],actions=actions)),[])
+            actions=list(d.draft_actions(root,[row],results,[],probe=lambda _:"c"*40))
+            self.assertEqual([x[2] for x in actions],["review"])
+            self.assertEqual(d.choose_review(root,[row],results,[],actions=actions),row)
+            def unavailable(_):
+                raise OSError("offline")
+            actions=list(d.draft_actions(root,[row],results,[],probe=unavailable))
+            self.assertEqual([x[2] for x in actions],["metadata_unavailable"])
+            self.assertIsNone(d.choose_review(root,[row],results,[],actions=actions))
 
     def test_capacity_includes_coordinator_without_false_agent_activity(self):
         with tempfile.TemporaryDirectory() as tmp:
