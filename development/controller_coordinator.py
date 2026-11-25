@@ -244,8 +244,8 @@ def rebase_disjoint(root,row,number):
     return result
 
 def repair_attempt(root,number,sha,limit=20):
-    """Allow a new attempt only after a previous attempt demonstrably published.
-    Never repeat uncertain, held or reserved execution, nor the same rejected SHA.
+    """Retain old records; an externally superseded held SHA cannot block a new head.
+    Reserved attempts and held attempts on the current head remain fail-closed.
     """
     seen=set()
     for i in range(1,limit+1):
@@ -256,7 +256,14 @@ def repair_attempt(root,number,sha,limit=20):
         value=read(path,{})
         head=value.get("head")
         new_head=value.get("new_head")
-        if value.get("state")!="published" or not HEX.fullmatch(str(new_head)) or head==sha or head==new_head or new_head in seen:
+        if not HEX.fullmatch(str(head)) or head==sha:
+            return None
+        if value.get("state")=="held":
+            # A later, independently verified remote head supersedes this failed
+            # attempt; preserve its checkout and record, never retry its old SHA.
+            seen.add(head)
+            continue
+        if value.get("state")!="published" or not HEX.fullmatch(str(new_head)) or head==new_head or new_head in seen:
             return None
         seen.update((head,new_head))
     return None
