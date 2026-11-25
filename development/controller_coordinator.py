@@ -243,18 +243,22 @@ def rebase_disjoint(root,row,number):
     save(record,dict(rec,state="complete"))
     return result
 
-def repair_attempt(root,number,sha,limit=3):
+def repair_attempt(root,number,sha,limit=20):
     """Allow a new attempt only after a previous attempt demonstrably published.
     Never repeat uncertain, held or reserved execution, nor the same rejected SHA.
     """
+    seen=set()
     for i in range(1,limit+1):
         suffix="" if i==1 else "-"+str(i)
         path=root/("coordinator-repair-"+str(number)+suffix+".json")
         if not path.exists():
             return i
         value=read(path,{})
-        if value.get("state")!="published" or not HEX.fullmatch(str(value.get("new_head",""))) or value.get("head")==sha:
+        head=value.get("head")
+        new_head=value.get("new_head")
+        if value.get("state")!="published" or not HEX.fullmatch(str(new_head)) or head==sha or head==new_head or new_head in seen:
             return None
+        seen.update((head,new_head))
     return None
 
 def verify_pr(row, number):
