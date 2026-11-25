@@ -28,7 +28,8 @@ class HotWatch(unittest.TestCase):
    portfolios.replace_pluto(c,1,[{'id':'portfolios:root','name':'Root','kind':'portfolio'}])
    pid=c.execute("SELECT id FROM portfolios WHERE external_id='portfolios:root'").fetchone()[0]
    for origin,intent in (('@hotwatch','signal-intent'),('@manual-buy','manual-intent')):
-    response={'orderIntentId':intent,'status':'PENDING'}
+    # A legacy readback stored the manual intent's response on the signal proposal.
+    response={'orderIntentId':'manual-intent','status':'PENDING'}
     c.execute("INSERT INTO broker_proposals(user_id,fingerprint,report_id,candidate_id,kind,portfolio_id,payload,status,created,intent_id,response) VALUES(1,?,?,'synthetic-MERC','direct',?,?,'sent',?,?,?)",
               (intent,origin,pid,json.dumps(payload),self.now.timestamp(),intent,json.dumps(response)))
   # A manual proposal for this asset cannot replace the signal's evidence.

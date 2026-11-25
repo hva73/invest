@@ -349,6 +349,27 @@ class Trading(unittest.TestCase):
   self.assertEqual(checked['status'],'sent')
   self.assertEqual(checked['report_id'],proposal['report_id'])
   self.assertEqual(len(self.writes()),1)
+ def test_check_recovers_from_unrelated_historical_response(self):
+  pid=self.send(self.estimate())['id']
+  valid={'orderIntentId':'synthetic-intent','status':'PENDING'}
+  for response in (
+      {'orderIntentId':'other-intent','status':'ACCEPTED'},
+      {'orderIntentId':'other-intent','status':'ACCEPTED','orderId':'other-order'},
+      {'status':'ACCEPTED','orderId':'other-order'}):
+   with self.subTest(response=response):
+    with app.connect() as c:
+     c.execute('UPDATE broker_proposals SET response=? WHERE id=?',(json.dumps(response),pid))
+    prior=dict(trade.get(app.connect,1,pid))
+    for reply in ({'status':'PENDING'},dict(valid,orderId='other-order')):
+     self.intent_result=reply
+     with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+      trade.check(app.connect,1,pid,self.factory)
+     self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+    self.intent_result=valid
+    checked=trade.check(app.connect,1,pid,self.factory)['proposal']
+    self.assertEqual(checked['response'],valid)
+    self.assertEqual(checked['status'],'sent')
+
  def test_check_only_reuses_order_id_from_compatible_prior_identity(self):
   pid=self.send(self.estimate())['id']
   intent={'orderIntentId':'synthetic-intent','orderId':'original-order'}

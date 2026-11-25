@@ -439,9 +439,9 @@ def check(connect,user_id,pid,factory=None):
 
     previous=proposal['response']
     prior_nodes=[]
-    if isinstance(previous,dict) and previous:
-        if intent_reference(previous,payload)!=reference:
-            raise TradeError(identity_error)
+    # Historical readbacks may belong to a different intent. Only use their
+    # identity fields when the response belongs to the stored proposal reference.
+    if intent_reference(previous,payload)==reference:
         prior_nodes.append(previous)
         if 'orderIntents' in previous:
             items=previous['orderIntents']
