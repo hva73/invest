@@ -28,7 +28,7 @@ const assert = (condition, message) => { if (!condition) throw Error(message); }
 const byId = id => document.getElementById(id);
 const api = (path, args) => {
     const user = username;
-    if (path === 'market/quote' || path === 'state' || path.includes('&before=') || path.endsWith('/pause') || path.endsWith('/ack-signal') || /manual-(search|start)/.test(path) || /sessions\/notification-/.test(path) || (holdCurrentLoad&&path.includes('view=current'))) {
+    if (path === 'market/quote' || path === 'state' || path.includes('&before=') || path.endsWith('/pause') || path.endsWith('/ack-signal') || path.includes('/buy-plan?') || /manual-(search|start)/.test(path) || /sessions\/notification-/.test(path) || (holdCurrentLoad&&path.includes('view=current'))) {
         return new Promise((resolve, reject) => pending.push({path, args, user, resolve, reject}));
     }
     if (path.includes('/start-candidates')) return Promise.resolve({candidates: [0, 1].map(i => ({
@@ -37,6 +37,7 @@ const api = (path, args) => {
     }))});
     if (/\\/(samples|events)\\?/.test(path)) return Promise.resolve({items: []});
     if (/\\/sessions\\//.test(path)) return Promise.resolve({session: {
+        watch_id: path.slice(path.lastIndexOf('/') + 1).split('?')[0],
         status: 'ACTIVE', signal: 'WAIT', request: {ticker: user, watch_mode: 'entry', portfolio_ids: []}
     }});
     if (path.includes('view=current')) return Promise.resolve({
@@ -297,6 +298,78 @@ const run = async () => {
     const failures = [];
     const check = (condition, message) => { if (!condition) failures.push(message); };
     const flush = () => new Promise(resolve => setTimeout(resolve, 0));
+    for (const outcome of ['current-error', 'current-success', 'stale-error', 'stale-success', 'closed-form', 'replaced-form']) {
+        switchAccount('alpha');
+        await flush();
+        const opening = open('alpha-watch');
+        take('state', 'alpha').resolve(account('alpha'));
+        await opening;
+        const form = byId('engine-buy-plan');
+        const details = form.closest('details');
+        details.open = true;
+        const saving = EngineUI.submit({target: form, preventDefault() {}});
+        const request = take('/buy-plan?', 'alpha');
+        const before = details.innerHTML;
+        const stale = !outcome.startsWith('current');
+        if (outcome.startsWith('stale')) epoch++; // Logout is pending with username and form still present.
+        if (outcome === 'closed-form') await EngineUI.click(button('[data-engine-close]'));
+        if (outcome === 'replaced-form') {
+            const replacement = open('alpha-next');
+            take('state', 'alpha').resolve(account('alpha'));
+            await replacement;
+        }
+        if (outcome.endsWith('error')) request.reject(Error('Buy plan rejected'));
+        else request.resolve({note: 'Buy plan saved'});
+        await flush();
+        const followUp = pending.findIndex(request => request.path === 'state');
+        check((followUp >= 0) === (outcome === 'current-success'), outcome + ' unexpected buy-plan detail refresh');
+        if (followUp >= 0) pending.splice(followUp, 1)[0].resolve(account('alpha'));
+        await saving;
+        if (stale) check(details.open && details.innerHTML === before, outcome + ' rewrote the old buy-plan form');
+        else if (outcome.endsWith('error')) check(
+            form.textContent.includes('Buy plan rejected') && !form.querySelector('button').disabled,
+            'Current buy-plan error did not allow retry');
+        else check(!details.open && byId('engine-buy-plan') !== form, 'Current buy plan did not refresh detail');
+    }
+
+    for (const phase of ['scheduled', 'in flight']) {
+        switchAccount('alpha');
+        await flush();
+        const engine = byId('engine-root');
+        const before = engine.innerHTML;
+        const oldPoll = poll;
+        holdCurrentLoad = true;
+        const cycle = phase === 'in flight' ? oldPoll() : null;
+        epoch++;
+        const pendingCycle = cycle || oldPoll();
+        const requestIndex = pending.findIndex(request => request.path.includes('view=current'));
+        check((requestIndex >= 0) === (phase === 'in flight'), 'Previously scheduled HOT WATCH poll sent a request during logout');
+        if (requestIndex >= 0) pending.splice(requestIndex, 1)[0].resolve({
+            sessions: [session('logout-poll')], kill_switch: {}
+        });
+        holdCurrentLoad = false;
+        await pendingCycle;
+        check(engine.innerHTML === before, phase + ' HOT WATCH poll repainted during logout');
+        check(poll === oldPoll, phase + ' HOT WATCH poll rescheduled during logout');
+    }
+
+    switchAccount('alpha');
+    await flush();
+    const oldPoll = poll;
+    holdCurrentLoad = true;
+    const oldCycle = oldPoll();
+    const oldLoad = take('view=current', 'alpha');
+    holdCurrentLoad = false;
+    EngineUI.mount(false);
+    await flush();
+    const freshPoll = poll;
+    oldLoad.resolve({sessions: [session('old-mount')], kill_switch: {}});
+    await oldCycle;
+    check(poll === freshPoll && !button('[data-engine-detail="old-mount"]'),
+        'Old poll interfered with a fresh mount on the same root');
+    await poll();
+    check(button('[data-engine-detail="alpha-watch"]'), 'Fresh mount did not continue polling');
+
     const openHolding = () => EngineUI.openHoldingStatus({key: 'position', ticker: 'ALPHA', label: 'Original'});
     const holding = watch => ({...account('alpha'), dashboard: {positions: [{
         key: 'position', ticker: 'ALPHA', hot_watch: watch
