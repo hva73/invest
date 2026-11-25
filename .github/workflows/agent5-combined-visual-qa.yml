@@ -1,0 +1,126 @@
+name: Agent 5 combined desktop visual QA (no production)
+on: [pull_request]
+permissions:
+  contents: read
+jobs:
+  visual:
+    if: github.event.pull_request.head.ref == 'codex/agent5-combined-232-visual-qa'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: .:tests
+      ESCAPE_PLAYWRIGHT_MANAGED: '1'
+      ESCAPE_SCREENSHOTS: visual-review
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt playwright==1.56.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Assert exact frozen product
+        run: test "$(git rev-parse HEAD)" = 3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65
+      - name: Combined desktop and mobile frontend regression
+        run: |
+          set -e
+          for f in tests/test_dashboard_data.js tests/test_nvda_daily_consistency.js tests/test_combined_holdings.js tests/test_sidebar_scope.js tests/test_market_daily_stale.cjs tests/test_demo_chart_identity.cjs tests/test_statistics_ui.cjs; do node "$f"; done
+      - name: Make signal fixture Copenhagen-day deterministic (QA checkout only)
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('tests/browser_signal_push_detail.py')
+          s = p.read_text()
+          def replace(old, new):
+              global s
+              assert s.count(old) == 1, old
+              s = s.replace(old, new)
+          replace('from datetime import datetime,timezone,timedelta',
+                  'from datetime import datetime,timezone,timedelta\nfrom zoneinfo import ZoneInfo')
+          replace(' now=datetime.now(timezone.utc);stamp=now.isoformat()',
+                  ' now=datetime.now(timezone.utc);tz=ZoneInfo("Europe/Copenhagen");midnight=now.astimezone(tz).replace(hour=0,minute=0,second=0,microsecond=0).astimezone(timezone.utc);now=max(now,midnight+timedelta(seconds=2));now=now.replace(microsecond=(now.microsecond//1000)*1000);stamp=now.isoformat()')
+          old_series = next(line for line in s.splitlines() if line.startswith(' series=['))
+          replace(old_series, """ values=[3.4,3.37,3.41,3.38,3.36,3.39,3.34,3.31,3.35,3.32,3.29,3.33,3.30,3.27,3.29,3.25,3.28,3.23,3.26,3.21,3.24,3.18,3.20,3.15,3.1]
+           first=max(midnight,now-timedelta(hours=2))
+           def point(at,price):return {'price':str(price),'epoch':at.timestamp(),'timestamp':at.isoformat(),'date':at.astimezone(tz).date().isoformat()}
+           series=[point(midnight-timedelta(minutes=1),4.57)]+[point(first+(now-first)*i/24,v) for i,v in enumerate(values)]
+           assert max(float(p['price']) for p in series if p['date']==now.astimezone(tz).date().isoformat())==3.41
+           assert max(float(p['price']) for p in series)==4.57""")
+          replace("   page.evaluate('state.connection.connected=true')",
+                  "   page.clock.set_fixed_time(now);page.evaluate('serverClockOffset=0;state.connection.connected=true')")
+          replace("account=page.evaluate('structuredClone(state)');account['dashboard']",
+                  "account=page.evaluate('structuredClone(state)');account['time']=stamp;account['dashboard']")
+          old_period = next(line for line in s.splitlines() if line.startswith("    slot.locator('[data-market-period='+name+']')"))
+          replace(old_period, old_period+"\n    if name=='week':expect(slot.locator('.market-peak-label')).to_have_text('Top 4,57 USD')\n    if name=='day':expect(slot.locator('.market-peak-label')).to_have_text('Top 3,41 USD')")
+          p.write_text(s)
+          compile(s,str(p),'exec')
+          PY
+          git diff --check -- tests/browser_signal_push_detail.py
+          git diff --stat -- tests/browser_signal_push_detail.py
+      - name: Combined desktop, sector, charts and signals
+        run: |
+          mkdir -p visual-review
+          failed=0
+          for f in tests/browser_daily_parity.py tests/browser_sector_journey.py tests/browser_desktop_experience.py tests/browser_portfolio_value_chart.py tests/browser_statistics_ring_center.py tests/browser_position_entry_regression.py tests/browser_signal_push_detail.py tests/browser_statistics_integration.py tests/browser_demo_signal_parity.py; do
+            echo "Testing $f"
+            python "$f" || failed=1
+          done
+          exit "$failed"
+      - name: Verify synthetic visual evidence
+        run: |
+          set -e
+          for f in overview-after-1440.png overview-after-1920.png overview-tooltip-1440.png sektor-oversigt-1440.png sektor-positioner-1440.png signal-buy-390.png signal-sell-390.png demo-signal-buy-390.png demo-signal-sell-390.png; do
+            test -s "visual-review/$f"
+          done
+          printf '%s\n' '3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65' > visual-review/product-sha.txt
+          find visual-review -maxdepth 1 -type f -printf '%f\n' | sort
+      - name: Upload synthetic browser screenshots (not live data)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: escape-3cc0c7be-synthetic-visual-review
+          path: |
+            visual-review/*.png
+            visual-review/product-sha.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  warning_desktop_regression:
+    if: github.event.pull_request.head.ref == 'codex/agent5-combined-232-visual-qa'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .:tests
+      ESCAPE_PLAYWRIGHT_MANAGED: '1'
+      ESCAPE_SCREENSHOTS: warning-review
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 94b5045fae711fae8cf2d4c78a3b21b2c19fcd72
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt playwright==1.56.0
+      - run: python -m playwright install --with-deps chromium
+      - name: Verify exact mobile patch candidate and desktop scope
+        run: |
+          test "$(git rev-parse HEAD)" = 94b5045fae711fae8cf2d4c78a3b21b2c19fcd72
+          test "$(git hash-object static/desktop-experience.css)" = 9b5c22ea7cf9fb82c84525c47ddcfcb741bdf117
+      - name: Independent desktop and sector acceptance after mobile patch
+        run: |
+          mkdir -p warning-review
+          python tests/browser_desktop_experience.py
+          python tests/browser_sector_journey.py
+          python tests/browser_daily_parity.py
+          git rev-parse HEAD > warning-review/product-sha.txt
+          for f in overview-after-1440.png overview-after-1920.png sektor-oversigt-1440.png sektor-positioner-1440.png; do
+            test -s "warning-review/$f"
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: escape-94b5045f-desktop-warning-regression
+          path: warning-review/
+          if-no-files-found: error
+          retention-days: 14
