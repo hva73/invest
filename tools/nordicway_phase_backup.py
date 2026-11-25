@@ -41,11 +41,28 @@ def budget(db_bytes, source_bytes, installed_bytes, free):
 
 def available(target,token):
     import nordicway_uapi_quota as q
-    v=q.read(token)
+    if token is None:
+        import shutil
+        executable=shutil.which("uapi") or "/usr/local/cpanel/bin/uapi"
+        result=subprocess.run([executable,"--output=json","StatsBar","get_stats","display=diskusage"],capture_output=True,check=True,timeout=20)
+        v=q.parse(json.loads(result.stdout))
+    else:
+        v=q.read(token)
     fs=os.statvfs(target)
     free=min(v["free_lower_bytes"],CAP-v["used_upper_bytes"],fs.f_bavail*fs.f_frsize)
     if free<=0: raise ValueError("insufficient_phase_space")
     return free
+
+def restart_check(target,token=None,minimum=0):
+    db=Path(target)/"var/escape.db"
+    n=identity(db)[2]
+    for ext in ("-wal","-journal"):
+        path=Path(str(db)+ext)
+        if os.path.lexists(path): n+=identity(path)[2]
+    required=max(minimum,n+max(HEADROOM,(n+9)//10)+HEADROOM)
+    if available(target,token)<required:
+        raise ValueError("insufficient_restart_reserve")
+    return required
 
 def phase_budget(checkout,target,token,manifest):
     source=existing=0
@@ -98,7 +115,7 @@ def write_snapshot(source,destination,cap,expected_bytes):
     try:
         with os.fdopen(fd,"wb") as raw:
             out=Bounded(raw,cap)
-            with gzip.GzipFile(fileobj=out,filename="",mtime=0,compresslevel=3,mode="wb") as zipped:
+            with gzip.GzipFile(fileobj=out,filename="",mtime=0,compresslevel=6,mode="wb") as zipped:
                 with open(source,"rb") as inp:
                     while block:=inp.read(CHUNK):
                         count+=len(block)
@@ -119,9 +136,10 @@ def snapshot(database,destination,cap,db_limit):
     Child I/O avoids releasing the parent's POSIX SQLite lock.
     """
     connection=None
+    database=Path(database); destination=Path(destination)
+    if os.path.lexists(destination): raise SnapshotFailure("backup_destination_exists")
     try:
         try:
-            database=Path(database); destination=Path(destination)
             if database.parent.is_symlink() or destination.parent.is_symlink():
                 raise ValueError("unsafe_snapshot_path")
             no_sidecars(database); before=identity(database)
@@ -147,7 +165,7 @@ def snapshot(database,destination,cap,db_limit):
             # O_EXCL in the child guarantees it cannot overwrite an existing file.
             # Timeout may leave a partial file; this path is inside a fresh mkdtemp.
             if destination.is_file() and not destination.is_symlink():
-                destination.unlink()
+                destination.unlink();sync_dir(destination.parent)
             raise SnapshotFailure(str(exc) if isinstance(exc,ValueError) else type(exc).__name__) from None
         yield {"database_sha256":digest,"database_bytes":before[2],"database_encoding":"gzip"}
     finally:
