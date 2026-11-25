@@ -204,20 +204,22 @@ async () => {
  mount('uncached');
  const uncached=slot('uncached');
  await click('uncached');
+ await finish(requests[19],quote(30));
+ await click('uncached','refresh');
  await MarketUI.click(uncached.querySelector('[data-market-period="month"]'));
  let completed=false;
  const pendingRefresh=MarketUI.refreshVisible().then(()=>{completed=true});
- assert(requests.length===20,'Uncached refresh overlapped day request');
- await finish(requests[19],quote(30));
- assert(!completed && requests.length===21 && requests[20].period==='ONE_MONTH',
+ assert(requests.length===21,'Uncached refresh overlapped day request');
+ await finish(requests[20],quote(30));
+ assert(!completed && requests.length===22 && requests[21].period==='ONE_MONTH',
         'Uncached refresh completed before selected period');
- await finish(requests[20],quote(31));
+ await finish(requests[21],quote(31));
  await pendingRefresh;
  const delayed=timers.shift();
  assert(delayed?.delay===0,'Missing guarded automatic follow-up');
  delayed.callback();
  await flush();
- assert(requests.length===21 && completed,'Uncached month duplicated or failed to complete');
+ assert(requests.length===22 && completed,'Uncached month duplicated or failed to complete');
 }
 """
 
