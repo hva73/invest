@@ -24,6 +24,31 @@ class WS:
   return json.dumps(self.messages.pop(0))
 
 class FeedTests(unittest.TestCase):
+ def test_replays_do_not_hide_other_symbols_or_same_time_conflicts(self):
+  first={'s':'FAST','t':1730000000000,'p':10}
+  rows=[first]*250+[dict(first,p=11),dict(first,s='SLOW',p=20)]
+  ws=WS(rows)
+  result=EODHDFeeds(SECRET,ws_factory=lambda *a,**kw:ws).capture('us_trades',['FAST','SLOW'],max_messages=3)
+  self.assertEqual([(m['symbol'],m['price']) for m in result['messages']],[('FAST','10'),('FAST','11'),('SLOW','20')])
+  self.assertTrue(all(m['event_time']=='2024-10-27T03:33:20+00:00' for m in result['messages']))
+
+ def test_history_completion_cache_stops_at_minute_boundary(self):
+  import eodhd_feeds
+  minute=1730000040
+  row={'s':'AMD.US','i':'1m','t':(minute-60)*1000,'o':10,'h':12,'l':9,'c':11,'v':45}
+  opener=Opener([row]);client=EODHDFeeds(SECRET,opener=opener,share_status=True)
+  with patch.object(eodhd_feeds,'_history_cache',{}),patch.object(eodhd_feeds.time,'time') as wall,patch.object(eodhd_feeds.time,'monotonic') as monotonic,patch.object(opener,'open',wraps=opener.open) as opens:
+   wall.return_value=minute+1;monotonic.return_value=1
+   first=client.minute_bars('us','AMD')
+   wall.return_value=minute+30;monotonic.return_value=30
+   self.assertEqual(client.minute_bars('us','AMD'),first)
+   self.assertEqual(opens.call_count,1)
+   wall.return_value=minute+60;monotonic.return_value=60
+   client.minute_bars('us','AMD')
+   wall.return_value=minute+81;monotonic.return_value=81
+   client.minute_bars('us','AMD')
+   self.assertEqual(opens.call_count,3)
+
  def test_batch_limit_diagnostics_cover_valid_partial_and_quiet_streams(self):
   now=int(datetime.now(timezone.utc).timestamp()*1000)
   for rows,valid,partial,limited in [
