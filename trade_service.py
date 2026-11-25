@@ -453,9 +453,9 @@ def check(connect,user_id,pid,factory=None):
             continue
         values=[node[key] for node in prior_nodes if isinstance(node.get(key),str) and node[key]]
         if values:
-            if key=='orderId' and expected['portfolioId'] and any(
-                isinstance(node.get('portfolioId'),str) and node['portfolioId']
-                and node['portfolioId']!=expected['portfolioId'] for node in prior_nodes
+            if key=='orderId' and any(
+                expected.get(field) and node.get(field) not in (None,'',expected[field])
+                for node in prior_nodes for field in ('portfolioId','assetId')
             ):
                 raise TradeError(identity_error)
             if any(value!=values[0] for value in values):

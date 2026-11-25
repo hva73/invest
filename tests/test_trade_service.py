@@ -349,15 +349,20 @@ class Trading(unittest.TestCase):
   self.assertEqual(checked['status'],'sent')
   self.assertEqual(checked['report_id'],proposal['report_id'])
   self.assertEqual(len(self.writes()),1)
- def test_check_only_reuses_order_id_from_compatible_prior_depot(self):
+ def test_check_only_reuses_order_id_from_compatible_prior_identity(self):
   pid=self.send(self.estimate())['id']
   intent={'orderIntentId':'synthetic-intent','orderId':'original-order'}
   self.intent_result=dict(intent,status='ACCEPTED')
-  for depot_fields,conflicting in (({'portfolioId':'other-depot'},True),
-                                  ({'portfolioId':'root','orderIntents':[dict(intent,portfolioId='other-depot')]},True),
-                                  ({'portfolioId':'root'},False),({},False)):
-   with self.subTest(depot_fields=depot_fields):
-    response=dict(intent,status='PENDING',**depot_fields)
+  for identity_fields,conflicting in (
+      ({'portfolioId':'other-depot'},True),
+      ({'portfolioId':'root','orderIntents':[dict(intent,portfolioId='other-depot')]},True),
+      ({'assetId':'other-asset'},True),
+      ({'assetId':'asset-test','orderIntents':[dict(intent,assetId='other-asset')]},True),
+      ({'portfolioId':'root','assetId':'asset-test'},False),
+      ({'orderIntents':[dict(intent,assetId='asset-test')]},False),
+      ({},False)):
+   with self.subTest(identity_fields=identity_fields):
+    response=dict(intent,status='PENDING',**identity_fields)
     with app.connect() as c:
      c.execute('UPDATE broker_proposals SET response=? WHERE id=?',(json.dumps(response),pid))
     prior=dict(trade.get(app.connect,1,pid))
