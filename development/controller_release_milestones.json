@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "release": "ESCAPE 2.0 · samlet release",
+  "updated_at": "2026-11-25T15:12:00Z",
+  "milestones": [
+    {
+      "id": "stabilization",
+      "phase": 1,
+      "title": "Stabilisering og grafer",
+      "status": "verified",
+      "issue": 267,
+      "evidence": "PR #281 integreret i udviklingsgrenen 546dec64; samlet CI bestået."
+    },
+    {
+      "id": "shared_data",
+      "phase": 1,
+      "title": "Fælles datamotor",
+      "status": "review",
+      "issue": 14,
+      "evidence": "PR #285 integreret (default-off); #287 afventer review. Deling og fuld belastning ikke endeligt accepteret."
+    },
+    {
+      "id": "candidate_rotation",
+      "phase": 1,
+      "title": "Dynamisk HOT WATCH",
+      "status": "blocked",
+      "issue": 268,
+      "evidence": "Generation 1: procesfejl; lokalt arbejde skal genfindes."
+    },
+    {
+      "id": "resources",
+      "phase": 1,
+      "title": "CPU/RAM, workers og serverdrift",
+      "status": "review",
+      "issue": 14,
+      "evidence": "PR #288 CPU/RAM-kode og CI bestået; review og UI mangler."
+    },
+    {
+      "id": "core",
+      "phase": 2,
+      "title": "Fælles beslutningskerne",
+      "status": "verified",
+      "issue": 273,
+      "evidence": "Første simuleringskerne integreret; ikke live handelsmotor."
+    },
+    {
+      "id": "strategies",
+      "phase": 2,
+      "title": "Strategy Center og strategier",
+      "status": "pending",
+      "issue": 273,
+      "evidence": "Swing, Recovery, Long-Term og fælles integration udestår."
+    },
+    {
+      "id": "position",
+      "phase": 2,
+      "title": "Position Watch og strategiskift",
+      "status": "review",
+      "issue": 273,
+      "evidence": "PR #286 simulation og CI bestået; persistence, review og UI udestår."
+    },
+    {
+      "id": "longterm",
+      "phase": 2,
+      "title": "Long-Term Watch",
+      "status": "pending",
+      "issue": 12,
+      "evidence": "Samlet funktion udestår."
+    },
+    {
+      "id": "replay",
+      "phase": 3,
+      "title": "Historisk replay – grundfunktion",
+      "status": "verified",
+      "issue": 273,
+      "evidence": "PR #283 og #284 integreret på v2-gren; begrænset historisk dækning."
+    },
+    {
+      "id": "learning",
+      "phase": 3,
+      "title": "Trading Lab, læring og faktisk dækning",
+      "status": "in_progress",
+      "issue": 273,
+      "evidence": "Replay-fundament på plads; virkelige data, shadow og målinger udestår."
+    },
+    {
+      "id": "statistics",
+      "phase": 3,
+      "title": "Hvordan står det til? – herkomst og statistik",
+      "status": "pending",
+      "issue": 114,
+      "evidence": "Verificeret entry/exit/fill-kæde og sammenligning udestår."
+    },
+    {
+      "id": "ui",
+      "phase": 3,
+      "title": "Samlet mobil/desktop 2.0",
+      "status": "pending",
+      "issue": 54,
+      "evidence": "Godkendte eksisterende grafer bevares; nye 2.0-visninger udestår."
+    },
+    {
+      "id": "load",
+      "phase": 4,
+      "title": "100 brugere og skaleringsmåling",
+      "status": "pending",
+      "issue": 14,
+      "evidence": "Samme-symbol adaptertest bestået; fuld scheduler-, CPU/RAM-, DB- og API-belastningstest udestår."
+    },
+    {
+      "id": "release",
+      "phase": 4,
+      "title": "Samlet releasekandidat, backup og migration",
+      "status": "pending",
+      "issue": 57,
+      "evidence": "Flet produktændringer oven på installeret SHA; eksakt CI, quota og rollback."
+    },
+    {
+      "id": "go",
+      "phase": 4,
+      "title": "Ejer-GO og verificeret drift",
+      "status": "pending",
+      "issue": 57,
+      "evidence": "Ingen ny installation eller ejer-GO endnu."
+    }
+  ]
+}
