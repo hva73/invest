@@ -152,16 +152,17 @@ def deployment_gates(token):
             out["build_commit"] = commit_marker(app, "BUILD_COMMIT")
         # Only two fixed source modules, never keys, configuration, DB or arbitrary paths.
         def read_code(name):
-            if name not in ("apply_update.py","nordicway_deploy_adapter.py","nordicway_uapi_quota.py","nordicway_deploy_runner.py","nordicway_release_backup.py","nordicway_deploy_sequence.py") or bridge_files.get(name,{}).get("type")!="file":
+            if name not in ("apply_update.py","nordicway_deploy_adapter.py","nordicway_uapi_quota.py","nordicway_deploy_runner.py","nordicway_release_backup.py","nordicway_deploy_sequence.py","nordicway_phase_backup.py") or bridge_files.get(name,{}).get("type")!="file":
                 raise ValueError("source_unavailable")
             result=call("get_file_content",{"dir":bridge,"file":name,"from_charset":"UTF-8","to_charset":"UTF-8","update_html_document_encoding":0})
             if not isinstance(result,dict) or not isinstance(result.get("content"),str):raise ValueError("source_unavailable")
             return result["content"]
         out["bridge_comparison"]=bridge_comparison(read_code)
+        out["phase_gate_held"] = "deploy-enabled.phase-held" in bridge_files
         out["maintenance_gate_held"] = "deploy-enabled.maintenance-held" in bridge_files
         out["maintenance_contract"] = {}
         out["phase_bridge_hashes"] = {}
-        for filename in ("apply_update.py","nordicway_deploy_adapter.py","nordicway_deploy_runner.py","nordicway_release_backup.py","nordicway_deploy_sequence.py"):
+        for filename in ("apply_update.py","nordicway_deploy_adapter.py","nordicway_deploy_runner.py","nordicway_release_backup.py","nordicway_deploy_sequence.py","nordicway_phase_backup.py"):
             try: out["phase_bridge_hashes"][filename] = hashlib.sha256(read_code(filename).encode("utf-8")).hexdigest()
             except Exception: out["phase_bridge_hashes"][filename] = "unavailable"
         for filename, wanted in (("nordicway_deploy_adapter.py", {"__init__","lock","service_status","quiescence"}), ("nordicway_uapi_quota.py", {"parse"})):
