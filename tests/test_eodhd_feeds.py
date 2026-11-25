@@ -406,7 +406,7 @@ class FeedTests(unittest.TestCase):
  def test_closed_bar_uses_actual_bar_open_time_without_inventing_trade_time(self):
   from test_hotwatch_engine import request
   import hotwatch_engine
-  req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0);adapter=EODHDAdapter(None,1,Opener({}));at=(now-timedelta(minutes=3)).isoformat()
+  req=request();req.update(provider='eodhd',provider_symbol='MERC.US');now=datetime.now(timezone.utc).replace(microsecond=0);adapter=EODHDAdapter(None,1,Opener({}));at=(now-timedelta(minutes=1)).isoformat()
   class Feeds:
    def minute_bars(self,*args):return {'status':'OK','bars':[{'bar_open_at':at,'open':'10','high':'12','low':'9','close':'11','volume':'50'}]}
   with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':SECRET,'ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'0','ESCAPE_HW_EODHD_BARS_ENABLED':'1'}),patch.object(adapter,'feeds',return_value=Feeds()),patch('hotwatch_adapters.PlutoAdapter.context',return_value=unknown_context()):sample=adapter.poll({'request_data':req})
