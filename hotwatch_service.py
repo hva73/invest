@@ -2,6 +2,7 @@
 from eodhd_capacity import Capacity
 import json,signal,threading,logging,hashlib,time,os,re,secrets,sqlite3,sys,math
 from datetime import timedelta
+from itertools import groupby
 from concurrent.futures import ThreadPoolExecutor,wait,FIRST_COMPLETED
 from contextlib import contextmanager,nullcontext
 import app,hotwatch_engine as engine
@@ -781,6 +782,65 @@ def refresh_holding_origin(connect,uid,pid,asset_id):
  try:trade_service.check(connect,uid,matches[0])
  except Exception:pass  # No proof remains no link; the ordinary holding monitor still runs.
 
+def _holding_watch_id(uid,pid,aid,generation):
+ identity=f'{uid}|{pid}|{aid}'
+ if generation is not None:identity+='|'+generation
+ return 'hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
+
+def _holding_batch(c,uid,keys,check_gate,epoch):
+ """Read each retry key once. A writer resolves history only at the current position."""
+ assets={asset for _,asset in keys}
+ portfolios={}
+ for pid,aid in keys:portfolios.setdefault(pid,[]).append(aid)
+ check_history='NULL'
+ if not c.in_transaction:
+  # Read terminal requests only if an exact watch ID exists and the scan
+  # reaches that position. The first existence check runs once per batch.
+  check_history="""
+   CASE WHEN EXISTS (SELECT 1 FROM hw_sessions WHERE user_id=:uid
+                     AND status NOT IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED'))
+         AND a.next_attempt>:epoch AND a.status!='STOPPED'
+   THEN EXISTS (SELECT 1 FROM hw_sessions h WHERE h.user_id=:uid AND h.is_test=0
+          AND h.watch_id IN (holding_watch_id(:uid,a.portfolio_id,a.asset_id,
+                               CASE WHEN a.status='POSITION_CLOSED' THEN a.updated END),
+                             CASE WHEN a.status!='POSITION_CLOSED' THEN NULLIF(a.watch_id,'') END)
+          AND h.status NOT IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED'))
+   END
+  """
+ sql=f"""
+  WITH tenant AS (
+   SELECT EXISTS(SELECT 1 FROM hw_control WHERE user_id=:uid AND :check_gate AND killed) AS killed
+  )
+  SELECT 'gate' AS kind,NULL AS portfolio_id,NULL AS asset_id,NULL AS watch_id,
+         NULL AS status,NULL AS request,NULL AS next_attempt,NULL AS updated,NULL AS check_history
+  FROM tenant WHERE killed
+  UNION ALL
+  SELECT 'session',NULL,json_extract(s.request,'$.asset_id'),s.watch_id,s.status,s.request,NULL,NULL,NULL
+  FROM tenant CROSS JOIN hw_sessions s WHERE NOT killed AND s.user_id=:uid AND s.is_test=0
+    AND s.status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')
+    AND json_extract(s.request,'$.asset_id') IN (SELECT value FROM json_each(:assets))
+  UNION ALL
+  SELECT 'attempt',a.portfolio_id,a.asset_id,a.watch_id,a.status,NULL,a.next_attempt,a.updated,{check_history}
+  FROM tenant CROSS JOIN json_each(:portfolios) p CROSS JOIN json_each(p.value) k CROSS JOIN hw_holding_autowatch a
+    ON a.user_id=:uid AND a.portfolio_id=p.key AND a.asset_id=k.value
+  WHERE NOT killed
+  """
+ return list(c.execute(sql,{'uid':uid,'check_gate':check_gate,'assets':json.dumps(list(assets)),
+                            'portfolios':json.dumps(portfolios),'epoch':epoch}))
+
+def _stopped_holding_watch(c,uid,pid,aid,watch,prior_watch):
+ history=c.execute("""SELECT 'history' AS kind,watch_id,status,request FROM hw_sessions
+   WHERE user_id=? AND watch_id IN (?,?) AND is_test=0
+     AND (watch_id=? OR status IN ('COMPLETED','EXPIRED','ERROR'))""",(uid,watch,prior_watch,watch)).fetchall()
+ # The previously linked terminal watch takes precedence over the generated ID.
+ for row in sorted(history,key=lambda row:row['watch_id']!=prior_watch):
+  if row['watch_id']!=watch and row['status'] not in ('COMPLETED','EXPIRED','ERROR'):continue
+  request=json.loads(row['request'])
+  portfolios=request.get('portfolio_ids')
+  if request.get('asset_id')==aid and request.get('watch_mode','both')!='entry' and (not portfolios or pid in portfolios):
+   return row['watch_id']
+ return None
+
 def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
  """Activate at most one owned position per tick, with persistent bounded retries."""
  from decimal import Decimal,InvalidOperation
@@ -788,8 +848,12 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
  now=now or engine.utc();epoch=now.timestamp();at=now.isoformat()
  if os.environ.get('ESCAPE_HW_HOLDINGS_AUTOWATCH','1')=='0':return None
  with connect() as c:
-  if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
-  snapshots=c.execute("SELECT p.user_id,p.id,s.payload FROM portfolios p JOIN users u ON u.id=p.user_id JOIN portfolio_snapshots s ON s.portfolio_id=p.id AND s.user_id=p.user_id WHERE p.active=1 AND p.source='pluto' AND u.active=1 AND s.last_error IS NULL ORDER BY p.user_id,p.id").fetchall()
+  snapshots=c.execute("""SELECT p.user_id,p.id,s.payload
+                         FROM hw_system_control gate CROSS JOIN portfolios p
+                         JOIN users u ON u.id=p.user_id
+                         JOIN portfolio_snapshots s ON s.portfolio_id=p.id AND s.user_id=p.user_id
+                         WHERE gate.id=1 AND gate.killed=0 AND p.active=1 AND p.source='pluto'
+                         AND u.active=1 AND s.last_error IS NULL ORDER BY p.user_id,p.id""").fetchall()
   choices=[]
   for snap in snapshots:
    try:payload=json.loads(snap['payload'])
@@ -803,29 +867,83 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
     try:valid=holding.get('kind')=='holding' and isinstance(aid,str) and bool(aid) and Decimal(str(holding.get('quantity')))>0
     except (InvalidOperation,ValueError,TypeError):valid=False
     if valid:choices.append((snap['user_id'],snap['id'],holding))
-  for uid,pid,holding in choices:
-   aid=holding['asset_id']
-   control=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
-   if control and control['killed']:continue
-   existing=c.execute("SELECT watch_id,status,request FROM hw_sessions WHERE user_id=? AND is_test=0 AND json_extract(request,'$.asset_id')=? ORDER BY id DESC",(uid,aid)).fetchall()
-   matches=[row for row in existing if json.loads(row['request']).get('watch_mode','both')!='entry' and (not json.loads(row['request']).get('portfolio_ids') or pid in json.loads(row['request'])['portfolio_ids'])]
-   active=[row for row in matches if row['status'] in ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')]
-   prior=c.execute('SELECT status,watch_id,next_attempt FROM hw_holding_autowatch WHERE user_id=? AND portfolio_id=? AND asset_id=?',(uid,pid,aid)).fetchone()
-   generation=c.execute('SELECT updated FROM hw_holding_autowatch WHERE user_id=? AND portfolio_id=? AND asset_id=?',(uid,pid,aid)).fetchone() if prior and prior['status']=='POSITION_CLOSED' else None
-   identity=str(uid)+'|'+str(pid)+'|'+aid+('|'+generation['updated'] if generation else '')
-   watch='hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
-   if len(active)==1:status='LINKED';linked=active[0]['watch_id']
-   elif len(active)>1:status='AMBIGUOUS';linked=None
-   elif prior and prior['status']=='STOPPED':status='STOPPED';linked=prior['watch_id']
-   elif prior and prior['status']!='POSITION_CLOSED' and prior['watch_id'] and any(row['watch_id']==prior['watch_id'] and row['status'] in ('COMPLETED','EXPIRED','ERROR') for row in matches):status='STOPPED';linked=prior['watch_id']
-   elif any(row['watch_id']==watch for row in matches):status='STOPPED';linked=watch
-   else:
-    if prior and prior['next_attempt']>epoch:continue
-    status='VERIFYING';linked=None
-   if status!='VERIFYING' and prior and prior['status']==status and prior['watch_id']==linked:continue
-   c.execute("INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,portfolio_id,asset_id) DO UPDATE SET status=excluded.status,watch_id=excluded.watch_id,next_attempt=excluded.next_attempt,updated=excluded.updated",(uid,pid,aid,status,linked,epoch+300,at))
-   if status=='VERIFYING':selected=(uid,pid,holding,watch);break
-  else:return None
+  if not choices:return None
+  c.create_function('holding_watch_id',4,_holding_watch_id)
+  scan_version=c.execute('PRAGMA data_version').fetchone()[0]
+  selected=None
+  for uid,tenant_choices in groupby(choices,key=lambda choice:choice[0]):
+   user_choices=list(tenant_choices)
+   sessions={};attempts={};keys=set()
+   index=0;refreshed=False;reserved=False;reader_contended=False
+   while index<len(user_choices):
+    _,pid,holding=user_choices[index]
+    aid=holding['asset_id']
+    locked=c.in_transaction
+    if (pid,aid) not in keys:
+     # Probe the first position alone so immediate activation stays cheap.
+     batch_size=1
+     if not locked and index>0 and not reader_contended:batch_size=32
+     elif locked and not reserved and index>=3:batch_size=24
+     keys={(p,h['asset_id']) for _,p,h in user_choices[index:index+batch_size]}
+     sessions.clear();attempts.clear()
+     rows=_holding_batch(c,uid,keys,not locked or index==0 or reserved,epoch)
+     if rows and rows[0]['kind']=='gate':
+      keys.clear()
+      reader_contended=True
+      if reserved:c.rollback();reserved=False
+      if c.in_transaction:break
+      index+=1
+      refreshed=False
+      continue
+     for row in rows:
+      if row['kind']=='attempt':attempts[row['portfolio_id'],row['asset_id']]=row
+      else:
+       request=json.loads(row['request'])
+       if request.get('watch_mode','both')!='entry':
+        sessions.setdefault(row['asset_id'],[]).append((row,request.get('portfolio_ids')))
+    active=[row for row,portfolios in sessions.get(aid,()) if not portfolios or pid in portfolios]
+    prior=attempts.get((pid,aid))
+    generation=prior['updated'] if prior and prior['status']=='POSITION_CLOSED' else None
+    watch=_holding_watch_id(uid,pid,aid,generation)
+    if len(active)==1:status='LINKED';linked=active[0]['watch_id']
+    elif len(active)>1:status='AMBIGUOUS';linked=None
+    elif prior and prior['status']=='STOPPED':status='STOPPED';linked=prior['watch_id']
+    else:
+     prior_watch=(prior['watch_id'] or None) if prior and prior['status']!='POSITION_CLOSED' else None
+     deferred=prior is not None and prior['next_attempt']>epoch
+     linked=None
+     if not deferred or locked or prior['check_history']:
+      linked=_stopped_holding_watch(c,uid,pid,aid,watch,prior_watch)
+     if linked is not None:status='STOPPED'
+     elif deferred:status=None
+     else:status='VERIFYING'
+    needs_write=status is not None and (status=='VERIFYING' or not prior or prior['status']!=status or prior['watch_id']!=linked)
+    if not locked and (needs_write or not refreshed):
+     if needs_write:
+      c.execute('BEGIN IMMEDIATE')
+      reserved=True
+     current_version=c.execute('PRAGMA data_version').fetchone()[0]
+     if current_version!=scan_version:
+      # Discard all lookahead. Resume at the current position and use single
+      # reads while commits keep invalidating the batch.
+      keys.clear()
+      reader_contended=True
+      scan_version=current_version
+      refreshed=True
+      continue
+     reader_contended=False
+    if needs_write:
+     c.execute("INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,portfolio_id,asset_id) DO UPDATE SET status=excluded.status,watch_id=excluded.watch_id,next_attempt=excluded.next_attempt,updated=excluded.updated",(uid,pid,aid,status,linked,epoch+300,at))
+     reserved=False
+     if status=='VERIFYING':selected=(uid,pid,holding,watch);break
+     attempts[pid,aid]={'status':status,'watch_id':linked,'next_attempt':epoch+300,'updated':at}
+    elif reserved:
+     c.rollback();reserved=False
+     keys.clear()
+    index+=1
+    refreshed=False
+   if selected:break
+  if not selected:return None
  uid,pid,holding,watch=selected;aid=holding['asset_id'];status='IDENTITY_UNVERIFIED';linked=None
  try:
   with connect() as c:
