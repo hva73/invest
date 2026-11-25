@@ -74,7 +74,7 @@ def deliver(path):
     # Check for the exact marker before retrying a possibly successful POST.
     existing=gh("api","--paginate",f"repos/{REPO}/issues/{issue}/comments",
                 "--jq",".[].body")
-    if marker not in existing:
+    if marker not in existing or (status=="draft_pr" and url not in existing):
         msg=(f"{marker}\nESCAPE Controller: #{issue}, generation {generation} — **{status}**."
              + (f"\nDraft PR: {url}" if url else "")
              + "\nAwaiting independent review. Not release approval or production deployment.")
