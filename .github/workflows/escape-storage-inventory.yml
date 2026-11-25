@@ -1,0 +1,40 @@
+name: ESCAPE backup and staging inventory
+on:
+  pull_request:
+    branches: [codex/escape-development]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inventory:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/issue57-storage-cleanup' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: ESCAPE_NORDICWAY_DEPLOY
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Read latest deploy run metadata
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python tools/nordicway_actions_readback.py
+      - name: Verify cleanup scope
+        run: |
+          python -m unittest discover -s tests -p test_nordicway_storage_cleanup.py
+          python -m unittest discover -s tests -p test_nordicway_pack_retained_backup.py
+      - name: Read remaining backup and staging metadata
+        env:
+          ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
+        run: python tools/nordicway_storage_inventory.py
+      - name: Read bounded maintenance storage metadata
+        env:
+          ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
+        run: python tools/nordicway_storage_scope_probe.py
+      - name: Read current numeric account quota
+        env:
+          ESCAPE_CPANEL_API_TOKEN: ${{ secrets.ESCAPE_CPANEL_API_TOKEN }}
+        run: python tools/nordicway_uapi_probe.py
