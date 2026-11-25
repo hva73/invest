@@ -165,7 +165,7 @@
     "task": "Independent #263 desktop acceptance: existing desktop browser tests only. Add focused tests of same maintenance contract as mobile after reviewing actual gen2 draft if available in local git objects; no duplicate UI code or speculative API. Validate planned maintenance state vs genuine HTTP404/503, auto recovery, stale action blocked, no change to existing approved desktop layout. If implementation is not yet present, prepare concrete tests with actual contract and mark integration required, not live pass. No production/network/broker access or deployment. Run relevant tests, fix actual failures, deliver draft only."
   },
   {
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/escape-development",
     "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
     "dependencies": [],
@@ -186,7 +186,7 @@
     "task": "P0 OWNER: HOT WATCH unusable. Real installed #232 3cc0c7be live readback 25/11 10:55 UTC complete 60 sessions: 41/41 candidate NO_DATA; 13/19 holdings NO_DATA; 44 DATA_STALE, 7 PLUTO_QUOTE_TIME_UNKNOWN, 5 WAITING_FOR_NEW_VERIFIED_QUOTE, 2 PROVIDER_RATE_BUDGET (overlap). Worker running. NOVOB verified fresh price/bidask but transient BAR_EVIDENCE_STALE age146.6s vs120s; later WAIT. ORCL fresh price NO_DATA without display reason. HYPE/ASMDEE/PEPE missing quote time. Actual logs WS fresh receive but source trades age126/414s; ambiguous same timestamp. Work on actual installed-code behavior: compare base to installed SHA using local object if available, isolate and fix actual feed-to-engine failure path for fresh verified quote/trade, closed bars, session identity and explicit blocked reasons. Reuse exact existing EODHD identities/verified fallback and session evidence; no fabricated timestamps/trades, no risk/strategy threshold loosening, no forced BUY, no unsafe price-only fallback for entry. Preserve price-based exit when unrelated entry evidence missing. Implement actual product fix plus positive/negative tests, not diagnostics only; use recorded representative cases. Coordinate Agent4 who owns eodhd_feeds.py/eodhd_capacity.py/worker.py only. No production changes/network/credentials/orders. Local tests and draft PR."
   },
   {
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/escape-development",
     "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
     "dependencies": [],
@@ -204,7 +204,7 @@
     "task": "P0 HOT WATCH throughput actual live #232 25/11 10:55 UTC: 60 sessions, 41/41 candidates NO_DATA, 44 DATA_STALE. Recent scans queue5–16s, occupied workers1–2, due5–19; provider 0.5–6s, WebSocket repeated captures 2.67s each trade/quote/status, status source age ~6900s with fresh receipt; SQLite begin mostly <1ms, ingest 14–115ms. 50 HTTP/min vs effective960, daily provider 30961/100000; no429, two budget blocks; 38847 local requests, high repetitive realtime_history. Concrete fix on actual existing shared feed/worker architecture: eliminate redundant synchronous connections/captures and serial status wait using safe bounded shared cache/coalescing or persistent feed if existing lifecycle supports it; prioritize due holding exit and verified fresh data without starving candidates; preserve source timestamps and freshness/identity, bounded subscriptions 40, no uncontrolled concurrency/API growth. Reproduce 60-session synthetic workload, quantify queue/event age/requests/WS captures before-after with same fixtures; test stale/ambiguous/partial reconnect, market sleep and budget. Do not weaken gates or manufacture data. Agent3 owns adapters/engine/service/features; do not modify them. Review actual source, implement and test fix, not another report. No network, prod, orders or credentials; draft PR."
   },
   {
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/escape-development",
     "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
     "dependencies": [],
@@ -248,9 +248,9 @@
   {
     "status": "ready",
     "base_branch": "codex/escape-development",
-    "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
+    "base_sha": "546dec64a6f6e22253455145866604490945c271",
     "dependencies": [
-      "267:2"
+      "267:4"
     ],
     "issue": 267,
     "generation": 3,
@@ -261,7 +261,7 @@
       "tests/browser_holdings_chart.py",
       "tests/browser_market_charts.py"
     ],
-    "task": "Independent #267 desktop and responsive acceptance on actual integrated chart renderer; check fixed future blank area, correct session axis/label, Top and Gns. købskurs, genuine gaps, no regression approved layout, hover and demo/live parity. No duplicate UI or fabricated data. Test actual gen2 branch locally if available, otherwise state integration required. Draft scoped tests."
+    "task": "Agent 5: implement the remaining real desktop/responsive acceptance on integrated #281 tree, exact base 546dec64. Read actual shared renderer and #267 owner requirements. Use existing actual browser tests with verified fixture for 11:40 Copenhagen, fixed future blank area, equity market sessions incl pre/after, crypto calendar day, Top and average purchase line, and demo/authenticated parity. Run all three existing browser journeys. Add missing assertions and if actual desktop-only product defect is found, report exact file/line and reproducer rather than alter shared product files owned by mobile. No new design or duplicate tests. If all requirements covered and pass, report no_changes with actual command/results; don't manufacture changes. No network, production or broker."
   },
   {
     "issue": 268,
@@ -270,7 +270,7 @@
     "priority": 0,
     "status": "ready",
     "base_branch": "codex/escape-development",
-    "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
+    "base_sha": "546dec64a6f6e22253455145866604490945c271",
     "dependencies": [
       "8:2"
     ],
@@ -282,7 +282,7 @@
       "tests/test_hotwatch_holdings_auto.py",
       "tests/test_hotwatch_e2e_contract.py"
     ],
-    "task": "P0 owner-requested dynamic lifecycle rotation, concrete issue #268. After #8 gen2 review/integration, use its integrated source (coordinator refresh base before dispatch if changed). Live 60/60 incl 19 holding exits/41 entry, 18 REVIEW_DUE all 41 NO_DATA. Existing candidate_currentness grace24h; auto req end_at=None, REPORT_ONLY never COLD, reconcile expires only COLD. Implement actual expiry/retirement of intensive entry scanning with history preserved, protect holdings/orders/manual/leases; distinguish no data backoff from reject; finite report-only and candidate prioritization policy proposed explicitly for owner approval before live, no change to trade strategy or orders. Reuse existing reconciliation, not new motor. Tests exact overdue, report-only, no expiry extension by duplicate report, genuine reassessment, capacity frees new candidates, cap is not fill target, protected holdings/exit/tenant/test. Avoid overlaps with #8 gen2; dependency only to avoid conflicts, coordinator must release after actual integration review. No production/credentials/network/orders. Draft implementation + tests."
+    "task": "P0 owner-requested dynamic lifecycle rotation, concrete issue #268. After #8 gen2 review/integration, use its integrated source (coordinator refresh base before dispatch if changed). Live 60/60 incl 19 holding exits/41 entry, 18 REVIEW_DUE all 41 NO_DATA. Existing candidate_currentness grace24h; auto req end_at=None, REPORT_ONLY never COLD, reconcile expires only COLD. Implement actual expiry/retirement of intensive entry scanning with history preserved, protect holdings/orders/manual/leases; distinguish no data backoff from reject; finite report-only and candidate prioritization policy proposed explicitly for owner approval before live, no change to trade strategy or orders. Reuse existing reconciliation, not new motor. Tests exact overdue, report-only, no expiry extension by duplicate report, genuine reassessment, capacity frees new candidates, cap is not fill target, protected holdings/exit/tenant/test. Avoid overlaps with #8 gen2; dependency only to avoid conflicts, coordinator must release after actual integration review. No production/credentials/network/orders. Draft implementation + tests. Coordinator verified #281 838817f9 integrated to development 546dec64 (identical Git tree ebdd76d7). Work directly on this base; no importing old PRs or fetching other branches. Expiry/rotation must remain simulation/test or default-off where new TTL/ranking policy needs owner approval; do not enable production behavior or change live risk/strategy. Preserve existing currentness semantics for other readers where needed. Record proposed policy separately from verified expiry."
   },
   {
     "issue": 273,
@@ -337,7 +337,7 @@
     "generation": 4,
     "role": "mobile",
     "priority": 1,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/escape-development",
     "base_sha": "dbe9eda0880a9fdbcf73cd2f674abe6f20e28f91",
     "dependencies": [],
@@ -372,7 +372,7 @@
     "generation": 3,
     "role": "motor",
     "priority": 0,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/escape-development",
     "base_sha": "dbe9eda0880a9fdbcf73cd2f674abe6f20e28f91",
     "dependencies": [],
@@ -396,7 +396,7 @@
     "generation": 5,
     "role": "data",
     "priority": 1,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/trading-engine-v2-integration",
     "base_sha": "677789559f8b0bc84b98c0694df9947c99181f49",
     "dependencies": [
@@ -408,5 +408,23 @@
       "docs/TRADING_ENGINE_V2_INTERFACE.md"
     ],
     "task": "Implement actual read-only vertical #273 replay adapter using accepted v2 evaluate at exact base 67778955 (same accepted v2 primitive plus existing read-only CI enabled). Extend existing strategy_lab.compare or a narrow explicit v2 comparison function in that module (no live route/schema/DB writes, no duplicate ledger). Reuse recorded hw_calculations/hw_samples, checksum, historical calculated/received timestamps, scope and strategy catalog; compare original recorded decision and new simulated decision on identical bounded chronological input, retain existing compare API behavior. Do not infer availability of inputs from later records or invent source IDs/positions; explicitly skip unverifiable historical data, count and explain coverage/first blocking reason. Reuse captured historical metrics/risk and context only with provenance, not current data. Show positive/negative causal examples using real persisted-schema test fixtures, multiple strategies same snapshot, no provider calls, tenant/test isolation, deterministic results, no brokerwrites. Report counts, latency and coverage; no fictional P/L without execution data. Keep bounded existing MAX_CALCULATIONS and avoid new disk/API load. Preserve existing legacy replay tests. Run actual tests, deliver draft on this separate integration base. Do not edit P0 live engine/chart files or add a production endpoint."
+  },
+  {
+    "issue": 273,
+    "generation": 6,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/trading-engine-v2-integration",
+    "base_sha": "cd7ff51564010119c74f4df12b717c1abf4d9075",
+    "dependencies": [
+      "273:5"
+    ],
+    "paths": [
+      "strategy_lab.py",
+      "tests/test_strategy_lab.py",
+      "docs/TRADING_ENGINE_V2_INTERFACE.md"
+    ],
+    "task": "Concrete next #273 replay-data fidelity fix on accepted #283 tree, not a separate report or mock helper. compare_v2 currently feeds historical metrics calculated with the original strategy's parameters to every alternative; this can falsely imply a valid comparison where indicator windows differ. Reuse recorded calculation strategy checksum and exact catalog spec; distinguish parameter-compatible snapshots from incompatible metrics. For incompatible feature parameters, causally reconstruct from immutable, scope-matched input_sample_ids only where full required history, provenance and availability can be proved, using existing features() and recorded verified bar evidence only if exact revision can be proved. Otherwise explicitly block/skip per strategy with coverage reason, not fabricate values; do not discard valid alternatives on the same shared data. Preserve single bounded read of recorded observations, no provider requests, no extra persistent table or production writes; held and mutable EODHD evidence remains excluded when unproven. Existing compare API unchanged. Add persisted-schema tests for distinct window parameters, future/later/mutable input, missing original strategy checksum, tenant/test isolation, same-input comparisons and deterministic no-broker behavior. Document exact limitations and measure bounded replay input count. Use actual existing tests; no live rule/threshold changes or unrelated files."
   }
 ]
