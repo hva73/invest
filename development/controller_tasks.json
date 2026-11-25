@@ -246,7 +246,7 @@
     "task": "Implement #267 approved graph behavior in existing shared renderers, no redesign. Full local 00–24 axis overview and crypto, actual full verified session for positions, draw only real points to latest observation, future blank. Show verified Marked åbent/Pre-market/Eftermarked/Marked lukket/24/7 or unknown. Preserve Top label actual high, dashed Gns. købskurs actual value/currency, no buy line on BUY without holding, same demo/live renderer and approved layout. Use actual backend contract from gen1 when available; do not guess market times. Ensure 11:40 portfolio ~49% width, European session fraction, US premarket and data gaps. Preserve tooltip behavior and existing period controls. Implement actual scoped code/test, no app.js overlap with #263. No production orders/deploy."
   },
   {
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/escape-development",
     "base_sha": "546dec64a6f6e22253455145866604490945c271",
     "dependencies": [
@@ -268,7 +268,7 @@
     "generation": 1,
     "role": "motor",
     "priority": 0,
-    "status": "ready",
+    "status": "blocked",
     "base_branch": "codex/escape-development",
     "base_sha": "546dec64a6f6e22253455145866604490945c271",
     "dependencies": [
@@ -414,7 +414,7 @@
     "generation": 6,
     "role": "data",
     "priority": 1,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/trading-engine-v2-integration",
     "base_sha": "cd7ff51564010119c74f4df12b717c1abf4d9075",
     "dependencies": [
@@ -444,5 +444,23 @@
       "tests/test_eodhd_feeds.py"
     ],
     "task": "Owner's new mandatory 100-user architecture (#273 comment 7164816520): implement first concrete cross-user market-data reuse slice on verified integrated #281 base. Existing EODHDAdapter.capture batches/cache at uid scope. Reuse existing market-only WS cache/capture/coalescing across subscribers with same verified provider instrument/feed/credential entitlement and freshness; never share per-user Pluto adapter/context, broker tokens, risk, positions, orders, health or test/live state. Do not weaken verified instrument identity or entitlement checks; cross-user mode simulation/explicit default-off pending license and final release, preserve existing behavior otherwise. Keep per-user scheduling and admission intact in this slice, no modifications to #268 motor files, no new cache service or schema. Tests with 1/10/100 synthetic users same instrument plus disjoint/overlap, separate entitlement/credential and test scope, concurrent same instrument requests, TTL/failed capture and independent broker contexts. Count actual synthetic provider captures vs subscriber requests, bound cache memory; use existing tests and run actual commands. Avoid new speculative framework. No network, production, orders, credentials access. Deliver actual draft code + tests. Coordinate next scheduler/fairness slice with #268; one combined production release only after owner GO."
+  },
+  {
+    "issue": 273,
+    "generation": 7,
+    "role": "motor",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/trading-engine-v2-integration",
+    "base_sha": "125b263352b7dc518e78a83fe9cbd58bdfc7a3d6",
+    "dependencies": [
+      "273:6"
+    ],
+    "paths": [
+      "trading_engine_v2.py",
+      "tests/test_trading_engine_v2.py",
+      "docs/TRADING_ENGINE_V2_INTERFACE.md"
+    ],
+    "task": "Next distinct #273 product slice: Position Watch strategy switch, not another replay fix or candidate rotation. On exact integrated base 125b2633, inspect existing position/strategy catalog and v2 contracts. Implement a narrow simulation-only auditable transition of strategy for an existing verified held position, using existing strategy specs/version checksums and existing evaluate/risk interface where applicable. Bind same user/test, portfolio, instrument, position and trade-cycle identity, prior/new strategy and effective causal time; preserve original position facts, cost/P&L inputs, native stop and provenance/history. Reject mismatched identity, invalid/stale evidence or unknown strategy; no order, broker write, implicit sale/stop modification or new live authority. Prefer extending existing types rather than new framework/ledger. Actual positive/negative tests of same held position switching strategy, immutable entry origin, distinct exit origin, scope isolation, idempotence and no broker mutation. Keep pure interface explicitly not yet persistence/UI; no live route/schema changes. No overlap with #268 candidate rotation or #14 adapters. Run relevant tests, deliver exact draft. No production, credentials, network, orders or deploy."
   }
 ]
