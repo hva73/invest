@@ -129,6 +129,20 @@ class StorageRollbackQA(unittest.TestCase):
                         self.inline_copy(c)
                     self.assertEqual(self.snapshot(c),corrupt)
                     c.execute('UPDATE hw_samples SET digest=? WHERE id=?',(sr[-1]['digest'],sr[-1]['id']))
+                # Also fail after all sample writes and earlier calculation writes:
+                # a bad final compact audit must not leave a partially restored copy.
+                with app.connect() as c:
+                    bad_audit = json.loads(cr[-1]['payload'])
+                    bad_audit[engine._RENEWAL_AUDIT_KEY]['sha256'] = '0'*64
+                    c.execute('UPDATE hw_calculations SET payload=? WHERE id=?',
+                              (engine.canonical(bad_audit),cr[-1]['id']))
+                with app.connect() as c:
+                    corrupt = self.snapshot(c)
+                    with self.assertRaisesRegex(engine.EngineError,'invalid_calculation_audit'):
+                        self.inline_copy(c)
+                    self.assertEqual(self.snapshot(c),corrupt)
+                    c.execute('UPDATE hw_calculations SET payload=? WHERE id=?',
+                              (cr[-1]['payload'],cr[-1]['id']))
                 with app.connect() as c:
                     self.inline_copy(c)
                     restored = self.snapshot(c)
