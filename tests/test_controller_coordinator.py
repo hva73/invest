@@ -167,6 +167,9 @@ class LocalCoordinatorTests(unittest.TestCase):
 
     def test_unstarted_pin_preserves_history_and_rejects_divergence(self):
         row=dict(self.row,follow_base=True);new="c"*40
+        # The default fixture represents a delivered PR and must never be re-pinned.
+        self.assertEqual(c.pin_unstarted(self.root,row,{}),row)
+        (self.root/"receipts/273-12.json").unlink()
         compare={"behind_by":0,"merge_base_commit":{"sha":row["base_sha"]}}
         with patch.object(c,"branch_head",return_value=new),patch.object(c,"gh",return_value=compare),patch.object(c,"replace_queue_row",side_effect=lambda old,new:new) as replace:
             self.assertEqual(c.pin_unstarted(self.root,row,{})["base_sha"],new)

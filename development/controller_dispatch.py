@@ -267,21 +267,7 @@ def choose_review(root,rows,results,running,now=None):
 
 def plan_with_review(rows,review_row,parallel):
     if review_row is None:
-        chosen=[]
-        adjusted=list(rows)
-        while len(chosen)<parallel:
-            options=plan(adjusted,max_parallel=parallel)
-            if not options:
-                break
-            task=options[0]
-            row=next(r for r in adjusted if (r["issue"],r.get("generation",1))==task.key)
-            existing=[r for r in adjusted if r["status"]=="active"]
-            if row.get("base_branch") and any(r.get("base_branch")==row["base_branch"] for r in existing):
-                adjusted=[dict(r,status="blocked") if r is row else r for r in adjusted]
-                continue
-            chosen.append(task)
-            adjusted=[dict(r,status="active") if r is row else r for r in adjusted]
-        return chosen
+        return plan(rows,max_parallel=parallel)
     # A coordinator future uses one model slot; suppress conflicting rows
     # before planning, but retain every row for dependency resolution.
     adjusted=[dict(r,status="blocked") if r["status"]=="ready" and review_conflict(r,review_row) else r for r in rows]

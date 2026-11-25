@@ -79,13 +79,6 @@ class ParallelReviewTests(unittest.TestCase):
                 cr.assert_called_once();worker.assert_called_once()
                 self.assertTrue(concurrent.is_set())
                 self.assertEqual(results["273:1"],"draft_pr")
-    def test_new_development_uses_independent_branch_capacity(self):
-        one=self.row(14,"desktop","dev","static/app.js")
-        same=self.row(54,"mobile","dev","static/engine-ui.js")
-        separate=self.row(273,"data","v2","trading_engine_v2.py")
-        self.assertEqual([x.issue for x in plan_with_review([one,same,separate],None,2)],[14,273])
-        self.assertEqual([x.issue for x in plan_with_review([dict(one,status="active"),same,separate],None,2)],[273])
-
     def test_capacity_includes_coordinator_without_false_agent_activity(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
