@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-25T15:59:58.433Z",
+  "updated_at": "2026-11-25T16:05:49.996Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -9,7 +9,27 @@
       "title": "Stabilisering og grafer",
       "status": "verified",
       "issue": 267,
-      "evidence": "PR #281 integreret i udviklingsgrenen 546dec64; samlet CI bestået."
+      "evidence": "PR #281 integreret i udviklingsgrenen 546dec64; samlet CI bestået.",
+      "subgoals": [
+        {
+          "id": "charts",
+          "title": "Godkendte grafer og positionstal",
+          "status": "verified",
+          "evidence": "PR #281 integreret på udviklingsgren."
+        },
+        {
+          "id": "desktop",
+          "title": "Desktop-kontrol",
+          "status": "review",
+          "evidence": "267:3 afsluttet uden kodeændring; samlet browseraccept udestår."
+        },
+        {
+          "id": "release",
+          "title": "Samlet releasekontrol",
+          "status": "pending",
+          "evidence": "Kontrolleres på fælles releasekandidat."
+        }
+      ]
     },
     {
       "id": "shared_data",
@@ -17,7 +37,39 @@
       "title": "Fælles datamotor",
       "status": "in_progress",
       "issue": 14,
-      "evidence": "PR #285/#287/#289 integreret. #292 rettet i draft 62c82528; exact CI afventes. Ingen live aktivering; scheduler og belastning udestår."
+      "evidence": "PR #285/#287/#289 integreret. #292 CI 45650205582: én fejl; scheduler og fuld belastning udestår.",
+      "subgoals": [
+        {
+          "id": "feeds",
+          "title": "Genbrug af markedsfeeds",
+          "status": "verified",
+          "evidence": "PR #285/#287 integreret."
+        },
+        {
+          "id": "features",
+          "title": "Fælles featureberegning",
+          "status": "verified",
+          "evidence": "PR #289 integreret på v2-gren; test-only."
+        },
+        {
+          "id": "optional",
+          "title": "Uafhængige valgfrie indikatorer",
+          "status": "review",
+          "evidence": "PR #292 CI 45650205582 fejlede én test."
+        },
+        {
+          "id": "scheduler",
+          "title": "Fælles scheduler og budget",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "live",
+          "title": "Integreret datavej og belastning",
+          "status": "pending",
+          "evidence": "Udestår."
+        }
+      ]
     },
     {
       "id": "candidate_rotation",
@@ -25,7 +77,45 @@
       "title": "Dynamisk HOT WATCH",
       "status": "in_progress",
       "issue": 268,
-      "evidence": "PR #291 integreret i development db73c8bf (test-only report-TTL og NO_DATA lifecycle). #268:4 ready: fælles entry-cap versus privat positionsbeskyttelse."
+      "evidence": "PR #290/#291 integreret test-only. #268:4 lokal review_required uden PR; gemt arbejde skal bevares.",
+      "subgoals": [
+        {
+          "id": "expiry",
+          "title": "Udløb af gamle vurderinger",
+          "status": "verified",
+          "evidence": "PR #290 integreret, test-only."
+        },
+        {
+          "id": "dormancy",
+          "title": "NO_DATA og automatisk nedprioritering",
+          "status": "verified",
+          "evidence": "PR #291 integreret, test-only."
+        },
+        {
+          "id": "pool",
+          "title": "Fælles kandidatpulje og positionsbeskyttelse",
+          "status": "review",
+          "evidence": "#268:4 lokal review_required; PR mangler."
+        },
+        {
+          "id": "replace",
+          "title": "Dynamisk kandidatrotation",
+          "status": "pending",
+          "evidence": "Planlagt opfølgning."
+        },
+        {
+          "id": "tenants",
+          "title": "Belastningstest med 100 brugere",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "integrate",
+          "title": "Integration og funktionstest",
+          "status": "pending",
+          "evidence": "Ingen live aktivering."
+        }
+      ]
     },
     {
       "id": "resources",
@@ -33,7 +123,33 @@
       "title": "CPU/RAM, workers og serverdrift",
       "status": "review",
       "issue": 14,
-      "evidence": "PR #293 exact 0d2a0628, CI 45647848879: 609 tests PASS. Draft-transition GraphQL-fejl; integration/UI og hostingmålinger udestår."
+      "evidence": "PR #293 exact 0d2a0628, CI 45647848879: 609 tests PASS. Draft-transition GraphQL-fejl; integration/UI og hostingmålinger udestår.",
+      "subgoals": [
+        {
+          "id": "backend",
+          "title": "CPU/RAM-måling i backend",
+          "status": "review",
+          "evidence": "PR #293, CI 45647848879: 609 testkørsler bestået; integration udestår."
+        },
+        {
+          "id": "display",
+          "title": "Adminvisning og historik",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "baseline",
+          "title": "Faktisk måling på hosting",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "scale",
+          "title": "Worker- og køkapacitet",
+          "status": "pending",
+          "evidence": "Udestår."
+        }
+      ]
     },
     {
       "id": "core",
@@ -41,7 +157,21 @@
       "title": "Fælles beslutningskerne",
       "status": "verified",
       "issue": 273,
-      "evidence": "Første simuleringskerne integreret; ikke live handelsmotor."
+      "evidence": "Første simuleringskerne integreret; ikke live handelsmotor.",
+      "subgoals": [
+        {
+          "id": "interface",
+          "title": "Beslutningsinterface og isoleret simulation",
+          "status": "verified",
+          "evidence": "Første kerne integreret på v2-gren."
+        },
+        {
+          "id": "live",
+          "title": "Kobling til samlet motor",
+          "status": "pending",
+          "evidence": "Udestår; denne del er ikke dækket af den godkendte fundamentmilepæl."
+        }
+      ]
     },
     {
       "id": "strategies",
@@ -49,7 +179,33 @@
       "title": "Strategy Center og strategier",
       "status": "pending",
       "issue": 273,
-      "evidence": "Swing, Recovery, Long-Term og fælles integration udestår."
+      "evidence": "Swing, Recovery, Long-Term og fælles integration udestår.",
+      "subgoals": [
+        {
+          "id": "modes",
+          "title": "Momentum, Early Catalyst og Swing",
+          "status": "pending",
+          "evidence": "Samlet 2.0-integration udestår."
+        },
+        {
+          "id": "recovery",
+          "title": "Recovery og Long-Term",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "crypto",
+          "title": "Krypto og 24/7-markedsstatus",
+          "status": "pending",
+          "evidence": "Samlet 2.0-accept udestår."
+        },
+        {
+          "id": "selection",
+          "title": "Valg, versionsstyring og test",
+          "status": "pending",
+          "evidence": "Udestår."
+        }
+      ]
     },
     {
       "id": "position",
@@ -57,7 +213,33 @@
       "title": "Position Watch og strategiskift",
       "status": "in_progress",
       "issue": 273,
-      "evidence": "PR #286 integreret på v2-gren, simulation af strategiskift testet. Faktisk persistence og UI udestår."
+      "evidence": "PR #286 integreret på v2-gren, simulation af strategiskift testet. Faktisk persistence og UI udestår.",
+      "subgoals": [
+        {
+          "id": "switch",
+          "title": "Strategiskift i simulation",
+          "status": "verified",
+          "evidence": "PR #286 integreret på v2-gren."
+        },
+        {
+          "id": "storage",
+          "title": "Vedvarende positionstilstand",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "ui",
+          "title": "Visning og ændring af strategi",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "e2e",
+          "title": "Integreret positionsbeskyttelse",
+          "status": "pending",
+          "evidence": "Udestår."
+        }
+      ]
     },
     {
       "id": "longterm",
@@ -65,7 +247,27 @@
       "title": "Long-Term Watch",
       "status": "pending",
       "issue": 12,
-      "evidence": "Samlet funktion udestår."
+      "evidence": "Samlet funktion udestår.",
+      "subgoals": [
+        {
+          "id": "watch",
+          "title": "Long-Term Watch-model",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "ui",
+          "title": "Brugerflade og genvurdering",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "test",
+          "title": "Integreret test",
+          "status": "pending",
+          "evidence": "Udestår."
+        }
+      ]
     },
     {
       "id": "replay",
@@ -73,7 +275,15 @@
       "title": "Historisk replay – grundfunktion",
       "status": "verified",
       "issue": 273,
-      "evidence": "PR #283 og #284 integreret på v2-gren; begrænset historisk dækning."
+      "evidence": "PR #283 og #284 integreret på v2-gren; begrænset historisk dækning.",
+      "subgoals": [
+        {
+          "id": "replay",
+          "title": "Historisk replay-grundfunktion",
+          "status": "verified",
+          "evidence": "PR #283/#284 integreret; begrænset dækning."
+        }
+      ]
     },
     {
       "id": "learning",
@@ -81,7 +291,33 @@
       "title": "Trading Lab, læring og faktisk dækning",
       "status": "in_progress",
       "issue": 273,
-      "evidence": "Replay-fundament på plads; virkelige data, shadow og målinger udestår."
+      "evidence": "Replay-fundament på plads; virkelige data, shadow og målinger udestår.",
+      "subgoals": [
+        {
+          "id": "replay",
+          "title": "Replay-fundament",
+          "status": "verified",
+          "evidence": "PR #283/#284 integreret på v2-gren."
+        },
+        {
+          "id": "coverage",
+          "title": "Faktisk historisk datadækning",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "shadow",
+          "title": "Shadow-evaluering og sammenligning",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "metrics",
+          "title": "Dokumenterede resultater pr. strategi",
+          "status": "pending",
+          "evidence": "Udestår."
+        }
+      ]
     },
     {
       "id": "statistics",
@@ -89,7 +325,27 @@
       "title": "Hvordan står det til? – herkomst og statistik",
       "status": "pending",
       "issue": 114,
-      "evidence": "Verificeret entry/exit/fill-kæde og sammenligning udestår."
+      "evidence": "Verificeret entry/exit/fill-kæde og sammenligning udestår.",
+      "subgoals": [
+        {
+          "id": "provenance",
+          "title": "Entry/exit-herkomst",
+          "status": "pending",
+          "evidence": "Samlet verificeret kæde udestår."
+        },
+        {
+          "id": "fills",
+          "title": "Fills, kostpris og afstemning",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "ui",
+          "title": "Godkendt statistikvisning",
+          "status": "pending",
+          "evidence": "Samlet 2.0-accept udestår."
+        }
+      ]
     },
     {
       "id": "ui",
@@ -97,7 +353,33 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "pending",
       "issue": 54,
-      "evidence": "Godkendte eksisterende grafer bevares; nye 2.0-visninger udestår."
+      "evidence": "Godkendte eksisterende grafer bevares; nye 2.0-visninger udestår.",
+      "subgoals": [
+        {
+          "id": "reuse",
+          "title": "Genbrug godkendt layout",
+          "status": "pending",
+          "evidence": "Samlet releasekontrol udestår."
+        },
+        {
+          "id": "mobile",
+          "title": "Mobil 2.0",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "desktop",
+          "title": "Desktop 2.0",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "test",
+          "title": "Fælles browsertest",
+          "status": "pending",
+          "evidence": "Udestår."
+        }
+      ]
     },
     {
       "id": "load",
@@ -105,7 +387,33 @@
       "title": "100 brugere og skaleringsmåling",
       "status": "pending",
       "issue": 14,
-      "evidence": "Samme-symbol adaptertest bestået; fuld scheduler-, CPU/RAM-, DB- og API-belastningstest udestår."
+      "evidence": "Samme-symbol adaptertest bestået; fuld scheduler-, CPU/RAM-, DB- og API-belastningstest udestår.",
+      "subgoals": [
+        {
+          "id": "adapter",
+          "title": "Genbrug af samme instrument",
+          "status": "verified",
+          "evidence": "Adaptertest med 1/10/100 syntetiske abonnenter bestået."
+        },
+        {
+          "id": "queue",
+          "title": "100 brugere og fair køer",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "resources",
+          "title": "CPU/RAM/API/DB/disk",
+          "status": "pending",
+          "evidence": "Faktiske målinger udestår."
+        },
+        {
+          "id": "model",
+          "title": "1.000/10.000 kapacitetsmodel",
+          "status": "pending",
+          "evidence": "Arkitekturhorisont, ikke separat livekrav."
+        }
+      ]
     },
     {
       "id": "release",
@@ -113,7 +421,27 @@
       "title": "Samlet releasekandidat, backup og migration",
       "status": "pending",
       "issue": 57,
-      "evidence": "Flet produktændringer oven på installeret SHA; eksakt CI, quota og rollback."
+      "evidence": "Flet produktændringer oven på installeret SHA; eksakt CI, quota og rollback.",
+      "subgoals": [
+        {
+          "id": "integrate",
+          "title": "Samlet releasegren",
+          "status": "pending",
+          "evidence": "Udestår."
+        },
+        {
+          "id": "preflight",
+          "title": "20 GB, migration og backup",
+          "status": "pending",
+          "evidence": "Verificeres på eksakt release-SHA."
+        },
+        {
+          "id": "ci",
+          "title": "Samlet regression og rollback",
+          "status": "pending",
+          "evidence": "Udestår."
+        }
+      ]
     },
     {
       "id": "go",
@@ -121,7 +449,21 @@
       "title": "Ejer-GO og verificeret drift",
       "status": "pending",
       "issue": 57,
-      "evidence": "Ingen ny installation eller ejer-GO endnu."
+      "evidence": "Ingen ny installation eller ejer-GO endnu.",
+      "subgoals": [
+        {
+          "id": "approval",
+          "title": "Ejerens SHA-bundne GO",
+          "status": "pending",
+          "evidence": "Ikke anmodet."
+        },
+        {
+          "id": "readback",
+          "title": "Installation og driftstest",
+          "status": "pending",
+          "evidence": "Ingen ny installation."
+        }
+      ]
     }
   ]
 }
