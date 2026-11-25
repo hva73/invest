@@ -51,6 +51,24 @@ class LocalCoordinatorTests(unittest.TestCase):
             review.assert_called_once()
             repair.assert_called_once()
 
+    def test_coordinator_defers_repair_to_developer_scheduler(self):
+        row=dict(self.row,local_repair=True)
+        p={"head":{"sha":"d"*40}}
+        decision={"verdict":"hold","reason":"Concrete reproducible regression"}
+        with patch.object(c,"verify_pr",return_value=(p,[],"open")),patch.object(c,"verified_ci",return_value=7),patch.object(c,"independent_review",return_value=decision) as review,patch.object(c,"comment"),patch.object(c,"repair_review") as repair:
+            c.run_once(self.root,self.root,[row],self.results,defer_repairs=True)
+            journal=c.read(self.root/"coordinator-review.json",{})
+            self.assertEqual(journal["501"]["state"],"hold")
+            self.assertEqual(journal["501"]["repair_reason"],decision["reason"])
+            repair.assert_not_called()
+            review.assert_called_once()
+        with patch.object(c,"verify_pr",return_value=(p,[],"open")),patch.object(c,"repair_review",return_value="published") as worker:
+            self.assertEqual(c.run_developer_repair(self.root,self.root,row,501,"d"*40,decision["reason"],60000),"published")
+            worker.assert_called_once()
+        with patch.object(c,"verify_pr",return_value=(p,[],"open")),patch.object(c,"repair_review") as worker:
+            self.assertEqual(c.run_developer_repair(self.root,self.root,row,501,"e"*40,decision["reason"],60000),"changed_head")
+            worker.assert_not_called()
+
     def test_trigger_is_explicit_and_bounded(self):
         self.assertIsNone(c.trigger(self.root))
         value={"schema":1,"id":"f"*32,"requests":["b"*32],"at":c.now()}
