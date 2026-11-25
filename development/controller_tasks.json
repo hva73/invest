@@ -426,5 +426,23 @@
       "docs/TRADING_ENGINE_V2_INTERFACE.md"
     ],
     "task": "Concrete next #273 replay-data fidelity fix on accepted #283 tree, not a separate report or mock helper. compare_v2 currently feeds historical metrics calculated with the original strategy's parameters to every alternative; this can falsely imply a valid comparison where indicator windows differ. Reuse recorded calculation strategy checksum and exact catalog spec; distinguish parameter-compatible snapshots from incompatible metrics. For incompatible feature parameters, causally reconstruct from immutable, scope-matched input_sample_ids only where full required history, provenance and availability can be proved, using existing features() and recorded verified bar evidence only if exact revision can be proved. Otherwise explicitly block/skip per strategy with coverage reason, not fabricate values; do not discard valid alternatives on the same shared data. Preserve single bounded read of recorded observations, no provider requests, no extra persistent table or production writes; held and mutable EODHD evidence remains excluded when unproven. Existing compare API unchanged. Add persisted-schema tests for distinct window parameters, future/later/mutable input, missing original strategy checksum, tenant/test isolation, same-input comparisons and deterministic no-broker behavior. Document exact limitations and measure bounded replay input count. Use actual existing tests; no live rule/threshold changes or unrelated files."
+  },
+  {
+    "issue": 14,
+    "generation": 3,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "546dec64a6f6e22253455145866604490945c271",
+    "dependencies": [
+      "14:2"
+    ],
+    "paths": [
+      "hotwatch_adapters.py",
+      "tests/test_feed_reuse.py",
+      "tests/test_eodhd_feeds.py"
+    ],
+    "task": "Owner's new mandatory 100-user architecture (#273 comment 7164816520): implement first concrete cross-user market-data reuse slice on verified integrated #281 base. Existing EODHDAdapter.capture batches/cache at uid scope. Reuse existing market-only WS cache/capture/coalescing across subscribers with same verified provider instrument/feed/credential entitlement and freshness; never share per-user Pluto adapter/context, broker tokens, risk, positions, orders, health or test/live state. Do not weaken verified instrument identity or entitlement checks; cross-user mode simulation/explicit default-off pending license and final release, preserve existing behavior otherwise. Keep per-user scheduling and admission intact in this slice, no modifications to #268 motor files, no new cache service or schema. Tests with 1/10/100 synthetic users same instrument plus disjoint/overlap, separate entitlement/credential and test scope, concurrent same instrument requests, TTL/failed capture and independent broker contexts. Count actual synthetic provider captures vs subscriber requests, bound cache memory; use existing tests and run actual commands. Avoid new speculative framework. No network, production, orders, credentials access. Deliver actual draft code + tests. Coordinate next scheduler/fairness slice with #268; one combined production release only after owner GO."
   }
 ]
