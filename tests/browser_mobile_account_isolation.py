@@ -12,12 +12,12 @@ def browser_fixture():
 const content = document.getElementById('content');
 const pending = [];
 const userIds = {alpha: 11, beta: 22};
-let username;
+let username,holdCurrentLoad=false;
 const assert = (condition, message) => { if (!condition) throw Error(message); };
 const byId = id => document.getElementById(id);
 const api = (path, args) => {
     const user = username;
-    if (path === 'market/quote' || path === 'state' || /manual-search/.test(path)) {
+    if (path === 'market/quote' || path === 'state' || /manual-(search|start)/.test(path) || /sessions\/notification-/.test(path) || (holdCurrentLoad&&path.includes('view=current'))) {
         return new Promise((resolve, reject) => pending.push({path, args, user, resolve, reject}));
     }
     if (path.includes('/start-candidates')) return Promise.resolve({candidates: [0, 1].map(i => ({
@@ -69,8 +69,14 @@ const run = async () => {
     const alphaDetail = take('state', 'alpha');
     const staleError = EngineUI.openDetail('alpha-error-watch');
     const alphaError = take('state', 'alpha');
+    const oldNotification=EngineUI.openNotification('notification-alpha');
+    const oldNotice=take('/sessions/notification-alpha','alpha');
+    const oldNoticeState=take('state','alpha');
     switchAccount(null);
     switchAccount('beta');
+    oldNotice.reject(Error('private alpha notification error'));
+    oldNoticeState.resolve(account('alpha'));
+    await oldNotification;
 
     const beta = await create('beta');
     alphaDetail.resolve(account('alpha'));
@@ -115,6 +121,34 @@ const run = async () => {
     outdatedModeQuote.resolve(quote('beta-previous-mode'));
     await beforeModeChange;
     assert(form.elements.asset_id.value === 'beta-latest', 'Quote survived a live/test round trip');
+
+    // Exercise the production manual-search/start and notification entry points.
+    const newButton=()=>byId('engine-root').querySelector('[data-engine-new]');
+    const notice=EngineUI.openNotification('notification-beta');
+    const noticeRequest=take('/sessions/notification-beta','beta');
+    const noticeState=take('state','beta');
+    await EngineUI.click(newButton());
+    noticeRequest.resolve({session:{status:'ACTIVE',signal:'WAIT',request:{ticker:'old-notice'}}});
+    noticeState.resolve(account('beta'));
+    await notice;
+    assert(byId('engine-manual-search'), 'Old notification replaced a newer dialog');
+
+    const manual=byId('engine-manual-search');
+    manual.elements.query.value='BETA';
+    const search=EngineUI.submit({target:manual,preventDefault(){}});
+    take('manual-search','beta').resolve({assets:[{asset_id:'shared-asset',ticker:'BETA',name:'Beta asset'}]});
+    await search;
+    const start=EngineUI.click(byId('engine-manual-results').querySelector('[data-engine-manual]'));
+    const startRequest=take('manual-start','beta');
+    holdCurrentLoad=true;
+    startRequest.resolve({session:{watch_id:'beta-new-watch'}});
+    await new Promise(resolve=>setTimeout(resolve,0));
+    const loadRequest=take('view=current','beta');
+    holdCurrentLoad=false;
+    await EngineUI.click(newButton());
+    loadRequest.resolve({sessions:[],kill_switch:{}});
+    await start;
+    assert(byId('engine-manual-search'), 'Old manual start replaced a newer dialog');
 
     // Confirm the ordinary detail entry point still displays the current account's depot.
     const detail = EngineUI.openDetail('beta-watch');
