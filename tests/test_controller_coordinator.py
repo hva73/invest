@@ -69,6 +69,46 @@ class LocalCoordinatorTests(unittest.TestCase):
         self.assertIn("SQLite",third)
         self.assertIn("untrusted evidence",third)
 
+    def test_same_head_recovery_reuses_exact_preserved_worktree(self):
+        import subprocess
+        root=self.root
+        repo=root/"repo"
+        repo.mkdir()
+        def git(path,*args):
+            return subprocess.check_output(["git","-C",str(path),*args],stderr=subprocess.DEVNULL).decode().strip()
+        git(repo,"init")
+        git(repo,"config","user.name","Test")
+        git(repo,"config","user.email","test@example.invalid")
+        (repo/"trading_engine_v2.py").write_text("original")
+        git(repo,"add",".")
+        git(repo,"commit","-m","base")
+        sha=git(repo,"rev-parse","HEAD")
+        row=dict(self.row,local_repair=True)
+        folder=root/"review-repair-273-12-501"
+        git(repo,"worktree","add","-b","controller/local-273-123",str(folder),sha)
+        (folder/"trading_engine_v2.py").write_text("preserved repair")
+        record=root/"coordinator-repair-501.json"
+        old={"key":c.key(row),"head":sha,"state":"held"}
+        c.save(record,old)
+        self.assertIsNone(c.repair_attempt(root,501,sha))
+        with patch.object(c,"verify_pr",return_value=({"head":{"sha":sha}},[],"open")):
+            self.assertEqual(c.authorize_repair_resume(root,repo,row,501,sha),1)
+        self.assertEqual(c.repair_attempt(root,501,sha),1)
+        self.assertEqual(c.resume_repair_workspace(root,repo,row,501,1,sha,folder,record),"controller/local-273-123")
+        self.assertEqual((folder/"trading_engine_v2.py").read_text(),"preserved repair")
+        git(folder,"add",".")
+        git(folder,"commit","-m","local tested fix")
+        local=git(folder,"rev-parse","HEAD")
+        c.resume_repair_workspace(root,repo,row,501,1,sha,folder,record)
+        self.assertEqual(git(folder,"rev-parse","HEAD"),sha)
+        self.assertEqual(git(folder,"rev-parse","refs/heads/controller/recovery-backup-501-"+local),local)
+        self.assertEqual((folder/"trading_engine_v2.py").read_text(),"preserved repair")
+        (folder/"outside.py").write_text("not approved")
+        with self.assertRaises(c.Hold):
+            c.resume_repair_workspace(root,repo,row,501,1,sha,folder,record)
+        c.save(record.with_suffix(".resume-history.json"),old)
+        self.assertIsNone(c.repair_attempt(root,501,sha))
+
     def test_coordinator_defers_repair_to_developer_scheduler(self):
         row=dict(self.row,local_repair=True)
         p={"head":{"sha":"d"*40}}
