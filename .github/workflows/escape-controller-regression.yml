@@ -1,0 +1,66 @@
+name: ESCAPE controller regression review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [codex/escape-development]
+permissions:
+  contents: read
+concurrency:
+  group: controller-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  regression:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.repo.full_name == github.repository && (startsWith(github.event.pull_request.head.ref, 'controller/local-') || github.event.pull_request.head.ref == 'codex/controller-regression-ci-225')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: .:tests
+      ESCAPE_PLAYWRIGHT_MANAGED: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Identify review scope
+        id: scope
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess
+          base, head = os.environ['BASE'], os.environ['HEAD']
+          assert all(re.fullmatch(r'[0-9a-f]{40}', sha) for sha in (base, head))
+          assert subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip() == head
+          paths = subprocess.check_output(['git','diff','--name-only','-z',base+'...'+head]).decode().split('\0')
+          ui = any(p.startswith(('static/','templates/','tests/browser_','tests/test_chart','tests/test_holding_chart')) or p in ('dashboard_projection.py','market_data.py') for p in paths)
+          motor = any(p.startswith(('hotwatch','eodhd','intel_workflows','trading_engine_v2','tests/test_hotwatch','tests/test_eodhd','tests/test_trading_engine_v2')) for p in paths)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              f.write(f'ui={str(ui).lower()}\nmotor={str(motor).lower()}\n')
+          print('Pinned reviewed head:', head, 'UI:', ui, 'motor:', motor)
+          PY
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Motor and data-path regression
+        if: steps.scope.outputs.motor == 'true'
+        run: |
+          python -m unittest tests.test_eodhd_feeds tests.test_feed_reuse tests.test_queue_recovery tests.test_hotwatch_holdings_auto tests.test_hotwatch_warmup tests.test_signal_readiness tests.test_sparse_feed_recovery tests.test_hotwatch_engine tests.test_hotwatch_bar_evidence
+          if test -f tests/test_trading_engine_v2.py; then python -m unittest discover -s tests -p test_trading_engine_v2.py; fi
+      - name: Chart and UI regression
+        if: steps.scope.outputs.ui == 'true'
+        run: |
+          python -m unittest tests.test_market_data tests.test_portfolio_value_chart
+          node tests/test_holding_chart_marker.cjs
+          if test -f tests/test_chart_source_selection.cjs; then node tests/test_chart_source_selection.cjs; fi
+          python -m pip install playwright==1.56.0
+          python -m playwright install --with-deps chromium
+          python tests/browser_market_charts.py
+          python tests/browser_desktop_experience.py
+      - name: Baseline smoke and scope confirmation
+        run: |
+          python -m unittest tests.test_market_data tests.test_hotwatch_engine
+          git diff --check "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}"
