@@ -167,7 +167,7 @@ def record_provider_pause(root,row,now=None):
     save(path,{"task":task_key(row),"observed_at":now,"reset_at":stamp})
     print("PROVIDER_PAUSE:", "until reported reset" if stamp is not None else "awaiting confirmed reset",flush=True)
 
-def write_status(root, reason, active, waiting=()):
+def write_status(root, reason, active, waiting=(), review=()):
     """One local heartbeat; contains only task IDs and scheduler state."""
     try:
         save(root/"status.json", {
@@ -175,6 +175,7 @@ def write_status(root, reason, active, waiting=()):
             "reason": reason,
             "active": sorted(task_key(row) for row in active),
             "waiting": sorted(waiting),
+            "awaiting_review": sorted(review),
         })
     except OSError as exc:
         print("STATUS_UNAVAILABLE:",type(exc).__name__,flush=True)
@@ -215,6 +216,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 continue
             reason="idle"
             waiting=[]
+            review=[]
             try:
                 if a.remote:
                     controller_remote.refresh(root,a.queue)
@@ -224,6 +226,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                     if key in interrupted:
                         notify_result(root,row,"blocked:interrupted",a.publish)
                         interrupted.remove(key)
+                review=[task_key(row) for row in rows if row["status"]=="ready" and results.get(task_key(row)) in ("draft_pr","review_required","no_changes")]
                 rows=effective_rows(rows,results,active.values())
                 waiting=[task_key(row) for row in rows if row["status"]=="ready"]
                 paused=provider_pause_active(root)
@@ -233,7 +236,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 elif waiting and not selected:
                     reason="waiting_for_dependency_or_worker"
                 elif not waiting and not active:
-                    reason="no_eligible_work"
+                    reason="awaiting_review" if review else "no_eligible_work"
             except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as exc:
                 print("QUEUE_UNAVAILABLE:",type(exc).__name__,flush=True)
                 selected=[]
@@ -254,7 +257,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
             active_keys={task_key(row) for row in active.values()}
             if active and reason in ("idle","waiting_for_dependency_or_worker"):
                 reason="working"
-            write_status(root,reason,active.values(),[key for key in waiting if key not in active_keys])
+            write_status(root,reason,active.values(),[key for key in waiting if key not in active_keys],review)
             if active:
                 concurrent.futures.wait(active,timeout=15,return_when=concurrent.futures.FIRST_COMPLETED)
             elif not (root/"STOP").exists():
