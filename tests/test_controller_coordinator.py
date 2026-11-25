@@ -149,3 +149,18 @@ class LocalCoordinatorTests(unittest.TestCase):
         with patch.object(c.subprocess,"run") as run:
             self.assertIn("ingen dublet",c.repair_review(self.root,self.root,self.row,501,p,"Defect",1234))
             run.assert_not_called()
+
+    def test_deferred_repair_resumes_same_reviewed_sha_without_new_review(self):
+        row=dict(self.row,local_repair=True)
+        p={"head":{"sha":"d"*40}}
+        with patch.object(c,"verify_pr",return_value=(p,[],"open")),patch.object(c,"verified_ci",return_value=7),patch.object(c,"independent_review",return_value={"verdict":"hold","reason":"Actual defect"}) as model,patch.object(c,"comment"),patch.object(c,"repair_review",return_value="Repaired; CI pending") as repair:
+            self.assertFalse(c.run_once(self.root,self.root,[row],self.results,reserve_review=iter([True,False]).__next__))
+            model.assert_called_once()
+            repair.assert_not_called()
+            journal=c.read(self.root/"coordinator-review.json",{})
+            journal["501"]["at"]=1
+            c.save(self.root/"coordinator-review.json",journal)
+            self.assertFalse(c.run_once(self.root,self.root,[row],self.results))
+            model.assert_called_once()
+            repair.assert_called_once()
+        self.assertEqual(c.read(self.root/"coordinator-review.json",{})["501"]["state"],"waiting")
