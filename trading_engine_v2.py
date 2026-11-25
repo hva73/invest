@@ -4,9 +4,10 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Literal
 
-from hotwatch_contract import checksum
+from hotwatch_contract import canonical, checksum
 from hotwatch_strategy import exit_context_key, risk_gate, rule_state, validate_strategy
 from report_validation import stamp
 
@@ -65,10 +66,14 @@ class DecisionOrigin:
     strategy_version: str
     strategy_checksum: str
     snapshot_checksum: str | None = None
+    position_switch_digest: str | None = None
 
     @property
     def digest(self) -> str:
-        return checksum(asdict(self))
+        fields = asdict(self)
+        if self.position_switch_digest is None:
+            del fields["position_switch_digest"]
+        return checksum(fields)
 
 
 @dataclass(frozen=True)
@@ -95,6 +100,101 @@ class VerifiedExecution:
                     and self.decision_digest == origin.digest)
 
 
+@dataclass(frozen=True)
+class PositionStrategySwitch:
+    scope_digest: str
+    entry_origin: DecisionOrigin
+    prior_strategy: tuple[str, str, str]
+    new_strategy: tuple[str, str, str]
+    effective_at: str
+    observed_at: str
+    held_evidence: str
+    previous_digest: str | None
+
+    @property
+    def digest(self) -> str:
+        return checksum(asdict(self))
+
+
+def switch_position_strategy(
+    scope: Scope,
+    entry_origin: DecisionOrigin,
+    held: Evidence,
+    effective_at: datetime,
+    strategy_id: str,
+    version: str,
+    catalog: dict[tuple[int, str, str], tuple[dict, str]],
+    previous: PositionStrategySwitch | None = None,
+) -> PositionStrategySwitch:
+    """Return an immutable simulation transition using caller-verified readback."""
+    at = _utc(effective_at)
+    scope_digest = scope.digest
+    if (
+        type(scope.user_id) is not int or scope.user_id <= 0 or scope.is_test is not True
+        or type(scope.portfolio_id) is not int or scope.portfolio_id <= 0
+        or not all((scope.exchange, scope.asset_id, scope.position_id, scope.trade_cycle_id))
+        or entry_origin.purpose != "entry" or not entry_origin.snapshot_checksum
+        or entry_origin.scope_digest not in (
+            scope_digest, replace(scope, position_id=None).digest,
+        )
+        or (previous is not None and (
+            previous.scope_digest != scope_digest or previous.entry_origin != entry_origin
+        ))
+    ):
+        raise ValueError("POSITION_SCOPE_MISMATCH")
+
+    try:
+        captured = held.capture(at)
+        facts = captured["value"]
+        observed = stamp(facts["as_of"])
+        quantity = Decimal(facts["quantity"])
+        cost = Decimal(facts["cost_price"]) if facts.get("cost_price") is not None else None
+        valid = (
+            facts["scope_digest"] == scope_digest
+            and facts["entry_digest"] == entry_origin.digest
+            and exit_context_key(facts, scope_digest)
+            and quantity.is_finite() and (cost is None or (cost.is_finite() and cost >= 0))
+            and all(isinstance(source, str) and source.strip() for source in held.source_ids)
+            and stamp(entry_origin.as_of) <= observed == _utc(held.event_time)
+            and (at - observed).total_seconds() <= 300
+        )
+        snapshot = canonical(captured)
+    except (AttributeError, KeyError, TypeError, ValueError, ArithmeticError):
+        valid = False
+    if not valid:
+        raise ValueError("POSITION_EVIDENCE_UNVERIFIED")
+
+    def resolve(sid, ver):
+        record = catalog.get((scope.user_id, sid, ver), catalog.get((0, sid, ver)))
+        if isinstance(record, tuple) and len(record) == 2:
+            spec, digest = record
+            try:
+                if (not validate_strategy(spec) and spec["strategy_id"] == sid
+                        and spec["version"] == ver and checksum(spec) == digest):
+                    return sid, ver, digest
+            except (TypeError, ValueError):
+                pass
+        raise ValueError("STRATEGY_UNVERIFIED")
+
+    target = resolve(strategy_id, version)
+    prior = (entry_origin.strategy_id, entry_origin.strategy_version,
+             entry_origin.strategy_checksum) if previous is None else previous.new_strategy
+    if previous is not None:
+        previous_at = stamp(previous.effective_at)
+        if at == previous_at and target == prior and snapshot == previous.held_evidence:
+            return previous
+        if at <= previous_at or observed < previous_at or observed <= stamp(previous.observed_at):
+            raise ValueError("POSITION_SWITCH_STALE")
+    if resolve(*prior[:2]) != prior:
+        raise ValueError("STRATEGY_UNVERIFIED")
+    if target == prior:
+        raise ValueError("POSITION_STRATEGY_UNCHANGED")
+    return PositionStrategySwitch(
+        scope_digest, entry_origin, prior, target, at.isoformat(), observed.isoformat(), snapshot,
+        previous.digest if previous is not None else None,
+    )
+
+
 def evaluate(
     scope: Scope,
     snapshot_id: str,
@@ -105,6 +205,8 @@ def evaluate(
     sample: Evidence,
     metrics: dict[str, Evidence],
     risk: Evidence,
+    *,
+    position_switch: PositionStrategySwitch | None = None,
 ) -> Decision:
     """Use a caller-resolved strategy version and timestamped HOT WATCH inputs."""
     as_of = _utc(as_of)
@@ -142,6 +244,17 @@ def evaluate(
         }))
         if validate_strategy(spec) or checksum(spec) != spec_checksum:
             return Decision(origin, "blocked", ("STRATEGY_UNVERIFIED",))
+        if position_switch is not None:
+            if (
+                purpose != "exit" or scope.is_test is not True
+                or position_switch.scope_digest != scope.digest
+                or as_of < stamp(position_switch.effective_at)
+                or position_switch.new_strategy != (
+                    origin.strategy_id, origin.strategy_version, origin.strategy_checksum,
+                )
+            ):
+                return Decision(origin, "blocked", ("POSITION_SWITCH_MISMATCH",))
+            origin = replace(origin, position_switch_digest=position_switch.digest)
         if purpose not in ("entry", "exit") or not (
             scope.portfolio_id and scope.asset_id and scope.exchange
         ):
@@ -154,6 +267,12 @@ def evaluate(
             return Decision(origin, "blocked", ("POSITION_SCOPE_MISMATCH",))
         if purpose == "exit" and (
             not scope.position_id or not exit_context_key(context, origin.scope_digest)
+        ):
+            return Decision(origin, "blocked", ("POSITION_SCOPE_MISMATCH",))
+        if position_switch is not None and (
+            context.get("scope_digest") != scope.digest
+            or context.get("entry_digest") != position_switch.entry_origin.digest
+            or stamp(context["as_of"]) < stamp(position_switch.effective_at)
         ):
             return Decision(origin, "blocked", ("POSITION_SCOPE_MISMATCH",))
 

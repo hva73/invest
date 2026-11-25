@@ -1,3 +1,4 @@
+import json
 import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -5,7 +6,7 @@ from unittest.mock import patch
 
 from hotwatch_contract import GLOBAL_RISK, checksum
 from hotwatch_strategy import BASELINE, EARLY_CATALYST_V1, risk_gate
-from trading_engine_v2 import Evidence, Scope, VerifiedExecution, evaluate
+from trading_engine_v2 import Evidence, Scope, VerifiedExecution, evaluate, switch_position_strategy
 
 
 class TradingEngineV2Tests(unittest.TestCase):
@@ -189,6 +190,114 @@ class TradingEngineV2Tests(unittest.TestCase):
                        {"position_id": "position-2"}):
             other = self.run_evaluation(exit_spec, **(arguments | {"scope": replace(scope, **change)}))
             self.assertFalse(fill.links(other.origin))
+
+    def position_switch_inputs(self):
+        entry = self.run_evaluation(EARLY_CATALYST_V1)
+        self.assertEqual(entry.action, "BUY")
+        scope = replace(self.scope, position_id="position-1")
+        held = Evidence({
+            "scope_digest": scope.digest, "entry_digest": entry.origin.digest,
+            "as_of": self.later.isoformat(), "status": "verified", "position": "held",
+            "quantity": "1", "cost_price": "100", "fees_dkk": "1", "fx_to_dkk": "7",
+            "unrealized_pnl_dkk": "-2", "native_stop": {"order_id": "stop-1", "price": "95"},
+        }, self.later, self.later, ("position-readback",))
+        catalog = {
+            (0, spec["strategy_id"], spec["version"]): (spec, checksum(spec))
+            for spec in (EARLY_CATALYST_V1, BASELINE)
+        }
+        return dict(
+            scope=scope, entry_origin=entry.origin, held=held, effective_at=self.later,
+            strategy_id=BASELINE["strategy_id"], version=BASELINE["version"], catalog=catalog,
+        )
+
+    def test_position_switch_preserves_facts_and_binds_gated_exit(self):
+        inputs = self.position_switch_inputs()
+        held = inputs["held"]
+        original = held.capture(self.later)
+        with patch("trading_engine_v2.risk_gate", wraps=risk_gate) as gate:
+            transition = switch_position_strategy(**inputs)
+            gate.assert_not_called()
+            self.assertIs(switch_position_strategy(**inputs, previous=transition), transition)
+            self.assertEqual(held.capture(self.later), original)
+            self.assertEqual(json.loads(transition.held_evidence)["value"], original["value"])
+            self.assertEqual(transition.entry_origin, inputs["entry_origin"])
+            self.assertEqual(transition.prior_strategy[0], EARLY_CATALYST_V1["strategy_id"])
+            sample = replace(held, value=self.sample.value | {
+                "event_time": self.later.isoformat(), "context": held.value,
+            })
+            arguments = dict(
+                scope=inputs["scope"], as_of=self.later, purpose="exit", sample=sample,
+                metrics={"return_3_pct": self.evidence("-1"), "breakdown": self.evidence(True)},
+                position_switch=transition,
+            )
+            exit_decision = self.run_evaluation(**arguments)
+            gate.assert_called_once()
+            self.assertEqual(exit_decision.action, "SELL")
+            self.assertEqual(exit_decision.origin.strategy_id, BASELINE["strategy_id"])
+            self.assertEqual(exit_decision.origin.position_switch_digest, transition.digest)
+            self.assertNotEqual(exit_decision.origin.digest, transition.entry_origin.digest)
+            self.assertEqual(self.run_evaluation(EARLY_CATALYST_V1, **arguments).reasons,
+                             ("POSITION_SWITCH_MISMATCH",))
+            self.assertEqual(self.run_evaluation(**(arguments | {"as_of": self.at})).reasons,
+                             ("POSITION_SWITCH_MISMATCH",))
+            other_context = replace(sample, value=sample.value | {
+                "context": held.value | {"scope_digest": "another-position"},
+            })
+            self.assertEqual(self.run_evaluation(**(arguments | {"sample": other_context})).reasons,
+                             ("POSITION_SCOPE_MISMATCH",))
+            self.assertEqual(self.run_evaluation(**(arguments | {
+                "risk": self.evidence(self.risk.value | {"exit_allowed": False}),
+            })).reasons, ("EXIT_OUTSIDE_WATCH_SCOPE",))
+        held.value["native_stop"]["price"] = "90"
+        self.assertEqual(json.loads(transition.held_evidence)["value"]["native_stop"]["price"], "95")
+
+    def test_position_switch_rejects_other_scopes_bad_evidence_and_unknown_versions(self):
+        inputs = self.position_switch_inputs()
+        held = inputs["held"]
+        for change in (
+            {"user_id": 8}, {"is_test": False}, {"portfolio_id": 4},
+            {"exchange": "NYSE"}, {"asset_id": "other"}, {"trade_cycle_id": "other"},
+        ):
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, "POSITION_SCOPE_MISMATCH"):
+                switch_position_strategy(**(inputs | {"scope": replace(inputs["scope"], **change)}))
+        with self.assertRaisesRegex(ValueError, "POSITION_EVIDENCE_UNVERIFIED"):
+            switch_position_strategy(**(inputs | {"scope": replace(inputs["scope"], position_id="other")}))
+        for change in (
+            {"status": "unknown"}, {"position": "none"}, {"quantity": "Infinity"},
+            {"cost_price": "NaN"}, {"entry_digest": "other"}, {"scope_digest": "other"},
+        ):
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, "POSITION_EVIDENCE_UNVERIFIED"):
+                switch_position_strategy(**(inputs | {"held": replace(held, value=held.value | change)}))
+        for overrides in (
+            {"effective_at": self.later + timedelta(seconds=301)},
+            {"held": replace(held, available_at=self.later + timedelta(seconds=1))},
+            {"held": replace(held, source_ids=("",))},
+        ):
+            with self.subTest(overrides=overrides), self.assertRaisesRegex(ValueError, "POSITION_EVIDENCE_UNVERIFIED"):
+                switch_position_strategy(**(inputs | overrides))
+        for overrides in (
+            {"version": "9.9.9"},
+            {"catalog": inputs["catalog"] | {
+                (7, BASELINE["strategy_id"], BASELINE["version"]): (BASELINE, "wrong"),
+            }},
+        ):
+            with self.subTest(overrides=overrides), self.assertRaisesRegex(ValueError, "STRATEGY_UNVERIFIED"):
+                switch_position_strategy(**(inputs | overrides))
+
+        first = switch_position_strategy(**inputs)
+        next_at = self.later + timedelta(seconds=1)
+        next_inputs = inputs | {
+            "previous": first, "effective_at": next_at, "strategy_id": EARLY_CATALYST_V1["strategy_id"],
+        }
+        with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_STALE"):
+            switch_position_strategy(**next_inputs)
+        second = switch_position_strategy(**(next_inputs | {"held": replace(
+            held, event_time=next_at, available_at=next_at,
+            value=held.value | {"as_of": next_at.isoformat()},
+        )}))
+        self.assertEqual(second.previous_digest, first.digest)
+        self.assertEqual(second.prior_strategy, first.new_strategy)
+        self.assertEqual(second.entry_origin, first.entry_origin)
 
 
 if __name__ == "__main__":
