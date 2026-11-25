@@ -168,6 +168,58 @@ const run = async () => {
     await start;
     assert(byId('engine-manual-search'), 'Old manual start replaced a newer dialog');
 
+    const searchManual = ticker => {
+        const form = byId('engine-manual-search');
+        form.elements.query.value = ticker;
+        return EngineUI.submit({target: form, preventDefault(){}});
+    };
+    const resolveSearch = ticker => take('manual-search','beta').resolve({
+        assets: [{asset_id: ticker, ticker, name: ticker + ' asset'}]
+    });
+    const manualResult = () => byId('engine-manual-results').querySelector('[data-engine-manual]');
+    const manualStatus = () => byId('engine-manual-status').textContent;
+    const sameForm = byId('engine-manual-search');
+    for (const outcome of ['success', 'error']) {
+        const searchA = searchManual('AAA');
+        resolveSearch('AAA');
+        await searchA;
+        const startA = EngineUI.click(manualResult());
+        const pendingA = take('manual-start','beta');
+        assert(pendingA.args.asset_id === 'AAA', 'Wrong instrument sent to manual start');
+        const searchB = searchManual('BBB');
+        if (outcome === 'error') {
+            pendingA.reject(Error('Old start failed'));
+            await startA;
+            assert(manualStatus() === 'Søger hos Pluto …', 'Old start error replaced pending search status');
+        }
+        resolveSearch('BBB');
+        await searchB;
+        const resultB = manualResult(), statusB = manualStatus();
+        if (outcome === 'success') {
+            pendingA.resolve({session:{watch_id:'aaa-watch'}});
+            await new Promise(resolve=>setTimeout(resolve,0));
+            assert(!pending.some(request => request.path === 'state'), 'Old start fetched instrument detail');
+            await startA;
+        }
+        assert(byId('engine-manual-search') === sameForm && byId('engine-dialog').open,
+            'Old start closed or replaced the same search form');
+        assert(manualResult() === resultB && resultB.textContent.includes('BBB') &&
+            !resultB.disabled && manualStatus() === statusB, 'Old start changed current search results');
+    }
+    const failedStart = EngineUI.click(manualResult());
+    take('manual-start','beta').reject(Error('Current start failed'));
+    await failedStart;
+    assert(!manualResult().disabled && manualStatus() === 'Current start failed',
+        'Current manual start failure cannot be retried');
+    const startB = EngineUI.click(manualResult());
+    const pendingB = take('manual-start','beta');
+    assert(pendingB.args.asset_id === 'BBB', 'New search result did not start the selected instrument');
+    pendingB.resolve({session:{watch_id:'bbb-watch'}});
+    await new Promise(resolve=>setTimeout(resolve,0));
+    take('state','beta').resolve(account('beta'));
+    await startB;
+    assert(byId('engine-dialog').dataset.watchId === 'bbb-watch', 'Current start did not open its detail');
+
     // Poll the currently open dialog while a newer detail is waiting for account data.
     const button = selector => content.querySelector(selector);
     const open = wid => EngineUI.click(button('[data-engine-detail="' + wid + '"]'));
