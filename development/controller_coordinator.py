@@ -262,7 +262,7 @@ def repair_attempt(root,number,sha,limit=20):
             # An explicit drained-service recovery can reuse the final held
             # workspace once. Never skip a live or ambiguous reservation.
             next_path=root/("coordinator-repair-"+str(number)+"-"+str(i+1)+".json")
-            if value.get("state")=="held" and value.get("resume_authorized") is True and not next_path.exists():
+            if value.get("state")=="held" and value.get("resume_authorized") is True and not next_path.exists() and not path.with_suffix(".resume-history.json").exists():
                 return i
             return None
         if value.get("state")=="held":
@@ -403,33 +403,85 @@ def adaptive_repair_task(root,row,number,sha,reason,attempt):
             +"\nPrior findings from this exact task:\n"+history
             +"\nOriginal approved task:\n"+row["task"])
 
-def resume_repair_workspace(root,row,number,attempt,sha,folder,record):
-    """Reuse an explicitly recovered isolated checkout without losing local code."""
-    previous=read(record,{})
-    if previous.get("state")!="held" or previous.get("resume_authorized") is not True or previous.get("key")!=key(row) or previous.get("head")!=sha:
-        raise Hold("Ingen verificeret genoptagelse")
+def inspect_repair_workspace(repo_dir,row,sha,folder):
+    """Validate an isolated checkout, including every preserved changed path."""
     if folder.is_symlink() or not folder.is_dir():
         raise Hold("Reparationsmappe mangler eller er ikke sikker")
     git=controller_publish.git
     if Path(git(folder,"rev-parse","--show-toplevel").decode().strip()).resolve()!=folder.resolve():
         raise Hold("Reparationsmappe matcher ikke checkout")
+    def common_dir(path):
+        return (path/git(path,"rev-parse","--git-common-dir").decode().strip()).resolve()
+    if common_dir(folder)!=common_dir(repo_dir):
+        raise Hold("Reparationsmappe tilhører ikke controllerens repository")
     branch=git(folder,"branch","--show-current").decode().strip()
     if not re.fullmatch("controller/local-"+str(row["issue"])+r"-[0-9]+",branch):
         raise Hold("Reparationsgren matcher ikke opgaven")
     head=git(folder,"rev-parse","HEAD").decode().strip()
     if head!=sha:
-        # A stop after the local commit but before publication is recoverable.
-        # Keep a durable backup ref and leave the index/worktree intact.
         parents=git(folder,"rev-list","--parents","-n","1",head).decode().split()
         if parents!=[head,sha]:
             raise Hold("Lokal reparationshistorik kræver afstemning")
-        paths=git(folder,"diff","--name-only","-z",sha,head).split(b"\0")
-        if not paths or not all(controller_publish.allowed(os.fsdecode(p),row["paths"],row["role"]) for p in paths if p):
-            raise Hold("Lokal commit uden for godkendt scope")
+    if git(folder,"ls-files","-u"):
+        raise Hold("Uafklaret konflikt i bevaret arbejde")
+    tracked=git(folder,"diff","--no-renames","--name-only","-z",sha).split(b"\0")
+    untracked=git(folder,"ls-files","--others","--exclude-standard","-z").split(b"\0")
+    names={os.fsdecode(p) for p in tracked+untracked if p}
+    for name in names:
+        path=folder/name
+        if (not controller_publish.allowed(name,row["paths"],row["role"])
+            or path.is_symlink() or not path.resolve().is_relative_to(folder.resolve())):
+            raise Hold("Bevaret kode uden for godkendt scope")
+    return branch,head
+
+def authorize_repair_resume(root,repo_dir,row,number,sha):
+    """Called only while the installer holds dispatcher.lock and service is stopped.
+    The exact open remote draft and the preserved checkout must both match.
+    Never clear reserved, accepted, unrelated or already recovered records.
+    """
+    if row.get("local_repair") is not True or row.get("local_review") is not True or row["role"]=="release":
+        raise Hold("Genoptagelse ikke godkendt for opgaven")
+    p,_,state=verify_pr(row,number)
+    if state!="open" or p["head"]["sha"]!=sha:
+        raise Hold("PR er ændret eller allerede integreret")
+    for i in range(1,21):
+        suffix="" if i==1 else "-"+str(i)
+        record=root/("coordinator-repair-"+str(number)+suffix+".json")
+        if not record.is_file() or record.is_symlink():
+            break
+        value=read(record,{})
+        if value.get("head")!=sha:
+            if value.get("state") not in ("held","published") or value.get("key")!=key(row):
+                raise Hold("Tidligere reservation kræver afstemning")
+            continue
+        if value.get("state")!="held" or value.get("key")!=key(row):
+            raise Hold("Aktuel reservation kan ikke genoptages")
+        if (root/("coordinator-repair-"+str(number)+"-"+str(i+1)+".json")).exists() or record.with_suffix(".resume-history.json").exists():
+            raise Hold("Genoptagelse er allerede anvendt eller nyere forsøg findes")
+        checkpoint=read(root/("review-repair-checkpoint-"+str(number)+suffix+".json"),{})
+        if checkpoint.get("provider_limit"):
+            raise Hold("Afventer faktisk provider-kapacitet")
+        folder=root/("review-repair-"+key(row).replace(":","-")+"-"+str(number)+suffix)
+        inspect_repair_workspace(repo_dir,row,sha,folder)
+        save(record,dict(value,resume_authorized=True))
+        return i
+    raise Hold("Ingen bevaret reparation på aktuel PR")
+
+def resume_repair_workspace(root,repo_dir,row,number,attempt,sha,folder,record):
+    """Reuse an explicitly recovered isolated checkout without losing local code."""
+    previous=read(record,{})
+    if previous.get("state")!="held" or previous.get("resume_authorized") is not True or previous.get("key")!=key(row) or previous.get("head")!=sha:
+        raise Hold("Ingen verificeret genoptagelse")
+    branch,head=inspect_repair_workspace(repo_dir,row,sha,folder)
+    if head!=sha:
+        # Preserve a completed local commit before restoring its parent as the
+        # publication base; the index and worktree remain unchanged.
+        git=controller_publish.git
         backup="refs/heads/controller/recovery-backup-"+str(number)+"-"+head
         git(folder,"update-ref",backup,head)
         git(folder,"reset","--soft",sha)
     return branch
+
 
 def repair_review(root, repo_dir, row, number, p, reason, allowance):
     """A bounded repair of a newly reviewed SHA; never merge or force-push."""
@@ -452,7 +504,7 @@ def repair_review(root, repo_dir, row, number, p, reason, allowance):
         archive=record.with_suffix(".resume-history.json")
         if archive.exists():
             raise Hold("Genoptagelse allerede anvendt")
-    local_branch=(resume_repair_workspace(root,row,number,attempt,sha,folder,record)
+    local_branch=(resume_repair_workspace(root,repo_dir,row,number,attempt,sha,folder,record)
                   if resume else "controller/local-"+str(row["issue"])+"-"+str(time.time_ns()))
     if resume:
         save(archive,previous)
