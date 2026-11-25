@@ -13,5 +13,79 @@
     "base_branch": "codex/issue57-combined-release-20261124",
     "base_sha": "3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65",
     "task": "Concrete independent P0 release-space work, not another offline budget helper. Installed bridge manifest is now 81/81 verified by Actions 45496977779; DB 6759829504 B, free 12723731904 B. Owner wants to stay within 20 GB for now. Implement in the EXISTING post-success retention flow a separately checked archive-creation reserve before any new cPanel compression call, so we can subsequently review whether installation snapshot and archive maintenance can be budgeted separately without weakening backup/restore safety. Use a fresh conservative measured quota input and complete bounded raw-backup inventory including code/manifest/keys (metadata only), an explicit conservative tar+gzip upper bound with overhead, and fail closed if quota, bound or inventory is unknown, changed or insufficient; preserve raw and previous verified backups, no deletion, no compression in blocked cases. For existing archive preserve hash verification and current release/metadata checks. Preserve current verified successful behavior where all gates pass; report a distinct safe deferred maintenance result if appropriate, never claim release succeeded or space recovered. Do not modify legacy server quota gate, release branch, workflows, production, credentials, owner approval, retention policy for live database or broker. No network calls, no commits. Use only the two allowlisted files and existing quota helper if suitable; test mocks for unknown/insufficient/exact-bound/headroom/race, no compression/no delete on failure, successful path and existing regressions. Run python -B -m unittest tests.test_nordicway_release_retention, verify exact file scope. Deliver draft for independent review only. This is one practical prerequisite for a safe phase-separated backup architecture; it is not itself sufficient to authorize the frozen release. Agent 4 owns dbstat and retention of DB rows; agent 3 owns HOT WATCH writes. No overlap."
+  },
+  {
+    "issue": 57,
+    "role": "release",
+    "priority": 1,
+    "status": "ready",
+    "paths": [
+      "tools/nordicway_release_retention.py",
+      "tests/test_nordicway_release_retention.py"
+    ],
+    "dependencies": [],
+    "generation": 5,
+    "base_branch": "codex/issue57-combined-release-20261124",
+    "base_sha": "3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65",
+    "task": "P0 unblock current release: follow up delivered gen4 draft #247 ee271a39257d3f8259a42f2d196db55b302162c7, not retry same generation. The draft was created by this Mac; reuse its two exact files via local git show if object exists, no fetch or network. If absent, use existing implementation and address only the concrete outstanding safety gaps. Owner terminal confirms filesystem 928G available but account cap 20GB, DB 6836097024, account used upper ~7826571264, quota free ~12.65GB, old 2.2x floor ~15.04GB. Owner bridge runner/sequence explicitly never restores old database; public apply_update.py makes one locked raw snapshot and verifies integrity. Separate post-success archive from install without weakening recovery. Implement/test a fail-closed safe maintenance deferral preserving fresh raw and prior verified archive whenever compression scratch/host bound or competing writer exclusion is unverified; fix last-read race (mutation during final quota call) and existing archive full nested inventory recheck identified in #247. Prefer no compression/delete on unproven conditions; explicit measured phase reserve proof and regression of safe paths. Do not lower actual private gate, no installation, no live DB, no FTP/API calls. No new helper or speculative claims. Use synthetic tests including strict 20GB cap, recovery backup preserved, quota race and existing archive mutation. Review-only isolated worktree, no production access, network, broker, orders, workflow, merge, credentials, deployment, or changes outside exact paths. Run relevant tests and fix actual failures. Do not invent code changes if acceptance already covered. Do not claim live or integrated candidate verification."
+  },
+  {
+    "issue": 54,
+    "role": "mobile",
+    "priority": 4,
+    "status": "ready",
+    "paths": [
+      "tests/browser_mobile_review.py",
+      "tests/browser_mobile_decision_overview.py"
+    ],
+    "dependencies": [],
+    "generation": 1,
+    "base_branch": "codex/escape-development",
+    "base_sha": "adb2cc6e4529ace96d137bfa42df95e0ef4b51b2",
+    "task": "Agent 2 controller migration. Independent mobile acceptance gap review on development baseline, not frozen release acceptance. Approved rules: one overview update line, only År/Måned/Dag below chart, no point count/Pluto label/per-row timestamps; one central buy/sell action, small Ignorer, no entry on BUY, SELL entry/Top, same layout demo and authenticated. Existing #248/#251/#253 product patches and tests must not be duplicated. Inspect the two scoped mobile browser test files for uncovered approved cross-flow assertions (especially mobile viewport plus demo/live identity); implement only genuinely missing regression coverage, run existing test if available, document expected baseline versus frozen difference, no UI changes. If fully covered return no_changes. Review-only isolated worktree, no production access, network, broker, orders, workflow, merge, credentials, deployment, or changes outside exact paths. Run relevant tests and fix actual failures. Do not invent code changes if acceptance already covered. Do not claim live or integrated candidate verification."
+  },
+  {
+    "issue": 8,
+    "role": "motor",
+    "priority": 2,
+    "status": "ready",
+    "paths": [
+      "tests/test_strategy_lab.py",
+      "tests/test_strategy_handoff.py"
+    ],
+    "dependencies": [],
+    "generation": 1,
+    "base_branch": "codex/escape-development",
+    "base_sha": "adb2cc6e4529ace96d137bfa42df95e0ef4b51b2",
+    "task": "Agent 3 controller migration, independent P0 rollback acceptance. #252 compact storage flags OFF; #254 isolated fixture restored 121/121 but full legacy runtime rollback unproven. On existing legacy development baseline inspect actual strategy reader/handoff tests and add only a missing contract regression demonstrating original inline sample/calculation replay preserves all audit/bar fields and fails closed for missing evidence; explicitly separate legacy reader from candidate codec, no fabricated codec/reimplementation, no new compression flags. Cover ability to read original evidence after restart/reopen if absent. If covered report no_changes. No overlap with #252/#254 code or Agent 4 data scope. Review-only isolated worktree, no production access, network, broker, orders, workflow, merge, credentials, deployment, or changes outside exact paths. Run relevant tests and fix actual failures. Do not invent code changes if acceptance already covered. Do not claim live or integrated candidate verification."
+  },
+  {
+    "issue": 14,
+    "role": "data",
+    "priority": 2,
+    "status": "ready",
+    "paths": [
+      "tests/test_storage_reclaim_proof.py"
+    ],
+    "dependencies": [],
+    "generation": 1,
+    "base_branch": "codex/escape-development",
+    "base_sha": "adb2cc6e4529ace96d137bfa42df95e0ef4b51b2",
+    "task": "Agent 4 controller migration. Concrete P0 offline physical reclaim proof test; actual owner PRAGMA 6.836GB database, only 16KiB free pages, auto_vacuum=0, live full and hw_samples dbstat timeout, no further live scans. Build reproducible synthetic SQLite test only (tempdir, bounded size) for safe offline copy/retention-compaction/restore semantics: measure actual file and freelist before/after, demonstrate DELETE alone doesn't necessarily shrink, preserve protected referenced trades/signals/lab evidence and checksums, verify integrity/FK, fail closed on insufficient scratch or corrupt snapshot, record measured synthetic peak and distinguish it from production prediction. No policy for actual rows and no production retention implementation. No duplication of existing #217/#246 census or Agent3 codec work. Review-only isolated worktree, no production access, network, broker, orders, workflow, merge, credentials, deployment, or changes outside exact paths. Run relevant tests and fix actual failures. Do not invent code changes if acceptance already covered. Do not claim live or integrated candidate verification."
+  },
+  {
+    "issue": 67,
+    "role": "desktop",
+    "priority": 5,
+    "status": "ready",
+    "paths": [
+      "tests/browser_desktop_experience.py",
+      "tests/browser_sector_holdings.py"
+    ],
+    "dependencies": [],
+    "generation": 1,
+    "base_branch": "codex/escape-development",
+    "base_sha": "adb2cc6e4529ace96d137bfa42df95e0ef4b51b2",
+    "task": "Agent 5 controller migration. Independent desktop acceptance review on development baseline, not frozen candidate. Approved desktop: sector click opens position list; sector hover correct monetary/percent values; same demo/live logic, no new design. Existing #233 visual suite and #237/#248/#251/#253 must not be duplicated. Inspect exact two scoped browser tests for missing sector navigation/hover cross-flow assertions, especially no stale tooltip after leaving or switching sector and correct identity. Add only genuinely uncovered approved regression if needed, run local tests; no product code change. If covered return no_changes. Review-only isolated worktree, no production access, network, broker, orders, workflow, merge, credentials, deployment, or changes outside exact paths. Run relevant tests and fix actual failures. Do not invent code changes if acceptance already covered. Do not claim live or integrated candidate verification."
   }
 ]
