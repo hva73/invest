@@ -46,6 +46,30 @@ fill-readback. Kaldet, der leverer linket, har ansvaret for kildens verifikation
 Entry og exit kan dermed spores til hver sin versionslåste oprindelse.
 Evalueringen producerer alene beslutningsoprindelsen og gemmer ingen data.
 
+## Genbrug af markedsfeatures i én simulation
+
+`market_features_batch` modtager én `MarketFeatureInput` pr. evaluering og
+returnerer et selvstændigt metric-opslag pr. input i samme rækkefølge.
+Kalderen leverer en ordnet, verificeret samplehistorik som `Evidence`
+og angiver provider, feed, timeframe, revision, entitlement og featureversion
+for det konkrete datasæt. Entitlement-etiketten skal identificere den samme
+datatilgang, som er verificeret for hver enkelt modtager.
+
+Kun instrument og testkategori fra `Scope` indgår i opslaget sammen med
+markedsfelter, kilde-ID'er, tider, replaytid og de effektive perioder i
+`features()`. En ændring i nogen af disse værdier giver et nyt opslag.
+Input skal være tilgængeligt ved evalueringstidspunktet. For bars skal
+hele intervallet være lukket ved den angivne tilgængelighedstid.
+Utilgængelig featurehistorik giver et tomt opslag. `evaluate` afgør som
+hidtil, hvilke metrics den enkelte regel kræver.
+
+Kalderen kombinerer de afledte facts med sin egen evidens og kalder
+`evaluate` for hver bruger og hvert depot med den aktuelle strategi,
+positionskontekst og risiko. Hver beslutning får sin egen oprindelse.
+Batchen gemmer højst 128 sæt features i hukommelsen. Når den er fuld,
+beregnes nye sæt ved behov, og alle opslag udløber ved retur.
+Grænsefladen bruges til lokal simulation. Schedulerintegration er separat.
+
 ## Strategiskift i Position Watch
 
 `switch_position_strategy` returnerer en uforanderlig overgang for en

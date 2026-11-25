@@ -2,11 +2,16 @@ import json
 import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from unittest.mock import patch
 
 from hotwatch_contract import GLOBAL_RISK, checksum
+from hotwatch_features import features
 from hotwatch_strategy import BASELINE, EARLY_CATALYST_V1, risk_gate
-from trading_engine_v2 import Evidence, Scope, VerifiedExecution, evaluate, switch_position_strategy
+from trading_engine_v2 import (
+    Evidence, MarketFeatureInput, Scope, VerifiedExecution, evaluate,
+    market_features_batch, switch_position_strategy,
+)
 
 
 class TradingEngineV2Tests(unittest.TestCase):
@@ -49,6 +54,138 @@ class TradingEngineV2Tests(unittest.TestCase):
             metrics=self.metrics, risk=self.risk,
         )
         return evaluate(**(arguments | overrides))
+
+    def market_input(self):
+        samples = []
+        for i in range(40):
+            at = self.at - timedelta(minutes=39 - i)
+            price = Decimal("99") + (Decimal(i) / 50 if i % 2 else Decimal(0))
+            if i == 39:
+                price = Decimal("100.5")
+            row = {
+                "source": "eodhd", "asset_id": self.scope.asset_id, "currency": "USD",
+                "venue": "NASDAQ", "session_key": "2026-11-25", "market_status": "REGULAR",
+                "feed_type": "US trades", "interval_s": 60, "price_time_kind": "trade",
+                "verification": "verified", "event_time": at.isoformat(),
+                "price": str(price), "high": str(price), "low": str(price), "close": str(price),
+                "bid": str(price - Decimal(".05")), "ask": str(price + Decimal(".05")),
+                "volume": "400" if i == 39 else "100", "volume_type": "interval",
+            }
+            samples.append(Evidence(row, at, at, (f"trade:{i}",)))
+        return MarketFeatureInput(
+            self.scope, self.at, tuple(samples), "eodhd", "US trades", "1m",
+            "revision-1", "realtime-us", "1.3.0", BASELINE["parameters"],
+        )
+
+    def test_market_features_fan_out_to_individual_decisions(self):
+        market = self.market_input()
+        exit_spec = BASELINE | {
+            "version": "1.0.1",
+            "exit_rules": {"metric": "breakout", "operator": "==", "value": True},
+        }
+        local_metrics = {name: self.metrics[name] for name in (
+            "ordinary_share", "pluto_tradable", "no_verified_news", "reference_gain_pct",
+        )}
+        for count in (1, 10, 100):
+            with self.subTest(count=count):
+                requests, evaluations = [], []
+                for i in range(count):
+                    held = i % 3 == 2
+                    spec = (EARLY_CATALYST_V1, BASELINE, exit_spec)[i % 3]
+                    scope = replace(
+                        self.scope, user_id=i + 1, portfolio_id=i + 100,
+                        position_id=f"position-{i}" if held else None,
+                    )
+                    context = self.sample.value["context"] | {
+                        "position": "held" if held else "none", "quantity": str(i + 1),
+                    }
+                    last = market.samples[-1]
+                    requests.append(replace(
+                        market, scope=scope, parameters=spec["parameters"],
+                        samples=(*market.samples[:-1], replace(last, value=last.value | {"context": context})),
+                    ))
+                    evaluations.append(dict(
+                        spec=spec, scope=scope, snapshot_id=f"snapshot-{i}",
+                        purpose="exit" if held else "entry",
+                        sample=self.evidence(self.sample.value | {"context": context, "price": last.value["price"]}),
+                        risk=self.evidence(self.risk.value | {"entry_allowed": i % 3 != 1}),
+                    ))
+                with patch("trading_engine_v2.features", wraps=features) as compute:
+                    shared = market_features_batch(requests)
+                    compute.assert_called_once()
+                    self.assertNotIn("context", compute.call_args.args[0][-1])
+                    separate = [market_features_batch([request])[0] for request in requests]
+                    self.assertEqual(compute.call_count, 1 + count)
+                decisions = [
+                    self.run_evaluation(**args, metrics=local_metrics | facts)
+                    for args, facts in zip(evaluations, shared)
+                ]
+                self.assertEqual(decisions, [
+                    self.run_evaluation(**args, metrics=local_metrics | facts)
+                    for args, facts in zip(evaluations, separate)
+                ])
+                self.assertEqual(len({decision.origin.digest for decision in decisions}), count)
+                self.assertEqual(decisions[0].action, "BUY")
+                if count > 1:
+                    self.assertIn("ENTRY_NOT_AUTHORIZED_BY_CANDIDATE_DECISION", decisions[1].reasons)
+                    self.assertEqual(decisions[2].action, "SELL")
+                self.assertEqual(shared[0]["sample_count"].value, 40)
+                shared[0].clear()
+                if count > 1:
+                    self.assertEqual(shared[1]["sample_count"].value, 40)
+
+    def test_market_batch_isolates_inputs_and_unavailable_history(self):
+        market = self.market_input()
+        last = market.samples[-1]
+
+        def with_last(**changes):
+            return replace(market, samples=(*market.samples[:-1], replace(last, **changes)))
+
+        variants = [
+            replace(market, scope=replace(self.scope, is_test=False)),
+            replace(market, scope=replace(self.scope, exchange="NYSE")),
+            replace(market, provider="other"), replace(market, feed="other"),
+            replace(market, timeframe="5m"), replace(market, revision="revision-2"),
+            replace(market, entitlement="delayed-us"), replace(market, feature_version="1.3.1"),
+            replace(market, as_of=self.later),
+            replace(market, parameters=market.parameters | {"short_period": 6}),
+            with_last(source_ids=("different-trade",)),
+            with_last(value=last.value | {"price": "100.6"}),
+            with_last(available_at=self.at - timedelta(microseconds=1),
+                      event_time=self.at - timedelta(microseconds=1),
+                      value=last.value | {"event_time": (self.at - timedelta(microseconds=1)).isoformat()}),
+        ]
+        other_asset = replace(
+            market, scope=replace(self.scope, asset_id="asset-2"),
+            samples=tuple(replace(row, value=row.value | {"asset_id": "asset-2"}) for row in market.samples),
+        )
+        variants.append(other_asset)
+        unavailable = [
+            with_last(available_at=self.later), with_last(source_ids=()),
+            with_last(value=last.value | {"bid_at": self.later.isoformat()}),
+            with_last(value=last.value | {"price_time_kind": "bar_open"}),
+        ]
+        with patch("trading_engine_v2.features", wraps=features) as compute:
+            original, *results = market_features_batch([market, *variants, *unavailable, market])
+            self.assertEqual(compute.call_count, 1 + len(variants))
+            self.assertEqual(results[len(variants):-1], [{}] * len(unavailable))
+            self.assertEqual(results[-1], original)
+            self.assertNotEqual(results[9]["sma_short"], original["sma_short"])
+            self.assertEqual(market_features_batch([market]), [original])
+            self.assertEqual(compute.call_count, 2 + len(variants))
+
+    def test_market_batch_cache_has_a_fixed_capacity(self):
+        market = self.market_input()
+        market = replace(market, samples=market.samples[-1:])
+        other = replace(market, revision="revision-2")
+        with (
+            patch("trading_engine_v2._MARKET_BATCH_CACHE_LIMIT", 1),
+            patch("trading_engine_v2.features", wraps=features) as compute,
+        ):
+            first, second, again, second_again = market_features_batch([market, other, market, other])
+            self.assertEqual(compute.call_count, 3)
+            self.assertEqual(first, again)
+            self.assertEqual(second, second_again)
 
     def test_real_rules_on_same_evidence_and_optional_macd(self):
         momentum = self.run_evaluation()

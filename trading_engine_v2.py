@@ -1,13 +1,15 @@
 """Pure, simulation-only evaluation of versioned HOT WATCH rules."""
 from __future__ import annotations
 
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import asdict, dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Literal
 
 from hotwatch_contract import canonical, checksum
+from hotwatch_features import features
 from hotwatch_strategy import exit_context_key, risk_gate, rule_state, validate_strategy
 from report_validation import stamp
 
@@ -54,6 +56,83 @@ class Evidence:
             "available_at": _utc(self.available_at).isoformat(),
             "source_ids": tuple(self.source_ids),
         }
+
+
+@dataclass(frozen=True)
+class MarketFeatureInput:
+    scope: Scope
+    as_of: datetime
+    samples: tuple[Evidence, ...]
+    provider: str
+    feed: str
+    timeframe: str
+    revision: str
+    entitlement: str
+    feature_version: str
+    parameters: dict
+
+
+# Fields read by features(), plus timestamps that establish availability.
+_MARKET_FIELDS = (
+    "source", "asset_id", "currency", "venue", "session_key", "market_status",
+    "feed_type", "interval_s", "price_time_kind", "verification", "event_time",
+    "price", "high", "low", "close", "bid", "ask", "volume", "volume_type",
+    "bid_at", "ask_at", "status_at",
+)
+_FEATURE_PERIODS = ("short_period", "long_period", "rsi_period", "atr_period", "breakout_window")
+_MARKET_BATCH_CACHE_LIMIT = 128
+
+
+def market_features_batch(requests: Iterable[MarketFeatureInput]) -> list[dict[str, Evidence]]:
+    """Compute market-only facts for one simulation batch in request order."""
+    cache: dict[str, dict[str, Evidence]] = {}
+    results = []
+    for request in requests:
+        try:
+            as_of = _utc(request.as_of)
+            identity = (request.scope.exchange, request.scope.asset_id, request.provider,
+                        request.feed, request.timeframe, request.revision, request.entitlement,
+                        request.feature_version)
+            if (not all(isinstance(value, str) and value.strip() for value in identity)
+                    or type(request.scope.is_test) is not bool or not request.samples):
+                raise ValueError("Market feature identity is required")
+            parameters = {name: int(request.parameters[name]) for name in _FEATURE_PERIODS}
+            parameters["momentum_window_minutes"] = int(request.parameters.get("momentum_window_minutes", 3))
+            if min(parameters.values()) < 1:
+                raise ValueError("Feature periods must be positive")
+            rows, provenance = [], []
+            for sample in request.samples:
+                event, available = _utc(sample.event_time), _utc(sample.available_at)
+                row = {name: sample.value[name] for name in _MARKET_FIELDS if name in sample.value}
+                if (not sample.visible(as_of)
+                        or not all(isinstance(source, str) and source.strip() for source in sample.source_ids)
+                        or row["asset_id"] != request.scope.asset_id
+                        or stamp(row["event_time"]) != event
+                        or (row.get("price_time_kind") == "bar_open"
+                            and (row["interval_s"] <= 0
+                                 or event + timedelta(seconds=row["interval_s"]) > available))
+                        or any(row.get(name) and stamp(row[name]) > available
+                               for name in ("bid_at", "ask_at", "status_at"))):
+                    raise ValueError("Market feature evidence unavailable")
+                rows.append(row)
+                provenance.append((event.isoformat(), available.isoformat(), sample.source_ids))
+            key = checksum((identity, request.scope.is_test, as_of.isoformat(),
+                            parameters, rows, provenance))
+            facts = cache.get(key)
+            if facts is None:
+                computed = features(rows, parameters)
+                event = max(_utc(sample.event_time) for sample in request.samples)
+                available = max(_utc(sample.available_at) for sample in request.samples)
+                sources = tuple(dict.fromkeys(source for sample in request.samples
+                                              for source in sample.source_ids))
+                facts = {name: Evidence(value, event, available, sources)
+                         for name, value in computed.items()}
+                if len(cache) < _MARKET_BATCH_CACHE_LIMIT:
+                    cache[key] = facts
+        except (AttributeError, KeyError, TypeError, ValueError, ArithmeticError):
+            facts = {}
+        results.append(dict(facts))
+    return results
 
 
 @dataclass(frozen=True)
