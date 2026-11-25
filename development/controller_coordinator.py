@@ -329,15 +329,37 @@ def verified_ci(sha, files):
     steps={s["name"]:s.get("conclusion") for s in job["steps"]}
     required={"Baseline smoke and scope confirmation"}
     names=[f["filename"] for f in files]
-    if any(n.startswith(("hotwatch","eodhd","intel_workflows","trading_engine_v2","tests/test_hotwatch","tests/test_eodhd","tests/test_trading_engine_v2")) for n in names):
+    if any(n.startswith(("hotwatch","eodhd","intel_workflows","trading_engine_v2","tests/test_hotwatch","tests/test_eodhd","tests/test_trading_engine_v2","strategy_lab","long_term_watch","tests/test_strategy_lab")) for n in names):
         required.add("Motor and data-path regression")
     if any(n.startswith(("static/","templates/","tests/browser_","tests/test_chart","tests/test_holding_chart")) or n in ("dashboard_projection.py","market_data.py") for n in names):
         required.add("Chart and UI regression")
     if any(steps.get(s)!="success" for s in required):
         raise Hold("En relevant testsuite er ikke udført")
     # These suites are not all covered by the generic regression workflow.
-    if any(n in ("hotwatch_supervisor.py","tests/test_admin_diagnostics.py","tests/test_hotwatch_supervisor.py","strategy_lab.py","tests/test_strategy_lab.py") for n in names):
-        raise Hold("Specialiseret test kræver særskilt integration")
+    # Verify the actual pinned workflow contents for specialized suites.
+    # The two development bases do not have identical test coverage.
+    if any(n in ("hotwatch_supervisor.py","tests/test_admin_diagnostics.py","tests/test_hotwatch_supervisor.py","strategy_lab.py","long_term_watch.py","tests/test_strategy_lab.py") for n in names):
+        import base64
+        source=gh(PREFIX+"/contents/.github/workflows/escape-controller-regression.yml?ref="+sha)
+        workflow=base64.b64decode(source["content"]).decode()
+        commands=[]
+        for line in workflow.splitlines():
+            line=line.strip()
+            if line.startswith("python -m unittest ") or line.startswith("if test -f tests/test_trading_engine_v2.py; then python -m unittest "):
+                commands.append(line.replace(";", " "))
+        if steps.get("Motor and data-path regression")!="success":
+            raise Hold("Specialiseret motortest er ikke bestået")
+        if any(n in ("strategy_lab.py","long_term_watch.py","tests/test_strategy_lab.py") for n in names):
+            if not any("tests.test_strategy_lab" in line.split() for line in commands):
+                raise Hold("Specialiseret strategy_lab-test mangler")
+            # The conditional test is only sufficient when its guard exists.
+            if not any(line.startswith("python -m unittest ") and "tests.test_strategy_lab" in line.split() for line in commands):
+                source=gh(PREFIX+"/contents/tests/test_trading_engine_v2.py?ref="+sha)
+                if source.get("type")!="file":
+                    raise Hold("Specialiseret test blev ikke aktiveret")
+        if any(n in ("hotwatch_supervisor.py","tests/test_admin_diagnostics.py","tests/test_hotwatch_supervisor.py") for n in names):
+            if not all(any(name in line.split() for line in commands) for name in ("tests.test_admin_diagnostics","tests.test_hotwatch_supervisor")):
+                raise Hold("Specialiseret supervisor-test mangler")
     return run["id"]
 
 def parse_review(text):
