@@ -223,7 +223,7 @@
     "task": "Implement #267 verified chart-domain metadata and history reuse on existing market/portfolio API. Fixed complete local Copenhagen calendar-day axis including DST for portfolio/krypto; individual market actual full session including verified extended hours; no future points, no fabricated interpolation; use real history, existing cache, no extra duplicate requests/storage growth. Expose session start/end/current phase and valid source/freshness, unknown honest. Preserve existing value semantics. Fixtures HYPE, NOVOB, ASMDEE, ORCL/JDZG at 11:40, weekend, DST, holidays/early close. Coordinate frontend; no modifications to HOT WATCH feed files or trade contract. Implement actual code/tests draft."
   },
   {
-    "status": "ready",
+    "status": "blocked",
     "base_branch": "codex/escape-development",
     "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
     "dependencies": [],
@@ -305,7 +305,7 @@
     "generation": 2,
     "role": "motor",
     "priority": 1,
-    "status": "ready",
+    "status": "blocked",
     "base_branch": "codex/escape-development",
     "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
     "dependencies": [],
@@ -315,5 +315,38 @@
       "docs/TRADING_ENGINE_V2_INTERFACE.md"
     ],
     "task": "Implement concrete #275 review (review_id 6057099632, exact draft 3023e172356e250369d9d3c6b3ef013000045d72). This generation SUPERSEDES gen1; reuse its useful code by read-only GitHub/git fetch if available, do not merge both. Keep this module simple and pure; use the existing versioned strategy specs/evaluator (strategy_center.py, hotwatch_strategy.py, strategy_lab.py) rather than a parallel registry or risk framework. Demonstrate actual existing Momentum and Early Catalyst rule evaluation on same data, including missing optional MACD for Early Catalyst, causal event vs availability time (required unavailable blocks; optional future not used), one common gate only at action boundary, no live authority. Scope owner/test and position identity via existing contract/digest, separate decision origin from verified order/fill linkage with distinct entry/exit strategy version; do not build persistence or a new ledger. Use existing names/semver and narrow data interface; no speculative framework, duplicate schema, or over-validation. Keep changes to three files; no changes to existing live code or strategy. Focus tests on meaningful positive/negative, causal replay and provenance. Deliver implementation and actual local test result, not another architecture report."
+  },
+  {
+    "issue": 273,
+    "generation": 3,
+    "role": "motor",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "dbe9eda0880a9fdbcf73cd2f674abe6f20e28f91",
+    "dependencies": [],
+    "paths": [
+      "trading_engine_v2.py",
+      "tests/test_trading_engine_v2.py",
+      "docs/TRADING_ENGINE_V2_INTERFACE.md"
+    ],
+    "task": "Supersede #277 exact 24630105c8431e77351498e09a0086acb0e09fd7; copy its three files from exact Git commit (read only). Relevant CI 45609041129 PASS. Address only independent review 6057165291: DecisionOrigin digest must bind actual causal snapshot sample/metrics/risk and source/time metadata using existing canonical checksum; same caller snapshot ID with changed visible input must not yield same digest; exclude future/unavailable input; identical input deterministic. Preserve thin adapter and single shared risk gate, no new registry, persistence, or wrapper. Clarify optional visible evidence may change origin even if outcome same. Deep-copy/canonicalize at snapshot boundary as necessary, not duplicated validation. Add meaningful tests including execution linkage rejection for changed evidence; preserve existing rule and causality tests. No live changes; deliver actual code and local tests, not report."
+  },
+  {
+    "issue": 267,
+    "generation": 4,
+    "role": "mobile",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "dbe9eda0880a9fdbcf73cd2f674abe6f20e28f91",
+    "dependencies": [],
+    "paths": [
+      "static/dashboard-ui.js",
+      "static/market-ui.js",
+      "tests/test_chart_source_selection.cjs",
+      "tests/browser_market_charts.py"
+    ],
+    "task": "Supersede #272 exact a4e3aeac9d7e5b9c083f6a75c8c3531f576ceafb, read/copy its scoped changes. Actual CI 45608936813 job 139187059615: 19 Python tests and Node pass; browser_market_charts.py line 25 fails old 'Førmarked' expectation. Inspect actual page and fixture; preserve owner-approved explicit verified market status and unknown when no authoritative calendar, do not fabricate data or weaken assertions merely to green CI. Coordinate with exact backend #271 d821fc42a85c751e04fa1a250e1bea4223877098 by using temporary combined checkout for local integration test, without publishing backend files in mobile PR. Fix minimal UI/fixture regression, keep Top, dashed cost basis, actual session, 00–24 overview, hover and demo/live parity. Test existing browser_market_charts and chart source selection. No redesign/production. Subsequent desktop gen3 dependency needs verified updated integration, not blind marking done."
   }
 ]
