@@ -40,5 +40,19 @@ async function call(payload){return window.fetch('/api/market/quote',{method:'PO
   const r=await window.fetch(sessionPath+suffix);assert.equal(r.status,404,suffix);
   const body=await r.json();assert(!body.session&&!body.items,suffix);
  }
+ // The same synthetic BTC asset exists in two depots. Only the direct
+ // depot's quantity may form the basis of a simulated percentage sale.
+ const collectionBTC=d.positions.find(p=>p.portfolio_id===2&&p.ticker==='BTC');
+ const directBTC=d.positions.find(p=>p.portfolio_id===1&&p.ticker==='BTC');
+ const previous=collectionBTC.quantity;collectionBTC.quantity='9';
+ const estimate=payload=>window.fetch('/api/trade/estimate',{method:'POST',body:JSON.stringify({asset_id:directBTC.asset_id,portfolio_id:1,size_mode:'percent',size:'50',...payload})});
+ const sale=await estimate({});assert.equal(sale.status,200);
+ const proposal=(await sale.json()).proposal;
+ assert.equal(proposal.portfolio_id,1);assert.equal(proposal.sell_basis.quantity,directBTC.quantity);
+ assert.equal(Number(proposal.payload.orders[0].shares),Number(directBTC.quantity)/2);
+ for(const invalid of [{portfolio_id:2},{portfolio_id:99},{portfolio_id:null},{asset_id:'synthetic-asset-UNKNOWN'},{asset_id:'synthetic-asset-NOVOB'},{size:'0'},{size:'101'},{size:'NaN'}]){
+  const rejected=await estimate(invalid);assert.equal(rejected.status,400,JSON.stringify(invalid));assert.equal((await rejected.json()).proposal,undefined);
+ }
+ collectionBTC.quantity=previous;
  console.log('PASS: demo calendar-day fixture, holding/position/candidate identity and no fallback to unrelated asset');
 })().catch(e=>{console.error(e);process.exitCode=1});
