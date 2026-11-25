@@ -14,6 +14,11 @@ window.EngineUI=(()=>{
   const mounted=captureView(),epoch=sessionEpoch(),authenticated=!logoutRequests;
   return ()=>authenticated&&mounted()&&!logoutRequests&&epoch===sessionEpoch();
  }
+ function captureDialog(modal=document.getElementById('engine-dialog')){
+  // Native dismissal changes open synchronously, even before the close event.
+  const version=dialogGeneration,open=modal?.open;
+  return ()=>version===dialogGeneration&&modal===document.getElementById('engine-dialog')&&modal?.open===open;
+ }
  function captureForm(form,current=captureScope()){
   const modal=document.getElementById('engine-dialog');
   return ()=>current()&&form?.isConnected&&modal===document.getElementById('engine-dialog')&&(!modal||modal.open);
@@ -184,12 +189,13 @@ window.EngineUI=(()=>{
   return out;
  }
  // A background refresh must yield to an explicit dialog request in the current scope.
- async function detail(wid,refresh=false,external=false,holdingKey=null){if(refresh&&(pendingDetail?.()||document.getElementById('engine-buy-plan')?.closest('details')?.open))return;if(!root()&&!external)return;
-  const scope=captureScope(),ticket=++detailRequest,dialogVersion=dialogGeneration;
-  const openDialog=document.getElementById('engine-dialog');
-  const current=()=>scope()&&ticket===detailRequest&&dialogVersion===dialogGeneration&&
-   (!refresh||(openDialog?.open&&openDialog.isConnected&&
-    (holdingKey===null?openDialog.dataset.watchId===wid:openDialog.dataset.holdingKey===holdingKey)));
+ async function detail(wid,refresh=false,external=false,holdingKey=null){
+  if((refresh&&pendingDetail?.())||(!root()&&!external))return;
+  const modal=document.getElementById('engine-dialog');
+  const scope=captureScope(),sameDialog=captureDialog(modal),ticket=++detailRequest;
+  const current=()=>scope()&&ticket===detailRequest&&sameDialog()&&
+   (!refresh||(modal?.open&&!modal.querySelector('#engine-buy-plan')?.closest('details')?.open&&
+    (holdingKey===null?modal.dataset.watchId===wid:modal.dataset.holdingKey===holdingKey)));
   if(!current())return;
   if(!refresh)pendingDetail=current;
   let r,samples,events,accountState;
@@ -242,8 +248,8 @@ window.EngineUI=(()=>{
    if(!item.provider_symbol)formStatus('Vælg det korrekte instrument i EODHD-listen før start.');
   }catch(error){if(!current())return;item.eodhd_lookup=null;item.eodhd_error='EODHD-opslag fejlede: '+reason(error.details?.code||error.details?.error||error.message)+'. Du kan indtaste et kendt EODHD-symbol i symbolfeltet.';if(slot)slot.textContent=item.eodhd_error;formStatus(item.eodhd_error)}
  }
- async function legacyCreation(){const scope=captureScope(),ticket=++creationRequest,dialogVersion=dialogGeneration;
- const current=()=>scope()&&ticket===creationRequest&&dialogVersion===dialogGeneration;
+ async function legacyCreation(){const scope=captureScope(),sameDialog=captureDialog(),ticket=++creationRequest;
+ const current=()=>scope()&&sameDialog()&&ticket===creationRequest;
  let r,s,providers;
  try{[r,s,providers]=await Promise.all([api(base+'/start-candidates'+query()),api('state'),api(base+'/providers'+query()).catch(()=>null)])}catch(error){if(current())throw error;return}if(!current()||!root())return;candidates=r.candidates||[];portfolios=s.portfolios.filter(p=>p.source==='pluto'&&p.active);portfolioSnapshots=s.portfolio_snapshots||{};batchCandidates=[];if(!candidates.length){dialog('Start overvågning',`<p>Ingen kandidater med en aktuel vurdering kan startes lige nu.</p><p>Allerede overvåget: ${esc(r.already_watched||0)} · mangler aktuel vurdering: ${esc(r.without_current_assessment||0)} · gentagne instrumenter: ${esc(r.duplicates||0)}.</p>`);return}dialog('Start HOT WATCH',`<p>Listen viser kandidater med en aktuel KØB- eller AFVENT-vurdering. Allerede overvåget: ${esc(r.already_watched||0)} · mangler aktuel vurdering: ${esc(r.without_current_assessment||0)} · gentagne instrumenter: ${esc(r.duplicates||0)}. Historikken er bevaret.</p><p>Analysemotor · ingen ordre eller handelsgodkendelse. Pluto-instrument og depoter kontrolleres før start.</p><form id="engine-create"><div class="formgrid"><label>Kandidat<select name="candidate" required>${candidates.map((x,i)=>({x,i})).filter(v=>v.x.candidate.candidate_id).map(({x,i})=>`<option value="${i}">${esc(x.candidate.ticker)} · ${esc(x.candidate.company_name||'')}${x.candidate.decision?.decided_at?' · vurderet '+esc(date(x.candidate.decision.decided_at)):x.generated_at?' · rapport '+esc(date(x.generated_at)):''}${x.candidate.decision?.deadline&&Date.parse(x.candidate.decision.deadline)<Date.now()?' · deadline overskredet':''}</option>`).join('')}</select></label><label>Datakilde<select name="provider"><option value="pluto">Pluto · verificeret læsekontrakt</option><option value="eodhd" ${!mode&&providers?.providers?.eodhd?.enabled&&providers?.providers?.eodhd?.key_configured?'selected':''}>EODHD · markedsdata</option><option value="report_inbox">Rapportmålinger · ingen nye købssignaler</option>${mode?'<option value="synthetic">Syntetisk testadapter</option>':''}</select></label><label>Børs / venue<input name="exchange" required maxlength="200"></label><label>Pluto asset-ID<input name="asset_id" required maxlength="100"></label><label>Aktivets verificerede valuta<input name="quote_currency" required pattern="[A-Z]{3}" maxlength="3" placeholder="ISO-valuta fra datakilden"></label><label>EODHD-symbol<input name="provider_symbol" placeholder="Vælg via EODHD-opslag" maxlength="80"></label><label>Overvågningsområde<select name="watch_mode"><option value="both">Kandidat og eksisterende position</option><option value="entry">Kun nye køb</option><option value="exit">Kun eksisterende position / exit</option></select></label><label>Genaktiveringsgrund, hvis kandidaten er lukket<input name="reactivation_reason" maxlength="4000"></label><label>Overvågningsformål<input name="purpose" required value="momentum" maxlength="200"></label><label>Profil<select name="profile">${['NORMAL','ACTIVE','CRITICAL','IDLE'].map(x=>`<option>${x}</option>`).join('')}</select></label><label>Sluttid (lokal tid)<input type="datetime-local" name="end_at" value="${localDeadline()}"></label></div><div id="engine-instrument-choice"></div><div id="engine-eodhd-choice"></div><button type="button" data-engine-eodhd-search>Find EODHD-instrument</button><button type="button" data-engine-batch-add>Tilføj valgt kandidat til batch</button><p id="engine-batch-list" class="muted">Ingen kandidater tilføjet endnu. Du kan starte 1–40 kandidater samlet.</p><label>Depoter med aktivet i seneste snapshot<select name="portfolios" multiple>${portfolios.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></label><label>Hvorfor aktiveres overvågningen?<textarea name="activation_reason" required maxlength="4000">Manuel, udtrykkelig HOT WATCH-aktivering fra ESCAPE.</textarea></label><details><summary>Avancerede instrumentfelter og risikogrænser</summary><div class="formgrid"><label>Planlagt antal<input name="quantity" type="number" min="0" step="any"></label><label>Stoppris i aktivets valuta<input name="stop" type="number" min="0" step="any"></label><label>Maksimal størrelse (DKK)<input name="max_notional" value="1000" type="number" min="1" max="1000"></label><label>Maksimalt tab (DKK)<input name="max_loss" value="100" type="number" min="1" max="100"></label></div><p>Asset-ID, børs, valuta og symbol vises her efter opslag og kan ikke udledes fra ticker alene.</p></details><p class="muted">Baseline: escape_momentum v1.0.0. EODHD-pollgulv ${esc(String(providers?.providers?.eodhd?.minimum_poll_s??'ukendt'))} sek. · Pluto mindst 300 sek. Intervaller garanterer ikke friske kurser. Ukendt spread, handelsstatus, gebyrer eller valuta kan blokere KØB.</p><button class="primary">Start overvågning</button><p id="engine-form-status" role="status"></p></form>`);if(!mode){const f=document.getElementById('engine-create'),index=Number(f.elements.candidate.value);const result=await resolveInstrument(index);if(result!==undefined&&f.elements.provider.value==='eodhd')await findEodhdSymbol()}}
  async function creation(){manualChoices=[];if(mode){dialog('Start HOT WATCH','<p>Manuel Pluto-søgning er tilgængelig i driftstilstand.</p>');return}dialog('Søg aktie på Pluto',`<p>Rapportens kandidater sættes automatisk til overvågning, når instrumentet er verificeret. Søg her for at tilføje et andet Pluto-instrument.</p><form id="engine-manual-search" class="engine-manual-search"><label>Aktie, ticker eller ISIN<input name="query" required minlength="1" maxlength="120" autocomplete="off" placeholder="Søg hos Pluto"></label><button class="primary" type="submit">Søg</button></form><div id="engine-manual-results" aria-live="polite"></div><p id="engine-manual-status" role="status"></p><p class="muted">Overvågningen er en analyse og opretter ingen ordre.</p>`);document.querySelector('#engine-manual-search input')?.focus()}
@@ -371,8 +377,8 @@ window.EngineUI=(()=>{
   );
  }
  async function openNotification(wid){
-  setMode(false);const scope=captureScope(),ticket=++detailRequest,version=dialogGeneration;
-  const current=()=>scope()&&ticket===detailRequest&&version===dialogGeneration;
+  setMode(false);const scope=captureScope(),sameDialog=captureDialog(),ticket=++detailRequest;
+  const current=()=>scope()&&sameDialog()&&ticket===detailRequest;
   if(!current())return;
   pendingDetail=current;
   let r,account;

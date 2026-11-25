@@ -355,6 +355,84 @@ const run = async () => {
     const failures = [];
     const check = (condition, message) => { if (!condition) failures.push(message); };
     const flush = () => new Promise(resolve => setTimeout(resolve, 0));
+    const dismiss = modal => {
+        // requestClose follows the native cancel path used by Escape.
+        if (modal.requestClose) {
+            let cancelled = false;
+            modal.addEventListener('cancel', () => { cancelled = true; }, {once: true});
+            modal.requestClose();
+            assert(cancelled, 'The browser did not dispatch cancel');
+        } else modal.close();
+        assert(!modal.open, 'The browser did not dismiss the dialog');
+    };
+
+    for (const entry of ['HOT WATCH', 'dashboard']) {
+        switchAccount('alpha');
+        await flush();
+        if (entry === 'dashboard') content.innerHTML = '';
+        const opening = entry === 'dashboard' ? EngineUI.openDetail('alpha-watch') : open('alpha-watch');
+        take('state', 'alpha').resolve(account('alpha'));
+        await opening;
+        const refreshing = poll();
+        await flush();
+        const delayedRefresh = take('state', 'alpha');
+        const draft = byId('engine-buy-plan');
+        const editor = draft.closest('details');
+        editor.querySelector('summary').click();
+        draft.elements.budget_dkk.value = '1250';
+        delayedRefresh.resolve(account('alpha'));
+        await refreshing;
+        check(byId('engine-buy-plan') === draft && editor.open && draft.elements.budget_dkk.value === '1250',
+            entry + ' detail poll erased the draft opened during its request');
+
+        const activeForm = byId('engine-buy-plan');
+        activeForm.closest('details').open = false;
+        const afterEditing = poll();
+        await flush();
+        take('state', 'alpha').resolve(account('alpha'));
+        await afterEditing;
+        check(byId('engine-buy-plan') !== activeForm, entry + ' detail did not resume refreshing after editing');
+    }
+
+    for (const outcome of ['success', 'error']) {
+        switchAccount('alpha');
+        await flush();
+        const opening = open('alpha-watch');
+        take('state', 'alpha').resolve(account('alpha'));
+        await opening;
+        const modal = byId('engine-dialog');
+        const next = click('[data-engine-detail="alpha-next"]');
+        const delayed = take('state', 'alpha');
+        dismiss(modal);
+        byId('notice').textContent = 'Dismissed';
+        if (outcome === 'success') delayed.resolve(account('alpha'));
+        else delayed.reject(Error('Dismissed detail error'));
+        await next;
+        check(!modal.open && byId('notice').textContent === 'Dismissed',
+            'Dismissed detail ' + outcome + ' updated the UI');
+
+        const reopening = open('alpha-next');
+        take('state', 'alpha').resolve(account('alpha'));
+        await reopening;
+        check(modal.open && modal.dataset.watchId === 'alpha-next', 'Fresh detail did not open after dismissal');
+    }
+
+    window.MarketUI = {mount() {}};
+    for (const entry of ['notification', 'candidate form']) {
+        await EngineUI.click(newButton());
+        const modal = byId('engine-dialog');
+        const opening = entry === 'notification' ? EngineUI.openNotification('notification-dismissed') : EngineUI.legacyCreation();
+        const delayed = take('state', 'alpha');
+        if (entry === 'notification') take('/sessions/notification-dismissed', 'alpha').resolve({session: session('dismissed')});
+        dismiss(modal);
+        delayed.resolve(account('alpha'));
+        await flush();
+        const quoteIndex = pending.findIndex(request => request.path === 'market/quote');
+        if (quoteIndex >= 0) pending.splice(quoteIndex, 1)[0].resolve(quote());
+        await opening;
+        check(!modal.open && quoteIndex < 0, 'Dismissed ' + entry + ' reopened the dialog');
+    }
+
     for (const outcome of ['current-error', 'current-success', 'stale-error', 'stale-success', 'closed-form', 'replaced-form']) {
         switchAccount('alpha');
         await flush();
