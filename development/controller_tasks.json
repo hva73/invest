@@ -719,5 +719,43 @@
         "task": "Next approved #273 Position Watch / provenance simulation slice: extend persisted-switch exit evaluation to return a scoped, immutable readback of the verified active strategy and original entry provenance at the chosen evaluation timestamp, suitable for later UI integration. Reuse existing journal/evaluate types; do not invent live holdings, signals or fills. Compare before/after switches and preserve original entry and cost evidence; reject mismatched scopes, truncated journal and unavailable versions. Provide concrete readback adapter only if not already present, actual SQLite tests and interface docs. No live routes, broker access, new strategy thresholds or migration."
       }
     ]
+  },
+  {
+    "issue": 14,
+    "generation": 7,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "171dcc0571738e8774b60660ad60233bcbfa80c9",
+    "dependencies": [
+      "14:6"
+    ],
+    "paths": [
+      "hotwatch_service.py",
+      "tests/test_hotwatch_holdings_auto.py",
+      "tests/test_discovery_order_performance.py"
+    ],
+    "local_review": true,
+    "local_repair": true,
+    "task": "Implement approved #14/#273 100-user discovery efficiency on current verified base. Concrete existing bottleneck: auto_discover reads hw_discovery_attempts separately for each candidate during a scan, while holding a database connection. Replace N+1 candidate-attempt lookups with a bounded user-scoped prefetch/join against existing indexed data (no new storage, no global private data). Preserve cursor semantics, report reset/reassessment, started-at policy, one activation per eligible user per pass, provider budgets, existing retry times and no speculative scan. Actual SQLite regression with overlapping candidate IDs across users, 1/10/100 synthetic users, eligible/blocked cases, unchanged selection and measured SQL count. Put essential regression in existing test_hotwatch_holdings_auto.py (executed by controller motor CI); no live calls, new infrastructure or trading changes. Deliver code and tests."
+  },
+  {
+    "issue": 114,
+    "generation": 1,
+    "role": "motor",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/trading-engine-v2-integration",
+    "base_sha": "33416f773447d80b7146c1510cd786b756ccfe29",
+    "dependencies": [],
+    "paths": [
+      "trade_service.py",
+      "tests/test_trade_service.py",
+      "tests/test_hotwatch_engine.py"
+    ],
+    "local_review": true,
+    "local_repair": true,
+    "task": "Implement approved #114 trade-origin foundation in existing proposal status readback. Concrete flaw in trade_service.check(): get_order_intent response is stored as sent without verifying returned orderIntentId equals the owned proposal reference (cancel_intent already checks this). Verify exact returned identity and any available portfolio/order identity before persisting the response; conflicting or missing identity must not overwrite prior evidence or imply fill/accepted status. Reuse existing provider contract, do not invent fill linkage. Keep manual/signal provenance distinct and no inferred fills; no new API calls, order submissions or cancellation changes. Add direct tests in test_trade_service.py and a focused regression in the existing motor CI suite tests/test_hotwatch_engine.py only if it can exercise real proposal evidence without duplication; preserve tenant isolation, legitimate status refresh and existing valid formats. Test mismatched/absent identity, other user's reference and unchanged prior record. Scope is offline development, not activation. No overlap with #268 or #299."
   }
 ]
