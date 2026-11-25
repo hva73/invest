@@ -43,7 +43,7 @@ class PhaseTests(unittest.TestCase):
     def test_real_bridge_patch_and_apply(self):
         history=ROOT/"bridge-history/tools"
         if not history.exists(): self.fail("historical bridge checkout missing")
-        old={name:(history/name).read_bytes() for name in installer.HASHES}
+        old={name:(history/name).read_bytes() for name in installer.HASHES if name!="apply_update.py"}
         old["apply_update.py"]=(ROOT/"apply_update.py").read_bytes()
         for name,content in old.items():
             print("Fixture",name,hashlib.sha256(content).hexdigest(),flush=True)
