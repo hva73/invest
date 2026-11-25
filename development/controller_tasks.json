@@ -450,7 +450,7 @@
     "generation": 7,
     "role": "motor",
     "priority": 1,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/trading-engine-v2-integration",
     "base_sha": "125b263352b7dc518e78a83fe9cbd58bdfc7a3d6",
     "dependencies": [
@@ -468,7 +468,7 @@
     "generation": 4,
     "role": "data",
     "priority": 1,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/escape-development",
     "base_sha": "a26ab93f4d83b617ee49bf091506d0284f5a09db",
     "dependencies": [
@@ -498,5 +498,42 @@
       "tests/test_admin_diagnostics.py"
     ],
     "task": "Owner requests resource measurement now, #14/#273. Actual current admin_diagnostics returns unavailable external CPU/memory; already tracks queue, leases, API and DB/disk. Implement low-overhead periodic CPU/RAM sampling in existing singleton supervisor (not every request, not per user, no new daemon/dependency). Use actual monotonic elapsed process CPU deltas for owned worker/supervisor where verifiable, Linux proc/cgroup/account quota evidence if available; distinguish host-wide from ESCAPE-process/account utilization and effective CPU quota/cpuset; never label host capacity as account entitlement. Include CPU seconds/elapsed and cores or explicitly unavailable denominator, memory RSS and actual limit if verified, timestamps, bounded recent history (e.g. one sample/minute, 24h cap; reuse existing bounded mechanism or compact atomic file, no DB write per scan). Handle restart/PID reuse, counter reset, missing/denied /proc/cgroup, stale measurements, no process scan of other users, no raw paths/PIDs/secrets returned, admin-only existing /api/admin/diagnostics, no change to public/tenant routes. Expose compact resource snapshot and 5m/1h/24h aggregate or honest missing coverage, no request sleeps, no provider calls. Compare measured overhead in tests; synthetic tests for two samples, quota/host distinction, unavailable/reset/stale, bounded history and read-only API. Preserve existing diagnostics tests. Keep code lean and avoid creating a new monitoring platform. No live server change. Scope backend only; coordinator queues small UI integration after exact contract; coordinate shared hotwatch_service.py with next #268 scope before dispatch/rebase. Deliver actual code and tests."
+  },
+  {
+    "issue": 268,
+    "generation": 2,
+    "role": "motor",
+    "priority": 0,
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "f8bdc17bd0a05ccf0ecef910b0333ce750e90650",
+    "dependencies": [
+      "8:2"
+    ],
+    "paths": [
+      "intel_workflows.py",
+      "hotwatch_engine.py",
+      "tests/test_hotwatch_engine.py",
+      "tests/test_hotwatch_e2e_contract.py"
+    ],
+    "task": "Narrow next #268 candidate lifecycle slice, distinct from gen1 terminal local CalledProcessError. Preserve old local checkout and receipt; no attempt to erase/retry/import it, no network. On exact current integrated base f8bdc17b implement test-only/default-off retirement of automatic entry watches whose explicit assessment deadline is past; release intensive scanning slot while preserving journal, protect holdings/exits, pending orders, manual watches, active leases, tenant and test scope. Duplicate reports cannot refresh an expired explicit deadline; genuine fresh assessment can reactivate under existing contract. Reuse existing candidate_currentness/reconcile path; no new service/schema, no policy activation, no cap increase. Test exact overdue/duplicate/new assessment, protected cases, restart and capacity freed. If report-only TTL or rank needs owner approval, keep that distinct follow-up. Do not edit hotwatch_service.py (CPU patch #288). Actual small code + tests, no more design report. Future 100-user shared candidate pool, not per-user hard limit. No broker, production or network."
+  },
+  {
+    "issue": 273,
+    "generation": 8,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/trading-engine-v2-integration",
+    "base_sha": "72733de5f79b77f20d23dfd519d68a2b7a6f4c20",
+    "dependencies": [
+      "273:7"
+    ],
+    "paths": [
+      "trading_engine_v2.py",
+      "tests/test_trading_engine_v2.py",
+      "docs/TRADING_ENGINE_V2_INTERFACE.md"
+    ],
+    "task": "Next concrete #273 market-only reuse slice on accepted v2 72733de5: demonstrate that identical causal market evidence, instrument/provider/feed/timeframe and feature parameters/version/entitlement can feed many individual strategy/position evaluations without repeating feature computation. Reuse existing features() and existing Evidence/Scope/Decision, thin bounded in-memory per-batch reuse (no persistent cache service, no second strategy registry). Keep actual user/depot position/risk/context and decision origin outside shared market evidence. Never reuse across incompatible feature params, revision/time, entitlement, or test/live scope; no new universal data gate. Tests with actual existing feature inputs and 1/10/100 simulated subscribers, different holdings/risks/strategies, count actual features invocations, cache bounded to a batch, identical decisions with/without reuse, no provider or broker calls. Keep pure simulation; actual scheduler wiring separate. No production changes. Deliver small runnable implementation/tests, not speculative abstraction."
   }
 ]
