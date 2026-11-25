@@ -242,3 +242,13 @@ class LocalCoordinatorTests(unittest.TestCase):
         with patch.object(c,"verify_pr",return_value=(p,[],"open")),patch.object(c,"verified_ci",return_value=run),patch.object(c,"independent_review") as model,patch.object(c,"integrate",return_value="Accepted") as merge:
             self.assertTrue(c.run_once(self.root,self.root,[self.row],self.results,reserve_review=lambda:False))
             model.assert_not_called();merge.assert_called_once()
+
+    def test_preflight_failure_preserves_prior_review_findings(self):
+        row=dict(self.row,follow_base=True)
+        sha="d"*40
+        c.save(self.root/"coordinator-review.json",{"501":{"at":1,"state":"hold","sha":sha,"repair_reason":"Material regression"}})
+        with patch.object(c,"rebase_disjoint",side_effect=c.Hold("Temporary basis mismatch")),patch.object(c,"independent_review") as model:
+            self.assertFalse(c.run_once(self.root,self.root,[row],self.results))
+            model.assert_not_called()
+        entry=c.read(self.root/"coordinator-review.json",{})["501"]
+        self.assertEqual((entry["sha"],entry["repair_reason"],entry["state"]),(sha,"Material regression","hold"))

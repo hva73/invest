@@ -198,6 +198,7 @@ def main():
     p.add_argument("--execute", action="store_true")
     p.add_argument("--recover", action="store_true", help="Continue a verified interrupted checkout")
     p.add_argument("--verify-smoke", action="store_true")
+    p.add_argument("--require-ready", action="store_true", help="Exit unsuccessfully unless the bounded task explicitly reached tested draft readiness")
     p.add_argument("--max-tokens", type=int, default=60000)
     p.add_argument("--generation",type=int,default=1)
     p.add_argument("--progress-root",type=Path)
@@ -307,6 +308,9 @@ Approved paths: {json.dumps(paths)} (if supplied, modify only these paths).\nTas
         raise SystemExit(75)
     if result == "execution_failed":
         raise SystemExit(1)
+    if a.require_ready and result != "verified":
+        print("INCOMPLETE: preserved checkout; no publication",flush=True)
+        raise SystemExit(76)
 
 if __name__ == "__main__":
     main()
