@@ -15,6 +15,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65
+          path: frozen-reader
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
@@ -22,9 +27,11 @@ jobs:
       - name: Offline restore and cardinality
         env:
           PYTHONPATH: .:tests
+          ESCAPE_QA_FROZEN_READER: frozen-reader/strategy_lab.py
           EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$(git -C frozen-reader rev-parse HEAD)" = "3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65"
           python -m unittest -v tests.test_hotwatch_storage_rollback_qa.StorageRollbackQA
       - name: Regression
         env:
