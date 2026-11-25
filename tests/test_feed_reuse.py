@@ -198,7 +198,7 @@ class FeedReuse(unittest.TestCase):
   from test_eodhd_feeds import WS
   capacity_fixture.LiveCapacity.add(self,'OTHER.US',1,due=self.now.timestamp())
   at=int(self.now.timestamp()*1000)
-  first_ws=WS([{'s':'OTHER','t':at,'p':200} for _ in range(250)]+[{'s':'MERC','t':at,'p':100}])
+  first_ws=WS([{'s':'OTHER','t':at-i,'p':200} for i in range(250)]+[{'s':'MERC','t':at,'p':100}])
   second_ws=WS([{'s':'MERC','t':at,'p':101}]);streams=iter([first_ws,second_ws]);client=EODHDFeeds('SYNTHETIC',ws_factory=lambda *a,**kw:next(streams))
   with patch('hotwatch_engine.verified_automatic_feed',return_value=True):
    first=self.adapter.capture(client,'us_trades','MERC',self.job)
