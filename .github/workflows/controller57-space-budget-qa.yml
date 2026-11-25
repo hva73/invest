@@ -40,11 +40,11 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: 30f39fdb35262cdf20a9e9c41dc18e072b6b8863
+          ref: 2d555adae1d06594b049b9f53413de73216220b4
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
       - run: |
-          test "$(git rev-parse HEAD)" = "30f39fdb35262cdf20a9e9c41dc18e072b6b8863"
+          test "$(git rev-parse HEAD)" = "2d555adae1d06594b049b9f53413de73216220b4"
           python -B -m unittest discover -s tests -p test_nordicway_release_retention.py -v
