@@ -1,24 +1,9 @@
-name: Controller generations 5 and motor 1 independent QA (offline only)
+name: Controller motor and storage independent QA (offline only)
 on:
   pull_request:
 permissions:
   contents: read
 jobs:
-  exact-release:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          ref: b7613b207333b233101189afb83ebedf6aacb11d
-          persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
-        with:
-          python-version: '3.11'
-      - run: |
-          test "$(git rev-parse HEAD)" = "b7613b207333b233101189afb83ebedf6aacb11d"
-          python -B -m unittest -v tests.test_nordicway_release_retention tests.test_nordicway_uapi_quota
-          python -m py_compile tools/nordicway_release_retention.py
   exact-motor:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -33,4 +18,19 @@ jobs:
       - run: |
           test "$(git rev-parse HEAD)" = "3e469b3eca78af144da2b52701654e2885e85801"
           python -m pip install -r requirements.txt
-          python -B -m unittest -v tests.test_strategy_lab tests.test_strategy_handoff
+          python -B -m unittest discover -s tests -p test_strategy_lab.py -v
+          python -B -m unittest discover -s tests -p test_strategy_handoff.py -v
+  exact-storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 8015166c4d2e4f52e3f7502695f48913ee76d4fa
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: |
+          test "$(git rev-parse HEAD)" = "8015166c4d2e4f52e3f7502695f48913ee76d4fa"
+          python -B -m unittest discover -s tests -p test_storage_reclaim_proof.py -v
