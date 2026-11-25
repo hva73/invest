@@ -124,3 +124,28 @@ class LocalCoordinatorTests(unittest.TestCase):
         with patch.object(c,"verify_pr",side_effect=[OSError("temporary"),({"head":{"sha":"e"*40}},[],"open")]),patch.object(c,"verified_ci",return_value=8),patch.object(c,"independent_review",return_value={"verdict":"accept","reason":"Independent task passed"}),patch.object(c,"integrate",return_value="Accepted") as merge:
             self.assertTrue(c.run_once(self.root,self.root,[self.row,other],results))
             self.assertEqual(merge.call_args.args[0],other)
+
+    def test_explicit_scoped_repair_reenters_ci_without_merging(self):
+        row=dict(self.row,local_repair=True)
+        p={"head":{"sha":"d"*40}}
+        with patch.object(c,"verify_pr",return_value=(p,[],"open")),patch.object(c,"verified_ci",return_value=7),patch.object(c,"independent_review",return_value={"verdict":"hold","reason":"Actual defect"}),patch.object(c,"comment"),patch.object(c,"repair_review",return_value="Repaired; CI pending") as repair,patch.object(c,"integrate") as merge:
+            self.assertFalse(c.run_once(self.root,self.root,[row],self.results,repair_allowance=1234))
+            repair.assert_called_once_with(self.root,self.root,row,501,p,"Actual defect",1234)
+            merge.assert_not_called()
+        self.assertEqual(c.read(self.root/"coordinator-review.json",{})["501"]["state"],"waiting")
+
+    def test_hold_without_opt_in_or_budget_does_not_repair(self):
+        p={"head":{"sha":"d"*40}}
+        for row,budget in ((self.row,lambda:True),(dict(self.row,local_repair=True),iter([True,False]).__next__)):
+            with patch.object(c,"verify_pr",return_value=(p,[],"open")),patch.object(c,"verified_ci",return_value=7),patch.object(c,"independent_review",return_value={"verdict":"hold","reason":"Actual defect"}),patch.object(c,"comment"),patch.object(c,"repair_review") as repair,patch.object(c,"integrate") as merge:
+                (self.root/"coordinator-review.json").unlink(missing_ok=True)
+                self.assertFalse(c.run_once(self.root,self.root,[row],self.results,reserve_review=budget))
+                repair.assert_not_called()
+                merge.assert_not_called()
+
+    def test_repair_existing_reservation_does_not_repeat(self):
+        c.save(self.root/"coordinator-repair-501.json",{"state":"reserved"})
+        p={"head":{"sha":"d"*40,"ref":"controller/local-273-1234"}}
+        with patch.object(c.subprocess,"run") as run:
+            self.assertIn("ingen dublet",c.repair_review(self.root,self.root,self.row,501,p,"Defect",1234))
+            run.assert_not_called()
