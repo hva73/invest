@@ -5,8 +5,10 @@ historical backtest. It never changes sessions or communicates with brokers.
 """
 import copy,json
 from collections import Counter
+from datetime import timedelta
 from functools import lru_cache
-from hotwatch_contract import EngineError, RISK, checksum, require, stamp
+from types import MappingProxyType
+from hotwatch_contract import EngineError, GLOBAL_RISK, RISK, checksum, require, stamp
 import trading_engine_v2 as v2
 from hotwatch_features import features,verified_bar_samples
 from hotwatch_strategy import calculate,validate_strategy,early_watch
@@ -137,19 +139,22 @@ def _immutable_sample(row):
 
     received = stamp(row['received'])
     event_time = stamp(sample['event_time'])
+    complete_at = event_time
+    if sample.get('price_time_kind') == 'bar_open':
+        complete_at += timedelta(seconds=sample['interval_s'])
     market_times = [stamp(sample[key]) for key in ('bid_at', 'ask_at', 'status_at')
                     if sample.get(key)]
-    if (event_time.timestamp() != row['event_epoch'] or event_time > received
+    if (event_time.timestamp() != row['event_epoch'] or complete_at > received
             or any(value > received for value in market_times)):
         raise EngineError('SAMPLE_CHRONOLOGY_UNVERIFIED')
-    return sample, event_time, received
+    return sample, event_time, received, complete_at
 
 
 def _v2_snapshot(session, request, row, at, calc):
     """Build the common evidence from this journal pair."""
     from hotwatch_engine import sample_errors
 
-    sample, event_time, received = _immutable_sample(row)
+    sample, event_time, received, _ = _immutable_sample(row)
     if received > at:
         raise EngineError('SAMPLE_CHRONOLOGY_UNVERIFIED')
     input_ids = calc.get('input_sample_ids')
@@ -257,27 +262,32 @@ def _feature_history(row, calc, request, at, samples, verified):
         key = prior['sample_row_id']
         if key not in verified:
             try:
-                sample, event, received = _immutable_sample(prior)
+                sample, event, received, complete_at = _immutable_sample(prior)
                 sample_errors(sample, request, received)
-                if sample['verification'] != 'verified':
+                if (sample['verification'] != 'verified' or sample['error_code'] is not None
+                        or sample['price'] is None):
                     raise EngineError('SAMPLE_UNVERIFIED')
-                verified[key] = (sample, event, received)
+                market = MappingProxyType({name: sample[name] for name in v2._MARKET_FIELDS
+                                           if name in sample})
+                verified[key] = (market, event, received, complete_at)
             except (ValueError, TypeError, KeyError, ArithmeticError, AttributeError) as exc:
                 verified[key] = exc.code if isinstance(exc, EngineError) else 'FEATURE_HISTORY_UNVERIFIED'
         evidence = verified[key]
         if isinstance(evidence, str):
             raise EngineError(evidence)
-        sample, event, received = evidence
+        sample, event, received, complete_at = evidence
         if (received > at or key > row['sample_row_id']
                 or previous_event is not None and event <= previous_event):
             raise EngineError('FEATURE_HISTORY_CHRONOLOGY_UNVERIFIED')
         previous_event = event
         history.append(sample)
         refs.append(f'hw_samples:{key}')
-    return history, tuple(refs)
+    if (at - complete_at).total_seconds() > GLOBAL_RISK['max_quote_age_s']:
+        raise EngineError('FEATURE_HISTORY_STALE')
+    return tuple(history), tuple(refs)
 
 
-def _strategy_facts(spec, original, metrics, history, at, snapshot_id):
+def _strategy_facts(spec, original, metrics, compute, at, snapshot_id):
     if original is None:
         raise EngineError('ORIGINAL_STRATEGY_UNVERIFIED')
     parameters, recorded = spec['parameters'], original['parameters']
@@ -301,8 +311,8 @@ def _strategy_facts(spec, original, metrics, history, at, snapshot_id):
         return facts, None
 
     try:
-        samples, refs = history()
-        computed = features(samples, parameters)
+        key = tuple(int(parameters.get(name, 3)) for name in FEATURE_PARAMETERS)
+        computed, refs = compute(key)
         count = metrics.get('sample_count')
         if count is None or type(count.value) is not int or computed['sample_count'] != count.value:
             raise EngineError('FEATURE_HISTORY_UNVERIFIED')
@@ -310,11 +320,13 @@ def _strategy_facts(spec, original, metrics, history, at, snapshot_id):
         return facts, exc.code
     except (ValueError, ArithmeticError):
         return facts, 'FEATURE_HISTORY_UNVERIFIED'
-    computed['new_breakout'] = computed.get('breakout') if 'new_breakout' in metrics else None
     missing = False
     for name in changed:
-        if computed.get(name) is not None:
-            facts[name] = v2.Evidence(computed[name], at, at, (*refs, snapshot_id))
+        value = computed.get(name)
+        if name == 'new_breakout' and name in metrics:
+            value = computed.get('breakout')
+        if value is not None:
+            facts[name] = v2.Evidence(value, at, at, (*refs, snapshot_id))
         else:
             missing = True
     return facts, 'FEATURE_HISTORY_INSUFFICIENT' if missing else None
@@ -356,14 +368,25 @@ def compare_v2(connect, uid, data):
         recorded_counts[recorded['signal']] += 1
         original = _original_strategy(row, calc)
         simulated = []
-        # Share verified history across alternatives with different windows.
+        # The journal proves this watch's replay scope, not a provider grant.
+        # Keep the feature cache inside this calculation's causal cutoff.
         @lru_cache(maxsize=1)
         def history():
-            return _feature_history(row, calc, request, at, samples, verified)
+            try:
+                return _feature_history(row, calc, request, at, samples, verified)
+            except EngineError as exc:
+                return None, exc.code
+
+        @lru_cache(maxsize=len(versions))
+        def compute(key):
+            market, refs = history()
+            if market is None:
+                raise EngineError(refs)
+            return features(market, dict(zip(FEATURE_PARAMETERS, key))), refs
 
         for (spec, digest), summary in zip(versions, strategies):
             try:
-                facts, feature_error = _strategy_facts(spec, original, metrics, history, at, snapshot_id)
+                facts, feature_error = _strategy_facts(spec, original, metrics, compute, at, snapshot_id)
                 result = v2.evaluate(scope, snapshot_id, at, 'entry', spec, digest, sample, facts, risk)
                 # Preserve the causal diagnostic only when the existing
                 # evaluator actually blocks on unavailable inputs.

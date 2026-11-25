@@ -87,7 +87,7 @@ class V2Replay(unittest.TestCase):
   with patch('hotwatch_engine.features', return_value=metrics):
    engine.ingest(app.connect, 1, self.req['watch_id'], True, tick(at, index), at + timedelta(seconds=2))
 
- def capture_windows(self):
+ def capture_windows(self, count=12):
   for window in (1, 5):
    spec = copy.deepcopy(EARLY_CATALYST_V1)
    spec.update(strategy_id=f'window_{window}')
@@ -97,10 +97,13 @@ class V2Replay(unittest.TestCase):
    engine.upload_strategy(app.connect, 1, 'Fixture', spec)
    self.data['strategies'].append({'strategy_id': spec['strategy_id'], 'version': spec['version']})
   self.data['strategies'].pop(1)
-  for index in range(12):
-   at = self.at + timedelta(minutes=index)
-   engine.ingest(app.connect, 1, self.req['watch_id'], True,
-                 tick(at, index, price=f'{100 + index / 10:.1f}'), at + timedelta(seconds=2))
+  for index in range(count):
+   self.capture_window_tick(index)
+
+ def capture_window_tick(self, index):
+  at = self.at + timedelta(minutes=index)
+  engine.ingest(app.connect, 1, self.req['watch_id'], True,
+                tick(at, index, price=f'{100 + index / 10:.1f}'), at + timedelta(seconds=2))
 
  def edit_calculation(self, c, index, change):
   row = c.execute('SELECT id,payload FROM hw_calculations ORDER BY id LIMIT 1 OFFSET ?',
@@ -229,6 +232,72 @@ class V2Replay(unittest.TestCase):
   self.assertEqual(bounded['coverage']['considered'], 3)
   self.assertEqual([len(call.args[0]) for call in compute.call_args_list], [1, 1, 2, 2, 3, 3])
 
+ def test_local_replay_reuses_periods_and_keeps_same_time_captures_distinct(self):
+  self.capture_windows(count=11)
+  with self.read_only() as c:
+   spec = json.loads(c.execute("SELECT payload FROM hw_strategies WHERE strategy_id='window_5'").fetchone()[0])
+  spec['strategy_id'] = 'window_5_other_rule'
+  spec['entry_rules']['value'] = '99'
+  engine.upload_strategy(app.connect, 1, 'Fixture', spec)
+  choices = self.data['strategies'][1:] + [{'strategy_id': spec['strategy_id'], 'version': spec['version']}]
+  data = dict(self.data, strategies=choices)
+  # Give the older calculation the same cutoff that the next ingest will use.
+  cutoff = (self.at + timedelta(minutes=11, seconds=2)).isoformat()
+  with app.connect() as c:
+   self.edit_calculation(c, 10, lambda calc: calc.update(calculation_timestamp=cutoff))
+   c.execute('UPDATE hw_calculations SET calculated=? WHERE id=(SELECT max(id) FROM hw_calculations)',
+             (cutoff,))
+  older = strategy_lab.compare_v2(self.read_only, 1, data)['timeline'][-1]
+  self.capture_window_tick(11)
+
+  with patch('strategy_lab.features', wraps=strategy_lab.features) as compute:
+   separate = [strategy_lab.compare_v2(self.read_only, 1, dict(data, strategies=[choice]))
+               for choice in choices]
+  self.assertEqual(compute.call_count, 36)
+  with patch('strategy_lab.features', wraps=strategy_lab.features) as compute, \
+       patch('strategy_lab.v2.shared_market_features_batch') as shared:
+   together = strategy_lab.compare_v2(self.read_only, 1, data)
+  self.assertEqual(compute.call_count, 24)
+  shared.assert_not_called()
+  for index, point in enumerate(together['timeline']):
+   self.assertEqual(point['simulated'], [run['timeline'][index]['simulated'][0] for run in separate])
+  old, new = together['timeline'][-2:]
+  self.assertEqual(old, older)
+  self.assertEqual(old['at'], new['at'])
+  self.assertNotEqual(old['simulated'][1]['snapshot_checksum'], new['simulated'][1]['snapshot_checksum'])
+  self.assertEqual(new['simulated'][1]['snapshot_checksum'], new['simulated'][2]['snapshot_checksum'])
+  self.assertEqual([item['outcome'] for item in new['simulated']], ['observation', 'decision', 'observation'])
+
+ def test_stale_price_history_is_not_recomputed(self):
+  self.capture_windows()
+  cutoff = (self.at + timedelta(minutes=14)).isoformat()
+  with app.connect() as c:
+   self.edit_calculation(c, 11, lambda calc: calc.update(calculation_timestamp=cutoff))
+   c.execute('UPDATE hw_calculations SET calculated=? WHERE id=(SELECT max(id) FROM hw_calculations)',
+             (cutoff,))
+  with patch('strategy_lab.features', wraps=strategy_lab.features) as compute:
+   point = strategy_lab.compare_v2(self.read_only, 1, self.data)['timeline'][-1]
+  self.assertEqual(compute.call_count, 22)
+  self.assertEqual(point['simulated'][2]['reason_codes'], ['FEATURE_HISTORY_STALE'])
+
+ def test_history_rejects_marked_errors_and_unclosed_bars(self):
+  self.capture_windows()
+  with self.read_only() as c:
+   row = c.execute('SELECT id,payload FROM hw_samples ORDER BY id LIMIT 1').fetchone()
+  for change, reason in (
+   ({'error_code': 'missing_provider_confirmation'}, 'SAMPLE_UNVERIFIED'),
+   ({'price_time_kind': 'bar_open'}, 'SAMPLE_CHRONOLOGY_UNVERIFIED'),
+  ):
+   with self.subTest(change=change):
+    sample = json.loads(row['payload']) | change
+    with app.connect() as c:
+     c.execute('UPDATE hw_samples SET payload=?,digest=? WHERE id=?',
+               (json.dumps(sample), checksum(sample), row['id']))
+    result = strategy_lab.compare_v2(self.read_only, 1, self.data)
+    baseline, _, long = result['timeline'][-1]['simulated']
+    self.assertIsNotNone(baseline['snapshot_checksum'])
+    self.assertEqual(long['reason_codes'], [reason])
+
  def test_optional_and_unused_changed_feature_do_not_block_valid_alternative(self):
   self.capture(0)
   price = {'metric': 'price', 'operator': '>', 'value': '0'}
@@ -244,10 +313,12 @@ class V2Replay(unittest.TestCase):
    engine.upload_strategy(app.connect, 1, 'Fixture', spec)
    choices.append({'strategy_id': spec['strategy_id'], 'version': spec['version']})
   data = dict(self.data, strategies=choices)
-  with patch('strategy_lab._feature_history', side_effect=strategy_lab.EngineError('FEATURE_HISTORY_MISSING')) as history:
+  with app.connect() as c:
+   self.edit_calculation(c, 0, lambda calc: calc['input_sample_ids'].insert(0, 'missing'))
+  with patch('strategy_lab._feature_history', wraps=strategy_lab._feature_history) as history:
    result = strategy_lab.compare_v2(self.read_only, 1, data)
   alternative, unused, required = result['timeline'][0]['simulated']
-  self.assertEqual(history.call_count, 2)  # failures are not cached
+  self.assertEqual(history.call_count, 1)
   self.assertEqual(alternative['action'], 'BUY')
   self.assertEqual(unused['action'], 'BUY')
   self.assertEqual(required['reason_codes'], ['FEATURE_HISTORY_MISSING'])
