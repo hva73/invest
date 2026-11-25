@@ -813,16 +813,15 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
     control=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
     if control and control['killed']:break
     sessions={};attempts={}
-    _,first_pid,first_holding=user_choices[0]
-    first_key=(first_pid,first_holding['asset_id'])
+    probed_keys=set();probed_assets=set()
     for index,(_,pid,holding) in enumerate(user_choices):
-     # Probe the first holding before loading the rest of this tenant's history.
-     # If the scan continues, batch the remaining keys and reuse the first lookup.
-     if index<2:
-      keys={first_key} if index==0 else {(p,h['asset_id']) for _,p,h in user_choices[1:]}
-      if index==1:keys.discard(first_key)
-      assets={aid for _,aid in keys}
-      if index==1:assets.discard(first_key[1])
+     # Probe the first two holdings separately. The first may link an
+     # existing watch and take the writer lock before the second activates.
+     if index<=2:
+      pending=user_choices[index:] if index==2 else [(uid,pid,holding)]
+      keys={(p,h['asset_id']) for _,p,h in pending}-probed_keys
+      assets={aid for _,aid in keys}-probed_assets
+      probed_keys.update(keys);probed_assets.update(assets)
       if assets:
        for row in c.execute("""SELECT watch_id,status,request,json_extract(request,'$.asset_id') AS asset_id
                                FROM hw_sessions WHERE user_id=? AND is_test=0

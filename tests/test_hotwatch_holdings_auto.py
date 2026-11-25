@@ -131,27 +131,29 @@ class HoldingAutowatch(unittest.TestCase):
   self.verify=lambda *_:self.instrument
   self.lookup=lambda *_:{'choices':[{'symbol':'TEST.US','currency':'USD','isin':'US1234567890'}]}
  def tearDown(self):self.fixture.tearDown()
- def test_first_holding_activation_does_not_load_later_history(self):
+ def _check_early_activation_history(self,link_first):
   at=self.now.isoformat();aid=self.holding['asset_id']
   closed_at=(self.now-timedelta(hours=1)).isoformat()
   later=[dict(self.holding,asset_id=f'later-{index}') for index in range(24)]
+  target=later[0] if link_first else self.holding
+  if link_first:self.verify=lambda _,uid,holding:dict(self.instrument,asset_id=holding['asset_id'])
   with app.connect() as c:
    payload=json.dumps({'positions_complete':True,'observed':at,'positions':[self.holding]+later})
    c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(payload,self.pid))
    for holding in [self.holding]+later:
     asset=holding['asset_id']
-    c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',
+    if not (link_first and asset==aid):c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',
               (1,self.pid,asset,'POSITION_CLOSED',asset,0,closed_at))
     request=json.dumps({'asset_id':asset,'portfolio_ids':[self.pid],'watch_mode':'exit'})
     c.execute("""INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due)
-                 VALUES(1,?,0,?,'manual holding','COMPLETED',?,'synthetic','{}','{}',?,?,0)""",
-              (asset,asset,request,at,at))
+                 VALUES(1,?,0,?,'manual holding',?,?,'synthetic','{}','{}',?,?,0)""",
+              (asset,asset,'PAUSED' if link_first and asset==aid else 'COMPLETED',request,at,at))
 
   read_assets={'sessions':[],'attempts':[]};connections=[];scan_sql=[]
   def count_rows(cursor,values):
    row=sqlite3.Row(cursor,values)
-   if 'request' in row.keys():read_assets['sessions'].append(row['asset_id'])
-   if 'next_attempt' in row.keys():read_assets['attempts'].append(row['asset_id'])
+   if 'request' in row.keys():read_assets['sessions'].append((row['asset_id'],cursor.connection.in_transaction))
+   if 'next_attempt' in row.keys():read_assets['attempts'].append((row['asset_id'],cursor.connection.in_transaction))
    return row
   def traced_connect():
    connection=app.connect()
@@ -163,13 +165,24 @@ class HoldingAutowatch(unittest.TestCase):
 
   with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_CAPACITY':'40','ESCAPE_HW_EODHD_REST_ENABLED':'0'}):
    self.assertEqual(service.auto_holdings_tick(traced_connect,verify=self.verify,now=self.now),'LINKED')
-  self.assertEqual(read_assets,{'sessions':[aid],'attempts':[aid]})
-  self.assertEqual(sum(sql.lstrip().upper().startswith('SELECT') for sql in scan_sql),5)
-  identity=f'1|{self.pid}|{aid}|{closed_at}'
+  target_aid=target['asset_id']
+  expected_sessions=[(aid,False)]
+  if link_first:expected_sessions.append((target_aid,True))
+  self.assertEqual(read_assets,{'sessions':expected_sessions,'attempts':[(target_aid,link_first)]})
+  self.assertEqual(sum(sql.lstrip().upper().startswith('SELECT') for sql in scan_sql),7 if link_first else 5)
+  identity=f'1|{self.pid}|{target_aid}|{closed_at}'
   watch='hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
   with app.connect() as c:
-   self.assertEqual([tuple(row) for row in c.execute("SELECT asset_id,watch_id FROM hw_holding_autowatch WHERE status='LINKED'")],[(aid,watch)])
-   self.assertEqual(c.execute("SELECT count(*) FROM hw_holding_autowatch WHERE status='POSITION_CLOSED'").fetchone()[0],len(later))
+   expected={target_aid:watch}
+   if link_first:expected[aid]=aid
+   self.assertEqual(dict(c.execute("SELECT asset_id,watch_id FROM hw_holding_autowatch WHERE status='LINKED'").fetchall()),expected)
+   self.assertEqual(c.execute("SELECT count(*) FROM hw_holding_autowatch WHERE status='POSITION_CLOSED'").fetchone()[0],len(later)-int(link_first))
+
+ def test_first_holding_activation_does_not_load_later_history(self):
+  self._check_early_activation_history(link_first=False)
+
+ def test_second_holding_activation_after_link_does_not_load_later_history(self):
+  self._check_early_activation_history(link_first=True)
 
  def test_closure_before_first_scan_write_uses_new_holding_generation(self):
   self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
