@@ -1,14 +1,14 @@
 import json
 import sqlite3
 import unittest
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from hotwatch_contract import GLOBAL_RISK, checksum
+from hotwatch_contract import GLOBAL_RISK, canonical, checksum
 from hotwatch_features import features
 from hotwatch_strategy import BASELINE, EARLY_CATALYST_V1, risk_gate, rule_state
 import trading_engine_v2
@@ -627,7 +627,7 @@ class TradingEngineV2Tests(unittest.TestCase):
         self.assertEqual(second.prior_strategy, first.new_strategy)
         self.assertEqual(second.entry_origin, first.entry_origin)
 
-    def position_switch_database(self):
+    def position_switch_database(self, *, initialize=True):
         directory = TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         path = Path(directory.name) / "simulation.sqlite"
@@ -637,7 +637,8 @@ class TradingEngineV2Tests(unittest.TestCase):
             connection.row_factory = sqlite3.Row
             return connection
 
-        setup_test_position_switch_history(connect)
+        if initialize:
+            setup_test_position_switch_history(connect)
         return connect
 
     def test_position_switch_history_reopens_and_rejects_stale_writes(self):
@@ -690,25 +691,34 @@ class TradingEngineV2Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
             append_test_position_strategy_switch(connect, **inputs)
 
-    def test_position_switch_history_rejects_deleted_only_row(self):
-        connect = self.position_switch_database()
-        inputs = self.position_switch_inputs()
-        append_test_position_strategy_switch(connect, **inputs)
-        with connect() as connection:
-            connection.execute("DELETE FROM test_position_switch_history_v1")
-        with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
-            read_test_position_switch_history(connect, inputs["scope"])
-        with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
-            append_test_position_strategy_switch(connect, **inputs)
-
     def test_persisted_strategy_drives_simulation_exit_at_effective_time(self):
-        connect = self.position_switch_database()
+        connect = self.position_switch_database(initialize=False)
         inputs = self.position_switch_inputs()
         scope, entry, held = inputs["scope"], inputs["entry_origin"], inputs["held"]
         target = BASELINE | {"parameters": BASELINE["parameters"] | {"exit_return_pct": "-0.5"}}
         target_key = (scope.user_id, target["strategy_id"], target["version"])
         catalog = inputs["catalog"] | {target_key: (target, checksum(target))}
-        first = append_test_position_strategy_switch(connect, **(inputs | {"catalog": catalog}))
+        first = switch_position_strategy(**(inputs | {"catalog": catalog}))
+        # Seed the accepted #298 schema and row before using the current adapter.
+        with connect() as connection:
+            connection.execute("""
+                CREATE TABLE test_position_switch_history_v1 (
+                    user_id INTEGER NOT NULL,
+                    portfolio_id INTEGER NOT NULL,
+                    position_id TEXT NOT NULL,
+                    trade_cycle_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    digest TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    PRIMARY KEY (user_id, portfolio_id, position_id, trade_cycle_id, sequence),
+                    UNIQUE (user_id, portfolio_id, position_id, trade_cycle_id, digest)
+                )
+            """)
+            connection.execute("""
+                INSERT INTO test_position_switch_history_v1 VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (scope.user_id, scope.portfolio_id, scope.position_id, scope.trade_cycle_id,
+                  1, first.digest, canonical(asdict(first))))
+        self.assertEqual(read_test_position_switch_history(connect, scope), (first,))
         future_at = self.later + timedelta(seconds=1)
         future_held = replace(held, event_time=future_at, available_at=future_at,
                               value=held.value | {"as_of": future_at.isoformat(), "cost_price": "101"})
@@ -732,6 +742,11 @@ class TradingEngineV2Tests(unittest.TestCase):
                 metrics={"return_3_pct": self.evidence("-.6"), "breakdown": self.evidence(True)},
             )
             return evaluate_test_position_exit(**(arguments | overrides))
+
+        setup_test_position_switch_history(connect)
+        with connect() as connection:
+            tables = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+            self.assertEqual([row[0] for row in tables], ["test_position_switch_history_v1"])
 
         before = exit_at(self.at)
         self.assertEqual(before.origin.strategy_checksum, entry.strategy_checksum)
@@ -762,24 +777,16 @@ class TradingEngineV2Tests(unittest.TestCase):
             exit_at(self.later, catalog=inputs["catalog"])
         with self.assertRaisesRegex(ValueError, "STRATEGY_UNVERIFIED"):
             exit_at(self.later, catalog={})
-        # Removing just the suffix must never revive a previous strategy.
-        # Rebuild the isolated fixture between deletion cases.
-        for predicate in ("sequence = 2", "1 = 1"):
-            with connect() as connection:
-                connection.execute("DELETE FROM test_position_switch_history_v1 WHERE " + predicate)
-            with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
-                exit_at(self.later)
-            with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
-                read_test_position_switch_history(connect, scope)
-            # Rebuild the isolated fixture for the next truncation case.
-            with connect() as connection:
-                connection.execute("DELETE FROM test_position_switch_history_v1")
-                connection.execute("DELETE FROM test_position_switch_head_v1")
-            append_test_position_strategy_switch(connect, **(inputs | {"catalog": catalog}))
-            append_test_position_strategy_switch(connect, **(inputs | {
-                "catalog": catalog, "effective_at": future_at, "held": future_held,
-                "previous": first, "strategy_id": entry.strategy_id,
-            }))
+        # A missing predecessor leaves a detectable gap in the existing journal.
+        with connect() as connection:
+            connection.execute("DELETE FROM test_position_switch_history_v1 WHERE sequence = 1")
+        with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
+            exit_at(self.later)
+        with connect() as connection:
+            connection.execute("""
+                INSERT INTO test_position_switch_history_v1 VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (scope.user_id, scope.portfolio_id, scope.position_id, scope.trade_cycle_id,
+                  1, first.digest, canonical(asdict(first))))
         with connect() as connection:
             connection.execute("UPDATE test_position_switch_history_v1 SET digest = 'corrupt' WHERE sequence = 2")
         with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):

@@ -436,17 +436,6 @@ def setup_test_position_switch_history(connect):
                 UNIQUE (user_id, portfolio_id, position_id, trade_cycle_id, digest)
             )
         """)
-        connection.execute("""
-            CREATE TABLE IF NOT EXISTS test_position_switch_head_v1 (
-                user_id INTEGER NOT NULL,
-                portfolio_id INTEGER NOT NULL,
-                position_id TEXT NOT NULL,
-                trade_cycle_id TEXT NOT NULL,
-                sequence INTEGER NOT NULL CHECK(sequence > 0),
-                digest TEXT NOT NULL,
-                PRIMARY KEY (user_id, portfolio_id, position_id, trade_cycle_id)
-            )
-        """)
 
 
 def _position_switch_chain_key(scope):
@@ -503,13 +492,6 @@ def _read_position_switch_chain(connection, scope, key):
         if transition.scope_digest != scope_digest:
             raise ValueError("POSITION_SCOPE_MISMATCH")
         history.append(transition)
-    anchor = connection.execute("""
-        SELECT sequence, digest FROM test_position_switch_head_v1
-        WHERE user_id = ? AND portfolio_id = ? AND position_id = ? AND trade_cycle_id = ?
-    """, key).fetchone()
-    expected = (len(history), history[-1].digest) if history else None
-    if (tuple(anchor) if anchor is not None else None) != expected:
-        raise ValueError("POSITION_SWITCH_HISTORY_INVALID")
     return tuple(history)
 
 
@@ -517,7 +499,6 @@ def read_test_position_switch_history(connect, scope: Scope) -> tuple[PositionSt
     """Read the verified chain for a caller-authorized simulation scope."""
     key = _position_switch_chain_key(scope)
     with connect() as connection:
-        connection.execute("BEGIN")
         return _read_position_switch_chain(connection, scope, key)
 
 
@@ -551,13 +532,6 @@ def append_test_position_strategy_switch(
                 (user_id, portfolio_id, position_id, trade_cycle_id, sequence, digest, payload)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (*key, len(history) + 1, digest, canonical(asdict(transition))))
-        connection.execute("""
-            INSERT INTO test_position_switch_head_v1
-                (user_id, portfolio_id, position_id, trade_cycle_id, sequence, digest)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(user_id, portfolio_id, position_id, trade_cycle_id)
-            DO UPDATE SET sequence = excluded.sequence, digest = excluded.digest
-        """, (*key, len(history) + 1, digest))
     return transition
 
 
