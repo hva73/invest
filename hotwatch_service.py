@@ -789,8 +789,12 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
  now=now or engine.utc();epoch=now.timestamp();at=now.isoformat()
  if os.environ.get('ESCAPE_HW_HOLDINGS_AUTOWATCH','1')=='0':return None
  with connect() as c:
-  if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
-  snapshots=c.execute("SELECT p.user_id,p.id,s.payload FROM portfolios p JOIN users u ON u.id=p.user_id JOIN portfolio_snapshots s ON s.portfolio_id=p.id AND s.user_id=p.user_id WHERE p.active=1 AND p.source='pluto' AND u.active=1 AND s.last_error IS NULL ORDER BY p.user_id,p.id").fetchall()
+  snapshots=c.execute("""SELECT p.user_id,p.id,s.payload
+                         FROM hw_system_control gate CROSS JOIN portfolios p
+                         JOIN users u ON u.id=p.user_id
+                         JOIN portfolio_snapshots s ON s.portfolio_id=p.id AND s.user_id=p.user_id
+                         WHERE gate.id=1 AND gate.killed=0 AND p.active=1 AND p.source='pluto'
+                         AND u.active=1 AND s.last_error IS NULL ORDER BY p.user_id,p.id""").fetchall()
   choices=[]
   for snap in snapshots:
    try:payload=json.loads(snap['payload'])
@@ -813,8 +817,16 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
    # if commits keep invalidating the batch. Idle scans stay read-only.
    refreshed=False;read_individually=False
    while not selected:
-    control=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
-    if control and control['killed']:break
+    # Keep the tenant gate fresh on each retry, including under the writer lock.
+    # The anchor returns the gate even when there is no matching watch.
+    first_sessions=c.execute("""SELECT k.killed,s.watch_id,s.status,s.request,
+                                       json_extract(s.request,'$.asset_id') AS asset_id
+                                FROM (SELECT ? AS user_id) tenant
+                                LEFT JOIN hw_control k ON k.user_id=tenant.user_id
+                                LEFT JOIN hw_sessions s ON s.user_id=tenant.user_id AND s.is_test=0
+                                  AND COALESCE(k.killed,0)=0 AND json_extract(s.request,'$.asset_id')=?""",
+                             (uid,user_choices[0][2]['asset_id'])).fetchall()
+    if first_sessions[0]['killed']:break
     sessions={};attempts={}
     probed_keys=set();probed_assets=set();batch_end=0
     for index,(_,pid,holding) in enumerate(user_choices):
@@ -828,11 +840,15 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
       keys={(p,h['asset_id']) for _,p,h in pending}-probed_keys
       assets={aid for _,aid in keys}-probed_assets
       probed_keys.update(keys);probed_assets.update(assets)
-      if assets:
-       for row in c.execute("""SELECT watch_id,status,request,json_extract(request,'$.asset_id') AS asset_id
+      if index==0:rows=first_sessions
+      elif assets:
+       rows=c.execute("""SELECT watch_id,status,request,json_extract(request,'$.asset_id') AS asset_id
                                FROM hw_sessions WHERE user_id=? AND is_test=0
                                AND json_extract(request,'$.asset_id') IN (SELECT value FROM json_each(?))""",
-                            (uid,json.dumps(list(assets)))):
+                      (uid,json.dumps(list(assets))))
+      else:rows=()
+      for row in rows:
+       if row['watch_id'] is not None:
         request=json.loads(row['request'])
         if request.get('watch_mode','both')!='entry':
          sessions.setdefault(row['asset_id'],[]).append((row,request.get('portfolio_ids')))

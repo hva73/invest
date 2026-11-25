@@ -53,6 +53,42 @@ class DiscoveryAttemptPerformance(unittest.TestCase):
      self.assertEqual([tuple(row) for row in actual],[(uid,cid,now.timestamp()+300) for uid,cid in expected])
 
 class HoldingAutowatchPerformance(unittest.TestCase):
+ def test_idle_linked_scan_statement_budget(self):
+  now=datetime(2026,11,25,12,tzinfo=timezone.utc)
+  at=now.isoformat()
+  aid='shared-idle'
+  payload=json.dumps({'positions_complete':True,'observed':at,'positions':[
+   {'kind':'holding','asset_id':aid,'quantity':'1'}]})
+  for count in (1,10,100):
+   with self.subTest(users=count),tempfile.TemporaryDirectory() as temp,patch.object(app,'DB',temp+'/db'):
+    app.init()
+    expected=[]
+    with app.connect() as c:
+     for uid in range(1,count+1):
+      pid=2*uid
+      watch=f'paused-{uid}'
+      c.execute('INSERT INTO users(id,username,active) VALUES(?,?,1)',(uid,f'user-{uid}'))
+      c.execute("INSERT INTO portfolios(id,user_id,name,source,updated) VALUES(?,?,'Test','pluto',?)",(pid,uid,now.timestamp()))
+      c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?)',(pid,uid,at,payload,at))
+      request=json.dumps({'asset_id':aid,'portfolio_ids':[pid],'watch_mode':'exit'})
+      c.execute("""INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due)
+                   VALUES(?,?,0,?,'test holding','PAUSED',?,'synthetic','{}','{}',?,?,0)""",(uid,watch,aid,request,at,at))
+      attempt=(uid,pid,aid,'LINKED',watch,0,at)
+      c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',attempt)
+      expected.append(attempt)
+    statements=[]
+    def traced_connect():
+     connection=app.connect()
+     connection.set_trace_callback(statements.append)
+     return connection
+    with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1'}):
+     self.assertIsNone(service.auto_holdings_tick(traced_connect,verify=lambda *_:self.fail('Unexpected activation'),now=now))
+    self.assertEqual(len(statements),2+3*count)
+    self.assertTrue(all(sql.lstrip().upper().startswith(('SELECT','PRAGMA DATA_VERSION')) for sql in statements))
+    with app.connect() as c:
+     self.assertEqual([tuple(row) for row in c.execute('SELECT * FROM hw_holding_autowatch ORDER BY user_id')],expected)
+     self.assertEqual(c.execute("SELECT count(*) FROM hw_sessions WHERE status='PAUSED'").fetchone()[0],count)
+
  def test_scoped_reads_and_decisions_for_1_10_and_100_users(self):
   now=datetime(2026,11,25,12,tzinfo=timezone.utc)
   at=now.isoformat()
@@ -104,11 +140,13 @@ class HoldingAutowatchPerformance(unittest.TestCase):
     reads=[sql for sql in scan_sql if sql.lstrip().upper().startswith('SELECT')]
     # The last user activates within the first multi-position batch.
     # Other enabled users also scan the remaining assets and second portfolio.
-    history_batches=4*(count-len(killed)-1)+3
+    enabled=count-len(killed)
+    history_batches=4*(enabled-1)+3
     # The second portfolio reuses the already loaded session history.
-    self.assertEqual(len(reads),2+count+2*history_batches-(count-len(killed)-1))
+    session_reads=history_batches-(enabled-1)
+    self.assertEqual(len(reads),1+len(killed)+session_reads+history_batches)
     self.assertEqual(scan_sql.count('PRAGMA data_version'),2)
-    self.assertEqual(sum('FROM hw_control' in sql for sql in reads),count)
+    self.assertEqual(sum('JOIN hw_control' in sql for sql in reads),count)
     self.assertEqual(sum('hw_holding_autowatch' in sql for sql in reads),history_batches)
     self.assertEqual(sum('INSERT INTO hw_holding_autowatch' in sql and "'LINKED'" in sql for sql in scan_sql),count-len(killed))
     identity=f'{count}|{count*2}|{assets[22]}|{closed_at}'
@@ -160,7 +198,7 @@ class HoldingAutowatch(unittest.TestCase):
   read_assets={'sessions':[],'attempts':[]};connections=[];scan_sql=[]
   def count_rows(cursor,values):
    row=sqlite3.Row(cursor,values)
-   if 'request' in row.keys():read_assets['sessions'].append((row['asset_id'],cursor.connection.in_transaction))
+   if 'request' in row.keys() and row['watch_id'] is not None:read_assets['sessions'].append((row['asset_id'],cursor.connection.in_transaction))
    if 'next_attempt' in row.keys():read_assets['attempts'].append((row['asset_id'],cursor.connection.in_transaction))
    return row
   def traced_connect():
@@ -182,7 +220,7 @@ class HoldingAutowatch(unittest.TestCase):
   if link_first:expected_sessions.append((target_aid,True))
   expected_attempts.append((target_aid,link_first))
   self.assertEqual(read_assets,{'sessions':expected_sessions,'attempts':expected_attempts})
-  self.assertEqual(sum(sql.lstrip().upper().startswith('SELECT') for sql in scan_sql),5+2*(int(link_first)+int(already_linked)))
+  self.assertEqual(sum(sql.lstrip().upper().startswith('SELECT') for sql in scan_sql),3+2*(int(link_first)+int(already_linked)))
   identity=f'1|{self.pid}|{target_aid}|{closed_at}'
   watch='hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
   with app.connect() as c:
@@ -369,7 +407,7 @@ class HoldingAutowatch(unittest.TestCase):
     raced=True
     with app.connect() as other:
      other.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(1,self.pid,aid,'LINKED','first-watch',self.now.timestamp()+300,at))
-   if sql=='SELECT killed FROM hw_control WHERE user_id=?' and args==((2,),):
+   if 'LEFT JOIN hw_control' in sql and args==((2,aid),):
     checked=True
     self.assertFalse(connection.in_transaction)
     other=app.connect()
