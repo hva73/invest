@@ -132,3 +132,8 @@ finally:
     server.server_close()
     case.tearDown()
 
+
+# QA-only wrapper: execute the exact admin diagnostics Node test from the reviewed product tree.
+import subprocess
+subprocess.run(['node','tests/test_admin_diagnostics_ui.cjs'],check=True)
+print('PASS: focused administrator CPU/RAM diagnostics regression')
