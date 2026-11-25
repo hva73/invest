@@ -1,4 +1,4 @@
-import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -60,6 +60,33 @@ class RestartRecoveryTests(unittest.TestCase):
             self.assertEqual(results["273:5"],"draft_pr")
             self.assertEqual(d.load(d.task_record(root,task),{})["boot"],"new")
             self.assertFalse(d.can_recover(root,task,"another"))
+
+    def test_resume_preserves_checkout_and_passes_recovery_flag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            task=row()
+            folder=root/"issue-273-5"
+            folder.mkdir()
+            (root/"task-273-5.txt").write_text(task["task"])
+            (folder/"trading_engine_v2.py").write_text("preserved change")
+            d.save(d.task_record(root,task),dict(row=task,boot="new",recovered=True))
+            outputs=[b"a"*40+b"\n",b" M trading_engine_v2.py\n",b"recovered diff"]
+            with patch.object(d.subprocess,"run",side_effect=lambda args,**kw: subprocess.CompletedProcess(args,0)) as runner,patch.object(d.subprocess,"check_output",side_effect=outputs),patch.object(d.controller_publish,"git",side_effect=[b"a"*40+b"\n",str(folder).encode(),b"controller/local-273-123\n"]):
+                self.assertEqual(d.run_task(root,root/"pilot.py",task,60000),"review_required")
+                self.assertIn("--recover",runner.call_args_list[-2].args[0])
+                self.assertFalse(any("worktree" in call.args[0] for call in runner.call_args_list))
+            self.assertEqual((folder/"trading_engine_v2.py").read_text(),"preserved change")
+
+    def test_committed_checkout_is_not_rerun(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            task=row()
+            (root/"issue-273-5").mkdir()
+            (root/"task-273-5.txt").write_text(task["task"])
+            d.save(d.task_record(root,task),dict(row=task,boot="new",recovered=True))
+            with patch.object(d.subprocess,"run") as runner,patch.object(d.subprocess,"check_output",return_value=b"a"*40+b"\n"),patch.object(d.controller_publish,"git",return_value=b"b"*40+b"\n"):
+                self.assertEqual(d.run_task(root,root/"pilot.py",task,60000),"blocked:interrupted")
+                self.assertEqual(runner.call_count,1)
 
     def test_same_boot_keeps_interrupted_generation_blocked(self):
         with tempfile.TemporaryDirectory() as tmp:
