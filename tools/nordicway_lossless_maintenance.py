@@ -341,11 +341,19 @@ def main():
                             no_sidecars(source)
                             if identity(source)!=before:
                                 raise ValueError("source_changed")
-                            os.replace(candidate,source)
-                            swapped=True
-                            sync_dir(source.parent)
                         finally:
                             locked.rollback()
+                    # Never rename an SQLite database while our own
+                    # connection is open. Existing deployment lock and
+                    # quiescence context remain held across replacement.
+                    if bridge.nordicway_writer_check.wait_for_quiescence(source) is not None:
+                        raise ValueError("writer_detected")
+                    no_sidecars(source)
+                    if identity(source)!=before:
+                        raise ValueError("source_changed")
+                    os.replace(candidate,source)
+                    swapped=True
+                    sync_dir(source.parent)
                     emit(status="compacted", old_bytes=old_size, compact_bytes=new_size,
                          recovery_archive=dest.name)
             adapter.start_service()
@@ -367,6 +375,80 @@ def main():
                 os.replace(held,gate);sync_dir(BRIDGE)
             else:
                 emit(status="manual_recovery_required", gate="held", database_replaced=swapped)
+
+def exercise_maintenance_flow(insufficient=False, health_failure=False):
+    """Exercise the exact main() path with real SQLite and a synthetic bridge."""
+    import types
+    from contextlib import contextmanager
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as td:
+        root=pathlib.Path(td); app=root/"app"; var=app/"var"; var.mkdir(parents=True)
+        private=root/"bridge"; private.mkdir(mode=0o700)
+        backups=root/".escape_backups"; backups.mkdir(mode=0o700)
+        repo=root/"checkout"; repo.mkdir()
+        source=var/"escape.db"
+        with closing(sqlite3.connect(source)) as c:
+            c.execute("create table evidence(id integer primary key,payload blob)")
+            c.executemany("insert into evidence values(?,?)",((i,b"x"*8192) for i in range(1,301)))
+            c.execute("delete from evidence where id between 21 and 280");c.commit()
+        original=source.read_bytes(); logical=logical_digest(source)
+        (app/"BUILD_COMMIT").write_text(INSTALLED)
+        (private/"approved-sha").write_text(RELEASE)
+        (private/"deploy-enabled").write_bytes(b"1\n")
+        module=private/"nordicway_deploy_adapter.py"; module.write_text("# fixture")
+        retained=backups/"retained-existing.tar.gz"; retained.write_bytes(b"existing")
+        state={"running":True,"locked":False,"drained":False,"starts":0}
+        class Adapter:
+            def __init__(self,*args): pass
+            @contextmanager
+            def lock(self):
+                state["locked"]=True
+                try: yield
+                finally: state["locked"]=False
+            def service_status(self):
+                assert state["locked"]
+                return "started"
+            def stop_service(self):
+                assert state["locked"] and not (private/"deploy-enabled").exists()
+                state["running"]=False
+            @contextmanager
+            def quiescence(self):
+                assert not state["running"]
+                state["drained"]=True
+                try: yield
+                finally: state["drained"]=False
+            def start_service(self):
+                assert not state["drained"] and state["locked"]
+                state["running"]=True; state["starts"]+=1
+            def verify_health(self,sha):
+                assert sha==INSTALLED and state["running"]
+                if health_failure: raise ValueError("fixture_health_failed")
+        def writer_check(path):
+            assert path==source and state["drained"] and not state["running"]
+            return None
+        mod=types.SimpleNamespace(Adapter=Adapter,nordicway_writer_check=types.SimpleNamespace(wait_for_quiescence=writer_check))
+        with patch.dict(sys.modules,{"nordicway_deploy_adapter":mod}), \
+             patch.multiple(sys.modules[__name__],HOME=root,APP=app,BRIDGE=private,REPO=repo,
+                ADAPTER_HASH=hashlib.sha256(module.read_bytes()).hexdigest(),MARGIN=1024,
+                quota=lambda: 100_000_000,release_required=lambda size: 200_000_000 if insufficient else 2*size+2048):
+            try:
+                main()
+            except ValueError as exc:
+                assert (insufficient and str(exc)=="compaction_insufficient_for_release") or (health_failure and str(exc)=="fixture_health_failed"),str(exc)
+            else:
+                assert not insufficient and not health_failure
+        assert state["running"] and not state["drained"] and state["starts"]==1
+        assert retained.read_bytes()==b"existing"
+        assert logical_digest(source)==logical
+        if insufficient:
+            assert source.read_bytes()==original
+            assert list(backups.iterdir())==[retained]
+        else:
+            archives=list(backups.glob("maintenance-*.sqlite.gz"))
+            assert len(archives)==1 and gzip.decompress(archives[0].read_bytes())==original
+            assert source.stat().st_size<len(original)
+        assert (private/"deploy-enabled").exists() != health_failure
+        assert (private/"deploy-enabled.maintenance-held").exists() == health_failure
 
 def self_test():
     with tempfile.TemporaryDirectory() as td:
@@ -399,7 +481,10 @@ def self_test():
         else:
             raise AssertionError("content difference not detected")
         assert identity(original)==before
-        emit(status="self_test_pass", checks=4)
+    exercise_maintenance_flow()
+    exercise_maintenance_flow(insufficient=True)
+    exercise_maintenance_flow(health_failure=True)
+    emit(status="self_test_pass", checks=7)
 
 if __name__=="__main__":
     p=argparse.ArgumentParser()
