@@ -4,6 +4,7 @@ import concurrent.futures
 import fcntl
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -50,16 +51,43 @@ def progress(root, row, phase, publish):
         except (OSError,ValueError):
             print("PROGRESS_PENDING:",task_key(row),phase,flush=True)
 
+def boot_id():
+    """A changed OS boot proves that old local workers cannot still be alive."""
+    try:
+        if sys.platform == "darwin":
+            value=subprocess.check_output(["sysctl","-n","kern.bootsessionuuid"],text=True,timeout=5).strip()
+        else:
+            value=Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        return value if re.fullmatch(r"[0-9a-fA-F-]{36}",value) else None
+    except (OSError,subprocess.SubprocessError):
+        return None
+
+def task_record(root,row):
+    return root/("reservation-"+task_key(row).replace(":","-")+".json")
+
+def can_recover(root,row,boot):
+    try:
+        record=load(task_record(root,row),{})
+        key=task_key(row).replace(":","-")
+        return bool(boot and record.get("boot") and boot!=record["boot"]
+                    and record.get("row")==row and not record.get("recovered")
+                    and row["status"]=="ready"
+                    and not (root/f"issue-{key}.pr").exists()
+                    and not (root/f"receipts/{key}.json").exists()
+                    and not load(root/f"checkpoint-{key}.json",{}).get("provider_limit"))
+    except (OSError,ValueError,TypeError,AttributeError):
+        return False
+
 def run_task(root, script, row, allowance, publish=False):
     issue = row["issue"]
     generation = row.get("generation", 1)
     folder = root / ("issue-" + str(issue) + "-" + str(generation))
-    # Never overwrite an existing checkout or retry an unchanged task blindly.
-    if folder.exists():
+    record=load(task_record(root,row),{})
+    recover=bool(record.get("recovered") and record.get("row")==row)
+    if folder.exists() and not recover:
         return "existing_checkout"
     branch = "controller/local-" + str(issue) + "-" + str(time.time_ns())
     base = row["base_sha"]
-    import re
     if not re.fullmatch(r"[0-9a-f]{40}", base):
         return "invalid_base"
     if row.get("base_branch"):
@@ -71,10 +99,22 @@ def run_task(root, script, row, allowance, publish=False):
             actual = subprocess.check_output(["git", "rev-parse", "FETCH_HEAD"], cwd=script.parent.parent).decode().strip()
         if actual != base:
             return "stale_base"
-    subprocess.run(["git", "worktree", "add", "-b", branch, str(folder), base],
-                   cwd=script.parent.parent, check=True)
     taskfile = root / ("task-" + str(issue) + "-" + str(generation) + ".txt")
-    taskfile.write_text(row["task"])
+    resume=folder.exists()
+    if resume:
+        # Never rerun after a publication commit or against another checkout.
+        if (folder.is_symlink() or not taskfile.is_file() or taskfile.read_text()!=row["task"]
+            or controller_publish.git(folder,"rev-parse","HEAD").decode().strip()!=base
+            or Path(controller_publish.git(folder,"rev-parse","--show-toplevel").decode().strip()).resolve()!=folder.resolve()):
+            return "blocked:interrupted"
+        branch=controller_publish.git(folder,"branch","--show-current").decode().strip()
+        if not re.fullmatch(r"controller/local-"+str(issue)+r"-[0-9]+",branch):
+            return "blocked:interrupted"
+        progress(root,row,"HANDOVER",publish)
+    else:
+        subprocess.run(["git", "worktree", "add", "-b", branch, str(folder), base],
+                       cwd=script.parent.parent, check=True)
+        taskfile.write_text(row["task"])
     log = root / ("issue-" + str(issue) + "-" + str(generation) + ".log")
     progress(root,row,"STARTED",publish)
     finished=threading.Event()
@@ -89,7 +129,8 @@ def run_task(root, script, row, allowance, publish=False):
             rc = subprocess.run([sys.executable, str(script), "--role", row["role"],
             "--issue", str(issue), "--task-file", str(taskfile), "--max-tokens",
             str(allowance), "--rounds", "3", "--minutes", "20", "--generation", str(generation),
-            "--allowed-paths-json", json.dumps(row["paths"]), "--progress-root", str(root), "--checkpoint", str(root / ("checkpoint-"+str(issue)+"-"+str(generation)+".json")), "--execute"],
+            "--allowed-paths-json", json.dumps(row["paths"]), "--progress-root", str(root), "--checkpoint", str(root / ("checkpoint-"+str(issue)+"-"+str(generation)+".json")), "--execute"]
+            + (["--recover"] if resume else []),
             cwd=folder, stdout=out, stderr=subprocess.STDOUT).returncode
     finally:
         finished.set()
@@ -181,13 +222,10 @@ def write_status(root, reason, active, waiting=(), review=()):
         print("STATUS_UNAVAILABLE:",type(exc).__name__,flush=True)
 
 def run_queue(a,root,script,statefile,donefile,state,results):
-    # A process restart cannot assume a previously reserved generation is idle.
-    # Preserve its checkout and explicitly expose the interrupted state.
+    boot=boot_id()
+    # A reservation remains durable until it is either recovered or reported.
+    # An in-session process crash cannot prove the old child has exited.
     interrupted={key for key,status in results.items() if status=="reserved"}
-    for key in interrupted:
-        results[key]="blocked:interrupted"
-    if interrupted:
-        save(donefile,results)
     with concurrent.futures.ThreadPoolExecutor(max_workers=a.parallel) as pool:
         active={}
         while active or not (root/"STOP").exists():
@@ -221,13 +259,19 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 if a.remote:
                     controller_remote.refresh(root,a.queue)
                 rows=load(a.queue,[])
+                recoverable=set()
                 for row in rows:
                     key=task_key(row)
                     if key in interrupted:
-                        notify_result(root,row,"blocked:interrupted",a.publish)
-                        interrupted.remove(key)
+                        if can_recover(root,row,boot):
+                            recoverable.add(key)
+                        else:
+                            results[key]="blocked:interrupted"
+                            save(donefile,results)
+                            notify_result(root,row,"blocked:interrupted",a.publish)
+                            interrupted.remove(key)
                 review=[task_key(row) for row in rows if row["status"]=="ready" and results.get(task_key(row)) in ("draft_pr","review_required","no_changes")]
-                rows=effective_rows(rows,results,active.values())
+                rows=effective_rows(rows,{k:v for k,v in results.items() if k not in recoverable},active.values())
                 waiting=[task_key(row) for row in rows if row["status"]=="ready"]
                 paused=provider_pause_active(root)
                 selected=[] if paused else plan(rows,max_parallel=a.parallel)
@@ -241,6 +285,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 print("QUEUE_UNAVAILABLE:",type(exc).__name__,flush=True)
                 selected=[]
                 rows=[]
+                recoverable=set()
                 reason="queue_unavailable"
             day=datetime.now(timezone.utc).date().isoformat()
             for task in selected:
@@ -251,8 +296,12 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                     reason="budget_limit"
                     break
                 save(statefile,state)
-                results[task_key(row)]="reserved"
+                key=task_key(row)
+                recovering=key in recoverable
+                save(task_record(root,row),{"row":row,"boot":boot,"recovered":recovering})
+                results[key]="reserved"
                 save(donefile,results)
+                interrupted.discard(key)
                 active[pool.submit(run_task,root,script,row,a.per_task,a.publish)]=row
             active_keys={task_key(row) for row in active.values()}
             if active and reason in ("idle","waiting_for_dependency_or_worker"):
