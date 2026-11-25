@@ -44,6 +44,10 @@ class LiveControllerTests(unittest.TestCase):
         self.assertFalse(publish.allowed(p,[p],"mobile"))
         self.assertFalse(publish.allowed(".github/workflows/escape-deploy-ping.yml",[".github/"],"release"))
         self.assertFalse(publish.allowed("tools/nordicway_deploy_guard.py",["tools/nordicway_deploy_guard.py"],"release"))
+    def test_v2_integration_is_explicitly_allowed_not_arbitrary_branch(self):
+        self.assertIn("codex/trading-engine-v2-integration", publish.BASES)
+        self.assertNotIn("codex/arbitrary-integration", publish.BASES)
+        self.assertNotIn("main", publish.BASES)
     def test_active_scope_survives_remote_queue_replacement(self):
         one=row(57,"release",1,"a.py")
         two=row(57,"release",2,"b.py")
