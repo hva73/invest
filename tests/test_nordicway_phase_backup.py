@@ -40,12 +40,34 @@ class PhaseTests(unittest.TestCase):
             with self.assertRaises((gzip.BadGzipFile,ValueError)):
                 phase.gzip_digest(gz,len(original))
 
+    def test_owner_installer_preserves_approval_and_originals(self):
+        history=ROOT/"bridge-history/tools"
+        old={n:((ROOT/n) if n=="apply_update.py" else (history/n)).read_bytes() for n in installer.HASHES}
+        helper=(ROOT/"tools"/installer.HELPER).read_bytes()
+        with tempfile.TemporaryDirectory() as td:
+            root=pathlib.Path(td); b=root/"bridge"; b.mkdir(mode=0o700)
+            app=root/"app"; (app/"var").mkdir(parents=True)
+            for n,data in old.items():installer.write(b/n,data)
+            installer.write(b/"deploy-enabled",b"1\n")
+            installer.write(b/"approved-sha",installer.RELEASE.encode()+b"\n")
+            installer.write(app/"BUILD_COMMIT",installer.INSTALLED.encode()+b"\n")
+            self.assertEqual(installer.install(b,app,helper,False)["status"],"preflight_pass")
+            self.assertFalse((b/installer.HELPER).exists())
+            report=installer.install(b,app,helper,True)
+            self.assertEqual(report["status"],"phase_bridge_installed")
+            self.assertEqual((b/"deploy-enabled").read_bytes(),b"1\n")
+            self.assertEqual((b/"approved-sha").read_text().strip(),installer.RELEASE)
+            self.assertEqual((app/"BUILD_COMMIT").read_text().strip(),installer.INSTALLED)
+            for n in report["modules"]:
+                if n in old:self.assertEqual((b/"bridge-backups"/report["backup"]/n).read_bytes(),old[n])
+            self.assertFalse((b/"deploy-enabled.phase-held").exists())
     def test_real_bridge_patch_and_apply(self):
         history=ROOT/"bridge-history/tools"
         if not history.exists(): self.fail("historical bridge checkout missing")
         old={name:(history/name).read_bytes() for name in installer.HASHES if name!="apply_update.py"}
         old["apply_update.py"]=(ROOT/"apply_update.py").read_bytes()
         for name,content in old.items():
+            self.assertEqual(hashlib.sha256(content).hexdigest(),installer.HASHES[name],name)
             print("Fixture",name,hashlib.sha256(content).hexdigest(),flush=True)
         result=installer.patch(old,(ROOT/"tools"/installer.HELPER).read_bytes())
         with tempfile.TemporaryDirectory() as d:
