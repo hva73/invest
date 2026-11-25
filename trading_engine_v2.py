@@ -561,15 +561,16 @@ def evaluate_test_position_exit(
             or entry_origin.scope_digest not in (scope.digest, replace(scope, position_id=None).digest)
             or (history and history[0].entry_origin != entry_origin)):
         raise ValueError("POSITION_SCOPE_MISMATCH")
-    actual_head = history[-1].digest if history else None
-    if expected_head_digest != actual_head:
-        raise ValueError("POSITION_SWITCH_HISTORY_INVALID")
     context = sample.value.get("context") if isinstance(sample.value, dict) else None
     if (not isinstance(context, dict) or context.get("scope_digest") != scope.digest
             or context.get("entry_digest") != entry_origin.digest):
         raise ValueError("POSITION_SCOPE_MISMATCH")
     if not stamp(entry_origin.as_of) <= stamp(context.get("as_of")) <= as_of:
         raise ValueError("POSITION_EVIDENCE_UNVERIFIED")
+
+    actual_head = history[-1].digest if history else None
+    if expected_head_digest != actual_head:
+        raise ValueError("POSITION_SWITCH_HISTORY_INVALID")
 
     transition = next((item for item in reversed(history) if stamp(item.effective_at) <= as_of), None)
     strategy_id, version, digest = transition.new_strategy if transition else (
