@@ -210,6 +210,14 @@ class LocalCoordinatorTests(unittest.TestCase):
         c.save(record,dict(held,state="reserved"))
         self.assertIsNone(c.repair_attempt(self.root,303,head))
 
+    def test_preflight_hold_without_code_rejection_can_proceed(self):
+        sha="d"*40
+        c.save(self.root/"coordinator-review.json",{"501":{"state":"hold","sha":sha,"detail":"Specialized CI","at":0}})
+        p={"head":{"sha":sha}}
+        with patch.object(c,"verify_pr",return_value=(p,[],"open")),patch.object(c,"verified_ci",return_value=7),patch.object(c,"independent_review",return_value={"verdict":"accept","reason":"Tested component"}) as review,patch.object(c,"integrate",return_value="Integrated"):
+            self.assertTrue(c.run_once(self.root,self.root,[self.row],self.results))
+            review.assert_called_once()
+
     def test_local_activation_holds_or_integrates_not_duplicate(self):
         p={"head":{"sha":"d"*40}}
         with patch.object(c,"verify_pr",return_value=(p,[],"open")),patch.object(c,"verified_ci",return_value=7),patch.object(c,"independent_review",return_value={"verdict":"accept","reason":"Scoped test-only component"}),patch.object(c,"integrate",return_value="Accepteret; næste opgave frigivet") as merge:
