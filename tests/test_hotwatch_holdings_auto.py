@@ -1,10 +1,56 @@
 """Automatic holding watches use synthetic owned snapshots and no provider calls."""
-import json,os,unittest
+import json,os,tempfile,unittest
 from datetime import datetime,timezone,timedelta
 from unittest.mock import patch
 import app,hotwatch_engine as engine,hotwatch_service as service
 from hotwatch_adapters import reserve,DataUnavailable
 import test_trade_service as fixtures
+
+class DiscoveryAttemptPerformance(unittest.TestCase):
+ def test_user_scoped_attempt_join_preserves_selection_and_bounds_sql(self):
+  now=datetime(2026,11,25,12,tzinfo=timezone.utc)
+  candidate_ids=[f'shared-{i:02}' for i in range(24)]
+  payload=json.dumps({'report_id':'current','candidates':[{'candidate_id':cid} for cid in candidate_ids]})
+  for count in (1,10,100):
+   with self.subTest(users=count),tempfile.TemporaryDirectory() as temp,patch.object(app,'DB',temp+'/db'):
+    app.init()
+    with app.connect() as c:
+     for uid in range(1,count+1):
+      c.execute('INSERT INTO users(id,username,active) VALUES(?,?,1)',(uid,f'user-{uid}'))
+      row_id=c.execute('INSERT INTO ingested_reports(user_id,report_id,received,payload,digest,is_test,generated_epoch,report_type) VALUES(?,?,?,?,?,0,?,?)',
+                       (uid,'current',now.isoformat(),payload,'synthetic',now.timestamp(),'hourly')).lastrowid
+      c.executemany('INSERT INTO report_candidate_links VALUES(?,0,?,?,?)',[(uid,cid,row_id,now.timestamp()) for cid in candidate_ids])
+    expected=[];expected_cursor=23
+    with app.connect() as c:
+     for uid in range(1,count+1):
+      eligible_index={1:22,2:0}.get(uid%3)
+      for index,cid in enumerate(candidate_ids):
+       if index==eligible_index and uid%3==1:continue
+       report_id='previous' if index==eligible_index and uid%2==0 else 'current'
+       retry=now.timestamp() if index==eligible_index and uid%2 else now.timestamp()+600
+       c.execute('INSERT INTO hw_discovery_attempts VALUES(?,?,?,?,?,?,?,NULL)',(uid,0,cid,report_id,'NOT_NEW',now.isoformat(),retry))
+      if eligible_index is not None:
+       cid=candidate_ids[eligible_index]
+       c.execute('INSERT INTO hw_discovery_attempts VALUES(?,1,?,?,?,?,?,NULL)',(uid,cid,'current','NOT_NEW',now.isoformat(),now.timestamp()+600))
+       expected.append((uid,cid))
+       expected_cursor+=(eligible_index-expected_cursor)%len(candidate_ids)
+    statements=[]
+    def traced_connect():
+     connection=app.connect()
+     connection.set_trace_callback(statements.append)
+     return connection
+    with patch.dict(os.environ,{'ESCAPE_HW_AUTOSTART_ENABLED':'1','ESCAPE_HW_AUTOSTART_AFTER':''}), \
+         patch.object(engine,'utc',return_value=now), \
+         patch.object(service,'auto_activate_candidate',return_value={'status':'NOT_NEW'}) as activate:
+     cursor=service.auto_discover(traced_connect,23)
+    self.assertEqual([(call.args[1],call.args[4]['candidate_id']) for call in activate.call_args_list],expected)
+    self.assertEqual(cursor,expected_cursor+1)
+    reads=[sql for sql in statements if sql.lstrip().upper().startswith(('SELECT','WITH'))]
+    self.assertEqual(len(reads),1+4*count)
+    self.assertEqual(sum('hw_discovery_attempts' in sql for sql in reads),count)
+    with app.connect() as c:
+     actual=c.execute('SELECT user_id,candidate_id,next_attempt FROM hw_discovery_attempts WHERE is_test=0 AND next_attempt=? ORDER BY user_id',(now.timestamp()+300,)).fetchall()
+     self.assertEqual([tuple(row) for row in actual],[(uid,cid,now.timestamp()+300) for uid,cid in expected])
 
 class HoldingAutowatch(unittest.TestCase):
  def setUp(self):

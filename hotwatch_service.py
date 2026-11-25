@@ -3,7 +3,7 @@ from eodhd_capacity import Capacity
 import json,signal,threading,logging,hashlib,time,os,re,secrets,sqlite3,sys,math
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor,wait,FIRST_COMPLETED
-from contextlib import contextmanager
+from contextlib import contextmanager,nullcontext
 import app,hotwatch_engine as engine
 from hotwatch_adapters import PlutoAdapter,EODHDAdapter,InboxAdapter,DataUnavailable,local_budget_error
 from hotwatch_contract import EngineError,stamp
@@ -322,15 +322,19 @@ def auto_activate_candidate(connect,uid,mode,report,candidate,verify=None,lookup
 # Select the latest eligible link once per distinct candidate. The former
 # anti-join repeated the history search for every historical link, holding a
 # read scope for seconds as report history grew.
-DISCOVERY_CANDIDATES_SQL = """WITH candidate_ids AS (SELECT DISTINCT candidate_id FROM report_candidate_links WHERE user_id=? AND is_test=0)
-SELECT l.candidate_id,l.generated,r.id,r.received,r.payload
+_DISCOVERY_CANDIDATES_SQL = """WITH candidate_ids AS (SELECT DISTINCT candidate_id FROM report_candidate_links WHERE user_id=? AND is_test=0)
+SELECT l.candidate_id,l.generated,r.id,r.received,r.payload{attempt_columns}
 FROM candidate_ids ids
 JOIN report_candidate_links l ON l.rowid=(
  SELECT newer.rowid FROM report_candidate_links newer JOIN ingested_reports nr ON nr.id=newer.report_row_id
  WHERE newer.user_id=? AND newer.is_test=0 AND newer.candidate_id=ids.candidate_id AND nr.report_type!='deep_analysis' AND newer.generated<=?
  ORDER BY newer.generated DESC,newer.report_row_id DESC LIMIT 1)
-JOIN ingested_reports r ON r.id=l.report_row_id
+JOIN ingested_reports r ON r.id=l.report_row_id{attempt_join}
 ORDER BY l.generated DESC,r.id DESC"""
+DISCOVERY_CANDIDATES_SQL = _DISCOVERY_CANDIDATES_SQL.format(attempt_columns='',attempt_join='')
+DISCOVERY_CANDIDATES_WITH_ATTEMPTS_SQL = _DISCOVERY_CANDIDATES_SQL.format(
+ attempt_columns=',a.report_id AS attempt_report_id,a.next_attempt',
+ attempt_join='\nLEFT JOIN hw_discovery_attempts a ON a.user_id=l.user_id AND a.is_test=l.is_test AND a.candidate_id=l.candidate_id')
 
 def discovery_candidate_order(rows, report_cache=None):
  """Sort candidates within each report after releasing the database read scope."""
@@ -367,11 +371,11 @@ def auto_discover(connect,cursor=0,identity_cache=None):
    latest_report=c.execute("SELECT id FROM ingested_reports WHERE user_id=? AND is_test=0 AND report_type!='deep_analysis' ORDER BY generated_epoch DESC,id DESC LIMIT 1",(uid,)).fetchone()
    radar_reset=c.execute('SELECT report_cutoff,reset_at FROM radar_resets WHERE user_id=?',(uid,)).fetchone()
    cleared={r[0] for r in c.execute('SELECT DISTINCT candidate_id FROM report_candidate_links WHERE user_id=? AND is_test=0 AND report_row_id<=?',(uid,radar_reset['report_cutoff']))} if radar_reset else set()
-   rows=c.execute(DISCOVERY_CANDIDATES_SQL,(uid,uid,now.timestamp())).fetchall()
+   rows=c.execute(DISCOVERY_CANDIDATES_WITH_ATTEMPTS_SQL,(uid,uid,now.timestamp())).fetchall()
   if rows:
    report_cache={};rows=discovery_candidate_order(rows,report_cache)
    candidate=None;report=None
-   with connect() as c:
+   with (connect() if cleared else nullcontext()) as c:
     for offset in range(len(rows)):
      row=rows[(cursor+offset)%len(rows)]
      if after and stamp(row['received'])<=after:continue
@@ -381,9 +385,9 @@ def auto_discover(connect,cursor=0,identity_cache=None):
       if not radar_reassessed_after_reset(c,uid,cid,radar_reset):continue
      item=next((v for v in current.get('candidates',[]) if v.get('candidate_id')==cid),None)
      if not item:continue
-     old=c.execute('SELECT report_id,next_attempt FROM hw_discovery_attempts WHERE user_id=? AND is_test=0 AND candidate_id=?',(uid,cid)).fetchone()
-     if not after and started and stamp(row['received'])<stamp(started['started_at']) and (not latest_report or row['id']!=latest_report['id']) and not old:continue
-     if not old or old['report_id']!=current['report_id'] or old['next_attempt']<=now.timestamp():candidate=item;report=current;cursor+=offset;break
+     attempt_report_id=row['attempt_report_id']
+     if not after and started and stamp(row['received'])<stamp(started['started_at']) and (not latest_report or row['id']!=latest_report['id']) and attempt_report_id is None:continue
+     if attempt_report_id is None or attempt_report_id!=current['report_id'] or row['next_attempt']<=now.timestamp():candidate=item;report=current;cursor+=offset;break
    if candidate is None:continue
    if identity_cache is None:result=auto_activate_candidate(connect,uid,False,report,candidate)
    else:
