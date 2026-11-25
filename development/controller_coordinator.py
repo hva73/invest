@@ -256,7 +256,14 @@ def repair_attempt(root,number,sha,limit=20):
         value=read(path,{})
         head=value.get("head")
         new_head=value.get("new_head")
-        if not HEX.fullmatch(str(head)) or head==sha:
+        if not HEX.fullmatch(str(head)):
+            return None
+        if head==sha:
+            # An explicit drained-service recovery can reuse the final held
+            # workspace once. Never skip a live or ambiguous reservation.
+            next_path=root/("coordinator-repair-"+str(number)+"-"+str(i+1)+".json")
+            if value.get("state")=="held" and value.get("resume_authorized") is True and not next_path.exists():
+                return i
             return None
         if value.get("state")=="held":
             # A later, independently verified remote head supersedes this failed
@@ -396,6 +403,34 @@ def adaptive_repair_task(root,row,number,sha,reason,attempt):
             +"\nPrior findings from this exact task:\n"+history
             +"\nOriginal approved task:\n"+row["task"])
 
+def resume_repair_workspace(root,row,number,attempt,sha,folder,record):
+    """Reuse an explicitly recovered isolated checkout without losing local code."""
+    previous=read(record,{})
+    if previous.get("state")!="held" or previous.get("resume_authorized") is not True or previous.get("key")!=key(row) or previous.get("head")!=sha:
+        raise Hold("Ingen verificeret genoptagelse")
+    if folder.is_symlink() or not folder.is_dir():
+        raise Hold("Reparationsmappe mangler eller er ikke sikker")
+    git=controller_publish.git
+    if Path(git(folder,"rev-parse","--show-toplevel").decode().strip()).resolve()!=folder.resolve():
+        raise Hold("Reparationsmappe matcher ikke checkout")
+    branch=git(folder,"branch","--show-current").decode().strip()
+    if not re.fullmatch("controller/local-"+str(row["issue"])+r"-[0-9]+",branch):
+        raise Hold("Reparationsgren matcher ikke opgaven")
+    head=git(folder,"rev-parse","HEAD").decode().strip()
+    if head!=sha:
+        # A stop after the local commit but before publication is recoverable.
+        # Keep a durable backup ref and leave the index/worktree intact.
+        parents=git(folder,"rev-list","--parents","-n","1",head).decode().split()
+        if parents!=[head,sha]:
+            raise Hold("Lokal reparationshistorik kræver afstemning")
+        paths=git(folder,"diff","--name-only","-z",sha,head).split(b"\0")
+        if not paths or not all(controller_publish.allowed(os.fsdecode(p),row["paths"],row["role"]) for p in paths if p):
+            raise Hold("Lokal commit uden for godkendt scope")
+        backup="refs/heads/controller/recovery-backup-"+str(number)+"-"+head
+        git(folder,"update-ref",backup,head)
+        git(folder,"reset","--soft",sha)
+    return branch
+
 def repair_review(root, repo_dir, row, number, p, reason, allowance):
     """A bounded repair of a newly reviewed SHA; never merge or force-push."""
     sha=p["head"]["sha"]
@@ -408,9 +443,18 @@ def repair_review(root, repo_dir, row, number, p, reason, allowance):
     suffix="" if attempt==1 else "-"+str(attempt)
     record=root/("coordinator-repair-"+str(number)+suffix+".json")
     folder=root/("review-repair-"+key(row).replace(":","-")+"-"+str(number)+suffix)
-    if folder.exists():
+    previous=read(record,{})
+    resume=previous.get("state")=="held" and previous.get("resume_authorized") is True
+    if folder.exists() and not resume:
         raise Hold("Bevaret reparationsmappe kræver afstemning")
-    local_branch="controller/local-"+str(row["issue"])+"-"+str(time.time_ns())
+    local_branch=(resume_repair_workspace(root,row,number,attempt,sha,folder,record)
+                  if resume else "controller/local-"+str(row["issue"])+"-"+str(time.time_ns()))
+    if resume:
+        # Keep the original held journal, including its original evidence.
+        archive=record.with_suffix(".resume-history.json")
+        if archive.exists():
+            raise Hold("Genoptagelse allerede anvendt")
+        save(archive,previous)
     # Reserve before starting; a crash cannot silently repeat model execution.
     save(record,{"key":key(row),"head":sha,"state":"reserved","reason":reason[:800],"at":now()})
     try:
@@ -418,12 +462,13 @@ def repair_review(root, repo_dir, row, number, p, reason, allowance):
             subprocess.run(["git","-c","core.hooksPath=/dev/null","-c","credential.helper=","-c","credential.helper=!gh auth git-credential","fetch","--no-tags","https://github.com/"+REPO+".git","refs/pull/"+str(number)+"/head"],cwd=repo_dir,check=True,timeout=60)
             if controller_publish.git(repo_dir,"rev-parse","FETCH_HEAD").decode().strip()!=sha:
                 raise Hold("PR ændret før reparation")
-        subprocess.run(["git","-c","core.hooksPath=/dev/null","worktree","add","-b",local_branch,str(folder),sha],cwd=repo_dir,check=True,timeout=60)
+        if not resume:
+            subprocess.run(["git","-c","core.hooksPath=/dev/null","worktree","add","-b",local_branch,str(folder),sha],cwd=repo_dir,check=True,timeout=60)
         taskfile=root/("review-repair-"+str(number)+suffix+".txt")
         taskfile.write_text(adaptive_repair_task(root,row,number,sha,reason,attempt))
         checkpoint=root/("review-repair-checkpoint-"+str(number)+suffix+".json")
         import sys
-        result=subprocess.run([sys.executable,str(Path(__file__).with_name("controller_pilot.py")),"--role",row["role"],"--issue",str(row["issue"]),"--generation",str(row.get("generation",1)),"--task-file",str(taskfile),"--allowed-paths-json",json.dumps(row["paths"]),"--rounds","3","--minutes","20","--max-tokens",str(allowance),"--checkpoint",str(checkpoint),"--require-ready","--execute"],cwd=folder,timeout=1260)
+        result=subprocess.run([sys.executable,str(Path(__file__).with_name("controller_pilot.py")),"--role",row["role"],"--issue",str(row["issue"]),"--generation",str(row.get("generation",1)),"--task-file",str(taskfile),"--allowed-paths-json",json.dumps(row["paths"]),"--rounds","3","--minutes","20","--max-tokens",str(allowance),"--checkpoint",str(checkpoint),"--require-ready","--execute"]+(["--recover"] if resume else []),cwd=folder,timeout=1260)
         if result.returncode==75:
             value=read(checkpoint,{})
             if value.get("provider_limit") is True:
