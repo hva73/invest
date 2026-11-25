@@ -15,10 +15,10 @@ FETCH_LOCK = threading.Lock()
 from datetime import datetime, timezone
 try:
     from .controller_queue import plan
-    from . import controller_remote, controller_publish, controller_receipts, controller_progress
+    from . import controller_remote, controller_publish, controller_receipts, controller_progress, controller_coordinator
 except ImportError:
     from controller_queue import plan
-    import controller_remote, controller_publish, controller_receipts, controller_progress
+    import controller_remote, controller_publish, controller_receipts, controller_progress, controller_coordinator
 
 def save(path, value):
     temp = path.with_suffix(".tmp")
@@ -208,7 +208,7 @@ def record_provider_pause(root,row,now=None):
     save(path,{"task":task_key(row),"observed_at":now,"reset_at":stamp})
     print("PROVIDER_PAUSE:", "until reported reset" if stamp is not None else "awaiting confirmed reset",flush=True)
 
-def write_status(root, reason, active, waiting=(), review=()):
+def write_status(root, reason, active, waiting=(), review=(), coordinator_capable=False, coordinator_running=False):
     """One local heartbeat; contains only task IDs and scheduler state."""
     try:
         save(root/"status.json", {
@@ -217,9 +217,24 @@ def write_status(root, reason, active, waiting=(), review=()):
             "active": sorted(task_key(row) for row in active),
             "waiting": sorted(waiting),
             "awaiting_review": sorted(review),
+            "coordinator_protocol": 1 if coordinator_capable else 0,
+            "coordinator_running": bool(coordinator_running),
         })
     except OSError as exc:
         print("STATUS_UNAVAILABLE:",type(exc).__name__,flush=True)
+
+def coordinate(root, repo_dir, rows, results, waiting, review):
+    stopped=threading.Event()
+    def heartbeat():
+        while not stopped.is_set():
+            write_status(root,"coordinating",[],waiting,review,True,True)
+            stopped.wait(10)
+    reporter=threading.Thread(target=heartbeat,daemon=True)
+    reporter.start()
+    try:
+        return controller_coordinator.run_once(root,repo_dir,rows,results)
+    finally:
+        stopped.set(); reporter.join()
 
 def run_queue(a,root,script,statefile,donefile,state,results):
     boot=boot_id()
@@ -253,6 +268,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                     concurrent.futures.wait(active,timeout=15,return_when=concurrent.futures.FIRST_COMPLETED)
                 continue
             reason="idle"
+            capable=bool(a.remote and a.publish)
             waiting=[]
             review=[]
             try:
@@ -271,9 +287,14 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                             notify_result(root,row,"blocked:interrupted",a.publish)
                             interrupted.remove(key)
                 review=[task_key(row) for row in rows if row["status"]=="ready" and results.get(task_key(row)) in ("draft_pr","review_required","no_changes")]
+                rows_before_effective=rows
                 rows=effective_rows(rows,{k:v for k,v in results.items() if k not in recoverable},active.values())
                 waiting=[task_key(row) for row in rows if row["status"]=="ready"]
                 paused=provider_pause_active(root)
+                if capable and not active and not paused and controller_coordinator.due(root,rows_before_effective,results):
+                    if coordinate(root,script.parent.parent,rows_before_effective,results,waiting,review):
+                        continue
+                    paused=provider_pause_active(root)
                 selected=[] if paused else plan(rows,max_parallel=a.parallel)
                 if paused:
                     reason="provider_pause"
@@ -306,11 +327,14 @@ def run_queue(a,root,script,statefile,donefile,state,results):
             active_keys={task_key(row) for row in active.values()}
             if active and reason in ("idle","waiting_for_dependency_or_worker"):
                 reason="working"
-            write_status(root,reason,active.values(),[key for key in waiting if key not in active_keys],review)
+            write_status(root,reason,active.values(),[key for key in waiting if key not in active_keys],review,capable)
             if active:
                 concurrent.futures.wait(active,timeout=15,return_when=concurrent.futures.FIRST_COMPLETED)
             elif not (root/"STOP").exists():
-                time.sleep(120)
+                for _ in range(24):
+                    if (root/"STOP").exists() or (capable and not provider_pause_active(root) and controller_coordinator.trigger(root)):
+                        break
+                    time.sleep(5)
 
 def main():
     p = argparse.ArgumentParser()
