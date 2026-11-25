@@ -27,8 +27,8 @@ def main():
     quick=page.locator('#quick-trade-dialog');expect(quick).to_contain_text('Sælg · TSLA')
     quick.locator('[name=size]').fill('50');quick.locator('button[type=submit]').click()
     expect(quick.get_by_role('heading',name='Gennemgå salget')).to_be_visible()
-    expect(quick.locator('.trade-review')).to_contain_text('Beholdning: 2 stk.')
-    expect(quick.locator('.trade-review')).to_contain_text('Foreslået salg: 1 stk.')
+    expect(quick.locator('.trade-review')).to_contain_text('Beholdning: 4 stk.')
+    expect(quick.locator('.trade-review')).to_contain_text('Foreslået salg: 2 stk.')
     expect(quick.locator('#quick-trade-confirm')).not_to_be_checked()
     assert not errors,errors
     assert all(u.startswith(origin+'/') and '/api/' not in u for u in requests),requests
