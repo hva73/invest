@@ -560,7 +560,7 @@
     "generation": 9,
     "role": "data",
     "priority": 1,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/trading-engine-v2-integration",
     "base_sha": "ee85efe735002ae6149a9488274f4935be6d2a0c",
     "dependencies": [
@@ -620,5 +620,23 @@
       "tests/test_admin_diagnostics_ui.cjs"
     ],
     "task": "Integrate actual #293 resources response into existing admin diagnostics on exact 613123e0. Add compact current and 5m/1h/24h CPU/RSS data using existing diagnostic markup/formatting. Clearly distinguish supervisor/owned worker vs visible cgroup limits and host CPU count, no asserted account entitlement; stale/unavailable coverage and null values shown honestly, not zero. Preserve approved UI, admin-only scope, live in-place update and open sections. Use real #293 payload contract; test fresh/stale/unavailable and non-admin path in existing Node test. No production, no new endpoints, no provider calls or trading; actual code/tests only."
+  },
+  {
+    "issue": 273,
+    "generation": 10,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/trading-engine-v2-integration",
+    "base_sha": "0a0181ee43458efc5ff143843f22913bdc9894f4",
+    "dependencies": [
+      "273:9"
+    ],
+    "paths": [
+      "strategy_lab.py",
+      "tests/test_strategy_lab.py",
+      "docs/TRADING_ENGINE_V2_INTERFACE.md"
+    ],
+    "task": "Wire accepted #292 shared immutable market history into actual Strategy Lab compare_v2 replay, using existing persisted verified observations and causal cutoff, not fabricated entitlements. Reuse _feature_history/_strategy_facts and v2.shared_market_features_batch where the same verified identity/parameters/history is reused; preserve exact original recorded facts and decision provenance, fail closed for unverified input and use existing strategy-specific required/optional rules. No live authority, no broker calls, no new store or network. If verified entitlement evidence is not yet persisted, do not invent it: scope this slice to one authorized user's existing replay context or leave shared subscriber path unavailable, prove with actual SQLite replay fixtures and explicit coverage. Test old/new same timestamp, overlapping strategy params vs distinct, cross-tenant access rejected, stale/optional and future timestamps, before/after actual call counts. Deliver functional code and tests, not helper-only."
   }
 ]
