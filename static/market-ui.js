@@ -60,9 +60,14 @@ window.MarketUI=(()=>{
     if(r.pendingRetries<=15){
      setTimeout(()=>{
       const active=mounted(r);
-      if(active&&!document.hidden&&r.promise===request&&periodKey(r.period)===requestPeriod){
-       const box=active.getBoundingClientRect();
-       if(box.bottom>0&&box.top<innerHeight+120){r.attempted=0;schedule(active,false)}
+      if(current(r)&&r.promise===request&&periodKey(r.period)===requestPeriod){
+       // Release only this pending request's throttle, even if not visible.
+       // The ordinary visibility/observer tick can then resume it.
+       r.attempted=0;
+       if(active&&!document.hidden){
+        const box=active.getBoundingClientRect();
+        if(box.bottom>0&&box.top<innerHeight+120)schedule(active,false);
+       }
       }
      },2000);
     }

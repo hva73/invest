@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 
 def account_isolation(page):
  page.add_script_tag(content="""
-  window.IntersectionObserver = class { observe() {} disconnect() {} };
+  window.IntersectionObserver = class { constructor(callback) { window.testChartObserver=callback; } observe() {} disconnect() {} };
  """)
  page.add_script_tag(path=str(Path(__file__).resolve().parents[1]/'static/market-ui.js'))
  page.evaluate(ACCOUNT_ISOLATION)
@@ -18,7 +18,8 @@ def account_isolation(page):
 ACCOUNT_ISOLATION = r"""
 async () => {
  const assert = (condition, message) => { if (!condition) throw new Error(message); };
- Object.defineProperty(document, 'hidden', {value: false});
+ let hidden=false;
+ Object.defineProperty(document, 'hidden', {get:()=>hidden});
  const requests = [], timers = [];
  const realTimeout = window.setTimeout;
  window.setTimeout = (callback, delay) => timers.push({callback, delay});
@@ -171,6 +172,32 @@ async () => {
  assert(requests.length === 15 && selected('month') &&
         [...root.querySelectorAll('.market-price')].every(n => n.textContent === '27'),
         'Refreshed month did not update both charts');
+
+ // A pending retry must not start hidden work, but visibility must release it.
+ await click('main','refresh');
+ await finish(requests[15],{pending:true});
+ hidden=true;
+ await retry();
+ assert(requests.length===16,'Hidden retry initiated a request');
+ hidden=false;
+ document.dispatchEvent(new Event('visibilitychange'));
+ await flush();
+ assert(requests.length===17 && requests[16].period==='ONE_MONTH','Visible chart remained throttled');
+ await finish(requests[16],quote(28));
+
+ // The same rule applies when the chart was offscreen at the retry deadline.
+ mount('main');
+ await click('main','refresh');
+ await finish(requests[17],{pending:true});
+ const offscreen=slot('main');
+ offscreen.style.position='absolute';offscreen.style.top='10000px';
+ await retry();
+ assert(requests.length===18,'Offscreen retry initiated a request');
+ offscreen.style.position='';offscreen.style.top='';
+ window.testChartObserver([{target:offscreen,isIntersecting:true}]);
+ await flush();
+ assert(requests.length===19,'Returning chart remained throttled');
+ await finish(requests[18],quote(29));
 }
 """
 
