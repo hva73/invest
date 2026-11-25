@@ -198,6 +198,26 @@ async () => {
  await flush();
  assert(requests.length===19,'Returning chart remained throttled');
  await finish(requests[18],quote(29));
+
+ // Fresh chart with no cached month. The visible refresh must await that
+ // month, not just the previous day request.
+ mount('uncached');
+ const uncached=slot('uncached');
+ await click('uncached');
+ await MarketUI.click(uncached.querySelector('[data-market-period="month"]'));
+ let completed=false;
+ const pendingRefresh=MarketUI.refreshVisible().then(()=>{completed=true});
+ assert(requests.length===20,'Uncached refresh overlapped day request');
+ await finish(requests[19],quote(30));
+ assert(!completed && requests.length===21 && requests[20].period==='ONE_MONTH',
+        'Uncached refresh completed before selected period');
+ await finish(requests[20],quote(31));
+ await pendingRefresh;
+ const delayed=timers.shift();
+ assert(delayed?.delay===0,'Missing guarded automatic follow-up');
+ delayed.callback();
+ await flush();
+ assert(requests.length===21 && completed,'Uncached month duplicated or failed to complete');
 }
 """
 
