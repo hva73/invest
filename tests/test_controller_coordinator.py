@@ -178,6 +178,38 @@ class LocalCoordinatorTests(unittest.TestCase):
         job["steps"][1]["conclusion"]="success"
         with patch.object(c,"gh",side_effect=[{"workflow_runs":[run]},{"jobs":[job]}]):
             self.assertEqual(c.verified_ci(sha,[{"filename":"trading_engine_v2.py"}]),7)
+    def test_long_term_specialized_ci_requires_actual_pinned_suite(self):
+        import base64
+        sha="d"*40
+        run={"id":7,"name":"ESCAPE controller regression review","path":".github/workflows/escape-controller-regression.yml","head_sha":sha,"status":"completed","conclusion":"success"}
+        job={"name":"regression","conclusion":"success","steps":[{"name":"Baseline smoke and scope confirmation","conclusion":"success"},{"name":"Motor and data-path regression","conclusion":"success"}]}
+        files=[{"filename":"long_term_watch.py"},{"filename":"tests/test_strategy_lab.py"}]
+        workflow={"content":base64.b64encode(b"if test -f tests/test_trading_engine_v2.py; then python -m unittest tests.test_trading_engine_v2 tests.test_strategy_lab; fi").decode()}
+        with patch.object(c,"gh",side_effect=[{"workflow_runs":[run]},{"jobs":[job]},workflow,{"type":"file"}]):
+            self.assertEqual(c.verified_ci(sha,files),7)
+        with patch.object(c,"gh",side_effect=[{"workflow_runs":[run]},{"jobs":[job]},workflow,{"type":"dir"}]):
+            with self.assertRaises(c.Hold):
+                c.verified_ci(sha,files)
+        missing={"content":base64.b64encode(b"python -m unittest tests.test_hotwatch_engine").decode()}
+        with patch.object(c,"gh",side_effect=[{"workflow_runs":[run]},{"jobs":[job]},missing]):
+            with self.assertRaises(c.Hold):
+                c.verified_ci(sha,files)
+
+    def test_owner_reset_grants_one_extra_exact_114_continuation(self):
+        head="b32e473553d233b616e8f57f88350327c8ab41a8"
+        record=self.root/"coordinator-repair-303.json"
+        held={"key":"114:1","head":head,"state":"held","child_finished":True,"resume_eligible":True}
+        for suffix in (".resume-history.json",".resume-history-2.json"):
+            c.save(record.with_suffix(suffix),held)
+        c.save(record,held)
+        self.assertEqual(c.repair_resume_archive(record),record.with_suffix(".resume-history-3.json"))
+        c.save(record,dict(held,resume_authorized=True))
+        self.assertEqual(c.repair_attempt(self.root,303,head),1)
+        c.save(record.with_suffix(".resume-history-3.json"),held)
+        self.assertIsNone(c.repair_attempt(self.root,303,head))
+        c.save(record,dict(held,state="reserved"))
+        self.assertIsNone(c.repair_attempt(self.root,303,head))
+
     def test_local_activation_holds_or_integrates_not_duplicate(self):
         p={"head":{"sha":"d"*40}}
         with patch.object(c,"verify_pr",return_value=(p,[],"open")),patch.object(c,"verified_ci",return_value=7),patch.object(c,"independent_review",return_value={"verdict":"accept","reason":"Scoped test-only component"}),patch.object(c,"integrate",return_value="Accepteret; næste opgave frigivet") as merge:
