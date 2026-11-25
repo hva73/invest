@@ -532,7 +532,15 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
                     row=rebase_disjoint(root,row,number)
                 p,files,state=verify_pr(row,number)
                 sha=p["head"]["sha"]
-                if last.get("state")=="hold" and last.get("sha")==sha:
+                # A prior integration HOLD is not a negative code review.
+                # Only reuse an approval for this exact task, head and base;
+                # the run and complete diff will be re-verified below.
+                cached=read(root/("coordinator-accepted-"+str(number)+".json"),{})
+                identity=review_identity(row,sha,cached.get("run"))
+                prior_accept=(all(cached.get(k)==v for k,v in identity.items())
+                              and isinstance(cached.get("decision"),dict)
+                              and cached["decision"].get("verdict")=="accept")
+                if last.get("state")=="hold" and last.get("sha")==sha and not prior_accept:
                     entry.update(last,at=time.time())
                     detail=last.get("detail","Uændret reviewblokering")
                     repair_reason=last.get("repair_reason")

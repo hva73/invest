@@ -234,3 +234,11 @@ class LocalCoordinatorTests(unittest.TestCase):
         with patch.object(c,"verify_pr",return_value=(p,[],"open")),patch.object(c,"verified_ci",return_value=run),patch.object(c,"independent_review") as model,patch.object(c,"integrate",return_value="Accepted") as merge:
             self.assertTrue(c.run_once(self.root,self.root,[self.row],self.results,reserve_review=lambda:False))
             model.assert_not_called();merge.assert_called_once()
+
+    def test_integration_hold_does_not_discard_exact_accepted_review(self):
+        sha="d"*40;run=7;p={"head":{"sha":sha}}
+        c.save(self.root/"coordinator-review.json",{"501":{"at":1,"state":"hold","sha":sha,"detail":"Integration temporarily held"}})
+        c.save(self.root/"coordinator-accepted-501.json",dict(c.review_identity(self.row,sha,run),decision={"verdict":"accept","reason":"Verified scoped change"}))
+        with patch.object(c,"verify_pr",return_value=(p,[],"open")),patch.object(c,"verified_ci",return_value=run),patch.object(c,"independent_review") as model,patch.object(c,"integrate",return_value="Accepted") as merge:
+            self.assertTrue(c.run_once(self.root,self.root,[self.row],self.results,reserve_review=lambda:False))
+            model.assert_not_called();merge.assert_called_once()
