@@ -2,6 +2,7 @@
 from eodhd_capacity import Capacity
 import json,signal,threading,logging,hashlib,time,os,re,secrets,sqlite3,sys,math
 from datetime import timedelta
+from itertools import groupby
 from concurrent.futures import ThreadPoolExecutor,wait,FIRST_COMPLETED
 from contextlib import contextmanager,nullcontext
 import app,hotwatch_engine as engine
@@ -803,29 +804,49 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
     try:valid=holding.get('kind')=='holding' and isinstance(aid,str) and bool(aid) and Decimal(str(holding.get('quantity')))>0
     except (InvalidOperation,ValueError,TypeError):valid=False
     if valid:choices.append((snap['user_id'],snap['id'],holding))
-  for uid,pid,holding in choices:
-   aid=holding['asset_id']
+  selected=None
+  for uid,user_choices in groupby(choices,key=lambda choice:choice[0]):
    control=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
    if control and control['killed']:continue
-   existing=c.execute("SELECT watch_id,status,request FROM hw_sessions WHERE user_id=? AND is_test=0 AND json_extract(request,'$.asset_id')=? ORDER BY id DESC",(uid,aid)).fetchall()
-   matches=[row for row in existing if json.loads(row['request']).get('watch_mode','both')!='entry' and (not json.loads(row['request']).get('portfolio_ids') or pid in json.loads(row['request'])['portfolio_ids'])]
-   active=[row for row in matches if row['status'] in ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')]
-   prior=c.execute('SELECT status,watch_id,next_attempt FROM hw_holding_autowatch WHERE user_id=? AND portfolio_id=? AND asset_id=?',(uid,pid,aid)).fetchone()
-   generation=c.execute('SELECT updated FROM hw_holding_autowatch WHERE user_id=? AND portfolio_id=? AND asset_id=?',(uid,pid,aid)).fetchone() if prior and prior['status']=='POSITION_CLOSED' else None
-   identity=str(uid)+'|'+str(pid)+'|'+aid+('|'+generation['updated'] if generation else '')
-   watch='hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
-   if len(active)==1:status='LINKED';linked=active[0]['watch_id']
-   elif len(active)>1:status='AMBIGUOUS';linked=None
-   elif prior and prior['status']=='STOPPED':status='STOPPED';linked=prior['watch_id']
-   elif prior and prior['status']!='POSITION_CLOSED' and prior['watch_id'] and any(row['watch_id']==prior['watch_id'] and row['status'] in ('COMPLETED','EXPIRED','ERROR') for row in matches):status='STOPPED';linked=prior['watch_id']
-   elif any(row['watch_id']==watch for row in matches):status='STOPPED';linked=watch
-   else:
-    if prior and prior['next_attempt']>epoch:continue
-    status='VERIFYING';linked=None
-   if status!='VERIFYING' and prior and prior['status']==status and prior['watch_id']==linked:continue
-   c.execute("INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,portfolio_id,asset_id) DO UPDATE SET status=excluded.status,watch_id=excluded.watch_id,next_attempt=excluded.next_attempt,updated=excluded.updated",(uid,pid,aid,status,linked,epoch+300,at))
-   if status=='VERIFYING':selected=(uid,pid,holding,watch);break
-  else:return None
+   user_choices=list(user_choices)
+   # Limit each batch to this user’s current holding keys, including retry history.
+   keys={(pid,holding['asset_id']) for _,pid,holding in user_choices}
+   assets={aid for _,aid in keys}
+   sessions={}
+   for row in c.execute("""SELECT watch_id,status,request,json_extract(request,'$.asset_id') AS asset_id
+                           FROM hw_sessions WHERE user_id=? AND is_test=0
+                           AND json_extract(request,'$.asset_id') IN (SELECT value FROM json_each(?))""",
+                        (uid,json.dumps(list(assets)))):
+    request=json.loads(row['request'])
+    if request.get('watch_mode','both')!='entry':
+     sessions.setdefault(row['asset_id'],[]).append((row,request.get('portfolio_ids')))
+   attempts={(row['portfolio_id'],row['asset_id']):dict(row) for row in c.execute("""
+    SELECT a.portfolio_id,a.asset_id,a.status,a.watch_id,a.next_attempt,a.updated
+    FROM json_each(?) k CROSS JOIN hw_holding_autowatch a
+      ON a.user_id=? AND a.portfolio_id=json_extract(k.value,'$[0]') AND a.asset_id=json_extract(k.value,'$[1]')
+    """,(json.dumps(list(keys)),uid))}
+   for _,pid,holding in user_choices:
+    aid=holding['asset_id']
+    matches=[row for row,portfolios in sessions.get(aid,()) if not portfolios or pid in portfolios]
+    active=[row for row in matches if row['status'] in ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')]
+    prior=attempts.get((pid,aid))
+    identity=str(uid)+'|'+str(pid)+'|'+aid
+    if prior and prior['status']=='POSITION_CLOSED':identity+='|'+prior['updated']
+    watch='hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
+    if len(active)==1:status='LINKED';linked=active[0]['watch_id']
+    elif len(active)>1:status='AMBIGUOUS';linked=None
+    elif prior and prior['status']=='STOPPED':status='STOPPED';linked=prior['watch_id']
+    elif prior and prior['status']!='POSITION_CLOSED' and prior['watch_id'] and any(row['watch_id']==prior['watch_id'] and row['status'] in ('COMPLETED','EXPIRED','ERROR') for row in matches):status='STOPPED';linked=prior['watch_id']
+    elif any(row['watch_id']==watch for row in matches):status='STOPPED';linked=watch
+    else:
+     if prior and prior['next_attempt']>epoch:continue
+     status='VERIFYING';linked=None
+    if status!='VERIFYING' and prior and prior['status']==status and prior['watch_id']==linked:continue
+    c.execute("INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,portfolio_id,asset_id) DO UPDATE SET status=excluded.status,watch_id=excluded.watch_id,next_attempt=excluded.next_attempt,updated=excluded.updated",(uid,pid,aid,status,linked,epoch+300,at))
+    if status=='VERIFYING':selected=(uid,pid,holding,watch);break
+    attempts[pid,aid]={'status':status,'watch_id':linked,'next_attempt':epoch+300,'updated':at}
+   if selected:break
+  if not selected:return None
  uid,pid,holding,watch=selected;aid=holding['asset_id'];status='IDENTITY_UNVERIFIED';linked=None
  try:
   with connect() as c:

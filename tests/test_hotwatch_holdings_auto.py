@@ -1,5 +1,5 @@
 """Automatic holding watches use synthetic owned snapshots and no provider calls."""
-import json,os,tempfile,unittest
+import hashlib,json,os,tempfile,unittest
 from datetime import datetime,timezone,timedelta
 from unittest.mock import patch
 import app,hotwatch_engine as engine,hotwatch_service as service
@@ -51,6 +51,72 @@ class DiscoveryAttemptPerformance(unittest.TestCase):
     with app.connect() as c:
      actual=c.execute('SELECT user_id,candidate_id,next_attempt FROM hw_discovery_attempts WHERE is_test=0 AND next_attempt=? ORDER BY user_id',(now.timestamp()+300,)).fetchall()
      self.assertEqual([tuple(row) for row in actual],[(uid,cid,now.timestamp()+300) for uid,cid in expected])
+
+class HoldingAutowatchPerformance(unittest.TestCase):
+ def test_scoped_reads_and_decisions_for_1_10_and_100_users(self):
+  now=datetime(2026,11,25,12,tzinfo=timezone.utc)
+  at=now.isoformat()
+  closed_at=(now-timedelta(hours=1)).isoformat()
+  future=now.timestamp()+600
+  assets=[f'shared-{i:02}' for i in range(24)]
+  positions=[{'kind':'holding','asset_id':aid,'quantity':'1'} for aid in assets]
+  for count in (1,10,100):
+   with self.subTest(users=count),tempfile.TemporaryDirectory() as temp,patch.object(app,'DB',temp+'/db'):
+    app.init()
+    killed=set(range(7,count,7))
+    expected={}
+    with app.connect() as c:
+     for uid in range(1,count+1):
+      pid=uid*2
+      c.execute('INSERT INTO users(id,username,active) VALUES(?,?,1)',(uid,f'user-{uid}'))
+      if uid in killed:c.execute('INSERT INTO hw_control VALUES(?,1,?,?)',(uid,at,'test'))
+      for portfolio,holdings in ((pid,positions[:1]+positions),(pid+1,positions[:1])):
+       c.execute("INSERT INTO portfolios(id,user_id,name,source,updated) VALUES(?,?,?,'pluto',?)",(portfolio,uid,'Test',now.timestamp()))
+       payload=json.dumps({'positions_complete':True,'observed':at,'positions':holdings})
+       c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?)',(portfolio,uid,at,payload,at))
+      paused=f'paused-{uid}'
+      stopped=f'stopped-{uid}'
+      for aid,wid,status in ((assets[0],paused,'PAUSED'),(assets[1],stopped,'COMPLETED'),(assets[22],f'closed-{uid}','COMPLETED')):
+       request=json.dumps({'asset_id':aid,'portfolio_ids':[pid],'watch_mode':'exit'})
+       c.execute("""INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due)
+                    VALUES(?,?,0,?,'test holding',?,?,'synthetic','{}','{}',?,?,0)""",
+                 (uid,wid,aid,status,request,at,at))
+      for portfolio,aid in [(pid,aid) for aid in assets[1:]]+[(pid+1,assets[0])]:
+       status,watch_id=('LINKED',stopped) if aid==assets[1] else ('POSITION_CLOSED',f'closed-{uid}')
+       retry=0 if uid==count and aid in assets[22:] else future
+       c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(uid,portfolio,aid,status,watch_id,retry,closed_at))
+       if uid not in killed and aid==assets[1]:status,retry='STOPPED',now.timestamp()+300
+       expected[uid,portfolio,aid]=(status,watch_id,retry)
+      if uid not in killed:expected[uid,pid,assets[0]]=('LINKED',paused,now.timestamp()+300)
+    # Trace the scan connection separately from the locked activation revalidation.
+    scan_sql=[];connections=[];verified=[]
+    def traced_connect():
+     connection=app.connect()
+     if not connections:connection.set_trace_callback(scan_sql.append)
+     connections.append(True)
+     return connection
+    def verify(_,uid,holding):
+     verified.append((uid,holding['asset_id']))
+     return {'asset_id':holding['asset_id'],'ticker':'TEST','exchange':'NASDAQ','currency':'USD'}
+    with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_CAPACITY':'200','ESCAPE_HW_EODHD_REST_ENABLED':'0'}):
+     self.assertEqual(service.auto_holdings_tick(traced_connect,verify=verify,now=now),'LINKED')
+    self.assertEqual(verified,[(count,assets[22])])
+    reads=[sql for sql in scan_sql if sql.lstrip().upper().startswith('SELECT')]
+    self.assertEqual(len(reads),2+3*count-2*len(killed))
+    self.assertEqual(sum('FROM hw_control' in sql for sql in reads),count)
+    self.assertEqual(sum('hw_holding_autowatch' in sql for sql in reads),count-len(killed))
+    self.assertEqual(sum('INSERT INTO hw_holding_autowatch' in sql and "'LINKED'" in sql for sql in scan_sql),count-len(killed))
+    identity=f'{count}|{count*2}|{assets[22]}|{closed_at}'
+    watch='hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
+    expected[count,count*2,assets[22]]=('LINKED',watch,now.timestamp()+300)
+    with app.connect() as c:
+     actual={(r[0],r[1],r[2]):tuple(r)[3:] for r in c.execute('SELECT user_id,portfolio_id,asset_id,status,watch_id,next_attempt FROM hw_holding_autowatch')}
+     self.assertEqual(actual,expected)
+     created=c.execute("SELECT user_id,watch_id,request FROM hw_sessions WHERE purpose='automatic holding watch'").fetchall()
+     self.assertEqual([(row['user_id'],row['watch_id']) for row in created],[(count,watch)])
+     request=json.loads(created[0]['request'])
+     self.assertEqual((request['watch_mode'],request['portfolio_ids']),('exit',[count*2]))
+     self.assertEqual(c.execute("SELECT count(*) FROM hw_sessions WHERE status='PAUSED'").fetchone()[0],count)
 
 class HoldingAutowatch(unittest.TestCase):
  def setUp(self):
