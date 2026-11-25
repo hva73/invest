@@ -14,12 +14,13 @@ class Updater(unittest.TestCase):
    probe='''import sys,io,json
 from pathlib import Path
 sys.path.insert(0,sys.argv[1])
-import passenger_wsgi,hotwatch_service,eodhd_capacity
+import passenger_wsgi,hotwatch_service,eodhd_capacity,long_term_watch
 status=[]
 body=b''.join(passenger_wsgi.application({'PATH_INFO':'/api/health','REQUEST_METHOD':'GET','REMOTE_ADDR':'test','wsgi.input':io.BytesIO(b'')},lambda s,h:status.append(s)))
 assert status==['200 OK'],status
 assert json.loads(body)['database'] is True
 assert Path(eodhd_capacity.__file__).parent==Path(sys.argv[1])
+assert Path(long_term_watch.__file__).parent==Path(sys.argv[1])
 status.clear()
 css=b''.join(passenger_wsgi.application({'PATH_INFO':'/style.css','REQUEST_METHOD':'GET','REMOTE_ADDR':'test','wsgi.input':io.BytesIO(b'')},lambda s,h:status.append(s)))
 assert status==['200 OK'],status
@@ -80,6 +81,12 @@ print('INSTALLED_RELEASE_HEALTH_PASS')
    with self.assertRaises(ValueError):apply_update.apply(source,target)
    self.assertEqual((target/'app.py').read_text(),'old code')
    self.assertFalse((target/'hotwatch_warmup.py').exists())
+ def test_missing_long_term_watch_module_is_rejected_before_existing_code_changes(self):
+  with tempfile.TemporaryDirectory() as d:
+   source,target=self.fixture(Path(d));(source/'long_term_watch.py').unlink()
+   with self.assertRaises(ValueError):apply_update.apply(source,target)
+   self.assertEqual((target/'app.py').read_text(),'old code')
+   self.assertFalse((target/'long_term_watch.py').exists())
  def test_partial_copy_rolls_back(self):
   with tempfile.TemporaryDirectory() as d:
    source,target=self.fixture(Path(d));original=apply_update.os.replace;calls=[]
