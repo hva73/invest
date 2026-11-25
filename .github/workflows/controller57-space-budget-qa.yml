@@ -34,3 +34,17 @@ jobs:
       - run: |
           test "$(git rev-parse HEAD)" = "8015166c4d2e4f52e3f7502695f48913ee76d4fa"
           python -B -m unittest discover -s tests -p test_storage_reclaim_proof.py -v
+  exact-compression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 30f39fdb35262cdf20a9e9c41dc18e072b6b8863
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: |
+          test "$(git rev-parse HEAD)" = "30f39fdb35262cdf20a9e9c41dc18e072b6b8863"
+          python -B -m unittest discover -s tests -p test_nordicway_release_retention.py -v
