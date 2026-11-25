@@ -1,5 +1,5 @@
 import unittest
-from development.controller_pilot import loop, codex_command, parse_events, usage_breakdown, context_exhausted
+from development.controller_pilot import loop, codex_command, parse_events, usage_breakdown, context_exhausted, execution_prompt
 
 class LoopTest(unittest.TestCase):
     def run_case(self, snapshots, rounds=3, rc=0):
@@ -15,6 +15,22 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(self.run_case(["a","a"]), ("no_progress",[0]))
     def test_cycle(self):
         self.assertEqual(self.run_case(["a","b","a"]), ("no_progress",[0,1]))
+    def test_analysis_only_turn_can_switch_approach(self):
+        calls=[]; stalls=[]
+        snapshots=iter(["a","a","b","c"])
+        result=loop(lambda i,t:calls.append(i) or 0,lambda:next(snapshots),3,100,lambda:0,
+                    verify=lambda:len(calls)==3,on_stall=lambda i:stalls.append(i) or True)
+        self.assertEqual((result,calls,stalls),("verified",[0,1,2],[0]))
+    def test_stall_retries_remain_bounded(self):
+        calls=[]
+        self.assertEqual(loop(lambda i,t:calls.append(i) or 0,lambda:"a",5,100,lambda:0,
+                              on_stall=lambda i:i<2),"no_progress")
+        self.assertEqual(calls,[0,1,2])
+    def test_execution_prompt_retains_scope_on_fresh_approach(self):
+        p=execution_prompt(114,"motor","approved task",["trade_service.py"],2,"fresh")
+        for phrase in ("different implementation method","approved task","trade_service.py","actual passing targeted tests","No production access"):
+            self.assertIn(phrase,p)
+
     def test_failure(self):
         self.assertEqual(self.run_case(["a"],rc=1), ("execution_failed",[0]))
     def test_deadline(self):
