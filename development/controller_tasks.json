@@ -666,7 +666,7 @@
     "priority": 1,
     "status": "ready",
     "base_branch": "codex/escape-development",
-    "base_sha": "171dcc0571738e8774b60660ad60233bcbfa80c9",
+    "base_sha": "99ba8ef656fa0386ee828d14d7b9c0bae158395a",
     "dependencies": [
       "54:1",
       "267:4"
@@ -841,4 +841,4 @@
     "local_review": true,
     "local_repair": true
   }
-]
+]\n
