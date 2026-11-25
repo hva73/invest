@@ -285,6 +285,8 @@ def run_queue(a,root,script,statefile,donefile,state,results):
         budget_lock=threading.Lock()
         def reserve_slot():
             with budget_lock:
+                if (root/"STOP").exists() or provider_pause_active(root):
+                    return False
                 if not reserve(state,datetime.now(timezone.utc).date().isoformat(),a.daily_reservation,a.per_task):
                     return False
                 save(statefile,state)
