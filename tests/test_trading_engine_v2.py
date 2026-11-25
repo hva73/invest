@@ -16,7 +16,7 @@ from trading_engine_v2 import (
     Evidence, MarketAccess, MarketFeatureInput, MarketHistory, MarketIdentity, MarketSubscriber,
     Scope, VerifiedExecution, evaluate, evaluate_test_position_exit, market_features_batch,
     shared_market_features_batch,
-    append_test_position_strategy_switch, read_test_position_switch_history,
+    append_test_position_strategy_switch, read_test_position_exit, read_test_position_switch_history,
     setup_test_position_switch_history, switch_position_strategy,
 )
 
@@ -732,7 +732,7 @@ class TradingEngineV2Tests(unittest.TestCase):
         self.assertEqual(future.entry_origin, entry)
         self.assertEqual(json.loads(first.held_evidence)["value"]["cost_price"], "100")
 
-        def exit_at(at, held_facts=held.value, **overrides):
+        def exit_at(at, held_facts=held.value, *, adapter=read_test_position_exit, **overrides):
             sample = replace(held, event_time=at, available_at=at, value=self.sample.value | {
                 "event_time": at.isoformat(), "context": held_facts | {"as_of": at.isoformat()},
             })
@@ -742,29 +742,52 @@ class TradingEngineV2Tests(unittest.TestCase):
                 expected_head_digest=future.digest,
                 metrics={"return_3_pct": self.evidence("-.6"), "breakdown": self.evidence(True)},
             )
-            return evaluate_test_position_exit(**(arguments | overrides))
+            return adapter(**(arguments | overrides))
 
         setup_test_position_switch_history(connect)
         with connect() as connection:
             tables = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
             self.assertEqual([row[0] for row in tables], ["test_position_switch_history_v1"])
 
-        before = exit_at(self.at)
+        before_readback = exit_at(self.at)
+        self.assertEqual(before_readback.scope, scope)
+        self.assertEqual(before_readback.as_of, self.at.isoformat())
+        self.assertEqual(before_readback.entry_origin, entry)
+        self.assertEqual(before_readback.active_strategy, first.prior_strategy)
+        self.assertIsNone(before_readback.first_switch)
+        self.assertIsNone(before_readback.active_switch)
+        before = before_readback.decision
         self.assertEqual(before.origin.strategy_checksum, entry.strategy_checksum)
         self.assertIsNone(before.origin.position_switch_digest)
         self.assertEqual(before.reasons, ("RULES_NOT_MET",))
         with patch("trading_engine_v2.risk_gate", wraps=risk_gate) as gate:
-            after = exit_at(self.later)
+            after_readback = exit_at(self.later)
             gate.assert_called_once()
             context = gate.call_args.args[0]["context"]
             self.assertEqual(context["cost_price"], "100")
             self.assertEqual(context["entry_digest"], entry.digest)
+        self.assertEqual(after_readback.scope, scope)
+        self.assertEqual(after_readback.as_of, self.later.isoformat())
+        self.assertEqual(after_readback.entry_origin, entry)
+        self.assertEqual(after_readback.active_strategy, first.new_strategy)
+        self.assertEqual(after_readback.first_switch, first)
+        self.assertEqual(after_readback.active_switch, first)
+        after = after_readback.decision
+        self.assertEqual(exit_at(self.later, adapter=evaluate_test_position_exit), after)
         self.assertEqual(after.action, "SELL")
         self.assertEqual(after.origin.strategy_checksum, checksum(target))
         self.assertEqual(after.origin.position_switch_digest, first.digest)
-        self.assertEqual(exit_at(future_at, future_held.value).origin.position_switch_digest,
-                         future.digest)
-        blocked = exit_at(self.later, risk=self.evidence(self.risk.value | {"exit_allowed": False}))
+        later_readback = exit_at(future_at, future_held.value)
+        self.assertEqual(later_readback.active_strategy, future.new_strategy)
+        self.assertEqual(later_readback.active_switch, future)
+        self.assertEqual(later_readback.decision.origin.position_switch_digest, future.digest)
+        self.assertEqual(later_readback.entry_origin, entry)
+        self.assertEqual(later_readback.first_switch.held_evidence, first.held_evidence)
+        self.assertEqual(json.loads(later_readback.first_switch.held_evidence)["value"]["cost_price"], "100")
+        self.assertEqual(json.loads(later_readback.active_switch.held_evidence)["value"]["cost_price"], "101")
+        with self.assertRaises(AttributeError):
+            later_readback.entry_origin = after.origin
+        blocked = exit_at(self.later, risk=self.evidence(self.risk.value | {"exit_allowed": False})).decision
         self.assertIsNone(blocked.action)
         self.assertEqual(blocked.reasons, ("EXIT_OUTSIDE_WATCH_SCOPE",))
 
@@ -792,7 +815,7 @@ class TradingEngineV2Tests(unittest.TestCase):
             connection.execute("""
                 UPDATE test_position_switch_history_v1 SET payload = ? WHERE sequence = 2
             """, (canonical(asdict(future)),))
-        self.assertEqual(exit_at(self.later), after)
+        self.assertEqual(exit_at(self.later), after_readback)
         # The independent head must detect valid-looking prefixes and empty
         # chains, even when evaluating before the first recorded switch.
         for sql in ("DELETE FROM test_position_switch_history_v1 WHERE sequence = 2",
@@ -812,8 +835,8 @@ class TradingEngineV2Tests(unittest.TestCase):
                           seq, item.digest, canonical(asdict(item))))
         # Explicit, independently attested empty history is still valid.
         empty_connect = self.position_switch_database()
-        self.assertEqual(exit_at(self.at, connect=empty_connect, expected_head_digest=None).origin.strategy_checksum,
-                         entry.strategy_checksum)
+        self.assertEqual(exit_at(self.at, connect=empty_connect, expected_head_digest=None),
+                         before_readback)
         with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
             exit_at(self.at, connect=empty_connect, expected_head_digest=first.digest)
         with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
