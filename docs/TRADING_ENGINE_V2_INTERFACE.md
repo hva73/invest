@@ -45,3 +45,30 @@ fill-readback. Kaldet, der leverer linket, har ansvaret for kildens verifikation
 `links` matcher beslutningens digest og scope. Ordre-ID udfylder aldrig fill-ID.
 Entry og exit kan dermed spores til hver sin versionslåste oprindelse.
 Evalueringen producerer alene beslutningsoprindelsen og gemmer ingen data.
+
+## Replay i Strategy Lab
+
+`strategy_lab.compare_v2(connect, uid, data)` bruger samme valg af watch,
+testkategori og op til tre strategiversioner som `compare`. Første op til
+240 beregninger læses i journalrækkefølge. Replays afviser tidsmæssige
+tilbagespring. Hver sammenligning viser det gemte signal og årsagskoder
+sammen med de simulerede udfald på samme snapshot. Katalogversionerne
+verificeres med checksum. Historiske indikatorer genberegnes ikke med
+de valgte strategiers parametre.
+
+`hw_samples.received` afgrænser markedsevidensens tilgængelighed. Det
+beregnede snapshot inklusive metrics, risiko og positionskontekst kan
+først dokumenteres ved `hw_calculations.calculated`. Evidensens kilde-ID'er
+peger på de faktiske journalrækker. Depot, aktiv, watch og eventuelt
+handelsforløb afstemmes mod beregningens fangede scope-checksum. EODHD
+trade-samples kan opdateres på samme række uden at ændre modtagelsestiden.
+Disse samples springes over, da beregningen mangler en historisk
+revisionsreference. Beholdningsberegninger springes over, da den gemte
+positionskontekst mangler et position-ID til v2.
+
+Svaret viser dækning, årsager til udeladelser, første udeladelse, udfald og
+første blokering for hver strategi samt historisk latenstid fra
+markedshændelse til modtagelse og fra modtagelse til beregning. Der beregnes
+ingen P/L eller eksekveringsstatistik. Sammenligningen bruger den gældende
+v2-risikogate med de fangede risikoinput. Kaldet læser kun SQLite og har
+ingen live-rute.
