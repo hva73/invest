@@ -287,6 +287,22 @@ def choose_review(root,rows,results,running,now=None):
             return row
     return None
 
+def repair_candidates(root,rows,results,running,review_row=None):
+    """Schedule known defects before paying for another review."""
+    journal=controller_coordinator.read(root/"coordinator-review.json",{})
+    for row,number in controller_coordinator.candidates(root,rows,results):
+        last=journal.get(str(number),{})
+        sha=last.get("sha")
+        reason=last.get("repair_reason")
+        if (last.get("state")!="hold" or row.get("local_repair") is not True
+            or not isinstance(sha,str) or not re.fullmatch(r"[0-9a-f]{40}",sha)
+            or not isinstance(reason,str) or not 1<=len(reason)<=800
+            or controller_coordinator.repair_attempt(root,number,sha) is None
+            or any(review_conflict(row,r) for r in running)
+            or (review_row is not None and review_conflict(row,review_row))):
+            continue
+        yield row,number,sha,reason
+
 def plan_with_review(rows,review_row,parallel):
     if review_row is None:
         return plan(rows,max_parallel=parallel)
@@ -304,6 +320,8 @@ def run_queue(a,root,script,statefile,donefile,state,results):
     interrupted={key for key,status in results.items() if status=="reserved"}
     with concurrent.futures.ThreadPoolExecutor(max_workers=a.parallel) as pool:
         active={}
+        repair_futures=set()
+        repair_cooldown={}
         coordination=None
         review_row=None
         budget_lock=threading.Lock()
@@ -325,6 +343,19 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 review_row=None
             for future,row in list(active.items()):
                 if not future.done():
+                    continue
+                if future in repair_futures:
+                    try:
+                        future.result()
+                    except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as exc:
+                        print("DEVELOPER_REPAIR_PENDING:",task_key(row),type(exc).__name__,flush=True)
+                    except Exception as exc:
+                        print("DEVELOPER_REPAIR_FAILED:",task_key(row),type(exc).__name__,flush=True)
+                    repair_futures.remove(future)
+                    repair_cooldown[task_key(row)]=time.time()+60
+                    del active[future]
+                    # Keep original draft receipt and rejected-SHA journal.
+                    # The next coordinator pass verifies the new remote head.
                     continue
                 try:
                     status=future.result()
@@ -373,12 +404,26 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 rows=effective_rows(rows,{k:v for k,v in results.items() if k not in recoverable},active.values())
                 waiting=[task_key(row) for row in rows if row["status"]=="ready"]
                 paused=provider_pause_active(root)
+                if capable and not paused:
+                    for row,number,sha,reason_text in repair_candidates(root,rows_before_effective,results,list(active.values()),review_row):
+                        if len(active)+int(coordination is not None)>=a.parallel:
+                            break
+                        if repair_cooldown.get(task_key(row),0)>time.time() or any(review_conflict(row,r) for r in active.values()):
+                            continue
+                        if not reserve_slot():
+                            break
+                        future=pool.submit(controller_coordinator.run_developer_repair,root,script.parent.parent,row,number,sha,reason_text,a.per_task)
+                        active[future]=row
+                        repair_futures.add(future)
+                    # Rebuild effective active scopes after allocating repairs.
+                    rows=effective_rows(rows_before_effective,{k:v for k,v in results.items() if k not in recoverable},active.values())
+                    waiting=[task_key(row) for row in rows if row["status"]=="ready"]
                 if capable and coordination is None and len(active)<a.parallel and not paused:
                     candidate=choose_review(root,rows_before_effective,results,list(active.values()))
                     if candidate is not None or (not active and controller_coordinator.trigger(root)):
                         review_row=candidate
                         keys={task_key(candidate)} if candidate else set()
-                        coordination=pool.submit(controller_coordinator.run_once,root,script.parent.parent,rows_before_effective,dict(results),reserve_review=reserve_slot,repair_allowance=a.per_task,review_keys=keys)
+                        coordination=pool.submit(controller_coordinator.run_once,root,script.parent.parent,rows_before_effective,dict(results),reserve_review=reserve_slot,repair_allowance=a.per_task,review_keys=keys,defer_repairs=True)
                 if paused:
                     selected=[]
                 elif coordination is not None and review_row is None:
