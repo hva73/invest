@@ -123,7 +123,7 @@
     "generation": 1,
     "role": "release",
     "priority": 2,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/issue57-combined-release-20261124",
     "base_sha": "3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65",
     "paths": [
@@ -138,7 +138,7 @@
     "generation": 2,
     "role": "mobile",
     "priority": 3,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/escape-development",
     "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
     "paths": [
@@ -155,7 +155,7 @@
     "generation": 3,
     "role": "desktop",
     "priority": 4,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/escape-development",
     "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
     "paths": [
@@ -163,5 +163,104 @@
     ],
     "dependencies": [],
     "task": "Independent #263 desktop acceptance: existing desktop browser tests only. Add focused tests of same maintenance contract as mobile after reviewing actual gen2 draft if available in local git objects; no duplicate UI code or speculative API. Validate planned maintenance state vs genuine HTTP404/503, auto recovery, stale action blocked, no change to existing approved desktop layout. If implementation is not yet present, prepare concrete tests with actual contract and mark integration required, not live pass. No production/network/broker access or deployment. Run relevant tests, fix actual failures, deliver draft only."
+  },
+  {
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
+    "dependencies": [],
+    "issue": 8,
+    "generation": 2,
+    "role": "motor",
+    "priority": 0,
+    "paths": [
+      "hotwatch_adapters.py",
+      "hotwatch_engine.py",
+      "hotwatch_features.py",
+      "hotwatch_service.py",
+      "tests/test_hotwatch_bar_evidence.py",
+      "tests/test_hotwatch_engine.py",
+      "tests/test_hotwatch_e2e_contract.py",
+      "tests/test_hotwatch_warmup.py"
+    ],
+    "task": "P0 OWNER: HOT WATCH unusable. Real installed #232 3cc0c7be live readback 25/11 10:55 UTC complete 60 sessions: 41/41 candidate NO_DATA; 13/19 holdings NO_DATA; 44 DATA_STALE, 7 PLUTO_QUOTE_TIME_UNKNOWN, 5 WAITING_FOR_NEW_VERIFIED_QUOTE, 2 PROVIDER_RATE_BUDGET (overlap). Worker running. NOVOB verified fresh price/bidask but transient BAR_EVIDENCE_STALE age146.6s vs120s; later WAIT. ORCL fresh price NO_DATA without display reason. HYPE/ASMDEE/PEPE missing quote time. Actual logs WS fresh receive but source trades age126/414s; ambiguous same timestamp. Work on actual installed-code behavior: compare base to installed SHA using local object if available, isolate and fix actual feed-to-engine failure path for fresh verified quote/trade, closed bars, session identity and explicit blocked reasons. Reuse exact existing EODHD identities/verified fallback and session evidence; no fabricated timestamps/trades, no risk/strategy threshold loosening, no forced BUY, no unsafe price-only fallback for entry. Preserve price-based exit when unrelated entry evidence missing. Implement actual product fix plus positive/negative tests, not diagnostics only; use recorded representative cases. Coordinate Agent4 who owns eodhd_feeds.py/eodhd_capacity.py/worker.py only. No production changes/network/credentials/orders. Local tests and draft PR."
+  },
+  {
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
+    "dependencies": [],
+    "issue": 14,
+    "generation": 2,
+    "role": "data",
+    "priority": 0,
+    "paths": [
+      "eodhd_feeds.py",
+      "eodhd_capacity.py",
+      "worker.py",
+      "tests/test_eodhd_feeds.py",
+      "tests/test_eodhd_capacity.py"
+    ],
+    "task": "P0 HOT WATCH throughput actual live #232 25/11 10:55 UTC: 60 sessions, 41/41 candidates NO_DATA, 44 DATA_STALE. Recent scans queue5–16s, occupied workers1–2, due5–19; provider 0.5–6s, WebSocket repeated captures 2.67s each trade/quote/status, status source age ~6900s with fresh receipt; SQLite begin mostly <1ms, ingest 14–115ms. 50 HTTP/min vs effective960, daily provider 30961/100000; no429, two budget blocks; 38847 local requests, high repetitive realtime_history. Concrete fix on actual existing shared feed/worker architecture: eliminate redundant synchronous connections/captures and serial status wait using safe bounded shared cache/coalescing or persistent feed if existing lifecycle supports it; prioritize due holding exit and verified fresh data without starving candidates; preserve source timestamps and freshness/identity, bounded subscriptions 40, no uncontrolled concurrency/API growth. Reproduce 60-session synthetic workload, quantify queue/event age/requests/WS captures before-after with same fixtures; test stale/ambiguous/partial reconnect, market sleep and budget. Do not weaken gates or manufacture data. Agent3 owns adapters/engine/service/features; do not modify them. Review actual source, implement and test fix, not another report. No network, prod, orders or credentials; draft PR."
+  },
+  {
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
+    "dependencies": [],
+    "issue": 267,
+    "generation": 1,
+    "role": "data",
+    "priority": 2,
+    "paths": [
+      "market_data.py",
+      "asset_quotes.py",
+      "dashboard_projection.py",
+      "tests/test_market_data.py",
+      "tests/test_asset_quotes.py",
+      "tests/test_portfolio_value_chart.py"
+    ],
+    "task": "Implement #267 verified chart-domain metadata and history reuse on existing market/portfolio API. Fixed complete local Copenhagen calendar-day axis including DST for portfolio/krypto; individual market actual full session including verified extended hours; no future points, no fabricated interpolation; use real history, existing cache, no extra duplicate requests/storage growth. Expose session start/end/current phase and valid source/freshness, unknown honest. Preserve existing value semantics. Fixtures HYPE, NOVOB, ASMDEE, ORCL/JDZG at 11:40, weekend, DST, holidays/early close. Coordinate frontend; no modifications to HOT WATCH feed files or trade contract. Implement actual code/tests draft."
+  },
+  {
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
+    "dependencies": [],
+    "issue": 267,
+    "generation": 2,
+    "role": "mobile",
+    "priority": 2,
+    "paths": [
+      "static/overview-ui.js",
+      "static/dashboard-ui.js",
+      "static/market-ui.js",
+      "static/position-ui.js",
+      "static/engine-ui.js",
+      "static/trade-ui.js",
+      "tests/test_chart_source_selection.cjs",
+      "tests/test_holding_chart_marker.cjs",
+      "tests/browser_intraday_market_chart.py",
+      "tests/browser_portfolio_value_chart.py"
+    ],
+    "task": "Implement #267 approved graph behavior in existing shared renderers, no redesign. Full local 00–24 axis overview and crypto, actual full verified session for positions, draw only real points to latest observation, future blank. Show verified Marked åbent/Pre-market/Eftermarked/Marked lukket/24/7 or unknown. Preserve Top label actual high, dashed Gns. købskurs actual value/currency, no buy line on BUY without holding, same demo/live renderer and approved layout. Use actual backend contract from gen1 when available; do not guess market times. Ensure 11:40 portfolio ~49% width, European session fraction, US premarket and data gaps. Preserve tooltip behavior and existing period controls. Implement actual scoped code/test, no app.js overlap with #263. No production orders/deploy."
+  },
+  {
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
+    "dependencies": [
+      "267:2"
+    ],
+    "issue": 267,
+    "generation": 3,
+    "role": "desktop",
+    "priority": 3,
+    "paths": [
+      "tests/browser_position_chart_detail.py",
+      "tests/browser_holdings_chart.py",
+      "tests/browser_market_charts.py"
+    ],
+    "task": "Independent #267 desktop and responsive acceptance on actual integrated chart renderer; check fixed future blank area, correct session axis/label, Top and Gns. købskurs, genuine gaps, no regression approved layout, hover and demo/live parity. No duplicate UI or fabricated data. Test actual gen2 branch locally if available, otherwise state integration required. Draft scoped tests."
   }
 ]
