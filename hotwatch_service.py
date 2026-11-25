@@ -812,23 +812,32 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
    while not selected:
     control=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
     if control and control['killed']:break
-    # Limit each batch to this user’s current holding keys, including retry history.
-    keys={(pid,holding['asset_id']) for _,pid,holding in user_choices}
-    assets={aid for _,aid in keys}
-    sessions={}
-    for row in c.execute("""SELECT watch_id,status,request,json_extract(request,'$.asset_id') AS asset_id
-                            FROM hw_sessions WHERE user_id=? AND is_test=0
-                            AND json_extract(request,'$.asset_id') IN (SELECT value FROM json_each(?))""",
-                         (uid,json.dumps(list(assets)))):
-     request=json.loads(row['request'])
-     if request.get('watch_mode','both')!='entry':
-      sessions.setdefault(row['asset_id'],[]).append((row,request.get('portfolio_ids')))
-    attempts={(row['portfolio_id'],row['asset_id']):dict(row) for row in c.execute("""
-     SELECT a.portfolio_id,a.asset_id,a.status,a.watch_id,a.next_attempt,a.updated
-     FROM json_each(?) k CROSS JOIN hw_holding_autowatch a
-       ON a.user_id=? AND a.portfolio_id=json_extract(k.value,'$[0]') AND a.asset_id=json_extract(k.value,'$[1]')
-     """,(json.dumps(list(keys)),uid))}
-    for _,pid,holding in user_choices:
+    sessions={};attempts={}
+    _,first_pid,first_holding=user_choices[0]
+    first_key=(first_pid,first_holding['asset_id'])
+    for index,(_,pid,holding) in enumerate(user_choices):
+     # Probe the first holding before loading the rest of this tenant's history.
+     # If the scan continues, batch the remaining keys and reuse the first lookup.
+     if index<2:
+      keys={first_key} if index==0 else {(p,h['asset_id']) for _,p,h in user_choices[1:]}
+      if index==1:keys.discard(first_key)
+      assets={aid for _,aid in keys}
+      if index==1:assets.discard(first_key[1])
+      if assets:
+       for row in c.execute("""SELECT watch_id,status,request,json_extract(request,'$.asset_id') AS asset_id
+                               FROM hw_sessions WHERE user_id=? AND is_test=0
+                               AND json_extract(request,'$.asset_id') IN (SELECT value FROM json_each(?))""",
+                            (uid,json.dumps(list(assets)))):
+        request=json.loads(row['request'])
+        if request.get('watch_mode','both')!='entry':
+         sessions.setdefault(row['asset_id'],[]).append((row,request.get('portfolio_ids')))
+      if keys:
+       for row in c.execute("""
+        SELECT a.portfolio_id,a.asset_id,a.status,a.watch_id,a.next_attempt,a.updated
+        FROM json_each(?) k CROSS JOIN hw_holding_autowatch a
+          ON a.user_id=? AND a.portfolio_id=json_extract(k.value,'$[0]') AND a.asset_id=json_extract(k.value,'$[1]')
+        """,(json.dumps(list(keys)),uid)):
+        attempts[row['portfolio_id'],row['asset_id']]=row
      aid=holding['asset_id']
      matches=[row for row,portfolios in sessions.get(aid,()) if not portfolios or pid in portfolios]
      active=[row for row in matches if row['status'] in ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')]

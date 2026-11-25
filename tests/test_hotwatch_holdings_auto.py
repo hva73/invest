@@ -1,5 +1,5 @@
 """Automatic holding watches use synthetic owned snapshots and no provider calls."""
-import hashlib,json,os,tempfile,unittest
+import hashlib,json,os,sqlite3,tempfile,unittest
 from datetime import datetime,timezone,timedelta
 from unittest.mock import patch
 import app,hotwatch_engine as engine,hotwatch_service as service
@@ -102,10 +102,10 @@ class HoldingAutowatchPerformance(unittest.TestCase):
      self.assertEqual(service.auto_holdings_tick(traced_connect,verify=verify,now=now),'LINKED')
     self.assertEqual(verified,[(count,assets[22])])
     reads=[sql for sql in scan_sql if sql.lstrip().upper().startswith('SELECT')]
-    self.assertEqual(len(reads),2+3*count-2*len(killed))
+    self.assertEqual(len(reads),2+count+4*(count-len(killed)))
     self.assertEqual(scan_sql.count('PRAGMA data_version'),2)
     self.assertEqual(sum('FROM hw_control' in sql for sql in reads),count)
-    self.assertEqual(sum('hw_holding_autowatch' in sql for sql in reads),count-len(killed))
+    self.assertEqual(sum('hw_holding_autowatch' in sql for sql in reads),2*(count-len(killed)))
     self.assertEqual(sum('INSERT INTO hw_holding_autowatch' in sql and "'LINKED'" in sql for sql in scan_sql),count-len(killed))
     identity=f'{count}|{count*2}|{assets[22]}|{closed_at}'
     watch='hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
@@ -131,6 +131,46 @@ class HoldingAutowatch(unittest.TestCase):
   self.verify=lambda *_:self.instrument
   self.lookup=lambda *_:{'choices':[{'symbol':'TEST.US','currency':'USD','isin':'US1234567890'}]}
  def tearDown(self):self.fixture.tearDown()
+ def test_first_holding_activation_does_not_load_later_history(self):
+  at=self.now.isoformat();aid=self.holding['asset_id']
+  closed_at=(self.now-timedelta(hours=1)).isoformat()
+  later=[dict(self.holding,asset_id=f'later-{index}') for index in range(24)]
+  with app.connect() as c:
+   payload=json.dumps({'positions_complete':True,'observed':at,'positions':[self.holding]+later})
+   c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(payload,self.pid))
+   for holding in [self.holding]+later:
+    asset=holding['asset_id']
+    c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',
+              (1,self.pid,asset,'POSITION_CLOSED',asset,0,closed_at))
+    request=json.dumps({'asset_id':asset,'portfolio_ids':[self.pid],'watch_mode':'exit'})
+    c.execute("""INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due)
+                 VALUES(1,?,0,?,'manual holding','COMPLETED',?,'synthetic','{}','{}',?,?,0)""",
+              (asset,asset,request,at,at))
+
+  read_assets={'sessions':[],'attempts':[]};connections=[];scan_sql=[]
+  def count_rows(cursor,values):
+   row=sqlite3.Row(cursor,values)
+   if 'request' in row.keys():read_assets['sessions'].append(row['asset_id'])
+   if 'next_attempt' in row.keys():read_assets['attempts'].append(row['asset_id'])
+   return row
+  def traced_connect():
+   connection=app.connect()
+   if not connections:
+    connection.row_factory=count_rows
+    connection.set_trace_callback(scan_sql.append)
+   connections.append(True)
+   return connection
+
+  with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_CAPACITY':'40','ESCAPE_HW_EODHD_REST_ENABLED':'0'}):
+   self.assertEqual(service.auto_holdings_tick(traced_connect,verify=self.verify,now=self.now),'LINKED')
+  self.assertEqual(read_assets,{'sessions':[aid],'attempts':[aid]})
+  self.assertEqual(sum(sql.lstrip().upper().startswith('SELECT') for sql in scan_sql),5)
+  identity=f'1|{self.pid}|{aid}|{closed_at}'
+  watch='hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
+  with app.connect() as c:
+   self.assertEqual([tuple(row) for row in c.execute("SELECT asset_id,watch_id FROM hw_holding_autowatch WHERE status='LINKED'")],[(aid,watch)])
+   self.assertEqual(c.execute("SELECT count(*) FROM hw_holding_autowatch WHERE status='POSITION_CLOSED'").fetchone()[0],len(later))
+
  def test_closure_before_first_scan_write_uses_new_holding_generation(self):
   self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
   earlier={'kind':'holding','asset_id':'earlier','quantity':'1'}
