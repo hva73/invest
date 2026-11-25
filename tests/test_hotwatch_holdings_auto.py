@@ -247,6 +247,48 @@ class HoldingAutowatch(unittest.TestCase):
    self.assertEqual([tuple(row) for row in attempts],[('earlier','LINKED','earlier'),(aid,'LINKED',watch)])
    self.assertEqual(c.execute('SELECT status FROM hw_sessions WHERE watch_id=?',(watch,)).fetchone()[0],'CREATED')
 
+ def test_concurrent_stop_invalidates_idle_holding_batch(self):
+  at=self.now.isoformat()
+  assets=[f'holding-{index}' for index in range(5)]
+  with app.connect() as c:
+   payload=json.dumps({'positions_complete':True,'observed':at,'positions':[
+    dict(self.holding,asset_id=aid) for aid in assets]})
+   c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(payload,self.pid))
+   for aid in assets:
+    request=json.dumps({'asset_id':aid,'portfolio_ids':[self.pid],'watch_mode':'exit'})
+    c.execute("""INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due)
+     VALUES(1,?,0,?,'manual holding','PAUSED',?,'synthetic','{}','{}',?,?,0)""",(aid,aid,request,at,at))
+    c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',
+              (1,self.pid,aid,'LINKED',aid,0,at))
+  execute=app.DatabaseConnection.execute
+  stopped=False
+  def stop_after_batch_reads(connection,sql,*args):
+   nonlocal stopped
+   cursor=execute(connection,sql,*args)
+   if not stopped and 'FROM json_each(?) k CROSS JOIN hw_holding_autowatch' in sql:
+    rows=cursor.fetchall()
+    if {row['asset_id'] for row in rows}==set(assets[3:]):
+     self.assertFalse(connection.in_transaction)
+     stopped=True
+     with app.connect() as other:
+      other.execute("UPDATE hw_sessions SET status='COMPLETED' WHERE user_id=1 AND watch_id=?",(assets[-1],))
+    return iter(rows)
+   return cursor
+  with patch.object(app.DatabaseConnection,'execute',stop_after_batch_reads):
+   self.assertIsNone(self.tick(verify=lambda *_:self.fail('No activation expected')))
+  self.assertTrue(stopped)
+  # With no intervening commit, the same scan stays read-only.
+  with app.connect() as other:
+   other.execute('BEGIN IMMEDIATE')
+   self.assertIsNone(self.tick(verify=lambda *_:self.fail('No activation expected')))
+  with app.connect() as c:
+   self.assertEqual([tuple(row) for row in c.execute(
+    'SELECT asset_id,status,watch_id,next_attempt FROM hw_holding_autowatch ORDER BY asset_id')],
+    [(aid,'LINKED',aid,0) for aid in assets[:-1]]+
+    [(assets[-1],'STOPPED',assets[-1],self.now.timestamp()+300)])
+   self.assertEqual(dict(c.execute('SELECT watch_id,status FROM hw_sessions').fetchall()),
+                    {**dict.fromkeys(assets[:-1],'PAUSED'),assets[-1]:'COMPLETED'})
+
  def test_concurrent_link_refresh_releases_unused_writer_before_next_tenant(self):
   at=self.now.isoformat();aid=self.holding['asset_id']
   with app.connect() as c:

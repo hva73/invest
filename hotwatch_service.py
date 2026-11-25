@@ -866,6 +866,10 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
      if status=='VERIFYING':selected=(uid,pid,holding,watch);break
      attempts[pid,aid]={'status':status,'watch_id':linked,'next_attempt':epoch+300,'updated':at}
     else:
+     # Cached no-write decisions can also become stale before the scan ends.
+     if not c.in_transaction and c.execute('PRAGMA data_version').fetchone()[0]!=scan_version:
+      c.execute('BEGIN IMMEDIATE');lock_without_write=True
+      continue
      break
    # A refreshed batch may need no write. Do not retain a writer lock
    # while scanning subsequent tenants when nothing was actually changed.
