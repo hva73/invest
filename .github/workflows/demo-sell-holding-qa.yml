@@ -1,0 +1,38 @@
+name: Demo direct holding sale QA (no production)
+on: [pull_request]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.event.pull_request.head.ref == 'codex/issue54-demo-sell-holding-identity'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: .:tests
+      ESCAPE_PLAYWRIGHT_MANAGED: '1'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Negative control and fixed identity regression
+        run: |
+          git rev-parse HEAD
+          cp static/demo-data.js /tmp/demo-fixed.js
+          trap 'cp /tmp/demo-fixed.js static/demo-data.js' EXIT
+          git show 3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65:static/demo-data.js > static/demo-data.js
+          if node tests/test_demo_chart_identity.cjs >/tmp/demo-negative.log 2>&1; then
+            cat /tmp/demo-negative.log
+            exit 1
+          fi
+          cat /tmp/demo-negative.log
+          grep -F "'9' !== '2'" /tmp/demo-negative.log
+          cp /tmp/demo-fixed.js static/demo-data.js
+          node tests/test_demo_chart_identity.cjs
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt playwright==1.56.0
+      - run: python -m playwright install --with-deps chromium
+      - run: python tests/browser_demo_sell_holding.py
