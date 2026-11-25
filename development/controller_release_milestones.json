@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-25T16:45:00Z",
+  "updated_at": "2026-11-25T17:18:56.735Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -140,7 +140,7 @@
       "title": "CPU/RAM, workers og serverdrift",
       "status": "in_progress",
       "issue": 14,
-      "evidence": "PR #293 integreret 613123e0, exact 0d2a0628 CI 45647848879 609 tests PASS og alle 5 ændrede blobs matcher. Backend afgrænset til worker/supervisor og synlige cgroups. UI #14:6 køsat; faktiske hostingmålinger udestår.",
+      "evidence": "#293 backend og #296 adminvisning integreret, fokuserede tests bestået. Faktiske hostingmålinger og fuld kapacitetsaccept udestår.",
       "subgoals": [
         {
           "id": "backend",
@@ -153,9 +153,9 @@
         {
           "id": "display",
           "title": "Adminvisning og historik",
-          "status": "in_progress",
-          "evidence": "#14:6 klar på exact 613123e0; eksisterende admin UI, ingen faktisk start dokumenteret.",
-          "updated_at": "2026-11-25T16:31:00Z",
+          "status": "verified",
+          "evidence": "#296 integreret 171dcc057; præcis CI 45655114007 og fokuseret admin-UI-test i QA #301 run 45662719831 bestået. Faktisk hostingmåling og release udestår.",
+          "updated_at": "2026-11-25T17:18:56.735Z",
           "owner_role": "desktop"
         },
         {
@@ -173,7 +173,7 @@
           "owner_role": "data"
         }
       ],
-      "updated_at": "2026-11-25T16:31:00Z"
+      "updated_at": "2026-11-25T17:18:56.735Z"
     },
     {
       "id": "core",
