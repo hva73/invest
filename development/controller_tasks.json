@@ -102,5 +102,20 @@
     ],
     "dependencies": [],
     "task": "P0 actual executable phase-separated backup implementation, not another deferral or quota estimator. New actual private source readback Actions 45577915186 job 139080324957: adapter sha256 65d1d5d5178d3afe5092f7e61ae39cc5aabb29948ed34def395ef8d883161ad3, estimate_required_bytes base=(DB+sidecars)*2+source*2+existing then +10%; sequence under lock authorize/preflight/check_quota/stage/stop/quiescence/backup_and_apply/verify_backup/verify_installed/start/health/cleanup; raw snapshot one verified copy, no automatic DB restore. DB 6839615488, free_lower 12644040128, used_upper 7834959872, owner cap 20GB, 928G physical host free. Concrete implementation in existing retention module: locally stream a verified private raw backup into tar+gzip directly (never intermediate tar), hard output byte ceiling from caller supplied verified available quota, fsync and verify complete manifest/file hashes by streaming decompression, preserve raw + previous backup, fail closed and remove only own incomplete temporary output if cap exceeded or corruption; no deletion of original in helper, no credentials/network. Test real synthetic tar+gzip, incompressible abort, corrupt output, unexpected member, source changes, exact cap, valid recovery hashes. Document integration requirements for actual private bridge, including raw backup verification/marker/resume and journal during restart; do not lower actual private gate or claim release-ready. Gen5 #256 review hold remains, no duplication of its guard code. No production actions, workflows, commit/push, extra files. This is a real functional bounded compression primitive for phase separation, not a standalone budget calculator."
+  },
+  {
+    "issue": 57,
+    "role": "release",
+    "priority": 1,
+    "status": "ready",
+    "generation": 7,
+    "base_branch": "codex/issue57-combined-release-20261124",
+    "base_sha": "3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65",
+    "paths": [
+      "tools/nordicway_release_retention.py",
+      "tests/test_nordicway_release_retention.py"
+    ],
+    "dependencies": [],
+    "task": "P0 actual production-compatible follow-up to coordinator PR #260 (phase bridge), exact head 76894fa5a5e5f83e1aebee7a729f116dd6292481 CI 45586514365 success. Owner requires release within strict 20 GB; no repeat compaction, no generic reports or isolated compression helpers. Implement missing compressed-directory post-success retention compatibility in the EXISTING retention entry point. New bridge creates one private timestamped directory containing escape.db.gz (gzip level 6, decompressed exact SQLite snapshot, SHA256 in manifest.database_sha256, manifest.database_bytes integer, manifest.database_encoding='gzip', format=1), manifest.json, code/ and keys as legacy. The server already verifies this compressed DB before mutation and after apply, preserves prior retained .tar.gz, and its existing resume supports it. Existing maintain() currently assumes escape.db raw and errors. Implement a positive distinct safe compressed-retained outcome, validate manifest schema, size and type, full bounded nested metadata inventory against manifest, stable current installed SHA/fresh directory, no extra server compression, no raw copy, no FTP account or transfer, no delete of old archive or new compressed directory when only metadata verified. Distinguish bridge verification from external metadata verification explicitly. Preserve legacy verified retention path and tests; no weakening of hash checks for legacy. Include regression for new valid layout and invalid manifest/dual raw+gzip/changed inventory/current SHA, no compression or deletion calls in compressed path. Run relevant tests and fix failures. Deliver draft PR with real code changes and test evidence. This is not the app deploy or approval, coordinator owns #260 integration and terminal handoff; do not modify bridge installer or production. Do not pause on ordinary implement/test problems; continue to verified deliverable. No credentials, broker, network, workflows, merge or deploy. Work only approved paths."
   }
 ]
