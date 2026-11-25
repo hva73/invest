@@ -240,7 +240,7 @@ def release_required(new_size):
     base = 2 * new_size + 2 * sum(sizes.values()) + existing
     return base + max(MARGIN, (base+9)//10)
 
-def main():
+def main(check_only=False):
     if sys.platform != "linux":
         raise ValueError("server_linux_required")
     bridge_info = BRIDGE.lstat()
@@ -279,6 +279,9 @@ def main():
         release_required(old_size) # validate exact candidate before service stop
         if adapter.service_status()!="started":
             raise ValueError("service_not_started")
+        if check_only:
+            emit(status="preflight_pass", database_bytes=old_size, free_bytes=free, legacy_required_bytes=release_required(old_size), changes="none")
+            return
         os.replace(gate, held)
         sync_dir(BRIDGE)
         stopped, swapped, healthy = False, False, False
@@ -431,6 +434,9 @@ def exercise_maintenance_flow(insufficient=False, health_failure=False):
              patch.multiple(sys.modules[__name__],HOME=root,APP=app,BRIDGE=private,REPO=repo,
                 ADAPTER_HASH=hashlib.sha256(module.read_bytes()).hexdigest(),MARGIN=1024,
                 quota=lambda: 100_000_000,release_required=lambda size: 200_000_000 if insufficient else 2*size+2048):
+            main(check_only=True)
+            assert state["running"] and state["starts"]==0 and (private/"deploy-enabled").exists()
+            assert source.read_bytes()==original and list(backups.iterdir())==[retained]
             try:
                 main()
             except ValueError as exc:
@@ -491,6 +497,7 @@ if __name__=="__main__":
     mode=p.add_mutually_exclusive_group(required=True)
     mode.add_argument("--self-test",action="store_true")
     mode.add_argument("--apply-maintenance",action="store_true")
+    mode.add_argument("--check-only",action="store_true")
     args=p.parse_args()
     try:
         if args.apply_maintenance:
@@ -498,8 +505,10 @@ if __name__=="__main__":
             def interrupt(signum, frame):
                 raise KeyboardInterrupt()
             signal.signal(signal.SIGTERM, interrupt)
-        self_test() if args.self_test else main()
+        self_test() if args.self_test else main(check_only=args.check_only)
     except Exception as exc:
         reason=str(exc)
-        emit(status="blocked",reason=reason if re.fullmatch(r"[a-z_]{1,100}",reason) else type(exc).__name__)
+        import traceback
+        frames = [{"file":pathlib.Path(t.filename).name,"line":t.lineno,"function":t.name} for t in traceback.extract_tb(exc.__traceback__)]
+        emit(status="blocked",reason=reason if re.fullmatch(r"[a-z_]{1,100}",reason) else type(exc).__name__,frames=frames)
         sys.exit(1)
