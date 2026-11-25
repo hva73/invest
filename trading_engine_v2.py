@@ -178,9 +178,13 @@ def _market_rows(samples, as_of, asset_id, identity=None):
         raise ValueError("Market history is empty")
     if identity is not None:
         oldest = as_of - timedelta(seconds=GLOBAL_RISK["max_quote_age_s"])
-        if end < oldest or any(row.get(name) and stamp(row[name]) < oldest
-                               for name in ("bid_at", "ask_at", "status_at")):
+        if end < oldest:
             raise ValueError("Market history is stale")
+        # Historical status groups observations; it is not current execution authority.
+        # A fresh price history can support price-only rules without an executable quote.
+        if not all(row.get(name) and stamp(row[name]) >= oldest
+                   for name in ("bid_at", "ask_at")):
+            row["bid"] = row["ask"] = None
     return rows, provenance
 
 

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from hotwatch_contract import GLOBAL_RISK, checksum
 from hotwatch_features import features
-from hotwatch_strategy import BASELINE, EARLY_CATALYST_V1, risk_gate
+from hotwatch_strategy import BASELINE, EARLY_CATALYST_V1, risk_gate, rule_state
 import trading_engine_v2
 from trading_engine_v2 import (
     Evidence, MarketAccess, MarketFeatureInput, MarketHistory, MarketIdentity, MarketSubscriber,
@@ -71,6 +71,7 @@ class TradingEngineV2Tests(unittest.TestCase):
                 "verification": "verified", "event_time": at.isoformat(),
                 "price": str(price), "high": str(price), "low": str(price), "close": str(price),
                 "bid": str(price - Decimal(".05")), "ask": str(price + Decimal(".05")),
+                "bid_at": at.isoformat(), "ask_at": at.isoformat(), "status_at": at.isoformat(),
                 "volume": "400" if i == 39 else "100", "volume_type": "interval",
             }
             samples.append(Evidence(row, at, at, (f"trade:{i}",)))
@@ -217,7 +218,6 @@ class TradingEngineV2Tests(unittest.TestCase):
             changed_row(venue="NYSE"), changed_row(asset_id="other"),
             changed_row(currency="EUR"), changed_row(error_code="NO_DATA"),
             changed_row(price="NaN"), changed_row(bid_at=self.later.isoformat()),
-            changed_row(ask_at=(self.at - timedelta(seconds=121)).isoformat()),
             changed_row(price_time_kind="bar_open"),
             replace(history, samples=history.samples[:-1] + (replace(last, source_ids=()),)),
             replace(history, samples=history.samples[:-1] + (replace(last, available_at=self.later),)),
@@ -261,6 +261,33 @@ class TradingEngineV2Tests(unittest.TestCase):
             self.assertEqual(captured_row["price"], "100.5")
             with self.assertRaises(TypeError):
                 captured_row["price"] = "2"
+
+    def test_optional_quote_freshness_does_not_discard_price_history(self):
+        history = self.shared_history(self.market_input())
+        subscriber = self.subscriber(history, self.scope)
+        fresh = shared_market_features_batch(history, [subscriber])[0]
+        self.assertIsNotNone(fresh["spread_pct"].value)
+        stale = (self.at - timedelta(seconds=121)).isoformat()
+        last = history.samples[-1]
+        for changes in ({"ask_at": stale}, {"bid_at": None}, {"ask_at": None}):
+            with self.subTest(changes=changes):
+                altered = replace(history, samples=history.samples[:-1] +
+                                  (replace(last, value=last.value | changes),))
+                facts = shared_market_features_batch(altered, [subscriber])[0]
+                self.assertEqual(facts["sample_count"].value, 40)
+                self.assertEqual(facts["breakout"].value, fresh["breakout"].value)
+                self.assertIsNone(facts["spread_pct"].value)
+                visible = {key: item.value for key, item in facts.items()}
+                self.assertTrue(rule_state({"metric": "breakout", "operator": "==", "value": True},
+                                           visible, BASELINE["parameters"]))
+                self.assertIsNone(rule_state({"metric": "spread_pct", "operator": "<=", "value": 1},
+                                             visible, BASELINE["parameters"]))
+                _, codes, _ = risk_gate(self.sample.value, visible, self.risk.value,
+                                        self.at, "BUY", require_macd=False)
+                self.assertIn("SPREAD_UNKNOWN", codes)
+        old_status = replace(history, samples=history.samples[:-1] +
+                             (replace(last, value=last.value | {"status_at": stale}),))
+        self.assertEqual(shared_market_features_batch(old_status, [subscriber])[0], fresh)
 
     def test_shared_batch_accepts_closed_bars_at_the_freshness_boundary(self):
         history = self.shared_history(self.market_input())

@@ -88,8 +88,11 @@ står for at attestere bevillingen og leverandørevidensen.
 Den delte sti kræver verificerede prisobservationer fra EODHD eller Pluto
 med matchende kilde, feed, børs, valuta og instrument. Bars skal matche
 historikkens timeframe og være lukket ved tilgængelighedstiden. Den nyeste
-observation (for bars gælder lukketid) og dens eventuelle quote- og
-statustider skal være inden for den gældende globale datatidsgrænse.
+prisobservation (for bars gælder lukketid) skal være inden for den globale
+datatidsgrænse. Manglende eller for gamle bid/ask-tider gør spread ukendt,
+men afviser ikke en ellers gyldig prishistorik. Historisk markedsstatus
+grupperer observationer; den dokumenterer ikke aktuel handelsadgang.
+Fremtidig evidens afvises fortsat. Individuel risikogate gælder uændret.
 Ugyldig historik giver tomme opslag for hele kaldet. En ugyldig bevilling
 eller et ugyldigt scope giver kun den pågældende modtager et tomt opslag.
 Individuelle beslutninger bruger fortsat `evaluate` med egen risiko og
