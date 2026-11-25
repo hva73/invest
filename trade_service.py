@@ -421,43 +421,40 @@ def check(connect,user_id,pid,factory=None):
     identity_error='Pluto bekræftede ikke forslagsidentiteten. Kontrollér status i Pluto.'
     if not isinstance(raw,dict) or raw.get('orderIntentId')!=reference:
         raise TradeError(identity_error)
+    def identity_nodes(response):
+        if 'orderIntents' not in response:
+            return [response]
+        items=response['orderIntents']
+        if (not isinstance(items,list) or len(items)!=1 or not isinstance(items[0],dict)
+                or 'orderIntentId' not in items[0]):
+            raise TradeError(identity_error)
+        return [response,items[0]]
+
+    nodes=identity_nodes(raw)
     payload=proposal['payload']
     expected={key:payload.get(key) for key in ('portfolioId','collectionId')}
+    expected['orderIntentId']=reference
     # A readback may corroborate an existing order ID, but cannot establish one.
     expected['orderId']=None
-    nodes=[raw]
-    if 'orderIntents' in raw:
-        items=raw['orderIntents']
-        if (not isinstance(items,list) or len(items)!=1 or not isinstance(items[0],dict)
-                or items[0].get('orderIntentId')!=reference):
-            raise TradeError(identity_error)
-        nodes.append(items[0])
 
     orders=payload.get('orders') or []
     if len(orders)==1:
         expected.update({key:orders[0].get(key) for key in ('assetId','side','orderType','timeInForce')})
 
     previous=proposal['response']
-    prior_nodes=[]
     # Historical readbacks may belong to a different intent. Only use their
     # identity fields when the response belongs to the stored proposal reference.
-    if intent_reference(previous,payload)==reference:
-        prior_nodes.append(previous)
-        if 'orderIntents' in previous:
-            items=previous['orderIntents']
-            if (not isinstance(items,list) or len(items)!=1 or not isinstance(items[0],dict)
-                    or items[0].get('orderIntentId')!=reference):
-                raise TradeError(identity_error)
-            prior_nodes.append(items[0])
-        if any('orderIntentId' in node and node['orderIntentId']!=reference for node in prior_nodes):
-            raise TradeError(identity_error)
+    prior_nodes=identity_nodes(previous) if intent_reference(previous,payload)==reference else []
 
-    # Validate every supplied historical identity against the immutable request
-    # before using any historical field as evidence for another identity.
-    for field,value in expected.items():
-        if value is not None and any(field in node and node[field]!=value for node in prior_nodes):
+    # A saved intent can recover from a legacy identity conflict if the new
+    # reply confirms every disputed request field independently.
+    required={field:value for field,value in expected.items() if value is not None
+              and any(field in node and node[field]!=value for node in prior_nodes)}
+    if required:
+        if row['intent_id']!=reference:
             raise TradeError(identity_error)
-    required={}
+        # In particular, an order ID from this response is no longer evidence.
+        prior_nodes=[]
     for field in ('portfolioId','orderId'):
         if expected[field]:
             continue

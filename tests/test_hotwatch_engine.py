@@ -28,25 +28,27 @@ class HotWatch(unittest.TestCase):
    portfolios.replace_pluto(c,1,[{'id':'portfolios:root','name':'Root','kind':'portfolio'}])
    pid=c.execute("SELECT id FROM portfolios WHERE external_id='portfolios:root'").fetchone()[0]
    for origin,intent in (('@hotwatch','signal-intent'),('@manual-buy','manual-intent')):
-    # A legacy readback stored the manual intent's response on the signal proposal.
-    response={'orderIntentId':'manual-intent','status':'PENDING'}
+    response={'orderIntentId':intent,'status':'PENDING','portfolioId':'root'}
     c.execute("INSERT INTO broker_proposals(user_id,fingerprint,report_id,candidate_id,kind,portfolio_id,payload,status,created,intent_id,response) VALUES(1,?,?,'synthetic-MERC','direct',?,?,'sent',?,?,?)",
               (intent,origin,pid,json.dumps(payload),self.now.timestamp(),intent,json.dumps(response)))
-  # A manual proposal for this asset cannot replace the signal's evidence.
-  with patch.object(trade_service,'client',return_value=(object(),{})),patch.object(trade_service,'call',side_effect=[
-      {'orderIntentId':'manual-intent','status':'ACCEPTED'},
-      {'orderIntentId':'signal-intent','orderId':'unrelated','status':'ACCEPTED'},
-      {'orderIntentId':'signal-intent','status':'ACCEPTED'}]) as call:
-   hotwatch_service.refresh_holding_origin(app.connect,1,pid,'synthetic-MERC')
-   self.assertEqual([item['provider_status'] for item in trade_service.summaries(app.connect,1)],['PENDING','PENDING'])
-   hotwatch_service.refresh_holding_origin(app.connect,1,pid,'synthetic-MERC')
-   self.assertEqual([item['provider_status'] for item in trade_service.summaries(app.connect,1)],['PENDING','PENDING'])
-   hotwatch_service.refresh_holding_origin(app.connect,1,pid,'synthetic-MERC')
-  self.assertEqual([call_args.args[2:] for call_args in call.call_args_list],
-                   [('get_order_intent',{'orderIntentId':'signal-intent'})]*3)
-  self.assertEqual([item['provider_status'] for item in trade_service.summaries(app.connect,1)],['PENDING','ACCEPTED'])
-  with app.connect() as c:
-   self.assertIsNone(hotwatch_service.holding_origin(c,1,pid,'synthetic-MERC'))
+  for history in ({'orderIntentId':'manual-intent'},
+                  {'orderIntentId':'signal-intent','portfolioId':'other'}):
+   with self.subTest(history=history):
+    with app.connect() as c:
+     c.execute("UPDATE broker_proposals SET response=? WHERE user_id=1 AND report_id='@hotwatch'",
+               (json.dumps(dict(history,status='PENDING')),))
+    valid={'orderIntentId':'signal-intent','status':'ACCEPTED'}
+    if 'portfolioId' in history:valid['portfolioId']='root'
+    replies=[dict(valid,orderIntentId='manual-intent'),dict(valid,orderId='unrelated'),valid]
+    with patch.object(trade_service,'client',return_value=(object(),{})),patch.object(trade_service,'call',side_effect=replies) as call:
+     for expected in ('PENDING','PENDING','ACCEPTED'):
+      hotwatch_service.refresh_holding_origin(app.connect,1,pid,'synthetic-MERC')
+      statuses={p['report_id']:p['provider_status'] for p in trade_service.summaries(app.connect,1)}
+      self.assertEqual(statuses,{'@manual-buy':'PENDING','@hotwatch':expected})
+    self.assertEqual([args.args[2:] for args in call.call_args_list],
+                     [('get_order_intent',{'orderIntentId':'signal-intent'})]*3)
+    with app.connect() as c:
+     self.assertIsNone(hotwatch_service.holding_origin(c,1,pid,'synthetic-MERC'))
 
  def test_sync_reads_sanitized_fallback_errors_through_existing_endpoint(self):
   import hotwatch_supervisor

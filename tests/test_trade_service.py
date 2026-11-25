@@ -370,6 +370,46 @@ class Trading(unittest.TestCase):
     self.assertEqual(checked['response'],valid)
     self.assertEqual(checked['status'],'sent')
 
+ def test_check_recovers_from_contradicted_request_identity(self):
+  pid=self.send(self.estimate())['id']
+  accepted={'orderIntentId':'synthetic-intent','status':'ACCEPTED'}
+  for identity,correction in (
+      ({'portfolioId':'other-depot'},{'portfolioId':'root'}),
+      ({'portfolioId':'other-depot','orderId':'unrelated'},{'portfolioId':'root'}),
+      ({'portfolioId':'root','orderIntents':[dict(accepted,portfolioId='other-depot')]},{'portfolioId':'root'}),
+      ({'portfolioId':'other-depot','orderIntents':[{'orderIntentId':'other-intent','orderId':'unrelated'}]},
+       {'portfolioId':'root'}),
+      ({'side':'SELL','orderId':'unrelated'},{'side':'BUY'}),
+      ({'portfolioId':'other-depot','assetId':'other-asset'},{'portfolioId':'root','assetId':'asset-test'})):
+   with self.subTest(identity=identity):
+    valid=dict(accepted,**correction)
+    response={'orderIntentId':'synthetic-intent','status':'PENDING',**identity}
+    with app.connect() as c:
+     c.execute('UPDATE broker_proposals SET response=? WHERE id=?',(json.dumps(response),pid))
+    prior=dict(trade.get(app.connect,1,pid))
+    incomplete=[{key:value for key,value in valid.items() if key!=field} for field in correction]
+    for reply in [dict(valid,portfolioId='other-depot'),dict(valid,orderId='unrelated'),*incomplete]:
+     self.intent_result=reply
+     with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+      trade.check(app.connect,1,pid,self.factory)
+     self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+    self.intent_result=valid
+    checked=trade.check(app.connect,1,pid,self.factory)['proposal']
+    self.assertEqual(checked['response'],valid)
+    self.assertEqual(checked['status'],'sent')
+
+ def test_conflicting_response_cannot_supply_its_own_recovery_reference(self):
+  pid=self.send(self.estimate())['id']
+  previous={'orderIntentId':'synthetic-intent','portfolioId':'other-depot','status':'PENDING'}
+  with app.connect() as c:
+   c.execute("UPDATE broker_proposals SET intent_id=NULL,status='uncertain',response=? WHERE id=?",
+             (json.dumps(previous),pid))
+  prior=dict(trade.get(app.connect,1,pid))
+  self.intent_result=dict(previous,portfolioId='root',status='ACCEPTED')
+  with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+   trade.check(app.connect,1,pid,self.factory)
+  self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+
  def test_check_only_reuses_order_id_from_compatible_prior_identity(self):
   pid=self.send(self.estimate())['id']
   intent={'orderIntentId':'synthetic-intent','orderId':'original-order'}
