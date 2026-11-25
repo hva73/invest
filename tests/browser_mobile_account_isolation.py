@@ -12,7 +12,9 @@ def browser_fixture():
 const content = document.getElementById('content');
 const pending = [];
 const userIds = {alpha: 11, beta: 22};
-let username,epoch=0,holdCurrentLoad=false,poll;
+let username,epoch=0,holdCurrentLoad=false,omitHistory=false,poll;
+// Run polling deterministically even when the browser fixture has no focused window.
+Object.defineProperty(document, 'hidden', {value: false});
 const realTimeout = window.setTimeout;
 window.setTimeout = (callback, delay) => {
     if (delay === 15000) { poll = callback; return null; }
@@ -41,7 +43,7 @@ const api = (path, args) => {
         sessions: [session(user + '-watch'), session(user + '-next')], kill_switch: {}
     });
     if (path.includes('view=history')) return Promise.resolve({
-        sessions: [session(user + '-closed', 'COMPLETED')], next_cursor: user + '-cursor'
+        sessions: omitHistory ? [] : [session(user + '-closed', 'COMPLETED')], next_cursor: user + '-cursor'
     });
     if (path.startsWith('reports/')) return Promise.resolve({candidates: []});
     return Promise.resolve({sessions: [], kill_switch: {}});
@@ -239,6 +241,94 @@ const run = async () => {
     pendingAck.reject(Error('private beta acknowledgement error'));
     await delayedAck;
     assert(!ack.isConnected,'Old acknowledgement remained mounted');
+
+    const failures = [];
+    const check = (condition, message) => { if (!condition) failures.push(message); };
+    const flush = () => new Promise(resolve => setTimeout(resolve, 0));
+    const openHolding = () => EngineUI.openHoldingStatus({key: 'position', ticker: 'ALPHA', label: 'Original'});
+    const holding = watch => ({...account('alpha'), dashboard: {positions: [{
+        key: 'position', ticker: 'ALPHA', hot_watch: watch
+    }]}});
+    window.TradeUI = {holdingActions: () => ''};
+    window.DashboardUI = {watchLabel: () => 'Updated holding'};
+
+    content.innerHTML = '';
+    openHolding();
+    const currentHolding = poll();
+    take('state', 'alpha').resolve(holding({auto_status: {status: 'VERIFYING'}}));
+    await currentHolding;
+    assert(byId('engine-dialog').textContent.includes('Updated holding'), 'Current holding poll did not refresh');
+    const failedLink = poll();
+    take('state', 'alpha').resolve(holding({session: {watch_id: 'alpha-linked'}}));
+    await flush();
+    take('state', 'alpha').reject(Error('transient detail error'));
+    await failedLink;
+    assert(byId('engine-dialog').dataset.holdingKey === 'position' &&
+        !byId('engine-dialog').dataset.watchId, 'Failed detail replaced holding identity');
+    const currentLink = poll();
+    take('state', 'alpha').resolve(holding({session: {watch_id: 'alpha-linked'}}));
+    await flush();
+    take('state', 'alpha').resolve(account('alpha'));
+    await currentLink;
+    assert(byId('engine-dialog').dataset.watchId === 'alpha-linked' &&
+        !byId('engine-dialog').dataset.holdingKey, 'Current holding poll did not open linked detail');
+    const externalPoll = poll;
+    epoch++;
+    const staleExternal = externalPoll();
+    const externalState = pending.findIndex(request => request.path === 'state');
+    if (externalState >= 0) pending.splice(externalState, 1)[0].resolve(account('alpha'));
+    await staleExternal;
+    check(externalState < 0, 'Old detail timer started a request during logout');
+
+    for (const watch of [{auto_status: {status: 'VERIFYING'}}, {session: {watch_id: 'alpha-stale'}}]) {
+        openHolding();
+        const modal = byId('engine-dialog');
+        const before = modal.innerHTML;
+        const stalePoll = poll();
+        const staleState = take('state', 'alpha');
+        epoch++; // Logout starts while the dashboard and username are still present.
+        staleState.resolve(holding(watch));
+        await flush();
+        const followUp = pending.findIndex(request => request.path === 'state');
+        check(followUp < 0, 'Holding poll requested detail during logout');
+        if (followUp >= 0) pending.splice(followUp, 1)[0].resolve(account('alpha'));
+        await stalePoll;
+        check(modal.innerHTML === before && !modal.dataset.watchId, 'Holding poll wrote to the dialog during logout');
+    }
+
+    switchAccount('alpha');
+    await flush();
+    const more = EngineUI.click(button(history));
+    take('&before=', 'alpha').resolve({sessions: [session('alpha-older', 'COMPLETED')]});
+    await more;
+    const older = '[data-engine-detail="alpha-older"]';
+    EngineUI.mount(false);
+    await flush();
+    assert(button(older), 'Same-session refresh lost paginated history');
+    omitHistory = true;
+    switchAccount(null);
+    switchAccount('alpha');
+    await flush();
+    check(!button(older) && !button('[data-engine-detail="alpha-closed"]'), 'Relogin reused prior-session history');
+
+    content.innerHTML = '';
+    const sameAck = ack.cloneNode();
+    sameAck.disabled = false;
+    content.append(sameAck);
+    const currentAck = click('[data-engine-ack]');
+    take('/ack-signal', 'alpha').reject(Error('current acknowledgement error'));
+    await currentAck;
+    assert(!sameAck.disabled && byId('notice').textContent === 'current acknowledgement error',
+        'Current acknowledgement error was hidden');
+    const staleAck = click('[data-engine-ack]');
+    const staleAckRequest = take('/ack-signal', 'alpha');
+    epoch++; username = null; content.innerHTML = '';
+    epoch++; username = 'alpha';
+    byId('notice').textContent = 'relogin notice';
+    staleAckRequest.reject(Error('prior-session acknowledgement error'));
+    await staleAck;
+    check(byId('notice').textContent === 'relogin notice', 'Prior-session acknowledgement error reached global notice');
+    assert(!failures.length, failures.join(' | '));
 };
 window.testResult = run().then(() => 'PASS', error => String(error) + '\\n' + (error.stack || ''));
 </script>
