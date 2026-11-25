@@ -172,6 +172,20 @@ overgangens digest, når skiftet gælder. Kalderen har fortsat ansvar for
 autorisation og evidens. Funktionen læser en allerede initialiseret
 testdatabase og har ingen live-rute, migration eller ordrehandling.
 
+`read_test_position_exit(...)` tager de samme argumenter og returnerer en
+uforanderlig `PositionExitReadback` fra samme evaluering. Den indeholder
+fuldt `scope`, evalueringens UTC-tid `as_of`, `active_strategy` som
+(ID, version, checksum), den oprindelige `entry_origin` og exitbeslutningen
+i `decision`. `evaluate_test_position_exit(...)` returnerer fortsat selve
+`Decision`.
+
+`first_switch` bevarer journalens første skift med den oprindeligt
+registrerede positionsevidens, herunder kostpris, kilder og tidsstempler.
+`active_switch` indeholder det skift, der gælder ved `as_of`, med sin egen
+positionsevidens. Før første skift er begge felter `None`, og
+`entry_origin` bærer den tilgængelige entry-proveniens. Journalens kostpris
+er positionsevidens fra skiftet. Et eventuelt fill kræver særskilt readback.
+
 ## Replay i Strategy Lab
 
 `strategy_lab.compare_v2(connect, uid, data)` bruger samme valg af watch,

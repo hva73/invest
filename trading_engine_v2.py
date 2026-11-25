@@ -339,6 +339,24 @@ class PositionStrategySwitch:
         return checksum(asdict(self))
 
 
+@dataclass(frozen=True)
+class PositionExitReadback:
+    scope: Scope
+    decision: Decision
+    entry_origin: DecisionOrigin
+    first_switch: PositionStrategySwitch | None
+    active_switch: PositionStrategySwitch | None
+
+    @property
+    def as_of(self) -> str:
+        return self.decision.origin.as_of
+
+    @property
+    def active_strategy(self) -> tuple[str, str, str]:
+        origin = self.decision.origin
+        return origin.strategy_id, origin.strategy_version, origin.strategy_checksum
+
+
 def _resolve_position_strategy(catalog, user_id, strategy_id, version):
     record = catalog.get((user_id, strategy_id, version), catalog.get((0, strategy_id, version)))
     if isinstance(record, tuple) and len(record) == 2:
@@ -550,7 +568,27 @@ def evaluate_test_position_exit(
     *,
     expected_head_digest: str | None,
 ) -> Decision:
-    """Evaluate a simulation exit against a caller-attested journal head.
+    """Evaluate a simulation exit against a caller-attested journal head."""
+    return read_test_position_exit(
+        connect, scope, snapshot_id, as_of, entry_origin, catalog, sample, metrics, risk,
+        expected_head_digest=expected_head_digest,
+    ).decision
+
+
+def read_test_position_exit(
+    connect,
+    scope: Scope,
+    snapshot_id: str,
+    as_of: datetime,
+    entry_origin: DecisionOrigin,
+    catalog: dict[tuple[int, str, str], tuple[dict, str]],
+    sample: Evidence,
+    metrics: dict[str, Evidence],
+    risk: Evidence,
+    *,
+    expected_head_digest: str | None,
+) -> PositionExitReadback:
+    """Read back a simulation exit and its provenance against an attested head.
 
     The head must come from independent trusted simulation state, not this
     journal read. Explicit None attests that there has never been a switch.
@@ -581,8 +619,12 @@ def evaluate_test_position_exit(
     spec, catalog_digest = _resolve_position_strategy(catalog, scope.user_id, strategy_id, version)
     if catalog_digest != digest:
         raise ValueError("STRATEGY_UNVERIFIED")
-    return evaluate(scope, snapshot_id, as_of, "exit", spec, digest, sample, metrics, risk,
-                    position_switch=transition)
+    decision = evaluate(scope, snapshot_id, as_of, "exit", spec, digest, sample, metrics, risk,
+                        position_switch=transition)
+    return PositionExitReadback(
+        scope, decision, entry_origin, history[0] if transition is not None else None,
+        transition,
+    )
 
 
 def evaluate(
