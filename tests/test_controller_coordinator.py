@@ -107,7 +107,26 @@ class LocalCoordinatorTests(unittest.TestCase):
         with self.assertRaises(c.Hold):
             c.resume_repair_workspace(root,repo,row,501,1,sha,folder,record)
         c.save(record.with_suffix(".resume-history.json"),old)
+        self.assertEqual(c.repair_attempt(root,501,sha),1)
+        c.save(record.with_suffix(".resume-history-2.json"),old)
         self.assertIsNone(c.repair_attempt(root,501,sha))
+
+    def test_automatic_recovery_requires_finished_child_and_is_bounded(self):
+        row=dict(self.row,local_repair=True)
+        head="d"*40
+        record=self.root/"coordinator-repair-501.json"
+        held={"key":c.key(row),"head":head,"state":"held"}
+        c.save(record,held)
+        self.assertFalse(c.finished_repair_can_resume(self.root,row,501,head))
+        c.save(record,dict(held,child_finished=True,resume_eligible=True))
+        self.assertTrue(c.finished_repair_can_resume(self.root,row,501,head))
+        c.save(record,dict(held,state="reserved",child_finished=True,resume_eligible=True))
+        self.assertFalse(c.finished_repair_can_resume(self.root,row,501,head))
+        c.save(record,dict(held,child_finished=True,resume_eligible=True))
+        c.save(record.with_suffix(".resume-history.json"),held)
+        self.assertTrue(c.finished_repair_can_resume(self.root,row,501,head))
+        c.save(record.with_suffix(".resume-history-2.json"),held)
+        self.assertFalse(c.finished_repair_can_resume(self.root,row,501,head))
 
     def test_coordinator_defers_repair_to_developer_scheduler(self):
         row=dict(self.row,local_repair=True)
