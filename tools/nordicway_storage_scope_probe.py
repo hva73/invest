@@ -108,6 +108,37 @@ def inspect(path, token):
     }
 
 
+def review_quota_paths(read_code):
+    """Bounded structural readback; no raw strings, credentials or file data."""
+    class Redact(ast.NodeTransformer):
+        def visit_Constant(self, node):
+            if isinstance(node.value, (str, bytes)):
+                return ast.copy_location(ast.Constant(value="<redacted>"), node)
+            return node
+    selected = {
+        "nordicway_deploy_adapter.py": ("estimate_required_bytes", "quota", "preflight", "backup", "recover", "restore", "cleanup", "apply", "stage", "restart"),
+        "nordicway_deploy_sequence.py": ("execute", "deploy", "run", "sequence"),
+        "nordicway_release_backup.py": ("verify_backup", "digest"),
+    }
+    result = {}
+    for filename, prefixes in selected.items():
+        try:
+            source = read_code(filename)
+            tree = ast.parse(source)
+            functions = []
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+                        node.name.lower().startswith(prefix) for prefix in prefixes):
+                    code = ast.unparse(Redact().visit(node))
+                    if len(code) > 12000:
+                        raise ValueError("function_too_large")
+                    functions.append({"name": node.name, "structure": code})
+            result[filename] = {"sha256": hashlib.sha256(source.encode("utf-8")).hexdigest(),
+                                "functions": functions}
+        except Exception as exc:
+            result[filename] = {"status": "unavailable", "reason": type(exc).__name__}
+    return result
+
 def deployment_gates(token):
     """Read only filenames and public commit markers of the fixed deployment guard."""
     opener = urllib.request.build_opener(NoRedirect())
@@ -152,12 +183,13 @@ def deployment_gates(token):
             out["build_commit"] = commit_marker(app, "BUILD_COMMIT")
         # Only two fixed source modules, never keys, configuration, DB or arbitrary paths.
         def read_code(name):
-            if name not in ("apply_update.py","nordicway_deploy_adapter.py") or bridge_files.get(name,{}).get("type")!="file":
+            if name not in ("apply_update.py","nordicway_deploy_adapter.py","nordicway_deploy_sequence.py","nordicway_release_backup.py") or bridge_files.get(name,{}).get("type")!="file":
                 raise ValueError("source_unavailable")
             result=call("get_file_content",{"dir":bridge,"file":name,"from_charset":"UTF-8","to_charset":"UTF-8","update_html_document_encoding":0})
             if not isinstance(result,dict) or not isinstance(result.get("content"),str):raise ValueError("source_unavailable")
             return result["content"]
         out["bridge_comparison"]=bridge_comparison(read_code)
+        out["quota_path_review"]=review_quota_paths(read_code)
         out["updater_upgrade_gate_held"] = "deploy-enabled.updater-held" in bridge_files
         for name in ("escape.db", "escape.db-wal", "escape.db-journal", "escape.db-shm"):
             r = var_files.get(name, {})
