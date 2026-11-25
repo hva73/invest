@@ -11,6 +11,7 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 
@@ -296,6 +297,181 @@ def record_database_locks(observations):
         pass
 
 
+RESOURCE_INTERVAL = 60
+RESOURCE_HISTORY = 1440
+RESOURCE_FIELDS = ('epoch', 'elapsed_s', 'supervisor_cpu_s', 'worker_cpu_s',
+                   'supervisor_rss_bytes', 'worker_rss_bytes', 'host_logical_cpus',
+                   'cgroup_cpu_quota_cores', 'cgroup_cpuset_cpus', 'cgroup_memory_limit_bytes',
+                   'cgroup_cpu_ceiling_cores')
+
+
+def process_resources(pid, parent=None, proc=Path('/proc')):
+    try:
+        # comm may contain whitespace and closing parentheses. Fields after it
+        # begin with state (field 3).
+        fields = (proc / str(pid) / 'stat').read_text().rsplit(')', 1)[1].split()
+        if parent is not None and (int(fields[1]) != parent or fields[0] in ('Z', 'X')):
+            return None, None, None
+        cpu = (int(fields[11]) + int(fields[12])) / os.sysconf('SC_CLK_TCK')
+        rss = int(fields[21]) * os.sysconf('SC_PAGE_SIZE')
+        return int(fields[19]), cpu, rss if rss >= 0 else None
+    except (OSError, ValueError, IndexError):
+        return None, None, None
+
+
+def cgroup_resources(proc=Path('/proc'), root=Path('/sys/fs/cgroup')):
+    """Visible cgroup v2 constraints for the supervisor, including ancestors."""
+    try:
+        membership = next(line[3:] for line in (proc / 'self/cgroup').read_text().splitlines()
+                          if line.startswith('0::/'))
+        relative = Path(membership.lstrip('/'))
+        if '..' in relative.parts:
+            return {}
+        # Only use the standard unified mount when its hierarchy mapping is known.
+        mounts = (proc / 'self/mountinfo').read_text().splitlines()
+        if not any(line.split()[3:5] == ['/', str(root)] and
+                   line.partition(' - ')[2].startswith('cgroup2 ') for line in mounts):
+            return {}
+    except (OSError, StopIteration, ValueError):
+        return {}
+    group = root / relative
+
+    def minimum_limit(name):
+        limits = []
+        for directory in (group, *group.parents):
+            try:
+                values = (directory / name).read_text().split()
+                if values[0] != 'max':
+                    value = int(values[0]) / int(values[1]) if name == 'cpu.max' else int(values[0])
+                    if value > 0 or name == 'memory.max' and value == 0:
+                        limits.append(value)
+            except FileNotFoundError:
+                # Controllers can be absent at the hierarchy root.
+                if directory != root:
+                    return None
+            except (OSError, ValueError, IndexError, ZeroDivisionError):
+                return None
+            if directory == root:
+                break
+        return min(limits, default=None)
+
+    try:
+        ranges = [item.split('-') for item in (group / 'cpuset.cpus.effective').read_text().strip().split(',')]
+        cpus = sum(int(item[-1]) - int(item[0]) + 1 for item in ranges)
+    except (OSError, ValueError):
+        cpus = None
+    quota = minimum_limit('cpu.max')
+    return {'cgroup_cpu_quota_cores': quota, 'cgroup_cpuset_cpus': cpus,
+            'cgroup_memory_limit_bytes': minimum_limit('memory.max'),
+            'cgroup_cpu_ceiling_cores': min(quota, cpus) if quota and cpus else None}
+
+
+def read_resource_history(path):
+    try:
+        with path.open('rb') as stream:
+            rows = json.loads(stream.read(1024 * 1024))
+        if not isinstance(rows, list):
+            return []
+        return [{key: value for key in RESOURCE_FIELDS
+                 if type(value := row.get(key)) in (int, float) and 0 <= value < 1e18}
+                for row in rows[-RESOURCE_HISTORY:] if isinstance(row, dict)
+                and type(row.get('epoch')) in (int, float) and 0 < row['epoch'] < 1e18]
+    except (OSError, ValueError):
+        return []
+
+
+class ResourceSampler:
+    def __init__(self):
+        self.next_sample = None
+        self.previous = None
+        self.history = None
+
+    def tick(self, now, child):
+        if self.next_sample is not None and now < self.next_sample:
+            return
+        now = time.monotonic()
+        self.next_sample = now + RESOURCE_INTERVAL
+        import app
+        path = Path(app.DB).resolve().with_name('hotwatch-resources.json')
+        epoch = time.time()
+        pid = os.getpid()
+        _, _, supervisor_rss = process_resources(pid)
+        worker = process_resources(child.pid, pid) if child and type(child.pid) is int else (None, None, None)
+        counters = {'supervisor': (pid, time.process_time()),
+                    'worker': ((child.pid, worker[0]) if worker[0] is not None else None, worker[1])}
+        row = {'epoch': epoch, 'supervisor_rss_bytes': supervisor_rss, 'worker_rss_bytes': worker[2],
+               'host_logical_cpus': os.cpu_count(), **cgroup_resources()}
+        if self.previous:
+            previous_now, previous_epoch, previous_counters = self.previous
+            elapsed = now - previous_now
+            if 0 < elapsed <= 2 * RESOURCE_INTERVAL and abs(epoch - previous_epoch - elapsed) <= 2:
+                row['elapsed_s'] = elapsed
+                for name, (identity, cpu) in counters.items():
+                    old_identity, old_cpu = previous_counters[name]
+                    if identity is not None and identity == old_identity and cpu is not None and old_cpu is not None and cpu >= old_cpu:
+                        row[name + '_cpu_s'] = cpu - old_cpu
+        self.previous = now, epoch, counters
+
+        if self.history is None:
+            self.history = read_resource_history(path)
+        self.history = [item for item in self.history if 0 < epoch - item['epoch'] < 86400]
+        self.history = (self.history + [row])[-RESOURCE_HISTORY:]
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', dir=path.parent, prefix='.hotwatch-resources-', delete=False) as stream:
+                temporary = Path(stream.name)
+                stream.write(json.dumps(self.history, separators=(',', ':')))
+            os.replace(temporary, path)
+        except OSError:
+            pass
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+
+def resource_snapshot(path, epoch):
+    rows = sorted((row for row in read_resource_history(path) if 0 <= epoch - row['epoch'] <= 86400),
+                  key=lambda row: row['epoch'])
+    latest = rows[-1] if rows else None
+    age = epoch - latest['epoch'] if latest else None
+    fresh = age is not None and age <= 2 * RESOURCE_INTERVAL
+    sampled_at = datetime.fromtimestamp(latest['epoch'], timezone.utc).isoformat() if latest else None
+    sample = None
+    if fresh:
+        sample = {key: latest.get(key) for key in RESOURCE_FIELDS if key != 'epoch'}
+        sample['at'] = sampled_at
+        for name in ('supervisor', 'worker'):
+            cpu = sample[name + '_cpu_s']
+            sample[name + '_average_cores'] = round(cpu / sample['elapsed_s'], 6) if cpu is not None and sample['elapsed_s'] else None
+
+    windows = {}
+    for label, seconds in (('5m', 300), ('1h', 3600), ('24h', 86400)):
+        start = epoch - seconds
+        window = windows[label] = {}
+        for name in ('supervisor', 'worker'):
+            cpu_key, rss_key = name + '_cpu_s', name + '_rss_bytes'
+            cpu = covered = 0
+            peak = None
+            rss_samples = 0
+            for row in rows:
+                if row['epoch'] >= start and rss_key in row:
+                    peak = max(peak or 0, row[rss_key])
+                    rss_samples += 1
+                elapsed = row.get('elapsed_s', 0)
+                if cpu_key in row and 0 < elapsed <= 2 * RESOURCE_INTERVAL and row['epoch'] - elapsed >= start:
+                    cpu += row[cpu_key]
+                    covered += elapsed
+            window[name] = {'covered_s': round(covered, 3), 'cpu_s': round(cpu, 6) if covered else None,
+                            'average_cores': round(cpu / covered, 6) if covered else None,
+                            'rss_samples': rss_samples, 'peak_sampled_rss_bytes': peak}
+    return {'status': 'fresh' if fresh else 'stale' if latest else 'unavailable',
+            'sampled_at': sampled_at, 'age_s': round(age, 1) if age is not None else None, 'sample': sample, 'windows': windows,
+            'scope': {'usage': 'supervisor_and_owned_worker_only', 'limits': 'supervisor_visible_cgroup_v2',
+                      'host_logical_cpus': 'system_capacity_only', 'account_entitlement': None}}
+
 def run(timeout=300):
     fd = lock('supervisor')
     if fd is None:
@@ -318,6 +494,7 @@ def run(timeout=300):
     child_had_heartbeat = False
     last_report = None
     last_report_at = None
+    resources = ResourceSampler()
     def report_periodic(status, reason, count, now):
         nonlocal last_report, last_report_at
         value = (status, reason, count)
@@ -383,6 +560,7 @@ def run(timeout=300):
                         child = None
                     next_start = now + min(30, 2 ** min(attempts, 5))
                 report_periodic('restarting', 'waiting_for_heartbeat', attempts, now)
+            resources.tick(now, child)
             time.sleep(2)
     finally:
         if stop_signal is not None:
