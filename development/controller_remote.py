@@ -41,8 +41,20 @@ def issue_open(issue):
 
 def refresh(root,path):
     rows=fetch_queue()
+    # A failed lookup of one issue must not starve independent work.
+    # Fail closed for that issue for this snapshot, then retry on the next poll.
+    checks={}
     for row in rows:
-        if row["status"]=="ready" and not issue_open(row["issue"]):
+        if row["status"]!="ready":
+            continue
+        issue=row["issue"]
+        if issue not in checks:
+            try:
+                checks[issue]=issue_open(issue)
+            except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as exc:
+                checks[issue]=False
+                print("ISSUE_LOOKUP_UNAVAILABLE:",issue,type(exc).__name__,flush=True)
+        if not checks[issue]:
             row["status"]="blocked"
     temp=path.with_suffix(".tmp")
     temp.write_text(json.dumps(rows,indent=2))
