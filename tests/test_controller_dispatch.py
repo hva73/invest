@@ -124,10 +124,15 @@ class ParallelReviewTests(unittest.TestCase):
                 (root/"STOP").touch()
                 return "published"
             args=SimpleNamespace(parallel=2,publish=True,remote=True,queue=q,daily_reservation=None,per_task=60000)
-            with patch.object(d.controller_remote,"refresh"),patch.object(d.controller_receipts,"flush"),patch.object(d.controller_progress,"flush"),patch.object(d.controller_coordinator,"run_developer_repair",side_effect=repair),patch.object(d.controller_coordinator,"run_once") as coordinator,patch.object(d,"write_status",wraps=d.write_status) as status:
+            snapshots=[]
+            original_status=d.write_status
+            def status(*args,**kwargs):
+                original_status(*args,**kwargs)
+                snapshots.append(d.load(root/"status.json",{}))
+            with patch.object(d.controller_remote,"refresh"),patch.object(d.controller_receipts,"flush"),patch.object(d.controller_progress,"flush"),patch.object(d.controller_coordinator,"run_developer_repair",side_effect=repair),patch.object(d.controller_coordinator,"run_once") as coordinator,patch.object(d,"write_status",side_effect=status):
                 d.run_queue(args,root,root/"pilot.py",root/"budget.json",root/"results.json",{},results)
                 coordinator.assert_not_called()
-                self.assertTrue(any(len(list(call.args[2]))==2 and not call.args[6] for call in status.call_args_list if len(call.args)>6))
+                self.assertTrue(any(len(x["active"])==2 and not x["coordinator_running"] for x in snapshots))
             self.assertEqual(set(seen),{14,67})
             self.assertEqual(results,{"14:1":"draft_pr","67:1":"draft_pr"})
 
