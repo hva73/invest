@@ -45,7 +45,7 @@ def prior_decision(c,uid,mode,cid,before=None):
     row=c.execute('SELECT decided,payload,origin FROM candidate_decision_events WHERE user_id=? AND is_test=? AND candidate_id=?'+bound+' ORDER BY decided DESC LIMIT 1',args).fetchone()
     return (row['decided'],json.loads(row['payload']),row['origin']) if row else None
 
-def candidate_currentness(c,uid,mode,cid,at=None,report_fallback=False):
+def candidate_currentness(c,uid,mode,cid,at=None,report_fallback=False,report_ttl_s=None):
     """Determine expiry from an assessment, never from market-feed freshness."""
     at=at or datetime.now(timezone.utc)
     decision=prior_decision(c,uid,mode,cid,at.timestamp())
@@ -63,7 +63,15 @@ def candidate_currentness(c,uid,mode,cid,at=None,report_fallback=False):
         # A report containing a candidate is not necessarily a new assessment.
         # Preserve it as discovery evidence without inventing a decision time
         # or closing a watch after a deadline the sender never supplied.
-        return {'status':'REPORT_ONLY','reason':'Tidsstemplet vurdering mangler','deadline':None,'assessed_at':None,'report_seen_at':datetime.fromtimestamp(row['generated'],timezone.utc).isoformat()}
+        result={'status':'REPORT_ONLY','reason':'Tidsstemplet vurdering mangler','deadline':None,'assessed_at':None,'report_seen_at':datetime.fromtimestamp(row['generated'],timezone.utc).isoformat()}
+        if mode and report_ttl_s:
+            first=c.execute("SELECT l.generated FROM report_candidate_links l JOIN ingested_reports r ON r.id=l.report_row_id WHERE l.user_id=? AND l.is_test=? AND l.candidate_id=? AND l.generated<=? AND r.report_type!='deep_analysis' ORDER BY l.generated LIMIT 1",(uid,int(mode),cid,at.timestamp())).fetchone()
+            deadline=datetime.fromtimestamp(first[0],timezone.utc)+timedelta(seconds=report_ttl_s) if first else None
+            if deadline:
+                result['report_eligibility_until']=deadline.isoformat()
+            if deadline is None or deadline<=at:
+                result.update(status='REPORT_ONLY_EXPIRED',reason='Rapportens testperiode udløbet')
+        return result
     due=deadline<=at
     return {'status':'COLD' if reason else 'REVIEW_DUE' if due else 'CURRENT',
             'reason':reason or ('revurdering forfalder' if due else None),

@@ -1716,6 +1716,126 @@ class HotWatch(unittest.TestCase):
    for wid in ('implicit','report-only','held','pending-order'):
     with app.connect() as c:self.assertEqual(engine.row_for(c,1,wid,True)['status'],'CREATED')
 
+ def test_report_only_test_window_keeps_first_report_time_and_preserves_history(self):
+  import intel_workflows
+  report=copy.deepcopy(self.r)
+  report.update(report_id='report-only-window',generated_at=self.now.isoformat())
+  candidate=report['candidates'][0]
+  candidate.update(candidate_id='report-only-window',decision=None)
+  report_ingest.save(app.connect,1,report)
+  req=dict(self.req,watch_id='report-only-window',report_id=report['report_id'],candidate_id=candidate['candidate_id'],purpose='automatic discovery',watch_mode='entry')
+  deadline=self.now+timedelta(minutes=10)
+  with patch.dict(os.environ,{'ESCAPE_HW_TEST_REPORT_ONLY_TTL_S':'600'}):
+   engine.create(app.connect,1,req,self.now)
+   duplicate=copy.deepcopy(report)
+   duplicate.update(report_id='report-only-redelivery',generated_at=(deadline-timedelta(seconds=1)).isoformat())
+   self.assertEqual(report_ingest.save(app.connect,1,report)[0],200)
+   self.assertEqual(report_ingest.save(app.connect,1,duplicate)[0],201)
+   self.assertEqual(engine.reconcile_candidates(app.connect,deadline-timedelta(seconds=1)),0)
+   with patch.dict(os.environ,{'ESCAPE_HW_TEST_REPORT_ONLY_TTL_S':'0'}),patch.object(intel_workflows,'candidate_currentness',wraps=intel_workflows.candidate_currentness) as currentness:
+    for _ in range(3):engine.reconcile_candidates(app.connect,deadline)
+    self.assertEqual(sum(call.args[3]==candidate['candidate_id'] for call in currentness.call_args_list),3)
+   self.assertEqual(engine.reconcile_candidates(app.connect,deadline),1)
+   self.assertIsNone(engine.claim(app.connect,deadline,req['watch_id']))
+   with patch.object(intel_workflows,'candidate_currentness',wraps=intel_workflows.candidate_currentness) as currentness:
+    for offset in range(1,4):engine.reconcile_candidates(app.connect,deadline+timedelta(seconds=offset))
+    checked=[call for call in currentness.call_args_list if call.args[3]==candidate['candidate_id']]
+    self.assertEqual(len(checked),0)
+   self.assertEqual(engine.item(app.connect,1,req['watch_id'],True)['session']['status'],'EXPIRED')
+   retry=dict(req,watch_id='report-only-retry',report_id=duplicate['report_id'])
+   with self.assertRaises(EngineError) as error:engine.create(app.connect,1,retry,deadline)
+   self.assertEqual(error.exception.code,'candidate_not_current')
+   reassessed=deadline+timedelta(seconds=1)
+   fresh=copy.deepcopy(duplicate)
+   fresh.update(report_id='report-only-fresh-evidence',generated_at=reassessed.isoformat())
+   fresh['candidates'][0]['decision']=dict(self.r['candidates'][0]['decision'],decided_at=reassessed.isoformat(),deadline=(reassessed+timedelta(hours=1)).isoformat())
+   report_ingest.save(app.connect,1,fresh)
+   retry.update(report_id=fresh['report_id'],reactivation_reason='Ny tidsstemplet syntetisk vurdering')
+   self.assertEqual(engine.create(app.connect,1,retry,reassessed)['session']['status'],'CREATED')
+  with app.connect() as c:
+   row=engine.row_for(c,1,req['watch_id'],True)
+   self.assertEqual([r[0] for r in c.execute('SELECT event_type FROM hw_events WHERE watch_row_id=? ORDER BY id',(row['id'],))],['WATCH_STARTED','CANDIDATE_WATCH_EXPIRED'])
+   self.assertEqual(c.execute('SELECT count(*) FROM report_candidate_links WHERE user_id=1 AND is_test=1 AND candidate_id=?',(candidate['candidate_id'],)).fetchone()[0],3)
+
+ def test_report_only_expiry_and_backoff_preserve_protected_test_watches(self):
+  start=self.now
+  later=start+timedelta(minutes=2)
+  protected={
+   'held':{'position':'held','orders':[]},
+   'order':{'position':'none','orders':[{'status':'OPEN'}]},
+   'leased':None,
+   'paused':None,
+   'exit':None,
+  }
+  with patch.dict(os.environ,{'ESCAPE_HW_TEST_REPORT_ONLY_TTL_S':'180','ESCAPE_HW_TEST_NO_DATA_BACKOFF_S':'900'}):
+   for name,context in protected.items():
+    report=copy.deepcopy(self.r)
+    report.update(report_id='protected-'+name,generated_at=start.isoformat())
+    report['candidates'][0].update(candidate_id=report['report_id'],decision=None)
+    report_ingest.save(app.connect,1,report)
+    req=dict(self.req,watch_id='protected-'+name,report_id=report['report_id'],candidate_id=report['report_id'],purpose='automatic discovery',watch_mode='exit' if name=='exit' else 'entry')
+    engine.create(app.connect,1,req,start)
+    if name=='paused':
+     engine.control(app.connect,1,req['watch_id'],True,'pause',start)
+     continue
+    if name=='leased':
+     job=engine.claim(app.connect,later,req['watch_id'])
+     continue
+    if context:
+     with app.connect() as c:
+      row=engine.row_for(c,1,req['watch_id'],True)
+      c.execute('INSERT INTO hw_context_events(watch_row_id,observed,payload) VALUES(?,?,?)',(row['id'],start.isoformat(),json.dumps(context)))
+    for at in (start,start+timedelta(seconds=60)):
+     engine.fault(app.connect,1,req['watch_id'],True,'DATA_STALE',at)
+    self.assertEqual(stamp(engine.item(app.connect,1,req['watch_id'],True)['session']['next_due_at']),later)
+   self.assertEqual(engine.reconcile_candidates(app.connect,start+timedelta(minutes=3)),0)
+   with app.connect() as c:
+    self.assertEqual(engine.row_for(c,1,'protected-leased',True)['lease_owner'],job['lease_owner'])
+   self.assertEqual(engine.reconcile_candidates(app.connect,start+timedelta(minutes=4)),1)
+   for name in ('held','order','paused','exit'):
+    self.assertNotEqual(engine.item(app.connect,1,'protected-'+name,True)['session']['status'],'EXPIRED')
+
+ def test_no_data_backoff_reduces_claims_and_respects_session_deadline(self):
+  start=self.now
+  end=start+timedelta(seconds=300)
+  baseline=dict(self.req,watch_id='sim-baseline',purpose='automatic discovery',watch_mode='entry',end_at=end.isoformat())
+  engine.create(app.connect,1,baseline,start)
+  def missing_claims(backoff):
+   count=0
+   with patch.dict(os.environ,{'ESCAPE_HW_TEST_NO_DATA_BACKOFF_S':str(backoff)}):
+    for seconds in range(0,300,30):
+     at=start+timedelta(seconds=seconds)
+     job=engine.claim(app.connect,at,baseline['watch_id'])
+     if job:
+      engine.fault(app.connect,1,baseline['watch_id'],True,'DATA_STALE',at,lease=job['lease_owner'])
+      count+=1
+   return count
+  self.assertEqual(missing_claims(0),5)
+  # A second isolated candidate starts with the same timing and assessment.
+  report=copy.deepcopy(self.r)
+  report['report_id']='sim-dormant-report'
+  report['candidates'][0]['candidate_id']='sim-dormant-candidate'
+  report_ingest.save(app.connect,1,report)
+  baseline.update(watch_id='sim-dormant',report_id=report['report_id'],candidate_id='sim-dormant-candidate')
+  engine.create(app.connect,1,baseline,start)
+  self.assertEqual(missing_claims(900),2)
+  dormant=engine.item(app.connect,1,baseline['watch_id'],True)['session']
+  self.assertEqual(dormant['signal'],'NO_DATA')
+  self.assertEqual(stamp(dormant['next_due_at']),end)
+  at=start+timedelta(seconds=241)
+  reassessed=copy.deepcopy(report)
+  reassessed.update(report_id='sim-dormant-reassessment',generated_at=at.isoformat())
+  decision=reassessed['candidates'][0]['decision']
+  decision.update(decided_at=at.isoformat(),deadline=(end+timedelta(hours=1)).isoformat())
+  report_ingest.save(app.connect,1,reassessed)
+  self.assertEqual(engine.reconcile_candidates(app.connect,at),1)
+  job=engine.claim(app.connect,at,baseline['watch_id'])
+  self.assertIsNotNone(job)
+  result=engine.ingest(app.connect,1,baseline['watch_id'],True,tick(at),at,lease=job['lease_owner'])
+  self.assertNotIn(result['calculation']['signal'],('BUY','SELL'))
+  self.assertEqual(engine.reconcile_candidates(app.connect,end),2)
+  self.assertIsNone(engine.claim(app.connect,end,baseline['watch_id']))
+
  def test_reassessed_candidate_after_automatic_expiry_starts_new_unplanned_watch(self):
   from hotwatch_service import auto_activate_candidate
   import intel_workflows
