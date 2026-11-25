@@ -79,6 +79,24 @@ def can_recover(root,row,boot):
     except (OSError,ValueError,TypeError,AttributeError):
         return False
 
+def can_resume_delivery(root,row,results):
+    """Retry only an explicitly finished local-only delivery once, not a live reservation."""
+    k=task_key(row).replace(":","-")
+    if results.get(task_key(row))!="review_required" or row["status"]!="ready" or row.get("local_review") is not True or row.get("base_branch") not in controller_coordinator.TARGETS or row["role"]=="release":
+        return False
+    try:
+        record=load(task_record(root,row),{})
+        folder=root/("issue-"+k)
+        receipt=load(root/("receipts/"+k+".json"),{})
+        return (record.get("row")==row and not record.get("delivery_retry")
+                and folder.is_dir() and not folder.is_symlink()
+                and (root/("issue-"+k+".patch")).is_file()
+                and not (root/("issue-"+k+".pr")).exists()
+                and receipt.get("status") in (None,"review_required")
+                and not load(root/("checkpoint-"+k+".json"),{}).get("provider_limit"))
+    except (OSError,ValueError,TypeError,AttributeError):
+        return False
+
 def run_task(root, script, row, allowance, publish=False):
     issue = row["issue"]
     generation = row.get("generation", 1)
@@ -99,7 +117,8 @@ def run_task(root, script, row, allowance, publish=False):
             subprocess.run(["git", "fetch", "--no-tags", "https://github.com/hva73/invest.git", target], cwd=script.parent.parent, check=True, timeout=90)
             actual = subprocess.check_output(["git", "rev-parse", "FETCH_HEAD"], cwd=script.parent.parent).decode().strip()
         if actual != base:
-            return "stale_base"
+            if not (recover and record.get("delivery_retry") and row.get("follow_base") is True and controller_coordinator.disjoint_base_changes(controller_coordinator.gh(controller_coordinator.PREFIX+"/compare/"+base+"..."+actual),base,row["paths"])):
+                return "stale_base"
     taskfile = root / ("task-" + str(issue) + "-" + str(generation) + ".txt")
     resume=folder.exists()
     if resume:
@@ -131,7 +150,8 @@ def run_task(root, script, row, allowance, publish=False):
             "--issue", str(issue), "--task-file", str(taskfile), "--max-tokens",
             str(allowance), "--rounds", "3", "--minutes", "20", "--generation", str(generation),
             "--allowed-paths-json", json.dumps(row["paths"]), "--progress-root", str(root), "--checkpoint", str(root / ("checkpoint-"+str(issue)+"-"+str(generation)+".json")), "--execute"]
-            + (["--recover"] if resume else []),
+            + (["--recover"] if resume else [])
+            + (["--require-ready"] if record.get("delivery_retry") else []),
             cwd=folder, stdout=out, stderr=subprocess.STDOUT).returncode
     finally:
         finished.set()
@@ -171,6 +191,8 @@ def notify_result(root,row,status,publish):
     try:
         phase="REVIEW_REQUIRED" if status in ("draft_pr","review_required","no_changes") else "BLOCKED"
         progress(root,row,phase,True)
+        if status=="draft_pr" and load(task_record(root,row),{}).get("delivery_retry"):
+            controller_receipts.promote_local_delivery(root,task_key(row))
         controller_receipts.record(root,task_key(row),status)
         controller_receipts.flush(root)
     except (OSError,ValueError):
@@ -344,6 +366,8 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                             save(donefile,results)
                             notify_result(root,row,"blocked:interrupted",a.publish)
                             interrupted.remove(key)
+                delivery_retry={task_key(row) for row in rows if capable and can_resume_delivery(root,row,results)}
+                recoverable.update(delivery_retry)
                 review=[task_key(row) for row in rows if row["status"]=="ready" and results.get(task_key(row)) in ("draft_pr","review_required","no_changes")]
                 rows_before_effective=rows
                 rows=effective_rows(rows,{k:v for k,v in results.items() if k not in recoverable},active.values())
@@ -373,6 +397,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 selected=[]
                 rows=[]
                 recoverable=set()
+                delivery_retry=set()
                 reason="queue_unavailable"
             day=datetime.now(timezone.utc).date().isoformat()
             for task in selected:
@@ -390,7 +415,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                     break
                 key=task_key(row)
                 recovering=key in recoverable
-                save(task_record(root,row),{"row":row,"boot":boot,"recovered":recovering})
+                save(task_record(root,row),{"row":row,"boot":boot,"recovered":recovering,"delivery_retry":key in delivery_retry})
                 results[key]="reserved"
                 save(donefile,results)
                 interrupted.discard(key)
