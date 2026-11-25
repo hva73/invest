@@ -369,7 +369,7 @@ def independent_review(repo_dir, root, row, number, sha, run):
                 "Return only JSON with keys verdict (accept or hold) and reason (specific, <=800 characters). "
                 "Accept only if this bounded component is independently satisfactory; if uncertain hold. Approved task: "+row["task"])
             env={k:os.environ[k] for k in ("PATH","HOME","TMPDIR","LANG","CODEX_HOME") if k in os.environ}
-            cmd=["codex","--ask-for-approval","never","exec","--sandbox","read-only","--cd",str(folder),"--json","--output-last-message",str(output),"-"]
+            cmd=["codex","--ask-for-approval","never","exec","--sandbox","read-only"]+controller_pilot.model_args("coordinator")+["--cd",str(folder),"--json","--output-last-message",str(output),"-"]
             result=controller_events.run(cmd,prompt,env,300)
             if controller_pilot.provider_limited(result.stdout):
                 return {"verdict":"provider_pause","reset_at":controller_pilot.provider_reset_at(result.stdout),"reason":"Codex-kapacitetsgrænse"}
