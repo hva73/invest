@@ -108,37 +108,6 @@ def inspect(path, token):
     }
 
 
-def review_quota_paths(read_code):
-    """Bounded structural readback; no raw strings, credentials or file data."""
-    class Redact(ast.NodeTransformer):
-        def visit_Constant(self, node):
-            if isinstance(node.value, (str, bytes)):
-                return ast.copy_location(ast.Constant(value="<redacted>"), node)
-            return node
-    selected = {
-        "nordicway_deploy_adapter.py": ("estimate_required_bytes", "check_quota", "quota", "preflight", "backup", "recover", "restore", "cleanup", "apply", "stage", "restart"),
-        "nordicway_deploy_sequence.py": ("execute", "deploy", "run", "sequence"),
-        "nordicway_release_backup.py": ("verify_backup", "digest"),
-    }
-    result = {}
-    for filename, prefixes in selected.items():
-        try:
-            source = read_code(filename)
-            tree = ast.parse(source)
-            functions = []
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
-                        node.name.lower().startswith(prefix) for prefix in prefixes):
-                    code = ast.unparse(Redact().visit(node))
-                    if len(code) > 12000:
-                        raise ValueError("function_too_large")
-                    functions.append({"name": node.name, "structure": code})
-            result[filename] = {"sha256": hashlib.sha256(source.encode("utf-8")).hexdigest(),
-                                "functions": functions}
-        except Exception as exc:
-            result[filename] = {"status": "unavailable", "reason": type(exc).__name__}
-    return result
-
 def deployment_gates(token):
     """Read only filenames and public commit markers of the fixed deployment guard."""
     opener = urllib.request.build_opener(NoRedirect())
@@ -183,13 +152,12 @@ def deployment_gates(token):
             out["build_commit"] = commit_marker(app, "BUILD_COMMIT")
         # Only two fixed source modules, never keys, configuration, DB or arbitrary paths.
         def read_code(name):
-            if name not in ("apply_update.py","nordicway_deploy_adapter.py","nordicway_deploy_sequence.py","nordicway_release_backup.py") or bridge_files.get(name,{}).get("type")!="file":
+            if name not in ("apply_update.py","nordicway_deploy_adapter.py") or bridge_files.get(name,{}).get("type")!="file":
                 raise ValueError("source_unavailable")
             result=call("get_file_content",{"dir":bridge,"file":name,"from_charset":"UTF-8","to_charset":"UTF-8","update_html_document_encoding":0})
             if not isinstance(result,dict) or not isinstance(result.get("content"),str):raise ValueError("source_unavailable")
             return result["content"]
         out["bridge_comparison"]=bridge_comparison(read_code)
-        out["quota_path_review"]=review_quota_paths(read_code)
         out["updater_upgrade_gate_held"] = "deploy-enabled.updater-held" in bridge_files
         for name in ("escape.db", "escape.db-wal", "escape.db-journal", "escape.db-shm"):
             r = var_files.get(name, {})
@@ -197,129 +165,6 @@ def deployment_gates(token):
     except Exception as ex:
         out = {"status": "unavailable", "scope": "fixed_deployment_gate_metadata", "reason": type(ex).__name__, "changes": "none"}
     return out
-
-
-def retained_archive_census(token):
-    """One pinned historical backup, private runner temp, aggregates only.
-    Reuses the previously approved scoped FTPS transport. No server file writes.
-    The original independent manifest was removed after prior verification:
-    current hashes are checked against the archived manifest, not a fresh external pin.
-    """
-    import ftplib, secrets, ssl, shutil, sqlite3, tarfile, tempfile
-    from pathlib import Path, PurePosixPath
-    from contextlib import closing
-    root = "/home/nordicr4/.escape_backups"
-    name = "20261116-210212-wjcycodn"
-    filename = "retained-" + name + ".tar.gz"
-    size, mtime = 629787530, 1794863170
-    opener = urllib.request.build_opener(NoRedirect())
-    def api(module, operation, params):
-        query = urllib.parse.urlencode(params)
-        req = urllib.request.Request("https://cp14.nordicway.dk:2083/execute/" + module + "/" + operation + "?" + query,
-            headers={"Authorization": "cpanel nordicr4:" + token, "Accept": "application/json"})
-        with opener.open(req, timeout=45) as response:
-            raw = response.read(2_000_001)
-        if len(raw) > 2_000_000: raise ValueError("response_limit")
-        result = json.loads(raw).get("result", {})
-        if result.get("status") not in (1, "1"): raise ValueError("api_rejected")
-        return result.get("data")
-    def pin():
-        rows = api("Fileman", "list_files", {"dir": root, "show_hidden": 1})
-        if not isinstance(rows, list): raise ValueError("inventory_unavailable")
-        matches = [r for r in rows if r.get("file") == filename]
-        if len(matches) != 1: raise ValueError("archive_unavailable")
-        r = matches[0]
-        if r.get("type") != "file" or int(r["size"]) != size or int(r["mtime"]) != mtime:
-            raise ValueError("archive_changed")
-    pin()
-    with tempfile.TemporaryDirectory(prefix="escape-private-census-") as tmp:
-        if shutil.disk_usage(tmp).free < size + 268435456:
-            raise ValueError("insufficient_runner_space")
-        archive_path = Path(tmp) / "backup.tar.gz"
-        dbpath = Path(tmp) / "backup.sqlite"
-        user, password = "escapeverify" + secrets.token_hex(4), secrets.token_urlsafe(40)
-        domain = "nordic-response.dk"
-        created = False
-        try:
-            api("Ftp", "add_ftp", {"user": user, "pass": password, "domain": domain,
-                                  "homedir": ".escape_backups", "quota": 1})
-            created = True
-            count = 0
-            with ftplib.FTP_TLS(context=ssl.create_default_context(), timeout=120) as ftp:
-                ftp.connect("cp14.nordicway.dk", 21)
-                ftp.login(user + "@" + domain, password)
-                ftp.prot_p()
-                with archive_path.open("xb") as target:
-                    def receive(block):
-                        nonlocal count
-                        count += len(block)
-                        if count > size: raise ValueError("archive_size_mismatch")
-                        target.write(block)
-                    ftp.retrbinary("RETR " + filename, receive, blocksize=1024*1024)
-            if count != size: raise ValueError("archive_size_mismatch")
-        finally:
-            if created:
-                api("Ftp", "delete_ftp", {"user": user, "domain": domain, "destroy": 0})
-        pin()
-        hashes, manifest, db_bytes, total, members = {}, None, None, 0, 0
-        with tarfile.open(archive_path, "r|gz") as archive:
-            for member in archive:
-                members += 1
-                if members > 500: raise ValueError("archive_member_limit")
-                path = PurePosixPath(member.name)
-                if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk():
-                    raise ValueError("unsafe_archive_member")
-                if member.isdir(): continue
-                if not member.isfile() or path.parts.count(name) != 1: raise ValueError("unexpected_archive_member")
-                relative = "/".join(path.parts[path.parts.index(name)+1:])
-                if not relative or relative in hashes: raise ValueError("duplicate_member")
-                total += member.size
-                if total > 10_000_000_000: raise ValueError("archive_expansion_limit")
-                digest = hashlib.sha256()
-                with archive.extractfile(member) as source:
-                    if relative == "manifest.json":
-                        if member.size > 100000: raise ValueError("manifest_limit")
-                        manifest = source.read()
-                        digest.update(manifest)
-                    elif relative == "escape.db":
-                        db_bytes = member.size
-                        if shutil.disk_usage(tmp).free < db_bytes + 268435456:
-                            raise ValueError("insufficient_runner_space_for_database")
-                        with dbpath.open("xb") as target:
-                            while block := source.read(1024*1024):
-                                digest.update(block)
-                                target.write(block)
-                    else:
-                        while block := source.read(1024*1024): digest.update(block)
-                hashes[relative] = digest.hexdigest()
-        if manifest is None or db_bytes is None: raise ValueError("missing_manifest_or_db")
-        expected = json.loads(manifest)
-        if expected.get("format") != 1: raise ValueError("manifest_format")
-        wanted = {"escape.db": expected["database_sha256"], "manifest.json": hashlib.sha256(manifest).hexdigest()}
-        for group, prefix in (("files", "code/"), ("keys", "")):
-            for key, digest in expected[group].items():
-                if digest is not None: wanted[prefix + key] = digest
-        if hashes != wanted: raise ValueError("archive_hash_mismatch")
-        with closing(sqlite3.connect(dbpath.as_uri()+"?mode=ro&immutable=1", uri=True)) as db:
-            db.execute("PRAGMA query_only=ON")
-            schema = dict(db.execute("SELECT name,tbl_name FROM sqlite_schema WHERE type IN ('table','index')"))
-            tables = {}
-            for obj, allocated, payload, unused in db.execute("SELECT name,pgsize,payload,unused FROM dbstat WHERE aggregate=TRUE"):
-                owner = schema.get(obj, obj)
-                if not re.fullmatch(r"[A-Za-z0-9_]{1,128}", owner): raise ValueError("unexpected_schema_name")
-                t = tables.setdefault(owner, {"bytes":0,"payload_bytes":0,"unused_bytes":0})
-                t["bytes"] += allocated; t["payload_bytes"] += payload; t["unused_bytes"] += unused
-            for table in ("hw_samples","hw_calculations","hw_context_events","hw_events","jobs","market_asset_cache","market_asset_period_cache","portfolio_snapshots"):
-                if table in tables:
-                    tables[table]["rows"] = db.execute("SELECT count(*) FROM "+table).fetchone()[0]
-            pages = db.execute("PRAGMA page_count").fetchone()[0]
-            page_size = db.execute("PRAGMA page_size").fetchone()[0]
-            free = db.execute("PRAGMA freelist_count").fetchone()[0]
-        return {"status":"ok","source":"historical_20261116_pinned_archive_self_manifest_verified",
-                "archive_bytes":size,"database_bytes":db_bytes,"verified_files":len(hashes),
-                "page_count":pages,"page_size":page_size,"freelist_bytes":free*page_size,
-                "tables":dict(sorted(tables.items(),key=lambda item:-item[1]["bytes"])),
-                "production_reclaim_verified":False,"temporary_transfer_account_removed":True}
 
 def main():
     token = os.environ.get("ESCAPE_CPANEL_API_TOKEN", "")
@@ -332,11 +177,6 @@ def main():
             result = {"scope": path, "status": "unavailable", "reason": type(ex).__name__}
         print(json.dumps(result, sort_keys=True), flush=True)
     print(json.dumps(deployment_gates(token), sort_keys=True), flush=True)
-    try:
-        print(json.dumps({"retained_archive_census":retained_archive_census(token)},sort_keys=True),flush=True)
-    except Exception as exc:
-        print(json.dumps({"retained_archive_census":{"status":"unavailable","category":str(exc) if isinstance(exc,ValueError) and re.fullmatch(r"[a-z_]{1,80}",str(exc)) else type(exc).__name__}}),flush=True)
-        raise SystemExit(1) from None
 
 if __name__ == "__main__":
     main()
