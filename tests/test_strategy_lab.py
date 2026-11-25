@@ -48,4 +48,27 @@ class Lab(unittest.TestCase):
   with app.connect() as c:
    row=c.execute('SELECT id,payload FROM hw_samples ORDER BY id LIMIT 1').fetchone();x=json.loads(row['payload']);x['event_time']=(self.now+timedelta(days=1)).isoformat();c.execute('UPDATE hw_samples SET payload=?,digest=? WHERE id=?',(json.dumps(x),checksum(x),row['id']))
   result=strategy_lab.compare(app.connect,1,self.data);self.assertEqual(result['skipped'],1);self.assertEqual(result['evaluated'],37)
+ def test_compact_renewal_replay_matches_inline_and_rejects_corruption(self):
+  import os,copy
+  from unittest.mock import patch
+  # Real market inputs and a stale as_of-only renewal; compare the exact
+  # same stored decision before and after encoding, not a synthetic signal.
+  for i in range(38,120):
+   at=self.base+timedelta(minutes=i);sample=tick(at,i,price=str(100+i/100))
+   engine.ingest(app.connect,1,self.req['watch_id'],True,sample,at,include_session=False)
+  at+=timedelta(seconds=121);renewed=copy.deepcopy(sample);renewed['context']['as_of']=at.isoformat()
+  with patch.dict(os.environ,{'ESCAPE_HW_COMPACT_RENEWAL_AUDIT':'1'}):
+   result=engine.ingest(app.connect,1,self.req['watch_id'],True,renewed,at,include_session=False)['calculation']
+  self.assertEqual(result['signal'],'NO_DATA');self.assertFalse(result['new_market_observation'])
+  with app.connect() as c:
+   row=c.execute('SELECT id,payload FROM hw_calculations ORDER BY id DESC LIMIT 1').fetchone()
+   packed=json.loads(row['payload']);self.assertIn(engine._RENEWAL_AUDIT_KEY,packed)
+  before=self.snapshot();compact=strategy_lab.compare(app.connect,1,self.data)
+  self.assertEqual(before,self.snapshot());self.assertEqual(compact['evaluated'],121);self.assertEqual(compact['skipped'],0)
+  with app.connect() as c:c.execute('UPDATE hw_calculations SET payload=? WHERE id=?',(engine.canonical(result),row['id']))
+  self.assertEqual(compact,strategy_lab.compare(app.connect,1,self.data))
+  packed[engine._RENEWAL_AUDIT_KEY]['sha256']='0'*64
+  with app.connect() as c:c.execute('UPDATE hw_calculations SET payload=? WHERE id=?',(json.dumps(packed),row['id']))
+  before=self.snapshot();broken=strategy_lab.compare(app.connect,1,self.data)
+  self.assertEqual(before,self.snapshot());self.assertEqual(broken['skipped'],1);self.assertEqual(broken['evaluated'],120)
 if __name__=='__main__':unittest.main()
