@@ -54,6 +54,12 @@ class DiscoveryAttemptPerformance(unittest.TestCase):
 
 class HoldingAutowatchPerformance(unittest.TestCase):
  def test_idle_linked_scan_statement_budget(self):
+  self._check_idle_linked_scan_statement_budget(concurrent=False)
+
+ def test_repeated_unrelated_commits_do_not_starve_next_tenant(self):
+  self._check_idle_linked_scan_statement_budget(concurrent=True)
+
+ def _check_idle_linked_scan_statement_budget(self,concurrent):
   now=datetime(2026,11,25,12,tzinfo=timezone.utc)
   at=now.isoformat()
   aid='shared-idle'
@@ -64,6 +70,7 @@ class HoldingAutowatchPerformance(unittest.TestCase):
     app.init()
     expected=[]
     with app.connect() as c:
+     if concurrent:c.execute("INSERT INTO users(id,username,active) VALUES(?,'unrelated',0)",(count+1,))
      for uid in range(1,count+1):
       pid=2*uid
       watch=f'paused-{uid}'
@@ -76,15 +83,35 @@ class HoldingAutowatchPerformance(unittest.TestCase):
       attempt=(uid,pid,aid,'LINKED',watch,0,at)
       c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',attempt)
       expected.append(attempt)
-    statements=[]
+    statements=[];reads={};decoded=[]
+    execute=app.DatabaseConnection.execute
+    def count_rows(cursor,values):
+     row=sqlite3.Row(cursor,values)
+     if 'kind' in row.keys():decoded.append((row['kind'],cursor.connection.in_transaction))
+     return row
     def traced_connect():
      connection=app.connect()
      connection.set_trace_callback(statements.append)
+     connection.row_factory=count_rows
      return connection
-    with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1'}):
+    def race(connection,sql,*args):
+     cursor=execute(connection,sql,*args)
+     if concurrent and 'CROSS JOIN hw_holding_autowatch' in sql:
+      rows=cursor.fetchall()
+      uid=args[0][0]
+      reads[uid]=reads.get(uid,0)+1
+      self.assertLessEqual(reads[uid],2)
+      with app.connect() as writer:
+       writer.execute('UPDATE users SET username=? WHERE id=?',(f'unrelated-{uid}-{reads[uid]}',count+1))
+      return rows
+     return cursor
+    with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1'}),patch.object(app.DatabaseConnection,'execute',race):
      self.assertIsNone(service.auto_holdings_tick(traced_connect,verify=lambda *_:self.fail('Unexpected activation'),now=now))
-    self.assertEqual(len(statements),2+3*count)
-    self.assertTrue(all(sql.lstrip().upper().startswith(('SELECT','PRAGMA DATA_VERSION')) for sql in statements))
+    self.assertEqual(len(statements),2+(3 if concurrent else 2)*count)
+    self.assertTrue(all(sql.lstrip().upper().startswith(('SELECT','WITH','PRAGMA DATA_VERSION')) for sql in statements))
+    passes=2 if concurrent else 1
+    if concurrent:self.assertEqual(reads,dict.fromkeys(range(1,count+1),passes))
+    self.assertEqual(decoded,[('session',False),('attempt',False)]*count*passes)
     with app.connect() as c:
      self.assertEqual([tuple(row) for row in c.execute('SELECT * FROM hw_holding_autowatch ORDER BY user_id')],expected)
      self.assertEqual(c.execute("SELECT count(*) FROM hw_sessions WHERE status='PAUSED'").fetchone()[0],count)
@@ -137,17 +164,14 @@ class HoldingAutowatchPerformance(unittest.TestCase):
     with patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_CAPACITY':'200','ESCAPE_HW_EODHD_REST_ENABLED':'0'}):
      self.assertEqual(service.auto_holdings_tick(traced_connect,verify=verify,now=now),'LINKED')
     self.assertEqual(verified,[(count,assets[22])])
-    reads=[sql for sql in scan_sql if sql.lstrip().upper().startswith('SELECT')]
+    reads=[sql for sql in scan_sql if sql.lstrip().upper().startswith(('SELECT','WITH'))]
     # The last user activates within the first multi-position batch.
     # Other enabled users also scan the remaining assets and second portfolio.
     enabled=count-len(killed)
     history_batches=4*(enabled-1)+3
-    # The second portfolio reuses the already loaded session history.
-    session_reads=history_batches-(enabled-1)
-    self.assertEqual(len(reads),1+len(killed)+session_reads+history_batches)
+    self.assertEqual(len(reads),1+len(killed)+history_batches)
     self.assertEqual(scan_sql.count('PRAGMA data_version'),2)
-    self.assertEqual(sum('JOIN hw_control' in sql for sql in reads),count)
-    self.assertEqual(sum('hw_holding_autowatch' in sql for sql in reads),history_batches)
+    self.assertEqual(sum('hw_holding_autowatch' in sql for sql in reads),len(killed)+history_batches)
     self.assertEqual(sum('INSERT INTO hw_holding_autowatch' in sql and "'LINKED'" in sql for sql in scan_sql),count-len(killed))
     identity=f'{count}|{count*2}|{assets[22]}|{closed_at}'
     watch='hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
@@ -198,8 +222,8 @@ class HoldingAutowatch(unittest.TestCase):
   read_assets={'sessions':[],'attempts':[]};connections=[];scan_sql=[]
   def count_rows(cursor,values):
    row=sqlite3.Row(cursor,values)
-   if 'request' in row.keys() and row['watch_id'] is not None:read_assets['sessions'].append((row['asset_id'],cursor.connection.in_transaction))
-   if 'next_attempt' in row.keys():read_assets['attempts'].append((row['asset_id'],cursor.connection.in_transaction))
+   if 'kind' in row.keys() and row['kind']=='session':read_assets['sessions'].append((row['asset_id'],cursor.connection.in_transaction))
+   if 'kind' in row.keys() and row['kind']=='attempt':read_assets['attempts'].append((row['asset_id'],cursor.connection.in_transaction))
    return row
   def traced_connect():
    connection=app.connect()
@@ -220,7 +244,7 @@ class HoldingAutowatch(unittest.TestCase):
   if link_first:expected_sessions.append((target_aid,True))
   expected_attempts.append((target_aid,link_first))
   self.assertEqual(read_assets,{'sessions':expected_sessions,'attempts':expected_attempts})
-  self.assertEqual(sum(sql.lstrip().upper().startswith('SELECT') for sql in scan_sql),3+2*(int(link_first)+int(already_linked)))
+  self.assertEqual(sum(sql.lstrip().upper().startswith(('SELECT','WITH')) for sql in scan_sql),2+int(link_first)+int(already_linked))
   identity=f'1|{self.pid}|{target_aid}|{closed_at}'
   watch='hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
   with app.connect() as c:
@@ -310,15 +334,15 @@ class HoldingAutowatch(unittest.TestCase):
    def commit_unrelated_during_scan(connection,sql,*args):
     nonlocal committed
     cursor=execute(connection,sql,*args)
-    if not committed and 'FROM json_each(?) k CROSS JOIN hw_holding_autowatch' in sql:
+    if 'CROSS JOIN hw_holding_autowatch' in sql:
      rows=cursor.fetchall()
-     if {row['asset_id'] for row in rows}==set(assets[3:]):
+     if not committed and {key[1] for key in json.loads(args[0][4])}==set(assets[3:]):
       writer.execute("INSERT INTO users(id,username,active) VALUES(2,'unrelated',1)")
       writer.commit()
       writer.execute('BEGIN IMMEDIATE')
       execute(connection,'PRAGMA busy_timeout=0')
       committed=True
-     return iter(rows)
+     return rows
     return cursor
    with patch.object(app.DatabaseConnection,'execute',commit_unrelated_during_scan):
     self.assertIsNone(self.tick(verify=lambda *_:self.fail('No activation expected')))
@@ -328,19 +352,19 @@ class HoldingAutowatch(unittest.TestCase):
   def stop_after_batch_reads(connection,sql,*args):
    nonlocal stopped,invalidated
    cursor=execute(connection,sql,*args)
-   if not stopped and 'FROM json_each(?) k CROSS JOIN hw_holding_autowatch' in sql:
-    rows=cursor.fetchall()
-    if {row['asset_id'] for row in rows}==set(assets[3:]):
-     self.assertFalse(connection.in_transaction)
-     with app.connect() as other:
-      if refresh and not invalidated:
-       other.execute("UPDATE users SET username='unrelated-refresh' WHERE id=2")
-       invalidated=True
-      else:
-       other.execute("UPDATE hw_sessions SET status='COMPLETED' WHERE user_id=1 AND watch_id=?",(assets[-1],))
-       stopped=True
-    return iter(rows)
-   return cursor
+   if 'CROSS JOIN hw_holding_autowatch' not in sql or stopped:return cursor
+   batch={key[1] for key in json.loads(args[0][4])}
+   if batch!=(set(assets[3:]) if not invalidated else {assets[2]}):return cursor
+   rows=cursor.fetchall()
+   self.assertFalse(connection.in_transaction)
+   with app.connect() as other:
+    if refresh and not invalidated:
+     other.execute("UPDATE users SET username='unrelated-refresh' WHERE id=2")
+     invalidated=True
+    else:
+     other.execute("UPDATE hw_sessions SET status='COMPLETED' WHERE user_id=1 AND watch_id=?",(assets[-1],))
+     stopped=True
+   return rows
   with patch.object(app.DatabaseConnection,'execute',stop_after_batch_reads):
    self.assertIsNone(self.tick(verify=lambda *_:self.fail('No activation expected')))
   self.assertTrue(stopped)
@@ -356,7 +380,7 @@ class HoldingAutowatch(unittest.TestCase):
    other.execute('BEGIN IMMEDIATE')
    self.assertIsNone(self.tick(verify=lambda *_:self.fail('No activation expected')))
 
- def test_repeated_unrelated_commits_do_not_starve_next_tenant(self):
+ def test_repeated_unrelated_commits_allow_next_tenant_activation(self):
   at=self.now.isoformat();aid=self.holding['asset_id']
   with app.connect() as c:
    c.execute("INSERT INTO users(id,username,active) VALUES(2,'second',1)")
@@ -371,13 +395,13 @@ class HoldingAutowatch(unittest.TestCase):
   def race(connection,sql,*args):
    nonlocal commits
    cursor=execute(connection,sql,*args)
-   if 'FROM json_each(?) k CROSS JOIN hw_holding_autowatch' in sql and args and args[0][1]==1 and not connection.in_transaction:
+   if 'FROM json_each(?) k CROSS JOIN hw_holding_autowatch' in sql and args and args[0][0]==1 and not connection.in_transaction:
     rows=cursor.fetchall()
     commits+=1
-    self.assertLessEqual(commits,3,'idle tenant retried without bound')
+    self.assertLessEqual(commits,2,'idle tenant retried without bound')
     with app.connect() as other:
      other.execute("UPDATE users SET username=? WHERE id=2",(f'second-{commits}',))
-    return iter(rows)
+    return rows
    return cursor
   verified=[]
   def verify(_,uid,holding):
@@ -385,8 +409,32 @@ class HoldingAutowatch(unittest.TestCase):
    return self.instrument
   with patch.object(app.DatabaseConnection,'execute',race),patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_CAPACITY':'40','ESCAPE_HW_EODHD_REST_ENABLED':'0'}):
    self.assertEqual(service.auto_holdings_tick(app.connect,verify=verify,now=self.now),'LINKED')
-  self.assertEqual(commits,3)
+  self.assertEqual(commits,2)
   self.assertEqual(verified,[2])
+
+ def test_concurrent_attempt_change_revalidates_idle_link(self):
+  at=self.now.isoformat();aid=self.holding['asset_id']
+  request=json.dumps({'asset_id':aid,'portfolio_ids':[self.pid],'watch_mode':'exit'})
+  with app.connect() as c:
+   c.execute("""INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due)
+    VALUES(1,'paused',0,?,'manual holding','PAUSED',?,'synthetic','{}','{}',?,?,0)""",(aid,request,at,at))
+   c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(1,self.pid,aid,'LINKED','paused',0,at))
+  execute=app.DatabaseConnection.execute;raced=False
+  def close_attempt_after_read(connection,sql,*args):
+   nonlocal raced
+   cursor=execute(connection,sql,*args)
+   if raced or 'CROSS JOIN hw_holding_autowatch' not in sql:return cursor
+   rows=cursor.fetchall()
+   with app.connect() as writer:
+    writer.execute("UPDATE hw_holding_autowatch SET status='POSITION_CLOSED' WHERE user_id=1 AND portfolio_id=? AND asset_id=?",(self.pid,aid))
+   raced=True
+   return rows
+  with patch.object(app.DatabaseConnection,'execute',close_attempt_after_read):
+   self.assertIsNone(self.tick(verify=lambda *_:self.fail('Expected to reuse the paused session')))
+  self.assertTrue(raced)
+  with app.connect() as c:
+   self.assertEqual(tuple(c.execute('SELECT status,watch_id,next_attempt FROM hw_holding_autowatch').fetchone()),
+                    ('LINKED','paused',self.now.timestamp()+300))
 
  def test_concurrent_link_refresh_releases_unused_writer_before_next_tenant(self):
   at=self.now.isoformat();aid=self.holding['asset_id']
@@ -407,7 +455,7 @@ class HoldingAutowatch(unittest.TestCase):
     raced=True
     with app.connect() as other:
      other.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(1,self.pid,aid,'LINKED','first-watch',self.now.timestamp()+300,at))
-   if 'LEFT JOIN hw_control' in sql and args==((2,aid),):
+   if 'CROSS JOIN hw_holding_autowatch' in sql and args[0][0]==2:
     checked=True
     self.assertFalse(connection.in_transaction)
     other=app.connect()

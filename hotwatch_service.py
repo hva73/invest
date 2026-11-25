@@ -813,52 +813,50 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
   selected=None;lock_without_write=False
   for uid,user_choices in groupby(choices,key=lambda choice:choice[0]):
    user_choices=list(user_choices)
-   # Refresh the batch once, then fall back to fresh per-position reads
-   # if commits keep invalidating the batch. Idle scans stay read-only.
-   refreshed=False;read_individually=False
+   refreshed=False
    while not selected:
-    # Keep the tenant gate fresh on each retry, including under the writer lock.
-    # The anchor returns the gate even when there is no matching watch.
-    first_sessions=c.execute("""SELECT k.killed,s.watch_id,s.status,s.request,
-                                       json_extract(s.request,'$.asset_id') AS asset_id
-                                FROM (SELECT ? AS user_id) tenant
-                                LEFT JOIN hw_control k ON k.user_id=tenant.user_id
-                                LEFT JOIN hw_sessions s ON s.user_id=tenant.user_id AND s.is_test=0
-                                  AND COALESCE(k.killed,0)=0 AND json_extract(s.request,'$.asset_id')=?""",
-                             (uid,user_choices[0][2]['asset_id'])).fetchall()
-    if first_sessions[0]['killed']:break
-    sessions={};attempts={}
+    sessions={};attempts={};killed=False
     probed_keys=set();probed_assets=set();batch_end=0
     for index,(_,pid,holding) in enumerate(user_choices):
-     # Probe early holdings separately: a LINKED write can take the writer
-     # lock before an activation. Bound later batches even with the lock held.
+     # Probe early holdings separately. Bound later batches even when a
+     # preceding LINKED write already holds the writer lock.
      if index==batch_end:
-      if read_individually:
-       sessions.clear();attempts.clear();probed_keys.clear();probed_assets.clear()
-      batch_end=index+(1 if read_individually or index<3 else 24)
+      batch_end=index+(1 if index<3 else 24)
       pending=user_choices[index:batch_end]
       keys={(p,h['asset_id']) for _,p,h in pending}-probed_keys
       assets={aid for _,aid in keys}-probed_assets
       probed_keys.update(keys);probed_assets.update(assets)
-      if index==0:rows=first_sessions
-      elif assets:
-       rows=c.execute("""SELECT watch_id,status,request,json_extract(request,'$.asset_id') AS asset_id
-                               FROM hw_sessions WHERE user_id=? AND is_test=0
-                               AND json_extract(request,'$.asset_id') IN (SELECT value FROM json_each(?))""",
-                      (uid,json.dumps(list(assets))))
-      else:rows=()
-      for row in rows:
-       if row['watch_id'] is not None:
-        request=json.loads(row['request'])
-        if request.get('watch_mode','both')!='entry':
-         sessions.setdefault(row['asset_id'],[]).append((row,request.get('portfolio_ids')))
       if keys:
-       for row in c.execute("""
-        SELECT a.portfolio_id,a.asset_id,a.status,a.watch_id,a.next_attempt,a.updated
+       # Read both histories from the same SQLite snapshot, without joining
+       # session rows to every portfolio that holds the instrument.
+       rows=list(c.execute("""
+        WITH tenant AS (
+         SELECT EXISTS(SELECT 1 FROM hw_control WHERE user_id=? AND ? AND killed) AS killed
+        ), assets AS (SELECT value FROM json_each(?))
+        SELECT 'gate' AS kind,NULL AS portfolio_id,NULL AS asset_id,NULL AS watch_id,
+               NULL AS status,NULL AS request,NULL AS next_attempt,NULL AS updated
+        FROM tenant WHERE killed
+        UNION ALL
+        SELECT 'session',NULL,json_extract(s.request,'$.asset_id'),s.watch_id,s.status,s.request,NULL,NULL
+        FROM hw_sessions s WHERE s.user_id=? AND s.is_test=0
+          AND EXISTS (SELECT 1 FROM assets) AND NOT (SELECT killed FROM tenant)
+          AND json_extract(s.request,'$.asset_id') IN (SELECT value FROM assets)
+        UNION ALL
+        SELECT 'attempt',a.portfolio_id,a.asset_id,a.watch_id,a.status,NULL,a.next_attempt,a.updated
         FROM json_each(?) k CROSS JOIN hw_holding_autowatch a
           ON a.user_id=? AND a.portfolio_id=json_extract(k.value,'$[0]') AND a.asset_id=json_extract(k.value,'$[1]')
-        """,(json.dumps(list(keys)),uid)):
-        attempts[row['portfolio_id'],row['asset_id']]=row
+        WHERE NOT (SELECT killed FROM tenant)
+        """,(uid,index==0,json.dumps(list(assets)),uid,json.dumps(list(keys)),uid)))
+       if rows and rows[0]['kind']=='gate':
+        killed=True
+        break
+       for row in rows:
+        if row['kind']=='attempt':
+         attempts[row['portfolio_id'],row['asset_id']]=row
+        else:
+         request=json.loads(row['request'])
+         if request.get('watch_mode','both')!='entry':
+          sessions.setdefault(row['asset_id'],[]).append((row,request.get('portfolio_ids')))
      aid=holding['asset_id']
      matches=[row for row,portfolios in sessions.get(aid,()) if not portfolios or pid in portfolios]
      active=[row for row in matches if row['status'] in ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')]
@@ -887,16 +885,17 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
      if status=='VERIFYING':selected=(uid,pid,holding,watch);break
      attempts[pid,aid]={'status':status,'watch_id':linked,'next_attempt':epoch+300,'updated':at}
     else:
-     # A database-wide commit may be unrelated. Refresh this user's batch
-     # read-only and reserve the writer only if the decisions require a write.
-     if not c.in_transaction and not read_individually:
+     # An idle decision can be refreshed once with fresh, paired reads.
+     # A commit after the refreshed read is work for the next tick. Writes
+     # still revalidate under the writer lock if the database has changed.
+     if not c.in_transaction and not refreshed:
       current_version=c.execute('PRAGMA data_version').fetchone()[0]
       if current_version!=scan_version:
-       read_individually=refreshed
        refreshed=True
        scan_version=current_version
        continue
      break
+    if selected or not lock_without_write or killed:break
    # A refreshed batch may need no write. Do not retain a writer lock
    # while scanning subsequent tenants when nothing was actually changed.
    if lock_without_write:
