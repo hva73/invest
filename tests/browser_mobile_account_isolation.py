@@ -7,20 +7,21 @@ def browser_fixture():
     # Exercise the retained report-candidate form without adding a production entry point.
     source = source.replace("return {openHoldingStatus,", "return {legacyCreation,openHoldingStatus,", 1)
     return """<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1">
-<p id="notice"></p><div id="content"></div>
+<button id="logout">Log ud</button><p id="notice"></p><div id="content"></div>
 <script>""" + source + """
 const content = document.getElementById('content');
 const pending = [];
 const userIds = {alpha: 11, beta: 22};
-let username,epoch=0,logoutView=null,logoutPending=false,requests=new AbortController();
+let username,epoch=0,failLogout;
 let holdCurrentLoad=false,omitHistory=false,poll,pollSchedules=0;
-const beginLogout = () => {
-    logoutView ??= epoch;
+const logout = document.getElementById('logout');
+// app.js advances the epoch synchronously and leaves the view mounted on failure.
+logout.onclick = async () => {
     epoch++;
-    logoutPending = true;
-    requests.abort();
-    requests = new AbortController();
+    await new Promise(resolve => { failLogout = resolve; });
 };
+const beginLogout = () => logout.onclick();
+const finishFailedLogout = async transition => { failLogout(); await transition; };
 // Run polling deterministically even when the browser fixture has no focused window.
 Object.defineProperty(document, 'hidden', {value: false});
 const realTimeout = window.setTimeout;
@@ -70,8 +71,6 @@ const account = user => ({
 });
 const switchAccount = user => {
     epoch++;
-    logoutView = null;
-    logoutPending = false;
     username = user;
     content.innerHTML = user ? '<div id="engine-root"></div>' : '';
     if (user) EngineUI.mount(false);
@@ -90,7 +89,7 @@ const select = index => {
 };
 const run = async () => {
     assert(innerWidth === 390, 'Expected 390px viewport');
-    EngineUI.setup({api, owner: () => username, session:()=>({epoch, view:logoutView ?? epoch, pending:logoutPending, signal:requests.signal}), isAdmin: () => false, editing: () => false,
+    EngineUI.setup({api, owner: () => username, session: () => epoch, isAdmin: () => false, editing: () => false,
         escape: value => String(value ?? ''), formatTime: String});
     switchAccount('alpha');
     const alpha = await create('alpha');
@@ -321,7 +320,7 @@ const run = async () => {
         const request = take('/buy-plan?', 'alpha');
         const before = details.innerHTML;
         const stale = !outcome.startsWith('current');
-        if (outcome.startsWith('stale')) epoch++; // Logout is pending with username and form still present.
+        const transition = outcome.startsWith('stale') ? beginLogout() : null;
         if (outcome === 'closed-form') await EngineUI.click(button('[data-engine-close]'));
         if (outcome === 'replaced-form') {
             const replacement = open('alpha-next');
@@ -340,6 +339,7 @@ const run = async () => {
             form.textContent.includes('Buy plan rejected') && !form.querySelector('button').disabled,
             'Current buy-plan error did not allow retry');
         else check(!details.open && byId('engine-buy-plan') !== form, 'Current buy plan did not refresh detail');
+        if (transition) await finishFailedLogout(transition);
     }
 
     for (const phase of ['scheduled', 'in flight']) {
@@ -348,10 +348,9 @@ const run = async () => {
         const engine = byId('engine-root');
         const before = engine.innerHTML;
         const oldPoll = poll;
-        const oldSchedule = pollSchedules;
         holdCurrentLoad = true;
         const cycle = phase === 'in flight' ? oldPoll() : null;
-        epoch++;
+        const transition = beginLogout();
         const pendingCycle = cycle || oldPoll();
         const requestIndex = pending.findIndex(request => request.path.includes('view=current'));
         check((requestIndex >= 0) === (phase === 'in flight'), 'Previously scheduled HOT WATCH poll sent a request during logout');
@@ -361,7 +360,7 @@ const run = async () => {
         holdCurrentLoad = false;
         await pendingCycle;
         check(engine.innerHTML === before, phase + ' HOT WATCH poll repainted during logout');
-        check(pollSchedules === oldSchedule, phase + ' HOT WATCH poll survived a changed session');
+        await finishFailedLogout(transition);
     }
 
     switchAccount('alpha');
@@ -409,12 +408,13 @@ const run = async () => {
     assert(byId('engine-dialog').dataset.watchId === 'alpha-linked' &&
         !byId('engine-dialog').dataset.holdingKey, 'Current holding poll did not open linked detail');
     const externalPoll = poll;
-    epoch++;
+    const externalLogout = beginLogout();
     const staleExternal = externalPoll();
     const externalState = pending.findIndex(request => request.path === 'state');
     if (externalState >= 0) pending.splice(externalState, 1)[0].resolve(account('alpha'));
     await staleExternal;
     check(externalState < 0, 'Old detail timer started a request during logout');
+    await finishFailedLogout(externalLogout);
 
     for (const watch of [{auto_status: {status: 'VERIFYING'}}, {session: {watch_id: 'alpha-stale'}}]) {
         openHolding();
@@ -422,7 +422,7 @@ const run = async () => {
         const before = modal.innerHTML;
         const stalePoll = poll();
         const staleState = take('state', 'alpha');
-        epoch++; // Logout starts while the dashboard and username are still present.
+        const transition = beginLogout();
         staleState.resolve(holding(watch));
         await flush();
         const followUp = pending.findIndex(request => request.path === 'state');
@@ -430,6 +430,7 @@ const run = async () => {
         if (followUp >= 0) pending.splice(followUp, 1)[0].resolve(account('alpha'));
         await stalePoll;
         check(modal.innerHTML === before && !modal.dataset.watchId, 'Holding poll wrote to the dialog during logout');
+        await finishFailedLogout(transition);
     }
 
     for (const interrupt of ['close', 'logout', 'replace']) {
@@ -440,7 +441,7 @@ const run = async () => {
         await flush();
         const linkedState = take('state', 'alpha');
         if (interrupt === 'close') modal.close();
-        if (interrupt === 'logout') epoch++;
+        const transition = interrupt === 'logout' ? beginLogout() : null;
         if (interrupt === 'replace') {
             EngineUI.openHoldingStatus({key: 'other', ticker: 'OTHER', label: 'Other holding'});
         }
@@ -449,6 +450,7 @@ const run = async () => {
         await linking;
         check(modal.open === (interrupt !== 'close') && modal.innerHTML === before && !modal.dataset.watchId,
             'Delayed linked detail rewrote holding after ' + interrupt);
+        if (transition) await finishFailedLogout(transition);
     }
 
     switchAccount('alpha');
@@ -522,34 +524,93 @@ const run = async () => {
         const oldSchedule = pollSchedules;
         const oldCycle = phase === 'in flight' ? poll() : null;
         const oldList = oldCycle && take('view=current', 'alpha');
-        beginLogout();
+        if (oldCycle) {
+            await poll();
+            assert(!pending.some(request => request.path.includes('view=current')),
+                'HOT WATCH started a duplicate poll in the same epoch');
+        }
+        const transition = beginLogout();
         if (oldCycle) {
             await flush();
             assert(pollSchedules > oldSchedule, 'Polling waited for the obsolete request to settle');
-            await oldCycle;
         }
         const waiting = poll();
         assert(!pending.some(request => request.path.includes('view=current')), 'HOT WATCH read during pending logout');
         await waiting;
         check(!pending.some(request => request.path.includes('view=current')) && engine.innerHTML === before,
             'HOT WATCH read or wrote while logout was pending');
-        logoutPending = false; // HTTP 500 leaves the authenticated view mounted.
+        await finishFailedLogout(transition);
         const recovered = poll();
         take('view=current', 'alpha').resolve({sessions: [session('recovered')], kill_switch: {}});
         await recovered;
         oldList?.resolve({sessions: [session('obsolete')], kill_switch: {}});
-        await flush();
+        await oldCycle;
         holdCurrentLoad = false;
         check(button('[data-engine-detail="recovered"]') && !button('[data-engine-detail="obsolete"]'),
             'HOT WATCH polling did not recover cleanly after failed logout');
+    }
+
+    for (const [operation, outcome] of [
+        ['buy plan', 'error while pending'], ['buy plan', 'error after retry'],
+        ['manual start', 'error while pending'], ['manual start', 'success after retry']
+    ]) {
+        switchAccount('alpha');
+        await flush();
+        let form, start, path;
+        if (operation === 'buy plan') {
+            const opening = open('alpha-watch');
+            take('state', 'alpha').resolve(account('alpha'));
+            await opening;
+            form = byId('engine-buy-plan');
+            form.closest('details').open = true;
+            start = () => EngineUI.submit({target: form, preventDefault() {}});
+            path = '/buy-plan?';
+        } else {
+            await EngineUI.click(newButton());
+            form = byId('engine-manual-search');
+            form.elements.query.value = 'ALPHA';
+            const search = EngineUI.submit({target: form, preventDefault() {}});
+            take('manual-search', 'alpha').resolve({assets: [{asset_id: 'alpha-id', ticker: 'ALPHA'}]});
+            await search;
+            start = () => EngineUI.click(manualResult());
+            path = 'manual-start';
+        }
+        const actionButton = operation === 'buy plan' ? form.querySelector('button') : manualResult();
+        const status = operation === 'buy plan' ? form.querySelector('[role=status]') : byId('engine-manual-status');
+        const previousStatus = status.textContent;
+        const obsolete = start();
+        const old = take(path, 'alpha');
+        const pendingStatus = status.textContent;
+        const transition = beginLogout();
+        if (outcome === 'error while pending') {
+            old.reject(Error('Obsolete ' + operation + ' error'));
+            await obsolete;
+            check(actionButton.disabled && status.textContent === pendingStatus,
+                'Obsolete ' + operation + ' error changed the pending form');
+        }
+        await finishFailedLogout(transition);
+        check(actionButton.isConnected && !actionButton.disabled && status.textContent === previousStatus,
+            'Failed logout left ' + operation + ' stuck');
+        const retry = start();
+        const current = take(path, 'alpha');
+        const retryStatus = status.textContent;
+        if (outcome === 'error after retry') old.reject(Error('Obsolete ' + operation + ' error'));
+        if (outcome === 'success after retry') old.resolve({session: {watch_id: 'obsolete-start'}});
+        await obsolete;
+        check(byId('engine-dialog').open && actionButton.disabled && status.textContent === retryStatus &&
+            !pending.some(request => request.path === 'state'), 'Obsolete ' + operation + ' disturbed its retry');
+        current.reject(Error('Current ' + operation + ' error'));
+        await retry;
+        check(!actionButton.disabled && status.textContent === 'Current ' + operation + ' error',
+            'Current ' + operation + ' retry did not report its error');
     }
 
     content.innerHTML = '';
     openHolding();
     const obsoleteHolding = poll();
     const obsoleteHoldingState = take('state', 'alpha');
-    beginLogout();
-    logoutPending = false;
+    const holdingLogout = beginLogout();
+    await finishFailedLogout(holdingLogout);
     obsoleteHoldingState.resolve(holding({session: {watch_id: 'obsolete-holding'}}));
     await obsoleteHolding;
     assert(!pending.some(request => request.path === 'state'), 'Obsolete holding poll started a detail read');
@@ -568,13 +629,13 @@ const run = async () => {
     dialog.append(ackButton);
     const beforeLogoutAck = click('[data-engine-ack]');
     const obsoleteAck = take('/ack-signal', 'alpha');
-    beginLogout();
+    const ackLogout = beginLogout();
     const waitingAck = EngineUI.click(ackButton);
     assert(!pending.some(request => request.path.endsWith('/ack-signal')), 'Acknowledgement posted during logout');
     await waitingAck;
     await poll();
     check(!pending.some(request => request.path === 'state'), 'External detail polled during logout');
-    logoutPending = false;
+    await finishFailedLogout(ackLogout);
     assert(!ackButton.disabled, 'Failed logout kept acknowledgement disabled until its old request settled');
     const retry = click('[data-engine-ack]');
     const retryAck = take('/ack-signal', 'alpha');
