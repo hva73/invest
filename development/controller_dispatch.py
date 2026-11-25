@@ -273,35 +273,67 @@ def review_conflict(row, other):
         return a==b or a.startswith(b+"/") or b.startswith(a+"/")
     return any(overlap(a,b) for a in row["paths"] for b in other["paths"])
 
-def choose_review(root,rows,results,running,now=None):
+def draft_actions(root,rows,results,running,review_row=None,probe=None):
+    """One mutually exclusive actionable state per draft.
+    Remote HEAD metadata is not a review and consumes no model slot.
+    Never infer acceptance or erase a rejected exact SHA from a transport error.
+    """
+    journal=controller_coordinator.read(root/"coordinator-review.json",{})
+    for row,number in controller_coordinator.candidates(root,rows,results):
+        if any(review_conflict(row,r) for r in running) or (review_row is not None and review_conflict(row,review_row)):
+            continue
+        last=journal.get(str(number),{})
+        if last.get("state")=="accepted":
+            continue
+        sha=last.get("sha")
+        reason=last.get("repair_reason")
+        if last.get("state")=="hold" and isinstance(reason,str) and 1<=len(reason)<=800 and isinstance(sha,str) and re.fullmatch(r"[0-9a-f]{40}",sha):
+            # A published successor or external change must be verified before
+            # the next review. An unchanged rejected draft is developer work.
+            try:
+                remote=probe(number) if probe else sha
+            except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError):
+                yield row,number,"metadata_unavailable",sha,reason
+                continue
+            if remote!=sha:
+                yield row,number,"review",remote,None
+            elif row.get("local_repair") is True and controller_coordinator.repair_attempt(root,number,sha) is not None:
+                yield row,number,"repair",sha,reason
+            else:
+                yield row,number,"blocked_repair",sha,reason
+            continue
+        yield row,number,"review",sha,None
+
+def choose_review(root,rows,results,running,now=None,actions=None):
     now=time.time() if now is None else now
     journal=controller_coordinator.read(root/"coordinator-review.json",{})
     requested=controller_coordinator.trigger(root) is not None
-    candidates=list(controller_coordinator.candidates(root,rows,results))
-    candidates.sort(key=lambda pair:(journal.get(str(pair[1]),{}).get("at",0),pair[0]["priority"],pair[0]["issue"]))
-    for row,number in candidates:
-        if any(review_conflict(row,r) for r in running):
+    available=list(draft_actions(root,rows,results,running) if actions is None else actions)
+    available.sort(key=lambda item:(journal.get(str(item[1]),{}).get("at",0),item[0]["priority"],item[0]["issue"]))
+    for row,number,state,sha,reason in available:
+        if state!="review" or any(review_conflict(row,r) for r in running):
             continue
         last=journal.get(str(number),{})
-        if last.get("state")!="accepted" and (requested or now-last.get("at",0)>=60):
+        if requested or now-last.get("at",0)>=60:
             return row
     return None
 
-def repair_candidates(root,rows,results,running,review_row=None):
-    """Schedule known defects before paying for another review."""
-    journal=controller_coordinator.read(root/"coordinator-review.json",{})
-    for row,number in controller_coordinator.candidates(root,rows,results):
-        last=journal.get(str(number),{})
-        sha=last.get("sha")
-        reason=last.get("repair_reason")
-        if (last.get("state")!="hold" or row.get("local_repair") is not True
-            or not isinstance(sha,str) or not re.fullmatch(r"[0-9a-f]{40}",sha)
-            or not isinstance(reason,str) or not 1<=len(reason)<=800
-            or controller_coordinator.repair_attempt(root,number,sha) is None
-            or any(review_conflict(row,r) for r in running)
-            or (review_row is not None and review_conflict(row,review_row))):
-            continue
-        yield row,number,sha,reason
+def repair_candidates(root,rows,results,running,review_row=None,actions=None):
+    available=draft_actions(root,rows,results,running,review_row) if actions is None else actions
+    for row,number,state,sha,reason in available:
+        if state=="repair" and not any(review_conflict(row,r) for r in running) and not (review_row is not None and review_conflict(row,review_row)):
+            yield row,number,sha,reason
+
+def remote_draft_head(number,cache,now=None):
+    now=time.monotonic() if now is None else now
+    if number in cache and now-cache[number][0]<30:
+        return cache[number][1]
+    p=controller_coordinator.gh(controller_coordinator.PREFIX+"/pulls/"+str(number))
+    sha=p["head"]["sha"]
+    if not isinstance(sha,str) or not re.fullmatch(r"[0-9a-f]{40}",sha):
+        raise ValueError("invalid remote draft head")
+    cache[number]=(now,sha)
+    return sha
 
 def plan_with_review(rows,review_row,parallel):
     if review_row is None:
@@ -326,6 +358,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
         active={}
         repair_futures=set()
         repair_cooldown={}
+        head_cache={}
         coordination=None
         review_row=None
         budget_lock=threading.Lock()
@@ -408,8 +441,10 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 rows=effective_rows(rows,{k:v for k,v in results.items() if k not in recoverable},active.values())
                 waiting=[task_key(row) for row in rows if row["status"]=="ready"]
                 paused=provider_pause_active(root)
+                actions=[]
                 if capable and not paused:
-                    for row,number,sha,reason_text in repair_candidates(root,rows_before_effective,results,list(active.values()),review_row):
+                    actions=list(draft_actions(root,rows_before_effective,results,list(active.values()),review_row,probe=lambda n: remote_draft_head(n,head_cache)))
+                    for row,number,sha,reason_text in repair_candidates(root,rows_before_effective,results,list(active.values()),review_row,actions=actions):
                         if len(active)+int(coordination is not None)>=a.parallel:
                             break
                         if repair_cooldown.get(task_key(row),0)>time.time() or any(review_conflict(row,r) for r in active.values()):
@@ -423,7 +458,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                     rows=effective_rows(rows_before_effective,{k:v for k,v in results.items() if k not in recoverable},active.values())
                     waiting=[task_key(row) for row in rows if row["status"]=="ready"]
                 if capable and coordination is None and len(active)<a.parallel and not paused:
-                    candidate=choose_review(root,rows_before_effective,results,list(active.values()))
+                    candidate=choose_review(root,rows_before_effective,results,list(active.values()),actions=actions)
                     if candidate is not None or (not active and controller_coordinator.trigger(root)):
                         review_row=candidate
                         keys={task_key(candidate)} if candidate else set()
@@ -440,7 +475,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 elif waiting and not selected:
                     reason="waiting_for_dependency_or_worker"
                 elif not waiting and not active:
-                    reason="awaiting_review" if review else "no_eligible_work"
+                    reason=("awaiting_review" if any(item[2]=="review" for item in actions) else "blocked_repair" if any(item[2]=="blocked_repair" for item in actions) else "no_eligible_work")
             except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as exc:
                 print("QUEUE_UNAVAILABLE:",type(exc).__name__,flush=True)
                 selected=[]
