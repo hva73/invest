@@ -313,6 +313,10 @@ def plan_with_review(rows,review_row,parallel):
         return []
     return plan(adjusted,max_parallel=parallel-1)
 
+def admission_closed(root):
+    """DRAIN lets running workers publish; STOP remains a hard publication guard."""
+    return (root/"STOP").exists() or (root/"DRAIN").exists()
+
 def run_queue(a,root,script,statefile,donefile,state,results):
     boot=boot_id()
     # A reservation remains durable until it is either recovered or reported.
@@ -327,13 +331,13 @@ def run_queue(a,root,script,statefile,donefile,state,results):
         budget_lock=threading.Lock()
         def reserve_slot():
             with budget_lock:
-                if (root/"STOP").exists() or provider_pause_active(root):
+                if admission_closed(root) or provider_pause_active(root):
                     return False
                 if not reserve(state,datetime.now(timezone.utc).date().isoformat(),a.daily_reservation,a.per_task):
                     return False
                 save(statefile,state)
                 return True
-        while active or coordination is not None or not (root/"STOP").exists():
+        while active or coordination is not None or not admission_closed(root):
             if coordination is not None and coordination.done():
                 try:
                     coordination.result()
@@ -372,7 +376,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
             if a.publish:
                 controller_receipts.flush(root)
                 controller_progress.flush(root)
-            if (root/"STOP").exists():
+            if admission_closed(root):
                 write_status(root,"stopping",active.values(),coordinator_running=coordination is not None,coordinator_task=task_key(review_row) if review_row else None,capacity=a.parallel)
                 futures=list(active)+([coordination] if coordination is not None else [])
                 if futures:
@@ -446,7 +450,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 reason="queue_unavailable"
             day=datetime.now(timezone.utc).date().isoformat()
             for task in selected:
-                if (root/"STOP").exists():
+                if admission_closed(root):
                     break
                 row=next(r for r in rows if (r["issue"],r.get("generation",1))==task.key)
                 if a.remote and a.publish and row.get("follow_base") is True and task_key(row) not in results:
@@ -474,9 +478,9 @@ def run_queue(a,root,script,statefile,donefile,state,results):
             futures=list(active)+([coordination] if coordination is not None else [])
             if futures:
                 concurrent.futures.wait(futures,timeout=5,return_when=concurrent.futures.FIRST_COMPLETED)
-            elif not (root/"STOP").exists():
+            elif not admission_closed(root):
                 for _ in range(12):
-                    if (root/"STOP").exists() or (capable and not provider_pause_active(root) and controller_coordinator.trigger(root)):
+                    if admission_closed(root) or (capable and not provider_pause_active(root) and controller_coordinator.trigger(root)):
                         break
                     time.sleep(5)
 
