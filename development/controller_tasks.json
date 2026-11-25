@@ -432,7 +432,7 @@
     "generation": 3,
     "role": "data",
     "priority": 1,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/escape-development",
     "base_sha": "546dec64a6f6e22253455145866604490945c271",
     "dependencies": [
@@ -462,5 +462,22 @@
       "docs/TRADING_ENGINE_V2_INTERFACE.md"
     ],
     "task": "Next distinct #273 product slice: Position Watch strategy switch, not another replay fix or candidate rotation. On exact integrated base 125b2633, inspect existing position/strategy catalog and v2 contracts. Implement a narrow simulation-only auditable transition of strategy for an existing verified held position, using existing strategy specs/version checksums and existing evaluate/risk interface where applicable. Bind same user/test, portfolio, instrument, position and trade-cycle identity, prior/new strategy and effective causal time; preserve original position facts, cost/P&L inputs, native stop and provenance/history. Reject mismatched identity, invalid/stale evidence or unknown strategy; no order, broker write, implicit sale/stop modification or new live authority. Prefer extending existing types rather than new framework/ledger. Actual positive/negative tests of same held position switching strategy, immutable entry origin, distinct exit origin, scope isolation, idempotence and no broker mutation. Keep pure interface explicitly not yet persistence/UI; no live route/schema changes. No overlap with #268 candidate rotation or #14 adapters. Run relevant tests, deliver exact draft. No production, credentials, network, orders or deploy."
+  },
+  {
+    "issue": 14,
+    "generation": 4,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "a26ab93f4d83b617ee49bf091506d0284f5a09db",
+    "dependencies": [
+      "14:3"
+    ],
+    "paths": [
+      "hotwatch_adapters.py",
+      "tests/test_feed_reuse.py"
+    ],
+    "task": "Concrete follow-up to integrated #285: shared WS capture on verified instrument now works for 100 persisted synthetic tenant sessions, but on quiet/empty streams the shared mode only caches positive messages, causing potentially N repeat upstream captures per cadence. Implement bounded market-only negative availability/coalescing for a verified entitlement+instrument+feed, using existing TTL and cache; distinguish no messages/partial/failed entitlement, never refresh source timestamps or reuse stale data as fresh, no retry storm, no negative result across distinct credential/instrument/test scope, no cache of private broker context. Ensure subscribers with stricter freshness or newer last_data can obtain genuinely newer observation without global starvation; actual persisted sessions. Add EU exchange/symbol collision and expiry/quiet/failed capture counts for 1/10/100 overlap+disjoint; measure actual capture count and bounded cache, not live claim. Keep cross-user flag default-off pending license and final integrated accept. No new service, schema, risk, live enable, broker/network or production edits. Run relevant tests. Draft only."
   }
 ]
