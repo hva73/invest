@@ -1,21 +1,36 @@
-name: Controller #57 generation 4 independent QA (offline only)
+name: Controller generations 5 and motor 1 independent QA (offline only)
 on:
   pull_request:
 permissions:
   contents: read
 jobs:
-  exact:
+  exact-release:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ee271a39257d3f8259a42f2d196db55b302162c7
+          ref: b7613b207333b233101189afb83ebedf6aacb11d
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
       - run: |
-          test "$(git rev-parse HEAD)" = "ee271a39257d3f8259a42f2d196db55b302162c7"
+          test "$(git rev-parse HEAD)" = "b7613b207333b233101189afb83ebedf6aacb11d"
           python -B -m unittest -v tests.test_nordicway_release_retention tests.test_nordicway_uapi_quota
           python -m py_compile tools/nordicway_release_retention.py
+  exact-motor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 3e469b3eca78af144da2b52701654e2885e85801
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: |
+          test "$(git rev-parse HEAD)" = "3e469b3eca78af144da2b52701654e2885e85801"
+          python -m pip install -r requirements.txt
+          python -B -m unittest -v tests.test_strategy_lab tests.test_strategy_handoff
