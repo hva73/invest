@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-25T19:54:00Z",
+  "updated_at": "2026-11-25T20:55:00Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -243,7 +243,7 @@
       "title": "Position Watch og strategiskift",
       "status": "in_progress",
       "issue": 273,
-      "evidence": "#298 integreret 33416f77. #299 a1309c28 CI 45682789110 PASS; HOLD: restart uden uafhængigt vedvarende journalanker stadig ikke bevist.",
+      "evidence": "#299 integreret 4f9acf2a og #307 integreret 2e02987c; begge 587 tests PASS på eksakte PR-heads, identiske produkt/testblobs. Simulation exit og readback kræver uafhængigt caller-attesteret journalanker; fuld restart-integration og UI udestår.",
       "subgoals": [
         {
           "id": "switch",
@@ -271,12 +271,12 @@
           "id": "e2e",
           "title": "Integreret positionsbeskyttelse",
           "status": "review",
-          "evidence": "#299 a1309c28 CI 45682789110 PASS; review 7172580104: restart kræver digest fra tidligere proces; afkortning må ikke give fallback.",
+          "evidence": "#299 3316310c (CI 45692797979), #307 5d950e70 (CI 45693798564): 587 tests hver, integreret. Verificeret scoped exit/readback; uafhængig vedvarende head-attestation og samlet positionsflow udestår.",
           "owner_role": "motor",
-          "updated_at": "2026-11-25T19:53:00Z"
+          "updated_at": "2026-11-25T20:55:00Z"
         }
       ],
-      "updated_at": "2026-11-25T19:53:00Z"
+      "updated_at": "2026-11-25T20:55:00Z"
     },
     {
       "id": "longterm",
@@ -284,14 +284,15 @@
       "title": "Long-Term Watch",
       "status": "pending",
       "issue": 12,
-      "evidence": "Samlet funktion udestår.",
+      "evidence": "Første isolerede funktionelle #12:1 model/persistence køsat fra 2e02987c (queue 00cfbff1). Faktisk STARTED og leverance udestår.",
       "subgoals": [
         {
           "id": "watch",
           "title": "Long-Term Watch-model",
           "status": "pending",
-          "evidence": "Udestår.",
-          "owner_role": "motor"
+          "evidence": "Køsat #12:1: tenant-isoleret add/list/status/remove/reopen, SQLite tests, ingen live migration eller brokerwrites.",
+          "owner_role": "motor",
+          "updated_at": "2026-11-25T20:55:00Z"
         },
         {
           "id": "ui",
@@ -307,7 +308,8 @@
           "evidence": "Udestår.",
           "owner_role": "motor"
         }
-      ]
+      ],
+      "updated_at": "2026-11-25T20:55:00Z"
     },
     {
       "id": "replay",
@@ -372,15 +374,15 @@
       "title": "Hvordan står det til? – herkomst og statistik",
       "status": "in_progress",
       "issue": 114,
-      "evidence": "#303 7678d47e CI 45681812880 PASS; HOLD: ukendt historisk depot må ikke bindes fra første statusrespons. Konkret løsning på #303 kommentar 7172878172.",
+      "evidence": "#303 b32e4735, CI 45696048873 motor PASS; review HOLD 7173927904 (legacy forkert depot blokerer verificeret refresh). Direkte test_trade_service ikke kørt i job 139493595156.",
       "subgoals": [
         {
           "id": "provenance",
           "title": "Entry/exit-herkomst",
           "status": "review",
-          "evidence": "Bevar verificeret send-time depotattestation i eksisterende proposal metadata; legacy ukendt må ikke blive autoritativ. #303 HOLD, ingen fill-attribution.",
+          "evidence": "Bevar immutable send-time identitet; #303 HOLD 7173927904. Fokuseret trade_service test skal køres på eksakt slut-head, ingen fill-attribution.",
           "owner_role": "motor",
-          "updated_at": "2026-11-25T19:53:00Z"
+          "updated_at": "2026-11-25T20:55:00Z"
         },
         {
           "id": "fills",
@@ -397,7 +399,7 @@
           "owner_role": "desktop"
         }
       ],
-      "updated_at": "2026-11-25T19:53:00Z"
+      "updated_at": "2026-11-25T20:55:00Z"
     },
     {
       "id": "ui",
@@ -405,7 +407,7 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "in_progress",
       "issue": 54,
-      "evidence": "#305 integreret 6e82e175; automatisk #306 reparation 44d024d0 under CI. #300 seneste HOLD. Samlet browseraccept udestår.",
+      "evidence": "#306 integreret 1b0f306a med identiske chart/testblobs og browser-CI 45691588370; #300 seneste 3d8362b3 generel CI PASS, fokuseret mobiltest ikke kørt i denne CI. Samlet browseraccept udestår.",
       "subgoals": [
         {
           "id": "reuse",
@@ -418,17 +420,17 @@
           "id": "mobile",
           "title": "Mobil 2.0",
           "status": "review",
-          "evidence": "#300 4fd38ad1 CI 45682839695 PASS; HOLD 7172599176: session-epoch ved holding poll og same-user historikcache. Særskilt mobil-workflow skipped.",
+          "evidence": "#300 3d8362b3 CI 45698810043 PASS generel chart/UI; job 139503171882 udelader browser_mobile_account_isolation.py og navigation. Krav til eksakt fokuseret test registreret på PR; ingen mergeaccept.",
           "owner_role": "mobile",
-          "updated_at": "2026-11-25T19:53:00Z"
+          "updated_at": "2026-11-25T20:55:00Z"
         },
         {
           "id": "desktop",
           "title": "Desktop 2.0",
           "status": "review",
-          "evidence": "#305 integreret 6e82e175; #67:3 #306 ny autonom reparation 44d024d0, CI 45689457715 chart/UI i gang; tidligere HOLD cc5da720. Ingen accept før eksakt ny test/review.",
+          "evidence": "#305/#306 integreret; #306 ce7e97e6 CI 45691588370 chart isolation/period races og desktop-browser PASS. Samlet desktop 2.0-accept udestår.",
           "owner_role": "desktop",
-          "updated_at": "2026-11-25T19:54:00Z"
+          "updated_at": "2026-11-25T20:55:00Z"
         },
         {
           "id": "test",
@@ -438,7 +440,7 @@
           "owner_role": "mobile"
         }
       ],
-      "updated_at": "2026-11-25T19:54:00Z"
+      "updated_at": "2026-11-25T20:55:00Z"
     },
     {
       "id": "load",
@@ -446,7 +448,7 @@
       "title": "100 brugere og skaleringsmåling",
       "status": "in_progress",
       "issue": 14,
-      "evidence": "#302 integreret 99ba8ef6. #304 73f747f9 CI 45681907634 PASS; HOLD: tidlig aktivering kan give større SQL/JSON arbejde. 100-brugeraccept udestår.",
+      "evidence": "#302 integreret 99ba8ef6; #304 2c92b7ad CI 45698387500 motor PASS, HOLD 7174278839: 100-bruger idle scan under samtidige urelaterede writes giver 8 mod 3 statements/tenant. Fuld fairness og hostingmåling udestår.",
       "subgoals": [
         {
           "id": "adapter",
@@ -459,9 +461,9 @@
           "id": "queue",
           "title": "100 brugere og fair køer",
           "status": "review",
-          "evidence": "#304 73f747f9 HOLD 7171889610: mål tidlig og sen aktivering, ikke kun færre SQL statements; ingen fuld fairness/workeraccept.#304 konkret lazy first / bounded batch løsning på kommentar 7172902621.",
+          "evidence": "#304 2c92b7ad HOLD 7174278839: bevar idle SQL-budget under unrelated writes og revalidér relevante ændringer; ingen accept før faktisk 100-bruger fairness/worker-test.",
           "owner_role": "data",
-          "updated_at": "2026-11-25T19:54:00Z"
+          "updated_at": "2026-11-25T20:55:00Z"
         },
         {
           "id": "resources",
@@ -478,7 +480,7 @@
           "owner_role": "data"
         }
       ],
-      "updated_at": "2026-11-25T19:54:00Z"
+      "updated_at": "2026-11-25T20:55:00Z"
     },
     {
       "id": "release",
