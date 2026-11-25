@@ -1,13 +1,19 @@
 /* Standalone engine view, sharing ESCAPE's design; never sends broker orders. */
 window.EngineUI=(()=>{
- let api,esc,money,time,owner,editing,isAdmin,getState,sessionEpoch=()=>0,mode=false,generation=0,timer=null,data=null,candidates=[],portfolios=[],portfolioSnapshots={},batchCandidates=[],pending=null,activeFilter='all',showOwn=false,manualChoices=[];
+ let api,esc,money,time,owner,editing,isAdmin,getState,session=()=>({epoch:0,view:0}),mode=false,generation=0,data=null,candidates=[],portfolios=[],portfolioSnapshots={},batchCandidates=[],pending=null,activeFilter='all',showOwn=false,manualChoices=[];
  const root=()=>document.getElementById('engine-root'),base='v1/hotwatch',labels={CREATED:'Oprettet',VALIDATING:'Validerer',ACTIVE:'Aktiv',PAUSED:'Pauseret',DEGRADED:'Begrænset datagrundlag',EXPIRED:'Udløbet',COMPLETED:'Afsluttet',ERROR:'Fejl',BUY:'KØB',WAIT:'VENT',SELL:'SÆLG',REDUCE:'REDUCÉR',NO_DATA:'AFVENTER SIGNALDATA',PAUSE:'PAUSE'};
  let pendingDetail=null;
  let modeGeneration=0,dialogGeneration=0,detailRequest=0,creationRequest=0,instrumentRequest=0,manualSearchRequest=0;
  function setMode(value){if(mode!==value){mode=value;modeGeneration++}}
+ const sessionEpoch=()=>session().epoch;
+ // A failed logout invalidates requests while leaving the mounted view in place.
+ function captureView(){
+  const user=owner(),node=root(),version=modeGeneration,view=session().view;
+  return ()=>Boolean(user)&&user===owner()&&view===session().view&&node===root()&&(!node||node.isConnected)&&version===modeGeneration;
+ }
  function captureScope(){
-  const user=owner(),node=root(),version=modeGeneration,epoch=sessionEpoch();
-  return ()=>Boolean(user)&&user===owner()&&epoch===sessionEpoch()&&node===root()&&(!node||node.isConnected)&&version===modeGeneration;
+  const mounted=captureView(),epoch=sessionEpoch();
+  return ()=>mounted()&&!session().pending&&epoch===sessionEpoch();
  }
  function captureForm(form){
   const current=captureScope(),modal=document.getElementById('engine-dialog');
@@ -53,7 +59,12 @@ window.EngineUI=(()=>{
   dialog((s.ticker?s.ticker+' · ':'')+'Signaladvarsel',`<section class="signal-notice-details"><strong>${a.state==='ACTIVE'?'Seneste signal':'Tidligere advarsel'}: ${esc(noticeSide(a))} · ${noticeState(a)}</strong><small>${date(a.created)}</small><p>${esc(a.reason||'Begrundelse ikke registreret')}</p><small>${a.state==='ACTIVE'?'Status ved seneste opdatering.':'Historisk advarsel · ikke et aktuelt handelssignal.'}</small>${acknowledged?'<p role="status">Kvitteret</p>':`<button type="button" data-engine-ack="${esc(s.watch_id)}" data-event-id="${esc(a.event_id)}" data-is-test="${s.is_test===true}">Kvittér advarsel</button>`}</section>`);
  }
  async function acknowledgeNotice(b){
-  const scope=captureScope(),eventId=b.dataset.eventId,wid=b.dataset.engineAck,test=b.dataset.isTest==='true',noticeDialog=b.closest?.('dialog');b.disabled=true;
+  const scope=captureScope(),eventId=b.dataset.eventId,wid=b.dataset.engineAck,test=b.dataset.isTest==='true',noticeDialog=b.closest?.('dialog');
+  if(!scope()||b.disabled)return;
+  const signal=session().signal;
+  const unlock=()=>{if(b.isConnected)b.disabled=false};
+  b.disabled=true;
+  signal?.addEventListener('abort',unlock,{once:true});
   try{
    await api(base+'/sessions/'+encodeURIComponent(wid)+'/ack-signal',{is_test:test,event_id:eventId});if(!scope())return;
    const mark=s=>{if(s?.watch_id===wid&&(s.is_test===true)===test&&s.last_action_signal?.event_id===eventId)s.last_action_signal.acknowledged=true};
@@ -62,6 +73,7 @@ window.EngineUI=(()=>{
    b.textContent='Kvitteret';b.setAttribute('aria-label','Advarslen er kvitteret');
    if(noticeDialog?.open&&b.isConnected&&noticeDialog.contains(b))noticeDialog.close();
   }catch(error){if(scope()){b.disabled=false;throw error}}
+  finally{signal?.removeEventListener('abort',unlock)}
  }
  function signalTiming(s){const live=s.status==='ACTIVE'&&['KØBSSIGNAL','SÆLGSSIGNAL','EXIT WATCH'].includes(s.display_status),last=s.last_action_signal||{},labels={BUY_SIGNAL:'Køb',SELL_SIGNAL:'Salg',REDUCE_SIGNAL:'Reducér'};if(live)return `<small class="signal-timing">${window.ESCAPE_DEMO?'Simuleret':'Aktuelt'} · beregnet ${date(s.last_calculation_at)}</small>`;if(labels[last.event_type]&&last.created)return `<small class="signal-timing">Tidligere ${esc(labels[last.event_type])} · ${date(last.created)} · ikke aktuelt</small>`;return ''}
  function signalCategory(s){if(!['CREATED','VALIDATING','ACTIVE','DEGRADED'].includes(s.status))return '';if(s.status==='ACTIVE'&&s.signal==='BUY'&&s.display_status==='KØBSSIGNAL')return 'BUY';if(s.status==='ACTIVE'&&['SELL','REDUCE'].includes(s.signal)&&['SÆLGSSIGNAL','EXIT WATCH'].includes(s.display_status))return 'SELL';if(s.status==='ACTIVE'&&s.signal==='WAIT'&&['AFVENT','VENT'].includes(s.display_status))return 'WAIT';return 'NO_DATA'}
@@ -92,6 +104,7 @@ window.EngineUI=(()=>{
   if(!root())return;
   const ticket=++generation,user=owner(),epoch=sessionEpoch(),scope=captureScope();
   const current=()=>scope()&&ticket===generation;
+  if(!current())return;
   if(data&&data._owner!==user){showOwn=false;activeFilter='all'}
   let r,h,registry;
   try{[r,h,registry]=await Promise.all([api(base+'/sessions'+query()+'&limit=100&view=current'),api(base+'/sessions'+query()+'&limit=20&view=history'),api('reports/candidate-registry?is_test='+mode)])}
@@ -105,25 +118,40 @@ window.EngineUI=(()=>{
    current_truncated:r.truncated,_owner:user,_mode:mode,_epoch:epoch};
   paint();
  }
- let pollScope=null;
- function schedule(scope){
-  clearTimeout(timer);
-  pollScope=scope;
-  const current=()=>pollScope===scope&&scope();
+ function pollView(mounted,refresh){
+  let stopped=false,timer;
+  const current=()=>!stopped&&mounted();
   const tick=async()=>{
    if(!current())return;
-   if(!document.hidden){
-    const open=document.querySelector('dialog[open]'),wid=open?.dataset.watchId,version=dialogGeneration;
+   const scope=captureScope();
+   if(scope()&&!document.hidden){
+    const signal=session().signal;
+    let release;
     try{
-     if(open?.id==='engine-dialog'&&wid){
-      await load();
-      if(current()&&version===dialogGeneration&&open.isConnected&&open.open&&open.dataset.watchId===wid)await detail(wid,true);
-     }else if(!open&&!editing())await load();
-    }catch{}
+     // An obsolete response must not hold up the next polling cycle.
+     const invalidated=signal&&new Promise(resolve=>{
+      release=resolve;
+      signal.addEventListener('abort',release,{once:true});
+     });
+     const work=refresh(scope,current);
+     await (invalidated?Promise.race([work,invalidated]):work);
+    }catch{}finally{if(release)signal.removeEventListener('abort',release)}
    }
    if(current())timer=setTimeout(tick,15000);
   };
   timer=setTimeout(tick,15000);
+  return ()=>{stopped=true;clearTimeout(timer)};
+ }
+ let stopListPoll;
+ function schedule(){
+  stopListPoll?.();
+  stopListPoll=pollView(captureView(),async(scope,current)=>{
+   const open=document.querySelector('dialog[open]'),wid=open?.dataset.watchId,version=dialogGeneration;
+   if(open?.id==='engine-dialog'&&wid){
+    await load();
+    if(current()&&scope()&&version===dialogGeneration&&open.isConnected&&open.open&&open.dataset.watchId===wid)await detail(wid,true);
+   }else if(!open&&!editing())await load();
+  });
  }
  function dialog(title,body,refresh=false){let d=document.getElementById('engine-dialog');if(!d){d=document.createElement('dialog');d.id='engine-dialog';d.className='overview-detail-dialog';document.getElementById('content').append(d)}if(!refresh){dialogGeneration++;delete d.dataset.watchId;delete d.dataset.holdingKey;d.classList?.remove('signal-overview-dialog')}const previousScroll=d.scrollTop;d.innerHTML=`<div class="overview-detail-header"><h2 tabindex="-1">${esc(title)}</h2><button data-engine-close aria-label="Luk motordetaljer">✕</button></div>${body}`;if(!d.open)d.showModal();if(refresh)d.scrollTop=previousScroll;else d.querySelector('h2').focus();return d}
  function chart(items){const points=items.map(x=>x.data).reverse().filter(s=>s.price!==null);if(points.length<2)return '<p>Grafen kræver mindst to faktiske observationer.</p>';const prices=points.map(s=>Number(s.price)),lo=Math.min(...prices),hi=Math.max(...prices),span=Math.max(hi-lo,Math.max(hi,1)*.01),low=(hi+lo-span)/2;const times=points.map(s=>Date.parse(s.event_time)),duration=Math.max(1,times.at(-1)-times[0]);const path=points.map((s,i)=>{const gap=i&&(s.session_key!==points[i-1].session_key||times[i]-times[i-1]>s.interval_s*1500);return `${!i||gap?'M':'L'}${10+580*(times[i]-times[0])/duration},${160-140*(prices[i]-low)/span}`}).join(' ');const color=prices.at(-1)>prices[0]?'#8ddbc8':prices.at(-1)<prices[0]?'#f08d9b':'#a9bac5';return `<figure class="engine-chart"><svg viewBox="0 0 600 180" role="img" aria-label="${window.ESCAPE_DEMO?'Fiktive':'Faktiske'}, tidsstemplede kursobservationer"><path d="${path}" fill="none" stroke="${color}" stroke-width="2"/></svg><figcaption>${date(points[0].event_time)} → ${date(points.at(-1).event_time)} · interval ${text(lo)}–${text(hi)} ${esc(points[0].currency)}. Huller forbindes ikke.</figcaption></figure>`}
@@ -144,6 +172,7 @@ window.EngineUI=(()=>{
   const current=()=>scope()&&ticket===detailRequest&&dialogVersion===dialogGeneration&&
    (!refresh||(openDialog?.open&&openDialog.isConnected&&
     (holdingKey===null?openDialog.dataset.watchId===wid:openDialog.dataset.holdingKey===holdingKey)));
+  if(!current())return;
   if(!refresh)pendingDetail=current;
   let r,samples,events,accountState;
   try{
@@ -282,37 +311,33 @@ window.EngineUI=(()=>{
  }
  async function click(b){if(b.dataset.engineNotice){openNotice(JSON.parse(b.dataset.engineNotice));return true}if(b.dataset.engineAck){await acknowledgeNotice(b);return true}if(b.dataset.engineOwn){showOwn=!showOwn;paint();return true}if(b.dataset.engineManual!==undefined){await startManualWatch(b);return true}if(b.hasAttribute('data-engine-eodhd-search')){await findEodhdSymbol();return true}if(b.hasAttribute('data-engine-batch-add')){await addBatchCandidate();return true}if(b.hasAttribute('data-engine-history-more')){await moreHistory();return true}if(b.hasAttribute('data-engine-close')){dialogGeneration++;document.getElementById('engine-dialog')?.close();return true}if(b.dataset.engineDetail){const opened=await detail(b.dataset.engineDetail,false,!root());if(opened&&b.hasAttribute('data-engine-plan')){const plan=document.getElementById('engine-buy-plan'),details=plan?.closest('details');if(details){details.open=true;details.scrollIntoView({block:'nearest'});details.querySelector('summary')?.focus({preventScroll:true})}}return true}if(b.hasAttribute('data-engine-new')){await creation();return true}if(b.dataset.engineControl){await controlSession(b);return true}if(b.dataset.engineFilter){activeFilter=b.dataset.engineFilter;applyFilter(activeFilter);return true}if(b.dataset.engineKill){if(!confirm(b.dataset.engineKill==='on'?'Pause alle dine motorsessioner i BÅDE DRIFT OG TEST? Historik og Pluto-ordrer bevares.':'Ophæv nødstop? Sessionerne genoptages kun manuelt.'))return true;await api(base+'/kill-switch',{enabled:b.dataset.engineKill==='on',reason:'Manuel ændring fra ESCAPE-kontrolcenter'});await load();return true}if(b.hasAttribute('data-engine-strategies')){const ticketOwner=owner();const [s,p]=await Promise.all([api(base+'/strategies'),api(base+'/providers'+query())]);if(owner()!==ticketOwner||!b.isConnected)return true;dialog('Strategier og datakilder',`${s.strategies.map(x=>`<article class="event"><h3>${esc(x.strategy_id)} v${esc(x.version)}</h3><p>${x.validation_status==='baseline_tested'?'Testet baseline · vælges eksplicit ved start':'Uploadet · kan ikke aktiveres før kvalificering'}</p><small>${esc(x.checksum)}</small><button data-engine-validate="${esc(x.strategy_id)}" data-engine-version="${esc(x.version)}">Kontrollér deklarationen</button></article>`).join('')}<p>Backtest, shadow mode og aktivering/rollback af nye versioner er ikke implementeret i fase 1–2.</p><h3>Datakilder</h3>${Object.entries(p.providers).map(([name,v])=>`<article class="event"><h4>${esc(name)}</h4><p>${esc((v.known_limits||[]).join(' · '))}</p>${v.minimum_poll_s?`<p>Mindste pollinterval: ${esc(String(v.minimum_poll_s))} sekunder.</p>`:''}${name==='eodhd'?`<p>Active Trader oplyst · nøgle ${v.key_configured?'konfigureret':'mangler'} · REST ${v.enabled?'aktiveret':'ikke aktiveret'} · WebSocket ${v.websocket_enabled?'aktiveret for trades · adgang uverificeret':'ikke aktiveret'}.</p>`:''}</article>`).join('')}${isAdmin()?'<label>Upload ny, inaktiv strategiversion<input type="file" id="engine-strategy-file" accept="application/json,.json"></label><p id="engine-strategy-status" role="status"></p>':''}`);return true}if(b.dataset.engineValidate){const r=await api(base+'/strategies/'+encodeURIComponent(b.dataset.engineValidate)+'/'+encodeURIComponent(b.dataset.engineVersion)+'/validate',{});b.textContent=r.valid?'Deklarationen er gyldig':'Deklarationen er ugyldig';return true}return false}
  async function change(e){if(e.target.id==='engine-eodhd-select'){const f=document.getElementById('engine-create'),item=candidates[Number(f.elements.candidate.value)];if(item){const choice=(item.eodhd_choices||[]).find(x=>x.symbol===e.target.value);const expectedCurrency=item.instrument?.currency||f.elements.quote_currency.value;if(e.target.value&&(!choice||!expectedCurrency||choice.currency!==expectedCurrency)){e.target.value='';item.provider_symbol=null;f.elements.provider_symbol.value='';if(item.instrument)item.instrument.provider_symbol=null;formStatus('EODHD-instrumentets valuta er ukendt eller stemmer ikke med Pluto. Vælg et dokumenteret match.');return true}item.provider_symbol=e.target.value||null;f.elements.provider_symbol.value=e.target.value;if(item.instrument)item.instrument.provider_symbol=item.provider_symbol}return true}if(e.target.name==='provider'){if(e.target.value==='eodhd')await findEodhdSymbol();return true}if(e.target.name==='provider_symbol'){const f=document.getElementById('engine-create'),item=candidates[Number(f.elements.candidate.value)];if(item)item.provider_symbol=e.target.value.trim();return true}if(e.target.name==='candidate'){const f=document.getElementById('engine-create');instrumentRequest++;if(f){f.elements.provider_symbol.value=candidates[Number(e.target.value)]?.provider_symbol||'';for(const id of ['engine-eodhd-choice','engine-instrument-choice']){const slot=document.getElementById(id);if(slot)slot.textContent=''}}if(!mode&&await resolveInstrument(Number(e.target.value))===undefined)return true;if(f?.elements.provider.value==='eodhd')await findEodhdSymbol();return true}if(e.target.id==='engine-asset-choice'){const index=Number(new FormData(document.getElementById('engine-create')).get('candidate'));await resolveInstrument(index,e.target.value);return true}if(e.target.id!=='engine-strategy-file')return false;const f=e.target.files[0];if(!f)return true;if(f.size>131072)throw Error('Strategifilen er for stor.');const r=await api(base+'/strategies',JSON.parse(await f.text()));document.getElementById('engine-strategy-status').textContent='Strategiversionen er gemt inaktiv. Ingen algoritme er aktiveret. Checksum: '+r.checksum;return true}
- let externalTimer=null;
+ let stopExternalPoll;
  function refreshExternal(wid){
-  const scope=captureScope(),d=document.getElementById('engine-dialog'),version=dialogGeneration;
-  const current=()=>scope()&&!root()&&d?.isConnected&&d.open&&d.dataset.watchId===wid&&dialogGeneration===version;
-  clearTimeout(externalTimer);
-  const scheduleNext=()=>{
-   externalTimer=setTimeout(async()=>{
-    if(!current())return;
-    if(!document.hidden)try{await detail(wid,true,true)}catch{}
-    if(current())scheduleNext();
-   },15000);
-  };
-  scheduleNext();
+  const mounted=captureView(),d=document.getElementById('engine-dialog'),version=dialogGeneration;
+  stopExternalPoll?.();
+  stopExternalPoll=pollView(
+   ()=>mounted()&&!root()&&d?.isConnected&&d.open&&d.dataset.watchId===wid&&dialogGeneration===version,
+   ()=>detail(wid,true,true)
+  );
  }
- function openHoldingStatus(item,refresh=false){const status=item.status||{},messages={IDENTITY_UNVERIFIED:'Instrumentets identitet kunne ikke bekræftes ud fra de seneste Pluto-oplysninger.',PLUTO_ASSET_METADATA_MISSING:'Pluto returnerede ikke genkendelige instrumentoplysninger.',PLUTO_ASSET_ID_MISMATCH:'Pluto-svaret passer ikke entydigt til beholdningens aktiv-ID.',PLUTO_CURRENCY_MISSING:'Pluto oplyste ikke en verificerbar valuta for instrumentet.',PLUTO_CURRENCY_MISMATCH:'Valutaen i Pluto-svaret og beholdningen stemmer ikke overens.',PLUTO_TICKER_MISSING:'Pluto oplyste ikke en ticker for instrumentet.',PLUTO_TICKER_MISMATCH:'Ticker i Pluto-svaret og beholdningen stemmer ikke overens.',EODHD_IDENTITY_UNCERTAIN:'Der er ikke fundet præcis ét sikkert EODHD-match med samme ISIN og valuta.',PROVIDER_RATE_BUDGET:'Motorens fælles budget for dataopslag er opbrugt.',EODHD_RATE_LIMIT:'EODHD har midlertidigt begrænset opslag.',EODHD_FEED_NOT_ENABLED:'EODHD er ikke aktiveret i motorens miljø.',EODHD_KEY_NOT_CONFIGURED:'EODHD-nøglen er ikke tilgængelig i motorens miljø.',holding_not_verified:'Et frisk, komplet Pluto-depot med denne beholdning mangler.',VERIFICATION_FAILED:'Instrumentkontrollen kunne ikke gennemføres.',CAPACITY_LIMIT:'Alle motorens sessionspladser er i brug.',global_capacity_limit:'Alle motorens sessionspladser er i brug.',AMBIGUOUS:'Flere sessioner matcher beholdningen. Vælg den ønskede session under HOT WATCH.',STOPPED:'Overvågningen er afsluttet og startes ikke automatisk igen.',VERIFYING:'Instrumentet kontrolleres mod Pluto og EODHD.'};const next=Number(status.next_attempt),retry=Number.isFinite(next)&&next>0&&!['STOPPED','AMBIGUOUS','LINKED'].includes(status.status);const d=dialog((item.ticker||'Beholdning')+' · HOT WATCH',`<p><strong>${esc(item.label)}</strong></p><p>${esc(messages[status.status]||'Der er endnu ikke en verificeret motorsession for denne beholdning. Når motoren har kontrolleret instrumentet, vises status her.')}</p>${status.updated?`<p>Seneste kontrol: ${date(status.updated)}</p>`:''}${retry?`<p>Næste forsøg tidligst: ${date(new Date(next*1000).toISOString())}</p>`:''}<p>Der er endnu ingen warmup-beregning for denne status.</p>${window.TradeUI.holdingActions(item.key)}`,refresh);d.dataset.holdingKey=item.key;if(!refresh)refreshHolding(item.key,captureScope(),d,dialogGeneration)}
- let holdingTimer=null;
- function refreshHolding(key,scope,d,version){
-  const current=()=>scope()&&d.isConnected&&d.open&&d.dataset.holdingKey===key&&dialogGeneration===version;
-  clearTimeout(holdingTimer);
-  holdingTimer=setTimeout(async()=>{
-   if(!current())return;
-   if(!document.hidden)try{
+ function openHoldingStatus(item,refresh=false){const status=item.status||{},messages={IDENTITY_UNVERIFIED:'Instrumentets identitet kunne ikke bekræftes ud fra de seneste Pluto-oplysninger.',PLUTO_ASSET_METADATA_MISSING:'Pluto returnerede ikke genkendelige instrumentoplysninger.',PLUTO_ASSET_ID_MISMATCH:'Pluto-svaret passer ikke entydigt til beholdningens aktiv-ID.',PLUTO_CURRENCY_MISSING:'Pluto oplyste ikke en verificerbar valuta for instrumentet.',PLUTO_CURRENCY_MISMATCH:'Valutaen i Pluto-svaret og beholdningen stemmer ikke overens.',PLUTO_TICKER_MISSING:'Pluto oplyste ikke en ticker for instrumentet.',PLUTO_TICKER_MISMATCH:'Ticker i Pluto-svaret og beholdningen stemmer ikke overens.',EODHD_IDENTITY_UNCERTAIN:'Der er ikke fundet præcis ét sikkert EODHD-match med samme ISIN og valuta.',PROVIDER_RATE_BUDGET:'Motorens fælles budget for dataopslag er opbrugt.',EODHD_RATE_LIMIT:'EODHD har midlertidigt begrænset opslag.',EODHD_FEED_NOT_ENABLED:'EODHD er ikke aktiveret i motorens miljø.',EODHD_KEY_NOT_CONFIGURED:'EODHD-nøglen er ikke tilgængelig i motorens miljø.',holding_not_verified:'Et frisk, komplet Pluto-depot med denne beholdning mangler.',VERIFICATION_FAILED:'Instrumentkontrollen kunne ikke gennemføres.',CAPACITY_LIMIT:'Alle motorens sessionspladser er i brug.',global_capacity_limit:'Alle motorens sessionspladser er i brug.',AMBIGUOUS:'Flere sessioner matcher beholdningen. Vælg den ønskede session under HOT WATCH.',STOPPED:'Overvågningen er afsluttet og startes ikke automatisk igen.',VERIFYING:'Instrumentet kontrolleres mod Pluto og EODHD.'};const next=Number(status.next_attempt),retry=Number.isFinite(next)&&next>0&&!['STOPPED','AMBIGUOUS','LINKED'].includes(status.status);const d=dialog((item.ticker||'Beholdning')+' · HOT WATCH',`<p><strong>${esc(item.label)}</strong></p><p>${esc(messages[status.status]||'Der er endnu ikke en verificeret motorsession for denne beholdning. Når motoren har kontrolleret instrumentet, vises status her.')}</p>${status.updated?`<p>Seneste kontrol: ${date(status.updated)}</p>`:''}${retry?`<p>Næste forsøg tidligst: ${date(new Date(next*1000).toISOString())}</p>`:''}<p>Der er endnu ingen warmup-beregning for denne status.</p>${window.TradeUI.holdingActions(item.key)}`,refresh);d.dataset.holdingKey=item.key;if(!refresh)refreshHolding(item.key,d,dialogGeneration)}
+ let stopHoldingPoll;
+ function refreshHolding(key,d,version){
+  let mounted=captureView();
+  stopHoldingPoll?.();
+  stopHoldingPoll=pollView(
+   ()=>mounted()&&d.isConnected&&d.open&&d.dataset.holdingKey===key&&dialogGeneration===version,
+   async(scope,current)=>{
     const state=await api('state');
-    if(!current())return;
+    if(!current()||!scope())return;
     const row=state.dashboard?.positions?.find(x=>x.key===key);
     if(row?.hot_watch?.session){
      const wid=row.hot_watch.session.watch_id;
      setMode(false);
+     mounted=captureView();
      scope=captureScope();
      const opened=await detail(wid,true,true,key);
-     if(!current())return;
+     if(!current()||!scope())return;
      if(opened){
       delete d.dataset.holdingKey;
       refreshExternal(wid);
@@ -320,9 +345,8 @@ window.EngineUI=(()=>{
      }
     }
     if(row)openHoldingStatus({key,ticker:row.ticker||row.name,label:window.DashboardUI.watchLabel(row.hot_watch||{},row),status:row.hot_watch?.auto_status||null},true);
-   }catch{}
-   if(current())refreshHolding(key,scope,d,version);
-  },15000);
+   }
+  );
  }
  async function openNotification(wid){
   setMode(false);const scope=captureScope(),ticket=++detailRequest,version=dialogGeneration;
@@ -363,6 +387,6 @@ window.EngineUI=(()=>{
   const node=dialog(title,body);node.classList.add('signal-overview-dialog');window.MarketUI.mount();
  }
 
- return {openHoldingStatus,actionNotice,openNotification,async openDetail(wid){setMode(false);if(await detail(wid,false,true))refreshExternal(wid)},setup(d){({api,escape:esc,formatAmount:money,formatTime:time,owner,editing,isAdmin,state:getState}=d);sessionEpoch=typeof d.session==='function'?d.session:()=>0},mount(value){setMode(value);const scope=captureScope();load().catch(e=>{if(scope())root().textContent='Motorstatus kunne ikke hentes: '+reason(e.details?.code||e.message)});schedule(scope)},click,submit,change};
+ return {openHoldingStatus,actionNotice,openNotification,async openDetail(wid){setMode(false);if(await detail(wid,false,true))refreshExternal(wid)},setup(d){({api,escape:esc,formatAmount:money,formatTime:time,owner,editing,isAdmin,state:getState}=d);if(d.session)session=d.session},mount(value){setMode(value);const scope=captureScope();load().catch(e=>{if(scope())root().textContent='Motorstatus kunne ikke hentes: '+reason(e.details?.code||e.message)});schedule()},click,submit,change};
 })();
 

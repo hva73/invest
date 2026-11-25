@@ -12,12 +12,20 @@ def browser_fixture():
 const content = document.getElementById('content');
 const pending = [];
 const userIds = {alpha: 11, beta: 22};
-let username,epoch=0,holdCurrentLoad=false,omitHistory=false,poll;
+let username,epoch=0,logoutView=null,logoutPending=false,requests=new AbortController();
+let holdCurrentLoad=false,omitHistory=false,poll,pollSchedules=0;
+const beginLogout = () => {
+    logoutView ??= epoch;
+    epoch++;
+    logoutPending = true;
+    requests.abort();
+    requests = new AbortController();
+};
 // Run polling deterministically even when the browser fixture has no focused window.
 Object.defineProperty(document, 'hidden', {value: false});
 const realTimeout = window.setTimeout;
 window.setTimeout = (callback, delay) => {
-    if (delay === 15000) { poll = callback; return null; }
+    if (delay === 15000) { poll = callback; pollSchedules++; return null; }
     return realTimeout(callback, delay);
 };
 const session = (watch_id, status = 'ACTIVE') => ({
@@ -62,6 +70,8 @@ const account = user => ({
 });
 const switchAccount = user => {
     epoch++;
+    logoutView = null;
+    logoutPending = false;
     username = user;
     content.innerHTML = user ? '<div id="engine-root"></div>' : '';
     if (user) EngineUI.mount(false);
@@ -80,7 +90,7 @@ const select = index => {
 };
 const run = async () => {
     assert(innerWidth === 390, 'Expected 390px viewport');
-    EngineUI.setup({api, owner: () => username, session:()=>epoch, isAdmin: () => false, editing: () => false,
+    EngineUI.setup({api, owner: () => username, session:()=>({epoch, view:logoutView ?? epoch, pending:logoutPending, signal:requests.signal}), isAdmin: () => false, editing: () => false,
         escape: value => String(value ?? ''), formatTime: String});
     switchAccount('alpha');
     const alpha = await create('alpha');
@@ -338,6 +348,7 @@ const run = async () => {
         const engine = byId('engine-root');
         const before = engine.innerHTML;
         const oldPoll = poll;
+        const oldSchedule = pollSchedules;
         holdCurrentLoad = true;
         const cycle = phase === 'in flight' ? oldPoll() : null;
         epoch++;
@@ -350,7 +361,7 @@ const run = async () => {
         holdCurrentLoad = false;
         await pendingCycle;
         check(engine.innerHTML === before, phase + ' HOT WATCH poll repainted during logout');
-        check(poll === oldPoll, phase + ' HOT WATCH poll rescheduled during logout');
+        check(pollSchedules === oldSchedule, phase + ' HOT WATCH poll survived a changed session');
     }
 
     switchAccount('alpha');
@@ -502,6 +513,85 @@ const run = async () => {
     staleAckRequest.reject(Error('prior-session acknowledgement error'));
     await staleAck;
     check(byId('notice').textContent === 'relogin notice', 'Prior-session acknowledgement error reached global notice');
+    for (const phase of ['scheduled', 'in flight']) {
+        switchAccount('alpha');
+        await flush();
+        const engine = byId('engine-root');
+        const before = engine.innerHTML;
+        holdCurrentLoad = true;
+        const oldSchedule = pollSchedules;
+        const oldCycle = phase === 'in flight' ? poll() : null;
+        const oldList = oldCycle && take('view=current', 'alpha');
+        beginLogout();
+        if (oldCycle) {
+            await flush();
+            assert(pollSchedules > oldSchedule, 'Polling waited for the obsolete request to settle');
+            await oldCycle;
+        }
+        const waiting = poll();
+        assert(!pending.some(request => request.path.includes('view=current')), 'HOT WATCH read during pending logout');
+        await waiting;
+        check(!pending.some(request => request.path.includes('view=current')) && engine.innerHTML === before,
+            'HOT WATCH read or wrote while logout was pending');
+        logoutPending = false; // HTTP 500 leaves the authenticated view mounted.
+        const recovered = poll();
+        take('view=current', 'alpha').resolve({sessions: [session('recovered')], kill_switch: {}});
+        await recovered;
+        oldList?.resolve({sessions: [session('obsolete')], kill_switch: {}});
+        await flush();
+        holdCurrentLoad = false;
+        check(button('[data-engine-detail="recovered"]') && !button('[data-engine-detail="obsolete"]'),
+            'HOT WATCH polling did not recover cleanly after failed logout');
+    }
+
+    content.innerHTML = '';
+    openHolding();
+    const obsoleteHolding = poll();
+    const obsoleteHoldingState = take('state', 'alpha');
+    beginLogout();
+    logoutPending = false;
+    obsoleteHoldingState.resolve(holding({session: {watch_id: 'obsolete-holding'}}));
+    await obsoleteHolding;
+    assert(!pending.some(request => request.path === 'state'), 'Obsolete holding poll started a detail read');
+    check(byId('engine-dialog').textContent.includes('Original'), 'Obsolete holding poll wrote after failed logout');
+
+    const linked = poll();
+    take('state', 'alpha').resolve(holding({session: {watch_id: 'alpha-recovered'}}));
+    await flush();
+    take('state', 'alpha').resolve(account('alpha'));
+    await linked;
+    const dialog = byId('engine-dialog');
+    assert(dialog.dataset.watchId === 'alpha-recovered', 'Holding polling did not recover after failed logout');
+
+    const ackButton = sameAck.cloneNode();
+    ackButton.disabled = false;
+    dialog.append(ackButton);
+    const beforeLogoutAck = click('[data-engine-ack]');
+    const obsoleteAck = take('/ack-signal', 'alpha');
+    beginLogout();
+    const waitingAck = EngineUI.click(ackButton);
+    assert(!pending.some(request => request.path.endsWith('/ack-signal')), 'Acknowledgement posted during logout');
+    await waitingAck;
+    await poll();
+    check(!pending.some(request => request.path === 'state'), 'External detail polled during logout');
+    logoutPending = false;
+    assert(!ackButton.disabled, 'Failed logout kept acknowledgement disabled until its old request settled');
+    const retry = click('[data-engine-ack]');
+    const retryAck = take('/ack-signal', 'alpha');
+    obsoleteAck.reject(Error('obsolete acknowledgement error'));
+    await beforeLogoutAck;
+    check(ackButton.disabled && byId('notice').textContent === 'relogin notice',
+        'Obsolete acknowledgement disturbed the retry');
+    retryAck.reject(Error('retry acknowledgement error'));
+    await retry;
+    check(!ackButton.disabled && byId('notice').textContent === 'retry acknowledgement error',
+        'Current retry could not report its error');
+
+    const external = poll();
+    take('state', 'alpha').resolve(account('alpha'));
+    await external;
+    check(dialog.open && !ackButton.isConnected && dialog.dataset.watchId === 'alpha-recovered',
+        'External detail polling did not recover after failed logout');
     assert(!failures.length, failures.join(' | '));
 };
 window.testResult = run().then(() => 'PASS', error => String(error) + '\\n' + (error.stack || ''));
