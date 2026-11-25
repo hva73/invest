@@ -930,5 +930,24 @@
         "task": "Measure and reduce repeated JSON parsing and unnecessary database writes in auto_holdings_tick on accepted prior base. Reuse existing per-position evidence only within one tick; do not reuse stale positions across ticks or change one activation per tick, retries or protection. Actual SQLite tests for 100 users and no extra writes for already-linked positions. Implement only verified remaining waste; if already fully met, return no_changes with evidence."
       }
     ]
+  },
+  {
+    "issue": 12,
+    "generation": 2,
+    "role": "motor",
+    "priority": 2,
+    "status": "ready",
+    "base_branch": "codex/trading-engine-v2-integration",
+    "base_sha": "e4b59436f7abc5fc154a65c8fd9a9de65281e4a8",
+    "dependencies": [],
+    "paths": [
+      "app.py",
+      "long_term_watch.py",
+      "tests/test_strategy_lab.py"
+    ],
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "task": "Implement #12 next vertical slice on accepted #308: authenticated Long-Term Watch list/add/status/remove/reopen routes using existing app.py session and CSRF, server-side verified Pluto asset identity via existing read-only instrument resolution (never trust caller identity, uid, price or claimed fill); use existing SQLite init under migration lock, on the development integration branch only. Missing/unverified identity fails without writing; no automatic price fetch, no broker proposals/orders, no change to holdings/P&L; no background polling. Keep reference price missing unless existing authoritative verified evidence is available. Preserve existing response and layout contracts; no UI changes. Actual authenticated HTTP and SQLite regression tests in tests/test_strategy_lab.py with two tenants, forged metadata/user, unauthenticated and CSRF failure, idempotency and removal/reopen, no holdings or trades changed. Run tests directly and existing motor CI. No production installation."
   }
 ]
