@@ -417,6 +417,19 @@ def repair_review(root, repo_dir, row, number, p, reason, allowance):
         save(record,{"key":key(row),"head":sha,"state":"held","at":now()})
         raise Hold("Reparation stoppet; arbejde bevaret ("+type(exc).__name__+")") from exc
 
+def run_developer_repair(root,repo_dir,row,number,sha,reason,allowance):
+    """Developer worker: exact reviewed draft only, no review or integration."""
+    if (root/"STOP").exists():
+        return "stopping"
+    if row.get("local_repair") is not True or row.get("local_review") is not True or row.get("base_branch") not in TARGETS or row["role"]=="release":
+        raise Hold("Reparation ikke godkendt")
+    p,files,state=verify_pr(row,number)
+    if state!="open" or p["head"]["sha"]!=sha:
+        return "changed_head"
+    if repair_attempt(root,number,sha) is None:
+        return "held"
+    return repair_review(root,repo_dir,row,number,p,reason,allowance)
+
 def successor(rows,row,integrated):
     # Only operator-authored followups, never model-generated queue instructions.
     followups=row.get("followups",[])
@@ -500,7 +513,7 @@ def due(root, rows, results, current_time=None):
             return True
     return False
 
-def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review=lambda: True, repair_allowance=60000, review_keys=None):
+def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review=lambda: True, repair_allowance=60000, review_keys=None, defer_repairs=False):
     request=trigger(root)
     ident=request["id"] if request else secrets.token_hex(16)
     if provider_pause:
@@ -561,7 +574,7 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
                     repair_reason=last.get("repair_reason")
                     # A previous review may have been unable to reserve a repair.
                     # Resume that exact reviewed defect, without another model review.
-                    if (state=="open" and row.get("local_repair") is True and isinstance(repair_reason,str)
+                    if (not defer_repairs and state=="open" and row.get("local_repair") is True and isinstance(repair_reason,str)
                             and 1<=len(repair_reason)<=800 and repair_attempt(root,number,sha) is not None
                             and not (root/"STOP").exists() and reserve_review()):
                         publish_status(root,ident,"running","Retter konkret reviewfejl i PR #"+str(number),request)
@@ -606,7 +619,7 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
                         save(root/"coordinator-review.json",journal)
                         comment(number,"Lokal uafhængig review HOLD "+sha+": "+decision["reason"][:800])
                         # Only explicitly approved scoped generations can repair.
-                        if row.get("local_repair") is True and repair_attempt(root,number,sha) is not None and not (root/"STOP").exists() and reserve_review():
+                        if not defer_repairs and row.get("local_repair") is True and repair_attempt(root,number,sha) is not None and not (root/"STOP").exists() and reserve_review():
                             publish_status(root,ident,"running","Retter konkret reviewfejl i PR #"+str(number),request)
                             detail=repair_review(root,repo_dir,row,number,p,decision["reason"],repair_allowance)
                             entry.update(state="waiting",detail=detail)
