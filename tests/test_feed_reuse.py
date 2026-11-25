@@ -79,6 +79,7 @@ class FeedReuse(unittest.TestCase):
    session=capacity_fixture.LiveCapacity.add(self,symbol,self._shared_seq,user=uid,due=self.now.timestamp()+3600)
   job=dict(session)
   req=dict(job['request_data'],asset_id=f'asset-{uid}-{symbol}',provider_symbol=symbol,ticker=symbol.split('.')[0])
+  if not symbol.endswith('.US'):req.update(exchange=symbol.rsplit('.',1)[1],quote_currency='EUR')
   job['request_data']=req
   with app.connect() as c:
    if isin:
@@ -136,7 +137,7 @@ class FeedReuse(unittest.TestCase):
   denied.capture.return_value={'status':'ENTITLEMENT_UNVERIFIED','messages':[]}
   for _ in range(2):
    self.assertEqual(other.capture(denied,'us_trades','MERC',second)['status'],'ENTITLEMENT_UNVERIFIED')
-  self.assertEqual(denied.capture.call_count,2)
+  self.assertEqual(denied.capture.call_count,1)
   other.capture(client,'us_quotes','MERC',second)
   other.capture(client,'us_trades','MERC',{**second,'request_data':dict(second['request_data'],is_test=True)})
   other.capture(client,'us_trades','MERC',{**second,'is_test':True})
@@ -207,18 +208,113 @@ class FeedReuse(unittest.TestCase):
    client.capture.side_effect=[RuntimeError('synthetic failure'),{'status':'NO_MESSAGES','messages':[]},capture('us_trades','MERC')]
    with self.assertRaisesRegex(RuntimeError,'synthetic failure'):
     other.capture(client,'us_trades','MERC',second)
-   self.assertEqual(other.capture(client,'us_trades','MERC',second)['status'],'OK')
-   self.assertEqual(other.capture(client,'us_trades','MERC',second)['status'],'OK')
-   self.assertEqual(client.capture.call_count,4)
+   self.assertEqual(other.capture(client,'us_trades','MERC',second)['status'],'NO_MESSAGES')
+   self.assertEqual(other.capture(client,'us_trades','MERC',second)['status'],'NO_MESSAGES')
+   self.assertEqual(client.capture.call_count,3)
   client.capture.side_effect=capture
-  with patch('hotwatch_adapters.utc',return_value=self.now+timedelta(seconds=121)):
-   other.capture(client,'us_trades','MERC',second)
+  with patch('hotwatch_adapters.time.monotonic',return_value=176):
+   self.assertEqual(other.capture(client,'us_trades','MERC',second)['status'],'OK')
+   with patch('hotwatch_adapters.utc',return_value=self.now+timedelta(seconds=121)):
+    other.capture(client,'us_trades','MERC',second)
   self.assertEqual(client.capture.call_count,5)
+  client.capture.side_effect=None
+  client.capture.return_value={'status':'NO_MESSAGES','messages':[]}
   for index in range(513):
    symbol=f'BOUND{index}'
    self.adapter.capture(client,'us_trades',symbol,self.shared_job(1,symbol+'.US'))
    self.assertLessEqual(len(adapters._ws_batch_cache),512)
   self.assertFalse(adapters._ws_batch_inflight)
+ @patch.dict(os.environ,{'ESCAPE_HW_EODHD_CROSS_USER_WS_ENABLED':'1'})
+ def test_cross_user_availability_counts_and_expiry(self):
+  subscribers=[adapters.EODHDAdapter(app.connect,uid) for uid in range(1,101)]
+  overlap=[self.shared_job(uid) for uid in range(1,101)]
+  disjoint=[self.shared_job(uid,f'DISTINCT{uid}.US') for uid in range(1,101)]
+  partial={'symbol':'MERC','price':'100','received_at':self.now.isoformat()}
+  outcomes=[
+   ('NO_MESSAGES',{'status':'NO_MESSAGES','messages':[]}),
+   ('INCOMPLETE',{'status':'NO_MESSAGES','messages':[],'partial_messages':[partial]}),
+   ('ENTITLEMENT_UNVERIFIED',{'status':'ENTITLEMENT_UNVERIFIED','messages':[]}),
+   ('NETWORK_OR_RESPONSE_ERROR',{'status':'NETWORK_OR_RESPONSE_ERROR','messages':[]}),
+  ]
+  for size in (1,10,100):
+   for jobs,expected in ((overlap,1),(disjoint,size)):
+    for status,response in outcomes:
+     with self.subTest(size=size,distinct=jobs is disjoint,status=status):
+      adapters._ws_batch_cache.clear()
+      client=self.shared_client()
+      def capture(feed,stream,**kwargs):
+       if status=='INCOMPLETE':return dict(response,partial_messages=[dict(partial,symbol=stream)])
+       return response
+      client.capture.side_effect=capture
+      for second,count in ((100,expected),(114,expected),(115,2*expected)):
+       with patch('hotwatch_adapters.time.monotonic',return_value=second):
+        for adapter,job in zip(subscribers[:size],jobs):
+         stream=adapters.realtime_symbol(job['request_data']['provider_symbol'])
+         result=adapter.capture(client,'us_trades',stream,job)
+         self.assertEqual(result['status'],status)
+         self.assertEqual(result['messages'],[])
+         if status=='INCOMPLETE':self.assertEqual(result['partial_messages'],[dict(partial,symbol=stream)])
+       self.assertEqual(client.capture.call_count,count)
+       self.assertEqual(len(adapters._ws_batch_cache),expected)
+
+ @patch.dict(os.environ,{'ESCAPE_HW_EODHD_CROSS_USER_WS_ENABLED':'1'})
+ def test_shared_quiet_does_not_cross_credential_feed_or_test_scope(self):
+  first,second=self.shared_job(1),self.shared_job(2)
+  other=adapters.EODHDAdapter(app.connect,2)
+  client=self.shared_client()
+  original=client.capture.side_effect
+  client.capture.side_effect=[{'status':'NO_MESSAGES','messages':[]},original('us_quotes','MERC'),original('us_trades','MERC')]
+  self.assertEqual(self.adapter.capture(client,'us_trades','MERC',first)['status'],'NO_MESSAGES')
+  self.assertEqual(other.capture(self.shared_client('other-fixture'),'us_trades','MERC',second)['status'],'OK')
+  self.assertEqual(other.capture(client,'us_quotes','MERC',second)['status'],'OK')
+  self.assertEqual(other.capture(client,'us_trades','MERC',dict(second,is_test=True))['status'],'OK')
+  self.assertEqual(other.capture(client,'us_trades','MERC',second)['status'],'NO_MESSAGES')
+  self.assertEqual(client.capture.call_count,3)
+
+ @patch.dict(os.environ,{'ESCAPE_HW_EODHD_CROSS_USER_WS_ENABLED':'1'})
+ def test_eu_quiet_exchange_and_symbol_collision(self):
+  first=self.shared_job(1,'SAME.XETRA',isin='DE1234567890')
+  same=self.shared_job(2,'SAME.XETRA',isin='DE1234567890')
+  venue=self.shared_job(2,'SAME.AS',isin='DE1234567890')
+  client=self.shared_client()
+  original=client.capture.side_effect
+  client.capture.side_effect=lambda feed,stream,**kw: (
+   {'status':'NO_MESSAGES','messages':[]} if stream=='SAME.XETRA' else original(feed,stream,**kw))
+  other=adapters.EODHDAdapter(app.connect,2)
+  self.assertEqual(self.adapter.capture(client,'eu_trades','SAME.XETRA',first)['status'],'NO_MESSAGES')
+  self.assertEqual(other.capture(client,'eu_trades','SAME.XETRA',same)['status'],'NO_MESSAGES')
+  self.assertEqual(other.capture(client,'eu_trades','SAME.AS',venue)['messages'][0]['symbol'],'SAME.AS')
+  self.assertEqual([call.args[1] for call in client.capture.call_args_list],['SAME.XETRA','SAME.AS'])
+  self.assertEqual(len(adapters._ws_batch_cache),2)
+
+ @patch.dict(os.environ,{'ESCAPE_HW_EODHD_CROSS_USER_WS_ENABLED':'1'})
+ def test_quiet_probe_keeps_prior_timestamps_and_allows_freshness_retry(self):
+  first,strict,ahead=(self.shared_job(uid) for uid in (1,2,3))
+  strict['request_data']['risk']['max_quote_age_s']=5
+  with app.connect() as c:
+   c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps(strict['request_data']),strict['id']))
+   ahead['last_data']=(self.now-timedelta(seconds=1)).isoformat()
+   c.execute('UPDATE hw_sessions SET last_data=? WHERE id=?',(ahead['last_data'],ahead['id']))
+  second,third=(adapters.EODHDAdapter(app.connect,uid) for uid in (2,3))
+  client=self.shared_client()
+  old=(self.now-timedelta(seconds=10)).isoformat()
+  message={'symbol':'MERC','event_time':old,'received_at':old,'price':'100'}
+  newer=dict(message,event_time=self.now.isoformat(),received_at=self.now.isoformat())
+  client.capture.side_effect=[
+   {'status':'OK','messages':[message]},
+   {'status':'NO_MESSAGES','messages':[]},
+   {'status':'OK','messages':[newer]},
+  ]
+  with patch('hotwatch_adapters.time.monotonic',return_value=100):
+   self.assertEqual(self.adapter.capture(client,'us_trades','MERC',first)['messages'],[message])
+   self.assertEqual(second.capture(client,'us_trades','MERC',strict)['status'],'NO_MESSAGES')
+   self.assertEqual(third.capture(client,'us_trades','MERC',ahead)['status'],'NO_MESSAGES')
+   self.assertEqual(self.adapter.capture(client,'us_trades','MERC',first)['messages'],[message])
+   self.assertEqual(client.capture.call_count,2)
+  with patch('hotwatch_adapters.time.monotonic',return_value=115):
+   self.assertEqual(third.capture(client,'us_trades','MERC',ahead)['messages'],[newer])
+   self.assertEqual(second.capture(client,'us_trades','MERC',strict)['messages'],[newer])
+   self.assertEqual(client.capture.call_count,3)
  @patch.dict(os.environ,{'ESCAPE_HW_EODHD_CROSS_USER_WS_ENABLED':'1',
                          'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1',
                          'ESCAPE_HW_EODHD_FUSE_ENABLED':'0'})
