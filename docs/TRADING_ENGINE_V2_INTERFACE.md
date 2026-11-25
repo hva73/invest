@@ -229,3 +229,5 @@ markedshændelse til modtagelse og fra modtagelse til beregning. Der beregnes
 ingen P/L eller eksekveringsstatistik. Sammenligningen bruger den gældende
 v2-risikogate med de fangede risikoinput. Kaldet læser kun SQLite og har
 ingen live-rute.
+
+Simulationsjournalens kædespids (sekvens og digest) opdateres atomisk i en separat tabel sammen med hvert append. Læsning sammenholder kæden med spidsen i samme SQLite-transaktion; manglende rækker eller afkortet suffix afvises. Ældre isolerede testjournaler uden spids afvises frem for at blive gendannet automatisk. Samtidig sletning eller manipulation af både journal og spids kan ikke verificeres uden en ekstern autoritativ reference; adapteren er fortsat udelukkende simulation.
