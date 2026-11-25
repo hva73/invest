@@ -16,6 +16,25 @@ class LocalCoordinatorTests(unittest.TestCase):
         self.results={"273:12":"draft_pr"}
         (self.root/"receipts").mkdir()
         c.save(self.root/"receipts"/"273-12.json",{"issue":273,"generation":12,"status":"draft_pr","pr":"https://github.com/hva73/invest/pull/501"})
+    def test_queue_repin_writes_valid_json_and_preserves_other_rows(self):
+        import base64
+        old=self.row
+        new=dict(old,base_sha="b"*40)
+        other=dict(old,issue=14,role="motor")
+        rows=[old,other]
+        def document():
+            return {"content":base64.b64encode(json.dumps(rows).encode()).decode(),"sha":"c"*40}
+        def api(endpoint,method="GET",data=None):
+            if method=="PUT":
+                payload=base64.b64decode(data["content"])
+                self.assertTrue(payload.endswith(b"\n"))
+                rows[:]=json.loads(payload)
+                return {}
+            return document()
+        with patch.object(c,"gh",side_effect=api):
+            self.assertEqual(c.replace_queue_row(old,new),new)
+        self.assertEqual(rows,[new,other])
+
     def test_trigger_is_explicit_and_bounded(self):
         self.assertIsNone(c.trigger(self.root))
         value={"schema":1,"id":"f"*32,"requests":["b"*32],"at":c.now()}
