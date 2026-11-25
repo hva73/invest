@@ -447,13 +447,14 @@ def repair_review(root, repo_dir, row, number, p, reason, allowance):
     resume=previous.get("state")=="held" and previous.get("resume_authorized") is True
     if folder.exists() and not resume:
         raise Hold("Bevaret reparationsmappe kræver afstemning")
-    local_branch=(resume_repair_workspace(root,row,number,attempt,sha,folder,record)
-                  if resume else "controller/local-"+str(row["issue"])+"-"+str(time.time_ns()))
     if resume:
         # Keep the original held journal, including its original evidence.
         archive=record.with_suffix(".resume-history.json")
         if archive.exists():
             raise Hold("Genoptagelse allerede anvendt")
+    local_branch=(resume_repair_workspace(root,row,number,attempt,sha,folder,record)
+                  if resume else "controller/local-"+str(row["issue"])+"-"+str(time.time_ns()))
+    if resume:
         save(archive,previous)
     # Reserve before starting; a crash cannot silently repeat model execution.
     save(record,{"key":key(row),"head":sha,"state":"reserved","reason":reason[:800],"at":now()})
