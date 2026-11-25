@@ -196,6 +196,7 @@ def main():
     p.add_argument("--rounds", type=int, default=3, choices=range(1, 6))
     p.add_argument("--minutes", type=int, default=20, choices=range(1, 46))
     p.add_argument("--execute", action="store_true")
+    p.add_argument("--recover", action="store_true", help="Continue a verified interrupted checkout")
     p.add_argument("--verify-smoke", action="store_true")
     p.add_argument("--max-tokens", type=int, default=60000)
     p.add_argument("--generation",type=int,default=1)
@@ -216,8 +217,8 @@ def main():
     branch = git("branch", "--show-current").decode().strip()
     if not branch.startswith("controller/"):
         p.error("use a dedicated controller/ branch in an isolated checkout")
-    if git("status", "--porcelain"):
-        p.error("start with a clean checkout")
+    if git("status", "--porcelain") and not (a.recover and paths and scoped_changes(paths,a.role)):
+        p.error("start with a clean checkout or recover only scoped changes")
     # Existing local ChatGPT login; API credentials only in explicit API mode.
     env = {k: os.environ[k] for k in ("PATH", "HOME", "TMPDIR", "LANG", "CODEX_HOME") if k in os.environ}
     if a.auth == "api":
