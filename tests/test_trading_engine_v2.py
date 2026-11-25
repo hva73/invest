@@ -330,7 +330,8 @@ class TradingEngineV2Tests(unittest.TestCase):
             with_last(value=last.value | {"price": "100.6"}),
             with_last(available_at=self.at - timedelta(microseconds=1),
                       event_time=self.at - timedelta(microseconds=1),
-                      value=last.value | {"event_time": (self.at - timedelta(microseconds=1)).isoformat()}),
+                      value=last.value | {key: (self.at - timedelta(microseconds=1)).isoformat()
+                                          for key in ("event_time", "bid_at", "ask_at", "status_at")}),
         ]
         other_asset = replace(
             market, scope=replace(self.scope, asset_id="asset-2"),
