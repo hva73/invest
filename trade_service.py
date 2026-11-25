@@ -439,28 +439,38 @@ def check(connect,user_id,pid,factory=None):
 
     previous=proposal['response']
     prior_nodes=[]
-    if intent_reference(previous,payload)==reference:
+    if isinstance(previous,dict) and previous:
+        if intent_reference(previous,payload)!=reference:
+            raise TradeError(identity_error)
         prior_nodes.append(previous)
-        items=previous.get('orderIntents')
-        if isinstance(items,list) and len(items)==1 and isinstance(items[0],dict) and items[0].get('orderIntentId')==reference:
+        if 'orderIntents' in previous:
+            items=previous['orderIntents']
+            if (not isinstance(items,list) or len(items)!=1 or not isinstance(items[0],dict)
+                    or items[0].get('orderIntentId')!=reference):
+                raise TradeError(identity_error)
             prior_nodes.append(items[0])
+        if any('orderIntentId' in node and node['orderIntentId']!=reference for node in prior_nodes):
+            raise TradeError(identity_error)
 
-    # Collection sells carry no depot in their request. Only historical provider
-    # evidence can bind one, because the collection may have moved since send.
+    # Validate every supplied historical identity against the immutable request
+    # before using any historical field as evidence for another identity.
+    for field,value in expected.items():
+        if value is not None and any(field in node and node[field]!=value for node in prior_nodes):
+            raise TradeError(identity_error)
     required={}
-    for key in ('portfolioId','orderId'):
-        if key=='portfolioId' and expected[key]:
+    for field in ('portfolioId','orderId'):
+        if expected[field]:
             continue
-        values=[node[key] for node in prior_nodes if isinstance(node.get(key),str) and node[key]]
+        values=[node[field] for node in prior_nodes if field in node]
         if values:
-            if key=='orderId' and any(
-                expected.get(field) and node.get(field) not in (None,'',expected[field])
-                for node in prior_nodes for field in ('portfolioId','assetId')
-            ):
+            if any(not isinstance(value,str) or not value or value!=values[0] for value in values):
                 raise TradeError(identity_error)
-            if any(value!=values[0] for value in values):
-                raise TradeError(identity_error)
-            expected[key]=required[key]=values[0]
+            expected[field]=required[field]=values[0]
+    # Reject contradictory historical identity even for fields that the request
+    # does not define (except the two explicitly corroborated historical IDs).
+    if any(field in node and (not value or node[field]!=value)
+           for node in prior_nodes for field,value in expected.items()):
+        raise TradeError(identity_error)
 
     if any(key in node and (not value or node[key]!=value)
            for node in nodes for key,value in expected.items()):
