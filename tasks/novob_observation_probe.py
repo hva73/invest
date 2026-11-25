@@ -42,11 +42,11 @@ try:
         saved = con.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? AND sample_id=?', (row['id'],current['source'],current['sample_id'])).fetchone()
         if not saved and row['last_data'] == current['event_time']:
             saved = con.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? AND source=? ORDER BY event_epoch DESC,id DESC LIMIT 1', (row['id'],current['source'])).fetchone()
+        previous = engine.sample_read(con,row['id'],saved['payload']) if saved else None
     if not saved:
         print('INGEN TIDLIGERE OBSERVATION MED SAMME ID ELLER KURSTID')
         print('KURSTID:', current['event_time'], 'KURS:', current['price'])
     else:
-        previous = json.loads(saved['payload'])
         before = {k:v for k,v in previous.items() if k not in ('context','sample_id')}
         after = {k:v for k,v in current.items() if k not in ('context','sample_id')}
         print('GEMT KURSTID:', previous.get('event_time'), 'KURS:', previous.get('price'))

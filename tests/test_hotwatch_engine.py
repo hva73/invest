@@ -620,6 +620,105 @@ class HotWatch(unittest.TestCase):
   from hotwatch_service import startup_diagnostics
   with patch.dict(os.environ,{},clear=True):info=startup_diagnostics(app.connect)
   self.assertFalse(info['startup_probe']['network_requests_made']);self.assertEqual(info['eodhd']['startup_status'],'blocked_feed_disabled');self.assertFalse(info['eodhd']['entitlements_verified'])
+ def test_combined_storage_flag_matrix_and_replay(self):
+  from test_hotwatch_bar_evidence import BarEvidenceTests
+  import strategy_lab
+  fixture=BarEvidenceTests();fixture.setUp();base=fixture.now
+  baseline=None
+  for bars,renewal in (('0','0'),('1','0'),('0','1'),('1','1')):
+   with self.subTest(bars=bars,renewal=renewal),patch.dict(os.environ,{'ESCAPE_HW_DEDUPE_BAR_HISTORY':bars,'ESCAPE_HW_COMPACT_RENEWAL_AUDIT':renewal}):
+    req=copy.deepcopy(self.req);req.update(watch_id='combined-storage-'+bars+renewal,purpose='synthetic combined storage regression',provider='eodhd',provider_symbol='MERC.US')
+    engine.create(app.connect,1,req,base)
+    samples=[];results=[]
+    for i in range(120):
+     at=base+timedelta(seconds=i);sample=copy.deepcopy(fixture.sample)
+     sample.update(sample_id='combined-'+str(i),event_time=at.isoformat(),bid_at=at.isoformat(),ask_at=at.isoformat(),status_at=at.isoformat())
+     sample['context']['as_of']=at.isoformat();sample['bar_evidence']['schedule_received_at']=at.isoformat()
+     samples.append(sample);results.append(engine.ingest(app.connect,1,req['watch_id'],True,sample,at,include_session=False)['calculation'])
+    later=at+timedelta(seconds=121);renewed=copy.deepcopy(sample);renewed['context']['as_of']=later.isoformat()
+    result=engine.ingest(app.connect,1,req['watch_id'],True,renewed,later,include_session=False)['calculation'];results.append(result)
+    self.assertEqual(result['signal'],'NO_DATA');self.assertFalse(result['new_market_observation'])
+    with app.connect() as c:
+     row=engine.row_for(c,1,req['watch_id'],True)
+     sr=c.execute('SELECT payload,digest FROM hw_samples WHERE watch_row_id=? ORDER BY id',(row['id'],)).fetchall()
+     cr=c.execute('SELECT payload FROM hw_calculations WHERE watch_row_id=? ORDER BY id',(row['id'],)).fetchall()
+     br=c.execute('SELECT payload FROM hw_bar_history_payloads WHERE watch_row_id=?',(row['id'],)).fetchall()
+     self.assertEqual(len(sr),120);self.assertEqual(len(cr),121)
+     self.assertEqual([engine.sample_read(c,row['id'],r['payload']) for r in sr],samples)
+     self.assertEqual([r['digest'] for r in sr],[engine.checksum(s) for s in samples])
+     self.assertEqual([engine.calculation_read(r['payload']) for r in cr],results)
+     self.assertEqual(len(br),int(bars))
+     self.assertEqual(engine._RENEWAL_AUDIT_KEY in json.loads(cr[-1]['payload']),renewal=='1')
+     self.assertEqual(engine.view(c,row,later)['latest_calculation'],result)
+     total=sum(len(r['payload'].encode('utf-8')) for r in list(sr)+list(cr)+list(br))
+     print('HW_COMBINED_STORAGE bars=%s renewal=%s samples=120 calculations=121 dictionary=%d bytes=%d'%(bars,renewal,len(br),total))
+    comparable=[(r['signal'],r['reason_codes'],r['supporting_metrics'],r['new_market_observation']) for r in results]
+    if baseline is None:baseline=comparable
+    else:self.assertEqual(comparable,baseline)
+    with patch.dict(os.environ,{'ESCAPE_HW_DEDUPE_BAR_HISTORY':'0','ESCAPE_HW_COMPACT_RENEWAL_AUDIT':'0'}):
+     choices={'watch_id':req['watch_id'],'is_test':True,'strategies':[{'strategy_id':req['strategy_id'],'version':req['strategy_version']}]}
+     replay=strategy_lab.compare(app.connect,1,choices)
+     self.assertEqual(replay['evaluated'],121);self.assertEqual(replay['skipped'],0)
+ def test_exact_bar_dictionary_preserves_full_samples_and_replay(self):
+  from test_hotwatch_bar_evidence import BarEvidenceTests
+  import strategy_lab
+  fixture=BarEvidenceTests();fixture.setUp();base=fixture.now
+  req=copy.deepcopy(self.req);req.update(watch_id='exact-bar-dedupe',purpose='synthetic bar dictionary regression',provider='eodhd',provider_symbol='MERC.US')
+  engine.create(app.connect,1,req,base)
+  samples=[];results=[]
+  with patch.dict(os.environ,{'ESCAPE_HW_DEDUPE_BAR_HISTORY':'1'}):
+   for i in range(40):
+    at=base+timedelta(seconds=i);sample=copy.deepcopy(fixture.sample)
+    sample.update(sample_id='bar-dedupe-'+str(i),event_time=at.isoformat(),bid_at=at.isoformat(),ask_at=at.isoformat(),status_at=at.isoformat())
+    sample['context']['as_of']=at.isoformat();sample['bar_evidence']['schedule_received_at']=at.isoformat()
+    samples.append(sample)
+    result=engine.ingest(app.connect,1,req['watch_id'],True,sample,at,include_session=False)
+    results.append(result['calculation']);self.assertTrue(result['calculation']['analysis_uses_bars'])
+   # One actual bar value change must retain a distinct block.
+   at=base+timedelta(seconds=40);changed=copy.deepcopy(samples[-1]);changed.update(sample_id='bar-dedupe-40',event_time=at.isoformat(),bid_at=at.isoformat(),ask_at=at.isoformat(),status_at=at.isoformat())
+   changed['context']['as_of']=at.isoformat();changed['bar_evidence']['schedule_received_at']=at.isoformat();changed['bar_history'][-1]['volume']='900'
+   samples.append(changed);engine.ingest(app.connect,1,req['watch_id'],True,changed,at,include_session=False)
+   with app.connect() as c:
+    row=engine.row_for(c,1,req['watch_id'],True)
+    stored=c.execute('SELECT payload,digest FROM hw_samples WHERE watch_row_id=? ORDER BY id',(row['id'],)).fetchall()
+    blocks=c.execute('SELECT digest,payload FROM hw_bar_history_payloads WHERE watch_row_id=?',(row['id'],)).fetchall()
+    self.assertEqual(len(stored),41);self.assertEqual(len(blocks),2)
+    self.assertEqual([engine.sample_read(c,row['id'],r['payload']) for r in stored],samples)
+    self.assertEqual([r['digest'] for r in stored],[engine.checksum(s) for s in samples])
+    before=sum(len(engine.canonical(x).encode('utf-8')) for x in samples)
+    after=sum(len(r['payload'].encode('utf-8')) for r in stored)+sum(len(r['payload'].encode('utf-8')) for r in blocks)
+    print('HW_BAR_STORAGE samples_before=41 samples_after=41 dictionary_rows=2 bytes_before=%d bytes_after=%d'%(before,after))
+    self.assertLess(after,before*.5)
+    view=engine.view(c,row,at);self.assertEqual(view['latest_calculation']['analysis_uses_bars'],True)
+    # A missing or wrong-owner digest is never silently treated as no bars.
+    other=engine.row_for(c,1,self.req['watch_id'],True)
+    with self.assertRaisesRegex(EngineError,'invalid_bar_history_reference'):engine.sample_read(c,other['id'],stored[0]['payload'])
+   choices={'watch_id':req['watch_id'],'is_test':True,'strategies':[{'strategy_id':req['strategy_id'],'version':req['strategy_version']}]}
+   replay=strategy_lab.compare(app.connect,1,choices)
+   self.assertEqual(replay['evaluated'],41);self.assertEqual(replay['skipped'],0)
+   self.assertEqual([r['data'] for r in engine.history(app.connect,1,req['watch_id'],True,'samples',limit=50)['items']],samples)
+  # Disable new encoding without making old encoded samples unreadable.
+  with patch.dict(os.environ,{'ESCAPE_HW_DEDUPE_BAR_HISTORY':'0'}):
+   self.assertEqual([r['data'] for r in engine.history(app.connect,1,req['watch_id'],True,'samples',limit=50)['items']],samples)
+   later=at+timedelta(seconds=1);duplicate=copy.deepcopy(changed);duplicate['context']['as_of']=later.isoformat()
+   renewed=engine.ingest(app.connect,1,req['watch_id'],True,duplicate,later,include_session=False)
+   self.assertFalse(renewed['calculation']['new_market_observation'])
+   self.assertEqual(strategy_lab.compare(app.connect,1,choices)['skipped'],0)
+ def test_bar_dictionary_rejects_corrupt_payload_and_keeps_invalid_bars_inline(self):
+  from test_hotwatch_bar_evidence import BarEvidenceTests
+  fixture=BarEvidenceTests();fixture.setUp()
+  with patch.dict(os.environ,{'ESCAPE_HW_DEDUPE_BAR_HISTORY':'1'}),app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True)
+   sample=copy.deepcopy(fixture.sample);invalid=copy.deepcopy(sample);invalid['bar_evidence']['provider_symbol']='OTHER.US'
+   self.assertEqual(engine.sample_payload(c,row['id'],invalid,fixture.req,fixture.now),engine.canonical(invalid))
+   unverified=dict(sample,verification='unverified')
+   self.assertEqual(engine.sample_payload(c,row['id'],unverified,fixture.req,fixture.now),engine.canonical(unverified))
+   packed=engine.sample_payload(c,row['id'],sample,fixture.req,fixture.now)
+   digest=json.loads(packed)[engine._BAR_HISTORY_REF]
+   self.assertEqual(engine.sample_read(c,row['id'],packed),sample)
+   c.execute("UPDATE hw_bar_history_payloads SET payload='[]' WHERE watch_row_id=? AND digest=?",(row['id'],digest))
+   with self.assertRaisesRegex(EngineError,'invalid_bar_history_reference'):engine.sample_read(c,row['id'],packed)
+   with self.assertRaisesRegex(EngineError,'bar_history_storage_conflict'):engine.sample_payload(c,row['id'],sample,fixture.req,fixture.now)
  def test_duplicate_samples_not_new_market_events_and_conflicts_atomic(self):
   t=tick(self.now);self.put(t);before=self.counts();self.assertTrue(self.put(t)['duplicate']);self.assertEqual(before,self.counts());changed=copy.deepcopy(t);changed['volume']='101'
   with self.assertRaisesRegex(EngineError,'sample_id_conflict'):self.put(changed)
@@ -639,6 +738,102 @@ class HotWatch(unittest.TestCase):
   changed=copy.deepcopy(refreshed);changed['context'].update(as_of=(at+timedelta(seconds=1)).isoformat(),position='held',quantity='2')
   self.put(changed,at+timedelta(seconds=1))
   with app.connect() as c:self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE event_type='BROKER_CONTEXT_UPDATED'").fetchone()[0],1)
+ def test_compact_renewal_audit_roundtrip_and_same_feed_storage(self):
+  # Real ingest path, 120 observations then 100 pure as_of renewals.
+  # Baseline is the exact canonical result that the old INSERT wrote.
+  # No synthetic price or calculation is dropped and all context rows stay.
+  all_results=[]
+  def ingest(sample,at):
+   output=engine.ingest(app.connect,1,self.req['watch_id'],True,sample,at,include_session=False)
+   all_results.append(output['calculation']);return output['calculation']
+  with patch.dict(os.environ,{'ESCAPE_HW_COMPACT_RENEWAL_AUDIT':'1'}):
+   for i in range(120):
+    at=self.now+timedelta(seconds=i*60);sample=tick(at,i);ingest(sample,at)
+   final=copy.deepcopy(sample)
+   for i in range(100):
+    later=at+timedelta(seconds=121+i*10);renewed=copy.deepcopy(final);renewed['context']['as_of']=later.isoformat()
+    result=ingest(renewed,later)
+    self.assertEqual(result['signal'],'NO_DATA');self.assertFalse(result['new_market_observation'])
+   with app.connect() as c:
+    rows=c.execute('SELECT payload FROM hw_calculations ORDER BY id').fetchall()
+    self.assertEqual(c.execute('SELECT count(*) FROM hw_samples').fetchone()[0],120)
+    self.assertEqual(c.execute('SELECT count(*) FROM hw_context_events').fetchone()[0],100)
+    self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE event_type='BROKER_CONTEXT_UPDATED'").fetchone()[0],0)
+   self.assertEqual(len(rows),220)
+   self.assertEqual([engine.calculation_read(r['payload']) for r in rows],all_results)
+   self.assertTrue(all(engine._RENEWAL_AUDIT_KEY not in json.loads(r['payload']) for r in rows[:120]))
+   self.assertTrue(all(engine._RENEWAL_AUDIT_KEY in json.loads(r['payload']) for r in rows[120:]))
+   before=sum(len(engine.canonical(r).encode('utf-8')) for r in all_results)
+   after=sum(len(r['payload'].encode('utf-8')) for r in rows)
+   renewal_before=sum(len(engine.canonical(r).encode('utf-8')) for r in all_results[120:])
+   renewal_after=sum(len(r['payload'].encode('utf-8')) for r in rows[120:])
+   print('HW_RENEWAL_STORAGE rows_before=220 rows_after=220 bytes_before=%d bytes_after=%d renewal_bytes_before=%d renewal_bytes_after=%d'%(before,after,renewal_before,renewal_after))
+   self.assertLess(renewal_after,renewal_before*.8)
+   self.assertLess(after,before)
+   history=engine.history(app.connect,1,self.req['watch_id'],True,kind='metrics',limit=50,order='desc')['items']
+   self.assertEqual([r['data'] for r in history],list(reversed(all_results[-50:])))
+   with app.connect() as c:view=engine.view(c,engine.row_for(c,1,self.req['watch_id'],True),later)
+   self.assertEqual(view['latest_calculation'],all_results[-1]);self.assertEqual(view['latest_context']['as_of'],later.isoformat())
+   # A material holding change still produces a full audit row.
+   change=copy.deepcopy(renewed);later+=timedelta(seconds=1);change['context'].update(as_of=later.isoformat(),position='held',quantity='2')
+   ingest(change,later)
+   with app.connect() as c:
+    self.assertNotIn(engine._RENEWAL_AUDIT_KEY,json.loads(c.execute('SELECT payload FROM hw_calculations ORDER BY id DESC LIMIT 1').fetchone()[0]))
+ def test_entry_funnel_compact_audit_integrity_and_no_historical_fallback(self):
+  from hotwatch_service import entry_funnel
+  now=self.now
+  def row(at,signal,codes,compact=False):
+   sample=tick(at);sample['source']='eodhd'
+   calculation={'signal':signal,'reason_codes':codes,'data_timestamp':at.isoformat(),'new_market_observation':not compact,'risk_level':'high','input_sample_ids':['synthetic-observation-'+str(i) for i in range(120)],'supporting_metrics':{}}
+   return {'watch_id':self.req['watch_id'],'request':engine.canonical(self.req),'strategy':engine.canonical(BASELINE),'strategy_checksum':engine.checksum(BASELINE),'calculated':at.isoformat(),'sample':engine.canonical(sample),'calculation':engine.calculation_payload(calculation,compact)}
+  prior=row(now-timedelta(seconds=20),'WAIT',['CONFIRMATION_PENDING'])
+  latest=row(now-timedelta(seconds=10),'NO_DATA',['POSITION_CONTEXT_UNKNOWN'],True)
+  packed=json.loads(latest['calculation']);self.assertIn(engine._RENEWAL_AUDIT_KEY,packed)
+  inline=dict(latest,calculation=engine.canonical(engine.calculation_read(latest['calculation'])))
+  original=entry_funnel([inline,prior],now)
+  self.assertEqual(original,entry_funnel([latest,prior],now));self.assertEqual(original['candidate_count'],1);self.assertEqual(original['missing_or_unverified'],0)
+  packed[engine._RENEWAL_AUDIT_KEY]['sha256']='0'*64
+  corrupt=dict(latest,calculation=json.dumps(packed))
+  missing=entry_funnel([corrupt,prior],now)
+  self.assertEqual(missing['candidate_count'],1);self.assertEqual(missing['missing_or_unverified'],1);self.assertEqual(missing['strategies'],{})
+  buy=row(now,'BUY',[])
+  self.assertEqual(entry_funnel([buy,prior],now)['confirmation_movement']['confirmed_sequences'],1)
+  self.assertEqual(entry_funnel([buy,corrupt,prior],now)['confirmation_movement']['confirmed_sequences'],0)
+ def test_compact_renewal_audit_excludes_action_critical_and_invalid_encoding(self):
+  source={'signal':'NO_DATA','new_market_observation':False,'risk_level':'high','critical_override':False,'input_sample_ids':['long-synthetic-sample-'+str(i) for i in range(120)],'risk_parameters':{'a':'b'}}
+  encoded=engine.calculation_payload(source,True)
+  self.assertIn(engine._RENEWAL_AUDIT_KEY,json.loads(encoded))
+  self.assertEqual(json.loads(encoded)['risk_parameters'],source['risk_parameters'])
+  self.assertEqual(engine.calculation_read(encoded),source)
+  self.assertEqual(engine.calculation_payload(source),engine.canonical(source))
+  for changes in ({'signal':'BUY'},{'signal':'SELL'},{'signal':'REDUCE'},{'signal':'WAIT'},{'risk_level':'critical'},{'critical_override':True},{'reason_codes':['EXIT_DEADLINE']},{'reason_codes':['TRAILING_EXIT']},{'new_market_observation':True}):
+   other=dict(source,**changes);self.assertEqual(engine.calculation_payload(other,True),engine.canonical(other))
+  broken=json.loads(encoded);broken[engine._RENEWAL_AUDIT_KEY]['sha256']='0'*64
+  with self.assertRaisesRegex(EngineError,'invalid_calculation_audit'):engine.calculation_read(json.dumps(broken))
+ def test_context_only_closed_renewals_preserve_journal_without_noop_state_updates(self):
+  first=tick(self.now,held=True);self.put(first)
+  observed=self.now+timedelta(seconds=1);closed=copy.deepcopy(first['context'])
+  closed.update(as_of=observed.isoformat(),position='none',quantity='0',cost_price=None)
+  engine.observe_context(app.connect,1,self.req['watch_id'],True,closed,observed)
+  trace=[]
+  def connect():
+   c=app.connect();c.set_trace_callback(trace.append);return c
+  with app.connect() as c:
+   before=c.execute('SELECT state FROM hw_sessions WHERE watch_id=?',(self.req['watch_id'],)).fetchone()[0]
+   row_count=c.execute('SELECT count(*) FROM hw_context_events').fetchone()[0]
+   old_calc=c.execute('SELECT count(*) FROM hw_calculations').fetchone()[0]
+  for i in range(100):
+   at=observed+timedelta(seconds=i+1);renewed=dict(closed,as_of=at.isoformat())
+   engine.observe_context(connect,1,self.req['watch_id'],True,renewed,at)
+  writes=sum(x.startswith('UPDATE hw_sessions SET state=') for x in trace)
+  print('HW_CONTEXT_ONLY state_updates_before=100 state_updates_after=%d context_rows_before=100 context_rows_after=100'%writes)
+  self.assertEqual(writes,0)
+  with app.connect() as c:
+   row=engine.row_for(c,1,self.req['watch_id'],True)
+   self.assertEqual(row['state'],before)
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_context_events').fetchone()[0],row_count+100)
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_calculations').fetchone()[0],old_calc)
+   self.assertEqual(engine.view(c,row,at)['latest_context']['as_of'],at.isoformat())
  def test_broker_context_changes_do_not_create_or_confirm_new_quotes(self):
   original=tick(self.now);self.put(original);before=self.counts()['hw_samples'];changed=copy.deepcopy(original);changed['context'].update(as_of=(self.now+timedelta(seconds=10)).isoformat(),position='held',quantity='2');changed['context']['orders']=[{'order_id':'synthetic-partial','status':'PARTIAL','requested_quantity':'5','filled_quantity':'2','side':'BUY'}]
   result=self.put(changed,self.now+timedelta(seconds=10));self.assertFalse(result['calculation']['new_market_observation']);self.assertEqual(self.counts()['hw_samples'],before);self.assertNotEqual(result['calculation']['signal'],'BUY');self.assertEqual(result['session']['latest_context']['quantity'],'2');self.assertTrue(self.put(changed,self.now+timedelta(seconds=11))['duplicate'])

@@ -1,0 +1,32 @@
+name: ESCAPE agent3 combined storage QA
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [codex/issue57-combined-release-20261124]
+permissions:
+  contents: read
+jobs:
+  regression:
+    if: github.repository == 'hva73/invest' && github.event.pull_request.head.ref == 'codex/agent3-storage-combined-qa-20261125'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r requirements.txt
+      - name: Exact head and four flag combinations
+        env:
+          PYTHONPATH: .:tests
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          python -m unittest -v tests.test_hotwatch_engine.HotWatch.test_combined_storage_flag_matrix_and_replay
+      - name: Existing safety regression
+        env:
+          PYTHONPATH: .:tests
+        run: python -m unittest tests.test_hotwatch_engine tests.test_hotwatch_bar_evidence tests.test_candidate_lifecycle tests.test_hotwatch_buy_plan tests.test_web_push tests.test_strategy_lab tests.test_hotwatch_warmup tests.test_strategy_center tests.test_eodhd_feeds

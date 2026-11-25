@@ -963,10 +963,18 @@ def entry_funnel(rows,now):
  latest={};series=defaultdict(list);truncated=len(rows)>5000
  for row in rows[:5000]:
   try:
-   req=json.loads(row['request']);strategy=json.loads(row['strategy']);calc=json.loads(row['calculation']);sample=json.loads(row['sample']) if row['sample'] else None
+   req=json.loads(row['request']);strategy=json.loads(row['strategy'])
    if req.get('watch_mode')=='exit' or req.get('purpose')=='automatic holding watch':continue
    candidate=req.get('candidate_id') or row['watch_id'];at=stamp(row['calculated'])
    if at>now or (now-at).total_seconds()>86400:continue
+   try:calc=engine.calculation_read(row['calculation'])
+   except engine.EngineError:
+    # A damaged compact audit is missing evidence, not permission to
+    # substitute an older valid calculation or bridge a confirmation gap.
+    if candidate not in latest:latest[candidate]=(req,strategy,{},None,at,row['strategy_checksum'])
+    series[row['watch_id']].append((at,{},None))
+    continue
+   sample=json.loads(row['sample']) if row['sample'] else None
    # Count the most recent calculation per candidate, even if data missing.
    if candidate not in latest:latest[candidate]=(req,strategy,calc,sample,at,row['strategy_checksum'])
    if sample and sample.get('verification')=='verified' and sample.get('source') in ('eodhd','pluto') and calc.get('data_timestamp')==sample.get('event_time') and 0<=(at-stamp(sample['event_time'])).total_seconds()<=req['risk']['max_quote_age_s']:
@@ -995,6 +1003,7 @@ def entry_funnel(rows,now):
  for items in series.values():
   items.sort(key=lambda x:x[0]);pending=None
   for index,(at,calc,sample) in enumerate(items):
+   if sample is None:pending=None;continue
    try:
     codes=calc.get('reason_codes',[]);price=Decimal(str(sample.get('price')))
     if not price.is_finite() or price<=0:continue
@@ -1004,6 +1013,7 @@ def entry_funnel(rows,now):
      if pending and pending[2]==identity(sample) and 0<=(at-pending[0]).total_seconds()<=600:
       confirmations+=1;before.append(float((price/pending[1]-1)*100))
       for future_at,_,future_sample in items[index+1:]:
+       if future_sample is None:break
        delta=(future_at-at).total_seconds()
        if delta>600:break
        if delta>=300 and identity(future_sample)==identity(sample):
