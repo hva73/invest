@@ -127,3 +127,15 @@ class LiveControllerTests(unittest.TestCase):
             (root/"checkpoint-57-4.json").write_text(json.dumps(dict(checkpoint,provider_reset_at=None)))
             dispatch.record_provider_pause(root,item,1200)
             self.assertTrue(dispatch.provider_pause_active(root,10000000))
+
+    def test_incomplete_repair_pilot_does_not_report_success(self):
+        with tempfile.TemporaryDirectory() as d:
+            task=Path(d)/"task.txt";task.write_text("Scoped repair")
+            sid="12345678-1234-1234-1234-123456789abc"
+            result=SimpleNamespace(returncode=0,stdout=json.dumps({"type":"thread.started","thread_id":sid})+"\\n"+json.dumps({"type":"turn.completed","usage":{"input_tokens":200,"cached_input_tokens":100,"output_tokens":50}}),draft_ready=False)
+            # parse_events needs a real newline, not a literal escape.
+            result.stdout=result.stdout.replace("\\n","\n")
+            args=["pilot","--role","data","--issue","14","--task-file",str(task),"--rounds","1","--allowed-paths-json",'["a.py"]',"--require-ready","--execute"]
+            with patch.object(sys,"argv",args),patch.object(pilot,"git",side_effect=[b"controller/local-14-123\n",b""]),patch.object(pilot,"fingerprint",return_value="same"),patch.object(pilot.subprocess,"run",return_value=SimpleNamespace(returncode=0,stdout="Logged in using ChatGPT",stderr="")),patch.object(pilot.controller_events,"run",return_value=result):
+                with self.assertRaises(SystemExit) as exc:pilot.main()
+                self.assertEqual(exc.exception.code,76)

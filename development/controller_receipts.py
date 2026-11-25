@@ -34,6 +34,27 @@ def record(root,key,status):
     atomic(path,{"issue":issue,"generation":generation,"status":status,"pr":url,
                  "created_at":datetime.now(timezone.utc).isoformat(),"notified":False})
 
+def promote_local_delivery(root,key):
+    """Keep the previous receipt, replace it only with a verified draft URL."""
+    m=KEY.fullmatch(key)
+    if not m:
+        raise ValueError("invalid completion")
+    issue,generation=map(int,m.groups())
+    folder=root/"receipts"
+    path=folder/(f"{issue}-{generation}.json")
+    if not path.exists():
+        return
+    item=json.loads(path.read_text())
+    url=(root/f"issue-{issue}-{generation}.pr").read_text().strip()
+    if item.get("status")=="draft_pr" and item.get("pr")==url:
+        return
+    if item.get("status")!="review_required" or item.get("issue")!=issue or item.get("generation")!=generation or not PR.fullmatch(url):
+        raise ValueError("invalid local delivery promotion")
+    archive=folder/(f"{issue}-{generation}.local-only.history")
+    if not archive.exists():
+        atomic(archive,item)
+    atomic(path,dict(item,status="draft_pr",pr=url,notified=False))
+
 def gh(*args):
     return subprocess.check_output(["gh",*args],text=True,timeout=30)
 
@@ -53,7 +74,7 @@ def deliver(path):
     # Check for the exact marker before retrying a possibly successful POST.
     existing=gh("api","--paginate",f"repos/{REPO}/issues/{issue}/comments",
                 "--jq",".[].body")
-    if marker not in existing:
+    if marker not in existing or (status=="draft_pr" and url not in existing):
         msg=(f"{marker}\nESCAPE Controller: #{issue}, generation {generation} — **{status}**."
              + (f"\nDraft PR: {url}" if url else "")
              + "\nAwaiting independent review. Not release approval or production deployment.")

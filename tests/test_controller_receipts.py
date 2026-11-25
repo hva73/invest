@@ -27,6 +27,23 @@ class ReceiptsTests(unittest.TestCase):
                 receipts.flush(root)
                 gh.assert_called_once()
             self.assertTrue(json.loads((root/"receipts/57-2.json").read_text())["notified"])
+    def test_local_only_receipt_promotion_preserves_history_and_notifies(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            receipts.record(root,"268:4","review_required")
+            p=root/"receipts/268-4.json"
+            url="https://github.com/hva73/invest/pull/999"
+            (root/"issue-268-4.pr").write_text(url+"\n")
+            receipts.promote_local_delivery(root,"268:4")
+            self.assertEqual(json.loads(p.read_text())["pr"],url)
+            self.assertEqual(json.loads((root/"receipts/268-4.local-only.history").read_text())["status"],"review_required")
+            with patch.object(receipts,"gh",side_effect=["<!-- escape-controller:268:4 -->","posted"]) as gh:
+                receipts.flush(root)
+                self.assertIn(url,gh.call_args.args[-1])
+            self.assertTrue(json.loads(p.read_text())["notified"])
+            receipts.promote_local_delivery(root,"268:4")
+            self.assertTrue(json.loads(p.read_text())["notified"])
+
     def test_invalid_url_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d)

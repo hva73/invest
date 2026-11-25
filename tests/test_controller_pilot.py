@@ -1,5 +1,5 @@
 import unittest
-from development.controller_pilot import loop, codex_command, parse_events, usage_breakdown, context_exhausted
+from development.controller_pilot import loop, codex_command, parse_events, usage_breakdown, context_exhausted, execution_prompt, MODEL_POLICY, model_args
 
 class LoopTest(unittest.TestCase):
     def run_case(self, snapshots, rounds=3, rc=0):
@@ -15,6 +15,22 @@ class LoopTest(unittest.TestCase):
         self.assertEqual(self.run_case(["a","a"]), ("no_progress",[0]))
     def test_cycle(self):
         self.assertEqual(self.run_case(["a","b","a"]), ("no_progress",[0,1]))
+    def test_analysis_only_turn_can_switch_approach(self):
+        calls=[]; stalls=[]
+        snapshots=iter(["a","a","b","c"])
+        result=loop(lambda i,t:calls.append(i) or 0,lambda:next(snapshots),3,100,lambda:0,
+                    verify=lambda:len(calls)==3,on_stall=lambda i:stalls.append(i) or True)
+        self.assertEqual((result,calls,stalls),("verified",[0,1,2],[0]))
+    def test_stall_retries_remain_bounded(self):
+        calls=[]
+        self.assertEqual(loop(lambda i,t:calls.append(i) or 0,lambda:"a",5,100,lambda:0,
+                              on_stall=lambda i:i<2),"no_progress")
+        self.assertEqual(calls,[0,1,2])
+    def test_execution_prompt_retains_scope_on_fresh_approach(self):
+        p=execution_prompt(114,"motor","approved task",["trade_service.py"],2,"fresh")
+        for phrase in ("different implementation method","approved task","trade_service.py","actual passing targeted tests","No production access"):
+            self.assertIn(phrase,p)
+
     def test_failure(self):
         self.assertEqual(self.run_case(["a"],rc=1), ("execution_failed",[0]))
     def test_deadline(self):
@@ -35,6 +51,18 @@ class OptimizationTests(unittest.TestCase):
     def test_verified_before_any_model_call(self):
         self.assertEqual(loop(lambda *_: self.fail(),lambda:"initial",3,100,
                               lambda:0,verify=lambda:True),"verified")
+    def test_explicit_model_policy_for_every_role(self):
+        expected={"release":("sol","medium"),"mobile":("sol","high"),
+                  "motor":("astra","high"),"data":("astra","high"),
+                  "desktop":("sol","high"),"coordinator":("sol","medium")}
+        self.assertEqual(set(MODEL_POLICY),set(expected))
+        for role,(model,effort) in expected.items():
+            args=model_args(role)
+            self.assertEqual(args,["--model","gpt-6.2-"+model,"-c",'model_reasoning_effort="'+effort+'"'])
+            if role!="coordinator":
+                self.assertEqual(codex_command(role=role)[6:10],args)
+                self.assertEqual(codex_command("12345678-1234-1234-1234-123456789abc",role)[6:10],args)
+
     def test_resume_exact_session(self):
         sid = "12345678-1234-1234-1234-123456789abc"
         self.assertEqual(codex_command(sid)[-4:], ["resume","--json",sid,"-"])

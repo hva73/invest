@@ -25,7 +25,7 @@ def allowed(path, scopes, role=None):
 def git(folder,*args):
     return subprocess.check_output(["git","-c","core.hooksPath=/dev/null",*args],cwd=folder,timeout=90)
 
-def publish(folder,row,branch,base):
+def commit_scoped(folder,row,branch,base):
     target=row.get("base_branch")
     if (target=="codex/issue57-combined-release-20261124" and row.get("role")!="release") or target not in BASES or not re.fullmatch(r"controller/local-[0-9]+-[0-9]+",branch):
         raise PublicationError("unapproved_branch")
@@ -43,7 +43,12 @@ def publish(folder,row,branch,base):
             raise PublicationError("unsafe_file_type")
     if len(git(folder,"diff","--cached","--binary"))>500000:
         raise PublicationError("patch_too_large")
-    # Explicit approved destination, no remote configured by agent.
     git(folder,"-c","user.name=ESCAPE Controller","-c","user.email=controller@users.noreply.github.com","commit","-m",f"Controller draft for #{row['issue']}")
+    return git(folder,"rev-parse","HEAD").decode().strip()
+
+def publish(folder,row,branch,base):
+    commit_scoped(folder,row,branch,base)
+    target=row["base_branch"]
+    # Explicit approved destination, no remote configured by agent.
     git(folder,"-c","credential.helper=","-c","credential.helper=!gh auth git-credential","push","https://github.com/"+REPO+".git","HEAD:refs/heads/"+branch)
     return subprocess.check_output(["gh","pr","create","--repo",REPO,"--draft","--base",target,"--head",branch,"--title",f"Controller draft #{row['issue']}","--body",f"Refs #{row['issue']}. Local agent changes; independent review and CI required. No deployment approval."],cwd=folder,text=True,timeout=60).strip()
