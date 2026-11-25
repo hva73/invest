@@ -813,12 +813,13 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
     control=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
     if control and control['killed']:break
     sessions={};attempts={}
-    probed_keys=set();probed_assets=set()
+    probed_keys=set();probed_assets=set();batch_end=0
     for index,(_,pid,holding) in enumerate(user_choices):
-     # Probe the first two holdings separately. The first may link an
-     # existing watch and take the writer lock before the second activates.
-     if index<=2:
-      pending=user_choices[index:] if index==2 else [(uid,pid,holding)]
+     # Probe early holdings separately: a LINKED write can take the writer
+     # lock before an activation. Bound later batches even with the lock held.
+     if index==batch_end:
+      batch_end=index+(1 if index<3 else 24)
+      pending=user_choices[index:batch_end]
       keys={(p,h['asset_id']) for _,p,h in pending}-probed_keys
       assets={aid for _,aid in keys}-probed_assets
       probed_keys.update(keys);probed_assets.update(assets)
