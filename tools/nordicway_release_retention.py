@@ -1,4 +1,5 @@
 """Post-success release retention, preserving the latest fully verified backup."""
+from contextlib import ExitStack
 import ftplib
 import secrets
 import ssl
@@ -10,11 +11,14 @@ from pathlib import PurePosixPath
 import re
 import tarfile
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
 import sys
+
+import nordicway_uapi_quota as quota
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
@@ -93,111 +97,233 @@ def validate_result(result, sha):
         raise ValueError('release_mismatch')
 
 
-def maintain(api, sha, started, *, redundant_only=False, before_delete=None):
-    uapi, request, download = api
-    def listing(path):
-        data = uapi('list_files', {'dir': path, 'show_hidden': 1})
-        if not isinstance(data, list) or len(data) > 500:
-            raise ValueError('invalid_inventory')
-        return {r['file']: r for r in data if isinstance(r, dict) and r.get('file') not in ('.', '..')}
-    def content(directory, filename):
-        data = uapi('get_file_content', {'dir': directory, 'file': filename,
-            'from_charset': 'ISO-8859-1', 'to_charset': 'UTF-8', 'update_html_document_encoding': 0})
-        if not isinstance(data, dict) or not isinstance(data.get('content'), str):
-            raise ValueError('invalid_content_reply')
-        return data['content']
-    def current():
-        if content(APP, 'BUILD_COMMIT').strip() != sha:
-            raise ValueError('installed_release_changed')
-    current()
-    top = listing(ROOT)
-    NAME = choose_backup(top, started)
-    ARCHIVE = 'retained-' + NAME + '.tar.gz'
-    before = listing(ROOT + '/' + NAME)
-    DB_BYTES = int(before.get('escape.db', {}).get('size', 0))
-    if not 512 < DB_BYTES <= 10_000_000_000:
-        raise ValueError('invalid_backup_size')
+ARCHIVE_HEADROOM = 256 * 1024 * 1024
+ACCOUNT_BUDGET = 20_000_000_000
 
-    top = listing(ROOT)
-    if NAME not in top:
-        raise ValueError('original_backup_unavailable')
-    before = listing(ROOT + '/' + NAME)
-    if before.get('escape.db', {}).get('type') != 'file' or int(before['escape.db']['size']) != DB_BYTES:
-        raise ValueError('original_backup_changed')
-    manifest = content(ROOT + '/' + NAME, 'manifest.json')
-    if not redundant_only and ARCHIVE not in top and '.escape_backups' in top:
-        nested = listing(ROOT + '/.escape_backups')
-        if ARCHIVE in nested:
-            uapi('move_file', {'source': ROOT + '/.escape_backups/' + ARCHIVE, 'destination': ROOT + '/' + ARCHIVE})
-            if not listing(ROOT + '/.escape_backups'):
-                uapi('delete_file', {'path': ROOT + '/.escape_backups'})
-            top = listing(ROOT)
-    if ARCHIVE not in top:
-        params = {'cpanel_jsonapi_user': 'nordicr4', 'cpanel_jsonapi_apiversion': 2,
-            'cpanel_jsonapi_module': 'Fileman', 'cpanel_jsonapi_func': 'fileop',
-            'op': 'compress', 'sourcefiles': ROOT + '/' + NAME,
-            'destfiles': ROOT + '/' + ARCHIVE, 'metadata': 'tar.gz', 'doubledecode': 0}
-        result = request('json-api/cpanel', params).get('cpanelresult', {})
-        if result.get('event', {}).get('result') not in (1, '1'):
-            raise ValueError('archive_creation_failed')
-    archive_row = listing(ROOT).get(ARCHIVE, {})
-    size = int(archive_row.get('size', 0))
-    if archive_row.get('type') != 'file' or not 1000 < size <= DB_BYTES * 2 + 10000000:
-        raise ValueError('archive_size_unavailable')
-    print(json.dumps({'status': 'archive_created', 'archive_bytes': size}), flush=True)
-    with tempfile.TemporaryDirectory(prefix='escape-private-backup-') as temporary:
-        archive_path = temporary + '/retained.tar.gz'
-        download(ARCHIVE, archive_path, size)
-        result = verify_archive(archive_path, manifest, DB_BYTES, NAME)
-    result['archive_bytes'] = size
-    print(json.dumps({'status': 'archive_hashes_verified', **result}), flush=True)
-    after = listing(ROOT + '/' + NAME)
-    metadata = lambda rows: {name: {k: row.get(k) for k in ('file','type','mode','size','mtime')} for name,row in rows.items()}
-    if metadata(before) != metadata(after) or manifest != content(ROOT + '/' + NAME, 'manifest.json'):
-        raise ValueError('original_backup_changed')
-    # The archive is verified against the original per-file and DB SHA256s.
-    # This deletes only the now-redundant uncompressed form, never production.
-    current()
-    if choose_backup(listing(ROOT), started) != NAME:
-        raise ValueError('backup_changed_during_verification')
-    if before_delete is not None:
-        before_delete(NAME, ARCHIVE, size)
-    uapi('delete_file', {'path': ROOT + '/' + NAME})
-    final = listing(ROOT)
-    if NAME in final or ARCHIVE not in final or int(final[ARCHIVE]['size']) != size:
-        raise ValueError('backup_replacement_unverified')
-    if redundant_only:
-        print(json.dumps({'status': 'verified', 'removed_redundant_raw': 1, **result}), flush=True)
+
+def archive_inventory(listing, root, manifest, db_bytes):
+    expected = json.loads(manifest)
+    if not isinstance(expected, dict) or expected.get('format') != 1:
+        raise ValueError('invalid_backup_inventory')
+    files = {'escape.db', 'manifest.json'}
+    for field, prefix in (('files', 'code/'), ('keys', '')):
+        members = expected.get(field)
+        if not isinstance(members, dict) or len(members) > 500:
+            raise ValueError('invalid_backup_inventory')
+        for name, digest in members.items():
+            if digest is None:
+                continue
+            path = prefix + name
+            if (path in files or not isinstance(digest, str) or not re.fullmatch('[0-9a-f]{64}', digest)
+                    or any(part in ('.', '..') or not re.fullmatch('[A-Za-z0-9_.-]{1,255}', part)
+                           for part in path.split('/')) or path.count('/') > 10):
+                raise ValueError('invalid_backup_inventory')
+            files.add(path)
+    if not re.fullmatch('[0-9a-f]{64}', str(expected.get('database_sha256'))):
+        raise ValueError('invalid_backup_inventory')
+    directories = {str(parent) for name in files for parent in PurePosixPath(name).parents} - {'.'}
+    if files & directories or len(files) + len(directories) >= 500:
+        raise ValueError('invalid_backup_inventory')
+
+    snapshot = {}
+    padded = 0
+    for directory in sorted(directories | {''}):
+        base = root + '/' + directory if directory else root
+        for name, row in listing(base).items():
+            relative = directory + '/' + name if directory else name
+            kind = 'file' if relative in files else 'dir' if relative in directories else None
+            size = row.get('size')
+            if isinstance(size, str) and re.fullmatch('[0-9]{1,11}', size):
+                size = int(size)
+            if (kind is None or row.get('type') != kind
+                    or type(size) is not int or not 0 <= size <= 10_000_000_000
+                    or row.get('mtime') is None or row.get('mode') is None
+                    or row.get('link') or row.get('islink') not in (None, False, 0, '0')):
+                raise ValueError('invalid_backup_inventory')
+            snapshot[relative] = (kind, size, row['mtime'], row['mode'])
+            if kind == 'file':
+                padded += ((size + 511) // 512) * 512
+        if directory and directory not in snapshot:
+            raise ValueError('invalid_backup_inventory')
+    if (snapshot.keys() != files | directories or snapshot['escape.db'][1] != db_bytes
+            or snapshot['manifest.json'][1] != len(manifest.encode('utf-8'))):
+        raise ValueError('invalid_backup_inventory')
+
+    # Include the root, extended tar headers, block padding and end records.
+    # Allow 12.5% DEFLATE expansion plus gzip framing, above stored-block overhead.
+    tar_upper = padded + (len(snapshot) + 2) * 65536
+    gzip_upper = tar_upper + (tar_upper + 7) // 8 + 65536
+    return snapshot, gzip_upper + ARCHIVE_HEADROOM
+
+
+def measured_quota(reader):
+    try:
+        values = reader()
+        capacity = tuple(values[key] for key in ('used_upper_bytes', 'limit_lower_bytes', 'free_lower_bytes'))
+        used, limit, free = capacity
+        if (any(type(value) is not int or value < 0 for value in capacity)
+                or limit <= 0 or limit - used != free):
+            raise ValueError('quota_unavailable')
+        return capacity
+    except (OSError, ValueError, TypeError, KeyError):
+        raise ValueError('quota_unavailable') from None
+
+
+def maintain(api, sha, started, *, redundant_only=False, before_delete=None, quota_reader=None,
+             maintenance_guard=None):
+    """Require exclusion of competing writers throughout retention.
+
+    The guard yields a host free-space lower bound and a compressor scratch upper
+    bound in bytes, valid through compression. Scratch is additional to the final
+    archive. Existing archives require exclusion alone.
+    """
+    with ExitStack() as stack:
+        try:
+            if maintenance_guard is None:
+                raise ValueError('maintenance_guard_unavailable')
+            host_free, scratch_upper = stack.enter_context(maintenance_guard)
+        except (OSError, ValueError, TypeError, AttributeError):
+            deferred = {'status': 'maintenance_deferred', 'category': 'maintenance_guard_unavailable'}
+            print(json.dumps(deferred), flush=True)
+            return deferred
+        uapi, request, download = api
+        def listing(path):
+            data = uapi('list_files', {'dir': path, 'show_hidden': 1})
+            if not isinstance(data, list) or len(data) > 500:
+                raise ValueError('invalid_inventory')
+            rows = {}
+            for row in data:
+                name = row.get('file') if isinstance(row, dict) else None
+                if name in ('.', '..'):
+                    continue
+                if not isinstance(name, str) or not name or '/' in name or name in rows:
+                    raise ValueError('invalid_inventory')
+                rows[name] = dict(row)
+            return rows
+        def content(directory, filename):
+            data = uapi('get_file_content', {'dir': directory, 'file': filename,
+                'from_charset': 'ISO-8859-1', 'to_charset': 'UTF-8', 'update_html_document_encoding': 0})
+            if not isinstance(data, dict) or not isinstance(data.get('content'), str):
+                raise ValueError('invalid_content_reply')
+            return data['content']
+        def current():
+            if content(APP, 'BUILD_COMMIT').strip() != sha:
+                raise ValueError('installed_release_changed')
+        current()
+        top = listing(ROOT)
+        NAME = choose_backup(top, started)
+        ARCHIVE = 'retained-' + NAME + '.tar.gz'
+        before = listing(ROOT + '/' + NAME)
+        DB_BYTES = int(before.get('escape.db', {}).get('size', 0))
+        if not 512 < DB_BYTES <= 10_000_000_000:
+            raise ValueError('invalid_backup_size')
+
+        top = listing(ROOT)
+        if NAME not in top:
+            raise ValueError('original_backup_unavailable')
+        before = listing(ROOT + '/' + NAME)
+        if before.get('escape.db', {}).get('type') != 'file' or int(before['escape.db']['size']) != DB_BYTES:
+            raise ValueError('original_backup_changed')
+        manifest = content(ROOT + '/' + NAME, 'manifest.json')
+        raw_path = ROOT + '/' + NAME
+        try:
+            reserved = archive_inventory(listing, raw_path, manifest, DB_BYTES)
+            if ARCHIVE not in top:
+                if (type(host_free) is not int or host_free < 0
+                        or type(scratch_upper) is not int or scratch_upper < 0):
+                    raise ValueError('archive_host_bound_unavailable')
+                if '.escape_backups' in top and ARCHIVE in listing(ROOT + '/.escape_backups'):
+                    raise ValueError('nested_archive_requires_maintenance')
+                if quota_reader is None:
+                    quota_reader = lambda: quota.read(os.environ.get('ESCAPE_CPANEL_API_TOKEN', ''))
+                checked_at = time.monotonic()
+                capacity = measured_quota(quota_reader)
+                used, _, free = capacity
+                if min(free, ACCOUNT_BUDGET - used, host_free) < reserved[1] + scratch_upper:
+                    raise ValueError('archive_reserve_insufficient')
+                if measured_quota(quota_reader) != capacity:
+                    raise ValueError('archive_quota_changed')
+                current()
+                if (content(raw_path, 'manifest.json') != manifest
+                        or archive_inventory(listing, raw_path, manifest, DB_BYTES) != reserved
+                        or listing(ROOT) != top):
+                    raise ValueError('archive_inventory_changed')
+                if time.monotonic() - checked_at > 60:
+                    raise ValueError('archive_quota_changed')
+        except (OSError, ValueError) as exc:
+            categories = {'invalid_backup_inventory', 'invalid_inventory', 'quota_unavailable',
+                          'archive_reserve_insufficient', 'archive_inventory_changed',
+                          'archive_quota_changed', 'installed_release_changed',
+                          'archive_host_bound_unavailable', 'nested_archive_requires_maintenance'}
+            category = str(exc) if str(exc) in categories else 'archive_preflight_unavailable'
+            deferred = {'status': 'maintenance_deferred', 'category': category}
+            print(json.dumps(deferred), flush=True)
+            return deferred
+        if ARCHIVE not in top:
+            params = {'cpanel_jsonapi_user': 'nordicr4', 'cpanel_jsonapi_apiversion': 2,
+                'cpanel_jsonapi_module': 'Fileman', 'cpanel_jsonapi_func': 'fileop',
+                'op': 'compress', 'sourcefiles': ROOT + '/' + NAME,
+                'destfiles': ROOT + '/' + ARCHIVE, 'metadata': 'tar.gz', 'doubledecode': 0}
+            result = request('json-api/cpanel', params).get('cpanelresult', {})
+            if result.get('event', {}).get('result') not in (1, '1'):
+                raise ValueError('archive_creation_failed')
+        archive_row = listing(ROOT).get(ARCHIVE, {})
+        size = int(archive_row.get('size', 0))
+        if archive_row.get('type') != 'file' or not 1000 < size <= DB_BYTES * 2 + 10000000:
+            raise ValueError('archive_size_unavailable')
+        print(json.dumps({'status': 'archive_created', 'archive_bytes': size}), flush=True)
+        with tempfile.TemporaryDirectory(prefix='escape-private-backup-') as temporary:
+            archive_path = temporary + '/retained.tar.gz'
+            download(ARCHIVE, archive_path, size)
+            result = verify_archive(archive_path, manifest, DB_BYTES, NAME)
+        result['archive_bytes'] = size
+        print(json.dumps({'status': 'archive_hashes_verified', **result}), flush=True)
+        if before_delete is not None:
+            before_delete(NAME, ARCHIVE, size)
+        current()
+        latest = listing(ROOT)
+        if choose_backup(latest, started) != NAME or latest.get(ARCHIVE) != archive_row:
+            raise ValueError('backup_changed_during_verification')
+        if (manifest != content(raw_path, 'manifest.json')
+                or archive_inventory(listing, raw_path, manifest, DB_BYTES) != reserved):
+            raise ValueError('original_backup_changed')
+        # Only the verified archive can replace the original backup.
+        uapi('delete_file', {'path': ROOT + '/' + NAME})
+        final = listing(ROOT)
+        if NAME in final or ARCHIVE not in final or int(final[ARCHIVE]['size']) != size:
+            raise ValueError('backup_replacement_unverified')
+        if redundant_only:
+            print(json.dumps({'status': 'verified', 'removed_redundant_raw': 1, **result}), flush=True)
+            return result
+        removed = 0
+        for old, row in listing(ROOT).items():
+            match = re.fullmatch(r'retained-(\d{8}-\d{6}-[A-Za-z0-9_-]+)\.tar\.gz', old)
+            older_archive = match and match.group(1) < NAME and row.get('type') == 'file'
+            older_raw = BACKUP_NAME.fullmatch(old) and old < NAME and row.get('type') == 'dir'
+            if older_archive or older_raw:
+                current()
+                uapi('delete_file', {'path': ROOT + '/' + old})
+                removed += 1
+        stage_root = APP + '/opdatering'
+        stages = listing(stage_root)
+        current_stages = [n for n, row in stages.items()
+            if re.fullmatch(r'\.escape-release-[A-Za-z0-9_-]+', n) and row.get('type') == 'dir'
+            and content(stage_root + '/' + n, 'BUILD_COMMIT').strip() == sha]
+        if not current_stages:
+            raise ValueError('current_staging_unavailable')
+        retained_stage = max(current_stages, key=lambda n: int(stages[n].get('mtime', 0)))
+        for old, row in stages.items():
+            if (old != retained_stage and re.fullmatch(r'\.escape-release-[A-Za-z0-9_-]+', old)
+                    and row.get('type') == 'dir' and int(row.get('mtime', 0)) < started
+                    and re.fullmatch(r'[0-9a-f]{40}', content(stage_root + '/' + old, 'BUILD_COMMIT').strip())):
+                current()
+                uapi('delete_file', {'path': stage_root + '/' + old})
+                removed += 1
+        remaining = listing(ROOT)
+        if NAME in remaining or int(remaining.get(ARCHIVE, {}).get('size', 0)) != size:
+            raise ValueError('final_backup_unverified')
+        print(json.dumps({'status': 'verified', 'retained_archive': ARCHIVE, 'removed_old_entries': removed, **result}), flush=True)
         return result
-    removed = 0
-    for old, row in listing(ROOT).items():
-        match = re.fullmatch(r'retained-(\d{8}-\d{6}-[A-Za-z0-9_-]+)\.tar\.gz', old)
-        older_archive = match and match.group(1) < NAME and row.get('type') == 'file'
-        older_raw = BACKUP_NAME.fullmatch(old) and old < NAME and row.get('type') == 'dir'
-        if older_archive or older_raw:
-            current()
-            uapi('delete_file', {'path': ROOT + '/' + old})
-            removed += 1
-    stage_root = APP + '/opdatering'
-    stages = listing(stage_root)
-    current_stages = [n for n, row in stages.items()
-        if re.fullmatch(r'\.escape-release-[A-Za-z0-9_-]+', n) and row.get('type') == 'dir'
-        and content(stage_root + '/' + n, 'BUILD_COMMIT').strip() == sha]
-    if not current_stages:
-        raise ValueError('current_staging_unavailable')
-    retained_stage = max(current_stages, key=lambda n: int(stages[n].get('mtime', 0)))
-    for old, row in stages.items():
-        if (old != retained_stage and re.fullmatch(r'\.escape-release-[A-Za-z0-9_-]+', old)
-                and row.get('type') == 'dir' and int(row.get('mtime', 0)) < started
-                and re.fullmatch(r'[0-9a-f]{40}', content(stage_root + '/' + old, 'BUILD_COMMIT').strip())):
-            current()
-            uapi('delete_file', {'path': stage_root + '/' + old})
-            removed += 1
-    remaining = listing(ROOT)
-    if NAME in remaining or int(remaining.get(ARCHIVE, {}).get('size', 0)) != size:
-        raise ValueError('final_backup_unverified')
-    print(json.dumps({'status': 'verified', 'retained_archive': ARCHIVE, 'removed_old_entries': removed, **result}), flush=True)
-    return result
 
 
 def transport_api():
@@ -261,7 +387,8 @@ def main():
     now = datetime.now(timezone.utc).timestamp()
     if not now - 3600 <= started <= now:
         raise ValueError('invalid_release_start')
-    maintain(transport_api(), sha, started)
+    # The release runner supplies no host bounds or writer exclusion.
+    maintain(None, sha, started)
 
 
 if __name__ == '__main__':
