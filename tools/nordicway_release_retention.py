@@ -1,13 +1,15 @@
 """Post-success release retention, preserving the latest fully verified backup."""
 import ftplib
+import gzip
 import secrets
 import ssl
 import hashlib
 import io
 import json
 import os
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import re
+import stat
 import tarfile
 import tempfile
 import urllib.parse
@@ -24,6 +26,140 @@ BACKUP_NAME = re.compile(r'\d{8}-\d{6}-[A-Za-z0-9_-]+\Z')
 APP = '/home/nordicr4/escape_app'
 ROOT = '/home/nordicr4/.escape_backups'
 
+
+
+def _manifest_hashes(manifest_content):
+    if len(manifest_content.encode('utf-8')) > 100000:
+        raise ValueError('invalid_backup_manifest')
+    expected = json.loads(manifest_content)
+    if not isinstance(expected, dict) or expected.get('format') != 1:
+        raise ValueError('invalid_backup_manifest')
+    wanted = {'escape.db': expected.get('database_sha256'),
+              'manifest.json': hashlib.sha256(manifest_content.encode('utf-8')).hexdigest()}
+    for group, prefix in (('files', 'code/'), ('keys', '')):
+        entries = expected.get(group, {})
+        if not isinstance(entries, dict):
+            raise ValueError('invalid_backup_manifest')
+        for name, digest in entries.items():
+            path = PurePosixPath(name)
+            relative = prefix + name
+            if (not path.parts or path.is_absolute() or '..' in path.parts
+                    or path.as_posix() != name or relative in wanted):
+                raise ValueError('invalid_backup_manifest')
+            if digest is not None:
+                wanted[relative] = digest
+    if any(not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest)
+           for digest in wanted.values()):
+        raise ValueError('invalid_backup_manifest')
+    return wanted
+
+
+class _BoundedOutput:
+    def __init__(self, stream, limit):
+        self.stream = stream
+        self.limit = limit
+        self.size = 0
+
+    def write(self, data):
+        if len(data) > self.limit - self.size:
+            raise ValueError('backup_output_cap_exceeded')
+        written = self.stream.write(data)
+        if written != len(data):
+            raise OSError('incomplete_backup_write')
+        self.size += written
+        return written
+
+
+def verify_local_backup_archive(path, manifest_content, expected_size, name):
+    """Read back a local archive against the independently verified raw inventory."""
+    wanted = _manifest_hashes(manifest_content)
+    if not BACKUP_NAME.fullmatch(name):
+        raise ValueError('invalid_backup_name')
+    with gzip.open(path, 'rb') as compressed:
+        with tarfile.open(fileobj=compressed, mode='r|', bufsize=512) as archive:
+            remaining = {name + '/' + relative: digest for relative, digest in wanted.items()}
+            while remaining:
+                member = archive.next()
+                if member is None or member.type != tarfile.REGTYPE or member.name not in remaining:
+                    raise ValueError('unexpected_archive_member')
+                if member.name == name + '/escape.db' and member.size != expected_size:
+                    raise ValueError('backup_manifest_or_size_mismatch')
+                digest = hashlib.sha256()
+                with archive.extractfile(member) as stream:
+                    while block := stream.read(1024 * 1024):
+                        digest.update(block)
+                if digest.hexdigest() != remaining.pop(member.name):
+                    raise ValueError('backup_hash_mismatch')
+            # Read the full tar terminator and force gzip CRC/size validation at EOF.
+            archive.fileobj.seek(archive.offset)
+            trailer_size = 1024 + (-(archive.offset + 1024) % tarfile.RECORDSIZE)
+            if archive.fileobj.read(trailer_size) != bytes(trailer_size) or archive.fileobj.read(1):
+                raise ValueError('unexpected_archive_member_or_tar_end')
+    return {'database_bytes': expected_size, 'verified_files': len(wanted)}
+
+
+def compress_verified_raw_backup(raw, destination, *, manifest_content, expected_size, available_bytes):
+    """Publish a verified private tar.gz within the caller's hard byte allowance.
+
+    The private bridge must hold its release lock and verify the quiesced raw
+    snapshot before apply. Persist a phase marker binding the release, raw path,
+    manifest hash and DB size. Resume must revalidate the marker and raw backup
+    or read back an already published archive against the pinned inventory.
+    Keep the existing deploy quota gate. Recalculate verified available quota
+    for this separate phase, accounting for the raw and prior backups. Journal
+    progress durably across restart, including restart/health and archive
+    readback outcomes, before separate retention cleanup. No automatic DB restore.
+
+    The caller owns the private directories and keeps the source immutable
+    under the lock. Publication never replaces an existing archive.
+    """
+    raw, destination = Path(raw), Path(destination)
+    if type(available_bytes) is not int or available_bytes < 0:
+        raise ValueError('invalid_backup_output_cap')
+    if not BACKUP_NAME.fullmatch(raw.name) or raw.is_symlink() or not raw.is_dir():
+        raise ValueError('invalid_backup_source')
+    if destination.parent.resolve().is_relative_to(raw.resolve()):
+        raise ValueError('invalid_backup_destination')
+    wanted = _manifest_hashes(manifest_content)
+    identities = {}
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=destination.parent, prefix='.backup-', delete=False) as output:
+            temporary = output.name
+            bounded = _BoundedOutput(output, available_bytes)
+            with gzip.GzipFile(filename='', fileobj=bounded, mode='wb', mtime=0) as compressed:
+                with tarfile.open(fileobj=compressed, mode='w|', format=tarfile.GNU_FORMAT) as archive:
+                    for relative in wanted:
+                        source = raw / relative
+                        if source.resolve() != raw.resolve() / relative:
+                            raise ValueError('invalid_backup_source')
+                        with os.fdopen(os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as stream:
+                            before = os.fstat(stream.fileno())
+                            if not stat.S_ISREG(before.st_mode):
+                                raise ValueError('invalid_backup_source')
+                            info = tarfile.TarInfo(raw.name + '/' + relative)
+                            info.size = before.st_size
+                            info.mode = 0o600
+                            archive.addfile(info, stream)
+                            identities[source] = before
+            output.flush()
+            os.fsync(output.fileno())
+        result = verify_local_backup_archive(temporary, manifest_content, expected_size, raw.name)
+        for source, before in identities.items():
+            after = source.lstat()
+            if ((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+                    != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+                raise ValueError('original_backup_changed')
+        os.link(temporary, destination)
+        directory = os.open(destination.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        return dict(result, archive_bytes=bounded.size)
+    finally:
+        if temporary is not None:
+            os.unlink(temporary)
 
 
 def verify_archive(data, manifest_content, expected_size, name):
