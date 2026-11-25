@@ -103,6 +103,7 @@ class HoldingAutowatchPerformance(unittest.TestCase):
     self.assertEqual(verified,[(count,assets[22])])
     reads=[sql for sql in scan_sql if sql.lstrip().upper().startswith('SELECT')]
     self.assertEqual(len(reads),2+3*count-2*len(killed))
+    self.assertEqual(scan_sql.count('PRAGMA data_version'),2)
     self.assertEqual(sum('FROM hw_control' in sql for sql in reads),count)
     self.assertEqual(sum('hw_holding_autowatch' in sql for sql in reads),count-len(killed))
     self.assertEqual(sum('INSERT INTO hw_holding_autowatch' in sql and "'LINKED'" in sql for sql in scan_sql),count-len(killed))
@@ -130,6 +131,55 @@ class HoldingAutowatch(unittest.TestCase):
   self.verify=lambda *_:self.instrument
   self.lookup=lambda *_:{'choices':[{'symbol':'TEST.US','currency':'USD','isin':'US1234567890'}]}
  def tearDown(self):self.fixture.tearDown()
+ def test_closure_before_first_scan_write_uses_new_holding_generation(self):
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  earlier={'kind':'holding','asset_id':'earlier','quantity':'1'}
+  at=self.now.isoformat()
+  def set_positions(positions):
+   payload=json.dumps({'positions_complete':True,'observed':at,'positions':positions})
+   with app.connect() as c:
+    c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(payload,self.pid))
+  set_positions([earlier,self.holding])
+  with app.connect() as c:
+   old_watch=c.execute('SELECT watch_id FROM hw_sessions').fetchone()[0]
+   request=json.dumps({'asset_id':'earlier','portfolio_ids':[self.pid],'watch_mode':'exit'})
+   c.execute("""
+    INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due)
+    VALUES(1,'earlier',0,'earlier','manual holding','PAUSED',?,'synthetic','{}','{}',?,?,0)
+   """,(request,at,at))
+
+  reconcile=service.reconcile_closed_holdings
+  execute=app.DatabaseConnection.execute
+  closed_at=self.now+timedelta(seconds=1)
+  raced=False
+  def race_before_scan_write(connection,sql,*args):
+   nonlocal raced
+   if not raced and (sql=='BEGIN IMMEDIATE' or sql.startswith('INSERT INTO hw_holding_autowatch')):
+    raced=True
+    set_positions([earlier])
+    self.assertEqual(reconcile(app.connect,closed_at),1)
+    set_positions([earlier,self.holding])
+   return execute(connection,sql,*args)
+
+  verified=[]
+  def verify(_,uid,holding):
+   verified.append((uid,holding['asset_id']))
+   return self.instrument
+
+  with patch.object(app.DatabaseConnection,'execute',race_before_scan_write), \
+       patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_CAPACITY':'40','ESCAPE_HW_EODHD_REST_ENABLED':'0'}):
+   self.assertEqual(service.auto_holdings_tick(app.connect,verify=verify,now=closed_at),'LINKED')
+  self.assertTrue(raced)
+  aid=self.holding['asset_id']
+  self.assertEqual(verified,[(1,aid)])
+  identity=f'1|{self.pid}|{aid}|{closed_at.isoformat()}'
+  watch='hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT status FROM hw_sessions WHERE watch_id=?',(old_watch,)).fetchone()[0],'COMPLETED')
+   attempts=c.execute('SELECT asset_id,status,watch_id FROM hw_holding_autowatch ORDER BY asset_id').fetchall()
+   self.assertEqual([tuple(row) for row in attempts],[('earlier','LINKED','earlier'),(aid,'LINKED',watch)])
+   self.assertEqual(c.execute('SELECT status FROM hw_sessions WHERE watch_id=?',(watch,)).fetchone()[0],'CREATED')
+
  def test_idle_identity_recheck_does_not_reserve_database_writer(self):
   holder=app.connect()
   try:
