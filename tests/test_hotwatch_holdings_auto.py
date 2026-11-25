@@ -248,6 +248,12 @@ class HoldingAutowatch(unittest.TestCase):
    self.assertEqual(c.execute('SELECT status FROM hw_sessions WHERE watch_id=?',(watch,)).fetchone()[0],'CREATED')
 
  def test_concurrent_stop_invalidates_idle_holding_batch(self):
+  self._check_concurrent_stop_in_idle_holding_batch()
+
+ def test_concurrent_stop_during_idle_holding_batch_refresh(self):
+  self._check_concurrent_stop_in_idle_holding_batch(refresh=True)
+
+ def _check_concurrent_stop_in_idle_holding_batch(self,refresh=False):
   at=self.now.isoformat()
   assets=[f'holding-{index}' for index in range(5)]
   with app.connect() as c:
@@ -280,26 +286,26 @@ class HoldingAutowatch(unittest.TestCase):
     self.assertIsNone(self.tick(verify=lambda *_:self.fail('No activation expected')))
    self.assertTrue(committed)
    writer.rollback()
-  stopped=False
+  stopped=False;invalidated=False
   def stop_after_batch_reads(connection,sql,*args):
-   nonlocal stopped
+   nonlocal stopped,invalidated
    cursor=execute(connection,sql,*args)
    if not stopped and 'FROM json_each(?) k CROSS JOIN hw_holding_autowatch' in sql:
     rows=cursor.fetchall()
     if {row['asset_id'] for row in rows}==set(assets[3:]):
      self.assertFalse(connection.in_transaction)
-     stopped=True
      with app.connect() as other:
-      other.execute("UPDATE hw_sessions SET status='COMPLETED' WHERE user_id=1 AND watch_id=?",(assets[-1],))
+      if refresh and not invalidated:
+       other.execute("UPDATE users SET username='unrelated-refresh' WHERE id=2")
+       invalidated=True
+      else:
+       other.execute("UPDATE hw_sessions SET status='COMPLETED' WHERE user_id=1 AND watch_id=?",(assets[-1],))
+       stopped=True
     return iter(rows)
    return cursor
   with patch.object(app.DatabaseConnection,'execute',stop_after_batch_reads):
    self.assertIsNone(self.tick(verify=lambda *_:self.fail('No activation expected')))
   self.assertTrue(stopped)
-  # With no intervening commit, the same scan stays read-only.
-  with app.connect() as other:
-   other.execute('BEGIN IMMEDIATE')
-   self.assertIsNone(self.tick(verify=lambda *_:self.fail('No activation expected')))
   with app.connect() as c:
    self.assertEqual([tuple(row) for row in c.execute(
     'SELECT asset_id,status,watch_id,next_attempt FROM hw_holding_autowatch ORDER BY asset_id')],
@@ -307,6 +313,10 @@ class HoldingAutowatch(unittest.TestCase):
     [(assets[-1],'STOPPED',assets[-1],self.now.timestamp()+300)])
    self.assertEqual(dict(c.execute('SELECT watch_id,status FROM hw_sessions').fetchall()),
                     {**dict.fromkeys(assets[:-1],'PAUSED'),assets[-1]:'COMPLETED'})
+  # With no intervening commit, the same scan stays read-only.
+  with app.connect() as other:
+   other.execute('BEGIN IMMEDIATE')
+   self.assertIsNone(self.tick(verify=lambda *_:self.fail('No activation expected')))
 
  def test_repeated_unrelated_commits_do_not_starve_next_tenant(self):
   at=self.now.isoformat();aid=self.holding['asset_id']
@@ -326,7 +336,7 @@ class HoldingAutowatch(unittest.TestCase):
    if 'FROM json_each(?) k CROSS JOIN hw_holding_autowatch' in sql and args and args[0][1]==1 and not connection.in_transaction:
     rows=cursor.fetchall()
     commits+=1
-    self.assertLessEqual(commits,2,'idle tenant retried without bound')
+    self.assertLessEqual(commits,3,'idle tenant retried without bound')
     with app.connect() as other:
      other.execute("UPDATE users SET username=? WHERE id=2",(f'second-{commits}',))
     return iter(rows)
@@ -337,7 +347,7 @@ class HoldingAutowatch(unittest.TestCase):
    return self.instrument
   with patch.object(app.DatabaseConnection,'execute',race),patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1','ESCAPE_HW_CAPACITY':'40','ESCAPE_HW_EODHD_REST_ENABLED':'0'}):
    self.assertEqual(service.auto_holdings_tick(app.connect,verify=verify,now=self.now),'LINKED')
-  self.assertEqual(commits,2)
+  self.assertEqual(commits,3)
   self.assertEqual(verified,[2])
 
  def test_concurrent_link_refresh_releases_unused_writer_before_next_tenant(self):

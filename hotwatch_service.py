@@ -809,9 +809,9 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
   selected=None;lock_without_write=False
   for uid,user_choices in groupby(choices,key=lambda choice:choice[0]):
    user_choices=list(user_choices)
-   # One read-only refresh per tenant per tick; unrelated database writes
-   # must not starve later tenants. Any actual write still revalidates under lock.
-   read_refreshes=0
+   # Refresh the batch once, then fall back to fresh per-position reads
+   # if commits keep invalidating the batch. Idle scans stay read-only.
+   refreshed=False;read_individually=False
    while not selected:
     control=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
     if control and control['killed']:break
@@ -821,7 +821,9 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
      # Probe early holdings separately: a LINKED write can take the writer
      # lock before an activation. Bound later batches even with the lock held.
      if index==batch_end:
-      batch_end=index+(1 if index<3 else 24)
+      if read_individually:
+       sessions.clear();attempts.clear();probed_keys.clear();probed_assets.clear()
+      batch_end=index+(1 if read_individually or index<3 else 24)
       pending=user_choices[index:batch_end]
       keys={(p,h['asset_id']) for _,p,h in pending}-probed_keys
       assets={aid for _,aid in keys}-probed_assets
@@ -871,15 +873,13 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
     else:
      # A database-wide commit may be unrelated. Refresh this user's batch
      # read-only and reserve the writer only if the decisions require a write.
-     if not c.in_transaction:
+     if not c.in_transaction and not read_individually:
       current_version=c.execute('PRAGMA data_version').fetchone()[0]
       if current_version!=scan_version:
-       if read_refreshes==0:
-        read_refreshes+=1
-        scan_version=current_version
-        continue
-       # Keep the older version so a later write must revalidate under lock.
-       # A no-write tenant is revisited on the next scheduled tick.
+       read_individually=refreshed
+       refreshed=True
+       scan_version=current_version
+       continue
      break
    # A refreshed batch may need no write. Do not retain a writer lock
    # while scanning subsequent tenants when nothing was actually changed.
