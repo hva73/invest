@@ -32,7 +32,9 @@ class HotWatch(unittest.TestCase):
     c.execute("INSERT INTO broker_proposals(user_id,fingerprint,report_id,candidate_id,kind,portfolio_id,payload,status,created,intent_id,response) VALUES(1,?,?,'synthetic-MERC','direct',?,?,'sent',?,?,?)",
               (intent,origin,pid,json.dumps(payload),self.now.timestamp(),intent,json.dumps(response)))
   for history in ({'orderIntentId':'manual-intent'},
-                  {'orderIntentId':'signal-intent','portfolioId':'other'}):
+                  {'orderIntentId':'signal-intent','portfolioId':'other'},
+                  {'orderIntentId':'signal-intent','orderId':'unrelated'},
+                  {'orderIntentId':'signal-intent','orderIntents':[{}]}):
    with self.subTest(history=history):
     with app.connect() as c:
      c.execute("UPDATE broker_proposals SET response=? WHERE user_id=1 AND report_id='@hotwatch'",

@@ -18,7 +18,9 @@ class InsufficientBuyingPower(TradeError):
 
 def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS broker_proposals(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),fingerprint TEXT NOT NULL,report_id TEXT NOT NULL,candidate_id TEXT NOT NULL,kind TEXT NOT NULL,portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),payload TEXT NOT NULL,status TEXT NOT NULL,created REAL NOT NULL,estimated REAL,review_token TEXT,estimate TEXT,asset TEXT,intent_id TEXT,response TEXT,error TEXT,UNIQUE(user_id,fingerprint))')
-    if 'sell_basis' not in {r[1] for r in c.execute('PRAGMA table_info(broker_proposals)')}:c.execute('ALTER TABLE broker_proposals ADD COLUMN sell_basis TEXT')
+    columns={r[1] for r in c.execute('PRAGMA table_info(broker_proposals)')}
+    if 'sent_identity' not in columns:c.execute('ALTER TABLE broker_proposals ADD COLUMN sent_identity TEXT')
+    if 'sell_basis' not in columns:c.execute('ALTER TABLE broker_proposals ADD COLUMN sell_basis TEXT')
     c.execute('CREATE TABLE IF NOT EXISTS manual_test_signals(user_id INTEGER PRIMARY KEY REFERENCES users(id),portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),ticker TEXT NOT NULL,amount TEXT NOT NULL,expires REAL NOT NULL)')
     if 'side' not in {r[1] for r in c.execute('PRAGMA table_info(manual_test_signals)')}:c.execute("ALTER TABLE manual_test_signals ADD COLUMN side TEXT NOT NULL DEFAULT 'BUY'")
 
@@ -251,6 +253,7 @@ def view(row):
     if r['status']=='uncertain' and r['response'] and not r['intent_id']:
         reference=intent_reference(r['response'],r['payload'])
         if reference:r['status']='sent';r['intent_id']=reference;r['error']=None
+    r.pop('sent_identity',None)
     r.pop('fingerprint',None);r.pop('user_id',None)
     if r['status']!='estimated':r.pop('review_token',None)
     return r
@@ -376,6 +379,58 @@ def intent_reference(raw,payload):
             if all(item.get(k)==order.get(k) for k in ('assetId','side','orderType','timeInForce')):intent=item.get('orderIntentId')
     return intent if isinstance(intent,str) and 1<=len(intent)<=200 else None
 
+IDENTITY_ERROR='Pluto bekræftede ikke forslagsidentiteten. Kontrollér status i Pluto.'
+
+def proposal_identity(payload,reference):
+    expected={'orderIntentId':reference,'orderId':None,
+              'portfolioId':payload.get('portfolioId'),'collectionId':payload.get('collectionId')}
+    orders=payload.get('orders') or []
+    if len(orders)==1:
+        expected.update({key:orders[0].get(key) for key in ('assetId','side','orderType','timeInForce')})
+    return expected
+
+def intent_nodes(response):
+    if not isinstance(response,dict):
+        raise TradeError(IDENTITY_ERROR)
+    if 'orderIntents' not in response:
+        return [response]
+    items=response['orderIntents']
+    if (not isinstance(items,list) or len(items)!=1 or not isinstance(items[0],dict)
+            or 'orderIntentId' not in items[0]):
+        raise TradeError(IDENTITY_ERROR)
+    return [response,items[0]]
+
+def response_identity(response,expected):
+    """Read identity from the provider's root and optional single-intent envelope."""
+    identity={}
+    for node in intent_nodes(response):
+        for field in expected.keys() & node.keys():
+            value=node[field]
+            if not isinstance(value,str) or not value or identity.get(field,value)!=value:
+                raise TradeError(IDENTITY_ERROR)
+            identity[field]=value
+    return identity
+
+def sent_identity(response,payload,reference,portfolio):
+    """Keep only supplemental IDs corroborated at the single submission."""
+    if not reference:
+        return {}
+    expected=proposal_identity(payload,reference)
+    if portfolio['kind']=='collection' and 'portfolioId' not in payload:
+        expected['portfolioId']=portfolio['parent_external_id'].split(':',1)[1]
+    try:
+        identity=response_identity(response,expected)
+    except TradeError:
+        return {}
+    if any(value!=expected[key] for key,value in identity.items() if key!='orderId'):
+        return {}
+    extra={}
+    if 'orderId' in identity:
+        extra['orderId']=identity['orderId']
+    if 'portfolioId' not in payload and 'portfolioId' in identity:
+        extra['portfolioId']=identity['portfolioId']
+    return extra
+
 def send(connect,user_id,data,factory=None):
     row=get(connect,user_id,int(data['id']))
     if row['status'] in ['sending','sent','uncertain']:return {'proposal':view(row),'duplicate':True}
@@ -407,7 +462,10 @@ def send(connect,user_id,data,factory=None):
         raw=call(cl,tools,name,json.loads(row['payload']))
         intent=intent_reference(raw,json.loads(row['payload']))
         status='sent' if intent else 'uncertain';error=None if intent else 'Pluto har svaret uden en genkendelig reference. Kontrollér i Pluto; forslaget genafsendes ikke.'
-        with connect() as c:c.execute('UPDATE broker_proposals SET status=?,intent_id=?,response=?,error=? WHERE id=? AND user_id=?',(status,intent,json.dumps(raw),error,row['id'],user_id))
+        extra=sent_identity(raw,current_payload,intent,p)
+        with connect() as c:
+            c.execute('UPDATE broker_proposals SET status=?,intent_id=?,response=?,sent_identity=?,error=? WHERE id=? AND user_id=?',
+                      (status,intent,json.dumps(raw),json.dumps(extra),error,row['id'],user_id))
     except Exception:
         with connect() as c:c.execute("UPDATE broker_proposals SET status='uncertain',error=? WHERE id=? AND user_id=?",('Afsendelsens resultat er uafklaret. Kontrollér i Pluto. Ingen automatisk genafsendelse.',row['id'],user_id))
     return {'proposal':view(get(connect,user_id,row['id']))}
@@ -418,62 +476,35 @@ def check(connect,user_id,pid,factory=None):
     reference=proposal['intent_id']
     if not reference:raise TradeError('Ingen sikker Pluto-reference. Kontrollér forslaget i Pluto-appen.')
     cl,tools=client(connect,user_id,factory);raw=call(cl,tools,'get_order_intent',{'orderIntentId':reference})
-    identity_error='Pluto bekræftede ikke forslagsidentiteten. Kontrollér status i Pluto.'
     if not isinstance(raw,dict) or raw.get('orderIntentId')!=reference:
-        raise TradeError(identity_error)
-    def identity_nodes(response):
-        if 'orderIntents' not in response:
-            return [response]
-        items=response['orderIntents']
-        if (not isinstance(items,list) or len(items)!=1 or not isinstance(items[0],dict)
-                or 'orderIntentId' not in items[0]):
-            raise TradeError(identity_error)
-        return [response,items[0]]
-
-    nodes=identity_nodes(raw)
+        raise TradeError(IDENTITY_ERROR)
     payload=proposal['payload']
-    expected={key:payload.get(key) for key in ('portfolioId','collectionId')}
-    expected['orderIntentId']=reference
-    # A readback may corroborate an existing order ID, but cannot establish one.
-    expected['orderId']=None
-
-    orders=payload.get('orders') or []
-    if len(orders)==1:
-        expected.update({key:orders[0].get(key) for key in ('assetId','side','orderType','timeInForce')})
+    expected=proposal_identity(payload,reference)
+    # Legacy rows have no independent submission evidence for supplemental IDs.
+    extra=json.loads(row['sent_identity']) if row['sent_identity'] else {}
+    expected.update(extra)
+    identity=response_identity(raw,expected)
+    if any(value!=expected[key] for key,value in identity.items()):
+        raise TradeError(IDENTITY_ERROR)
 
     previous=proposal['response']
-    # Historical readbacks may belong to a different intent. Only use their
-    # identity fields when the response belongs to the stored proposal reference.
-    prior_nodes=identity_nodes(previous) if intent_reference(previous,payload)==reference else []
-
-    # A saved intent can recover from a legacy identity conflict if the new
-    # reply confirms every disputed request field independently.
-    required={field:value for field,value in expected.items() if value is not None
-              and any(field in node and node[field]!=value for node in prior_nodes)}
-    if required:
-        if row['intent_id']!=reference:
-            raise TradeError(identity_error)
-        # In particular, an order ID from this response is no longer evidence.
-        prior_nodes=[]
-    for field in ('portfolioId','orderId'):
-        if expected[field]:
-            continue
-        values=[node[field] for node in prior_nodes if field in node]
-        if values:
-            if any(not isinstance(value,str) or not value or value!=values[0] for value in values):
-                raise TradeError(identity_error)
-            expected[field]=required[field]=values[0]
-    # Reject contradictory historical identity even for fields that the request
-    # does not define (except the two explicitly corroborated historical IDs).
-    if any(field in node and (not value or node[field]!=value)
-           for node in prior_nodes for field,value in expected.items()):
-        raise TradeError(identity_error)
-
-    if any(key in node and (not value or node[key]!=value)
-           for node in nodes for key,value in expected.items()):
-        raise TradeError(identity_error)
-    if any(not any(node.get(key)==value for node in nodes) for key,value in required.items()):
-        raise TradeError(identity_error)
+    required=set(extra)
+    if not row['intent_id']:
+        # The legacy reference itself came from this response via view().
+        prior=response_identity(previous,expected)
+        if any(value!=expected[key] for key,value in prior.items()):
+            raise TradeError(IDENTITY_ERROR)
+    elif intent_reference(previous,payload)==reference:
+        # A previous readback can dispute a known field, never establish one.
+        # Malformed nesting does not invalidate the independently saved intent.
+        try:
+            history=intent_nodes(previous)
+        except TradeError:
+            history=[previous]
+        required.update(key for node in history for key in expected.keys() & node.keys()
+                        if expected[key] is not None and node[key]!=expected[key])
+    if not required.issubset(identity):
+        raise TradeError(IDENTITY_ERROR)
     # Do not replace evidence updated while the provider lookup was in flight.
     # Preserve exact provider status separately. Acceptance is never a fill.
     with connect() as c:

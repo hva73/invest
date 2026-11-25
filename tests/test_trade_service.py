@@ -411,6 +411,7 @@ class Trading(unittest.TestCase):
   self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
 
  def test_check_only_reuses_order_id_from_compatible_prior_identity(self):
+  self.write_result['orderId']='original-order'
   pid=self.send(self.estimate())['id']
   intent={'orderIntentId':'synthetic-intent','orderId':'original-order'}
   self.intent_result=dict(intent,status='ACCEPTED')
@@ -471,6 +472,63 @@ class Trading(unittest.TestCase):
     self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
   self.intent_result=valid
   self.assertEqual(trade.check(app.connect,1,pid,self.factory)['proposal']['response'],valid)
+
+ def test_unchecked_history_cannot_corroborate_additional_ids(self):
+  direct=self.send(self.estimate())
+  self.write_result={'orderIntentId':'collection-intent'}
+  request=dict(self.request,portfolio_id=self.child,kind='collection_sell',size='25')
+  with patch('trade_service.candidate',return_value={'signal':'SÆLG'}):
+   collection=self.send(self.estimate(request))
+  for proposal,field,value in ((direct,'orderId','unrelated'),(collection,'portfolioId','other-depot')):
+   pid=proposal['id'];accepted={'orderIntentId':proposal['intent_id'],'status':'ACCEPTED'}
+   for nested in (True,False):
+    with self.subTest(field=field,nested=nested):
+     identity={'orderIntentId':proposal['intent_id'],field:value}
+     history=dict(accepted,status='PENDING')
+     if nested:history['orderIntents']=[identity]
+     else:history.update(identity)
+     with app.connect() as c:
+      c.execute('UPDATE broker_proposals SET response=?,sent_identity=NULL WHERE id=?',(json.dumps(history),pid))
+     prior=dict(trade.get(app.connect,1,pid))
+     self.intent_result=dict(accepted,**{field:value})
+     with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+      trade.check(app.connect,1,pid,self.factory)
+     self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+     self.intent_result=accepted
+     self.assertEqual(trade.check(app.connect,1,pid,self.factory)['proposal']['response'],accepted)
+
+ def test_collection_receipt_cannot_corroborate_another_depot_or_its_order(self):
+  request=dict(self.request,portfolio_id=self.child,kind='collection_sell',size='25')
+  self.write_result.update(portfolioId='other-depot',collectionId='child',orderId='other-order')
+  with patch('trade_service.candidate',return_value={'signal':'SÆLG'}):
+   pid=self.send(self.estimate(request))['id']
+  prior=dict(trade.get(app.connect,1,pid))
+  valid={'orderIntentId':'synthetic-intent','collectionId':'child','status':'ACCEPTED'}
+  for field in ('portfolioId','orderId'):
+   with self.subTest(field=field):
+    self.intent_result=dict(valid,**{field:self.write_result[field]})
+    with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+     trade.check(app.connect,1,pid,self.factory)
+    self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+  self.intent_result=valid
+  self.assertEqual(trade.check(app.connect,1,pid,self.factory)['proposal']['response'],valid)
+
+ def test_verified_reply_recovers_from_malformed_historical_nesting(self):
+  pid=self.send(self.estimate())['id']
+  valid={'orderIntentId':'synthetic-intent','portfolioId':'root','status':'ACCEPTED'}
+  for malformed in ([{}],[{'assetId':'unrelated'}],[],None,[1,2]):
+   with self.subTest(malformed=malformed):
+    history=dict(valid,status='PENDING',orderIntents=malformed)
+    with app.connect() as c:
+     c.execute('UPDATE broker_proposals SET response=? WHERE id=?',(json.dumps(history),pid))
+    prior=dict(trade.get(app.connect,1,pid))
+    self.intent_result=dict(valid,orderIntents=malformed)
+    with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+     trade.check(app.connect,1,pid,self.factory)
+    self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+    self.intent_result=valid
+    checked=trade.check(app.connect,1,pid,self.factory)['proposal']
+    self.assertEqual((checked['response'],checked['status']),(valid,'sent'))
 
  def test_check_validates_nested_order_identity_before_replacing_evidence(self):
   estimated=self.estimate()
