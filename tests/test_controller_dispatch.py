@@ -28,11 +28,12 @@ class DispatcherStatusTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_status(root, "working", [{"issue": 273, "generation": 2,
-                                             "task": "private task"}], ["268:1"])
+                                             "task": "private task"}], ["268:1"], ["8:2"])
             status = json.loads((root/"status.json").read_text())
             self.assertEqual(status["reason"], "working")
             self.assertEqual(status["active"], ["273:2"])
             self.assertEqual(status["waiting"], ["268:1"])
+            self.assertEqual(status["awaiting_review"], ["8:2"])
             self.assertNotIn("private task", str(status))
             self.assertTrue(status["updated_at"].endswith("+00:00"))
 
