@@ -806,7 +806,7 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
     if valid:choices.append((snap['user_id'],snap['id'],holding))
   if not choices:return None
   scan_version=c.execute('PRAGMA data_version').fetchone()[0]
-  selected=None
+  selected=None;lock_without_write=False
   for uid,user_choices in groupby(choices,key=lambda choice:choice[0]):
    user_choices=list(user_choices)
    while not selected:
@@ -848,15 +848,21 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
      if not c.in_transaction:
       # Stay read-only until a write is needed, then check for commits
       # that could have invalidated the current user's batch.
-      c.execute('BEGIN IMMEDIATE')
+      c.execute('BEGIN IMMEDIATE');lock_without_write=True
       if c.execute('PRAGMA data_version').fetchone()[0]!=scan_version:
        # Repeat this user’s batch under the writer lock.
        break
      c.execute("INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,portfolio_id,asset_id) DO UPDATE SET status=excluded.status,watch_id=excluded.watch_id,next_attempt=excluded.next_attempt,updated=excluded.updated",(uid,pid,aid,status,linked,epoch+300,at))
+     lock_without_write=False
      if status=='VERIFYING':selected=(uid,pid,holding,watch);break
      attempts[pid,aid]={'status':status,'watch_id':linked,'next_attempt':epoch+300,'updated':at}
     else:
      break
+   # A refreshed batch may need no write. Do not retain a writer lock
+   # while scanning subsequent tenants when nothing was actually changed.
+   if lock_without_write:
+    c.rollback();lock_without_write=False
+    scan_version=c.execute('PRAGMA data_version').fetchone()[0]
    if selected:break
   if not selected:return None
  uid,pid,holding,watch=selected;aid=holding['asset_id'];status='IDENTITY_UNVERIFIED';linked=None

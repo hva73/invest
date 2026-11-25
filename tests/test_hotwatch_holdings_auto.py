@@ -180,6 +180,41 @@ class HoldingAutowatch(unittest.TestCase):
    self.assertEqual([tuple(row) for row in attempts],[('earlier','LINKED','earlier'),(aid,'LINKED',watch)])
    self.assertEqual(c.execute('SELECT status FROM hw_sessions WHERE watch_id=?',(watch,)).fetchone()[0],'CREATED')
 
+ def test_concurrent_link_refresh_releases_unused_writer_before_next_tenant(self):
+  at=self.now.isoformat();aid=self.holding['asset_id']
+  with app.connect() as c:
+   c.execute("INSERT INTO users(id,username,active) VALUES(2,'second',1)")
+   pid2=c.execute("INSERT INTO portfolios(user_id,name,source,updated) VALUES(2,'Second','pluto',?)",(self.now.timestamp(),)).lastrowid
+   data=json.dumps({'positions_complete':True,'observed':at,'positions':[self.holding]})
+   c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?)',(pid2,2,at,data,at))
+   for uid,pid,wid in ((1,self.pid,'first-watch'),(2,pid2,'second-watch')):
+    request=json.dumps({'asset_id':aid,'portfolio_ids':[pid],'watch_mode':'exit'})
+    c.execute("""INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due)
+     VALUES(?,?,0,?,'manual holding','PAUSED',?,'synthetic','{}','{}',?,?,0)""",(uid,wid,aid,request,at,at))
+   c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(2,pid2,aid,'LINKED','second-watch',self.now.timestamp()+300,at))
+  execute=app.DatabaseConnection.execute;raced=False;checked=False
+  def racing(connection,sql,*args):
+   nonlocal raced,checked
+   if sql=='BEGIN IMMEDIATE' and not raced:
+    raced=True
+    with app.connect() as other:
+     other.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(1,self.pid,aid,'LINKED','first-watch',self.now.timestamp()+300,at))
+   if sql=='SELECT killed FROM hw_control WHERE user_id=?' and args==((2,),):
+    checked=True
+    self.assertFalse(connection.in_transaction)
+    other=app.connect()
+    try:
+     other.execute('PRAGMA busy_timeout=0')
+     other.execute('BEGIN IMMEDIATE')
+     other.rollback()
+    finally:other.close()
+   return execute(connection,sql,*args)
+  with patch.object(app.DatabaseConnection,'execute',racing),patch.dict(os.environ,{'ESCAPE_HW_HOLDINGS_AUTOWATCH':'1'}):
+   self.assertIsNone(service.auto_holdings_tick(app.connect,verify=lambda *_:self.fail('No activation expected'),now=self.now))
+  self.assertTrue(raced and checked)
+  with app.connect() as c:
+   self.assertEqual(c.execute("SELECT count(*) FROM hw_holding_autowatch WHERE status='LINKED'").fetchone()[0],2)
+
  def test_idle_identity_recheck_does_not_reserve_database_writer(self):
   holder=app.connect()
   try:
