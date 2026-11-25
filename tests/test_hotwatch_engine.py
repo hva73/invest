@@ -627,15 +627,15 @@ class HotWatch(unittest.TestCase):
   baseline=None
   for bars,renewal in (('0','0'),('1','0'),('0','1'),('1','1')):
    with self.subTest(bars=bars,renewal=renewal),patch.dict(os.environ,{'ESCAPE_HW_DEDUPE_BAR_HISTORY':bars,'ESCAPE_HW_COMPACT_RENEWAL_AUDIT':renewal}):
-    req=copy.deepcopy(self.req);req.update(watch_id='combined-storage-'+bars+renewal,purpose='synthetic combined storage regression',provider='eodhd',provider_symbol='MERC.US')
+    req=copy.deepcopy(self.req);req.update(watch_id='combined-storage-'+bars+renewal,purpose='synthetic combined storage regression '+bars+renewal,provider='eodhd',provider_symbol='MERC.US')
     engine.create(app.connect,1,req,base)
     samples=[];results=[]
     for i in range(120):
-     at=base+timedelta(seconds=i);sample=copy.deepcopy(fixture.sample)
-     sample.update(sample_id='combined-'+str(i),event_time=at.isoformat(),bid_at=at.isoformat(),ask_at=at.isoformat(),status_at=at.isoformat())
+     event_at=base+timedelta(seconds=i);at=event_at+timedelta(seconds=1);sample=copy.deepcopy(fixture.sample)
+     sample.update(sample_id='combined-'+str(i),event_time=event_at.isoformat(),bid_at=at.isoformat(),ask_at=at.isoformat(),status_at=at.isoformat())
      sample['context']['as_of']=at.isoformat();sample['bar_evidence']['schedule_received_at']=at.isoformat()
      samples.append(sample);results.append(engine.ingest(app.connect,1,req['watch_id'],True,sample,at,include_session=False)['calculation'])
-    later=at+timedelta(seconds=121);renewed=copy.deepcopy(sample);renewed['context']['as_of']=later.isoformat()
+    later=at+timedelta(seconds=120);renewed=copy.deepcopy(sample);renewed['context']['as_of']=later.isoformat()
     result=engine.ingest(app.connect,1,req['watch_id'],True,renewed,later,include_session=False)['calculation'];results.append(result)
     self.assertEqual(result['signal'],'NO_DATA');self.assertFalse(result['new_market_observation'])
     with app.connect() as c:
