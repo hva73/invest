@@ -779,10 +779,26 @@ def sessions(connect,uid,mode=False,after=0,limit=50):
   rows=c.execute('SELECT * FROM hw_sessions WHERE user_id=? AND is_test=? AND id>? ORDER BY id LIMIT ?',(uid,int(mode),after,limit+1)).fetchall();control=c.execute('SELECT killed,reason,changed FROM hw_control WHERE user_id=?',(uid,)).fetchone();beat=c.execute('SELECT updated,status FROM hw_heartbeat WHERE id=1').fetchone();supervisor=c.execute('SELECT updated,status,reason,attempts FROM hw_supervisor_status WHERE id=1').fetchone()
   return {'sessions':[view(c,r) for r in rows[:limit]],'next_cursor':rows[limit-1]['id'] if len(rows)>limit else None,'is_test':mode,'operator_kill_switch':bool(c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]),'kill_switch':dict(control) if control else {'killed':0,'reason':'','changed':None},'worker':dict(beat) if beat else None,'supervisor':dict(supervisor) if supervisor else None,'capacity':capacity(),'phase':'1-2','deferred':['backtest','shadow','qualified strategy activation/rollback']}
 
+def _can_retire_overdue_entry(c,row,state,now):
+ """Preserve leased watches and local evidence of positions or open orders."""
+ if row['lease_until']>now.timestamp() or state.get('pending') or state.get('signal') in ('BUY','SELL','REDUCE'):return False
+ context=c.execute('SELECT payload FROM hw_context_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
+ sample=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
+ contexts=([json.loads(context['payload'])] if context else [])+([json.loads(sample['payload'])['context']] if sample else [])
+ if any(ctx.get('position')!='none' or ctx.get('orders') for ctx in contexts):return False
+ import candidate_lifecycle
+ journal=candidate_lifecycle.projection(c,row['user_id'],True,{'candidate_id':row['candidate_id']})
+ return not journal['has_confirmed_position'] and not any(order['status'] in ('SUBMITTED','PARTIALLY_FILLED','UNKNOWN') for order in journal['execution'])
+
 def reconcile_candidates(connect,now=None,connection=None):
- """Expire report-only entry watches without relying on a market-data read."""
+ """Reconcile candidate watches without relying on a market-data read."""
  from intel_workflows import candidate_currentness
  now=now or utc();changed=0
+ retire_overdue=os.environ.get('ESCAPE_HW_TEST_RETIRE_OVERDUE_ENTRY')=='1'
+ def explicit_retirement(row,req,current):
+  return (retire_overdue and row['is_test']==1 and row['purpose']=='automatic discovery'
+          and req.get('purpose')=='automatic discovery' and req.get('watch_mode')=='entry'
+          and current.get('explicit_deadline_due'))
  if connection is None:
   # The worker runs this repeatedly. Avoid reserving the single SQLite writer
   # when all sessions are already current; re-evaluate after acquiring it.
@@ -795,7 +811,11 @@ def reconcile_candidates(connect,now=None,connection=None):
     if req.get('end_at') and stamp(req['end_at'])<=now:needed=True;break
     if mode=='exit' or req.get('purpose')=='automatic holding watch' or req.get('report_id')=='manual-pluto':continue
     current=candidate_currentness(preflight,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=req.get('purpose')=='automatic discovery')
-    if current['status']=='COLD' or json.loads(row['state']).get('candidate_cold'):needed=True;break
+    state=json.loads(row['state'])
+    if explicit_retirement(row,req,current):
+     if _can_retire_overdue_entry(preflight,row,state,now):needed=True;break
+     continue
+    if current['status']=='COLD' or state.get('candidate_cold'):needed=True;break
    if not needed:return 0
  with (nullcontext(connection) if connection is not None else connect()) as c:
   if connection is None:c.execute('BEGIN IMMEDIATE')
@@ -811,15 +831,17 @@ def reconcile_candidates(connect,now=None,connection=None):
     continue
    if mode=='exit' or req.get('purpose')=='automatic holding watch' or req.get('report_id')=='manual-pluto':continue
    current=candidate_currentness(c,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=req.get('purpose')=='automatic discovery')
-   if current['status']!='COLD':
-    state=json.loads(row['state'])
+   state=json.loads(row['state'])
+   retire_explicit=explicit_retirement(row,req,current)
+   if retire_explicit and not _can_retire_overdue_entry(c,row,state,now):continue
+   if current['status']!='COLD' and not retire_explicit:
     if state.pop('candidate_cold',None):
      c.execute('UPDATE hw_sessions SET state=?,updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?',(canonical(state),now.isoformat(),row['id']))
      event(c,row,'CANDIDATE_REASSESSED',now,'Ny gyldig vurdering');changed+=1
     continue
    if mode=='entry':
     c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']))
-    event(c,row,'CANDIDATE_WATCH_EXPIRED',now,current['reason']);changed+=1
+    event(c,row,'CANDIDATE_WATCH_EXPIRED',now,'Eksplicit vurderingsfrist udløbet' if retire_explicit else current['reason']);changed+=1
    else:
     # A legacy combined watch also carries exit protection. Split it in the
     # same transaction, retaining its scope and pause state before closing it.
