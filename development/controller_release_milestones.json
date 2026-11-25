@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-25T19:53:00Z",
+  "updated_at": "2026-11-25T19:54:00Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -405,7 +405,7 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "in_progress",
       "issue": 54,
-      "evidence": "#305 integreret 6e82e175, automatisk efterfølger #306. #300/#306 nye eksakte reviewholds; samlet browseraccept udestår.",
+      "evidence": "#305 integreret 6e82e175; automatisk #306 reparation 44d024d0 under CI. #300 seneste HOLD. Samlet browseraccept udestår.",
       "subgoals": [
         {
           "id": "reuse",
@@ -426,9 +426,9 @@
           "id": "desktop",
           "title": "Desktop 2.0",
           "status": "review",
-          "evidence": "#306 cc5da720 CI 45681984006 PASS; HOLD 7171911446: pending retry kan strande cached day ved retur fra måned.",
+          "evidence": "#305 integreret 6e82e175; #67:3 #306 ny autonom reparation 44d024d0, CI 45689457715 chart/UI i gang; tidligere HOLD cc5da720. Ingen accept før eksakt ny test/review.",
           "owner_role": "desktop",
-          "updated_at": "2026-11-25T19:53:00Z"
+          "updated_at": "2026-11-25T19:54:00Z"
         },
         {
           "id": "test",
@@ -438,7 +438,7 @@
           "owner_role": "mobile"
         }
       ],
-      "updated_at": "2026-11-25T19:53:00Z"
+      "updated_at": "2026-11-25T19:54:00Z"
     },
     {
       "id": "load",
@@ -459,9 +459,9 @@
           "id": "queue",
           "title": "100 brugere og fair køer",
           "status": "review",
-          "evidence": "#304 73f747f9 HOLD 7171889610: mål tidlig og sen aktivering, ikke kun færre SQL statements; ingen fuld fairness/workeraccept.",
+          "evidence": "#304 73f747f9 HOLD 7171889610: mål tidlig og sen aktivering, ikke kun færre SQL statements; ingen fuld fairness/workeraccept.#304 konkret lazy first / bounded batch løsning på kommentar 7172902621.",
           "owner_role": "data",
-          "updated_at": "2026-11-25T19:53:00Z"
+          "updated_at": "2026-11-25T19:54:00Z"
         },
         {
           "id": "resources",
@@ -478,7 +478,7 @@
           "owner_role": "data"
         }
       ],
-      "updated_at": "2026-11-25T19:53:00Z"
+      "updated_at": "2026-11-25T19:54:00Z"
     },
     {
       "id": "release",
