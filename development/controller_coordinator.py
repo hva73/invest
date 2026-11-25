@@ -297,7 +297,21 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
         return False
     publish_status(root,ident,"running","Kontrollerer aktuelle leverancer og anmodninger",request)
     journal=read(root/"coordinator-review.json",{})
-    detail="Ingen reviewklar leverance; kvalificerede køopgaver starter automatisk."
+    pending=[]
+    for row in rows:
+        if row["status"]!="ready":
+            continue
+        terminal=results.get(key(row))
+        if terminal not in ("draft_pr","review_required","no_changes"):
+            continue
+        if terminal!="draft_pr":
+            why="mangler PR eller særskilt afstemning"
+        elif row.get("local_review") is not True or row.get("base_branch") not in TARGETS or row["role"]=="release":
+            why="afventer særskilt koordinatorreview"
+        else:
+            why="afventer verificering af PR og test"
+        pending.append("#"+key(row)+": "+why)
+    detail=("Udestående: "+"; ".join(pending[:8])) if pending else "Ingen lokal reviewopgave fundet; køen kontrolleres separat."
     handled=False
     held=False
     requests={}
