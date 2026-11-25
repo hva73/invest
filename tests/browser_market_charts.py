@@ -107,6 +107,53 @@ async () => {
         'Current refresh did not update both charts');
  assert(root.querySelectorAll('.signal-chart-peak').length === 2, 'Chart peak was lost');
  assert(root.querySelectorAll('.market-marker-entry').length === 2, 'Purchase markers were lost');
+
+ const select = period => MarketUI.click(slot('main').querySelector('[data-market-period="' + period + '"]'));
+ const selected = period => {
+  const buttons = [...root.querySelectorAll('[aria-pressed="true"]')];
+  return buttons.length === 2 && buttons.every(button => button.dataset.marketPeriod === period);
+ };
+ await click('main', 'refresh');
+ await select('week');
+ await select('month');
+ await finish(requests[8], quote(23));
+ const followup = timers.shift();
+ assert(followup?.delay === 0 && selected('month'), 'Week response discarded the selected month');
+ assert(!root.querySelector('.market-line'), 'Week series appeared under the month tab');
+
+ // A visible refresh can load the missing period before the deferred follow-up runs.
+ const refreshing = MarketUI.refreshVisible();
+ assert(requests.length === 10 && requests[9].period === 'ONE_MONTH', 'Visible refresh did not coalesce');
+ await finish(requests[9], quote(24));
+ await refreshing;
+ followup.callback();
+ await flush();
+ assert(requests.length === 10 && selected('month'), 'Deferred follow-up duplicated the month request');
+
+ await select('day');
+ await click('main', 'refresh');
+ await finish(requests[10], {pending: true});
+ await select('month');
+ await retry();
+ assert(requests.length === 11 && selected('month'), 'Week retry refreshed the selected month');
+
+ await select('day');
+ await click('main', 'refresh');
+ await select('year');
+ await finish(requests[11], {pending: true});
+ const yearFollowup = timers.shift();
+ assert(yearFollowup?.delay === 0 && !root.querySelector('.market-warning'),
+        'Obsolete week response blocked or marked the selected year');
+ yearFollowup.callback();
+ assert(requests[12]?.period === 'ONE_YEAR', 'Latest uncached period was not requested');
+ await finish(requests[12], quote(25));
+ assert(requests.length === 13 && selected('year'), 'Year view was lost');
+ await select('day');
+ const firstTick = slot('main').querySelector('.market-axis span').textContent;
+ assert(selected('day') && /^11[.:]00$/.test(firstTick),
+        'Day axis lost Copenhagen time');
+ assert(root.querySelectorAll('.signal-chart-peak strong').length === 2, 'Peak display was lost');
+ assert(root.querySelectorAll('.market-marker-entry').length === 2, 'Average cost markers were lost');
 }
 """
 
@@ -160,7 +207,7 @@ def main():
    isolation_page=browser.new_page(viewport={'width':1440,'height':1000})
    account_isolation(isolation_page)
    browser.close()
-  print('PASS: A→B→A chart isolation, stale queue and pending retries, shared cache and current refresh')
+  print('PASS: chart isolation, shared cache, and period/refresh races')
   print('PASS: actual-shape hourly series, day defaults to 2 points, optional week has 82 points, rolling 24h crosses midnight with 24 samples; sparse decline stays small/red while daily remains green; yellow AFVENT unchanged, premarket and unknown quote time, full report/Radar and 320–1920px')
  finally:server.shutdown();server.server_close();case.tearDown()
 if __name__=='__main__':main()

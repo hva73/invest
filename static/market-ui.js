@@ -49,19 +49,20 @@ window.MarketUI=(()=>{
   r.queued=false;
   if(!r.owner||!current(r)||!node.isConnected||key(node)!==r.key||!connected())return;
   const requestPeriod=periodKey(r.period);
+  const request=r.promise;
   r.busy=true;r.error=null;r.attempted=now();sync(r.key);
   try{
    const result=await api('market/quote',{...(node.dataset.marketHoldingPortfolio?{holding_portfolio_id:Number(node.dataset.marketHoldingPortfolio),holding_asset_id:node.dataset.marketHoldingAsset}:{report_id:node.dataset.marketReport,...(node.dataset.marketPosition?{portfolio_id:node.dataset.marketPortfolio,position_id:node.dataset.marketPosition}:{candidate_id:node.dataset.marketCandidate})}),is_test:node.dataset.marketTest==='true',period:requestPeriod,refresh,choose,...(asset?{asset_id:asset}:{})});
    if(!current(r))return;
    if(result.pending){
+    if(periodKey(r.period)!==requestPeriod)return;
     r.pendingRetries=(r.pendingRetries||0)+1;r.error='Pluto henter kursen · delt opslag';
     if(r.pendingRetries<=15){
-     r.attempted=0;
      setTimeout(()=>{
       const active=mounted(r);
-      if(active&&!document.hidden){
+      if(active&&!document.hidden&&r.promise===request&&periodKey(r.period)===requestPeriod){
        const box=active.getBoundingClientRect();
-       if(box.bottom>0&&box.top<innerHeight+120)schedule(active,false);
+       if(box.bottom>0&&box.top<innerHeight+120){r.attempted=0;schedule(active,false)}
       }
      },2000);
     }
@@ -71,13 +72,14 @@ window.MarketUI=(()=>{
     r.pendingRetries=0;r.data=result;r.byPeriod[requestPeriod]=result;r.choices=null;
    }
   }catch(error){
-   if(current(r))r.error=error.message;
+   if(current(r)&&periodKey(r.period)===requestPeriod)r.error=error.message;
   }finally{
    if(current(r)){
     r.busy=false;sync(r.key);
-    if(!r.error&&periodKey(r.period)!==requestPeriod&&!r.byPeriod[periodKey(r.period)])setTimeout(()=>{
+    const selectedPeriod=periodKey(r.period);
+    if(!r.choices&&selectedPeriod!==requestPeriod&&!r.byPeriod[selectedPeriod])setTimeout(()=>{
      const active=mounted(r);
-     if(active)schedule(active,true);
+     if(active&&r.promise===request&&periodKey(r.period)===selectedPeriod&&!r.byPeriod[selectedPeriod])schedule(active,true);
     },0);
    }
   }
@@ -87,7 +89,7 @@ window.MarketUI=(()=>{
  const observer=typeof IntersectionObserver==='undefined'?null:new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting&&e.target.dataset.marketTest!=='true'&&!document.hidden&&connected())schedule(e.target)})},{rootMargin:'120px'});
  function mount(){if(observer)observer.disconnect();if(activeOwner!==owner()){activeOwner=owner();records.clear();queue.splice(0).forEach(task=>task[task.length-1]())}document.querySelectorAll('.market-slot').forEach(node=>{paint(node,record(node));if(observer)observer.observe(node);else if(connected()&&node.dataset.marketTest!=='true'&&!document.hidden)schedule(node)})}
  function tick(){if(document.hidden||!owner()||!connected())return;document.querySelectorAll('.market-slot').forEach(node=>{const box=node.getBoundingClientRect();if(node.dataset.marketTest!=='true'&&box.bottom>0&&box.top<innerHeight)schedule(node)})}
- async function click(b){if(b.hasAttribute('data-market-close')){document.querySelector('#market-chart-dialog')?.close();return true}const node=b.closest('.market-slot');if(!node)return false;const r=record(node);if(b.hasAttribute('data-market-expand')){r.period='day';let dialog=document.querySelector('#market-chart-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='market-chart-dialog';dialog.className='market-chart-dialog';document.querySelector('#content').append(dialog)}dialog.setAttribute('aria-labelledby','market-chart-title');dialog.innerHTML=`<div class="overview-detail-header"><h2 id="market-chart-title">${esc(r.data?.ticker||'Kursgraf')}</h2><button data-market-close aria-label="Luk kursgraf">✕</button></div>${slot({report_id:node.dataset.marketReport,...(node.dataset.marketPosition?{portfolio_id:node.dataset.marketPortfolio,position_id:node.dataset.marketPosition}:{candidate_id:node.dataset.marketCandidate}),is_test:node.dataset.marketTest==='true',holding_portfolio_id:node.dataset.marketHoldingPortfolio,holding_asset_id:node.dataset.marketHoldingAsset,markers:(()=>{try{return JSON.parse(node.dataset.marketMarkers||'[]')}catch{return []}})()})}${node.dataset.marketTest==='true'?'':window.TradeUI.assetActions({ticker:r.data?.ticker,assetId:r.data?.asset_id,portfolioId:node.dataset.marketHoldingPortfolio||null,position:Boolean(node.dataset.marketPosition||node.dataset.marketHoldingPortfolio)})}`;const originIndex=[...node.querySelectorAll('[data-market-expand]')].indexOf(b);dialog.addEventListener('close',()=>{const origin=[...document.querySelectorAll('.market-quote-only')].find(n=>key(n)===r.key);origin?.querySelectorAll('[data-market-expand]')[Math.max(0,originIndex)]?.focus({preventScroll:true})},{once:true});dialog.showModal();mount();return true}if(b.dataset.marketPeriod){if(!['day','week','month','year'].includes(b.dataset.marketPeriod))return true;r.period=b.dataset.marketPeriod;paint(node,r);if(!r.byPeriod[periodKey(r.period)])schedule(node,true);return true}if(b.hasAttribute('data-market-load')||b.hasAttribute('data-market-refresh')){schedule(node,true);return true}if(b.hasAttribute('data-market-cancel')){r.choices=null;r.error=null;paint(node,r);return true}if(b.hasAttribute('data-market-choose')){schedule(node,true,null,true);return true}if(b.hasAttribute('data-market-select')){const value=node.querySelector('[data-market-asset]').value;if(!value){r.error='Vælg et aktiv først.';paint(node,r)}else schedule(node,true,value);return true}return false}
+ async function click(b){if(b.hasAttribute('data-market-close')){document.querySelector('#market-chart-dialog')?.close();return true}const node=b.closest('.market-slot');if(!node)return false;const r=record(node);if(b.hasAttribute('data-market-expand')){r.period='day';let dialog=document.querySelector('#market-chart-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='market-chart-dialog';dialog.className='market-chart-dialog';document.querySelector('#content').append(dialog)}dialog.setAttribute('aria-labelledby','market-chart-title');dialog.innerHTML=`<div class="overview-detail-header"><h2 id="market-chart-title">${esc(r.data?.ticker||'Kursgraf')}</h2><button data-market-close aria-label="Luk kursgraf">✕</button></div>${slot({report_id:node.dataset.marketReport,...(node.dataset.marketPosition?{portfolio_id:node.dataset.marketPortfolio,position_id:node.dataset.marketPosition}:{candidate_id:node.dataset.marketCandidate}),is_test:node.dataset.marketTest==='true',holding_portfolio_id:node.dataset.marketHoldingPortfolio,holding_asset_id:node.dataset.marketHoldingAsset,markers:(()=>{try{return JSON.parse(node.dataset.marketMarkers||'[]')}catch{return []}})()})}${node.dataset.marketTest==='true'?'':window.TradeUI.assetActions({ticker:r.data?.ticker,assetId:r.data?.asset_id,portfolioId:node.dataset.marketHoldingPortfolio||null,position:Boolean(node.dataset.marketPosition||node.dataset.marketHoldingPortfolio)})}`;const originIndex=[...node.querySelectorAll('[data-market-expand]')].indexOf(b);dialog.addEventListener('close',()=>{const origin=[...document.querySelectorAll('.market-quote-only')].find(n=>key(n)===r.key);origin?.querySelectorAll('[data-market-expand]')[Math.max(0,originIndex)]?.focus({preventScroll:true})},{once:true});dialog.showModal();mount();return true}if(b.dataset.marketPeriod){if(!['day','week','month','year'].includes(b.dataset.marketPeriod))return true;if(periodKey(r.period)!==periodKey(b.dataset.marketPeriod)){r.error=null;r.pendingRetries=0}r.period=b.dataset.marketPeriod;sync(r.key);if(!r.byPeriod[periodKey(r.period)])schedule(node,true);return true}if(b.hasAttribute('data-market-load')||b.hasAttribute('data-market-refresh')){schedule(node,true);return true}if(b.hasAttribute('data-market-cancel')){r.choices=null;r.error=null;paint(node,r);return true}if(b.hasAttribute('data-market-choose')){schedule(node,true,null,true);return true}if(b.hasAttribute('data-market-select')){const value=node.querySelector('[data-market-asset]').value;if(!value){r.error='Vælg et aktiv først.';paint(node,r)}else schedule(node,true,value);return true}return false}
  setInterval(tick,30000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)tick()});
  async function refreshVisible(){if(document.hidden||!connected())return;const jobs=[];document.querySelectorAll('.market-slot').forEach(node=>{const box=node.getBoundingClientRect(),r=record(node);if(box.bottom>0&&box.top<innerHeight+120&&!r.choices&&(node.dataset.marketTest!=='true'||r.data))jobs.push(schedule(node,true))});await Promise.all(jobs)}
  return {slot,mount,click,refreshVisible,setup(deps){({api,escape:esc,formatAmount:money,formatTime:stamp,owner,connected,now,age}=deps)}};
