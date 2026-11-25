@@ -827,8 +827,8 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
       assets={aid for _,aid in keys}-probed_assets
       probed_keys.update(keys);probed_assets.update(assets)
       if keys:
-       # Read both histories from the same SQLite snapshot, without joining
-       # session rows to every portfolio that holds the instrument.
+       # Batch live sessions and retry state. Look up history by exact watch
+       # ID only when the scan actually reaches a holding that needs it.
        rows=list(c.execute("""
         WITH tenant AS (
          SELECT EXISTS(SELECT 1 FROM hw_control WHERE user_id=? AND ? AND killed) AS killed
@@ -839,6 +839,7 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
         UNION ALL
         SELECT 'session',NULL,json_extract(s.request,'$.asset_id'),s.watch_id,s.status,s.request,NULL,NULL
         FROM hw_sessions s WHERE s.user_id=? AND s.is_test=0
+          AND s.status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')
           AND EXISTS (SELECT 1 FROM assets) AND NOT (SELECT killed FROM tenant)
           AND json_extract(s.request,'$.asset_id') IN (SELECT value FROM assets)
         UNION ALL
@@ -858,8 +859,7 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
          if request.get('watch_mode','both')!='entry':
           sessions.setdefault(row['asset_id'],[]).append((row,request.get('portfolio_ids')))
      aid=holding['asset_id']
-     matches=[row for row,portfolios in sessions.get(aid,()) if not portfolios or pid in portfolios]
-     active=[row for row in matches if row['status'] in ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')]
+     active=[row for row,portfolios in sessions.get(aid,()) if not portfolios or pid in portfolios]
      prior=attempts.get((pid,aid))
      identity=str(uid)+'|'+str(pid)+'|'+aid
      if prior and prior['status']=='POSITION_CLOSED':identity+='|'+prior['updated']
@@ -867,11 +867,22 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
      if len(active)==1:status='LINKED';linked=active[0]['watch_id']
      elif len(active)>1:status='AMBIGUOUS';linked=None
      elif prior and prior['status']=='STOPPED':status='STOPPED';linked=prior['watch_id']
-     elif prior and prior['status']!='POSITION_CLOSED' and prior['watch_id'] and any(row['watch_id']==prior['watch_id'] and row['status'] in ('COMPLETED','EXPIRED','ERROR') for row in matches):status='STOPPED';linked=prior['watch_id']
-     elif any(row['watch_id']==watch for row in matches):status='STOPPED';linked=watch
      else:
-      if prior and prior['next_attempt']>epoch:continue
-      status='VERIFYING';linked=None
+      prior_watch=(prior['watch_id'] or None) if prior and prior['status']!='POSITION_CLOSED' else None
+      history=c.execute("""SELECT 'history' AS kind,watch_id,request FROM hw_sessions
+       WHERE user_id=? AND watch_id IN (?,?) AND is_test=0
+         AND (watch_id=? OR status IN ('COMPLETED','EXPIRED','ERROR'))
+       ORDER BY watch_id=? DESC""",(uid,watch,prior_watch,watch,prior_watch)).fetchall()
+      linked=None
+      for row in history:
+       request=json.loads(row['request'])
+       portfolios=request.get('portfolio_ids')
+       if request.get('asset_id')==aid and request.get('watch_mode','both')!='entry' and (not portfolios or pid in portfolios):
+        linked=row['watch_id']
+        break
+      if linked is not None:status='STOPPED'
+      elif prior and prior['next_attempt']>epoch:continue
+      else:status='VERIFYING'
      if status!='VERIFYING' and prior and prior['status']==status and prior['watch_id']==linked:continue
      if not c.in_transaction:
       # Stay read-only until a write is needed, then check for commits
