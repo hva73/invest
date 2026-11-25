@@ -40,20 +40,20 @@ jobs:
           replace('from datetime import datetime,timezone,timedelta',
                   'from datetime import datetime,timezone,timedelta\nfrom zoneinfo import ZoneInfo')
           replace(' now=datetime.now(timezone.utc);stamp=now.isoformat()',
-                  ' now=datetime.now(timezone.utc);tz=ZoneInfo("Europe/Copenhagen");midnight=now.astimezone(tz).replace(hour=0,minute=0,second=0,microsecond=0).astimezone(timezone.utc);now=max(now,midnight+timedelta(seconds=2));stamp=now.isoformat()')
+                  ' now=datetime.now(timezone.utc);tz=ZoneInfo("Europe/Copenhagen");midnight=now.astimezone(tz).replace(hour=0,minute=0,second=0,microsecond=0).astimezone(timezone.utc);now=max(now,midnight+timedelta(seconds=2));now=now.replace(microsecond=(now.microsecond//1000)*1000);stamp=now.isoformat()')
           old_series = next(line for line in s.splitlines() if line.startswith(' series=['))
           replace(old_series, """ values=[3.4,3.37,3.41,3.38,3.36,3.39,3.34,3.31,3.35,3.32,3.29,3.33,3.30,3.27,3.29,3.25,3.28,3.23,3.26,3.21,3.24,3.18,3.20,3.15,3.1]
            first=max(midnight,now-timedelta(hours=2))
            def point(at,price):return {'price':str(price),'epoch':at.timestamp(),'timestamp':at.isoformat(),'date':at.astimezone(tz).date().isoformat()}
-           series=[point(midnight-timedelta(minutes=1),4.50)]+[point(first+(now-first)*i/24,v) for i,v in enumerate(values)]
+           series=[point(midnight-timedelta(minutes=1),4.57)]+[point(first+(now-first)*i/24,v) for i,v in enumerate(values)]
            assert max(float(p['price']) for p in series if p['date']==now.astimezone(tz).date().isoformat())==3.41
-           assert max(float(p['price']) for p in series)==4.50""".replace('\n           ','\n '))
+           assert max(float(p['price']) for p in series)==4.57""")
           replace("   page.evaluate('state.connection.connected=true')",
                   "   page.clock.set_fixed_time(now);page.evaluate('serverClockOffset=0;state.connection.connected=true')")
           replace("account=page.evaluate('structuredClone(state)');account['dashboard']",
                   "account=page.evaluate('structuredClone(state)');account['time']=stamp;account['dashboard']")
           old_period = next(line for line in s.splitlines() if line.startswith("    slot.locator('[data-market-period='+name+']')"))
-          replace(old_period, old_period+"\n    if name=='week':expect(slot.locator('.market-peak-label')).to_have_text('Top 4,50 USD')\n    if name=='day':expect(slot.locator('.market-peak-label')).to_have_text('Top 3,41 USD')")
+          replace(old_period, old_period+"\n    if name=='week':expect(slot.locator('.market-peak-label')).to_have_text('Top 4,57 USD')\n    if name=='day':expect(slot.locator('.market-peak-label')).to_have_text('Top 3,41 USD')")
           p.write_text(s)
           compile(s,str(p),'exec')
           PY
