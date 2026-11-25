@@ -34,12 +34,15 @@ class HotWatch(unittest.TestCase):
   # A manual proposal for this asset cannot replace the signal's evidence.
   with patch.object(trade_service,'client',return_value=(object(),{})),patch.object(trade_service,'call',side_effect=[
       {'orderIntentId':'manual-intent','status':'ACCEPTED'},
+      {'orderIntentId':'signal-intent','orderId':'unrelated','status':'ACCEPTED'},
       {'orderIntentId':'signal-intent','status':'ACCEPTED'}]) as call:
    hotwatch_service.refresh_holding_origin(app.connect,1,pid,'synthetic-MERC')
    self.assertEqual([item['provider_status'] for item in trade_service.summaries(app.connect,1)],['PENDING','PENDING'])
    hotwatch_service.refresh_holding_origin(app.connect,1,pid,'synthetic-MERC')
+   self.assertEqual([item['provider_status'] for item in trade_service.summaries(app.connect,1)],['PENDING','PENDING'])
+   hotwatch_service.refresh_holding_origin(app.connect,1,pid,'synthetic-MERC')
   self.assertEqual([call_args.args[2:] for call_args in call.call_args_list],
-                   [('get_order_intent',{'orderIntentId':'signal-intent'})]*2)
+                   [('get_order_intent',{'orderIntentId':'signal-intent'})]*3)
   self.assertEqual([item['provider_status'] for item in trade_service.summaries(app.connect,1)],['PENDING','ACCEPTED'])
   with app.connect() as c:
    self.assertIsNone(hotwatch_service.holding_origin(c,1,pid,'synthetic-MERC'))

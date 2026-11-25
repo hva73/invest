@@ -423,6 +423,8 @@ def check(connect,user_id,pid,factory=None):
         raise TradeError(identity_error)
     payload=proposal['payload']
     expected={key:payload.get(key) for key in ('portfolioId','collectionId')}
+    # A readback may corroborate an existing order ID, but cannot establish one.
+    expected['orderId']=None
     nodes=[raw]
     if 'orderIntents' in raw:
         items=raw['orderIntents']
@@ -459,9 +461,6 @@ def check(connect,user_id,pid,factory=None):
            for node in nodes for key,value in expected.items()):
         raise TradeError(identity_error)
     if any(not any(node.get(key)==value for node in nodes) for key,value in required.items()):
-        raise TradeError(identity_error)
-    order_ids=[node['orderId'] for node in nodes if 'orderId' in node]
-    if order_ids and any(not isinstance(value,str) or not value or value!=order_ids[0] for value in order_ids):
         raise TradeError(identity_error)
     # Do not replace evidence updated while the provider lookup was in flight.
     # Preserve exact provider status separately. Acceptance is never a fill.

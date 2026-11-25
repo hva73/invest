@@ -349,6 +349,20 @@ class Trading(unittest.TestCase):
   self.assertEqual(checked['status'],'sent')
   self.assertEqual(checked['report_id'],proposal['report_id'])
   self.assertEqual(len(self.writes()),1)
+ def test_check_cannot_bind_a_new_order_id(self):
+  self.write_result['status']='PENDING'
+  pid=self.send(self.estimate())['id'];prior=dict(trade.get(app.connect,1,pid))
+  valid={'orderIntentId':'synthetic-intent','status':'ACCEPTED'}
+  for reply in (dict(valid,orderId='unrelated'),dict(valid,orderId=None),
+                dict(valid,orderIntents=[{'orderIntentId':'synthetic-intent','orderId':'unrelated'}])):
+   with self.subTest(reply=reply):
+    self.intent_result=reply
+    with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+     trade.check(app.connect,1,pid,self.factory)
+    self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+  self.intent_result=valid
+  self.assertEqual(trade.check(app.connect,1,pid,self.factory)['proposal']['response'],valid)
+
  def test_check_validates_nested_order_identity_before_replacing_evidence(self):
   estimated=self.estimate()
   item={**estimated['payload']['orders'][0],'orderIntentId':'synthetic-intent','orderId':'original-order'}
