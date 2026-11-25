@@ -261,6 +261,25 @@ class HoldingAutowatch(unittest.TestCase):
     c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',
               (1,self.pid,aid,'LINKED',aid,0,at))
   execute=app.DatabaseConnection.execute
+  committed=False
+  with app.connect() as writer:
+   def commit_unrelated_during_scan(connection,sql,*args):
+    nonlocal committed
+    cursor=execute(connection,sql,*args)
+    if not committed and 'FROM json_each(?) k CROSS JOIN hw_holding_autowatch' in sql:
+     rows=cursor.fetchall()
+     if {row['asset_id'] for row in rows}==set(assets[3:]):
+      writer.execute("INSERT INTO users(id,username,active) VALUES(2,'unrelated',1)")
+      writer.commit()
+      writer.execute('BEGIN IMMEDIATE')
+      execute(connection,'PRAGMA busy_timeout=0')
+      committed=True
+     return iter(rows)
+    return cursor
+   with patch.object(app.DatabaseConnection,'execute',commit_unrelated_during_scan):
+    self.assertIsNone(self.tick(verify=lambda *_:self.fail('No activation expected')))
+   self.assertTrue(committed)
+   writer.rollback()
   stopped=False
   def stop_after_batch_reads(connection,sql,*args):
    nonlocal stopped
