@@ -64,7 +64,11 @@ def candidate_currentness(c,uid,mode,cid,at=None,report_fallback=False):
         # Preserve it as discovery evidence without inventing a decision time
         # or closing a watch after a deadline the sender never supplied.
         return {'status':'REPORT_ONLY','reason':'Tidsstemplet vurdering mangler','deadline':None,'assessed_at':None,'report_seen_at':datetime.fromtimestamp(row['generated'],timezone.utc).isoformat()}
-    return {'status':'COLD' if reason else 'REVIEW_DUE' if deadline<=at else 'CURRENT','reason':reason or ('revurdering forfalder' if deadline<=at else None),'deadline':deadline.isoformat(),'assessed_at':assessment.isoformat()}
+    due=deadline<=at
+    return {'status':'COLD' if reason else 'REVIEW_DUE' if due else 'CURRENT',
+            'reason':reason or ('revurdering forfalder' if due else None),
+            'deadline':deadline.isoformat(),'assessed_at':assessment.isoformat(),
+            'explicit_deadline_due':due and bool(data.get('deadline')) and data.get('status')!='FRAVÆLG'}
 
 def decision_errors(decision,path,at,previous=None):
     errors=[]

@@ -1605,6 +1605,117 @@ class HotWatch(unittest.TestCase):
   with app.connect() as c:
    attempt=c.execute('SELECT status,watch_id FROM hw_discovery_attempts WHERE user_id=1 AND candidate_id=?',(candidate['candidate_id'],)).fetchone();self.assertEqual(attempt['status'],'CREATED');wid=attempt['watch_id']
   session=engine.item(app.connect,1,wid,False)['session'];self.assertEqual(session['request']['candidate_id'],candidate['candidate_id']);self.assertEqual(session['status'],'CREATED')
+ def overdue_fixture(self,uid=1,mode=True,suffix='entry',explicit=True):
+  report=merc_report(mode)
+  assessment=self.now-timedelta(minutes=2)
+  deadline=self.now-timedelta(seconds=30) if explicit else assessment+timedelta(hours=24)
+  report.update(report_id='deadline-'+suffix,generated_at=assessment.isoformat(),positions=[],orders=[])
+  candidate=report['candidates'][0]
+  candidate.update(candidate_id='deadline-candidate' if explicit else 'implicit-candidate',asset_id='synthetic-deadline-asset',exchange='NASDAQ')
+  candidate['decision'].update(decided_at=assessment.isoformat(),deadline=deadline.isoformat() if explicit else None)
+  report_ingest.save(app.connect,uid,report)
+  return report,candidate,deadline
+
+ def test_explicit_deadline_retirement_releases_shared_slot_and_requires_new_assessment(self):
+  from hotwatch_service import auto_activate_candidate
+  from intel_workflows import candidate_currentness
+  report,candidate,deadline=self.overdue_fixture()
+  verified={'asset_id':candidate['asset_id'],'ticker':'MERC','exchange':'NASDAQ','currency':'USD'}
+  verify=lambda *_:verified
+  before=deadline-timedelta(seconds=1)
+  req=dict(self.req,watch_id='deadline-auto-entry',report_id=report['report_id'],candidate_id=candidate['candidate_id'],asset_id=candidate['asset_id'],purpose='automatic discovery',watch_mode='entry')
+  self.assertEqual(engine.create(app.connect,1,req,before)['session']['status'],'CREATED')
+  wid=req['watch_id']
+  with patch.dict(os.environ,{'ESCAPE_HW_TEST_RETIRE_OVERDUE_ENTRY':'0'}):
+   self.assertEqual(engine.reconcile_candidates(app.connect,deadline),0)
+  duplicate=copy.deepcopy(report)
+  duplicate.update(report_id='deadline-redelivery',generated_at=deadline.isoformat())
+  self.assertEqual(report_ingest.save(app.connect,1,report)[0],200)
+  self.assertEqual(report_ingest.save(app.connect,1,duplicate)[0],201)
+  with app.connect() as c:
+   review=candidate_currentness(c,1,True,candidate['candidate_id'],deadline)
+   self.assertEqual((review['status'],review['deadline']),('REVIEW_DUE',deadline.isoformat()))
+   c.execute("INSERT INTO users(id,username) VALUES(2,'second-test-tenant')")
+  other=merc_report(True);report_ingest.save(app.connect,2,other)
+  other_req=request(wid='shared-slot-replacement')
+  with patch.dict(os.environ,{'ESCAPE_HW_TEST_RETIRE_OVERDUE_ENTRY':'1','ESCAPE_HW_CAPACITY':'2'}):
+   self.assertEqual(engine.reconcile_candidates(app.connect,before),0)
+   with self.assertRaises(EngineError) as full:engine.create(app.connect,2,other_req,deadline)
+   self.assertEqual(full.exception.code,'global_capacity_limit')
+   self.assertEqual(engine.reconcile_candidates(app.connect,deadline),1)
+   app.init()
+   self.assertEqual(engine.reconcile_candidates(app.connect,deadline),0)
+   self.assertIsNone(engine.claim(app.connect,deadline,wid))
+   self.assertEqual(engine.item(app.connect,1,wid,True)['session']['status'],'EXPIRED')
+   self.assertEqual(engine.create(app.connect,2,other_req,deadline)['session']['status'],'CREATED')
+  later=deadline+timedelta(seconds=1)
+  with patch('hotwatch_engine.utc',return_value=later):
+   stale=auto_activate_candidate(app.connect,1,True,duplicate,duplicate['candidates'][0],lambda *_:self.fail('Expired assessment'))
+  self.assertEqual(stale['status'],'NOT_NEW')
+  fresh=copy.deepcopy(duplicate);fresh.update(report_id='deadline-fresh',generated_at=later.isoformat())
+  new=fresh['candidates'][0]
+  new['decision'].update(decided_at=later.isoformat(),deadline=(later+timedelta(hours=1)).isoformat())
+  report_ingest.save(app.connect,1,fresh)
+  with patch('hotwatch_engine.utc',return_value=later):
+   restarted=auto_activate_candidate(app.connect,1,True,fresh,new,verify)
+  self.assertEqual(restarted['status'],'CREATED')
+  self.assertNotEqual(wid,restarted['watch_id'])
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT count(*) FROM candidate_decision_events WHERE user_id=1 AND is_test=1 AND candidate_id=?',(candidate['candidate_id'],)).fetchone()[0],2)
+   self.assertEqual([r[0] for r in c.execute('SELECT event_type FROM hw_events WHERE watch_row_id=(SELECT id FROM hw_sessions WHERE user_id=1 AND watch_id=?) ORDER BY id',(wid,))],['WATCH_STARTED','CANDIDATE_WATCH_EXPIRED'])
+
+ def test_explicit_deadline_retirement_protects_scoped_watches(self):
+  report,candidate,deadline=self.overdue_fixture()
+  cid=candidate['candidate_id']
+  before=deadline-timedelta(seconds=1)
+  base=dict(self.req,report_id=report['report_id'],candidate_id=cid,asset_id=candidate['asset_id'],purpose='automatic discovery',watch_mode='entry')
+  with app.connect() as c:c.execute("INSERT INTO users(id,username) VALUES(2,'second-test-tenant')")
+  live,_,_=self.overdue_fixture(mode=False,suffix='live')
+  tenant=copy.deepcopy(report);tenant['candidates'][0]['decision']['deadline']=(deadline+timedelta(days=2)).isoformat()
+  report_ingest.save(app.connect,2,tenant)
+  implicit,_,implicit_deadline=self.overdue_fixture(suffix='implicit',explicit=False)
+  specs=[
+   (1,dict(base,watch_id='leased')),
+   (1,dict(base,watch_id='held')),
+   (1,dict(base,watch_id='pending-order')),
+   (1,dict(base,watch_id='manual-entry',purpose='manual entry')),
+   (1,dict(base,watch_id='exit',watch_mode='exit')),
+   (1,dict(base,watch_id='live',is_test=False,provider='pluto',report_id=live['report_id'])),
+   (2,dict(base,watch_id='tenant')),
+   (1,dict(base,watch_id='implicit')),
+   (1,dict(base,watch_id='report-only')),
+  ]
+  # The engine permits only one open automatic entry per candidate/purpose.
+  # Use distinct candidate identities for independent protection cases.
+  for uid,req in specs:
+   rid=req['watch_id']
+   if uid==1 and req['is_test']:
+    fixture=copy.deepcopy(implicit if rid=='implicit' else report)
+    fixture['report_id']='protection-'+rid
+    fixture['candidates'][0]['candidate_id']='protection-'+rid
+    if rid=='report-only':fixture['candidates'][0]['decision']=None
+    report_ingest.save(app.connect,uid,fixture)
+    req.update(report_id=fixture['report_id'],candidate_id=fixture['candidates'][0]['candidate_id'])
+   engine.create(app.connect,uid,req,before)
+  job=engine.claim(app.connect,before,'leased')
+  self.assertIsNotNone(job)
+  with app.connect() as c:
+   for wid,context in [('held',{'position':'held','orders':[]}),('pending-order',{'position':'none','orders':[{'status':'OPEN'}]})]:
+    row=engine.row_for(c,1,wid,True)
+    c.execute('INSERT INTO hw_context_events(watch_row_id,observed,payload) VALUES(?,?,?)',(row['id'],before.isoformat(),json.dumps(context)))
+  with patch.dict(os.environ,{'ESCAPE_HW_TEST_RETIRE_OVERDUE_ENTRY':'1'}):
+   self.assertEqual(engine.reconcile_candidates(app.connect,deadline),0)
+   with app.connect() as c:
+    for uid,req in specs:
+     row=engine.row_for(c,uid,req['watch_id'],req['is_test'])
+     self.assertEqual(row['status'],'VALIDATING' if req['watch_id']=='leased' else 'CREATED')
+     if req['watch_id']=='leased':self.assertEqual(row['lease_owner'],job['lease_owner'])
+   self.assertEqual(engine.reconcile_candidates(app.connect,deadline+timedelta(minutes=5)),1)
+   self.assertEqual(engine.item(app.connect,1,'leased',True)['session']['status'],'EXPIRED')
+   self.assertEqual(engine.reconcile_candidates(app.connect,implicit_deadline),0)
+   for wid in ('implicit','report-only','held','pending-order'):
+    with app.connect() as c:self.assertEqual(engine.row_for(c,1,wid,True)['status'],'CREATED')
+
  def test_reassessed_candidate_after_automatic_expiry_starts_new_unplanned_watch(self):
   from hotwatch_service import auto_activate_candidate
   import intel_workflows
