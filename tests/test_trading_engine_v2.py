@@ -690,6 +690,17 @@ class TradingEngineV2Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
             append_test_position_strategy_switch(connect, **inputs)
 
+    def test_position_switch_history_rejects_deleted_only_row(self):
+        connect = self.position_switch_database()
+        inputs = self.position_switch_inputs()
+        append_test_position_strategy_switch(connect, **inputs)
+        with connect() as connection:
+            connection.execute("DELETE FROM test_position_switch_history_v1")
+        with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
+            read_test_position_switch_history(connect, inputs["scope"])
+        with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
+            append_test_position_strategy_switch(connect, **inputs)
+
     def test_persisted_strategy_drives_simulation_exit_at_effective_time(self):
         connect = self.position_switch_database()
         inputs = self.position_switch_inputs()
@@ -751,6 +762,24 @@ class TradingEngineV2Tests(unittest.TestCase):
             exit_at(self.later, catalog=inputs["catalog"])
         with self.assertRaisesRegex(ValueError, "STRATEGY_UNVERIFIED"):
             exit_at(self.later, catalog={})
+        # Removing just the suffix must never revive a previous strategy.
+        # Rebuild the isolated fixture between deletion cases.
+        for predicate in ("sequence = 2", "1 = 1"):
+            with connect() as connection:
+                connection.execute("DELETE FROM test_position_switch_history_v1 WHERE " + predicate)
+            with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
+                exit_at(self.later)
+            with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
+                read_test_position_switch_history(connect, scope)
+            # Rebuild the isolated fixture for the next truncation case.
+            with connect() as connection:
+                connection.execute("DELETE FROM test_position_switch_history_v1")
+                connection.execute("DELETE FROM test_position_switch_head_v1")
+            append_test_position_strategy_switch(connect, **(inputs | {"catalog": catalog}))
+            append_test_position_strategy_switch(connect, **(inputs | {
+                "catalog": catalog, "effective_at": future_at, "held": future_held,
+                "previous": first, "strategy_id": entry.strategy_id,
+            }))
         with connect() as connection:
             connection.execute("UPDATE test_position_switch_history_v1 SET digest = 'corrupt' WHERE sequence = 2")
         with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
