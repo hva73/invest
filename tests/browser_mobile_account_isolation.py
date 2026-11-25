@@ -12,7 +12,7 @@ def browser_fixture():
 const content = document.getElementById('content');
 const pending = [];
 const userIds = {alpha: 11, beta: 22};
-let username,holdCurrentLoad=false,poll;
+let username,epoch=0,holdCurrentLoad=false,poll;
 const realTimeout = window.setTimeout;
 window.setTimeout = (callback, delay) => {
     if (delay === 15000) { poll = callback; return null; }
@@ -26,7 +26,7 @@ const assert = (condition, message) => { if (!condition) throw Error(message); }
 const byId = id => document.getElementById(id);
 const api = (path, args) => {
     const user = username;
-    if (path === 'market/quote' || path === 'state' || path.includes('&before=') || path.endsWith('/pause') || /manual-(search|start)/.test(path) || /sessions\/notification-/.test(path) || (holdCurrentLoad&&path.includes('view=current'))) {
+    if (path === 'market/quote' || path === 'state' || path.includes('&before=') || path.endsWith('/pause') || path.endsWith('/ack-signal') || /manual-(search|start)/.test(path) || /sessions\/notification-/.test(path) || (holdCurrentLoad&&path.includes('view=current'))) {
         return new Promise((resolve, reject) => pending.push({path, args, user, resolve, reject}));
     }
     if (path.includes('/start-candidates')) return Promise.resolve({candidates: [0, 1].map(i => ({
@@ -58,6 +58,7 @@ const account = user => ({
     ]}}}
 });
 const switchAccount = user => {
+    epoch++;
     username = user;
     content.innerHTML = user ? '<div id="engine-root"></div>' : '';
     if (user) EngineUI.mount(false);
@@ -76,7 +77,7 @@ const select = index => {
 };
 const run = async () => {
     assert(innerWidth === 390, 'Expected 390px viewport');
-    EngineUI.setup({api, owner: () => username, isAdmin: () => false, editing: () => false,
+    EngineUI.setup({api, owner: () => username, session:()=>epoch, isAdmin: () => false, editing: () => false,
         escape: value => String(value ?? ''), formatTime: String});
     switchAccount('alpha');
     const alpha = await create('alpha');
@@ -220,6 +221,24 @@ const run = async () => {
     take('state', 'beta').resolve(account('beta'));
     await detail;
     assert(byId('engine-buy-plan').elements.portfolio_id.value === '22', 'Fresh detail lost beta depot');
+
+    // Dashboard detail without engine root, logout and relogin as same username.
+    content.innerHTML='';
+    const staleSame=EngineUI.openDetail('beta-prior-session');
+    const staleSameState=take('state','beta');
+    epoch++; username=null; content.innerHTML='';
+    epoch++; username='beta'; content.innerHTML='';
+    staleSameState.resolve(account('beta'));
+    await staleSame;
+    assert(!byId('engine-dialog'),'Prior same-user session opened a dashboard dialog');
+    const ack=document.createElement('button');
+    ack.dataset.engineAck='beta-watch';ack.dataset.eventId='event';ack.dataset.isTest='false';content.append(ack);
+    const delayedAck=EngineUI.click(ack);
+    const pendingAck=take('/ack-signal','beta');
+    switchAccount('alpha');
+    pendingAck.reject(Error('private beta acknowledgement error'));
+    await delayedAck;
+    assert(!ack.isConnected,'Old acknowledgement remained mounted');
 };
 window.testResult = run().then(() => 'PASS', error => String(error) + '\\n' + (error.stack || ''));
 </script>

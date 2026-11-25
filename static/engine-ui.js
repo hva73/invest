@@ -1,13 +1,13 @@
 /* Standalone engine view, sharing ESCAPE's design; never sends broker orders. */
 window.EngineUI=(()=>{
- let api,esc,money,time,owner,editing,isAdmin,getState,mode=false,generation=0,timer=null,data=null,candidates=[],portfolios=[],portfolioSnapshots={},batchCandidates=[],pending=null,activeFilter='all',showOwn=false,manualChoices=[];
+ let api,esc,money,time,owner,editing,isAdmin,getState,sessionEpoch=()=>0,mode=false,generation=0,timer=null,data=null,candidates=[],portfolios=[],portfolioSnapshots={},batchCandidates=[],pending=null,activeFilter='all',showOwn=false,manualChoices=[];
  const root=()=>document.getElementById('engine-root'),base='v1/hotwatch',labels={CREATED:'Oprettet',VALIDATING:'Validerer',ACTIVE:'Aktiv',PAUSED:'Pauseret',DEGRADED:'Begrænset datagrundlag',EXPIRED:'Udløbet',COMPLETED:'Afsluttet',ERROR:'Fejl',BUY:'KØB',WAIT:'VENT',SELL:'SÆLG',REDUCE:'REDUCÉR',NO_DATA:'AFVENTER SIGNALDATA',PAUSE:'PAUSE'};
  let pendingDetail=null;
  let modeGeneration=0,dialogGeneration=0,detailRequest=0,creationRequest=0,instrumentRequest=0,manualSearchRequest=0;
  function setMode(value){if(mode!==value){mode=value;modeGeneration++}}
  function captureScope(){
-  const user=owner(),node=root(),version=modeGeneration;
-  return ()=>Boolean(user)&&user===owner()&&node===root()&&(!node||node.isConnected)&&version===modeGeneration;
+  const user=owner(),node=root(),version=modeGeneration,epoch=sessionEpoch();
+  return ()=>Boolean(user)&&user===owner()&&epoch===sessionEpoch()&&node===root()&&(!node||node.isConnected)&&version===modeGeneration;
  }
  function captureForm(form){
   const current=captureScope(),modal=document.getElementById('engine-dialog');
@@ -53,15 +53,15 @@ window.EngineUI=(()=>{
   dialog((s.ticker?s.ticker+' · ':'')+'Signaladvarsel',`<section class="signal-notice-details"><strong>${a.state==='ACTIVE'?'Seneste signal':'Tidligere advarsel'}: ${esc(noticeSide(a))} · ${noticeState(a)}</strong><small>${date(a.created)}</small><p>${esc(a.reason||'Begrundelse ikke registreret')}</p><small>${a.state==='ACTIVE'?'Status ved seneste opdatering.':'Historisk advarsel · ikke et aktuelt handelssignal.'}</small>${acknowledged?'<p role="status">Kvitteret</p>':`<button type="button" data-engine-ack="${esc(s.watch_id)}" data-event-id="${esc(a.event_id)}" data-is-test="${s.is_test===true}">Kvittér advarsel</button>`}</section>`);
  }
  async function acknowledgeNotice(b){
-  const user=owner(),eventId=b.dataset.eventId,wid=b.dataset.engineAck,test=b.dataset.isTest==='true',noticeDialog=b.closest?.('dialog');b.disabled=true;
+  const scope=captureScope(),eventId=b.dataset.eventId,wid=b.dataset.engineAck,test=b.dataset.isTest==='true',noticeDialog=b.closest?.('dialog');b.disabled=true;
   try{
-   await api(base+'/sessions/'+encodeURIComponent(wid)+'/ack-signal',{is_test:test,event_id:eventId});if(owner()!==user)return;
+   await api(base+'/sessions/'+encodeURIComponent(wid)+'/ack-signal',{is_test:test,event_id:eventId});if(!scope())return;
    const mark=s=>{if(s?.watch_id===wid&&(s.is_test===true)===test&&s.last_action_signal?.event_id===eventId)s.last_action_signal.acknowledged=true};
    (data?.sessions||[]).forEach(mark);window.DashboardUI?.acknowledgeSignal?.(wid,eventId,test);
    document.querySelectorAll('[data-engine-notice]').forEach(icon=>{const s=JSON.parse(icon.dataset.engineNotice);mark(s);if(s.last_action_signal.acknowledged){icon.dataset.engineNotice=JSON.stringify(s);icon.className='signal-alert signal-alert--read';const label='Vis kvitteret advarsel · '+noticeSide(s.last_action_signal)+' · '+noticeState(s.last_action_signal);icon.setAttribute('aria-label',label);icon.title=label}});
    b.textContent='Kvitteret';b.setAttribute('aria-label','Advarslen er kvitteret');
    if(noticeDialog?.open&&b.isConnected&&noticeDialog.contains(b))noticeDialog.close();
-  }catch(error){b.disabled=false;throw error}
+  }catch(error){if(scope()){b.disabled=false;throw error}}
  }
  function signalTiming(s){const live=s.status==='ACTIVE'&&['KØBSSIGNAL','SÆLGSSIGNAL','EXIT WATCH'].includes(s.display_status),last=s.last_action_signal||{},labels={BUY_SIGNAL:'Køb',SELL_SIGNAL:'Salg',REDUCE_SIGNAL:'Reducér'};if(live)return `<small class="signal-timing">${window.ESCAPE_DEMO?'Simuleret':'Aktuelt'} · beregnet ${date(s.last_calculation_at)}</small>`;if(labels[last.event_type]&&last.created)return `<small class="signal-timing">Tidligere ${esc(labels[last.event_type])} · ${date(last.created)} · ikke aktuelt</small>`;return ''}
  function signalCategory(s){if(!['CREATED','VALIDATING','ACTIVE','DEGRADED'].includes(s.status))return '';if(s.status==='ACTIVE'&&s.signal==='BUY'&&s.display_status==='KØBSSIGNAL')return 'BUY';if(s.status==='ACTIVE'&&['SELL','REDUCE'].includes(s.signal)&&['SÆLGSSIGNAL','EXIT WATCH'].includes(s.display_status))return 'SELL';if(s.status==='ACTIVE'&&s.signal==='WAIT'&&['AFVENT','VENT'].includes(s.display_status))return 'WAIT';return 'NO_DATA'}
@@ -238,6 +238,6 @@ window.EngineUI=(()=>{
   const node=dialog(title,body);node.classList.add('signal-overview-dialog');window.MarketUI.mount();
  }
 
- return {openHoldingStatus,actionNotice,openNotification,async openDetail(wid){setMode(false);if(await detail(wid,false,true))refreshExternal(wid)},setup(d){({api,escape:esc,formatAmount:money,formatTime:time,owner,editing,isAdmin,state:getState}=d)},mount(value){setMode(value);const scope=captureScope();load().catch(e=>{if(scope())root().textContent='Motorstatus kunne ikke hentes: '+reason(e.details?.code||e.message)});schedule()},click,submit,change};
+ return {openHoldingStatus,actionNotice,openNotification,async openDetail(wid){setMode(false);if(await detail(wid,false,true))refreshExternal(wid)},setup(d){({api,escape:esc,formatAmount:money,formatTime:time,owner,editing,isAdmin,state:getState}=d);sessionEpoch=typeof d.session==='function'?d.session:()=>0},mount(value){setMode(value);const scope=captureScope();load().catch(e=>{if(scope())root().textContent='Motorstatus kunne ikke hentes: '+reason(e.details?.code||e.message)});schedule()},click,submit,change};
 })();
 
