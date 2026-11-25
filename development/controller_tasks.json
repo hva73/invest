@@ -676,7 +676,18 @@
       "tests/browser_mobile_account_isolation.py"
     ],
     "local_review": true,
-    "task": "Implement the already approved #54/#273 account isolation in the existing mobile HOT WATCH UI (shared with desktop). Concrete defect on current base: detail() writes module-global portfolios from accountState before checking owner/mode/root after awaiting four requests; resolveInstrument() also writes candidate/form state after async quote without verifying the current account/form. Fix stale owner/mode/request-generation guards before any private state or DOM write; ensure stale async success/error after logout/account switch cannot overwrite another user's holdings, candidates or instrument choices. Preserve current design, trade workflow and API contracts. Use existing modules and a synthetic browser test with two distinct users and deliberately delayed responses, including rapid account switch and 390px view; no live broker calls. Coordinate with Agent 5: only engine-ui.js + scoped tests, no app.js/CSS edits. If branch advances, return explicit stale base; do not overwrite. Concrete code + actual tests, not a report."
+    "task": "Implement the already approved #54/#273 account isolation in the existing mobile HOT WATCH UI (shared with desktop). Concrete defect on current base: detail() writes module-global portfolios from accountState before checking owner/mode/root after awaiting four requests; resolveInstrument() also writes candidate/form state after async quote without verifying the current account/form. Fix stale owner/mode/request-generation guards before any private state or DOM write; ensure stale async success/error after logout/account switch cannot overwrite another user's holdings, candidates or instrument choices. Preserve current design, trade workflow and API contracts. Use existing modules and a synthetic browser test with two distinct users and deliberately delayed responses, including rapid account switch and 390px view; no live broker calls. Coordinate with Agent 5: only engine-ui.js + scoped tests, no app.js/CSS edits. If branch advances, return explicit stale base; do not overwrite. Concrete code + actual tests, not a report.",
+    "local_repair": true,
+    "followups": [
+      {
+        "paths": [
+          "static/engine-ui.js",
+          "tests/browser_mobile_navigation_app.py",
+          "tests/browser_mobile_account_isolation.py"
+        ],
+        "task": "Complete #54/#273 tenant-safe HOT WATCH UI across remaining asynchronous paths, not a redesign. On the integrated account-isolation baseline, inspect refreshHolding, refreshExternal, acknowledgement and engine-control/history continuations for stale owner, dialog, mode and request generation after await. Fix only verified stale private DOM/state writes, preserve current data/strategy/risk and purchase/sale behavior. Extend existing real 390px synthetic browser regression to exercise at least one remaining production race, and verify normal same-user flow. No live broker calls, no new framework, no app.js/CSS overlap."
+      }
+    ]
   },
   {
     "issue": 273,
@@ -695,6 +706,17 @@
       "docs/TRADING_ENGINE_V2_INTERFACE.md"
     ],
     "local_review": true,
-    "task": "Integrate accepted #298 persisted position strategy switches into actual simulation exit evaluation. Existing evaluate() accepts caller-supplied PositionStrategySwitch; add a scoped test-only evaluation path loading the verified history and selecting the effective strategy at the evaluation timestamp, resolving exact catalog digest and preserving original entry provenance. Use only the existing simulation DB adapter and evaluate/risk gates. Reject invalid chain, wrong tenant/position and unavailable strategy; never apply a future switch or silently fallback after corrupt history. No live endpoint, broker orders, migration or new store. Actual SQLite integration tests: restart/readback then exit evaluation before/after switch, future event cutoff, unchanged risk, wrong tenant, original cost and entry provenance, corrupt journal. Document limits. Deliver product code and tests."
+    "task": "Integrate accepted #298 persisted position strategy switches into actual simulation exit evaluation. Existing evaluate() accepts caller-supplied PositionStrategySwitch; add a scoped test-only evaluation path loading the verified history and selecting the effective strategy at the evaluation timestamp, resolving exact catalog digest and preserving original entry provenance. Use only the existing simulation DB adapter and evaluate/risk gates. Reject invalid chain, wrong tenant/position and unavailable strategy; never apply a future switch or silently fallback after corrupt history. No live endpoint, broker orders, migration or new store. Actual SQLite integration tests: restart/readback then exit evaluation before/after switch, future event cutoff, unchanged risk, wrong tenant, original cost and entry provenance, corrupt journal. Document limits. Deliver product code and tests.",
+    "local_repair": true,
+    "followups": [
+      {
+        "paths": [
+          "trading_engine_v2.py",
+          "tests/test_trading_engine_v2.py",
+          "docs/TRADING_ENGINE_V2_INTERFACE.md"
+        ],
+        "task": "Next approved #273 Position Watch / provenance simulation slice: extend persisted-switch exit evaluation to return a scoped, immutable readback of the verified active strategy and original entry provenance at the chosen evaluation timestamp, suitable for later UI integration. Reuse existing journal/evaluate types; do not invent live holdings, signals or fills. Compare before/after switches and preserve original entry and cost evidence; reject mismatched scopes, truncated journal and unavailable versions. Provide concrete readback adapter only if not already present, actual SQLite tests and interface docs. No live routes, broker access, new strategy thresholds or migration."
+      }
+    ]
   }
 ]
