@@ -263,15 +263,15 @@ def coordinate(root, repo_dir, rows, results, waiting, review, reserve_review=la
     finally:
         stopped.set(); reporter.join()
 
-def review_conflict(row, other):
-    # Integration moves a branch head. Do not dispatch a task from that
-    # branch during review, even when file scopes are disjoint.
-    if row["issue"]==other["issue"] or row["role"]==other["role"] or row.get("base_branch")==other.get("base_branch"):
+def developer_conflict(row, other):
+    # Separate draft branches may be edited simultaneously when scopes are
+    # independent. Integration, unlike development, changes the base branch.
+    if row["issue"]==other["issue"] or row["role"]==other["role"]:
         return True
-    def overlap(a,b):
-        a,b=a.rstrip("/"),b.rstrip("/")
-        return a==b or a.startswith(b+"/") or b.startswith(a+"/")
-    return any(overlap(a,b) for a in row["paths"] for b in other["paths"])
+    return any(controller_coordinator.path_overlap(a,b) for a in row["paths"] for b in other["paths"])
+
+def review_conflict(row, other):
+    return row.get("base_branch")==other.get("base_branch") or developer_conflict(row,other)
 
 def draft_actions(root,rows,results,running,review_row=None,probe=None):
     """One mutually exclusive actionable state per draft.
@@ -280,7 +280,7 @@ def draft_actions(root,rows,results,running,review_row=None,probe=None):
     """
     journal=controller_coordinator.read(root/"coordinator-review.json",{})
     for row,number in controller_coordinator.candidates(root,rows,results):
-        if any(review_conflict(row,r) for r in running) or (review_row is not None and review_conflict(row,review_row)):
+        if any(developer_conflict(row,r) for r in running) or (review_row is not None and review_conflict(row,review_row)):
             continue
         last=journal.get(str(number),{})
         if last.get("state")=="accepted":
@@ -321,7 +321,7 @@ def choose_review(root,rows,results,running,now=None,actions=None):
 def repair_candidates(root,rows,results,running,review_row=None,actions=None):
     available=draft_actions(root,rows,results,running,review_row) if actions is None else actions
     for row,number,state,sha,reason in available:
-        if state=="repair" and not any(review_conflict(row,r) for r in running) and not (review_row is not None and review_conflict(row,review_row)):
+        if state=="repair" and not any(developer_conflict(row,r) for r in running) and not (review_row is not None and review_conflict(row,review_row)):
             yield row,number,sha,reason
 
 def remote_draft_head(number,cache,now=None):
@@ -444,10 +444,23 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 actions=[]
                 if capable and not paused:
                     actions=list(draft_actions(root,rows_before_effective,results,list(active.values()),review_row,probe=lambda n: remote_draft_head(n,head_cache)))
+                    # Recover an explicitly finished, preserved worktree without
+                    # turning the rejected draft into another coordinator review.
+                    for index,(row,number,stage,sha,reason_text) in enumerate(actions):
+                        if stage!="blocked_repair" or repair_cooldown.get(task_key(row),0)>time.time():
+                            continue
+                        if controller_coordinator.finished_repair_can_resume(root,row,number,sha):
+                            try:
+                                controller_coordinator.authorize_repair_resume(root,script.parent.parent,row,number,sha)
+                            except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as exc:
+                                repair_cooldown[task_key(row)]=time.time()+60
+                                print("REPAIR_RECOVERY_BLOCKED:",task_key(row),str(exc)[:200] if isinstance(exc,controller_coordinator.Hold) else type(exc).__name__,flush=True)
+                            else:
+                                actions[index]=(row,number,"repair",sha,reason_text)
                     for row,number,sha,reason_text in repair_candidates(root,rows_before_effective,results,list(active.values()),review_row,actions=actions):
                         if len(active)+int(coordination is not None)>=a.parallel:
                             break
-                        if repair_cooldown.get(task_key(row),0)>time.time() or any(review_conflict(row,r) for r in active.values()):
+                        if repair_cooldown.get(task_key(row),0)>time.time() or any(developer_conflict(row,r) for r in active.values()):
                             continue
                         if not reserve_slot():
                             break
@@ -457,6 +470,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                     # Rebuild effective active scopes after allocating repairs.
                     rows=effective_rows(rows_before_effective,{k:v for k,v in results.items() if k not in recoverable},active.values())
                     waiting=[task_key(row) for row in rows if row["status"]=="ready"]
+                    review=[task_key(item[0]) for item in actions if item[2]=="review"]
                 if capable and coordination is None and len(active)<a.parallel and not paused:
                     candidate=choose_review(root,rows_before_effective,results,list(active.values()),actions=actions)
                     if candidate is not None or (not active and controller_coordinator.trigger(root)):
@@ -505,7 +519,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 interrupted.discard(key)
                 active[pool.submit(run_task,root,script,row,a.per_task,a.publish)]=row
             active_keys={task_key(row) for row in active.values()}
-            if active and reason in ("idle","waiting_for_dependency_or_worker"):
+            if active and reason not in ("provider_pause","budget_limit","queue_unavailable"):
                 reason="working"
             if coordination is not None:
                 reason="coordinating" if not active else "working"
