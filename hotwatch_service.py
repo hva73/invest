@@ -955,6 +955,22 @@ def recent_scan_log(uid,mode,watch_ids):
   return {'status':'AVAILABLE','records':rows,'retention':'rotating 3 x 1 MiB; records may be incomplete'}
  except OSError:return {'status':'UNAVAILABLE','records':[]}
 
+def verify_funnel_sample_references(c,rows):
+ """Check compact samples before diagnostics use their inline market fields.
+ Retain only a per-sample boolean, not decompressed bar arrays, across rows.
+ """
+ verified={};result=[]
+ for raw in rows:
+  row=dict(raw);payload=row['sample']
+  if isinstance(payload,str) and '"_bar_history_ref_v1"' in payload:
+   key=(row['watch_row_id'],row['sample_row_id'],row['sample_digest'])
+   if key not in verified:
+    try:verified[key]=engine.checksum(engine.sample_read(c,key[0],payload))==key[2]
+    except (ValueError,TypeError,KeyError,ArithmeticError):verified[key]=False
+   row['sample_reference_verified']=verified[key]
+  result.append(row)
+ return result
+
 def entry_funnel(rows,now):
  """Bounded historical readout, no strategy/risk changes or backtest claims."""
  from collections import Counter,defaultdict
@@ -974,7 +990,13 @@ def entry_funnel(rows,now):
     if candidate not in latest:latest[candidate]=(req,strategy,{},None,at,row['strategy_checksum'])
     series[row['watch_id']].append((at,{},None))
     continue
-   sample=json.loads(row['sample']) if row['sample'] else None
+   try:
+    sample=json.loads(row['sample']) if row['sample'] else None
+    if sample and engine._BAR_HISTORY_REF in sample and not (isinstance(row,dict) and row.get('sample_reference_verified') is True):raise ValueError('unverified sample reference')
+   except (ValueError,TypeError,KeyError,ArithmeticError):
+    if candidate not in latest:latest[candidate]=(req,strategy,{},None,at,row['strategy_checksum'])
+    series[row['watch_id']].append((at,{},None))
+    continue
    # Count the most recent calculation per candidate, even if data missing.
    if candidate not in latest:latest[candidate]=(req,strategy,calc,sample,at,row['strategy_checksum'])
    if sample and sample.get('verification')=='verified' and sample.get('source') in ('eodhd','pluto') and calc.get('data_timestamp')==sample.get('event_time') and 0<=(at-stamp(sample['event_time'])).total_seconds()<=req['risk']['max_quote_age_s']:
@@ -1052,7 +1074,8 @@ def admin_diagnostics(connect,uid,now=None):
   cron=c.execute('SELECT heartbeat FROM worker_state WHERE id=1').fetchone()
   provider=snapshot(c,epoch);journal=c.execute('PRAGMA journal_mode').fetchone()[0];pages=c.execute('PRAGMA page_count').fetchone()[0];page_size=c.execute('PRAGMA page_size').fetchone()[0]
   busy=c.execute("SELECT count(*) FROM hw_sessions WHERE lease_owner IS NOT NULL AND lease_until>?",(epoch,)).fetchone()[0]
-  funnel_rows=c.execute("SELECT s.watch_id,s.request,s.strategy,h.calculated,h.payload AS calculation,h.strategy_checksum,m.payload AS sample FROM hw_calculations h JOIN hw_sessions s ON s.id=h.watch_row_id LEFT JOIN hw_samples m ON m.id=h.sample_row_id WHERE h.id>COALESCE((SELECT max(id)-100000 FROM hw_calculations),0) AND s.user_id=? AND s.is_test=0 AND h.calculated>=? AND h.calculated<=? ORDER BY h.id DESC LIMIT 5001",(uid,(now-timedelta(days=1)).isoformat(),now.isoformat())).fetchall()
+  funnel_rows=c.execute("SELECT s.watch_id,s.request,s.strategy,h.calculated,h.payload AS calculation,h.strategy_checksum,h.watch_row_id,m.id AS sample_row_id,m.digest AS sample_digest,m.payload AS sample FROM hw_calculations h JOIN hw_sessions s ON s.id=h.watch_row_id LEFT JOIN hw_samples m ON m.id=h.sample_row_id AND m.watch_row_id=h.watch_row_id WHERE h.id>COALESCE((SELECT max(id)-100000 FROM hw_calculations),0) AND s.user_id=? AND s.is_test=0 AND h.calculated>=? AND h.calculated<=? ORDER BY h.id DESC LIMIT 5001",(uid,(now-timedelta(days=1)).isoformat(),now.isoformat())).fetchall()
+  funnel_rows=verify_funnel_sample_references(c,funnel_rows)
   push_rows=c.execute("SELECT s.request,j.status,e.event_type,e.payload FROM push_jobs j JOIN push_devices d ON d.id=j.device_id JOIN hw_sessions s ON s.id=j.watch_row_id LEFT JOIN hw_events e ON e.event_id=j.event_key AND e.watch_row_id=s.id WHERE d.user_id=? AND j.created>=? LIMIT 20000",(uid,epoch-86400)).fetchall()
   readiness=[]
   for row in sessions:

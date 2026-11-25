@@ -779,6 +779,32 @@ class HotWatch(unittest.TestCase):
    ingest(change,later)
    with app.connect() as c:
     self.assertNotIn(engine._RENEWAL_AUDIT_KEY,json.loads(c.execute('SELECT payload FROM hw_calculations ORDER BY id DESC LIMIT 1').fetchone()[0]))
+ def test_entry_funnel_bar_reference_integrity_and_no_fallback(self):
+  from hotwatch_service import entry_funnel,verify_funnel_sample_references
+  from test_hotwatch_bar_evidence import BarEvidenceTests
+  fixture=BarEvidenceTests();fixture.setUp();now=fixture.now
+  def row(at,signal,codes):
+   sample=copy.deepcopy(fixture.sample);sample['event_time']=at.isoformat()
+   calculation={'signal':signal,'reason_codes':codes,'data_timestamp':at.isoformat(),'new_market_observation':True,'supporting_metrics':{}}
+   return {'watch_id':self.req['watch_id'],'request':engine.canonical(fixture.req),'strategy':engine.canonical(BASELINE),'strategy_checksum':engine.checksum(BASELINE),'calculated':at.isoformat(),'sample':engine.canonical(sample),'calculation':engine.canonical(calculation)}
+  prior=row(now-timedelta(seconds=10),'WAIT',['CONFIRMATION_PENDING'])
+  latest=row(now,'BUY',[])
+  sample=json.loads(latest['sample'])
+  expected=entry_funnel([latest,prior],now)
+  self.assertEqual(expected['confirmation_movement']['confirmed_sequences'],1)
+  with patch.dict(os.environ,{'ESCAPE_HW_DEDUPE_BAR_HISTORY':'1'}),app.connect() as c:
+   watch=engine.row_for(c,1,self.req['watch_id'],True)
+   packed=engine.sample_payload(c,watch['id'],sample,fixture.req,now)
+   digest=json.loads(packed)[engine._BAR_HISTORY_REF]
+   latest_packed=dict(latest,sample=packed,watch_row_id=watch['id'],sample_row_id=1,sample_digest=engine.checksum(sample))
+   self.assertEqual(entry_funnel([latest_packed,prior],now)['missing_or_unverified'],1)
+   self.assertEqual(entry_funnel(verify_funnel_sample_references(c,[latest_packed,prior]),now),expected)
+   wrong=dict(latest_packed,sample_digest='0'*64)
+   self.assertEqual(entry_funnel(verify_funnel_sample_references(c,[wrong,prior]),now)['missing_or_unverified'],1)
+   c.execute("UPDATE hw_bar_history_payloads SET payload='[]' WHERE watch_row_id=? AND digest=?",(watch['id'],digest))
+   missing=entry_funnel(verify_funnel_sample_references(c,[latest_packed,prior]),now)
+   self.assertEqual(missing['candidate_count'],1);self.assertEqual(missing['missing_or_unverified'],1)
+   self.assertEqual(missing['strategies'],{});self.assertEqual(missing['confirmation_movement']['confirmed_sequences'],0)
  def test_entry_funnel_compact_audit_integrity_and_no_historical_fallback(self):
   from hotwatch_service import entry_funnel
   now=self.now
