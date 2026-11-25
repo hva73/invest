@@ -285,7 +285,9 @@ def due(root, rows, results, current_time=None):
     journal=read(root/"coordinator-review.json",{})
     for row,number in candidates(root,rows,results):
         last=journal.get(str(number),{})
-        if last.get("state") not in ("hold","accepted") and current_time-last.get("at",0)>=60:
+        # A held SHA is not a permanent task hold. Poll metadata at a bounded
+        # cadence; run_once will never spend another review on the same SHA.
+        if last.get("state")!="accepted" and current_time-last.get("at",0)>=60:
             return True
     return False
 
@@ -320,7 +322,7 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
         requests=owner_requests(request["requests"]) if request else {}
         for row,number in candidates(root,rows,results):
             last=journal.get(str(number),{})
-            if last.get("state")=="accepted" or last.get("state")=="hold" and not request:
+            if last.get("state")=="accepted":
                 continue
             if time.time()-last.get("at",0)<60 and not request:
                 continue
@@ -329,7 +331,7 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
                 p,files,state=verify_pr(row,number)
                 sha=p["head"]["sha"]
                 if last.get("state")=="hold" and last.get("sha")==sha:
-                    entry.update(last)
+                    entry.update(last,at=time.time())
                     held=True
                     detail=last.get("detail","Uændret reviewblokering")
                     continue
@@ -367,6 +369,11 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
                 held=True
                 detail="PR #"+str(number)+": "+str(exc)
                 entry.update(state="hold",detail=detail[:600])
+            except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
+                # A failed lookup/review of one candidate must not starve
+                # independent candidates in the same queue. Retry after cooldown.
+                detail="PR #"+str(number)+": midlertidig fejl "+type(exc).__name__
+                entry.update(state="waiting",detail=detail[:600])
             finally:
                 journal[str(number)]=entry
                 outcomes[key(row)]=detail
