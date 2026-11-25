@@ -339,6 +339,19 @@ class PositionStrategySwitch:
         return checksum(asdict(self))
 
 
+def _resolve_position_strategy(catalog, user_id, strategy_id, version):
+    record = catalog.get((user_id, strategy_id, version), catalog.get((0, strategy_id, version)))
+    if isinstance(record, tuple) and len(record) == 2:
+        spec, digest = record
+        try:
+            if (not validate_strategy(spec) and spec["strategy_id"] == strategy_id
+                    and spec["version"] == version and checksum(spec) == digest):
+                return record
+        except (TypeError, ValueError):
+            pass
+    raise ValueError("STRATEGY_UNVERIFIED")
+
+
 def switch_position_strategy(
     scope: Scope,
     entry_origin: DecisionOrigin,
@@ -387,19 +400,8 @@ def switch_position_strategy(
     if not valid:
         raise ValueError("POSITION_EVIDENCE_UNVERIFIED")
 
-    def resolve(sid, ver):
-        record = catalog.get((scope.user_id, sid, ver), catalog.get((0, sid, ver)))
-        if isinstance(record, tuple) and len(record) == 2:
-            spec, digest = record
-            try:
-                if (not validate_strategy(spec) and spec["strategy_id"] == sid
-                        and spec["version"] == ver and checksum(spec) == digest):
-                    return sid, ver, digest
-            except (TypeError, ValueError):
-                pass
-        raise ValueError("STRATEGY_UNVERIFIED")
-
-    target = resolve(strategy_id, version)
+    _, target_digest = _resolve_position_strategy(catalog, scope.user_id, strategy_id, version)
+    target = strategy_id, version, target_digest
     prior = (entry_origin.strategy_id, entry_origin.strategy_version,
              entry_origin.strategy_checksum) if previous is None else previous.new_strategy
     if previous is not None:
@@ -408,7 +410,7 @@ def switch_position_strategy(
             return previous
         if at <= previous_at or observed < previous_at or observed <= stamp(previous.observed_at):
             raise ValueError("POSITION_SWITCH_STALE")
-    if resolve(*prior[:2]) != prior:
+    if _resolve_position_strategy(catalog, scope.user_id, *prior[:2])[1] != prior[2]:
         raise ValueError("STRATEGY_UNVERIFIED")
     if target == prior:
         raise ValueError("POSITION_STRATEGY_UNCHANGED")
@@ -461,14 +463,16 @@ def _read_position_switch_chain(connection, scope, key):
             for name in ("prior_strategy", "new_strategy"):
                 fields[name] = tuple(fields[name])
             transition = PositionStrategySwitch(entry_origin=origin, **fields)
+            effective = stamp(transition.effective_at)
+            observed = stamp(transition.observed_at)
             previous = history[-1] if history else None
             linked = (
                 transition.previous_digest == previous.digest
                 and origin == previous.entry_origin
                 and transition.prior_strategy == previous.new_strategy
-                and stamp(transition.effective_at) > stamp(previous.effective_at)
-                and stamp(transition.observed_at) >= stamp(previous.effective_at)
-                and stamp(transition.observed_at) > stamp(previous.observed_at)
+                and effective > stamp(previous.effective_at)
+                and observed >= stamp(previous.effective_at)
+                and observed > stamp(previous.observed_at)
             ) if previous else (
                 transition.previous_digest is None
                 and transition.prior_strategy == (
@@ -476,6 +480,11 @@ def _read_position_switch_chain(connection, scope, key):
                 )
             )
             if (sequence != len(history) + 1 or not linked
+                    or not stamp(origin.as_of) <= observed <= effective
+                    or transition.prior_strategy == transition.new_strategy
+                    or any(len(identity) != 3 or not all(
+                        isinstance(part, str) and part.strip() for part in identity
+                    ) for identity in (transition.prior_strategy, transition.new_strategy))
                     or canonical(asdict(transition)) != payload or transition.digest != digest):
                 raise ValueError("Invalid journal row")
         except (KeyError, TypeError, ValueError) as exc:
@@ -524,6 +533,42 @@ def append_test_position_strategy_switch(
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (*key, len(history) + 1, digest, canonical(asdict(transition))))
     return transition
+
+
+def evaluate_test_position_exit(
+    connect,
+    scope: Scope,
+    snapshot_id: str,
+    as_of: datetime,
+    entry_origin: DecisionOrigin,
+    catalog: dict[tuple[int, str, str], tuple[dict, str]],
+    sample: Evidence,
+    metrics: dict[str, Evidence],
+    risk: Evidence,
+) -> Decision:
+    """Evaluate a scoped simulation exit using the persisted strategy at as_of."""
+    as_of = _utc(as_of)
+    history = read_test_position_switch_history(connect, scope)
+    if (entry_origin.purpose != "entry" or not entry_origin.snapshot_checksum
+            or entry_origin.scope_digest not in (scope.digest, replace(scope, position_id=None).digest)
+            or (history and history[0].entry_origin != entry_origin)):
+        raise ValueError("POSITION_SCOPE_MISMATCH")
+    context = sample.value.get("context") if isinstance(sample.value, dict) else None
+    if (not isinstance(context, dict) or context.get("scope_digest") != scope.digest
+            or context.get("entry_digest") != entry_origin.digest):
+        raise ValueError("POSITION_SCOPE_MISMATCH")
+    if not stamp(entry_origin.as_of) <= stamp(context.get("as_of")) <= as_of:
+        raise ValueError("POSITION_EVIDENCE_UNVERIFIED")
+
+    transition = next((item for item in reversed(history) if stamp(item.effective_at) <= as_of), None)
+    strategy_id, version, digest = transition.new_strategy if transition else (
+        entry_origin.strategy_id, entry_origin.strategy_version, entry_origin.strategy_checksum,
+    )
+    spec, catalog_digest = _resolve_position_strategy(catalog, scope.user_id, strategy_id, version)
+    if catalog_digest != digest:
+        raise ValueError("STRATEGY_UNVERIFIED")
+    return evaluate(scope, snapshot_id, as_of, "exit", spec, digest, sample, metrics, risk,
+                    position_switch=transition)
 
 
 def evaluate(

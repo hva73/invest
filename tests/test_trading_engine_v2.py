@@ -14,7 +14,8 @@ from hotwatch_strategy import BASELINE, EARLY_CATALYST_V1, risk_gate, rule_state
 import trading_engine_v2
 from trading_engine_v2 import (
     Evidence, MarketAccess, MarketFeatureInput, MarketHistory, MarketIdentity, MarketSubscriber,
-    Scope, VerifiedExecution, evaluate, market_features_batch, shared_market_features_batch,
+    Scope, VerifiedExecution, evaluate, evaluate_test_position_exit, market_features_batch,
+    shared_market_features_batch,
     append_test_position_strategy_switch, read_test_position_switch_history,
     setup_test_position_switch_history, switch_position_strategy,
 )
@@ -688,6 +689,72 @@ class TradingEngineV2Tests(unittest.TestCase):
             read_test_position_switch_history(connect, scope)
         with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
             append_test_position_strategy_switch(connect, **inputs)
+
+    def test_persisted_strategy_drives_simulation_exit_at_effective_time(self):
+        connect = self.position_switch_database()
+        inputs = self.position_switch_inputs()
+        scope, entry, held = inputs["scope"], inputs["entry_origin"], inputs["held"]
+        target = BASELINE | {"parameters": BASELINE["parameters"] | {"exit_return_pct": "-0.5"}}
+        target_key = (scope.user_id, target["strategy_id"], target["version"])
+        catalog = inputs["catalog"] | {target_key: (target, checksum(target))}
+        first = append_test_position_strategy_switch(connect, **(inputs | {"catalog": catalog}))
+        future_at = self.later + timedelta(seconds=1)
+        future_held = replace(held, event_time=future_at, available_at=future_at,
+                              value=held.value | {"as_of": future_at.isoformat(), "cost_price": "101"})
+        future = append_test_position_strategy_switch(connect, **(inputs | {
+            "catalog": catalog, "effective_at": future_at, "held": future_held, "previous": first,
+            "strategy_id": entry.strategy_id,
+        }))
+        # Each adapter call opens a fresh connection to the same SQLite file.
+        self.assertEqual(read_test_position_switch_history(connect, scope), (first, future))
+        self.assertEqual(first.entry_origin, entry)
+        self.assertEqual(future.entry_origin, entry)
+        self.assertEqual(json.loads(first.held_evidence)["value"]["cost_price"], "100")
+
+        def exit_at(at, held_facts=held.value, **overrides):
+            sample = replace(held, event_time=at, available_at=at, value=self.sample.value | {
+                "event_time": at.isoformat(), "context": held_facts | {"as_of": at.isoformat()},
+            })
+            arguments = dict(
+                connect=connect, scope=scope, snapshot_id="exit", as_of=at, entry_origin=entry,
+                catalog=catalog, sample=sample, risk=self.risk,
+                metrics={"return_3_pct": self.evidence("-.6"), "breakdown": self.evidence(True)},
+            )
+            return evaluate_test_position_exit(**(arguments | overrides))
+
+        before = exit_at(self.at)
+        self.assertEqual(before.origin.strategy_checksum, entry.strategy_checksum)
+        self.assertIsNone(before.origin.position_switch_digest)
+        self.assertEqual(before.reasons, ("RULES_NOT_MET",))
+        with patch("trading_engine_v2.risk_gate", wraps=risk_gate) as gate:
+            after = exit_at(self.later)
+            gate.assert_called_once()
+            context = gate.call_args.args[0]["context"]
+            self.assertEqual(context["cost_price"], "100")
+            self.assertEqual(context["entry_digest"], entry.digest)
+        self.assertEqual(after.action, "SELL")
+        self.assertEqual(after.origin.strategy_checksum, checksum(target))
+        self.assertEqual(after.origin.position_switch_digest, first.digest)
+        self.assertEqual(exit_at(future_at, future_held.value).origin.position_switch_digest,
+                         future.digest)
+        blocked = exit_at(self.later, risk=self.evidence(self.risk.value | {"exit_allowed": False}))
+        self.assertIsNone(blocked.action)
+        self.assertEqual(blocked.reasons, ("EXIT_OUTSIDE_WATCH_SCOPE",))
+
+        for other_scope in (replace(scope, user_id=8), replace(scope, position_id="other"),
+                            replace(scope, is_test=False)):
+            with self.subTest(scope=other_scope), self.assertRaisesRegex(ValueError, "POSITION_SCOPE_MISMATCH"):
+                exit_at(self.at, scope=other_scope)
+        with self.assertRaisesRegex(ValueError, "POSITION_SCOPE_MISMATCH"):
+            exit_at(self.later, held.value | {"entry_digest": "other"})
+        with self.assertRaisesRegex(ValueError, "STRATEGY_UNVERIFIED"):
+            exit_at(self.later, catalog=inputs["catalog"])
+        with self.assertRaisesRegex(ValueError, "STRATEGY_UNVERIFIED"):
+            exit_at(self.later, catalog={})
+        with connect() as connection:
+            connection.execute("UPDATE test_position_switch_history_v1 SET digest = 'corrupt' WHERE sequence = 2")
+        with self.assertRaisesRegex(ValueError, "POSITION_SWITCH_HISTORY_INVALID"):
+            exit_at(self.at)
 
 
 if __name__ == "__main__":
