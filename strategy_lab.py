@@ -5,12 +5,22 @@ historical backtest. It never changes sessions or communicates with brokers.
 """
 import copy,json
 from collections import Counter
+from functools import lru_cache
 from hotwatch_contract import EngineError, RISK, checksum, require, stamp
 import trading_engine_v2 as v2
 from hotwatch_features import features,verified_bar_samples
 from hotwatch_strategy import calculate,validate_strategy,early_watch
 
 MAX_CALCULATIONS=240
+MAX_FEATURE_INPUTS = 120
+FEATURE_PARAMETERS = {
+    'short_period': {'sma_short', 'ema_short', 'trend_up'},
+    'long_period': {'sma_long', 'ema_long', 'trend_up'},
+    'rsi_period': {'rsi'},
+    'atr_period': {'atr'},
+    'breakout_window': {'breakout', 'breakdown', 'relative_volume', 'new_breakout'},
+    'momentum_window_minutes': {'return_window_pct'},
+}
 
 
 def available(connect,uid):
@@ -27,7 +37,7 @@ def required(rule):
     return {rule['metric']}
 
 
-def _recorded_inputs(connect,uid,data):
+def _recorded_inputs(connect,uid,data,*, resolve_original=False):
     if not isinstance(data,dict) or set(data)!={'watch_id','is_test','strategies'} or not isinstance(data['watch_id'],str) or not 1<=len(data['watch_id'])<=100 or type(data['is_test']) is not bool:raise ValueError('Vælg en gyldig overvågning.')
     choices=data['strategies']
     if not isinstance(choices,list) or not 1<=len(choices)<=3:raise ValueError('Vælg én til tre strategier.')
@@ -43,11 +53,17 @@ def _recorded_inputs(connect,uid,data):
             spec=json.loads(item['payload'])
             if validate_strategy(spec) or checksum(spec)!=item['checksum']:raise ValueError('Strategiversionen kunne ikke verificeres.')
             specs.append((spec, item['checksum']))
-        rows=c.execute('''SELECT c.id,c.calculated,c.payload AS calculation,c.strategy_checksum,
+        original = ''', (SELECT k.payload FROM hw_strategies k
+            WHERE k.owner_id IN (0,?) AND k.checksum=c.strategy_checksum
+            AND k.strategy_id=json_extract(CASE WHEN json_valid(c.payload) THEN c.payload END,'$.strategy_id')
+            AND k.version=json_extract(CASE WHEN json_valid(c.payload) THEN c.payload END,'$.strategy_version')
+            ORDER BY k.owner_id DESC LIMIT 1) AS original_spec''' if resolve_original else ''
+        params = (uid,) if resolve_original else ()
+        rows=c.execute(f'''SELECT c.id,c.calculated,c.payload AS calculation,c.strategy_checksum,
                    s.id AS sample_row_id,s.source,s.sample_id,s.received,
-                   s.digest AS sample_digest,s.payload AS sample
+                   s.event_epoch,s.digest AS sample_digest,s.payload AS sample {original}
             FROM hw_calculations c LEFT JOIN hw_samples s ON s.id=c.sample_row_id AND s.watch_row_id=c.watch_row_id
-            WHERE c.watch_row_id=? ORDER BY c.id LIMIT ?''',(row['id'],MAX_CALCULATIONS+1)).fetchall()
+            WHERE c.watch_row_id=? ORDER BY c.id LIMIT ?''',(*params,row['id'],MAX_CALCULATIONS+1)).fetchall()
         request=json.loads(row['request'])
     if not rows:raise ValueError('Der er endnu ingen gemte observationer at sammenligne.')
     return row, request, specs, rows[:MAX_CALCULATIONS], len(rows)>MAX_CALCULATIONS
@@ -106,11 +122,7 @@ def compare(connect,uid,data):
     return {'watch_id':data['watch_id'],'ticker':request['ticker'],'is_test':data['is_test'],'evaluated':len(rows)-skipped,'skipped':skipped,'truncated':truncated,'limit':MAX_CALCULATIONS,'from':rows[0]['calculated'],'to':rows[-1]['calculated'],'strategies':outcomes,'limitations':['Kun gemte observationer og tidligere risikokontekst er anvendt.','Historisk warmup, nyhedsdata og alle hændelser er ikke fuldt rekonstrueret.','Ingen handler, afkast, omkostninger eller faktisk eksekvering er simuleret.']}
 
 
-def _v2_snapshot(session, request, row, at):
-    """Build evidence from this journal pair alone."""
-    from hotwatch_engine import sample_errors
-
-    calc = json.loads(row['calculation'])
+def _immutable_sample(row):
     if row['sample_row_id'] is None:
         raise EngineError('SAMPLE_MISSING')
     sample = json.loads(row['sample'])
@@ -127,12 +139,22 @@ def _v2_snapshot(session, request, row, at):
     event_time = stamp(sample['event_time'])
     market_times = [stamp(sample[key]) for key in ('bid_at', 'ask_at', 'status_at')
                     if sample.get(key)]
-    if not event_time <= received <= at or any(value > received for value in market_times):
+    if (event_time.timestamp() != row['event_epoch'] or event_time > received
+            or any(value > received for value in market_times)):
+        raise EngineError('SAMPLE_CHRONOLOGY_UNVERIFIED')
+    return sample, event_time, received
+
+
+def _v2_snapshot(session, request, row, at, calc):
+    """Build the common evidence from this journal pair."""
+    from hotwatch_engine import sample_errors
+
+    sample, event_time, received = _immutable_sample(row)
+    if received > at:
         raise EngineError('SAMPLE_CHRONOLOGY_UNVERIFIED')
     input_ids = calc.get('input_sample_ids')
     if (stamp(calc['calculation_timestamp']) != at
             or stamp(calc['data_timestamp']) != event_time
-            or calc['strategy_checksum'] != row['strategy_checksum']
             or not isinstance(input_ids, list) or sample['sample_id'] not in input_ids):
         raise EngineError('CALCULATION_LINK_UNVERIFIED')
 
@@ -169,8 +191,6 @@ def _v2_snapshot(session, request, row, at):
         exchange=request['exchange'], candidate_id=session['candidate_id'], **position_scope,
     )
 
-    # Indicator history is already represented by the recorded metrics.
-    # The primitive only consumes the market sample and captured risk context.
     sample.pop('bar_history', None)
     sample.pop('bar_evidence', None)
     sample['context'] = context
@@ -202,9 +222,107 @@ def _v2_snapshot(session, request, row, at):
     return scope, calc_id, observation, facts, risks, recorded, latency
 
 
+def _original_strategy(row, calc):
+    try:
+        original = json.loads(row['original_spec'])
+        if (not validate_strategy(original)
+                and checksum(original) == row['strategy_checksum'] == calc.get('strategy_checksum')
+                and original['strategy_id'] == calc['strategy_id']
+                and original['version'] == calc['strategy_version']):
+            return original
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def _feature_history(row, calc, request, at, samples, verified):
+    from hotwatch_engine import sample_errors
+
+    # Embedded verified bars belong to mutable trades. Separately cached
+    # warmup bars also lack a revision link in these calculations.
+    if calc.get('analysis_uses_bars') is not False or 'bar_history_count' in calc['supporting_metrics']:
+        raise EngineError('FEATURE_BAR_REVISION_UNVERIFIED')
+    if calc.get('feature_version') != '1.3.0':
+        raise EngineError('FEATURE_VERSION_UNVERIFIED')
+    ids = calc['input_sample_ids']
+    if (not 1 <= len(ids) <= MAX_FEATURE_INPUTS or ids[-1] != row['sample_id']
+            or any(not isinstance(item, str) for item in ids) or len(set(ids)) != len(ids)):
+        raise EngineError('FEATURE_HISTORY_UNVERIFIED')
+    history, refs = [], []
+    previous_event = None
+    for sample_id in ids:
+        prior = samples.get((row['source'], sample_id))
+        if prior is None:
+            raise EngineError('FEATURE_HISTORY_MISSING')
+        key = prior['sample_row_id']
+        if key not in verified:
+            try:
+                sample, event, received = _immutable_sample(prior)
+                sample_errors(sample, request, received)
+                if sample['verification'] != 'verified':
+                    raise EngineError('SAMPLE_UNVERIFIED')
+                verified[key] = (sample, event, received)
+            except (ValueError, TypeError, KeyError, ArithmeticError, AttributeError) as exc:
+                verified[key] = exc.code if isinstance(exc, EngineError) else 'FEATURE_HISTORY_UNVERIFIED'
+        evidence = verified[key]
+        if isinstance(evidence, str):
+            raise EngineError(evidence)
+        sample, event, received = evidence
+        if (received > at or key > row['sample_row_id']
+                or previous_event is not None and event <= previous_event):
+            raise EngineError('FEATURE_HISTORY_CHRONOLOGY_UNVERIFIED')
+        previous_event = event
+        history.append(sample)
+        refs.append(f'hw_samples:{key}')
+    return history, tuple(refs)
+
+
+def _strategy_facts(spec, original, metrics, history, at, snapshot_id):
+    if original is None:
+        raise EngineError('ORIGINAL_STRATEGY_UNVERIFIED')
+    parameters, recorded = spec['parameters'], original['parameters']
+    # Validated specs always have the period parameters. Schema 1 uses the
+    # feature function's three-minute default for momentum_window_minutes.
+    changed = set().union(*(names for key, names in FEATURE_PARAMETERS.items()
+                           if parameters.get(key, 3) != recorded.get(key, 3)))
+    facts = dict(metrics)
+    if parameters.get('news_max_age_minutes', 120) != recorded.get('news_max_age_minutes', 120):
+        for name in ('catalyst_verified', 'earnings_previous_session', 'no_verified_news'):
+            facts.pop(name, None)
+    # Only recompute metrics used by this entry evaluation or its existing
+    # risk gate. Never let a missing optional branch override rule_state().
+    needed = required(spec['entry_rules']) | {'relative_volume'}
+    if spec['schema_version'] == 2:
+        needed |= required(spec['watch_rules']) | {'return_window_pct'}
+    for name in changed:
+        facts.pop(name, None)
+    changed &= needed
+    if not changed:
+        return facts, None
+
+    try:
+        samples, refs = history()
+        computed = features(samples, parameters)
+        count = metrics.get('sample_count')
+        if count is None or type(count.value) is not int or computed['sample_count'] != count.value:
+            raise EngineError('FEATURE_HISTORY_UNVERIFIED')
+    except EngineError as exc:
+        return facts, exc.code
+    except (ValueError, ArithmeticError):
+        return facts, 'FEATURE_HISTORY_UNVERIFIED'
+    computed['new_breakout'] = computed.get('breakout') if 'new_breakout' in metrics else None
+    missing = False
+    for name in changed:
+        if computed.get(name) is not None:
+            facts[name] = v2.Evidence(computed[name], at, at, (*refs, snapshot_id))
+        else:
+            missing = True
+    return facts, 'FEATURE_HISTORY_INSUFFICIENT' if missing else None
+
+
 def compare_v2(connect, uid, data):
     """Compare recorded decisions with v2 decisions on shared, bounded snapshots."""
-    session, request, versions, rows, truncated = _recorded_inputs(connect, uid, data)
+    session, request, versions, rows, truncated = _recorded_inputs(connect, uid, data, resolve_original=True)
     strategies = [
         {'strategy_id': spec['strategy_id'], 'version': spec['version'], 'checksum': digest,
          'counts': dict.fromkeys(('decision', 'observation', 'blocked'), 0),
@@ -216,14 +334,18 @@ def compare_v2(connect, uid, data):
     recorded_counts = Counter()
     first_skip = None
     previous_at = None
+    samples, verified = {}, {}
     for row in rows:
+        if row['sample_row_id'] is not None:
+            samples[(row['source'], row['sample_id'])] = row
         try:
             at = stamp(row['calculated'])
             if previous_at is not None and at < previous_at:
                 raise EngineError('CALCULATION_OUT_OF_ORDER')
             previous_at = at
+            calc = json.loads(row['calculation'])
             scope, snapshot_id, sample, metrics, risk, recorded, latency = _v2_snapshot(
-                session, request, row, at,
+                session, request, row, at, calc,
             )
         except (ValueError, KeyError, TypeError, AttributeError, ArithmeticError) as exc:
             reason = exc.code if isinstance(exc, EngineError) else 'INVALID_HISTORICAL_CAPTURE'
@@ -232,9 +354,27 @@ def compare_v2(connect, uid, data):
                 first_skip = {'calculation_id': row['id'], 'at': row['calculated'], 'reason': reason}
             continue
         recorded_counts[recorded['signal']] += 1
+        original = _original_strategy(row, calc)
         simulated = []
+        # Share verified history across alternatives with different windows.
+        @lru_cache(maxsize=1)
+        def history():
+            return _feature_history(row, calc, request, at, samples, verified)
+
         for (spec, digest), summary in zip(versions, strategies):
-            result = v2.evaluate(scope, snapshot_id, at, 'entry', spec, digest, sample, metrics, risk)
+            try:
+                facts, feature_error = _strategy_facts(spec, original, metrics, history, at, snapshot_id)
+                result = v2.evaluate(scope, snapshot_id, at, 'entry', spec, digest, sample, facts, risk)
+                # Preserve the causal diagnostic only when the existing
+                # evaluator actually blocks on unavailable inputs.
+                if feature_error and result.outcome == 'blocked':
+                    reasons = tuple(feature_error if reason in ('RULE_INPUT_UNAVAILABLE', 'FEATURES_INSUFFICIENT')
+                                    else reason for reason in result.reasons)
+                    result = v2.Decision(result.origin, result.outcome, reasons, result.action)
+            except EngineError as exc:
+                origin = v2.DecisionOrigin(scope.digest, snapshot_id, at.isoformat(), 'entry',
+                                           spec['strategy_id'], spec['version'], digest)
+                result = v2.Decision(origin, 'blocked', (exc.code,))
             summary['counts'][result.outcome] += 1
             if result.outcome == 'blocked' and summary['first_blocking_reason'] is None:
                 summary['first_blocking_reason'] = {'at': row['calculated'], 'reason': result.reasons[0]}

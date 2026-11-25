@@ -1,10 +1,11 @@
 """Read-only, causal comparison on isolated synthetic HOT WATCH observations."""
-import json,sqlite3,tempfile,unittest
+import copy,json,sqlite3,tempfile,unittest
 from contextlib import closing
 from unittest.mock import patch
 from datetime import datetime,timedelta,timezone
 import app,report_ingest,hotwatch_engine as engine,strategy_lab
 from hotwatch_contract import checksum
+from hotwatch_strategy import EARLY_CATALYST_V1
 from test_intel_workflows import merc_report
 from test_hotwatch_engine import good_metrics,request,tick
 
@@ -86,9 +87,33 @@ class V2Replay(unittest.TestCase):
   with patch('hotwatch_engine.features', return_value=metrics):
    engine.ingest(app.connect, 1, self.req['watch_id'], True, tick(at, index), at + timedelta(seconds=2))
 
- def read_only(self):
+ def capture_windows(self):
+  for window in (1, 5):
+   spec = copy.deepcopy(EARLY_CATALYST_V1)
+   spec.update(strategy_id=f'window_{window}')
+   spec['parameters']['momentum_window_minutes'] = window
+   spec['entry_rules'] = {'metric': 'return_window_pct', 'operator': '>=', 'value': '.4'}
+   spec['watch_rules'] = {'metric': 'price', 'operator': '>', 'value': '0'}
+   engine.upload_strategy(app.connect, 1, 'Fixture', spec)
+   self.data['strategies'].append({'strategy_id': spec['strategy_id'], 'version': spec['version']})
+  self.data['strategies'].pop(1)
+  for index in range(12):
+   at = self.at + timedelta(minutes=index)
+   engine.ingest(app.connect, 1, self.req['watch_id'], True,
+                 tick(at, index, price=f'{100 + index / 10:.1f}'), at + timedelta(seconds=2))
+
+ def edit_calculation(self, c, index, change):
+  row = c.execute('SELECT id,payload FROM hw_calculations ORDER BY id LIMIT 1 OFFSET ?',
+                  (index,)).fetchone()
+  calc = json.loads(row['payload'])
+  change(calc)
+  c.execute('UPDATE hw_calculations SET payload=? WHERE id=?', (json.dumps(calc), row['id']))
+
+ def read_only(self, trace=None):
   c = sqlite3.connect(f'file:{app.DB}?mode=ro', uri=True)
   c.row_factory = sqlite3.Row
+  if trace is not None:
+   c.set_trace_callback(trace)
   return closing(c)
 
  def test_same_capture_records_original_and_distinct_v2_outcomes(self):
@@ -177,6 +202,131 @@ class V2Replay(unittest.TestCase):
    c.execute("UPDATE hw_strategies SET checksum='wrong' WHERE strategy_id='escape_momentum'")
   with self.assertRaisesRegex(ValueError, 'verificeres'):
    strategy_lab.compare_v2(self.read_only, 1, self.data)
+
+ def test_distinct_windows_use_real_recorded_inputs_in_one_bounded_read(self):
+  self.capture_windows()
+  reads = []
+
+  with patch('hotwatch_adapters.PlutoAdapter', side_effect=AssertionError('Pluto access')), \
+       patch('hotwatch_adapters.EODHDAdapter', side_effect=AssertionError('EODHD access')), \
+       patch('trade_service.call', side_effect=AssertionError('Broker access')):
+   result = strategy_lab.compare_v2(lambda: self.read_only(reads.append), 1, self.data)
+   self.assertEqual(result, strategy_lab.compare_v2(self.read_only, 1, self.data))
+  self.assertEqual(result['coverage']['considered'], 12)
+  first = result['timeline'][0]['simulated']
+  self.assertEqual(first[1]['reason_codes'], ['FEATURE_HISTORY_INSUFFICIENT'])
+  _, short, long = result['timeline'][-1]['simulated']
+  self.assertEqual(short['outcome'], 'observation')
+  self.assertEqual(long['action'], 'BUY')
+  self.assertNotEqual(short['snapshot_checksum'], long['snapshot_checksum'])
+  journal_reads = [sql for sql in reads if 'hw_samples' in sql or 'hw_calculations' in sql]
+  self.assertEqual(len(journal_reads), 1)
+  self.assertIn('LIMIT 241', journal_reads[0])
+  with patch('strategy_lab.MAX_CALCULATIONS', 3), \
+       patch('strategy_lab.features', wraps=strategy_lab.features) as compute:
+   bounded = strategy_lab.compare_v2(self.read_only, 1, self.data)
+  self.assertTrue(bounded['truncated'])
+  self.assertEqual(bounded['coverage']['considered'], 3)
+  self.assertEqual([len(call.args[0]) for call in compute.call_args_list], [1, 1, 2, 2, 3, 3])
+
+ def test_optional_and_unused_changed_feature_do_not_block_valid_alternative(self):
+  self.capture(0)
+  price = {'metric': 'price', 'operator': '>', 'value': '0'}
+  rsi = {'metric': 'rsi', 'operator': '<=', 'value': '80'}
+  choices = []
+  for name, entry in (('alternative', {'any': [price, rsi]}),
+                      ('unused', price), ('required', rsi)):
+   spec = copy.deepcopy(EARLY_CATALYST_V1)
+   spec.update(strategy_id='replay_' + name)
+   spec['parameters']['rsi_period'] = 15
+   spec['entry_rules'] = entry
+   spec['watch_rules'] = price
+   engine.upload_strategy(app.connect, 1, 'Fixture', spec)
+   choices.append({'strategy_id': spec['strategy_id'], 'version': spec['version']})
+  data = dict(self.data, strategies=choices)
+  with patch('strategy_lab._feature_history', side_effect=strategy_lab.EngineError('FEATURE_HISTORY_MISSING')) as history:
+   result = strategy_lab.compare_v2(self.read_only, 1, data)
+  alternative, unused, required = result['timeline'][0]['simulated']
+  self.assertEqual(history.call_count, 2)  # failures are not cached
+  self.assertEqual(alternative['action'], 'BUY')
+  self.assertEqual(unused['action'], 'BUY')
+  self.assertEqual(required['reason_codes'], ['FEATURE_HISTORY_MISSING'])
+  self.assertIsNotNone(required['snapshot_checksum'])
+
+ def test_later_future_and_mutable_history_only_block_incompatible_versions(self):
+  self.capture_windows()
+  baseline = strategy_lab.compare_v2(self.read_only, 1, self.data)['timeline'][-1]['simulated'][0]
+  with app.connect() as c:
+   self.edit_calculation(c, 10, lambda calc: calc['input_sample_ids'].insert(0, 'synthetic-tick-11'))
+   c.execute("UPDATE hw_samples SET received=? WHERE sample_id='synthetic-tick-0'",
+             ((self.at + timedelta(days=1)).isoformat(),))
+  result = strategy_lab.compare_v2(self.read_only, 1, self.data)
+  self.assertEqual(result['timeline'][-2]['simulated'][2]['reason_codes'], ['FEATURE_HISTORY_MISSING'])
+  current, _, long = result['timeline'][-1]['simulated']
+  self.assertEqual(current, baseline)
+  self.assertEqual(long['reason_codes'], ['FEATURE_HISTORY_CHRONOLOGY_UNVERIFIED'])
+  with app.connect() as c:
+   rows = c.execute('SELECT id,payload FROM hw_samples ORDER BY id').fetchall()
+   c.execute("UPDATE hw_sessions SET request=json_set(request,'$.provider','eodhd')")
+   for index, row in enumerate(rows):
+    sample = json.loads(row['payload'])
+    sample['source'] = 'eodhd'
+    if index == 0:
+     sample['price_time_kind'] = 'trade'
+    c.execute('UPDATE hw_samples SET source=?,received=?,payload=?,digest=? WHERE id=?',
+              ('eodhd', (self.at + timedelta(minutes=index, seconds=2)).isoformat(),
+               json.dumps(sample), checksum(sample), row['id']))
+  result = strategy_lab.compare_v2(self.read_only, 1, self.data)
+  self.assertEqual(result['timeline'][-1]['simulated'][2]['reason_codes'], ['SAMPLE_REVISION_UNVERIFIED'])
+
+ def test_missing_original_checksum_and_foreign_catalog_cannot_supply_parameters(self):
+  self.capture(0)
+  with app.connect() as c:
+   self.edit_calculation(c, 0, lambda calc: calc.pop('strategy_checksum'))
+  result = strategy_lab.compare_v2(self.read_only, 1, self.data)
+  self.assertEqual([item['reason_codes'] for item in result['timeline'][0]['simulated']],
+                   [['ORIGINAL_STRATEGY_UNVERIFIED']] * 2)
+  foreign = copy.deepcopy(EARLY_CATALYST_V1)
+  foreign.update(strategy_id='foreign_window')
+  engine.upload_strategy(app.connect, 2, 'Fixture', foreign)
+  digest = checksum(foreign)
+  with app.connect() as c:
+   c.execute('UPDATE hw_calculations SET strategy_checksum=?', (digest,))
+   self.edit_calculation(c, 0, lambda calc: calc.update(
+       strategy_id=foreign['strategy_id'], strategy_version=foreign['version'], strategy_checksum=digest))
+  result = strategy_lab.compare_v2(self.read_only, 1, self.data)
+  self.assertEqual(result['strategies'][0]['first_blocking_reason']['reason'],
+                   'ORIGINAL_STRATEGY_UNVERIFIED')
+
+ def test_history_link_cannot_cross_owner_or_test_scope(self):
+  self.capture_windows()
+  with app.connect() as c:
+   sample = c.execute('SELECT id,watch_row_id FROM hw_samples ORDER BY id LIMIT 1').fetchone()
+   for owner, is_test in ((2, True), (1, False)):
+    with self.subTest(owner=owner, is_test=is_test):
+     other = c.execute('''INSERT INTO hw_sessions
+         (user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,
+          created,updated,next_due)
+         SELECT ?,?, ?,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due
+         FROM hw_sessions WHERE id=?''',
+         (owner, f'other-{owner}', int(is_test), sample['watch_row_id'])).lastrowid
+     c.execute('UPDATE hw_samples SET watch_row_id=? WHERE id=?', (other, sample['id']))
+     c.commit()
+     result = strategy_lab.compare_v2(self.read_only, 1, self.data)
+     self.assertEqual(result['coverage']['skip_reasons'], {'SAMPLE_MISSING': 1})
+     baseline, _, long = result['timeline'][-1]['simulated']
+     self.assertIsNotNone(baseline['snapshot_checksum'])
+     self.assertEqual(long['reason_codes'], ['FEATURE_HISTORY_MISSING'])
+
+ def test_unpinned_bar_history_blocks_only_incompatible_windows(self):
+  self.capture_windows()
+  with app.connect() as c:
+   self.edit_calculation(c, 11, lambda calc: calc['supporting_metrics'].update(bar_history_count=12))
+  result = strategy_lab.compare_v2(self.read_only, 1, self.data)
+  baseline, short, long = result['timeline'][-1]['simulated']
+  self.assertIsNotNone(baseline['snapshot_checksum'])
+  for alternative in (short, long):
+   self.assertEqual(alternative['reason_codes'], ['FEATURE_BAR_REVISION_UNVERIFIED'])
 
 
 if __name__=='__main__':unittest.main()
