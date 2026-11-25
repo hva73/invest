@@ -699,7 +699,7 @@
     "priority": 1,
     "status": "ready",
     "base_branch": "codex/trading-engine-v2-integration",
-    "base_sha": "6e82e17564db58a2b98f0829970a4ed3b23af9a8",
+    "base_sha": "1b0f306a4ad06c10da4e908b85d2b40f12ac7ddf",
     "dependencies": [
       "273:11"
     ],
