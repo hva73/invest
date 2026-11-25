@@ -51,7 +51,7 @@ def table_totals(db, table, now):
             "age_buckets":{label:{"rows":row[2+2*i],"payload_bytes":row[3+2*i]}
                            for i,label in enumerate(AGE_BUCKETS)}}
 
-def inspect(path=LIVE, seconds=8, table=None, now=None, backup_epoch=None):
+def inspect(path=LIVE, seconds=8, table=None, now=None, backup_epoch=None, physical_table=None):
     path=Path(path)
     observed=time.time()
     # Never label a non-live path as production. A backup date is supplied by
@@ -69,6 +69,8 @@ def inspect(path=LIVE, seconds=8, table=None, now=None, backup_epoch=None):
            "operator_dated_backup_read_only_aggregate" if backup_epoch is not None else
            "offline_unclassified_read_only_aggregate")
     if table is not None and table not in TABLES:raise ValueError("unknown_table")
+    if physical_table is not None and physical_table not in TABLES:raise ValueError("unknown_table")
+    if table is not None and physical_table is not None:raise ValueError("conflicting_scan_modes")
     now=time.time() if now is None else now
     if not 0<seconds<=15:raise ValueError("invalid_deadline")
     if path.parent.is_symlink() or path.is_symlink():raise ValueError("unsafe_path")
@@ -80,7 +82,7 @@ def inspect(path=LIVE, seconds=8, table=None, now=None, backup_epoch=None):
     if header[:16]!=b"SQLite format 3\0" or header[18:20]!=b"\x01\x01":
         raise ValueError("unsupported_journal_mode")
     deadline=time.monotonic()+seconds
-    report={"status":"partial","file_bytes":initial.st_size,"objects":None,"observed_epoch":observed,"age_reference_epoch":now,"table":table}
+    report={"status":"partial","file_bytes":initial.st_size,"objects":None,"observed_epoch":observed,"age_reference_epoch":now,"table":table,"physical_table":physical_table}
     with closing(sqlite3.connect(path.absolute().as_uri()+"?mode=ro",uri=True,timeout=.15,isolation_level=None)) as db:
         db.execute("PRAGMA query_only=ON")
         db.set_progress_handler(lambda: int(time.monotonic()>=deadline),1000)
@@ -95,7 +97,23 @@ def inspect(path=LIVE, seconds=8, table=None, now=None, backup_epoch=None):
                 # temporary GROUP BY over millions of page rows on a full host.
                 schema={name:(kind,owner) for name,kind,owner in db.execute(
                     "SELECT name,type,tbl_name FROM sqlite_schema WHERE type IN ('table','index')")}
-                rows=db.execute("SELECT name,pgsize,pageno,payload,unused FROM dbstat WHERE aggregate=TRUE").fetchall()
+                if physical_table is None:
+                    rows=db.execute("SELECT name,pgsize,pageno,payload,unused FROM dbstat WHERE aggregate=TRUE").fetchall()
+                else:
+                    # Equality constraints let dbstat visit only the selected
+                    # b-trees, instead of walking every page of a multi-GB DB.
+                    # Use bound schema names, including implicit indexes.
+                    names=[name for name,(kind,owner) in schema.items()
+                           if owner==physical_table and kind in ("table","index")]
+                    if not names or schema.get(physical_table)!=("table",physical_table):
+                        raise LookupError("schema_unavailable")
+                    rows=[]
+                    for name in names:
+                        rows.extend(db.execute(
+                            "SELECT name,pgsize,pageno,payload,unused FROM dbstat WHERE aggregate=TRUE AND name=?",
+                            (name,)).fetchall())
+                    if {row[0] for row in rows}!=set(names):
+                        raise sqlite3.OperationalError("incomplete_btree_census")
                 rows.sort(key=lambda row:row[1],reverse=True)
                 objects=[]
                 tables={}
@@ -122,6 +140,11 @@ def inspect(path=LIVE, seconds=8, table=None, now=None, backup_epoch=None):
                 report["page_accounting"]={"snapshot_bytes":snapshot_bytes,
                     "btree_bytes":allocated,"freelist_bytes":report["freelist_bytes"],
                     "unattributed_bytes":residual}
+                if physical_table is not None:
+                    # The remainder includes other tables, not unexplained or
+                    # reclaimable pages. Do not report whole-DB accounting.
+                    report.pop("page_accounting")
+                    report["coverage"]="selected_table_and_indexes_only"
                 if residual<0:
                     report["reason"]="inconsistent_page_accounting"
                 else:
@@ -129,6 +152,8 @@ def inspect(path=LIVE, seconds=8, table=None, now=None, backup_epoch=None):
             else:
                 report["table_totals"]=table_totals(db,table,now)
                 report["status"]=report["table_totals"]["status"]
+        except LookupError:
+            report["status"]="schema_unavailable"
         except sqlite3.OperationalError as e:
             report["reason"]="deadline" if time.monotonic()>=deadline else "busy_or_dbstat_unavailable"
         finally:
@@ -146,10 +171,12 @@ def inspect(path=LIVE, seconds=8, table=None, now=None, backup_epoch=None):
 
 if __name__=="__main__":
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--table",choices=sorted(TABLES),help="one bounded payload/age scan instead of dbstat")
+    mode=parser.add_mutually_exclusive_group()
+    mode.add_argument("--table",choices=sorted(TABLES),help="one bounded payload/age scan instead of dbstat")
+    mode.add_argument("--physical-table",choices=sorted(TABLES),help="bounded dbstat for one table and its indexes")
     args=parser.parse_args()
     try:
-        result=inspect(table=args.table)
+        result=inspect(table=args.table,physical_table=args.physical_table)
         print(json.dumps(result,sort_keys=True))
         if result["status"]!="ok":raise SystemExit(2)
     except (OSError,ValueError,sqlite3.Error) as e:
