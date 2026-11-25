@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-25T22:00:00Z",
+  "updated_at": "2026-11-25T23:08:54Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -284,22 +284,23 @@
       "title": "Long-Term Watch",
       "status": "in_progress",
       "issue": 12,
-      "evidence": "#12:1 godkendt og integreret via PR #308. Brugerflade, genvurdering og samlet integrationstest udestår.",
+      "evidence": "#308 integreret på v2 e4b59436, exact 9da02d3a CI 45708196119/job 139535492902: 590 tests PASS; #12:2 køsat 5d7fd45b til autentificeret observations-API, ikke startet verificeret.",
       "subgoals": [
         {
           "id": "watch",
           "title": "Long-Term Watch-model",
           "status": "verified",
-          "evidence": "PR #308 integreret; eksakt head 9da02d3a, CI 45700153552 bestået og uafhængigt review accepteret. Tenant-isoleret SQLite observationsmodel; ingen live migration eller handel.",
+          "evidence": "PR #308 integreret e4b59436; uafhængigt review af 9da02d3a og motor-CI 45708196119: 590 tests PASS. Kun tenant-isoleret observationsmodel.",
           "owner_role": "motor",
-          "updated_at": "2026-11-25T22:00:00Z"
+          "updated_at": "2026-11-25T23:08:54Z"
         },
         {
           "id": "ui",
           "title": "Brugerflade og genvurdering",
           "status": "pending",
-          "evidence": "Udestår.",
-          "owner_role": "desktop"
+          "evidence": "API-forudsætning #12:2 køsat; UI og genvurdering udestår.",
+          "owner_role": "desktop",
+          "updated_at": "2026-11-25T23:08:54Z"
         },
         {
           "id": "test",
@@ -309,7 +310,7 @@
           "owner_role": "motor"
         }
       ],
-      "updated_at": "2026-11-25T22:00:00Z"
+      "updated_at": "2026-11-25T23:08:54Z"
     },
     {
       "id": "replay",
@@ -374,15 +375,15 @@
       "title": "Hvordan står det til? – herkomst og statistik",
       "status": "in_progress",
       "issue": 114,
-      "evidence": "#303 b32e4735, CI 45696048873 motor PASS; review HOLD 7173927904 (legacy forkert depot blokerer verificeret refresh). Direkte test_trade_service ikke kørt i job 139493595156.",
+      "evidence": "#114:1 supersederet; #114:2 PR #309 exact 14e20758 CI 45717195794: 592 motor-tests PASS, uafhængigt HOLD 7176987304, direkte trade_service suite ikke kørt.",
       "subgoals": [
         {
           "id": "provenance",
           "title": "Entry/exit-herkomst",
           "status": "review",
-          "evidence": "Bevar immutable send-time identitet; #303 HOLD 7173927904. Fokuseret trade_service test skal køres på eksakt slut-head, ingen fill-attribution.",
+          "evidence": "#309 14e20758 HOLD: root intent med tom liste, historisk depot og eksakt legacy receipt; ingen integration før reparation og målrettet test.",
           "owner_role": "motor",
-          "updated_at": "2026-11-25T20:55:00Z"
+          "updated_at": "2026-11-25T23:08:54Z"
         },
         {
           "id": "fills",
@@ -399,7 +400,7 @@
           "owner_role": "desktop"
         }
       ],
-      "updated_at": "2026-11-25T20:55:00Z"
+      "updated_at": "2026-11-25T23:08:54Z"
     },
     {
       "id": "ui",
@@ -407,7 +408,7 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "in_progress",
       "issue": 54,
-      "evidence": "#306 integreret 1b0f306a med identiske chart/testblobs og browser-CI 45691588370; #300 seneste 3d8362b3 generel CI PASS, fokuseret mobiltest ikke kørt i denne CI. Samlet browseraccept udestår.",
+      "evidence": "#306 integreret 1b0f306a; #300 latest 7308e43c controller CI 45717091429 chart/UI PASS, særskilte mobile workflows skipped; ny uafhængig accept ikke verificeret.",
       "subgoals": [
         {
           "id": "reuse",
@@ -420,9 +421,9 @@
           "id": "mobile",
           "title": "Mobil 2.0",
           "status": "review",
-          "evidence": "#300 3d8362b3 CI 45698810043 PASS generel chart/UI; job 139503171882 udelader browser_mobile_account_isolation.py og navigation. Krav til eksakt fokuseret test registreret på PR; ingen mergeaccept.",
+          "evidence": "#300 7308e43c; CI 45717091429/job 139565814504 chart/UI PASS, dedikerede mobile workflows skipped. Forrige HOLD 908e2bd4; eksakt re-review og specialtest udestår.",
           "owner_role": "mobile",
-          "updated_at": "2026-11-25T20:55:00Z"
+          "updated_at": "2026-11-25T23:08:54Z"
         },
         {
           "id": "desktop",
@@ -440,7 +441,7 @@
           "owner_role": "mobile"
         }
       ],
-      "updated_at": "2026-11-25T20:55:00Z"
+      "updated_at": "2026-11-25T23:08:54Z"
     },
     {
       "id": "load",
@@ -448,7 +449,7 @@
       "title": "100 brugere og skaleringsmåling",
       "status": "in_progress",
       "issue": 14,
-      "evidence": "#302 integreret 99ba8ef6; #304 2c92b7ad CI 45698387500 motor PASS, HOLD 7174278839: 100-bruger idle scan under samtidige urelaterede writes giver 8 mod 3 statements/tenant. Fuld fairness og hostingmåling udestår.",
+      "evidence": "#304 supersederet efter ejer-godkendt ren genstart; #14:9 STARTED/WORKING/TESTING verificeret, ingen PR endnu. #302 integreret; fuld hosting/fairness-accept udestår.",
       "subgoals": [
         {
           "id": "adapter",
@@ -460,10 +461,10 @@
         {
           "id": "queue",
           "title": "100 brugere og fair køer",
-          "status": "review",
-          "evidence": "#304 2c92b7ad HOLD 7174278839: bevar idle SQL-budget under unrelated writes og revalidér relevante ændringer; ingen accept før faktisk 100-bruger fairness/worker-test.",
+          "status": "in_progress",
+          "evidence": "#14:9 ren implementering på 99ba8ef6, TESTING marker 7176952414; bevar #304 som reference. 100-bruger faktisk VM-step og SQLite fairness skal måles.",
           "owner_role": "data",
-          "updated_at": "2026-11-25T20:55:00Z"
+          "updated_at": "2026-11-25T23:08:54Z"
         },
         {
           "id": "resources",
@@ -480,7 +481,7 @@
           "owner_role": "data"
         }
       ],
-      "updated_at": "2026-11-25T20:55:00Z"
+      "updated_at": "2026-11-25T23:08:54Z"
     },
     {
       "id": "release",
