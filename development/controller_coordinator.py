@@ -589,7 +589,10 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
                         detail="Codex-kapacitetsgrænse; afventer verificeret reset"
                         break
                     if decision["verdict"]=="hold":
-                        entry["repair_reason"]=decision["reason"]
+                        entry.update(state="hold",repair_reason=decision["reason"],detail=decision["reason"])
+                        # Persist the exact rejected SHA before any remote comment or repair.
+                        journal[str(number)]=dict(entry)
+                        save(root/"coordinator-review.json",journal)
                         comment(number,"Lokal uafhængig review HOLD "+sha+": "+decision["reason"][:800])
                         # Only explicitly approved scoped generations can repair.
                         if row.get("local_repair") is True and repair_attempt(root,number,sha) is not None and not (root/"STOP").exists() and reserve_review():
@@ -613,7 +616,9 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
                 # A failed lookup/review of one candidate must not starve
                 # independent candidates in the same queue. Retry after cooldown.
                 detail="PR #"+str(number)+": midlertidig fejl "+type(exc).__name__
-                if "sha" not in entry and prior_hold:
+                if entry.get("repair_reason") and entry.get("sha"):
+                    entry.update(state="hold",detail=detail[:600])
+                elif "sha" not in entry and prior_hold:
                     entry.update(prior_hold,state="hold",detail=detail[:600])
                 else:
                     entry.update(state="waiting",detail=detail[:600])
