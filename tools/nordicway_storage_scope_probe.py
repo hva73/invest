@@ -116,7 +116,7 @@ def review_quota_paths(read_code):
                 return ast.copy_location(ast.Constant(value="<redacted>"), node)
             return node
     selected = {
-        "nordicway_deploy_adapter.py": ("estimate_required_bytes", "quota", "preflight", "backup", "recover", "restore", "cleanup", "apply", "stage", "restart"),
+        "nordicway_deploy_adapter.py": ("estimate_required_bytes", "check_quota", "quota", "preflight", "backup", "recover", "restore", "cleanup", "apply", "stage", "restart"),
         "nordicway_deploy_sequence.py": ("execute", "deploy", "run", "sequence"),
         "nordicway_release_backup.py": ("verify_backup", "digest"),
     }
@@ -233,7 +233,7 @@ def retained_archive_census(token):
             raise ValueError("archive_changed")
     pin()
     with tempfile.TemporaryDirectory(prefix="escape-private-census-") as tmp:
-        if shutil.disk_usage(tmp).free < size + 10_000_000_000 + 268435456:
+        if shutil.disk_usage(tmp).free < size + 268435456:
             raise ValueError("insufficient_runner_space")
         archive_path = Path(tmp) / "backup.tar.gz"
         dbpath = Path(tmp) / "backup.sqlite"
@@ -283,6 +283,8 @@ def retained_archive_census(token):
                         digest.update(manifest)
                     elif relative == "escape.db":
                         db_bytes = member.size
+                        if shutil.disk_usage(tmp).free < db_bytes + 268435456:
+                            raise ValueError("insufficient_runner_space_for_database")
                         with dbpath.open("xb") as target:
                             while block := source.read(1024*1024):
                                 digest.update(block)
@@ -333,7 +335,7 @@ def main():
     try:
         print(json.dumps({"retained_archive_census":retained_archive_census(token)},sort_keys=True),flush=True)
     except Exception as exc:
-        print(json.dumps({"retained_archive_census":{"status":"unavailable","category":type(exc).__name__}}),flush=True)
+        print(json.dumps({"retained_archive_census":{"status":"unavailable","category":str(exc) if isinstance(exc,ValueError) and re.fullmatch(r"[a-z_]{1,80}",str(exc)) else type(exc).__name__}}),flush=True)
         raise SystemExit(1) from None
 
 if __name__ == "__main__":
