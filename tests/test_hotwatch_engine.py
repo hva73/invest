@@ -31,24 +31,28 @@ class HotWatch(unittest.TestCase):
     response={'orderIntentId':intent,'status':'PENDING','portfolioId':'root'}
     c.execute("INSERT INTO broker_proposals(user_id,fingerprint,report_id,candidate_id,kind,portfolio_id,payload,status,created,intent_id,response) VALUES(1,?,?,'synthetic-MERC','direct',?,?,'sent',?,?,?)",
               (intent,origin,pid,json.dumps(payload),self.now.timestamp(),intent,json.dumps(response)))
-  for history in ({'orderIntentId':'manual-intent'},
-                  {'orderIntentId':'signal-intent','portfolioId':'other'},
-                  {'orderIntentId':'signal-intent','orderId':'unrelated'},
-                  {'orderIntentId':'signal-intent','orderIntents':[{}]}):
-   with self.subTest(history=history):
+  verified=json.dumps({'orderIntentId':'signal-intent'})
+  for history,snapshot,final in (
+      ({'orderIntentId':'manual-intent'},None,'ACCEPTED'),
+      ({'orderIntentId':'signal-intent','portfolioId':'other'},None,'ACCEPTED'),
+      ({'orderIntentId':'signal-intent','orderId':'unrelated'},verified,'ACCEPTED'),
+      ({'orderIntentId':'signal-intent','orderId':'unrelated'},None,'PENDING'),
+      ({'orderIntentId':'signal-intent','orderIntents':[{'orderIntentId':'manual-intent'}]},None,'PENDING'),
+      ({'orderIntentId':'signal-intent','orderIntents':[{}]},None,'ACCEPTED')):
+   with self.subTest(history=history,snapshot=snapshot):
     with app.connect() as c:
-     c.execute("UPDATE broker_proposals SET response=? WHERE user_id=1 AND report_id='@hotwatch'",
-               (json.dumps(dict(history,status='PENDING')),))
+     c.execute("UPDATE broker_proposals SET response=?,sent_identity=? WHERE user_id=1 AND report_id='@hotwatch'",
+               (json.dumps(dict(history,status='PENDING')),snapshot))
     valid={'orderIntentId':'signal-intent','status':'ACCEPTED'}
     if 'portfolioId' in history:valid['portfolioId']='root'
     replies=[dict(valid,orderIntentId='manual-intent'),dict(valid,orderId='unrelated'),valid]
     with patch.object(trade_service,'client',return_value=(object(),{})),patch.object(trade_service,'call',side_effect=replies) as call:
-     for expected in ('PENDING','PENDING','ACCEPTED'):
+     for expected in ('PENDING','PENDING',final):
       hotwatch_service.refresh_holding_origin(app.connect,1,pid,'synthetic-MERC')
       statuses={p['report_id']:p['provider_status'] for p in trade_service.summaries(app.connect,1)}
       self.assertEqual(statuses,{'@manual-buy':'PENDING','@hotwatch':expected})
-    self.assertEqual([args.args[2:] for args in call.call_args_list],
-                     [('get_order_intent',{'orderIntentId':'signal-intent'})]*3)
+    expected_calls=[('get_order_intent',{'orderIntentId':'signal-intent'})]*3 if final=='ACCEPTED' else []
+    self.assertEqual([args.args[2:] for args in call.call_args_list],expected_calls)
     with app.connect() as c:
      self.assertIsNone(hotwatch_service.holding_origin(c,1,pid,'synthetic-MERC'))
 

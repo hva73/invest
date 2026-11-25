@@ -263,6 +263,26 @@ class Trading(unittest.TestCase):
   self.assertIsNone(trade.intent_reference({'orderIntents':raw['orderIntents']*2},{'orders':[order]}))
   row={'payload':json.dumps({'orders':[order]}),'response':json.dumps(raw),'estimate':None,'asset':None,'sell_basis':None,'status':'uncertain','intent_id':None,'error':'uafklaret'}
   self.assertEqual(trade.view(row)['status'],'sent');self.assertEqual(trade.view(row)['intent_id'],'intent-1')
+ def test_conflicting_submission_intents_preserve_receipt(self):
+  proposal=self.estimate()
+  order=dict(proposal['payload']['orders'][0],orderIntentId='signal-intent')
+  self.write_result={'orderIntentId':'manual-intent','orderIntents':[order]}
+  sent=self.send(proposal)
+  self.assertEqual((sent['status'],sent['intent_id'],sent['response']),('uncertain',None,self.write_result))
+  self.intent_result={'orderIntentId':'manual-intent','status':'ACCEPTED'}
+  for reference,snapshot in ((None,'{}'),('manual-intent','{}'),('manual-intent',None),('signal-intent',None)):
+   with self.subTest(reference=reference,snapshot=snapshot):
+    # Older versions could persist either a recovered or a root-only reference.
+    with app.connect() as c:
+     c.execute('UPDATE broker_proposals SET intent_id=?,sent_identity=?,status=? WHERE id=?',
+               (reference,snapshot,'sent' if reference else 'uncertain',sent['id']))
+    prior=dict(trade.get(app.connect,1,sent['id']))
+    self.intent_result['orderIntentId']=reference or 'manual-intent'
+    calls=len(self.calls)
+    with self.assertRaises(trade.TradeError):
+     trade.check(app.connect,1,sent['id'],self.factory)
+    self.assertEqual(len(self.calls),calls)
+    self.assertEqual(dict(trade.get(app.connect,1,sent['id'])),prior)
  def test_cancel_only_own_pending_intent_and_confirm_provider_status(self):
   proposal=self.send(self.estimate());original=self.factory;state={'status':'PENDING','calls':0}
   class CancelClient(original):
@@ -328,6 +348,16 @@ class Trading(unittest.TestCase):
   self.write_result.update(status='PENDING',orderId='original-order')
   proposal=self.send(self.estimate())
   pid=proposal['id'];prior=dict(trade.get(app.connect,1,pid))
+  with app.connect() as c:
+   c.execute("INSERT INTO users(id,username) VALUES(2,'other')")
+   portfolios.replace_pluto(c,2,[{'id':'portfolios:root','name':'Root','kind':'portfolio'}])
+   other_portfolio=c.execute("SELECT id FROM portfolios WHERE user_id=2 AND kind='portfolio'").fetchone()[0]
+   other=c.execute("""INSERT INTO broker_proposals(user_id,fingerprint,report_id,candidate_id,kind,
+                      portfolio_id,payload,status,created,intent_id,response)
+                      SELECT 2,fingerprint,'@manual-buy',candidate_id,kind,?,payload,'sent',created,'other-intent',?
+                      FROM broker_proposals WHERE id=?""",
+                   (other_portfolio,json.dumps({'orderIntentId':'other-intent','status':'PENDING'}),pid)).lastrowid
+  other_prior=dict(trade.get(app.connect,2,other))
   valid={'orderIntentId':'synthetic-intent','portfolioId':'root','assetId':'asset-test','side':'BUY','orderId':'original-order','status':'accepted'}
   replies=[[],{'status':'accepted'},dict(valid,orderIntentId='other-intent'),dict(valid,portfolioId='other-depot'),
            dict(valid,assetId='other-asset'),dict(valid,side='SELL'),dict(valid,orderId='other-order'),
@@ -348,6 +378,7 @@ class Trading(unittest.TestCase):
   self.assertEqual(checked['response'],valid)
   self.assertEqual(checked['status'],'sent')
   self.assertEqual(checked['report_id'],proposal['report_id'])
+  self.assertEqual(dict(trade.get(app.connect,2,other)),other_prior)
   self.assertEqual(len(self.writes()),1)
  def test_check_recovers_from_unrelated_historical_response(self):
   pid=self.send(self.estimate())['id']
@@ -495,7 +526,13 @@ class Trading(unittest.TestCase):
       trade.check(app.connect,1,pid,self.factory)
      self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
      self.intent_result=accepted
-     self.assertEqual(trade.check(app.connect,1,pid,self.factory)['proposal']['response'],accepted)
+     if field=='orderId':
+      # This legacy response could be the only surviving submission receipt.
+      with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+       trade.check(app.connect,1,pid,self.factory)
+      self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+     else:
+      self.assertEqual(trade.check(app.connect,1,pid,self.factory)['proposal']['response'],accepted)
 
  def test_collection_receipt_cannot_corroborate_another_depot_or_its_order(self):
   request=dict(self.request,portfolio_id=self.child,kind='collection_sell',size='25')
