@@ -1,7 +1,9 @@
 """Read-only, causal comparison on isolated synthetic HOT WATCH observations."""
 import copy,json,sqlite3,tempfile,unittest
+import io
+from http.client import HTTPResponse
 from contextlib import closing
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 from datetime import datetime,timedelta,timezone
 import app,report_ingest,hotwatch_engine as engine,strategy_lab
 import long_term_watch as watch
@@ -412,19 +414,16 @@ class LongTermWatch(unittest.TestCase):
                        exchange='NASDAQ', currency='USD')
   self.asset_id = self.identity['asset_id']
   epoch = datetime.fromisoformat(self.at).timestamp()
-  import candidate_lifecycle, market_data, portfolio_data, portfolios
-  with app.connect() as c:
-   c.execute('CREATE TABLE users(id INTEGER PRIMARY KEY, username TEXT, role TEXT, active INTEGER)')
-   c.execute('CREATE TABLE proposals(id INTEGER PRIMARY KEY, user_id INTEGER, portfolio TEXT)')
-   portfolios.init(c)
-   portfolio_data.init(c)
-   report_ingest.init(c)
-   candidate_lifecycle.init(c)
-   market_data.init(c)
-   watch.init(c)
-   watch.init(c)
+  # Exercise the application migration twice. Observations are independent
+  # of the HOT WATCH engine schema and its push subsystem.
+  with patch.object(engine, 'init'):
+   app.init()
+   app.init()
   fixture_users()
   with app.connect() as c:
+   for uid in (1, 2):
+    c.execute('INSERT INTO sessions VALUES(?, ?, ?, ?)',
+              (app.token_hash(f'session-{uid}'), uid, f'csrf-{uid}', datetime.now().timestamp() + 3600))
    portfolio = c.execute("""
     INSERT INTO portfolios(user_id,name,source,updated) VALUES(1,'Fixture','pluto',0)
    """).lastrowid
@@ -446,6 +445,102 @@ class LongTermWatch(unittest.TestCase):
  def history(self):
   with app.connect() as c:
    return [line for line in c.iterdump() if 'long_term_observations' not in line]
+
+ def http(self, path='', data=None, uid=1, csrf=True):
+  """Run the real HTTP parser, cookie lookup and JSON response over memory streams."""
+  body = json.dumps(data).encode() if data is not None else b''
+  method = 'POST' if data is not None else 'GET'
+  headers = [f'{method} /api/long-term-watch{path} HTTP/1.0',
+             'Content-Type: application/json', f'Content-Length: {len(body)}']
+  if uid is not None:
+   headers.append(f'Cookie: escape=session-{uid}')
+   if csrf:
+    headers.append(f'X-CSRF-Token: csrf-{uid}')
+  request = ('\r\n'.join(headers) + '\r\n\r\n').encode() + body
+  transport = Mock()
+  transport.makefile.return_value = io.BytesIO(request)
+  reply = io.BytesIO()
+  transport.sendall.side_effect = reply.write
+  app.Handler(transport, ('test', 0), None)
+  reply.seek(0)
+  transport.makefile.return_value = reply
+  response = HTTPResponse(transport)
+  response.begin()
+  return response.status, json.loads(response.read())
+
+ def test_http_authentication_and_csrf_precede_lookup_and_mutation(self):
+  before = self.history()
+  with patch('trade_service.client') as client:
+   self.assertEqual(self.http(uid=None)[0], 401)
+   for path in ('/add', '/status', '/remove', '/reopen'):
+    with self.subTest(path=path):
+     data = {'asset_id': self.asset_id, 'status': watch.INTERESTING}
+     self.assertEqual(self.http(path, data, uid=None)[0], 401)
+     self.assertEqual(self.http(path, data, csrf=False)[0], 403)
+   client.assert_not_called()
+  self.assertEqual(self.http('?include_inactive=true'), (200, {'observations': []}))
+  self.assertEqual(self.history(), before)
+
+ def test_http_add_requires_complete_matching_pluto_identity(self):
+  before = self.history()
+  data = dict(self.identity, verified_identity=self.identity, reference_price='50')
+  asset = dict(id=self.asset_id, ticker='FIX', currency='USD', exchange='NASDAQ')
+  with patch('trade_service.client', return_value=(None, {})) as client, patch('trade_service.call') as lookup:
+   for invalid in ({}, {'asset_id': []}, {'asset_id': 'invalid id'}):
+    self.assertEqual(self.http('/add', invalid)[0], 400)
+   client.assert_not_called()
+   for raw in ({}, dict(asset, id='other'), dict(asset, assetId='other'),
+               dict(asset, ticker=None), dict(asset, exchange=None), dict(asset, currency=None)):
+    with self.subTest(raw=raw):
+     lookup.return_value = {'asset': raw}
+     self.assertEqual(self.http('/add', data)[0], 409)
+   lookup.side_effect = TimeoutError()
+   self.assertEqual(self.http('/add', data)[0], 502)
+  self.assertEqual(self.http('?include_inactive=true'), (200, {'observations': []}))
+  self.assertEqual(self.history(), before)
+
+ def test_http_observation_lifecycle_is_tenant_scoped_and_preserves_financial_history(self):
+  before = self.history()
+  selected = {'asset_id': self.asset_id}
+  forged = dict(selected, uid=2, user_id=2, ticker='FAKE', name='Wrong', currency='EUR',
+                exchange='FAKE', verified_identity={'asset_id':'other'}, status=watch.REASSESS,
+                reference_price='99', reference_at=self.at, reference_source='Pluto',
+                fill={'status':'FILLED', 'quantity':10})
+  raw = {'asset': dict(self.identity, id=self.asset_id, price=88)}
+  with patch('trade_service.client', return_value=(None, {})) as client, \
+       patch('trade_service.call', return_value=raw) as lookup:
+   status, result = self.http('/add', forged)
+   self.assertEqual(status, 200)
+   original = result['observation']
+   self.assertEqual({k:original[k] for k in self.identity}, self.identity)
+   self.assertEqual(original['user_id'], 1)
+   self.assertEqual(original['status'], watch.OBSERVER)
+   for key in ('reference_price','reference_source','reference_at'):
+    self.assertIsNone(original[key])
+   self.assertEqual(self.http('/add', selected), (200, result))
+   self.assertEqual(self.http('?user_id=1', uid=2), (200, {'observations':[]}))
+   self.assertEqual(self.http('/status', dict(selected, status=watch.REASSESS, user_id=1), uid=2)[0], 404)
+   self.assertEqual(self.http('/remove', dict(selected, user_id=1), uid=2), (200, {'changed':False}))
+   status, other = self.http('/add', selected, uid=2)
+   self.assertEqual(status, 200)
+   self.assertEqual(other['observation']['user_id'], 2)
+   self.assertEqual(self.http('/status', dict(selected, status='KØB'))[0], 400)
+   self.assertEqual(self.http('/status', dict(selected, status=watch.INTERESTING))[0], 200)
+   self.assertEqual(self.http('/remove', selected), (200, {'changed':True}))
+   self.assertEqual(self.http('/remove', selected), (200, {'changed':False}))
+   self.assertEqual(self.http('/status', dict(selected, status=watch.OBSERVER))[0], 404)
+   archived = dict(original, status=watch.INTERESTING, active=0)
+   self.assertEqual(self.http('/add', selected), (200, {'observation':archived}))
+   self.assertEqual(self.http('/reopen', dict(selected, user_id=1), uid=2), (200, {'changed':False}))
+   self.assertEqual(self.http(), (200, {'observations':[]}))
+   self.assertEqual(self.http('?include_inactive=true'), (200, {'observations':[archived]}))
+   self.assertEqual(self.http('/reopen', selected), (200, {'changed':True}))
+   self.assertEqual(self.http('/reopen', selected), (200, {'changed':False}))
+   self.assertEqual(self.http(), (200, {'observations':[dict(archived, active=1)]}))
+   self.assertEqual(self.http(uid=2), (200, {'observations':[other['observation']]}))
+   self.assertEqual([args.args[1] for args in client.call_args_list], [1, 1, 2, 1])
+   self.assertEqual(lookup.call_args_list, [call(None, {}, 'get_asset', {'assetId':self.asset_id})] * 4)
+  self.assertEqual(self.history(), before)
 
  def test_user_scope_and_missing_reference(self):
   before = self.history()

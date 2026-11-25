@@ -6,6 +6,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from urllib.parse import urlsplit,parse_qs
 import oauth
+import long_term_watch
 from report_validation import ReportValidationError,unique_object
 ROOT=Path(__file__).parent
 def _startup_build_commit():
@@ -122,6 +123,7 @@ def init():
         trade_service.init(c)
         import market_data
         market_data.init(c)
+        long_term_watch.init(c)
         c.execute('DELETE FROM sessions WHERE expires<?',(time.time(),))
 
 def token_hash(token):
@@ -278,6 +280,12 @@ class Handler(BaseHTTPRequestHandler):
             s=self.session()
             if not s: return self.send(401,{'error':'Log ind først'})
             user_id=s['user_id']
+            if self.path=='/api/long-term-watch':
+                mode=parse_qs(request.query,keep_blank_values=True).get('include_inactive',['false'])
+                if mode not in (['true'],['false']):
+                    return self.send(400,{'error':'Ugyldigt valg af inaktive observationer'})
+                observations=long_term_watch.list_observations(connect,user_id,include_inactive=mode==['true'])
+                return self.send(200,{'observations':observations})
             if self.path=='/api/push/config':
                 import web_push
                 return self.send(200,web_push.config(connect,user_id))
@@ -453,6 +461,27 @@ class Handler(BaseHTTPRequestHandler):
             if not s:return self.send(401,{'error':'Log ind først'})
             if not hmac.compare_digest(self.headers.get('X-CSRF-Token',''),s['csrf']):return self.send(403,{'error':'Ugyldigt sikkerhedstoken'})
             user_id=s['user_id']
+            if self.path=='/api/long-term-watch/add':
+                import hotwatch_service
+                asset_id=long_term_watch.validate_asset_id(data.get('asset_id'))
+                try:
+                    identity=hotwatch_service.holding_instrument(connect,user_id,{'asset_id':asset_id})
+                except Exception:
+                    return self.send(502,{'error':'Instrumentet kunne ikke hentes fra Pluto'})
+                if identity and identity.get('asset_id')!=asset_id:
+                    identity=None
+                try:
+                    observation=long_term_watch.add(connect,user_id,verified_identity=identity)
+                except ValueError:
+                    return self.send(409,{'error':'Instrumentets identitet kunne ikke bekræftes hos Pluto'})
+                return self.send(200,{'observation':observation})
+            if self.path=='/api/long-term-watch/status':
+                if not long_term_watch.set_status(connect,user_id,data.get('asset_id'),data.get('status')):
+                    return self.send(404,{'error':'Aktiv observation blev ikke fundet'})
+                return self.send(200,{'ok':True})
+            if self.path in ('/api/long-term-watch/remove','/api/long-term-watch/reopen'):
+                action=long_term_watch.remove if self.path.endswith('/remove') else long_term_watch.reopen
+                return self.send(200,{'changed':action(connect,user_id,data.get('asset_id'))})
             if self.path=='/api/admin/reset-password':
                 if s['role']!='admin':return self.send(403,{'error':'Kun administratoren kan ændre brugerens adgangskode'})
                 if self.throttled():return self.send(429,{'error':'Prøv igen om fem minutter'})

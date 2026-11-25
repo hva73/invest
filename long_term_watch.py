@@ -34,7 +34,7 @@ def init(connection):
     """)
 
 
-def _asset_id(value):
+def validate_asset_id(value):
     if not isinstance(value, str) or not re.fullmatch(ID["pattern"], value):
         raise ValueError("A stable Pluto asset ID is required")
     return value
@@ -50,13 +50,13 @@ def add(connect, uid, *, verified_identity=None, reference_price=None,
     """
     if not isinstance(verified_identity, dict):
         raise ValueError("Verified Pluto identity is required")
-    asset_id = _asset_id(verified_identity.get("asset_id"))
+    asset_id = validate_asset_id(verified_identity.get("asset_id"))
     ticker = verified_identity.get("ticker")
     exchange = verified_identity.get("exchange")
     currency = verified_identity.get("currency")
     name = verified_identity.get("name")
     if (not isinstance(ticker, str) or not ticker.strip()
-            or not isinstance(exchange, str) or not exchange.strip()
+            or not isinstance(exchange, str) or exchange.strip().upper() in ("", "UKENDT", "UNKNOWN")
             or not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency)
             or (name is not None and not isinstance(name, str))):
         raise ValueError("Incomplete verified Pluto identity")
@@ -105,7 +105,7 @@ def set_status(connect, uid, asset_id, status):
         return connection.execute("""
             UPDATE long_term_observations SET status = ?
             WHERE user_id = ? AND asset_id = ? AND active = 1
-        """, (status, uid, _asset_id(asset_id))).rowcount == 1
+        """, (status, uid, validate_asset_id(asset_id))).rowcount == 1
 
 
 def _set_active(connect, uid, asset_id, active):
@@ -113,7 +113,7 @@ def _set_active(connect, uid, asset_id, active):
         return connection.execute("""
             UPDATE long_term_observations SET active = ?
             WHERE user_id = ? AND asset_id = ? AND active != ?
-        """, (active, uid, _asset_id(asset_id), active)).rowcount == 1
+        """, (active, uid, validate_asset_id(asset_id), active)).rowcount == 1
 
 
 def remove(connect, uid, asset_id):
