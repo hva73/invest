@@ -283,5 +283,21 @@
       "tests/test_hotwatch_e2e_contract.py"
     ],
     "task": "P0 owner-requested dynamic lifecycle rotation, concrete issue #268. After #8 gen2 review/integration, use its integrated source (coordinator refresh base before dispatch if changed). Live 60/60 incl 19 holding exits/41 entry, 18 REVIEW_DUE all 41 NO_DATA. Existing candidate_currentness grace24h; auto req end_at=None, REPORT_ONLY never COLD, reconcile expires only COLD. Implement actual expiry/retirement of intensive entry scanning with history preserved, protect holdings/orders/manual/leases; distinguish no data backoff from reject; finite report-only and candidate prioritization policy proposed explicitly for owner approval before live, no change to trade strategy or orders. Reuse existing reconciliation, not new motor. Tests exact overdue, report-only, no expiry extension by duplicate report, genuine reassessment, capacity frees new candidates, cap is not fill target, protected holdings/exit/tenant/test. Avoid overlaps with #8 gen2; dependency only to avoid conflicts, coordinator must release after actual integration review. No production/credentials/network/orders. Draft implementation + tests."
+  },
+  {
+    "issue": 273,
+    "generation": 1,
+    "role": "motor",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
+    "dependencies": [],
+    "paths": [
+      "trading_engine_v2.py",
+      "tests/test_trading_engine_v2.py",
+      "docs/TRADING_ENGINE_V2_INTERFACE.md"
+    ],
+    "task": "First isolated vertical implementation of owner-approved #273, including #114 provenance. Read AGENTS.md, master contract, existing strategy catalog and position/candidate contracts. New standalone module only; no edits to existing motor or schema, no provider/production calls. Implement a minimal immutable decision/evidence interface and registry with explicit required vs optional inputs per strategy, pure evaluation with positive/negative synthetic tests (Momentum and Early Catalyst distinct; no invented live threshold, no live authority), stable instrument/strategy-version/time identity, structured observation/blocked/decision reasons, decision provenance including entry/exit origin and intent/order/fill references (not fabricated). Demonstrate one shared immutable input evaluated by both strategies, missing irrelevant indicator does not block Early Catalyst, missing mandatory data blocks, replay deterministic, no broker side effects. Compact interface note with migration seams and explicit integration follow-up; actual code/tests not just plan. Preserve existing rules; sample profiles simulated only. No changes to current production, no orders. Independent review before integration into separate v2 branch."
   }
 ]
