@@ -455,6 +455,17 @@ def check(connect,user_id,pid,factory=None):
                 raise TradeError(identity_error)
             expected[key]=required[key]=values[0]
 
+    # A collection-sell payload has no portfolioId. When the first exact
+    # intent readback supplies a depot, bind it only with matching collection
+    # evidence and consistent provider values, never the mutable current parent.
+    if row['kind']=='collection_sell' and not expected['portfolioId']:
+        reported=[node['portfolioId'] for node in nodes if 'portfolioId' in node]
+        if reported:
+            if (not expected['collectionId'] or
+                    not any(node.get('collectionId')==expected['collectionId'] for node in nodes) or
+                    any(not isinstance(value,str) or not value or value!=reported[0] for value in reported)):
+                raise TradeError(identity_error)
+            expected['portfolioId']=reported[0]
     if any(key in node and (not value or node[key]!=value)
            for node in nodes for key,value in expected.items()):
         raise TradeError(identity_error)

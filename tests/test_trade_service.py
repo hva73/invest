@@ -384,6 +384,25 @@ class Trading(unittest.TestCase):
   self.intent_result=valid
   self.assertEqual(trade.check(app.connect,1,pid,self.factory)['proposal']['response'],valid)
 
+ def test_first_collection_sell_readback_can_bind_historical_depot(self):
+  request=dict(self.request,portfolio_id=self.child,kind='collection_sell',size='25')
+  with patch('trade_service.candidate',return_value={'signal':'SÆLG'}):
+   pid=self.send(self.estimate(request))['id']
+  with app.connect() as c:
+   c.execute("UPDATE portfolios SET parent_external_id='portfolios:other-root' WHERE id=?",(self.child,))
+  prior=dict(trade.get(app.connect,1,pid))
+  valid={'orderIntentId':'synthetic-intent','collectionId':'child','portfolioId':'root','status':'ACCEPTED'}
+  for reply in (dict(valid,collectionId='other'),{k:v for k,v in valid.items() if k!='collectionId'},dict(valid,orderIntents=[{'orderIntentId':'synthetic-intent','portfolioId':'conflict'}])):
+   self.intent_result=reply
+   with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+    trade.check(app.connect,1,pid,self.factory)
+   self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+  self.intent_result=valid
+  self.assertEqual(trade.check(app.connect,1,pid,self.factory)['proposal']['response'],valid)
+  self.intent_result=dict(valid,portfolioId='other-root')
+  with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+   trade.check(app.connect,1,pid,self.factory)
+
  def test_isolation_confirmation_and_expiry(self):
   q=self.estimate()
   with self.assertRaises(trade.TradeError):trade.send(app.connect,2,{'id':q['id'],'confirm':True,'review_token':q['review_token']},self.factory)

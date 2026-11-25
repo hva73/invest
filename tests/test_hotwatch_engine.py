@@ -21,6 +21,13 @@ def tick(at,index=0,price='100',held=False):
 def good_metrics():return {'sample_count':40,'price':'100','return_1_pct':'.1','return_3_pct':'.5','acceleration_pct_s2':'.01','relative_volume':'3','spread_pct':'.1','volatility_pct':'.3','breakout':True,'breakdown':False,'trend_up':True,'rsi':'60','macd_histogram':'.1','distance_high_pct':'0'}
 
 class HotWatch(unittest.TestCase):
+ def test_collection_status_identity_when_send_omits_depot(self):
+  # Run the actual isolated trade regression in the existing motor CI suite.
+  from test_trade_service import Trading
+  fixture=Trading('test_first_collection_sell_readback_can_bind_historical_depot')
+  result=fixture.run()
+  self.assertTrue(result.wasSuccessful(),str(result.errors+result.failures))
+
  def test_holding_origin_refresh_checks_signal_proposal_without_attributing_fill(self):
   import hotwatch_service,portfolios,trade_service
   payload={'portfolioId':'root','orders':[{'assetId':'synthetic-MERC','side':'BUY'}]}
