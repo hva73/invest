@@ -104,6 +104,37 @@ class ParallelReviewTests(unittest.TestCase):
             self.assertEqual(results["268:4"],"draft_pr")
             self.assertFalse(d.can_resume_delivery(root,work,{"268:4":"review_required"}))
 
+    def test_owner_reset_recovers_local_only_delivery_without_erasing_reservation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            row=dict(self.row(268,"motor","codex/escape-development","hotwatch_engine.py"),generation=4,local_review=True,follow_base=True)
+            key="268-4"
+            previous={"row":dict(row,local_review=False),"delivery_retry":True,"recovered":True}
+            d.save(d.task_record(root,row),previous)
+            (root/("issue-"+key)).mkdir()
+            (root/("issue-"+key+".patch")).write_bytes(b"preserved patch")
+            (root/("task-"+key+".txt")).write_text(row["task"])
+            results={"268:4":"review_required"}
+            self.assertFalse(d.can_resume_delivery(root,row,results))
+            with patch.object(d.controller_coordinator,"inspect_repair_workspace",return_value=("controller/local-268-123",row["base_sha"])),patch.object(d.controller_publish,"git",return_value=b"preserved patch"),patch.object(d.controller_coordinator,"gh",return_value=[]),patch.object(d.controller_coordinator,"branch_head",return_value=row["base_sha"]):
+                self.assertTrue(d.authorize_preserved_delivery(root,root,row,results))
+                self.assertTrue(d.can_resume_delivery(root,row,results))
+                self.assertEqual(d.load(d.task_record(root,row).with_suffix(".team-reset-history.json"),{}),previous)
+                self.assertEqual(results,{"268:4":"review_required"})
+                d.save(d.task_record(root,row),{"row":row,"delivery_retry":True})
+                with self.assertRaises(ValueError):
+                    d.authorize_preserved_delivery(root,root,row,results)
+
+    def test_owner_reset_refuses_mismatched_local_delivery_scope(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            row=dict(self.row(268,"motor","codex/escape-development","hotwatch_engine.py"),generation=4,local_review=True)
+            previous={"row":dict(row,task="another approved task"),"delivery_retry":True}
+            d.save(d.task_record(root,row),previous)
+            with self.assertRaises(ValueError):
+                d.authorize_preserved_delivery(root,root,row,{"268:4":"review_required"})
+            self.assertEqual(d.load(d.task_record(root,row),{}),previous)
+
     def test_two_developer_repairs_use_development_slots_not_coordinator(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);q=root/"queue.json"
