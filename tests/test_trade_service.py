@@ -349,6 +349,41 @@ class Trading(unittest.TestCase):
   self.assertEqual(checked['status'],'sent')
   self.assertEqual(checked['report_id'],proposal['report_id'])
   self.assertEqual(len(self.writes()),1)
+ def test_check_validates_nested_order_identity_before_replacing_evidence(self):
+  estimated=self.estimate()
+  item={**estimated['payload']['orders'][0],'orderIntentId':'synthetic-intent','orderId':'original-order'}
+  self.write_result={'orderIntents':[item]}
+  pid=self.send(estimated)['id'];prior=dict(trade.get(app.connect,1,pid))
+  valid={'orderIntentId':'synthetic-intent','status':'ACCEPTED','orderIntents':[item]}
+  for conflict in ({'orderIntentId':'other-intent'},{'assetId':'other-asset'},
+                   {'portfolioId':'other-depot'},{'orderId':'other-order'},{'orderIntentId':None}):
+   with self.subTest(conflict=conflict):
+    self.intent_result=dict(valid,orderIntents=[dict(item,**conflict)])
+    with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+     trade.check(app.connect,1,pid,self.factory)
+    self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+  self.intent_result=valid
+  self.assertEqual(trade.check(app.connect,1,pid,self.factory)['proposal']['response'],valid)
+
+ def test_check_collection_sell_uses_historical_depot_after_reparenting(self):
+  request=dict(self.request,portfolio_id=self.child,kind='collection_sell',size='25')
+  with patch('trade_service.candidate',return_value={'signal':'SÆLG'}):
+   estimated=self.estimate(request)
+   self.write_result.update(portfolioId='root',collectionId='child',status='PENDING')
+   pid=self.send(estimated)['id']
+  with app.connect() as c:
+   c.execute("UPDATE portfolios SET parent_external_id='portfolios:new-root' WHERE id=?",(self.child,))
+  prior=dict(trade.get(app.connect,1,pid))
+  valid=dict(self.write_result,status='ACCEPTED')
+  for reply in (dict(valid,portfolioId='new-root'),{'orderIntentId':'synthetic-intent','status':'ACCEPTED'}):
+   with self.subTest(reply=reply):
+    self.intent_result=reply
+    with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+     trade.check(app.connect,1,pid,self.factory)
+    self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+  self.intent_result=valid
+  self.assertEqual(trade.check(app.connect,1,pid,self.factory)['proposal']['response'],valid)
+
  def test_isolation_confirmation_and_expiry(self):
   q=self.estimate()
   with self.assertRaises(trade.TradeError):trade.send(app.connect,2,{'id':q['id'],'confirm':True,'review_token':q['review_token']},self.factory)

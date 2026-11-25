@@ -423,27 +423,46 @@ def check(connect,user_id,pid,factory=None):
         raise TradeError(identity_error)
     payload=proposal['payload']
     expected={key:payload.get(key) for key in ('portfolioId','collectionId')}
-    if 'portfolioId' in raw and not expected['portfolioId']:
-        with connect() as c:
-            portfolio=c.execute("SELECT kind,external_id,parent_external_id FROM portfolios WHERE id=? AND user_id=? AND source='pluto'",
-                                (row['portfolio_id'],user_id)).fetchone()
-        if not portfolio:
+    nodes=[raw]
+    if 'orderIntents' in raw:
+        items=raw['orderIntents']
+        if (not isinstance(items,list) or len(items)!=1 or not isinstance(items[0],dict)
+                or items[0].get('orderIntentId')!=reference):
             raise TradeError(identity_error)
-        external_id=portfolio['parent_external_id'] if portfolio['kind']=='collection' else portfolio['external_id']
-        expected['portfolioId']=(external_id or '').partition(':')[2]
+        nodes.append(items[0])
+
     orders=payload.get('orders') or []
     if len(orders)==1:
         expected.update({key:orders[0].get(key) for key in ('assetId','side','orderType','timeInForce')})
-    if any(key in raw and (not value or raw[key]!=value) for key,value in expected.items()):
-        raise TradeError(identity_error)
+
     previous=proposal['response']
-    # A batch proposal can carry the prior identity on its one matched intent.
-    if isinstance(previous,dict) and previous.get('orderIntentId')!=reference and intent_reference(previous,payload)==reference:
-        previous=previous['orderIntents'][0]
-    if isinstance(previous,dict) and previous.get('orderIntentId')==reference:
-        order_id=previous.get('orderId')
-        if isinstance(order_id,str) and order_id and raw.get('orderId')!=order_id:
-            raise TradeError(identity_error)
+    prior_nodes=[]
+    if intent_reference(previous,payload)==reference:
+        prior_nodes.append(previous)
+        items=previous.get('orderIntents')
+        if isinstance(items,list) and len(items)==1 and isinstance(items[0],dict) and items[0].get('orderIntentId')==reference:
+            prior_nodes.append(items[0])
+
+    # Collection sells carry no depot in their request. Only historical provider
+    # evidence can bind one, because the collection may have moved since send.
+    required={}
+    for key in ('portfolioId','orderId'):
+        if key=='portfolioId' and expected[key]:
+            continue
+        values=[node[key] for node in prior_nodes if isinstance(node.get(key),str) and node[key]]
+        if values:
+            if any(value!=values[0] for value in values):
+                raise TradeError(identity_error)
+            expected[key]=required[key]=values[0]
+
+    if any(key in node and (not value or node[key]!=value)
+           for node in nodes for key,value in expected.items()):
+        raise TradeError(identity_error)
+    if any(not any(node.get(key)==value for node in nodes) for key,value in required.items()):
+        raise TradeError(identity_error)
+    order_ids=[node['orderId'] for node in nodes if 'orderId' in node]
+    if order_ids and any(not isinstance(value,str) or not value or value!=order_ids[0] for value in order_ids):
+        raise TradeError(identity_error)
     # Do not replace evidence updated while the provider lookup was in flight.
     # Preserve exact provider status separately. Acceptance is never a fill.
     with connect() as c:
