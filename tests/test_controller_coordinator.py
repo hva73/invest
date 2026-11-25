@@ -198,3 +198,39 @@ class LocalCoordinatorTests(unittest.TestCase):
         self.assertEqual(c.repair_attempt(self.root,501,new),2)
         c.save(self.root/"coordinator-repair-501-2.json",{"state":"held","head":new})
         self.assertIsNone(c.repair_attempt(self.root,501,"f"*40))
+
+    def test_verify_pr_uses_exact_branch_and_diff_when_pr_base_metadata_lags(self):
+        row=self.row;sha="d"*40
+        f={"filename":"trading_engine_v2.py","status":"modified","sha":"e"*40}
+        p={"head":{"sha":sha,"ref":"controller/local-273-123","repo":{"full_name":c.REPO}},
+           "base":{"sha":"b"*40,"ref":row["base_branch"],"repo":{"full_name":c.REPO}},
+           "state":"open","changed_files":1}
+        comparison={"merge_base_commit":{"sha":row["base_sha"]},"behind_by":0,"files":[f]}
+        with patch.object(c,"branch_head",return_value=row["base_sha"]),patch.object(c,"gh",side_effect=[p,[f],comparison]):
+            self.assertEqual(c.verify_pr(row,501),(p,[f],"open"))
+        with patch.object(c,"branch_head",return_value=row["base_sha"]),patch.object(c,"gh",side_effect=[p,[f],dict(comparison,files=[dict(f,sha="f"*40)])]):
+            with self.assertRaises(c.Hold):
+                c.verify_pr(row,501)
+
+    def test_disjoint_rebase_does_not_require_fresh_pr_base_metadata(self):
+        row=dict(self.row,follow_base=True);old=row["base_sha"];latest="b"*40;sha="d"*40;new="e"*40
+        f={"filename":"trading_engine_v2.py","status":"modified","sha":"f"*40}
+        p={"head":{"sha":sha,"ref":"controller/local-273-123","repo":{"full_name":c.REPO}},
+           "base":{"sha":old,"ref":row["base_branch"],"repo":{"full_name":c.REPO}},
+           "state":"open","changed_files":1}
+        fresh=dict(p,head=dict(p["head"],sha=new))
+        compare=lambda base,files:{"merge_base_commit":{"sha":base},"behind_by":0,"files":files}
+        calls=[p,compare(old,[{"filename":"unrelated.py"}]),[f],compare(old,[f]),
+               {"tree":[{"path":f["filename"],"type":"blob","mode":"100644","sha":f["sha"]}]},
+               {"sha":"1"*40},{"sha":new},compare(latest,[f]),p,{"object":{"sha":new}},fresh]
+        with patch.object(c,"branch_head",return_value=latest),patch.object(c,"tree",return_value="2"*40),patch.object(c,"gh",side_effect=calls) as api,patch.object(c,"replace_queue_row",side_effect=lambda old,new:new):
+            self.assertEqual(c.rebase_disjoint(self.root,row,501)["base_sha"],latest)
+            self.assertFalse(next(call.args[2]["force"] for call in api.call_args_list if len(call.args)>1 and call.args[1]=="PATCH"))
+
+    def test_exact_accepted_review_is_reused_without_another_model(self):
+        sha="d"*40;run=7;p={"head":{"sha":sha}}
+        decision={"verdict":"accept","reason":"Verified scoped change"}
+        c.save(self.root/"coordinator-accepted-501.json",dict(c.review_identity(self.row,sha,run),decision=decision))
+        with patch.object(c,"verify_pr",return_value=(p,[],"open")),patch.object(c,"verified_ci",return_value=run),patch.object(c,"independent_review") as model,patch.object(c,"integrate",return_value="Accepted") as merge:
+            self.assertTrue(c.run_once(self.root,self.root,[self.row],self.results,reserve_review=lambda:False))
+            model.assert_not_called();merge.assert_called_once()
