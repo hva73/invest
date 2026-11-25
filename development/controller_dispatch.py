@@ -97,6 +97,51 @@ def can_resume_delivery(root,row,results):
     except (OSError,ValueError,TypeError,AttributeError):
         return False
 
+def authorize_preserved_delivery(root,repo_dir,row,results):
+    """One owner-reset retry of a finished local-only delivery, under dispatcher.lock.
+    Do not clear unknown reservations, publish code, or change the approved task.
+    """
+    k=task_key(row).replace(":","-")
+    if results.get(task_key(row))!="review_required" or row["status"]!="ready" or row.get("local_review") is not True or row.get("base_branch") not in controller_coordinator.TARGETS or row["role"]=="release":
+        raise ValueError("Ingen afsluttet lokal leverance")
+    if can_resume_delivery(root,row,results):
+        return False
+    reservation=task_record(root,row)
+    archive=reservation.with_suffix(".team-reset-history.json")
+    folder=root/("issue-"+k)
+    patchfile=root/("issue-"+k+".patch")
+    receipt=load(root/("receipts/"+k+".json"),{})
+    old=load(reservation,{})
+    prior=old.get("row")
+    # Only a scheduling/permission flag may have been added since the original
+    # approved task; identity, base, role, dependencies and code scope stay exact.
+    if not isinstance(prior,dict) or any(prior.get(field)!=row.get(field) for field in ("issue","generation","role","base_branch","base_sha","paths","task","dependencies")):
+        raise ValueError("Tidligere reservation matcher ikke godkendt opgave")
+    if archive.exists() or reservation.is_symlink() or patchfile.is_symlink() or not patchfile.is_file() or (root/("issue-"+k+".pr")).exists():
+        raise ValueError("Lokal leverance allerede afstemt eller mulig publicering")
+    if receipt and (receipt.get("status")!="review_required" or receipt.get("issue")!=row["issue"] or receipt.get("generation")!=row.get("generation",1) or receipt.get("pr") is not None):
+        raise ValueError("Leveringskvittering matcher ikke lokal opgave")
+    checkpoint=load(root/("checkpoint-"+k+".json"),{})
+    if checkpoint.get("provider_limit"):
+        raise ValueError("Afventer faktisk provider-kapacitet")
+    taskfile=root/("task-"+k+".txt")
+    if not taskfile.is_file() or taskfile.is_symlink() or taskfile.read_text()!=row["task"]:
+        raise ValueError("Bevaret opgavetekst matcher ikke")
+    branch,head=controller_coordinator.inspect_repair_workspace(repo_dir,row,row["base_sha"],folder)
+    if head!=row["base_sha"] or controller_publish.git(folder,"diff","--binary","HEAD")!=patchfile.read_bytes():
+        raise ValueError("Bevaret kode matcher ikke lokal patch")
+    # An existing remote branch is evidence of possible earlier publication.
+    # In that case reconcile the PR instead of creating another one.
+    remote=controller_coordinator.gh(controller_coordinator.PREFIX+"/git/matching-refs/heads/"+branch)
+    if not isinstance(remote,list) or any(x.get("ref")=="refs/heads/"+branch for x in remote):
+        raise ValueError("Eksisterende remote leverance kræver afstemning")
+    latest=controller_coordinator.branch_head(row["base_branch"])
+    if latest!=row["base_sha"] and (row.get("follow_base") is not True or not controller_coordinator.disjoint_base_changes(controller_coordinator.gh(controller_coordinator.PREFIX+"/compare/"+row["base_sha"]+"..."+latest),row["base_sha"],row["paths"])):
+        raise ValueError("Ny basis overlapper bevaret scope")
+    controller_coordinator.save(archive,old)
+    controller_coordinator.save(reservation,dict(old,row=row,delivery_retry=False))
+    return True
+
 def run_task(root, script, row, allowance, publish=False):
     issue = row["issue"]
     generation = row.get("generation", 1)
