@@ -296,15 +296,64 @@ const run = async () => {
         check(modal.innerHTML === before && !modal.dataset.watchId, 'Holding poll wrote to the dialog during logout');
     }
 
+    for (const interrupt of ['close', 'logout', 'replace']) {
+        openHolding();
+        const modal = byId('engine-dialog');
+        const linking = poll();
+        take('state', 'alpha').resolve(holding({session: {watch_id: 'alpha-linked'}}));
+        await flush();
+        const linkedState = take('state', 'alpha');
+        if (interrupt === 'close') modal.close();
+        if (interrupt === 'logout') epoch++;
+        if (interrupt === 'replace') {
+            EngineUI.openHoldingStatus({key: 'other', ticker: 'OTHER', label: 'Other holding'});
+        }
+        const before = modal.innerHTML;
+        linkedState.resolve(account('alpha'));
+        await linking;
+        check(modal.open === (interrupt !== 'close') && modal.innerHTML === before && !modal.dataset.watchId,
+            'Delayed linked detail rewrote holding after ' + interrupt);
+    }
+
     switchAccount('alpha');
     await flush();
-    const more = EngineUI.click(button(history));
-    take('&before=', 'alpha').resolve({sessions: [session('alpha-older', 'COMPLETED')]});
+    for (const interrupt of ['mode', 'epoch']) {
+        const stalePage = EngineUI.click(button(history));
+        const stalePageRequest = take('&before=alpha-cursor', 'alpha');
+        if (interrupt === 'mode') EngineUI.mount(true);
+        if (interrupt === 'epoch') epoch++;
+        EngineUI.mount(false);
+        await flush();
+        stalePageRequest.resolve({sessions: [session('alpha-stale-page', 'COMPLETED')]});
+        await stalePage;
+        check(!button('[data-engine-detail="alpha-stale-page"]') && button(history),
+            'Stale history page survived a change of ' + interrupt);
+    }
+    const originalButton = button(history);
+    const more = EngineUI.click(originalButton);
+    const pageRequest = take('&before=alpha-cursor', 'alpha');
+    await poll();
+    assert(!originalButton.isConnected && button(history), 'Regular poll did not replace history button');
+    const concurrent = EngineUI.click(button(history));
+    const duplicate = pending.findIndex(request => request.path.includes('&before='));
+    check(duplicate < 0, 'Repaint started duplicate history request');
+    if (duplicate >= 0) pending.splice(duplicate, 1)[0].resolve({sessions: []});
+    await concurrent;
+    pageRequest.resolve({sessions: [session('alpha-older', 'COMPLETED')], next_cursor: 'older-cursor'});
     await more;
     const older = '[data-engine-detail="alpha-older"]';
-    EngineUI.mount(false);
-    await flush();
-    assert(button(older), 'Same-session refresh lost paginated history');
+    check(button(older) && document.querySelector('[data-engine-group="history"]').open,
+        'Same-session repaint dropped the pending history page');
+    await poll();
+    check(button(older), 'Same-session refresh lost paginated history');
+    const lastPage = EngineUI.click(button(history));
+    const lastRequest = take('&before=', 'alpha');
+    check(lastRequest.path.endsWith('&before=older-cursor'), 'Refresh reset the advanced history cursor');
+    lastRequest.resolve({sessions: [], next_cursor: null});
+    await lastPage;
+    await poll();
+    check(!button(history), 'Refresh restored pagination after the last page');
+
     omitHistory = true;
     switchAccount(null);
     switchAccount('alpha');
