@@ -368,7 +368,7 @@ def _create_in_transaction(c,uid,data,now,holding=False,manual=False):
    if proposed and (proposed['strategy_id']!=data['strategy_id'] or proposed['version']!=data['strategy_version']):raise EngineError('strategy_proposal_mismatch',409)
   if data.get('watch_mode','both')!='exit':
    from intel_workflows import candidate_currentness
-   currentness=candidate_currentness(c,uid,data['is_test'],data['candidate_id'],now,report_fallback=data.get('purpose')=='automatic discovery')
+   currentness=candidate_currentness(c,uid,data['is_test'],data['candidate_id'],now,report_fallback=data.get('purpose')=='automatic discovery',report_ttl_s=_report_only_test_ttl(data['is_test'],data))
    if currentness['status']!='CURRENT' and not (data.get('purpose')=='automatic discovery' and currentness['status']=='REPORT_ONLY'):raise EngineError('candidate_not_current',409)
    if currentness['status']=='REPORT_ONLY' and (now-stamp(currentness['report_seen_at'])).total_seconds()>86400:raise EngineError('candidate_not_current',409)
    reset=c.execute('SELECT reset_at FROM hw_discovery_resets WHERE user_id=?',(uid,)).fetchone() if not data['is_test'] and data.get('purpose')=='automatic discovery' else None
@@ -658,11 +658,11 @@ def view(c,row,now=None):
  candidate_review=None
  if request.get('report_id')!='manual-pluto' and request.get('watch_mode','both')!='exit' and row['status'] in ('CREATED','VALIDATING','ACTIVE','DEGRADED','PAUSED'):
   from intel_workflows import candidate_currentness
-  candidate_review=candidate_currentness(c,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery')
+  candidate_review=candidate_currentness(c,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery',report_ttl_s=_report_only_test_ttl(row['is_test'],request))
   # Candidate assessment gates entry; it must not hide an independent exit.
   if effective not in ('SELL','REDUCE') and row['status']!='PAUSED':
    if candidate_review['status']=='REVIEW_DUE':display_status='REVURDERING FORFALDET'
-   if candidate_review['status']=='REPORT_ONLY':display_status='MANGLER VURDERING'
+   if candidate_review['status'] in ('REPORT_ONLY','REPORT_ONLY_EXPIRED'):display_status='MANGLER VURDERING'
  provisional=c.execute('SELECT symbol,evidence FROM hw_provisional_feed_links WHERE watch_row_id=?',(row['id'],)).fetchone()
  if provisional and request.get('provider')=='pluto':
   try:
@@ -779,9 +779,24 @@ def sessions(connect,uid,mode=False,after=0,limit=50):
   rows=c.execute('SELECT * FROM hw_sessions WHERE user_id=? AND is_test=? AND id>? ORDER BY id LIMIT ?',(uid,int(mode),after,limit+1)).fetchall();control=c.execute('SELECT killed,reason,changed FROM hw_control WHERE user_id=?',(uid,)).fetchone();beat=c.execute('SELECT updated,status FROM hw_heartbeat WHERE id=1').fetchone();supervisor=c.execute('SELECT updated,status,reason,attempts FROM hw_supervisor_status WHERE id=1').fetchone()
   return {'sessions':[view(c,r) for r in rows[:limit]],'next_cursor':rows[limit-1]['id'] if len(rows)>limit else None,'is_test':mode,'operator_kill_switch':bool(c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]),'kill_switch':dict(control) if control else {'killed':0,'reason':'','changed':None},'worker':dict(beat) if beat else None,'supervisor':dict(supervisor) if supervisor else None,'capacity':capacity(),'phase':'1-2','deferred':['backtest','shadow','qualified strategy activation/rollback']}
 
-def _can_retire_overdue_entry(c,row,state,now):
+def _test_discovery_entry(is_test,request):
+ return (bool(is_test) and request.get('purpose')=='automatic discovery'
+         and request.get('watch_mode')=='entry' and request.get('report_id')!='manual-pluto')
+
+def _test_interval(name,maximum):
+ try:value=int(os.environ.get(name,'0'))
+ except ValueError:return None
+ return value if 0<value<=maximum else None
+
+def _report_only_test_ttl(is_test,request):
+ # Proposed simulation policy: 3600 seconds from the first discovery report.
+ # An unset or invalid setting leaves the existing lifecycle policy in place.
+ if _test_discovery_entry(is_test,request):
+  return _test_interval('ESCAPE_HW_TEST_REPORT_ONLY_TTL_S',86400)
+
+def _can_retire_overdue_entry(c,row,state,now,lease=None):
  """Preserve leased watches and local evidence of positions or open orders."""
- if row['lease_until']>now.timestamp() or state.get('pending') or state.get('signal') in ('BUY','SELL','REDUCE'):return False
+ if (row['lease_until']>now.timestamp() and (not lease or row['lease_owner']!=lease)) or state.get('pending') or state.get('signal') in ('BUY','SELL','REDUCE'):return False
  context=c.execute('SELECT payload FROM hw_context_events WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
  sample=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
  contexts=([json.loads(context['payload'])] if context else [])+([json.loads(sample['payload'])['context']] if sample else [])
@@ -795,10 +810,14 @@ def reconcile_candidates(connect,now=None,connection=None):
  from intel_workflows import candidate_currentness
  now=now or utc();changed=0
  retire_overdue=os.environ.get('ESCAPE_HW_TEST_RETIRE_OVERDUE_ENTRY')=='1'
- def explicit_retirement(row,req,current):
-  return (retire_overdue and row['is_test']==1 and row['purpose']=='automatic discovery'
-          and req.get('purpose')=='automatic discovery' and req.get('watch_mode')=='entry'
-          and current.get('explicit_deadline_due'))
+ def retirement_reason(row,req,current):
+  if row['purpose']!='automatic discovery' or not _test_discovery_entry(row['is_test'],req):return None
+  if retire_overdue and current.get('explicit_deadline_due'):return 'Eksplicit vurderingsfrist udløbet'
+  if row['status']!='PAUSED' and current['status']=='REPORT_ONLY_EXPIRED':return current['reason']
+ def reassessed_dormant(row,state,current):
+  return (row['status']=='DEGRADED' and row['lease_until']<=now.timestamp()
+          and state.get('test_no_data_since') and current['status']=='CURRENT'
+          and stamp(current['assessed_at'])>stamp(state['test_no_data_since']))
  if connection is None:
   # The worker runs this repeatedly. Avoid reserving the single SQLite writer
   # when all sessions are already current; re-evaluate after acquiring it.
@@ -810,12 +829,12 @@ def reconcile_candidates(connect,now=None,connection=None):
     if row['status']=='DEGRADED' and row['last_error']=='sample_id_conflict' and row['lease_until']<=now.timestamp() and row['next_due']>now.timestamp()+effective_poll_interval(preflight,req):needed=True;break
     if req.get('end_at') and stamp(req['end_at'])<=now:needed=True;break
     if mode=='exit' or req.get('purpose')=='automatic holding watch' or req.get('report_id')=='manual-pluto':continue
-    current=candidate_currentness(preflight,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=req.get('purpose')=='automatic discovery')
+    current=candidate_currentness(preflight,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=req.get('purpose')=='automatic discovery',report_ttl_s=_report_only_test_ttl(row['is_test'],req))
     state=json.loads(row['state'])
-    if explicit_retirement(row,req,current):
+    if retirement_reason(row,req,current):
      if _can_retire_overdue_entry(preflight,row,state,now):needed=True;break
      continue
-    if current['status']=='COLD' or state.get('candidate_cold'):needed=True;break
+    if current['status']=='COLD' or state.get('candidate_cold') or reassessed_dormant(row,state,current):needed=True;break
    if not needed:return 0
  with (nullcontext(connection) if connection is not None else connect()) as c:
   if connection is None:c.execute('BEGIN IMMEDIATE')
@@ -830,18 +849,22 @@ def reconcile_candidates(connect,now=None,connection=None):
     event(c,row,'WATCH_EXPIRED',now,'Session deadline reached');changed+=1
     continue
    if mode=='exit' or req.get('purpose')=='automatic holding watch' or req.get('report_id')=='manual-pluto':continue
-   current=candidate_currentness(c,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=req.get('purpose')=='automatic discovery')
+   current=candidate_currentness(c,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=req.get('purpose')=='automatic discovery',report_ttl_s=_report_only_test_ttl(row['is_test'],req))
    state=json.loads(row['state'])
-   retire_explicit=explicit_retirement(row,req,current)
-   if retire_explicit and not _can_retire_overdue_entry(c,row,state,now):continue
-   if current['status']!='COLD' and not retire_explicit:
-    if state.pop('candidate_cold',None):
+   retire_reason=retirement_reason(row,req,current)
+   if retire_reason and not _can_retire_overdue_entry(c,row,state,now):continue
+   if current['status']!='COLD' and not retire_reason:
+    if reassessed_dormant(row,state,current):
+     state.pop('test_no_data_since')
+     c.execute('UPDATE hw_sessions SET state=?,next_due=min(next_due,?),updated=?,revision=revision+1 WHERE id=?',(canonical(state),now.timestamp(),now.isoformat(),row['id']))
+     event(c,row,'CANDIDATE_REASSESSED',now,'Ny gyldig vurdering efter pause i datatilgang');changed+=1
+    elif state.pop('candidate_cold',None):
      c.execute('UPDATE hw_sessions SET state=?,updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?',(canonical(state),now.isoformat(),row['id']))
      event(c,row,'CANDIDATE_REASSESSED',now,'Ny gyldig vurdering');changed+=1
     continue
    if mode=='entry':
     c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']))
-    event(c,row,'CANDIDATE_WATCH_EXPIRED',now,'Eksplicit vurderingsfrist udløbet' if retire_explicit else current['reason']);changed+=1
+    event(c,row,'CANDIDATE_WATCH_EXPIRED',now,retire_reason or current['reason']);changed+=1
    else:
     # A legacy combined watch also carries exit protection. Split it in the
     # same transaction, retaining its scope and pause state before closing it.
@@ -920,7 +943,7 @@ def sync(connect,uid,mode=False,after=0,limit=50,sessions_after=0,session_limit=
     review=None
     if source=='candidate':
      from intel_workflows import candidate_currentness
-     review=candidate_currentness(c,uid,mode,r['candidate_id'],now,report_fallback=purpose=='automatic discovery')
+     review=candidate_currentness(c,uid,mode,r['candidate_id'],now,report_fallback=purpose=='automatic discovery',report_ttl_s=_report_only_test_ttl(mode,req))
     detail=view(c,r,now);data_status=detail['data_status']
     if not mode and purpose in ('automatic discovery','automatic holding watch') and req.get('provider')=='eodhd' and not data_status['instrument_match_verified']:unverified=True
     calculation=detail.get('latest_calculation') or {}
@@ -968,13 +991,15 @@ def control(connect,uid,wid,mode,action,now=None):
    if request['end_at'] and stamp(request['end_at'])<=now:raise EngineError('watch_expired',409)
    if request.get('watch_mode','both')=='entry' and request.get('report_id')!='manual-pluto':
     from intel_workflows import candidate_currentness
-    if candidate_currentness(c,uid,mode,row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery')['status'] not in ('CURRENT','REVIEW_DUE','REPORT_ONLY'):raise EngineError('candidate_not_current',409)
+    if candidate_currentness(c,uid,mode,row['candidate_id'],now,report_fallback=request.get('purpose')=='automatic discovery',report_ttl_s=_report_only_test_ttl(mode,request))['status'] not in ('CURRENT','REVIEW_DUE','REPORT_ONLY'):raise EngineError('candidate_not_current',409)
    new='VALIDATING'
   elif action=='stop':new='COMPLETED'
   else:raise EngineError('unknown_action')
   if status==new or action=='resume' and status in ['VALIDATING','ACTIVE']:return {'ok':True,'duplicate':True,'session':view(c,row,now)}
   if status in ['EXPIRED','COMPLETED','ERROR']:raise EngineError('watch_is_terminal',409)
-  c.execute('UPDATE hw_sessions SET status=?,updated=?,revision=revision+1,lease_owner=NULL,lease_until=0,next_due=?,state=? WHERE id=?',(new,now.isoformat(),now.timestamp(),canonical({**json.loads(row['state']),'signal':'PAUSE' if action=='pause' else 'NO_DATA','pending':None,'confirmations':0}),row['id']))
+  state=json.loads(row['state']);state.pop('test_no_data_since',None)
+  state.update(signal='PAUSE' if action=='pause' else 'NO_DATA',pending=None,confirmations=0)
+  c.execute('UPDATE hw_sessions SET status=?,updated=?,revision=revision+1,lease_owner=NULL,lease_until=0,next_due=?,state=? WHERE id=?',(new,now.isoformat(),now.timestamp(),canonical(state),row['id']))
   event(c,row,{'pause':'WATCH_PAUSED','resume':'WATCH_RESUMED','stop':'WATCH_COMPLETED'}[action],now,action)
   return {'ok':True,'duplicate':False,'session':view(c,row_for(c,uid,wid,mode),now)}
 
@@ -1238,6 +1263,7 @@ def ingest(connect,uid,wid,mode,sample,now=None,lease=None,include_session=True)
   import hotwatch_buy_plan
   risk_sample,risk,buy_plan=hotwatch_buy_plan.apply(c,row,request,sample,risk,now)
   result,nextstate=calculate(risk_sample,metrics,strategy_data,risk,state,now,new_market_event=new_market_event)
+  nextstate.pop('test_no_data_since',None)
   if pilot is not None:
    from hotwatch_strategy import early_watch
    if early_watch(strategy_data,metrics):pilot['watch_state']='EARLY_WATCH'
@@ -1384,6 +1410,9 @@ def observe_context(connect,uid,wid,mode,context,now=None,lease=None,broker_sour
   candidate_lifecycle.observe_pluto(c,uid,mode,request['candidate_id'],context,now.isoformat(),wid,cycle,'NO_DATA',synthetic=request['provider']=='synthetic')
   material=lambda value:{k:v for k,v in value.items() if k!='as_of'}
   state=json.loads(row['state'])
+  if state.get('test_no_data_since') and (context['position']=='held' or context['orders']):
+   state.pop('test_no_data_since')
+   c.execute('UPDATE hw_sessions SET state=?,next_due=min(next_due,?) WHERE id=?',(canonical(state),now.timestamp(),row['id']))
   from hotwatch_strategy import exit_context_key
   ids=request.get('portfolio_ids',[]);scope=checksum({'asset_id':request['asset_id'],'portfolio_id':ids[0],'watch_id':wid,'trade_cycle_id':request.get('trade_cycle_id')}) if len(ids)==1 else None
   latest=c.execute('SELECT payload FROM hw_samples WHERE watch_row_id=? ORDER BY id DESC LIMIT 1',(row['id'],)).fetchone()
@@ -1416,7 +1445,7 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   if request['end_at'] and stamp(request['end_at'])<=now:
    c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']));event(c,row,'WATCH_EXPIRED',now,'Session deadline reached');return
   if row['last_error']!=code:event(c,row,'DATA_STALE' if code=='DATA_STALE' else 'DATA_ERROR',now,code,severity='warning',data_time=row['last_data'])
-  failures=min(row['failures']+1,10);floor=provider_floor(request['provider']);interval=min(1800,max(floor,PROFILES[request['profile']])*2**min(failures-1,5));state.update(signal='NO_DATA',pending=None,confirmations=0)
+  failures=min(row['failures']+1,10);floor=provider_floor(request['provider']);interval=min(1800,max(floor,PROFILES[request['profile']])*2**min(failures-1,5))
   # A locally denied request collected no observation. Retry once the shared
   # minute budget renews instead of treating it as a completed scan and
   # postponing this session for an entire multi-minute polling cycle.
@@ -1438,11 +1467,27 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
   if code.startswith('PROCESSING_DATABASE_BUSY_'):interval=60
   if request['provider']=='eodhd' and code in ('EODHD_RATE_LIMIT','PROVIDER_RATE_BUDGET') and retry_after_s is not None:interval=max(1,retry_after_s)
   elif retry_after_s is not None:interval=max(interval,max(0,retry_after_s))
+  # Back off repeated missing observations in test entry watches only.
+  # The next verified sample follows the normal ingest and scheduling paths.
+  backoff=_test_interval('ESCAPE_HW_TEST_NO_DATA_BACKOFF_S',1800) if _test_discovery_entry(row['is_test'],request) else None
+  dormant_since=state.pop('test_no_data_since',None)
+  if (backoff and code in ('DATA_STALE','NO_INBOX_OBSERVATION') and row['last_error']==code
+      and (not lease or row['lease_until']>now.timestamp())
+      and _can_retire_overdue_entry(c,row,state,now,lease)):
+   from intel_workflows import candidate_currentness
+   current=candidate_currentness(c,uid,mode,row['candidate_id'],now,report_fallback=True,report_ttl_s=_report_only_test_ttl(mode,request))
+   deadlines=[stamp(value) for value in (request['end_at'],request['risk'].get('exit_deadline'),current['deadline'],current.get('report_eligibility_until')) if value]
+   remaining=min(((deadline-now).total_seconds() for deadline in deadlines),default=backoff)
+   deferred=min(backoff,remaining)
+   if deferred>interval:
+    state['test_no_data_since']=dormant_since or now.isoformat()
+    interval=deferred
+  state.update(signal='NO_DATA',pending=None,confirmations=0)
   state['scheduled_interval_s']=interval
   # Only stale-data scheduling uses the quiet-market baseline. Other errors
   # do not need a full shared-session budget lookup while holding the writer.
   baseline=effective_poll_interval(c,request,state.get('adaptive_profile',request['profile'])) if code=='DATA_STALE' else None
-  state['quiet_market_poll']=code=='DATA_STALE' and interval>baseline
+  state['quiet_market_poll']=code=='DATA_STALE' and 'test_no_data_since' not in state and interval>baseline
   state['quiet_baseline_s']=baseline if state['quiet_market_poll'] else None
   if row['last_error']!=code:
    previous=json.loads(row['strategy']);result={'signal':'NO_DATA','reason_codes':[code],'human_readable_explanation':code,'supporting_metrics':{'quote_age_s':(now-stamp(row['last_data'])).total_seconds() if row['last_data'] else None},'calculation_timestamp':now.isoformat(),'data_timestamp':row['last_data'],'strategy_id':previous['strategy_id'],'strategy_version':previous['version'],'strategy_checksum':checksum(previous),'confidence_score':0,'risk_level':'critical' if set(state.get('alert_codes',[]))&{'STOP_BREACHED','EXIT_DEADLINE'} else 'high','rules_score_note':'No valid current market input','critical_override':False}
