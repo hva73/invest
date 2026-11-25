@@ -223,7 +223,7 @@ def write_status(root, reason, active, waiting=(), review=(), coordinator_capabl
     except OSError as exc:
         print("STATUS_UNAVAILABLE:",type(exc).__name__,flush=True)
 
-def coordinate(root, repo_dir, rows, results, waiting, review):
+def coordinate(root, repo_dir, rows, results, waiting, review, reserve_review=lambda: True):
     stopped=threading.Event()
     def heartbeat():
         while not stopped.is_set():
@@ -232,7 +232,7 @@ def coordinate(root, repo_dir, rows, results, waiting, review):
     reporter=threading.Thread(target=heartbeat,daemon=True)
     reporter.start()
     try:
-        return controller_coordinator.run_once(root,repo_dir,rows,results)
+        return controller_coordinator.run_once(root,repo_dir,rows,results,reserve_review=reserve_review)
     finally:
         stopped.set(); reporter.join()
 
@@ -292,7 +292,12 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 waiting=[task_key(row) for row in rows if row["status"]=="ready"]
                 paused=provider_pause_active(root)
                 if capable and not active and not paused and controller_coordinator.due(root,rows_before_effective,results):
-                    if coordinate(root,script.parent.parent,rows_before_effective,results,waiting,review):
+                    def reserve_review():
+                        if not reserve(state,datetime.now(timezone.utc).date().isoformat(),a.daily_reservation,a.per_task):
+                            return False
+                        save(statefile,state)
+                        return True
+                    if coordinate(root,script.parent.parent,rows_before_effective,results,waiting,review,reserve_review):
                         continue
                     paused=provider_pause_active(root)
                 selected=[] if paused else plan(rows,max_parallel=a.parallel)

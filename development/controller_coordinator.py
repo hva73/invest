@@ -175,7 +175,7 @@ def verified_ci(sha, files):
 
 def parse_review(text):
     value=json.loads(text)
-    if not isinstance(value,dict) or set(value)!={"verdict","reason"} or value["verdict"] not in ("accept","hold") or not isinstance(value["reason"],str) or not 1<=len(value["reason"])<=800:
+    if not isinstance(value,dict) or set(value)!={"verdict","reason"} or value["verdict"] not in ("accept","hold") or not isinstance(value["reason"],str) or not 1<=len(value["reason"])<=800 or re.search(r"(?i)(github_pat_|gh[pousr]_|sk-[A-Za-z0-9]|BEGIN .*PRIVATE KEY|Bearer\s+[A-Za-z0-9])",value["reason"]):
         raise Hold("Review gav ikke en gyldig beslutning")
     return value
 
@@ -189,6 +189,9 @@ def independent_review(repo_dir, root, row, number, sha, run):
         actual=subprocess.check_output(["git","rev-parse","FETCH_HEAD"],cwd=repo_dir,text=True,timeout=10).strip()
         if actual!=sha:
             raise Hold("PR ændret før review")
+        raw=subprocess.check_output(["git","diff","--raw","--no-renames",row["base_sha"],sha],cwd=repo_dir,text=True,timeout=15)
+        if any(line.startswith(":") and any(mode in ("120000","160000") for mode in line[1:].split()[:2]) for line in raw.splitlines()):
+            raise Hold("Symlink eller submodule i review-scope")
         subprocess.run(["git","-c","core.hooksPath=/dev/null","worktree","add","--detach",str(folder),sha],cwd=repo_dir,check=True,timeout=60,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         try:
             prompt=("Independent ESCAPE code review, not implementation. Read the exact diff from "+row["base_sha"]+" to "+sha+" and relevant unchanged code. "
@@ -281,7 +284,7 @@ def due(root, rows, results, current_time=None):
             return True
     return False
 
-def run_once(root, repo_dir, rows, results, provider_pause=False):
+def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review=lambda: True):
     request=trigger(root)
     ident=request["id"] if request else secrets.token_hex(16)
     if provider_pause:
@@ -292,6 +295,7 @@ def run_once(root, repo_dir, rows, results, provider_pause=False):
     detail="Ingen reviewklar leverance; kvalificerede køopgaver starter automatisk."
     handled=False
     requests={}
+    outcomes={}
     try:
         requests=owner_requests(request["requests"]) if request else {}
         for row,number in candidates(root,rows,results):
@@ -321,6 +325,9 @@ def run_once(root, repo_dir, rows, results, provider_pause=False):
                     if run is None:
                         detail="PR #"+str(number)+": afventer faktisk CI"
                         continue
+                    if not reserve_review():
+                        detail="Review afventer den konfigurerede dagsgrænse"
+                        break
                     publish_status(root,ident,"running","Uafhængigt review af PR #"+str(number))
                     decision=independent_review(repo_dir,root,row,number,sha,run)
                     if decision["verdict"]=="provider_pause":
@@ -330,6 +337,8 @@ def run_once(root, repo_dir, rows, results, provider_pause=False):
                     if decision["verdict"]=="hold":
                         comment(number,"Lokal uafhængig review HOLD "+sha+": "+decision["reason"][:800])
                         raise Hold(decision["reason"])
+                    if (root/"STOP").exists():
+                        raise Hold("Controller stop anmodet; ingen integration")
                     detail="PR #"+str(number)+": "+integrate(row,number,p,files,run,decision,root)
                     entry.update(state="accepted",sha=sha)
                     handled=True
@@ -338,6 +347,7 @@ def run_once(root, repo_dir, rows, results, provider_pause=False):
                 entry.update(state="hold",detail=detail[:600])
             finally:
                 journal[str(number)]=entry
+                outcomes[key(row)]=detail
                 save(root/"coordinator-review.json",journal)
             if handled:
                 break
@@ -345,6 +355,8 @@ def run_once(root, repo_dir, rows, results, provider_pause=False):
             target=r["task"]
             if target=="all":
                 outcome=detail
+            elif target in outcomes:
+                outcome=outcomes[target]
             else:
                 target_row=next((x for x in rows if key(x)==target),None)
                 terminal=results.get(target)
