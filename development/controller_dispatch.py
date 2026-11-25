@@ -129,7 +129,7 @@ def run_task(root, script, row, allowance, publish=False):
             rc = subprocess.run([sys.executable, str(script), "--role", row["role"],
             "--issue", str(issue), "--task-file", str(taskfile), "--max-tokens",
             str(allowance), "--rounds", "3", "--minutes", "20", "--generation", str(generation),
-            "--allowed-paths-json", json.dumps(row["paths"]), "--progress-root", str(root), "--checkpoint", str(root / ("checkpoint-"+str(issue)+"-"+str(generation)+".json")), "--execute"],
+            "--allowed-paths-json", json.dumps(row["paths"]), "--progress-root", str(root), "--checkpoint", str(root / ("checkpoint-"+str(issue)+"-"+str(generation)+".json")), "--execute"]
             + (["--recover"] if resume else []),
             cwd=folder, stdout=out, stderr=subprocess.STDOUT).returncode
     finally:
