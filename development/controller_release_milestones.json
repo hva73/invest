@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-25T20:55:00Z",
+  "updated_at": "2026-11-25T20:57:00Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -282,17 +282,17 @@
       "id": "longterm",
       "phase": 2,
       "title": "Long-Term Watch",
-      "status": "pending",
+      "status": "in_progress",
       "issue": 12,
-      "evidence": "Første isolerede funktionelle #12:1 model/persistence køsat fra 2e02987c (queue 00cfbff1). Faktisk STARTED og leverance udestår.",
+      "evidence": "#12:1 faktisk STARTED/WORKING efter køcommit 00cfbff1; https://github.com/hva73/invest/issues/12#issuecomment-7174401867; ingen leverance endnu.",
       "subgoals": [
         {
           "id": "watch",
           "title": "Long-Term Watch-model",
-          "status": "pending",
-          "evidence": "Køsat #12:1: tenant-isoleret add/list/status/remove/reopen, SQLite tests, ingen live migration eller brokerwrites.",
+          "status": "in_progress",
+          "evidence": "Tenant-isoleret SQLite-observationsmodel i arbejde, ingen live migration eller handel.",
           "owner_role": "motor",
-          "updated_at": "2026-11-25T20:55:00Z"
+          "updated_at": "2026-11-25T20:57:00Z"
         },
         {
           "id": "ui",
@@ -309,7 +309,7 @@
           "owner_role": "motor"
         }
       ],
-      "updated_at": "2026-11-25T20:55:00Z"
+      "updated_at": "2026-11-25T20:57:00Z"
     },
     {
       "id": "replay",
