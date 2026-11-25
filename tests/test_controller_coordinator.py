@@ -80,3 +80,23 @@ class LocalCoordinatorTests(unittest.TestCase):
         with patch.object(c,"run_once",return_value=True) as run:
             self.assertTrue(coordinate(self.root,self.root,[self.row],self.results,[],["273:12"]))
             run.assert_called_once()
+
+    def test_manual_receipt_distinguishes_waiting_and_survives_automatic_run(self):
+        rid="b"*32
+        value={"schema":1,"id":rid,"requests":[rid],"at":c.now()}
+        c.save(self.root/"coordinator-trigger.json",value)
+        with patch.object(c,"owner_requests",return_value={rid:{"task":"all"}}),patch.object(c,"comment") as ack:
+            self.assertFalse(c.run_once(self.root,self.root,[],{}))
+            ack.assert_called_once()
+        receipt=c.read(self.root/"coordinator-manual-status.json",{})
+        self.assertEqual((receipt["id"],receipt["state"],receipt["requests"]),(rid,"waiting",[rid]))
+        self.assertFalse((self.root/"coordinator-trigger.json").exists())
+        self.assertFalse(c.run_once(self.root,self.root,[],{}))
+        self.assertEqual(c.read(self.root/"coordinator-manual-status.json",{}),receipt)
+
+    def test_manual_failure_is_not_completion(self):
+        rid="a"*32
+        c.save(self.root/"coordinator-trigger.json",{"schema":1,"id":rid,"requests":[rid],"at":c.now()})
+        with patch.object(c,"owner_requests",side_effect=OSError("offline")):
+            self.assertFalse(c.run_once(self.root,self.root,[],{}))
+        self.assertEqual(c.read(self.root/"coordinator-manual-status.json",{})["state"],"blocked")
