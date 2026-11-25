@@ -459,6 +459,8 @@ def _read_position_switch_chain(connection, scope, key):
     for sequence, digest, payload in rows:
         try:
             fields = loads(payload)
+            if not isinstance(fields, dict):
+                raise ValueError("Journal payload must be a JSON object")
             origin = DecisionOrigin(**fields.pop("entry_origin"))
             for name in ("prior_strategy", "new_strategy"):
                 fields[name] = tuple(fields[name])

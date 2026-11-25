@@ -778,6 +778,21 @@ class TradingEngineV2Tests(unittest.TestCase):
             exit_at(self.later, catalog=inputs["catalog"])
         with self.assertRaisesRegex(ValueError, "STRATEGY_UNVERIFIED"):
             exit_at(self.later, catalog={})
+        for payload in ("null", "[]", '"text"', "42", "true", "{", "{}"):
+            with self.subTest(payload=payload):
+                with connect() as connection:
+                    connection.execute("""
+                        UPDATE test_position_switch_history_v1 SET payload = ? WHERE sequence = 2
+                    """, (payload,))
+                with patch("trading_engine_v2.evaluate") as evaluate_exit:
+                    with self.assertRaisesRegex(ValueError, "^POSITION_SWITCH_HISTORY_INVALID$"):
+                        exit_at(self.later)
+                    evaluate_exit.assert_not_called()
+        with connect() as connection:
+            connection.execute("""
+                UPDATE test_position_switch_history_v1 SET payload = ? WHERE sequence = 2
+            """, (canonical(asdict(future)),))
+        self.assertEqual(exit_at(self.later), after)
         # The independent head must detect valid-looking prefixes and empty
         # chains, even when evaluating before the first recorded switch.
         for sql in ("DELETE FROM test_position_switch_history_v1 WHERE sequence = 2",
