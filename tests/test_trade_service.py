@@ -349,6 +349,27 @@ class Trading(unittest.TestCase):
   self.assertEqual(checked['status'],'sent')
   self.assertEqual(checked['report_id'],proposal['report_id'])
   self.assertEqual(len(self.writes()),1)
+ def test_check_only_reuses_order_id_from_compatible_prior_depot(self):
+  pid=self.send(self.estimate())['id']
+  intent={'orderIntentId':'synthetic-intent','orderId':'original-order'}
+  self.intent_result=dict(intent,status='ACCEPTED')
+  for depot_fields,conflicting in (({'portfolioId':'other-depot'},True),
+                                  ({'portfolioId':'root','orderIntents':[dict(intent,portfolioId='other-depot')]},True),
+                                  ({'portfolioId':'root'},False),({},False)):
+   with self.subTest(depot_fields=depot_fields):
+    response=dict(intent,status='PENDING',**depot_fields)
+    with app.connect() as c:
+     c.execute('UPDATE broker_proposals SET response=? WHERE id=?',(json.dumps(response),pid))
+    prior=dict(trade.get(app.connect,1,pid))
+    if conflicting:
+     with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+      trade.check(app.connect,1,pid,self.factory)
+     self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+    else:
+     checked=trade.check(app.connect,1,pid,self.factory)['proposal']
+     self.assertEqual(checked['response'],self.intent_result)
+     self.assertEqual(checked['status'],'sent')
+
  def test_check_cannot_bind_a_new_order_id(self):
   self.write_result['status']='PENDING'
   pid=self.send(self.estimate())['id'];prior=dict(trade.get(app.connect,1,pid))
