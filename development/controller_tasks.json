@@ -609,7 +609,7 @@
     "generation": 6,
     "role": "desktop",
     "priority": 1,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/escape-development",
     "base_sha": "613123e0e60fb8d69fda37a819796c88c91a605a",
     "dependencies": [
