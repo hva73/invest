@@ -4,7 +4,9 @@ This is a bounded replay of saved inputs, not a trade simulation or a full
 historical backtest. It never changes sessions or communicates with brokers.
 """
 import copy,json
-from hotwatch_contract import checksum,stamp
+from collections import Counter
+from hotwatch_contract import EngineError, RISK, checksum, require, stamp
+import trading_engine_v2 as v2
 from hotwatch_features import features,verified_bar_samples
 from hotwatch_strategy import calculate,validate_strategy,early_watch
 
@@ -25,7 +27,7 @@ def required(rule):
     return {rule['metric']}
 
 
-def compare(connect,uid,data):
+def _recorded_inputs(connect,uid,data):
     if not isinstance(data,dict) or set(data)!={'watch_id','is_test','strategies'} or not isinstance(data['watch_id'],str) or not 1<=len(data['watch_id'])<=100 or type(data['is_test']) is not bool:raise ValueError('Vælg en gyldig overvågning.')
     choices=data['strategies']
     if not isinstance(choices,list) or not 1<=len(choices)<=3:raise ValueError('Vælg én til tre strategier.')
@@ -40,13 +42,20 @@ def compare(connect,uid,data):
             if not item:raise ValueError('En strategiversion blev ikke fundet på din konto.')
             spec=json.loads(item['payload'])
             if validate_strategy(spec) or checksum(spec)!=item['checksum']:raise ValueError('Strategiversionen kunne ikke verificeres.')
-            specs.append(spec)
-        rows=c.execute('''SELECT c.id,c.calculated,c.payload AS calculation,s.id AS sample_row_id,s.received,s.digest AS sample_digest,s.payload AS sample
+            specs.append((spec, item['checksum']))
+        rows=c.execute('''SELECT c.id,c.calculated,c.payload AS calculation,c.strategy_checksum,
+                   s.id AS sample_row_id,s.source,s.sample_id,s.received,
+                   s.digest AS sample_digest,s.payload AS sample
             FROM hw_calculations c LEFT JOIN hw_samples s ON s.id=c.sample_row_id AND s.watch_row_id=c.watch_row_id
             WHERE c.watch_row_id=? ORDER BY c.id LIMIT ?''',(row['id'],MAX_CALCULATIONS+1)).fetchall()
         request=json.loads(row['request'])
     if not rows:raise ValueError('Der er endnu ingen gemte observationer at sammenligne.')
-    truncated=len(rows)>MAX_CALCULATIONS;rows=rows[:MAX_CALCULATIONS]
+    return row, request, specs, rows[:MAX_CALCULATIONS], len(rows)>MAX_CALCULATIONS
+
+
+def compare(connect,uid,data):
+    _, request, versions, rows, truncated = _recorded_inputs(connect,uid,data)
+    specs = [spec for spec, _ in versions]
     outcomes=[{'strategy_id':s['strategy_id'],'version':s['version'],'checksum':checksum(s),'counts':{'BUY':0,'SELL':0,'REDUCE':0,'WAIT':0,'NO_DATA':0,'PAUSE':0},'missing_indicators':set(),'timeline':[],'early_watch':{'met':0,'not_met':0,'unknown':0,'first_met_at':None} if s['schema_version']==2 else None,'first_buy_at':None} for s in specs]
     states=[{} for _ in specs];window=[];previous_id=None;previous_time=None;skipped=0
     from hotwatch_engine import sample_errors
@@ -95,3 +104,154 @@ def compare(connect,uid,data):
             skipped+=1;states=[{} for _ in specs];window=[];previous_id=None;previous_time=None
     for out in outcomes:out['missing_indicators']=sorted(out['missing_indicators']);out['timeline']=out['timeline'][-12:]
     return {'watch_id':data['watch_id'],'ticker':request['ticker'],'is_test':data['is_test'],'evaluated':len(rows)-skipped,'skipped':skipped,'truncated':truncated,'limit':MAX_CALCULATIONS,'from':rows[0]['calculated'],'to':rows[-1]['calculated'],'strategies':outcomes,'limitations':['Kun gemte observationer og tidligere risikokontekst er anvendt.','Historisk warmup, nyhedsdata og alle hændelser er ikke fuldt rekonstrueret.','Ingen handler, afkast, omkostninger eller faktisk eksekvering er simuleret.']}
+
+
+def _v2_snapshot(session, request, row, at):
+    """Build evidence from this journal pair alone."""
+    from hotwatch_engine import sample_errors
+
+    calc = json.loads(row['calculation'])
+    if row['sample_row_id'] is None:
+        raise EngineError('SAMPLE_MISSING')
+    sample = json.loads(row['sample'])
+    if checksum(sample) != row['sample_digest']:
+        raise EngineError('SAMPLE_CHECKSUM_MISMATCH')
+    if sample['source'] != row['source'] or sample['sample_id'] != row['sample_id']:
+        raise EngineError('SAMPLE_IDENTITY_MISMATCH')
+    if sample['source'] == 'eodhd' and sample.get('price_time_kind') == 'trade':
+        # Ingest can overwrite quote/status evidence without changing received.
+        # The calculation does not pin the sample revision it used.
+        raise EngineError('SAMPLE_REVISION_UNVERIFIED')
+
+    received = stamp(row['received'])
+    event_time = stamp(sample['event_time'])
+    market_times = [stamp(sample[key]) for key in ('bid_at', 'ask_at', 'status_at')
+                    if sample.get(key)]
+    if not event_time <= received <= at or any(value > received for value in market_times):
+        raise EngineError('SAMPLE_CHRONOLOGY_UNVERIFIED')
+    input_ids = calc.get('input_sample_ids')
+    if (stamp(calc['calculation_timestamp']) != at
+            or stamp(calc['data_timestamp']) != event_time
+            or calc['strategy_checksum'] != row['strategy_checksum']
+            or not isinstance(input_ids, list) or sample['sample_id'] not in input_ids):
+        raise EngineError('CALCULATION_LINK_UNVERIFIED')
+
+    context = calc.get('position_context')
+    if not isinstance(context, dict) or not context.get('as_of'):
+        raise EngineError('POSITION_CONTEXT_UNVERIFIED')
+    if context.get('position') == 'held':
+        raise EngineError('POSITION_ID_UNAVAILABLE')
+    if context.get('position') != 'none' or context.get('status') != 'verified':
+        raise EngineError('POSITION_CONTEXT_UNVERIFIED')
+    risk = calc.get('risk_parameters')
+    metrics = calc.get('supporting_metrics')
+    if not isinstance(risk, dict) or type(risk.get('entry_allowed')) is not bool:
+        raise EngineError('RISK_CAPTURE_UNAVAILABLE')
+    require({key: risk[key] for key in RISK['properties'] if key in risk}, RISK)
+    if not isinstance(metrics, dict) or not any(value is not None for value in metrics.values()):
+        raise EngineError('METRICS_CAPTURE_UNAVAILABLE')
+
+    portfolios = request.get('portfolio_ids', [])
+    if len(portfolios) != 1 or type(portfolios[0]) is not int or portfolios[0] <= 0:
+        raise EngineError('PORTFOLIO_SCOPE_UNVERIFIED')
+    position_scope = {
+        'asset_id': request['asset_id'], 'portfolio_id': portfolios[0],
+        'watch_id': session['watch_id'], 'trade_cycle_id': request.get('trade_cycle_id'),
+    }
+    if (risk.get('_position_scope') != checksum(position_scope)
+            or request['watch_id'] != session['watch_id']
+            or request['candidate_id'] != session['candidate_id']
+            or request['is_test'] is not bool(session['is_test'])
+            or not request['exchange']):
+        raise EngineError('HISTORICAL_SCOPE_UNVERIFIED')
+    scope = v2.Scope(
+        user_id=session['user_id'], is_test=bool(session['is_test']),
+        exchange=request['exchange'], candidate_id=session['candidate_id'], **position_scope,
+    )
+
+    # Indicator history is already represented by the recorded metrics.
+    # The primitive only consumes the market sample and captured risk context.
+    sample.pop('bar_history', None)
+    sample.pop('bar_evidence', None)
+    sample['context'] = context
+    sample_errors(sample, {**request, 'risk': risk}, at)
+    if any(order.get('status_time') and stamp(order['status_time']) > at
+           for order in context['orders']):
+        raise EngineError('POSITION_CONTEXT_UNVERIFIED')
+
+    calc_id = f"hw_calculations:{row['id']}"
+    sample_id = f"hw_samples:{row['sample_row_id']}"
+    # Local journal references identify the actual capture. The full sample
+    # includes the calculation's context and is proven available at calculation time.
+    observation = v2.Evidence(sample, event_time, at, (sample_id, calc_id))
+    risks = v2.Evidence(risk, at, at, (calc_id,))
+    facts = {key: v2.Evidence(value, at, at, (calc_id,))
+             for key, value in metrics.items() if value is not None}
+    recorded = {
+        'signal': calc['signal'], 'reason_codes': calc['reason_codes'],
+        'strategy_id': calc['strategy_id'], 'version': calc['strategy_version'],
+        'checksum': row['strategy_checksum'],
+    }
+    if (recorded['signal'] not in ('BUY', 'SELL', 'REDUCE', 'WAIT', 'NO_DATA', 'PAUSE')
+            or not isinstance(recorded['reason_codes'], list)):
+        raise EngineError('RECORDED_DECISION_UNVERIFIED')
+    latency = {
+        'event_to_received_ms': (received - event_time).total_seconds() * 1000,
+        'received_to_calculated_ms': (at - received).total_seconds() * 1000,
+    }
+    return scope, calc_id, observation, facts, risks, recorded, latency
+
+
+def compare_v2(connect, uid, data):
+    """Compare recorded decisions with v2 decisions on shared, bounded snapshots."""
+    session, request, versions, rows, truncated = _recorded_inputs(connect, uid, data)
+    strategies = [
+        {'strategy_id': spec['strategy_id'], 'version': spec['version'], 'checksum': digest,
+         'counts': dict.fromkeys(('decision', 'observation', 'blocked'), 0),
+         'first_blocking_reason': None}
+        for spec, digest in versions
+    ]
+    timeline = []
+    skips = Counter()
+    recorded_counts = Counter()
+    first_skip = None
+    previous_at = None
+    for row in rows:
+        try:
+            at = stamp(row['calculated'])
+            if previous_at is not None and at < previous_at:
+                raise EngineError('CALCULATION_OUT_OF_ORDER')
+            previous_at = at
+            scope, snapshot_id, sample, metrics, risk, recorded, latency = _v2_snapshot(
+                session, request, row, at,
+            )
+        except (ValueError, KeyError, TypeError, AttributeError, ArithmeticError) as exc:
+            reason = exc.code if isinstance(exc, EngineError) else 'INVALID_HISTORICAL_CAPTURE'
+            skips[reason] += 1
+            if first_skip is None:
+                first_skip = {'calculation_id': row['id'], 'at': row['calculated'], 'reason': reason}
+            continue
+        recorded_counts[recorded['signal']] += 1
+        simulated = []
+        for (spec, digest), summary in zip(versions, strategies):
+            result = v2.evaluate(scope, snapshot_id, at, 'entry', spec, digest, sample, metrics, risk)
+            summary['counts'][result.outcome] += 1
+            if result.outcome == 'blocked' and summary['first_blocking_reason'] is None:
+                summary['first_blocking_reason'] = {'at': row['calculated'], 'reason': result.reasons[0]}
+            simulated.append({
+                'strategy_id': spec['strategy_id'], 'version': spec['version'],
+                'outcome': result.outcome, 'action': result.action, 'reason_codes': list(result.reasons),
+                'decision_digest': result.origin.digest, 'snapshot_checksum': result.origin.snapshot_checksum,
+            })
+        timeline.append({
+            'snapshot_id': snapshot_id, 'at': row['calculated'], 'latency': latency,
+            'recorded': recorded, 'simulated': simulated,
+        })
+
+    return {
+        'watch_id': session['watch_id'], 'ticker': request['ticker'], 'is_test': bool(session['is_test']),
+        'limit': MAX_CALCULATIONS, 'truncated': truncated,
+        'coverage': {'considered': len(rows), 'evaluated': len(timeline), 'skipped': sum(skips.values()),
+                     'skip_reasons': dict(skips), 'first_skip': first_skip},
+        'recorded_counts': dict(recorded_counts), 'strategies': strategies, 'timeline': timeline,
+    }
