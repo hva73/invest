@@ -750,7 +750,7 @@
     "priority": 1,
     "status": "ready",
     "base_branch": "codex/trading-engine-v2-integration",
-    "base_sha": "4f9acf2ab798199794f583d06431a6c403424eb1",
+    "base_sha": "2e02987c2c7f14f4277c2a8899dabda1adb46733",
     "dependencies": [],
     "paths": [
       "trade_service.py",
