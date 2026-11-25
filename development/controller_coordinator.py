@@ -391,8 +391,18 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
                 sha=p["head"]["sha"]
                 if last.get("state")=="hold" and last.get("sha")==sha:
                     entry.update(last,at=time.time())
-                    held=True
                     detail=last.get("detail","Uændret reviewblokering")
+                    repair_reason=last.get("repair_reason")
+                    # A previous review may have been unable to reserve a repair.
+                    # Resume that exact reviewed defect, without another model review.
+                    if (state=="open" and row.get("local_repair") is True and isinstance(repair_reason,str)
+                            and 1<=len(repair_reason)<=800 and not (root/("coordinator-repair-"+str(number)+".json")).exists()
+                            and not (root/"STOP").exists() and reserve_review()):
+                        publish_status(root,ident,"running","Retter konkret reviewfejl i PR #"+str(number),request)
+                        detail=repair_review(root,repo_dir,row,number,p,repair_reason,repair_allowance)
+                        entry.update(state="waiting",detail=detail)
+                    else:
+                        held=True
                     continue
                 entry["sha"]=sha
                 if state=="merged":
@@ -417,6 +427,7 @@ def run_once(root, repo_dir, rows, results, provider_pause=False, reserve_review
                         detail="Codex-kapacitetsgrænse; afventer verificeret reset"
                         break
                     if decision["verdict"]=="hold":
+                        entry["repair_reason"]=decision["reason"]
                         comment(number,"Lokal uafhængig review HOLD "+sha+": "+decision["reason"][:800])
                         # Only explicitly approved scoped generations can repair.
                         if row.get("local_repair") is True and not (root/("coordinator-repair-"+str(number)+".json")).exists() and not (root/"STOP").exists() and reserve_review():
