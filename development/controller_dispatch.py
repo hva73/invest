@@ -11,7 +11,6 @@ import sys
 import time
 import threading
 
-FETCH_LOCK = threading.Lock()
 from datetime import datetime, timezone
 try:
     from .controller_queue import plan
@@ -19,6 +18,8 @@ try:
 except ImportError:
     from controller_queue import plan
     import controller_remote, controller_publish, controller_receipts, controller_progress, controller_coordinator
+
+FETCH_LOCK = controller_coordinator.FETCH_LOCK
 
 def save(path, value):
     temp = path.with_suffix(".tmp")
@@ -208,9 +209,10 @@ def record_provider_pause(root,row,now=None):
     save(path,{"task":task_key(row),"observed_at":now,"reset_at":stamp})
     print("PROVIDER_PAUSE:", "until reported reset" if stamp is not None else "awaiting confirmed reset",flush=True)
 
-def write_status(root, reason, active, waiting=(), review=(), coordinator_capable=False, coordinator_running=False):
+def write_status(root, reason, active, waiting=(), review=(), coordinator_capable=False, coordinator_running=False, coordinator_task=None, capacity=2):
     """One local heartbeat; contains only task IDs and scheduler state."""
     try:
+        active=list(active)
         save(root/"status.json", {
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "reason": reason,
@@ -219,6 +221,9 @@ def write_status(root, reason, active, waiting=(), review=(), coordinator_capabl
             "awaiting_review": sorted(review),
             "coordinator_protocol": 1 if coordinator_capable else 0,
             "coordinator_running": bool(coordinator_running),
+            "coordinator_task": coordinator_task,
+            "slots_used": len(active)+int(bool(coordinator_running)),
+            "slot_capacity": capacity,
         })
     except OSError as exc:
         print("STATUS_UNAVAILABLE:",type(exc).__name__,flush=True)
@@ -236,6 +241,38 @@ def coordinate(root, repo_dir, rows, results, waiting, review, reserve_review=la
     finally:
         stopped.set(); reporter.join()
 
+def review_conflict(row, other):
+    # Integration moves a branch head. Do not dispatch a task from that
+    # branch during review, even when file scopes are disjoint.
+    if row["issue"]==other["issue"] or row["role"]==other["role"] or row.get("base_branch")==other.get("base_branch"):
+        return True
+    def overlap(a,b):
+        a,b=a.rstrip("/"),b.rstrip("/")
+        return a==b or a.startswith(b+"/") or b.startswith(a+"/")
+    return any(overlap(a,b) for a in row["paths"] for b in other["paths"])
+
+def choose_review(root,rows,results,running,now=None):
+    now=time.time() if now is None else now
+    journal=controller_coordinator.read(root/"coordinator-review.json",{})
+    requested=controller_coordinator.trigger(root) is not None
+    for row,number in controller_coordinator.candidates(root,rows,results):
+        if any(review_conflict(row,r) for r in running):
+            continue
+        last=journal.get(str(number),{})
+        if last.get("state")!="accepted" and (requested or now-last.get("at",0)>=60):
+            return row
+    return None
+
+def plan_with_review(rows,review_row,parallel):
+    if review_row is None:
+        return plan(rows,max_parallel=parallel)
+    # A coordinator future uses one model slot; suppress conflicting rows
+    # before planning, but retain every row for dependency resolution.
+    adjusted=[dict(r,status="blocked") if r["status"]=="ready" and review_conflict(r,review_row) else r for r in rows]
+    if parallel==1:
+        return []
+    return plan(adjusted,max_parallel=parallel-1)
+
 def run_queue(a,root,script,statefile,donefile,state,results):
     boot=boot_id()
     # A reservation remains durable until it is either recovered or reported.
@@ -243,7 +280,23 @@ def run_queue(a,root,script,statefile,donefile,state,results):
     interrupted={key for key,status in results.items() if status=="reserved"}
     with concurrent.futures.ThreadPoolExecutor(max_workers=a.parallel) as pool:
         active={}
-        while active or not (root/"STOP").exists():
+        coordination=None
+        review_row=None
+        budget_lock=threading.Lock()
+        def reserve_slot():
+            with budget_lock:
+                if not reserve(state,datetime.now(timezone.utc).date().isoformat(),a.daily_reservation,a.per_task):
+                    return False
+                save(statefile,state)
+                return True
+        while active or coordination is not None or not (root/"STOP").exists():
+            if coordination is not None and coordination.done():
+                try:
+                    coordination.result()
+                except Exception as exc:
+                    print("COORDINATION_FAILED:",type(exc).__name__,flush=True)
+                coordination=None
+                review_row=None
             for future,row in list(active.items()):
                 if not future.done():
                     continue
@@ -263,9 +316,10 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 controller_receipts.flush(root)
                 controller_progress.flush(root)
             if (root/"STOP").exists():
-                write_status(root,"stopping",active.values())
-                if active:
-                    concurrent.futures.wait(active,timeout=15,return_when=concurrent.futures.FIRST_COMPLETED)
+                write_status(root,"stopping",active.values(),coordinator_running=coordination is not None,coordinator_task=task_key(review_row) if review_row else None,capacity=a.parallel)
+                futures=list(active)+([coordination] if coordination is not None else [])
+                if futures:
+                    concurrent.futures.wait(futures,timeout=15,return_when=concurrent.futures.FIRST_COMPLETED)
                 continue
             reason="idle"
             capable=bool(a.remote and a.publish)
@@ -291,16 +345,19 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 rows=effective_rows(rows,{k:v for k,v in results.items() if k not in recoverable},active.values())
                 waiting=[task_key(row) for row in rows if row["status"]=="ready"]
                 paused=provider_pause_active(root)
-                if capable and not active and not paused and controller_coordinator.due(root,rows_before_effective,results):
-                    def reserve_review():
-                        if not reserve(state,datetime.now(timezone.utc).date().isoformat(),a.daily_reservation,a.per_task):
-                            return False
-                        save(statefile,state)
-                        return True
-                    if coordinate(root,script.parent.parent,rows_before_effective,results,waiting,review,reserve_review,a.per_task):
-                        continue
-                    paused=provider_pause_active(root)
-                selected=[] if paused else plan(rows,max_parallel=a.parallel)
+                if capable and coordination is None and len(active)<a.parallel and not paused:
+                    candidate=choose_review(root,rows_before_effective,results,list(active.values()))
+                    if candidate is not None or (not active and controller_coordinator.trigger(root)):
+                        review_row=candidate
+                        keys={task_key(candidate)} if candidate else set()
+                        coordination=pool.submit(controller_coordinator.run_once,root,script.parent.parent,rows_before_effective,dict(results),reserve_review=reserve_slot,repair_allowance=a.per_task,review_keys=keys)
+                if paused:
+                    selected=[]
+                elif coordination is not None and review_row is None:
+                    # A manual receipt-only pass also occupies a slot.
+                    selected=plan(rows,max_parallel=a.parallel-1) if a.parallel>1 else []
+                else:
+                    selected=plan_with_review(rows,review_row,a.parallel)
                 if paused:
                     reason="provider_pause"
                 elif waiting and not selected:
@@ -318,10 +375,9 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 if (root/"STOP").exists():
                     break
                 row=next(r for r in rows if (r["issue"],r.get("generation",1))==task.key)
-                if not reserve(state,day,a.daily_reservation,a.per_task):
-                    reason="budget_limit"
+                if provider_pause_active(root) or not reserve_slot():
+                    reason="provider_pause" if provider_pause_active(root) else "budget_limit"
                     break
-                save(statefile,state)
                 key=task_key(row)
                 recovering=key in recoverable
                 save(task_record(root,row),{"row":row,"boot":boot,"recovered":recovering})
@@ -332,11 +388,14 @@ def run_queue(a,root,script,statefile,donefile,state,results):
             active_keys={task_key(row) for row in active.values()}
             if active and reason in ("idle","waiting_for_dependency_or_worker"):
                 reason="working"
-            write_status(root,reason,active.values(),[key for key in waiting if key not in active_keys],review,capable)
-            if active:
-                concurrent.futures.wait(active,timeout=15,return_when=concurrent.futures.FIRST_COMPLETED)
+            if coordination is not None:
+                reason="coordinating" if not active else "working"
+            write_status(root,reason,active.values(),[key for key in waiting if key not in active_keys],review,capable,coordination is not None,task_key(review_row) if review_row else None,a.parallel)
+            futures=list(active)+([coordination] if coordination is not None else [])
+            if futures:
+                concurrent.futures.wait(futures,timeout=5,return_when=concurrent.futures.FIRST_COMPLETED)
             elif not (root/"STOP").exists():
-                for _ in range(24):
+                for _ in range(12):
                     if (root/"STOP").exists() or (capable and not provider_pause_active(root) and controller_coordinator.trigger(root)):
                         break
                     time.sleep(5)
