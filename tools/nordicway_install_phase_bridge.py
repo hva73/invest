@@ -91,7 +91,7 @@ def patch(old,helper):
         self.phase_plan=plan
         return plan''')
     s=replace(s,"    def backup_and_apply(self, release):\n        names = apply_update.FILES",
-              "    def backup_and_apply(self, release):\n        self.check_quota()\n        names = apply_update.FILES")
+              "    def backup_and_apply(self, release):\n        try:\n            self.check_quota()\n        except Exception as exc:\n            raise BackupVerificationFailure(\'phase_quota_changed\') from exc\n        names = apply_update.FILES")
     s=replace(s,"                if self.backup_observer is not None:\n                    self.backup_observer(backup)",
               "                if getattr(self,'phase_plan',None) is not None:\n                    phase.restart_check(self.target,self.cpanel_token,self.phase_plan['restart_reserve'])\n                if self.backup_observer is not None:\n                    self.backup_observer(backup)")
     # Keep the original backup callback, recovery marker and autostart handling.
