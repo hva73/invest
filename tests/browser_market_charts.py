@@ -220,6 +220,30 @@ async () => {
  delayed.callback();
  await flush();
  assert(requests.length===22 && completed,'Uncached month duplicated or failed to complete');
+
+ // A cached period must resume its pending refresh after the timer expires away.
+ mount('main','main');
+ await select('day');
+ const before = requests.length;
+ await click('main','refresh');
+ await finish(requests[before],{pending:true});
+ await select('month');
+ await retry();
+ window.testChartObserver([{target:slot('main'),isIntersecting:true}]);
+ document.dispatchEvent(new Event('visibilitychange'));
+ await flush();
+ assert(requests.length===before+1 && selected('month'),'Pending day refreshed cached month');
+ await select('day');
+ assert(requests.length===before+2 && requests[before+1].period==='ONE_WEEK' &&
+        !requests[before+1].refresh,'Returning to cached day did not resume its pending request');
+ await select('week');
+ document.dispatchEvent(new Event('visibilitychange'));
+ await finish(requests[before+1],quote(32));
+ assert(requests.length===before+2 && selected('week'),'Shared day/week retry duplicated or lost selection');
+ await select('day');
+ assert(requests.length===before+2 && selected('day') &&
+        [...root.querySelectorAll('.market-price')].every(n=>n.textContent==='32'),
+        'Completed retry did not refresh cached day or was repeated');
 }
 """
 
