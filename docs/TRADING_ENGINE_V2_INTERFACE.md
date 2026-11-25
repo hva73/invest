@@ -69,9 +69,10 @@ stemme. De genberegnede værdier bindes til journalens sample- og
 beregnings-ID'er i snapshot-checksummen. En alternativ nyhedsaldersgrænse
 kan ikke genbruge den oprindelige nyhedsattestering.
 
-Manglende historik, utilstrækkelig opvarmning for ændrede regel- eller
-risikoinput og uverificerbare revisioner vises som blokering for den enkelte
-strategi. Parameterkompatible udfald bevares. Historik uden for den læste
+Manglende historik, utilstrækkelig opvarmning og uverificerbare revisioner
+fjerner de berørte facts. Eksisterende treværdilogik og risikogate afgør,
+om de faktisk blokerer strategien; en sand alternativ regelgren bevares.
+Ubrugte ændrede parametre kræver ingen historiklæsning. Historik uden for den læste
 journal kan ikke udfylde huller. Replay kan genbruge fangede bar-metrics ved
 ens parametre og en verificerbar aktuel observation. Det kan kun
 genberegne fra bars med en dokumenteret historisk revision. Den nuværende

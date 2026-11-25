@@ -229,6 +229,30 @@ class V2Replay(unittest.TestCase):
   self.assertEqual(bounded['coverage']['considered'], 3)
   self.assertEqual([len(call.args[0]) for call in compute.call_args_list], [1, 1, 2, 2, 3, 3])
 
+ def test_optional_and_unused_changed_feature_do_not_block_valid_alternative(self):
+  self.capture(0)
+  price = {'metric': 'price', 'operator': '>', 'value': '0'}
+  rsi = {'metric': 'rsi', 'operator': '<=', 'value': '80'}
+  choices = []
+  for name, entry in (('alternative', {'any': [price, rsi]}),
+                      ('unused', price), ('required', rsi)):
+   spec = copy.deepcopy(EARLY_CATALYST_V1)
+   spec.update(strategy_id='replay_' + name)
+   spec['parameters']['rsi_period'] = 15
+   spec['entry_rules'] = entry
+   spec['watch_rules'] = price
+   engine.upload_strategy(app.connect, 1, 'Fixture', spec)
+   choices.append({'strategy_id': spec['strategy_id'], 'version': spec['version']})
+  data = dict(self.data, strategies=choices)
+  with patch('strategy_lab._feature_history', side_effect=strategy_lab.EngineError('FEATURE_HISTORY_MISSING')) as history:
+   result = strategy_lab.compare_v2(self.read_only, 1, data)
+  alternative, unused, required = result['timeline'][0]['simulated']
+  self.assertEqual(history.call_count, 2)  # failures are not cached
+  self.assertEqual(alternative['action'], 'BUY')
+  self.assertEqual(unused['action'], 'BUY')
+  self.assertEqual(required['reason_codes'], ['FEATURE_HISTORY_MISSING'])
+  self.assertIsNotNone(required['snapshot_checksum'])
+
  def test_later_future_and_mutable_history_only_block_incompatible_versions(self):
   self.capture_windows()
   baseline = strategy_lab.compare_v2(self.read_only, 1, self.data)['timeline'][-1]['simulated'][0]

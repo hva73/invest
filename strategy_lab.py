@@ -289,28 +289,35 @@ def _strategy_facts(spec, original, metrics, history, at, snapshot_id):
     if parameters.get('news_max_age_minutes', 120) != recorded.get('news_max_age_minutes', 120):
         for name in ('catalyst_verified', 'earnings_previous_session', 'no_verified_news'):
             facts.pop(name, None)
-    if not changed:
-        return facts
-
-    samples, refs = history()
-    try:
-        computed = features(samples, parameters)
-    except (ValueError, ArithmeticError) as exc:
-        raise EngineError('FEATURE_HISTORY_UNVERIFIED') from exc
-    count = metrics.get('sample_count')
-    if count is None or type(count.value) is not int or computed['sample_count'] != count.value:
-        raise EngineError('FEATURE_HISTORY_UNVERIFIED')
-    computed['new_breakout'] = computed.get('breakout') if 'new_breakout' in metrics else None
+    # Only recompute metrics used by this entry evaluation or its existing
+    # risk gate. Never let a missing optional branch override rule_state().
     needed = required(spec['entry_rules']) | {'relative_volume'}
     if spec['schema_version'] == 2:
         needed |= required(spec['watch_rules']) | {'return_window_pct'}
-    if any(computed.get(name) is None for name in changed & needed):
-        raise EngineError('FEATURE_HISTORY_INSUFFICIENT')
     for name in changed:
         facts.pop(name, None)
+    changed &= needed
+    if not changed:
+        return facts, None
+
+    try:
+        samples, refs = history()
+        computed = features(samples, parameters)
+        count = metrics.get('sample_count')
+        if count is None or type(count.value) is not int or computed['sample_count'] != count.value:
+            raise EngineError('FEATURE_HISTORY_UNVERIFIED')
+    except EngineError as exc:
+        return facts, exc.code
+    except (ValueError, ArithmeticError):
+        return facts, 'FEATURE_HISTORY_UNVERIFIED'
+    computed['new_breakout'] = computed.get('breakout') if 'new_breakout' in metrics else None
+    missing = False
+    for name in changed:
         if computed.get(name) is not None:
             facts[name] = v2.Evidence(computed[name], at, at, (*refs, snapshot_id))
-    return facts
+        else:
+            missing = True
+    return facts, 'FEATURE_HISTORY_INSUFFICIENT' if missing else None
 
 
 def compare_v2(connect, uid, data):
@@ -356,8 +363,14 @@ def compare_v2(connect, uid, data):
 
         for (spec, digest), summary in zip(versions, strategies):
             try:
-                facts = _strategy_facts(spec, original, metrics, history, at, snapshot_id)
+                facts, feature_error = _strategy_facts(spec, original, metrics, history, at, snapshot_id)
                 result = v2.evaluate(scope, snapshot_id, at, 'entry', spec, digest, sample, facts, risk)
+                # Preserve the causal diagnostic only when the existing
+                # evaluator actually blocks on unavailable inputs.
+                if feature_error and result.outcome == 'blocked':
+                    reasons = tuple(feature_error if reason in ('RULE_INPUT_UNAVAILABLE', 'FEATURES_INSUFFICIENT')
+                                    else reason for reason in result.reasons)
+                    result = v2.Decision(result.origin, result.outcome, reasons, result.action)
             except EngineError as exc:
                 origin = v2.DecisionOrigin(scope.digest, snapshot_id, at.isoformat(), 'entry',
                                            spec['strategy_id'], spec['version'], digest)
