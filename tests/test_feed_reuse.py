@@ -3,7 +3,9 @@ import copy,hashlib,json,os,threading,time,unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from unittest.mock import Mock,patch
+from eodhd_feeds import EODHDFeeds
 import app,hotwatch_adapters as adapters,hotwatch_engine as engine,hotwatch_service as service
+from test_eodhd_feeds import WS
 import test_hotwatch_engine as fixture
 import test_post_install_capacity as capacity_fixture
 
@@ -13,7 +15,7 @@ class FeedReuse(unittest.TestCase):
   self.req=dict(self.f.req,is_test=False,provider='eodhd',provider_symbol='MERC.US')
   self.job={'id':123,'request_data':self.req,'state':'{}'}
   self.adapter=adapters.EODHDAdapter(app.connect,1)
-  self.env=patch.dict(os.environ,{'ESCAPE_EODHD_API_KEY':'feed-reuse','ESCAPE_HW_CONCURRENCY':'2'});self.env.start()
+  self.env=patch.dict(os.environ,{'ESCAPE_EODHD_API_KEY':'feed-reuse','ESCAPE_HW_CONCURRENCY':'2','ESCAPE_HW_EODHD_CROSS_USER_WS_ENABLED':'0'});self.env.start()
   self.clock=patch('hotwatch_adapters.utc',return_value=self.now);self.clock.start()
   self.credential=hashlib.sha256(b'feed-reuse').digest()
   adapters._ws_batch_cache.clear();adapters._ws_batch_inflight.clear()
@@ -67,6 +69,174 @@ class FeedReuse(unittest.TestCase):
    client.capture.return_value={'status':'NO_MESSAGES','messages':[]}
    self.assertEqual(self.adapter.capture(client,'us_trades','MERC',self.job)['status'],'NO_MESSAGES')
   client.capture.assert_called_once()
+ def shared_job(self,uid,symbol='MERC.US',isin='US1234567890',session=None):
+  with app.connect() as c:
+   c.execute("INSERT OR IGNORE INTO users(id,username,role,active) VALUES(?,?,'member',1)",(uid,f'shared-fixture-{uid}'))
+  if session is None:
+   self._shared_seq=getattr(self,'_shared_seq',10000)+1
+   # Real persisted sessions; keep synthetic subscribers outside the due
+   # batch until explicitly polled so capture counts remain attributable.
+   session=capacity_fixture.LiveCapacity.add(self,symbol,self._shared_seq,user=uid,due=self.now.timestamp()+3600)
+  job=dict(session)
+  req=dict(job['request_data'],asset_id=f'asset-{uid}-{symbol}',provider_symbol=symbol,ticker=symbol.split('.')[0])
+  job['request_data']=req
+  with app.connect() as c:
+   if isin:
+    c.execute('INSERT OR REPLACE INTO hw_verified_feed_links VALUES(?,?,?,?,?,?,?,?)',
+              (uid,req['asset_id'],req['ticker'],req['quote_currency'],req['exchange'],symbol,isin,self.now.timestamp()))
+   c.execute('UPDATE hw_sessions SET request=? WHERE id=? AND user_id=?',(json.dumps(req),job['id'],uid))
+  return job
+ def shared_client(self,key='feed-reuse'):
+  def capture(feed,symbols,**kwargs):
+   at=self.now.isoformat()
+   return {'status':'OK','messages':[{'symbol':symbol,'event_time':at,'received_at':at,'price':'100','market_session':'open'}
+                                    for symbol in ([symbols] if isinstance(symbols,str) else symbols)]}
+  client=EODHDFeeds(key)
+  client.capture=Mock(side_effect=capture)
+  return client
+ def test_cross_user_capture_counts_at_1_10_and_100_subscribers(self):
+  jobs=[self.shared_job(uid) for uid in range(1,101)]
+  subscribers=[adapters.EODHDAdapter(app.connect,uid) for uid in range(1,101)]
+  for size in (1,10,100):
+   for enabled in ('0','1'):
+    with self.subTest(size=size,enabled=enabled),patch.dict(os.environ,{'ESCAPE_HW_EODHD_CROSS_USER_WS_ENABLED':enabled}):
+     adapters._ws_batch_cache.clear()
+     factory=Mock(side_effect=lambda *args,**kwargs:WS([{'s':'MERC','t':int(self.now.timestamp()*1000),'p':100}]))
+     client=EODHDFeeds('feed-reuse',ws_factory=factory)
+     results=[adapter.capture(client,'us_trades','MERC',job) for adapter,job in zip(subscribers[:size],jobs)]
+     self.assertEqual(len(results),size)
+     self.assertEqual([r['messages'][0]['price'] for r in results],['100']*size)
+     self.assertEqual(factory.call_count,1 if enabled=='1' else size)
+     self.assertEqual(len(adapters._ws_batch_cache),1 if enabled=='1' else size)
+     if enabled=='1' and size>1:
+      self.assertTrue(all(r['messages']==results[0]['messages'] for r in results))
+      results[0]['messages'][0]['price']='999'
+      self.assertEqual(subscribers[1].capture(client,'us_trades','MERC',jobs[1])['messages'][0]['price'],'100')
+ @patch.dict(os.environ,{'ESCAPE_HW_EODHD_CROSS_USER_WS_ENABLED':'1'})
+ def test_cross_user_overlap_reuses_batch_without_recruiting_other_users(self):
+  local=capacity_fixture.LiveCapacity.add(self,'MSFT.US',1)
+  self.shared_job(1,'MSFT.US',session=local)
+  first=self.shared_job(1)
+  second=self.shared_job(2,'MSFT.US')
+  disjoint=self.shared_job(2,'AMD.US')
+  other=adapters.EODHDAdapter(app.connect,2)
+  client=self.shared_client()
+  self.adapter.capture(client,'us_trades','MERC',first)
+  self.assertEqual(other.capture(client,'us_trades','MSFT',second)['messages'][0]['symbol'],'MSFT')
+  self.assertEqual(other.capture(client,'us_trades','AMD',disjoint)['messages'][0]['symbol'],'AMD')
+  self.assertEqual([call.args[1] for call in client.capture.call_args_list],[['MERC','MSFT'],'AMD'])
+ @patch.dict(os.environ,{'ESCAPE_HW_EODHD_CROSS_USER_WS_ENABLED':'1'})
+ def test_cross_user_identity_feed_credential_and_test_scope_are_isolated(self):
+  first,second=self.shared_job(1),self.shared_job(2)
+  other=adapters.EODHDAdapter(app.connect,2)
+  client=self.shared_client()
+  self.adapter.capture(client,'us_trades','MERC',first)
+  denied=self.shared_client('different-account')
+  denied.capture.side_effect=None
+  denied.capture.return_value={'status':'ENTITLEMENT_UNVERIFIED','messages':[]}
+  for _ in range(2):
+   self.assertEqual(other.capture(denied,'us_trades','MERC',second)['status'],'ENTITLEMENT_UNVERIFIED')
+  self.assertEqual(denied.capture.call_count,2)
+  other.capture(client,'us_quotes','MERC',second)
+  other.capture(client,'us_trades','MERC',{**second,'request_data':dict(second['request_data'],is_test=True)})
+  other.capture(client,'us_trades','MERC',{**second,'is_test':True})
+  unseen=adapters.EODHDAdapter(app.connect,3)
+  unseen.capture(client,'us_trades','MERC',self.shared_job(3,isin=None))
+  unseen.capture(client,'us_trades','MERC',self.shared_job(3,isin='US1234567891'))
+  self.assertEqual(client.capture.call_count,6)
+  self.assertEqual(other.capture(client,'us_trades','MERC',second)['status'],'OK')
+  self.assertEqual(client.capture.call_count,6)
+  with app.connect() as c:
+   c.execute('UPDATE hw_verified_feed_links SET verified_epoch=0 WHERE user_id=2')
+  other.capture(client,'us_trades','MERC',second)
+  self.assertEqual(client.capture.call_count,7)
+ @patch.dict(os.environ,{'ESCAPE_HW_EODHD_CROSS_USER_WS_ENABLED':'1'})
+ def test_shared_capture_requires_persisted_tenant_watch_and_current_request(self):
+  first,second=self.shared_job(1),self.shared_job(2)
+  other=adapters.EODHDAdapter(app.connect,2)
+  client=self.shared_client()
+  self.adapter.capture(client,'us_trades','MERC',first)
+  with app.connect() as c:
+   self.assertIsNotNone(other.shared_stream_identity(c,second['request_data'],second['id']))
+   self.assertIsNone(other.shared_stream_identity(c,second['request_data'],first['id']))
+   self.assertIsNone(other.shared_stream_identity(c,dict(second['request_data'],profile='CRITICAL'),second['id']))
+  forged=dict(second,id=first['id'])
+  other.capture(client,'us_trades','MERC',forged)
+  self.assertEqual(client.capture.call_count,2)  # no shared cache reuse
+  other.capture(client,'us_trades','MERC',second)
+  self.assertEqual(client.capture.call_count,2)
+  with app.connect() as c:
+   c.execute("UPDATE hw_sessions SET status='EXPIRED' WHERE id=?",(second['id'],))
+   self.assertIsNone(other.shared_stream_identity(c,second['request_data'],second['id']))
+ @patch.dict(os.environ,{'ESCAPE_HW_EODHD_CROSS_USER_WS_ENABLED':'1'})
+ def test_cross_user_concurrent_capture_defers_only_the_matching_instrument(self):
+  started,finish=threading.Event(),threading.Event()
+  client=self.shared_client()
+  capture=client.capture.side_effect
+  def blocked(feed,symbols,**kwargs):
+   if symbols=='MERC':
+    started.set()
+    if not finish.wait(5):raise AssertionError('test did not unblock capture')
+   return capture(feed,symbols,**kwargs)
+  client.capture.side_effect=blocked
+  first,second,disjoint=self.shared_job(1),self.shared_job(2),self.shared_job(2,'AMD.US')
+  other=adapters.EODHDAdapter(app.connect,2)
+  with ThreadPoolExecutor(max_workers=1) as pool:
+   leader=pool.submit(self.adapter.capture,client,'us_trades','MERC',first)
+   try:
+    self.assertTrue(started.wait(5))
+    self.assertEqual(other.capture(client,'us_trades','MERC',second)['status'],'COLLECTING')
+    ready=other.pending_feed
+    self.assertFalse(ready.is_set())
+    self.assertEqual(other.capture(client,'us_trades','AMD',disjoint)['status'],'OK')
+   finally:finish.set()
+   self.assertEqual(leader.result(timeout=5)['status'],'OK')
+  self.assertTrue(ready.is_set())
+  self.assertEqual(other.capture(client,'us_trades','MERC',second)['status'],'OK')
+  self.assertEqual(client.capture.call_count,2)
+  self.assertFalse(adapters._ws_batch_inflight)
+ @patch.dict(os.environ,{'ESCAPE_HW_EODHD_CROSS_USER_WS_ENABLED':'1'})
+ def test_cross_user_expiry_retry_and_cache_bound(self):
+  first,second=self.shared_job(1),self.shared_job(2)
+  other=adapters.EODHDAdapter(app.connect,2)
+  client=self.shared_client()
+  capture=client.capture.side_effect
+  with patch('hotwatch_adapters.time.monotonic',return_value=100):
+   self.adapter.capture(client,'us_trades','MERC',first)
+  with patch('hotwatch_adapters.time.monotonic',return_value=161):
+   client.capture.side_effect=[RuntimeError('synthetic failure'),{'status':'NO_MESSAGES','messages':[]},capture('us_trades','MERC')]
+   with self.assertRaisesRegex(RuntimeError,'synthetic failure'):
+    other.capture(client,'us_trades','MERC',second)
+   self.assertEqual(other.capture(client,'us_trades','MERC',second)['status'],'OK')
+   self.assertEqual(other.capture(client,'us_trades','MERC',second)['status'],'OK')
+   self.assertEqual(client.capture.call_count,4)
+  client.capture.side_effect=capture
+  with patch('hotwatch_adapters.utc',return_value=self.now+timedelta(seconds=121)):
+   other.capture(client,'us_trades','MERC',second)
+  self.assertEqual(client.capture.call_count,5)
+  for index in range(513):
+   symbol=f'BOUND{index}'
+   self.adapter.capture(client,'us_trades',symbol,self.shared_job(1,symbol+'.US'))
+   self.assertLessEqual(len(adapters._ws_batch_cache),512)
+  self.assertFalse(adapters._ws_batch_inflight)
+ @patch.dict(os.environ,{'ESCAPE_HW_EODHD_CROSS_USER_WS_ENABLED':'1',
+                         'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_HW_EODHD_WS_TRADES_ENABLED':'1',
+                         'ESCAPE_HW_EODHD_FUSE_ENABLED':'0'})
+ def test_cross_user_poll_only_shares_market_data(self):
+  client=self.shared_client()
+  contexts=[{'position':'held','quantity':'3','orders':['user-1']},
+            {'position':'none','quantity':'0','orders':[]}]
+  results=[]
+  for uid,context in enumerate(contexts,1):
+   adapter=adapters.EODHDAdapter(app.connect,uid)
+   job=self.shared_job(uid)
+   self.assertEqual(adapter.pluto.uid,uid)
+   with patch.object(adapter.pluto,'safe_context',return_value=context) as broker,patch.object(adapter,'feeds',return_value=client),patch.object(adapter,'interval',return_value=60):
+    results.append(adapter.poll(job))
+    broker.assert_called_once_with(job['request_data'],'USD')
+  self.assertEqual(client.capture.call_count,1)
+  self.assertEqual([sample['context'] for sample in results],contexts)
+  self.assertNotEqual(results[0]['asset_id'],results[1]['asset_id'])
  def test_batches_skip_reusable_symbols_and_fill_with_missing_observations(self):
   jobs=[capacity_fixture.LiveCapacity.add(self,'TEST'+str(i)+'.US',i,due=self.now.timestamp()-30+i) for i in range(20)]
   originals=[self.cached('TEST'+str(i)) for i in range(10)]
