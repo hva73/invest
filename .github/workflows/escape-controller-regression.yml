@@ -2,7 +2,7 @@ name: ESCAPE controller regression review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    branches: [codex/escape-development]
+    branches: [codex/escape-development, codex/trading-engine-v2-integration]
 permissions:
   contents: read
 concurrency:
@@ -35,7 +35,7 @@ jobs:
           assert subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip() == head
           paths = subprocess.check_output(['git','diff','--name-only','-z',base+'...'+head]).decode().split('\0')
           ui = any(p.startswith(('static/','templates/','tests/browser_','tests/test_chart','tests/test_holding_chart')) or p in ('dashboard_projection.py','market_data.py') for p in paths)
-          motor = any(p.startswith(('hotwatch','eodhd','intel_workflows','trading_engine_v2','tests/test_hotwatch','tests/test_eodhd','tests/test_trading_engine_v2')) for p in paths)
+          motor = any(p.startswith(('hotwatch','eodhd','intel_workflows','trading_engine_v2','strategy_lab','tests/test_strategy_lab','tests/test_hotwatch','tests/test_eodhd','tests/test_trading_engine_v2')) for p in paths)
           with open(os.environ['GITHUB_OUTPUT'],'a') as f:
               f.write(f'ui={str(ui).lower()}\nmotor={str(motor).lower()}\n')
           print('Pinned reviewed head:', head, 'UI:', ui, 'motor:', motor)
@@ -49,7 +49,7 @@ jobs:
         if: steps.scope.outputs.motor == 'true'
         run: |
           python -m unittest tests.test_eodhd_feeds tests.test_feed_reuse tests.test_queue_recovery tests.test_hotwatch_holdings_auto tests.test_hotwatch_warmup tests.test_signal_readiness tests.test_sparse_feed_recovery tests.test_hotwatch_engine tests.test_hotwatch_bar_evidence
-          if test -f tests/test_trading_engine_v2.py; then python -m unittest discover -s tests -p test_trading_engine_v2.py; fi
+          if test -f tests/test_trading_engine_v2.py; then python -m unittest tests.test_trading_engine_v2 tests.test_strategy_lab; fi
       - name: Chart and UI regression
         if: steps.scope.outputs.ui == 'true'
         run: |
