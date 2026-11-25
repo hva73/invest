@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-25T18:35:10Z",
+  "updated_at": "2026-11-25T19:53:00Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -243,7 +243,7 @@
       "title": "Position Watch og strategiskift",
       "status": "in_progress",
       "issue": 273,
-      "evidence": "#298 test-only SQLite historik integreret 33416f77; exitintegration #299 HOLD c1847c70: uafhængigt vedvarende journalanker mangler.",
+      "evidence": "#298 integreret 33416f77. #299 a1309c28 CI 45682789110 PASS; HOLD: restart uden uafhængigt vedvarende journalanker stadig ikke bevist.",
       "subgoals": [
         {
           "id": "switch",
@@ -271,12 +271,12 @@
           "id": "e2e",
           "title": "Integreret positionsbeskyttelse",
           "status": "review",
-          "evidence": "#299 c1847c70 CI 45664780097 PASS, uafhængigt HOLD: ingen faktisk genstartssikker attesteret kædespids.",
+          "evidence": "#299 a1309c28 CI 45682789110 PASS; review 7172580104: restart kræver digest fra tidligere proces; afkortning må ikke give fallback.",
           "owner_role": "motor",
-          "updated_at": "2026-11-25T17:43:00Z"
+          "updated_at": "2026-11-25T19:53:00Z"
         }
       ],
-      "updated_at": "2026-11-25T17:43:00Z"
+      "updated_at": "2026-11-25T19:53:00Z"
     },
     {
       "id": "longterm",
@@ -372,15 +372,15 @@
       "title": "Hvordan står det til? – herkomst og statistik",
       "status": "in_progress",
       "issue": 114,
-      "evidence": "#303 f81d749e CI 45666550924 PASS, review HOLD på legitim collection-sell statusreadback uden tidligere portfolioId.",
+      "evidence": "#303 7678d47e CI 45681812880 PASS; HOLD: ukendt historisk depot må ikke bindes fra første statusrespons. Konkret løsning på #303 kommentar 7172878172.",
       "subgoals": [
         {
           "id": "provenance",
           "title": "Entry/exit-herkomst",
           "status": "review",
-          "evidence": "#303 f81d749e konkret kode, CI PASS, review HOLD: collection-sell med matchende collectionId/orderIntentId og første portfolioId må ikke afvises.",
+          "evidence": "Bevar verificeret send-time depotattestation i eksisterende proposal metadata; legacy ukendt må ikke blive autoritativ. #303 HOLD, ingen fill-attribution.",
           "owner_role": "motor",
-          "updated_at": "2026-11-25T17:43:00Z"
+          "updated_at": "2026-11-25T19:53:00Z"
         },
         {
           "id": "fills",
@@ -397,7 +397,7 @@
           "owner_role": "desktop"
         }
       ],
-      "updated_at": "2026-11-25T17:43:00Z"
+      "updated_at": "2026-11-25T19:53:00Z"
     },
     {
       "id": "ui",
@@ -405,7 +405,7 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "in_progress",
       "issue": 54,
-      "evidence": "#305 integreret 6e82e175 efter uafhængigt review af 8dc16d65 og chart/UI CI 45667433871/job 139393284194. Automatisk #67:3 publicerede #306, fortsat review/reparation af refresh/visibility-race. Mobil #300 HOLD; samlet browseraccept udestår.",
+      "evidence": "#305 integreret 6e82e175, automatisk efterfølger #306. #300/#306 nye eksakte reviewholds; samlet browseraccept udestår.",
       "subgoals": [
         {
           "id": "reuse",
@@ -418,17 +418,17 @@
           "id": "mobile",
           "title": "Mobil 2.0",
           "status": "review",
-          "evidence": "#300 752c3a06 CI 45663404430 PASS, uafhængigt HOLD på session-epoch og stale kill/holding continuations.",
+          "evidence": "#300 4fd38ad1 CI 45682839695 PASS; HOLD 7172599176: session-epoch ved holding poll og same-user historikcache. Særskilt mobil-workflow skipped.",
           "owner_role": "mobile",
-          "updated_at": "2026-11-25T17:43:00Z"
+          "updated_at": "2026-11-25T19:53:00Z"
         },
         {
           "id": "desktop",
           "title": "Desktop 2.0",
           "status": "review",
-          "evidence": "#305 accepteret på 6e82e175; #67:3 automatisk STARTED/WORKING/TESTING og PR #306. Nyere reparation 0f2b1a87; ingen samlet eller live accept.",
+          "evidence": "#306 cc5da720 CI 45681984006 PASS; HOLD 7171911446: pending retry kan strande cached day ved retur fra måned.",
           "owner_role": "desktop",
-          "updated_at": "2026-11-25T18:35:10Z"
+          "updated_at": "2026-11-25T19:53:00Z"
         },
         {
           "id": "test",
@@ -438,7 +438,7 @@
           "owner_role": "mobile"
         }
       ],
-      "updated_at": "2026-11-25T18:35:10Z"
+      "updated_at": "2026-11-25T19:53:00Z"
     },
     {
       "id": "load",
@@ -446,7 +446,7 @@
       "title": "100 brugere og skaleringsmåling",
       "status": "in_progress",
       "issue": 14,
-      "evidence": "#302 integreret 99ba8ef6; SQLite discovery 1/10/100. #304 e7c25b85 CI 45668034113 PASS, HOLD: BEGIN IMMEDIATE fastholdes over øvrige tenants selv uden writes efter refresh; fuld 100-brugeraccept udestår.",
+      "evidence": "#302 integreret 99ba8ef6. #304 73f747f9 CI 45681907634 PASS; HOLD: tidlig aktivering kan give større SQL/JSON arbejde. 100-brugeraccept udestår.",
       "subgoals": [
         {
           "id": "adapter",
@@ -458,10 +458,10 @@
         {
           "id": "queue",
           "title": "100 brugere og fair køer",
-          "status": "in_progress",
-          "evidence": "#304 e7c25b85: kræver regression for refreshed no-write batch uden fastholdt writer-lock; ingen fuld fairness/workeraccept.",
+          "status": "review",
+          "evidence": "#304 73f747f9 HOLD 7171889610: mål tidlig og sen aktivering, ikke kun færre SQL statements; ingen fuld fairness/workeraccept.",
           "owner_role": "data",
-          "updated_at": "2026-11-25T18:35:10Z"
+          "updated_at": "2026-11-25T19:53:00Z"
         },
         {
           "id": "resources",
@@ -478,7 +478,7 @@
           "owner_role": "data"
         }
       ],
-      "updated_at": "2026-11-25T18:35:10Z"
+      "updated_at": "2026-11-25T19:53:00Z"
     },
     {
       "id": "release",
