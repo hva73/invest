@@ -167,6 +167,19 @@ def record_provider_pause(root,row,now=None):
     save(path,{"task":task_key(row),"observed_at":now,"reset_at":stamp})
     print("PROVIDER_PAUSE:", "until reported reset" if stamp is not None else "awaiting confirmed reset",flush=True)
 
+def write_status(root, reason, active, waiting=(), review=()):
+    """One local heartbeat; contains only task IDs and scheduler state."""
+    try:
+        save(root/"status.json", {
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "reason": reason,
+            "active": sorted(task_key(row) for row in active),
+            "waiting": sorted(waiting),
+            "awaiting_review": sorted(review),
+        })
+    except OSError as exc:
+        print("STATUS_UNAVAILABLE:",type(exc).__name__,flush=True)
+
 def run_queue(a,root,script,statefile,donefile,state,results):
     # A process restart cannot assume a previously reserved generation is idle.
     # Preserve its checkout and explicitly expose the interrupted state.
@@ -197,9 +210,13 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 controller_receipts.flush(root)
                 controller_progress.flush(root)
             if (root/"STOP").exists():
+                write_status(root,"stopping",active.values())
                 if active:
                     concurrent.futures.wait(active,timeout=15,return_when=concurrent.futures.FIRST_COMPLETED)
                 continue
+            reason="idle"
+            waiting=[]
+            review=[]
             try:
                 if a.remote:
                     controller_remote.refresh(root,a.queue)
@@ -209,23 +226,38 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                     if key in interrupted:
                         notify_result(root,row,"blocked:interrupted",a.publish)
                         interrupted.remove(key)
+                review=[task_key(row) for row in rows if row["status"]=="ready" and results.get(task_key(row)) in ("draft_pr","review_required","no_changes")]
                 rows=effective_rows(rows,results,active.values())
-                selected=[] if provider_pause_active(root) else plan(rows,max_parallel=a.parallel)
+                waiting=[task_key(row) for row in rows if row["status"]=="ready"]
+                paused=provider_pause_active(root)
+                selected=[] if paused else plan(rows,max_parallel=a.parallel)
+                if paused:
+                    reason="provider_pause"
+                elif waiting and not selected:
+                    reason="waiting_for_dependency_or_worker"
+                elif not waiting and not active:
+                    reason="awaiting_review" if review else "no_eligible_work"
             except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as exc:
                 print("QUEUE_UNAVAILABLE:",type(exc).__name__,flush=True)
                 selected=[]
                 rows=[]
+                reason="queue_unavailable"
             day=datetime.now(timezone.utc).date().isoformat()
             for task in selected:
                 if (root/"STOP").exists():
                     break
                 row=next(r for r in rows if (r["issue"],r.get("generation",1))==task.key)
                 if not reserve(state,day,a.daily_reservation,a.per_task):
+                    reason="budget_limit"
                     break
                 save(statefile,state)
                 results[task_key(row)]="reserved"
                 save(donefile,results)
                 active[pool.submit(run_task,root,script,row,a.per_task,a.publish)]=row
+            active_keys={task_key(row) for row in active.values()}
+            if active and reason in ("idle","waiting_for_dependency_or_worker"):
+                reason="working"
+            write_status(root,reason,active.values(),[key for key in waiting if key not in active_keys],review)
             if active:
                 concurrent.futures.wait(active,timeout=15,return_when=concurrent.futures.FIRST_COMPLETED)
             elif not (root/"STOP").exists():
