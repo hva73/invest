@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-25T16:05:49.996Z",
+  "updated_at": "2026-11-25T16:31:00Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -37,7 +37,7 @@
       "title": "Fælles datamotor",
       "status": "in_progress",
       "issue": 14,
-      "evidence": "PR #285/#287/#289 integreret. #292 CI 45650205582: én fejl; scheduler og fuld belastning udestår.",
+      "evidence": "PR #292 exact b942c0e3, CI 45654397233: 581 tests PASS; integreret 0a0181ee med identiske produkt/testblobs. Causal shared simulation capture; scheduler og fuld belastning udestår.",
       "subgoals": [
         {
           "id": "feeds",
@@ -49,13 +49,15 @@
           "id": "features",
           "title": "Fælles featureberegning",
           "status": "verified",
-          "evidence": "PR #289 integreret på v2-gren; test-only."
+          "evidence": "PR #289/#292 integreret; 1/10/100 simulerede overlap/disjoint; én validering per fælles capture, separate entitlement/parametre, ingen live gate.",
+          "updated_at": "2026-11-25T16:31:00Z"
         },
         {
           "id": "optional",
           "title": "Uafhængige valgfrie indikatorer",
-          "status": "review",
-          "evidence": "PR #292 CI 45650205582 fejlede én test."
+          "status": "verified",
+          "evidence": "PR #292: gyldig prishistorik bevares ved stale/ukendte valgfrie quotes; risikogate afviser stadig ukendt spread. 581 tests PASS.",
+          "updated_at": "2026-11-25T16:31:00Z"
         },
         {
           "id": "scheduler",
@@ -69,7 +71,8 @@
           "status": "pending",
           "evidence": "Udestår."
         }
-      ]
+      ],
+      "updated_at": "2026-11-25T16:31:00Z"
     },
     {
       "id": "candidate_rotation",
@@ -121,21 +124,23 @@
       "id": "resources",
       "phase": 1,
       "title": "CPU/RAM, workers og serverdrift",
-      "status": "review",
+      "status": "in_progress",
       "issue": 14,
-      "evidence": "PR #293 exact 0d2a0628, CI 45647848879: 609 tests PASS. Draft-transition GraphQL-fejl; integration/UI og hostingmålinger udestår.",
+      "evidence": "PR #293 integreret 613123e0, exact 0d2a0628 CI 45647848879 609 tests PASS og alle 5 ændrede blobs matcher. Backend afgrænset til worker/supervisor og synlige cgroups. UI #14:6 køsat; faktiske hostingmålinger udestår.",
       "subgoals": [
         {
           "id": "backend",
           "title": "CPU/RAM-måling i backend",
-          "status": "review",
-          "evidence": "PR #293, CI 45647848879: 609 testkørsler bestået; integration udestår."
+          "status": "verified",
+          "evidence": "Testet backend integreret #293 613123e0; ikke installeret eller full hosting entitlement.",
+          "updated_at": "2026-11-25T16:31:00Z"
         },
         {
           "id": "display",
           "title": "Adminvisning og historik",
-          "status": "pending",
-          "evidence": "Udestår."
+          "status": "in_progress",
+          "evidence": "#14:6 klar på exact 613123e0; eksisterende admin UI, ingen faktisk start dokumenteret.",
+          "updated_at": "2026-11-25T16:31:00Z"
         },
         {
           "id": "baseline",
@@ -149,7 +154,8 @@
           "status": "pending",
           "evidence": "Udestår."
         }
-      ]
+      ],
+      "updated_at": "2026-11-25T16:31:00Z"
     },
     {
       "id": "core",
