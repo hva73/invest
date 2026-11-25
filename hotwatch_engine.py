@@ -321,6 +321,39 @@ def release_entry_for_holding(c,uid,now):
  event(c,row,'CAPACITY_RELEASED',now,'Plads frigivet til en verificeret beholdnings exit-overvågning')
  return True
 
+def _test_entry_capacity(is_test):
+ if is_test:
+  return _test_interval('ESCAPE_HW_TEST_ENTRY_INSTRUMENT_CAPACITY',10000)
+
+def _entry_only(request):
+ return request.get('watch_mode')=='entry' and request.get('report_id')!='manual-pluto' and request.get('purpose')!='automatic holding watch'
+
+def _test_entry_key(c,uid,request,now,entitlement):
+ # The explicit scope models a verified entitlement in simulation only.
+ # Every tenant still needs its own current instrument proof.
+ if not entitlement or request.get('provider')!='eodhd' or not verified_automatic_feed(c,uid,request,now):
+  return None
+ link=c.execute('SELECT isin FROM hw_verified_feed_links WHERE user_id=? AND asset_id=?',(uid,request['asset_id'])).fetchone()
+ if link and isinstance(link['isin'],str) and re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',link['isin']):
+  return ('eodhd',request['provider_symbol'],link['isin'],request['exchange'].upper(),request['quote_currency'],entitlement)
+
+def _check_test_capacity(c,uid,data,now,limit):
+ if not _entry_only(data):
+  rows=c.execute("SELECT request FROM hw_sessions WHERE is_test=1 AND user_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,))
+  if sum(not _entry_only(json.loads(row['request'])) for row in rows)>=capacity():
+   raise EngineError('capacity_limit',409)
+  return
+ entitlement=os.environ.get('ESCAPE_HW_TEST_VERIFIED_ENTITLEMENT_SCOPE','').strip()
+ incoming=_test_entry_key(c,uid,data,now,entitlement)
+ occupied=set()
+ for row in c.execute("SELECT s.id,s.user_id,s.request,p.watch_row_id AS provisional FROM hw_sessions s LEFT JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id WHERE s.is_test=1 AND s.status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')"):
+  request=json.loads(row['request'])
+  if _entry_only(request):
+   key=_test_entry_key(c,row['user_id'],request,now,entitlement) if row['provisional'] is None else None
+   occupied.add(key or (row['id'],))
+ if incoming not in occupied and len(occupied)>=limit:
+  raise EngineError('global_capacity_limit',409)
+
 def _create_in_transaction(c,uid,data,now,holding=False,manual=False):
  if len(set(data['portfolio_ids']))!=len(data['portfolio_ids']):raise EngineError('duplicate_portfolio_reference')
  if data['provider']=='synthetic' and not data['is_test']:raise EngineError('synthetic_requires_test_mode')
@@ -334,8 +367,12 @@ def _create_in_transaction(c,uid,data,now,holding=False,manual=False):
  if old:
   if old['digest']!=checksum(data):raise EngineError('watch_id_conflict',409)
   return {'ok':True,'duplicate':True,'session':view(c,old,now)}
- if not holding and c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]>=capacity():raise EngineError('global_capacity_limit',409)
- if not holding and c.execute("SELECT count(*) FROM hw_sessions WHERE user_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,)).fetchone()[0]>=capacity():raise EngineError('capacity_limit',409)
+ test_limit=_test_entry_capacity(data['is_test'])
+ if test_limit:
+  _check_test_capacity(c,uid,data,now,test_limit)
+ else:
+  if not holding and c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]>=capacity():raise EngineError('global_capacity_limit',409)
+  if not holding and c.execute("SELECT count(*) FROM hw_sessions WHERE user_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,)).fetchone()[0]>=capacity():raise EngineError('capacity_limit',409)
  if c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=? AND purpose=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,int(data['is_test']),data['candidate_id'],data['purpose'].strip().casefold())).fetchone():raise EngineError('active_watch_exists',409)
  if holding:
   if data['is_test'] or data['watch_mode']!='exit' or data['provider'] not in ('eodhd','pluto') or len(data['portfolio_ids'])!=1:raise EngineError('invalid_holding_watch')
@@ -505,12 +542,19 @@ def create_batch(connect,uid,data,now=None):
    if candidate.get('ticker','').casefold()!=item['ticker'].casefold():raise EngineError('candidate_ticker_mismatch',409)
    if c.execute('SELECT 1 FROM hw_sessions WHERE user_id=? AND watch_id=?',(uid,item['watch_id'])).fetchone():raise EngineError('watch_id_conflict',409)
    if c.execute("SELECT 1 FROM hw_sessions WHERE user_id=? AND is_test=? AND candidate_id=? AND purpose=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,int(item['is_test']),item['candidate_id'],item['purpose'].strip().casefold())).fetchone():raise EngineError('active_watch_exists',409)
-  open_count=c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]
-  own_count=c.execute("SELECT count(*) FROM hw_sessions WHERE user_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,)).fetchone()[0]
-  if open_count+len(data['sessions'])>capacity() or own_count+len(data['sessions'])>capacity():raise EngineError('activation_capacity_exceeded',409)
+  test_limit=_test_entry_capacity(data['is_test'])
+  if not test_limit:
+   open_count=c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]
+   own_count=c.execute("SELECT count(*) FROM hw_sessions WHERE user_id=? AND status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')",(uid,)).fetchone()[0]
+   if open_count+len(data['sessions'])>capacity() or own_count+len(data['sessions'])>capacity():raise EngineError('activation_capacity_exceeded',409)
   batch_started=time.perf_counter();results=[]
   for item in data['sessions']:
-   result=_create_in_transaction(c,uid,item,now);results.append({'candidate_id':item['candidate_id'],'watch_id':item['watch_id'],'outcome':'duplicate' if result['duplicate'] else 'created','session':result['session']})
+   try:result=_create_in_transaction(c,uid,item,now)
+   except EngineError as error:
+    if test_limit and error.code in ('global_capacity_limit','capacity_limit'):
+     raise EngineError('activation_capacity_exceeded',409) from error
+    raise
+   results.append({'candidate_id':item['candidate_id'],'watch_id':item['watch_id'],'outcome':'duplicate' if result['duplicate'] else 'created','session':result['session']})
   response={'ok':True,'request_id':data['request_id'],'duplicate':False,'results':results,'created_count':sum(x['outcome']=='created' for x in results),'batch_elapsed_ms':round((time.perf_counter()-batch_started)*1000,3)}
   c.execute('INSERT INTO hw_activation_requests VALUES(?,?,?,?,?,?)',(uid,data['request_id'],int(data['is_test']),digest_value,canonical(response),now.isoformat()))
   return response
@@ -831,7 +875,7 @@ def reconcile_candidates(connect,now=None,connection=None):
     if mode=='exit' or req.get('purpose')=='automatic holding watch' or req.get('report_id')=='manual-pluto':continue
     current=candidate_currentness(preflight,row['user_id'],row['is_test'],row['candidate_id'],now,report_fallback=req.get('purpose')=='automatic discovery',report_ttl_s=_report_only_test_ttl(row['is_test'],req))
     state=json.loads(row['state'])
-    if retirement_reason(row,req,current):
+    if retirement_reason(row,req,current) or (current['status']=='COLD' and mode=='entry' and _test_entry_capacity(row['is_test'])):
      if _can_retire_overdue_entry(preflight,row,state,now):needed=True;break
      continue
     if current['status']=='COLD' or state.get('candidate_cold') or reassessed_dormant(row,state,current):needed=True;break
@@ -863,6 +907,7 @@ def reconcile_candidates(connect,now=None,connection=None):
      event(c,row,'CANDIDATE_REASSESSED',now,'Ny gyldig vurdering');changed+=1
     continue
    if mode=='entry':
+    if not retire_reason and _test_entry_capacity(row['is_test']) and not _can_retire_overdue_entry(c,row,state,now):continue
     c.execute("UPDATE hw_sessions SET status='EXPIRED',updated=?,revision=revision+1,lease_owner=NULL,lease_until=0 WHERE id=?",(now.isoformat(),row['id']))
     event(c,row,'CANDIDATE_WATCH_EXPIRED',now,retire_reason or current['reason']);changed+=1
    else:

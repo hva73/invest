@@ -1664,6 +1664,95 @@ class HotWatch(unittest.TestCase):
    self.assertEqual(c.execute('SELECT count(*) FROM candidate_decision_events WHERE user_id=1 AND is_test=1 AND candidate_id=?',(candidate['candidate_id'],)).fetchone()[0],2)
    self.assertEqual([r[0] for r in c.execute('SELECT event_type FROM hw_events WHERE watch_row_id=(SELECT id FROM hw_sessions WHERE user_id=1 AND watch_id=?) ORDER BY id',(wid,))],['WATCH_STARTED','CANDIDATE_WATCH_EXPIRED'])
 
+ def test_simulated_entry_instrument_capacity_across_tenants(self):
+  with app.connect() as c:
+   c.executemany('INSERT INTO users(id,username) VALUES(?,?)',[(uid,f'sim-{uid}') for uid in range(2,103)])
+
+  def entry(uid,scenario,verified=True):
+   aid=f'sim-asset-{scenario}-{uid}'
+   report=copy.deepcopy(self.r)
+   report['report_id']=aid
+   report['candidates'][0]['candidate_id']=aid
+   report.update(positions=[],orders=[])
+   self.assertEqual(report_ingest.save(app.connect,uid,report)[0],201)
+   symbol='MERC.US' if scenario.startswith('overlap') else f'MERC-{uid}.US'
+   if verified:
+    with app.connect() as c:
+     c.execute('INSERT INTO hw_verified_feed_links VALUES(?,?,?,?,?,?,?,?)',(uid,aid,'MERC','USD','NASDAQ',symbol,'US0000000001',self.now.timestamp()))
+   return dict(self.req,watch_id=aid,report_id=aid,candidate_id=aid,asset_id=aid,provider='eodhd',provider_symbol=symbol,watch_mode='entry')
+
+  for size in (1,10,100):
+   for overlapping in (True,False):
+    with self.subTest(tenants=size,overlapping=overlapping):
+     scenario=f'{"overlap" if overlapping else "disjoint"}-{size}'
+     limit=1 if overlapping else size
+     settings={'ESCAPE_HW_CAPACITY':'1','ESCAPE_HW_TEST_ENTRY_INSTRUMENT_CAPACITY':str(limit),'ESCAPE_HW_TEST_VERIFIED_ENTITLEMENT_SCOPE':'fixture-feed'}
+     with patch.dict(os.environ,settings):
+      for uid in range(2,size+2):
+       req=entry(uid,scenario)
+       self.assertEqual(engine.create(app.connect,uid,req,self.now)['session']['status'],'CREATED')
+      if size>1:
+       with self.assertRaises(EngineError):
+        engine.item(app.connect,2,f'sim-asset-{scenario}-3',True)
+      unknown=entry(size+2,scenario,verified=False)
+      with self.assertRaisesRegex(EngineError,'global_capacity_limit'):
+       engine.create(app.connect,size+2,unknown,self.now)
+      if overlapping:
+       with patch.dict(os.environ,{'ESCAPE_HW_TEST_VERIFIED_ENTITLEMENT_SCOPE':''}):
+        with self.assertRaisesRegex(EngineError,'global_capacity_limit'):
+         engine.create(app.connect,1,entry(1,scenario),self.now)
+      different=entry(size+2,f'different-{scenario}')
+      with self.assertRaisesRegex(EngineError,'global_capacity_limit'):
+       engine.create(app.connect,size+2,different,self.now)
+      for uid in range(2,size+2):
+       engine.control(app.connect,uid,f'sim-asset-{scenario}-{uid}',True,'stop',self.now)
+
+ def test_simulated_entry_batch_rolls_back_at_capacity(self):
+  report,candidate,_=self.overdue_fixture()
+  first=dict(self.req,watch_id='batch-entry-first',purpose='batch entry',watch_mode='entry')
+  second=dict(first,watch_id='batch-entry-second',report_id=report['report_id'],candidate_id=candidate['candidate_id'],asset_id=candidate['asset_id'])
+  batch={'request_id':'sim-entry-batch','is_test':True,'sessions':[first,second]}
+  with patch.dict(os.environ,{'ESCAPE_HW_TEST_ENTRY_INSTRUMENT_CAPACITY':'1'}):
+   with self.assertRaisesRegex(EngineError,'activation_capacity_exceeded'):
+    engine.create_batch(app.connect,1,batch,self.now)
+   with app.connect() as c:
+    self.assertEqual(c.execute("SELECT count(*) FROM hw_sessions WHERE watch_id LIKE 'batch-entry-%'").fetchone()[0],0)
+   second.update(watch_mode='exit')
+   self.assertEqual(engine.create_batch(app.connect,1,batch,self.now)['created_count'],2)
+
+ def test_simulated_entry_capacity_preserves_private_watches_and_releases_retired_slot(self):
+  report,candidate,deadline=self.overdue_fixture()
+  before=deadline-timedelta(seconds=1)
+  req=dict(self.req,watch_id='retire-for-slot',report_id=report['report_id'],candidate_id=candidate['candidate_id'],asset_id=candidate['asset_id'],purpose='automatic discovery',watch_mode='entry')
+  req.update(provider='eodhd',provider_symbol='MERC.US')
+  with app.connect() as c:
+   c.execute('INSERT INTO hw_verified_feed_links VALUES(?,?,?,?,?,?,?,?)',(1,req['asset_id'],'MERC','USD','NASDAQ','MERC.US','US0000000001',before.timestamp()))
+  protected=[]
+  for name in ('held','pending'):
+   fixture=copy.deepcopy(report)
+   fixture['report_id']='protected-entry-'+name
+   fixture['candidates'][0]['candidate_id']=fixture['report_id']
+   report_ingest.save(app.connect,1,fixture)
+   protected.append(dict(req,watch_id=fixture['report_id'],report_id=fixture['report_id'],candidate_id=fixture['report_id'],asset_id='private-'+name,provider='synthetic',provider_symbol=None))
+  exit_watch=dict(req,watch_id='private-protective-exit',purpose='protective exit',watch_mode='exit')
+  manual=dict(req,watch_id='private-manual',purpose='manual watch',watch_mode='both')
+  replacement=dict(self.req,watch_id='new-entry-slot',purpose='replacement',watch_mode='entry')
+  settings={'ESCAPE_HW_CAPACITY':'3','ESCAPE_HW_TEST_ENTRY_INSTRUMENT_CAPACITY':'3','ESCAPE_HW_TEST_RETIRE_OVERDUE_ENTRY':'1','ESCAPE_HW_TEST_VERIFIED_ENTITLEMENT_SCOPE':'fixture-feed'}
+  with patch.dict(os.environ,settings):
+   for item in (req,*protected,exit_watch,manual):
+    self.assertEqual(engine.create(app.connect,1,item,before)['session']['status'],'CREATED')
+   with app.connect() as c:
+    for item,context in zip(protected,({'position':'held','orders':[]},{'position':'none','orders':[{'status':'OPEN'}]})):
+     row=engine.row_for(c,1,item['watch_id'],True)
+     c.execute('INSERT INTO hw_context_events(watch_row_id,observed,payload) VALUES(?,?,?)',(row['id'],before.isoformat(),json.dumps(context)))
+   with self.assertRaisesRegex(EngineError,'global_capacity_limit'):
+    engine.create(app.connect,1,replacement,before)
+   self.assertEqual(engine.reconcile_candidates(app.connect,deadline),1)
+   self.assertEqual(engine.item(app.connect,1,req['watch_id'],True)['session']['status'],'EXPIRED')
+   for item in (*protected,exit_watch,manual):
+    self.assertEqual(engine.item(app.connect,1,item['watch_id'],True)['session']['status'],'CREATED')
+   self.assertEqual(engine.create(app.connect,1,replacement,deadline)['session']['status'],'CREATED')
+
  def test_explicit_deadline_retirement_protects_scoped_watches(self):
   report,candidate,deadline=self.overdue_fixture()
   cid=candidate['candidate_id']
