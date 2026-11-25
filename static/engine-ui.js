@@ -157,6 +157,19 @@ window.EngineUI=(()=>{
   return data?._owner===user&&data._mode===mode&&data._epoch===epoch?data:null;
  }
  const isArchived=s=>['EXPIRED','COMPLETED'].includes(s.status);
+ const historyPath=(limit,before)=>base+'/sessions'+query()+'&limit='+limit+'&view=history'+(before?'&before='+before:'');
+ async function archiveTailChanged(cursor,rows,end,current){
+  let offset=0;
+  while(cursor&&offset<rows.length){
+   const limit=Math.min(100,rows.length-offset);
+   const page=await api(historyPath(limit,cursor));
+   if(!current())return false;
+   if(page.sessions.length!==limit||page.sessions.some((s,i)=>s.watch_id!==rows[offset+i].watch_id))return true;
+   offset+=limit;
+   cursor=page.next_cursor;
+  }
+  return offset!==rows.length||cursor!==end;
+ }
  let pendingHistory=null;
  async function load(){
   if(!root())return;
@@ -165,18 +178,35 @@ window.EngineUI=(()=>{
   if(!current())return;
   if(data&&data._owner!==user){showOwn=false;activeFilter='all'}
   let r,h,registry;
-  try{[r,h,registry]=await Promise.all([api(base+'/sessions'+query()+'&limit=100&view=current'),api(base+'/sessions'+query()+'&limit=20&view=history'),api('reports/candidate-registry?is_test='+mode)])}
+  try{[r,h,registry]=await Promise.all([api(base+'/sessions'+query()+'&limit=100&view=current'),api(historyPath(20)),api('reports/candidate-registry?is_test='+mode)])}
   catch(error){if(current())throw error;return}
   if(!current())return;
-  const previous=listData(user,epoch);
+  let previous=listData(user,epoch);
   const ids=new Set([...r.sessions,...h.sessions].map(s=>s.watch_id));
+  const archiveTail=list=>list?.sessions.filter(s=>isArchived(s)&&!ids.has(s.watch_id))||[];
   // History is ordered by creation, so a newly closed watch can land inside a page already read.
-  const historyChanged=previous?.sessions.some(s=>!isArchived(s)&&!ids.has(s.watch_id));
+  let historyChanged=previous?.sessions.some(s=>!isArchived(s)&&!ids.has(s.watch_id));
+  const mayHaveHiddenArchives=r.truncated||previous?.current_truncated||previous?.historyRequestOverlappedCap;
+  if(!historyChanged&&mayHaveHiddenArchives){
+   // The capped current list can miss an archive transition entirely. Check the loaded history
+   // range and its end cursor so an insertion outside the first page becomes reachable.
+   let checked;
+   while(previous?.historyPage&&previous.historyPage!==checked){
+    checked=previous.historyPage;
+    try{historyChanged=await archiveTailChanged(h.next_cursor,archiveTail(previous),checked.next_cursor,current)}
+    catch(error){if(current())throw error;return}
+    if(!current())return;
+    previous=listData(user,epoch);
+    if(historyChanged)break;
+   }
+  }
   if(historyChanged)pendingHistory=null;
   const page=historyChanged?null:previous?.historyPage;
-  const cached=historyChanged?[]:previous?.sessions.filter(s=>isArchived(s)&&!ids.has(s.watch_id))||[];
+  const cached=historyChanged?[]:archiveTail(previous);
   data={...r,sessions:[...r.sessions,...h.sessions,...cached],candidates:registry.candidates||[],historyPage:page,
    history_cursor:page?page.next_cursor:h.next_cursor,history_truncated:page?page.truncated:h.truncated,
+   // Recheck a pending page even if the current list has dropped below the cap by then.
+   historyRequestOverlappedCap:mayHaveHiddenArchives&&pendingHistory?.(),
    current_truncated:r.truncated,_owner:user,_mode:mode,_epoch:epoch};
   paint();
  }
@@ -323,7 +353,7 @@ window.EngineUI=(()=>{
   const current=()=>pendingHistory===scope&&scope();
   let history;
   try{
-   history=await api(base+'/sessions'+query()+'&limit=20&view=history&before='+cursor);
+   history=await api(historyPath(20,cursor));
    if(!current())return;
   }catch(error){if(current())throw error;return}
   finally{if(pendingHistory===scope)pendingHistory=null}

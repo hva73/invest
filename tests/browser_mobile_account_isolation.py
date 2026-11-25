@@ -37,6 +37,9 @@ const assert = (condition, message) => { if (!condition) throw Error(message); }
 const byId = id => document.getElementById(id);
 const api = (path, args) => {
     const user = username;
+    if (archiveFixture?.autoHistory && path.includes('view=history')) {
+        return Promise.resolve(archiveFixture.autoHistory(new URLSearchParams(path.split('?')[1])));
+    }
     if (path === 'market/quote' || path === 'market/eodhd-symbols' || path === 'state' || path.includes('&before=') || path.endsWith('/pause') || path.endsWith('/ack-signal') || path.includes('/buy-plan?') || /manual-(search|start)/.test(path) || /sessions\/notification-/.test(path) || (holdCurrentLoad&&path.includes('view=current'))) {
         return new Promise((resolve, reject) => pending.push({path, args, user, resolve, reject}));
     }
@@ -50,7 +53,7 @@ const api = (path, args) => {
         status: 'ACTIVE', signal: 'WAIT', request: {ticker: user, watch_mode: 'entry', portfolio_ids: []}
     }});
     if (archiveFixture && path.includes('view=current')) return Promise.resolve({
-        sessions: archiveFixture.current, kill_switch: {}
+        sessions: archiveFixture.current.slice(0, 100), truncated: archiveFixture.current.length > 100, kill_switch: {}
     });
     if (archiveFixture && path.includes('view=history')) return Promise.resolve(archiveFixture.page());
     if (path.includes('view=current')) return Promise.resolve({
@@ -712,6 +715,67 @@ const run = async () => {
             !button(history), 'Newly archived watches were missing from the last page');
         await poll();
         check(button(archived) && !button(history), 'Poll lost the newly archived watch or reset pagination');
+    }
+    archiveFixture = null;
+
+    for (const [currentCount, archiveCount, delayPage] of [[101, 21, false], [102, 141, false], [101, 21, true]]) {
+        const current = Array.from({length: currentCount}, (_, index) => ({
+            id: 500 - index, ...session('capped-current-' + index)
+        }));
+        const expired = current.at(-1);
+        const archived = Array.from({length: archiveCount}, (_, index) => ({
+            id: 300 - 2 * index, ...session('capped-archive-' + index, 'COMPLETED')
+        }));
+        // Insert outside the first page and, for deep history, inside the last loaded page.
+        const insertion = archiveCount === 21 ? 21 : 130;
+        expired.id = 301 - 2 * insertion;
+        let finishPage;
+        archiveFixture = {
+            current,
+            autoHistory(params) {
+                const before = Number(params.get('before')) || Infinity;
+                const limit = Number(params.get('limit'));
+                const rows = archived.filter(row => row.id < before).slice(0, limit + 1);
+                const truncated = rows.length > limit;
+                const result = {
+                    sessions: rows.slice(0, limit).map(({id, ...row}) => row),
+                    next_cursor: truncated ? rows[limit - 1].id : null, truncated
+                };
+                if (delayPage && before !== Infinity && !finishPage) {
+                    return new Promise(resolve => { finishPage = () => resolve(result); });
+                }
+                return result;
+            }
+        };
+        switchAccount('alpha');
+        await flush();
+        const expiredButton = '[data-engine-detail="' + expired.watch_id + '"]';
+        assert(!button(expiredButton), 'Capped fixture exposed the oldest current watch');
+        const pages = Math.ceil(archiveCount / 20) - 1;
+        const readPages = async () => {
+            for (let i = 0; i < pages; ++i) await click(history);
+        };
+        const firstPage = delayPage && click(history);
+        if (!delayPage) {
+            await readPages();
+            assert(!button(history), 'Capped fixture did not exhaust history');
+            await poll();
+            check(!button(history), 'Unchanged capped current list reopened exhausted history');
+        }
+        current.pop();
+        archived.splice(insertion, 0, {...expired, status: 'EXPIRED'});
+        if (delayPage) {
+            await poll();
+            finishPage();
+            await firstPage;
+        }
+        await poll();
+        check(button(history), 'An unseen watch expiring with ' + currentCount + ' current watches did not restore pagination');
+        if (button(history)) await readPages();
+        check(button('[data-engine-group=history] ' + expiredButton) && !button(history),
+            'An unseen expired watch was missing from the reopened last page');
+        await poll();
+        check(button(expiredButton) && !button(history), 'Capped refresh lost the expired watch after pagination');
     }
     archiveFixture = null;
 
