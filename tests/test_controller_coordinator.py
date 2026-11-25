@@ -234,6 +234,16 @@ class LocalCoordinatorTests(unittest.TestCase):
         c.save(self.root/"coordinator-repair-501-2.json",{"state":"held","head":new})
         self.assertIsNone(c.repair_attempt(self.root,501,"f"*40))
 
+    def test_fourth_repair_is_allowed_after_three_distinct_publications(self):
+        heads=[str(i)*40 for i in range(1,5)]
+        for i in range(3):
+            suffix="" if i==0 else "-"+str(i+1)
+            c.save(self.root/("coordinator-repair-501"+suffix+".json"),{"state":"published","head":heads[i],"new_head":heads[i+1]})
+        self.assertEqual(c.repair_attempt(self.root,501,heads[3]),4)
+        self.assertIsNone(c.repair_attempt(self.root,501,heads[1]))
+        c.save(self.root/"coordinator-repair-501-4.json",{"state":"published","head":heads[3],"new_head":heads[0]})
+        self.assertIsNone(c.repair_attempt(self.root,501,"5"*40))
+
     def test_verify_pr_uses_exact_branch_and_diff_when_pr_base_metadata_lags(self):
         row=self.row;sha="d"*40
         f={"filename":"trading_engine_v2.py","status":"modified","sha":"e"*40}
