@@ -56,7 +56,10 @@ window.MarketUI=(()=>{
    const result=await api('market/quote',{...(node.dataset.marketHoldingPortfolio?{holding_portfolio_id:Number(node.dataset.marketHoldingPortfolio),holding_asset_id:node.dataset.marketHoldingAsset}:{report_id:node.dataset.marketReport,...(node.dataset.marketPosition?{portfolio_id:node.dataset.marketPortfolio,position_id:node.dataset.marketPosition}:{candidate_id:node.dataset.marketCandidate})}),is_test:node.dataset.marketTest==='true',period:requestPeriod,refresh,choose,...(asset?{asset_id:asset}:{})});
    if(!current(r))return;
    if(result.pending){
-    if(periodKey(r.period)!==requestPeriod)return;
+    if(periodKey(r.period)!==requestPeriod){
+     r.retryPeriod=requestPeriod;
+     return;
+    }
     r.pendingRetries=(r.pendingRetries||0)+1;r.error='Pluto henter kursen · delt opslag';
     if(r.pendingRetries<=15){
      setTimeout(()=>{
