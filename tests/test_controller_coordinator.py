@@ -164,3 +164,34 @@ class LocalCoordinatorTests(unittest.TestCase):
             model.assert_called_once()
             repair.assert_called_once()
         self.assertEqual(c.read(self.root/"coordinator-review.json",{})["501"]["state"],"waiting")
+
+    def test_unstarted_pin_preserves_history_and_rejects_divergence(self):
+        row=dict(self.row,follow_base=True);new="c"*40
+        compare={"behind_by":0,"merge_base_commit":{"sha":row["base_sha"]}}
+        with patch.object(c,"branch_head",return_value=new),patch.object(c,"gh",return_value=compare),patch.object(c,"replace_queue_row",side_effect=lambda old,new:new) as replace:
+            self.assertEqual(c.pin_unstarted(self.root,row,{})["base_sha"],new)
+            replace.assert_called_once()
+            self.assertEqual(c.pin_unstarted(self.root,row,{c.key(row):"reserved"}),row)
+            replace.assert_called_once()
+        with patch.object(c,"branch_head",return_value=new),patch.object(c,"gh",return_value={"behind_by":1,"merge_base_commit":{"sha":row["base_sha"]}}):
+            with self.assertRaises(c.Hold):
+                c.pin_unstarted(self.root,row,{})
+
+    def test_rebase_refuses_overlap_and_incomplete_compare(self):
+        old="a"*40
+        data={"behind_by":0,"merge_base_commit":{"sha":old},"files":[{"filename":"unrelated.py"}]}
+        self.assertTrue(c.disjoint_base_changes(data,old,["static/","tests/test.py"]))
+        self.assertFalse(c.disjoint_base_changes(dict(data,files=[{"filename":"other.py","previous_filename":"static/app.js"}]),old,["static/"]))
+        self.assertFalse(c.disjoint_base_changes(dict(data,files=[{"filename":"x"}]*300),old,["static/"]))
+        self.assertFalse(c.disjoint_base_changes(dict(data,behind_by=1),old,["static/"]))
+
+    def test_multiple_repairs_only_after_published_new_sha(self):
+        old="d"*40;new="e"*40
+        self.assertEqual(c.repair_attempt(self.root,501,old),1)
+        c.save(self.root/"coordinator-repair-501.json",{"state":"reserved","head":old})
+        self.assertIsNone(c.repair_attempt(self.root,501,new))
+        c.save(self.root/"coordinator-repair-501.json",{"state":"published","head":old,"new_head":new})
+        self.assertIsNone(c.repair_attempt(self.root,501,old))
+        self.assertEqual(c.repair_attempt(self.root,501,new),2)
+        c.save(self.root/"coordinator-repair-501-2.json",{"state":"held","head":new})
+        self.assertIsNone(c.repair_attempt(self.root,501,"f"*40))

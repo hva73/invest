@@ -255,7 +255,9 @@ def choose_review(root,rows,results,running,now=None):
     now=time.time() if now is None else now
     journal=controller_coordinator.read(root/"coordinator-review.json",{})
     requested=controller_coordinator.trigger(root) is not None
-    for row,number in controller_coordinator.candidates(root,rows,results):
+    candidates=list(controller_coordinator.candidates(root,rows,results))
+    candidates.sort(key=lambda pair:(journal.get(str(pair[1]),{}).get("at",0),pair[0]["priority"],pair[0]["issue"]))
+    for row,number in candidates:
         if any(review_conflict(row,r) for r in running):
             continue
         last=journal.get(str(number),{})
@@ -265,7 +267,21 @@ def choose_review(root,rows,results,running,now=None):
 
 def plan_with_review(rows,review_row,parallel):
     if review_row is None:
-        return plan(rows,max_parallel=parallel)
+        chosen=[]
+        adjusted=list(rows)
+        while len(chosen)<parallel:
+            options=plan(adjusted,max_parallel=parallel)
+            if not options:
+                break
+            task=options[0]
+            row=next(r for r in adjusted if (r["issue"],r.get("generation",1))==task.key)
+            existing=[r for r in adjusted if r["status"]=="active"]
+            if row.get("base_branch") and any(r.get("base_branch")==row["base_branch"] for r in existing):
+                adjusted=[dict(r,status="blocked") if r is row else r for r in adjusted]
+                continue
+            chosen.append(task)
+            adjusted=[dict(r,status="active") if r is row else r for r in adjusted]
+        return chosen
     # A coordinator future uses one model slot; suppress conflicting rows
     # before planning, but retain every row for dependency resolution.
     adjusted=[dict(r,status="blocked") if r["status"]=="ready" and review_conflict(r,review_row) else r for r in rows]
@@ -377,6 +393,12 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 if (root/"STOP").exists():
                     break
                 row=next(r for r in rows if (r["issue"],r.get("generation",1))==task.key)
+                if a.remote and a.publish and row.get("follow_base") is True and task_key(row) not in results:
+                    try:
+                        row=controller_coordinator.pin_unstarted(root,row,results)
+                    except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as exc:
+                        print("BASE_PIN_PENDING:",task_key(row),type(exc).__name__,flush=True)
+                        continue
                 if provider_pause_active(root) or not reserve_slot():
                     reason="provider_pause" if provider_pause_active(root) else "budget_limit"
                     break
