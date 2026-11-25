@@ -18,7 +18,7 @@
     "issue": 57,
     "role": "release",
     "priority": 1,
-    "status": "ready",
+    "status": "blocked",
     "paths": [
       "tools/nordicway_release_retention.py",
       "tests/test_nordicway_release_retention.py"
@@ -33,7 +33,7 @@
     "issue": 54,
     "role": "mobile",
     "priority": 4,
-    "status": "ready",
+    "status": "done",
     "paths": [
       "tests/browser_mobile_review.py",
       "tests/browser_mobile_decision_overview.py"
@@ -48,7 +48,7 @@
     "issue": 8,
     "role": "motor",
     "priority": 2,
-    "status": "ready",
+    "status": "done",
     "paths": [
       "tests/test_strategy_lab.py",
       "tests/test_strategy_handoff.py"
@@ -63,7 +63,7 @@
     "issue": 14,
     "role": "data",
     "priority": 2,
-    "status": "ready",
+    "status": "done",
     "paths": [
       "tests/test_storage_reclaim_proof.py"
     ],
@@ -77,7 +77,7 @@
     "issue": 67,
     "role": "desktop",
     "priority": 5,
-    "status": "ready",
+    "status": "done",
     "paths": [
       "tests/browser_desktop_experience.py",
       "tests/browser_sector_holdings.py"
@@ -87,5 +87,20 @@
     "base_branch": "codex/escape-development",
     "base_sha": "adb2cc6e4529ace96d137bfa42df95e0ef4b51b2",
     "task": "Agent 5 controller migration. Independent desktop acceptance review on development baseline, not frozen candidate. Approved desktop: sector click opens position list; sector hover correct monetary/percent values; same demo/live logic, no new design. Existing #233 visual suite and #237/#248/#251/#253 must not be duplicated. Inspect exact two scoped browser tests for missing sector navigation/hover cross-flow assertions, especially no stale tooltip after leaving or switching sector and correct identity. Add only genuinely uncovered approved regression if needed, run local tests; no product code change. If covered return no_changes. Review-only isolated worktree, no production access, network, broker, orders, workflow, merge, credentials, deployment, or changes outside exact paths. Run relevant tests and fix actual failures. Do not invent code changes if acceptance already covered. Do not claim live or integrated candidate verification."
+  },
+  {
+    "issue": 57,
+    "role": "release",
+    "priority": 1,
+    "status": "ready",
+    "generation": 6,
+    "base_branch": "codex/issue57-combined-release-20261124",
+    "base_sha": "3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65",
+    "paths": [
+      "tools/nordicway_release_retention.py",
+      "tests/test_nordicway_release_retention.py"
+    ],
+    "dependencies": [],
+    "task": "P0 actual executable phase-separated backup implementation, not another deferral or quota estimator. New actual private source readback Actions 45577915186 job 139080324957: adapter sha256 65d1d5d5178d3afe5092f7e61ae39cc5aabb29948ed34def395ef8d883161ad3, estimate_required_bytes base=(DB+sidecars)*2+source*2+existing then +10%; sequence under lock authorize/preflight/check_quota/stage/stop/quiescence/backup_and_apply/verify_backup/verify_installed/start/health/cleanup; raw snapshot one verified copy, no automatic DB restore. DB 6839615488, free_lower 12644040128, used_upper 7834959872, owner cap 20GB, 928G physical host free. Concrete implementation in existing retention module: locally stream a verified private raw backup into tar+gzip directly (never intermediate tar), hard output byte ceiling from caller supplied verified available quota, fsync and verify complete manifest/file hashes by streaming decompression, preserve raw + previous backup, fail closed and remove only own incomplete temporary output if cap exceeded or corruption; no deletion of original in helper, no credentials/network. Test real synthetic tar+gzip, incompressible abort, corrupt output, unexpected member, source changes, exact cap, valid recovery hashes. Document integration requirements for actual private bridge, including raw backup verification/marker/resume and journal during restart; do not lower actual private gate or claim release-ready. Gen5 #256 review hold remains, no duplication of its guard code. No production actions, workflows, commit/push, extra files. This is a real functional bounded compression primitive for phase separation, not a standalone budget calculator."
   }
 ]
