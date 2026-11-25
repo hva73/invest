@@ -54,12 +54,15 @@ class DiscoveryAttemptPerformance(unittest.TestCase):
 
 class HoldingAutowatchPerformance(unittest.TestCase):
  def test_idle_linked_scan_statement_budget(self):
-  self._check_idle_linked_scan_statement_budget(concurrent=False)
+  self._check_idle_scan_statement_budget(concurrent=False)
 
  def test_repeated_unrelated_commits_do_not_starve_next_tenant(self):
-  self._check_idle_linked_scan_statement_budget(concurrent=True)
+  self._check_idle_scan_statement_budget(concurrent=True)
 
- def _check_idle_linked_scan_statement_budget(self,concurrent):
+ def test_unrelated_commits_preserve_deferred_holding_read_budget(self):
+  self._check_idle_scan_statement_budget(concurrent=True,deferred=True)
+
+ def _check_idle_scan_statement_budget(self,concurrent,deferred=False):
   now=datetime(2026,11,25,12,tzinfo=timezone.utc)
   at=now.isoformat()
   aid='shared-idle'
@@ -77,10 +80,13 @@ class HoldingAutowatchPerformance(unittest.TestCase):
       c.execute('INSERT INTO users(id,username,active) VALUES(?,?,1)',(uid,f'user-{uid}'))
       c.execute("INSERT INTO portfolios(id,user_id,name,source,updated) VALUES(?,?,'Test','pluto',?)",(pid,uid,now.timestamp()))
       c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?)',(pid,uid,at,payload,at))
-      request=json.dumps({'asset_id':aid,'portfolio_ids':[pid],'watch_mode':'exit'})
-      c.execute("""INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due)
-                   VALUES(?,?,0,?,'test holding','PAUSED',?,'synthetic','{}','{}',?,?,0)""",(uid,watch,aid,request,at,at))
-      attempt=(uid,pid,aid,'LINKED',watch,0,at)
+      if deferred:
+       attempt=(uid,pid,aid,'IDENTITY_UNVERIFIED',None,now.timestamp()+600,at)
+      else:
+       request=json.dumps({'asset_id':aid,'portfolio_ids':[pid],'watch_mode':'exit'})
+       c.execute("""INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due)
+                    VALUES(?,?,0,?,'test holding','PAUSED',?,'synthetic','{}','{}',?,?,0)""",(uid,watch,aid,request,at,at))
+       attempt=(uid,pid,aid,'LINKED',watch,0,at)
       c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',attempt)
       expected.append(attempt)
     statements=[];reads={};decoded=[]
@@ -111,10 +117,11 @@ class HoldingAutowatchPerformance(unittest.TestCase):
     self.assertTrue(all(sql.lstrip().upper().startswith(('SELECT','WITH','PRAGMA DATA_VERSION')) for sql in statements))
     passes=2 if concurrent else 1
     if concurrent:self.assertEqual(reads,dict.fromkeys(range(1,count+1),passes))
-    self.assertEqual(decoded,[('session',False),('attempt',False)]*count*passes)
+    expected_rows=[('attempt',False)] if deferred else [('session',False),('attempt',False)]
+    self.assertEqual(decoded,expected_rows*count*passes)
     with app.connect() as c:
      self.assertEqual([tuple(row) for row in c.execute('SELECT * FROM hw_holding_autowatch ORDER BY user_id')],expected)
-     self.assertEqual(c.execute("SELECT count(*) FROM hw_sessions WHERE status='PAUSED'").fetchone()[0],count)
+     self.assertEqual(c.execute("SELECT count(*) FROM hw_sessions WHERE status='PAUSED'").fetchone()[0],0 if deferred else count)
 
  def test_scoped_reads_and_decisions_for_1_10_and_100_users(self):
   now=datetime(2026,11,25,12,tzinfo=timezone.utc)
@@ -169,7 +176,7 @@ class HoldingAutowatchPerformance(unittest.TestCase):
     # Other enabled users also scan the remaining assets and second portfolio.
     enabled=count-len(killed)
     batches=4*(enabled-1)+3
-    history_reads=[sql for sql in reads if "SELECT 'history'" in sql]
+    history_reads=[sql for sql in reads if sql.lstrip().startswith("SELECT 'history'")]
     self.assertEqual(len(reads)-len(history_reads),1+len(killed)+batches)
     self.assertEqual(len(history_reads),26*(enabled-1)+22)
     self.assertEqual(scan_sql.count('PRAGMA data_version'),2)
@@ -257,7 +264,7 @@ class HoldingAutowatch(unittest.TestCase):
   self.assertEqual(read_assets['sessions'],expected_sessions)
   self.assertCountEqual(read_assets['attempts'],[(asset,link_first) for asset in expected_attempts])
   self.assertEqual(read_assets['history'],[])
-  history_reads=[sql for sql in scan_sql if "SELECT 'history'" in sql]
+  history_reads=[sql for sql in scan_sql if sql.lstrip().startswith("SELECT 'history'")]
   self.assertEqual(len(history_reads),1)
   self.assertEqual(sum(sql.lstrip().upper().startswith(('SELECT','WITH')) for sql in scan_sql),3+int(link_first)+already_linked)
   if extra_history:
@@ -279,6 +286,61 @@ class HoldingAutowatch(unittest.TestCase):
 
  def test_second_holding_activation_after_link_does_not_load_later_history(self):
   self._check_early_activation_history(link_first=True)
+
+ def test_clearing_kill_switch_resumes_at_second_holding(self):
+  second=dict(self.holding,asset_id='second')
+  at=self.now.isoformat()
+  with app.connect() as c:
+   payload=json.dumps({'positions_complete':True,'observed':at,'positions':[self.holding,second]})
+   c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(payload,self.pid))
+   c.execute('INSERT INTO hw_control VALUES(1,1,?,?)',(at,'test'))
+  execute=app.DatabaseConnection.execute
+  cleared=False
+  def clear_after_gate(connection,sql,*args):
+   nonlocal cleared
+   cursor=execute(connection,sql,*args)
+   if not cleared and 'FROM hw_control' in sql:
+    rows=cursor.fetchall()
+    with app.connect() as other:
+     other.execute('UPDATE hw_control SET killed=0 WHERE user_id=1')
+    cleared=True
+    return rows
+   return cursor
+  verified=[]
+  def verify(_,uid,holding):
+   verified.append((uid,holding['asset_id']))
+   return dict(self.instrument,asset_id=holding['asset_id'])
+  with patch.object(app.DatabaseConnection,'execute',clear_after_gate):
+   self.assertEqual(self.tick(verify=verify,lookup=self.lookup),'LINKED')
+  self.assertTrue(cleared)
+  self.assertEqual(verified,[(1,'second')])
+  with app.connect() as c:
+   self.assertEqual([tuple(row) for row in c.execute('SELECT asset_id,status FROM hw_holding_autowatch')],[('second','LINKED')])
+
+ def test_write_revalidation_does_not_restart_an_earlier_retry(self):
+  at=self.now.isoformat()
+  aid=self.holding['asset_id']
+  with app.connect() as c:
+   payload=json.dumps({'positions_complete':True,'observed':at,'positions':[self.holding,dict(self.holding,asset_id='second')]})
+   c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(payload,self.pid))
+   c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(1,self.pid,aid,'IDENTITY_UNVERIFIED',None,self.now.timestamp()+600,at))
+  execute=app.DatabaseConnection.execute
+  changed=False
+  def advance_retry(connection,sql,*args):
+   nonlocal changed
+   if not changed and sql=='BEGIN IMMEDIATE':
+    with app.connect() as other:
+     other.execute('UPDATE hw_holding_autowatch SET next_attempt=0 WHERE user_id=1 AND portfolio_id=? AND asset_id=?',(self.pid,aid))
+    changed=True
+   return execute(connection,sql,*args)
+  def verify(_,uid,holding):
+   self.assertEqual((uid,holding['asset_id']),(1,'second'))
+   return dict(self.instrument,asset_id='second')
+  with patch.object(app.DatabaseConnection,'execute',advance_retry):
+   self.assertEqual(self.tick(verify=verify,lookup=self.lookup),'LINKED')
+  self.assertTrue(changed)
+  with app.connect() as c:
+   self.assertEqual(dict(c.execute('SELECT asset_id,status FROM hw_holding_autowatch')),{aid:'IDENTITY_UNVERIFIED','second':'LINKED'})
 
  def test_closure_before_first_scan_write_uses_new_holding_generation(self):
   self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
@@ -356,7 +418,7 @@ class HoldingAutowatch(unittest.TestCase):
     cursor=execute(connection,sql,*args)
     if 'CROSS JOIN hw_holding_autowatch' in sql:
      rows=cursor.fetchall()
-     if not committed and {key[1] for key in json.loads(args[0][4])}=={assets[-1]}:
+     if not committed and {key[1] for key in json.loads(args[0][3])}=={assets[-1]}:
       writer.execute("INSERT INTO users(id,username,active) VALUES(2,'unrelated',1)")
       writer.commit()
       writer.execute('BEGIN IMMEDIATE')
@@ -373,8 +435,8 @@ class HoldingAutowatch(unittest.TestCase):
    nonlocal stopped,invalidated
    cursor=execute(connection,sql,*args)
    if 'CROSS JOIN hw_holding_autowatch' not in sql or stopped:return cursor
-   batch={key[1] for key in json.loads(args[0][4])}
-   if batch!=({assets[-1]} if not invalidated else {assets[2]}):return cursor
+   batch={key[1] for key in json.loads(args[0][3])}
+   if batch!={assets[2] if refresh else assets[-1]}:return cursor
    rows=cursor.fetchall()
    self.assertFalse(connection.in_transaction)
    with app.connect() as other:
@@ -426,7 +488,7 @@ class HoldingAutowatch(unittest.TestCase):
    cursor=execute(connection,sql,*args)
    if 'CROSS JOIN hw_holding_autowatch' not in sql or args[0][0]!=1 or connection.in_transaction:
     return cursor
-   if assets[3] not in {key[1] for key in json.loads(args[0][4])}:
+   if assets[3] not in {key[1] for key in json.loads(args[0][3])}:
     return cursor
    rows=cursor.fetchall()
    self.assertFalse(connection.in_transaction)
@@ -570,6 +632,27 @@ class HoldingAutowatch(unittest.TestCase):
   self.assertIsNone(self.tick(verify=lambda *_:self.fail('The current generation is stopped')))
   with app.connect() as c:
    self.assertEqual(tuple(c.execute('SELECT status,watch_id FROM hw_holding_autowatch').fetchone()),('STOPPED',watch))
+
+ def test_deferred_history_checks_exact_generation_and_prefers_prior_terminal_watch(self):
+  aid=self.holding['asset_id'];at=self.now.isoformat()
+  generation=(self.now-timedelta(hours=1)).isoformat()
+  identity=f'1|{self.pid}|{aid}'
+  default_watch='hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
+  generation_watch='hw-holding-'+hashlib.sha256(f'{identity}|{generation}'.encode()).hexdigest()[:28]
+  with app.connect() as c:
+   request=json.dumps({'asset_id':aid,'portfolio_ids':[self.pid],'watch_mode':'exit'})
+   for watch in (default_watch,generation_watch):
+    c.execute("""INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due)
+                 VALUES(1,?,0,?,'holding','COMPLETED',?,'synthetic','{}','{}',?,?,0)""",(watch,aid,request,at,at))
+   c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',
+             (1,self.pid,aid,'POSITION_CLOSED','previous',self.now.timestamp()+600,generation))
+  for prior_status in ('POSITION_CLOSED','LINKED'):
+   with self.subTest(prior_status=prior_status):
+    if prior_status=='LINKED':
+     with app.connect() as c:c.execute("UPDATE hw_holding_autowatch SET status='LINKED',next_attempt=?",(self.now.timestamp()+600,))
+    self.assertIsNone(self.tick(verify=lambda *_:self.fail('A stopped watch must stay stopped')))
+    with app.connect() as c:
+     self.assertEqual(tuple(c.execute('SELECT status,watch_id FROM hw_holding_autowatch').fetchone()),('STOPPED',generation_watch))
 
  def test_idle_identity_recheck_does_not_reserve_database_writer(self):
   holder=app.connect()
