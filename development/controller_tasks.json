@@ -826,7 +826,7 @@
     "generation": 3,
     "role": "desktop",
     "priority": 1,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/trading-engine-v2-integration",
     "base_sha": "6e82e17564db58a2b98f0829970a4ed3b23af9a8",
     "dependencies": [
