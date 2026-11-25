@@ -10,8 +10,12 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import controller_publish, controller_events, controller_pilot
-from .controller_queue import plan
+try:
+    from . import controller_publish, controller_events, controller_pilot
+    from .controller_queue import plan
+except ImportError:
+    import controller_publish, controller_events, controller_pilot
+    from controller_queue import plan
 
 REPO = "hva73/invest"
 PREFIX = "repos/" + REPO
@@ -110,7 +114,7 @@ def owner_requests(ids):
 
 def candidates(root, rows, results):
     for row in sorted(rows,key=lambda r:(r["priority"],r["issue"],r.get("generation",1))):
-        if row["status"] != "ready" or row.get("base_branch") not in TARGETS or row["role"] == "release":
+        if row["status"] != "ready" or row.get("local_review") is not True or row.get("base_branch") not in TARGETS or row["role"] == "release":
             continue
         if results.get(key(row)) != "draft_pr":
             continue
@@ -215,7 +219,7 @@ def successor(rows,row,integrated):
     if set(first)!={"task","paths"} or not isinstance(first["task"],str) or not 1<=len(first["task"])<=12000 or not isinstance(first["paths"],list) or not first["paths"] or not all(isinstance(p,str) and p in row["paths"] and controller_publish.allowed(p,row["paths"],row["role"]) for p in first["paths"]):
         raise Hold("Opfølgning uden for godkendt scope")
     generation=max(r.get("generation",1) for r in rows if r["issue"]==row["issue"])+1
-    return dict(issue=row["issue"],generation=generation,role=row["role"],priority=row["priority"],status="ready",base_branch=row["base_branch"],base_sha=integrated,dependencies=[key(row)],paths=first["paths"],task=first["task"],followups=followups[1:])
+    return dict(issue=row["issue"],generation=generation,role=row["role"],priority=row["priority"],status="ready",base_branch=row["base_branch"],base_sha=integrated,dependencies=[key(row)],paths=first["paths"],task=first["task"],followups=followups[1:],local_review=True)
 
 def accept_queue(row, integrated):
     for _ in range(2):
@@ -292,16 +296,23 @@ def run_once(root, repo_dir, rows, results, provider_pause=False):
         requests=owner_requests(request["requests"]) if request else {}
         for row,number in candidates(root,rows,results):
             last=journal.get(str(number),{})
-            if last.get("state") in ("hold","accepted"):
+            if last.get("state")=="accepted" or last.get("state")=="hold" and not request:
                 continue
-            if time.time()-last.get("at",0)<60:
+            if time.time()-last.get("at",0)<60 and not request:
                 continue
             entry={"at":time.time(),"state":"waiting"}
             try:
                 p,files,state=verify_pr(row,number)
                 sha=p["head"]["sha"]
+                if last.get("state")=="hold" and last.get("sha")==sha:
+                    entry.update(last)
+                    detail=last.get("detail","Uændret reviewblokering")
+                    continue
+                entry["sha"]=sha
                 if state=="merged":
-                    # External acceptance is authoritative only with exact tree and current base.
+                    accepted=read(root/("coordinator-accepted-"+str(number)+".json"),{})
+                    if accepted.get("sha")!=sha or accepted.get("base")!=row["base_sha"] or accepted.get("key")!=key(row):
+                        raise Hold("Ekstern integration kræver køafstemning")
                     detail=accept_queue(row,p["merge_commit_sha"])
                     entry.update(state="accepted",sha=sha)
                     handled=True
@@ -331,8 +342,21 @@ def run_once(root, repo_dir, rows, results, provider_pause=False):
             if handled:
                 break
         for rid,r in requests.items():
-            # A processed request is not a claim that the requested blocker is gone.
-            comment(225,"<!-- escape-dev-action:"+rid+":processed -->\nLokal gennemgang af "+r["task"]+". "+detail)
+            target=r["task"]
+            if target=="all":
+                outcome=detail
+            else:
+                target_row=next((x for x in rows if key(x)==target),None)
+                terminal=results.get(target)
+                if target_row and target_row["status"]=="done":
+                    outcome="Opgaven er allerede accepteret."
+                elif terminal=="draft_pr":
+                    outcome="Leveret til review; se PR og lokal gennemgang. Ingen dubletstart."
+                elif terminal or not target_row or target_row["status"]!="ready":
+                    outcome="Blokering består; ingen automatisk nulstilling af reservation eller sikkerhedsgrænse."
+                else:
+                    outcome="Opgaven er i godkendt kø; faktisk start afhænger af ledig plads og afhængigheder."
+            comment(225,"<!-- escape-dev-action:"+rid+":processed -->\nLokal gennemgang af "+target+". "+outcome)
         publish_status(root,ident,"completed",detail)
         return handled
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
