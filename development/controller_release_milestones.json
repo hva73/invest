@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-25T16:31:00Z",
+  "updated_at": "2026-11-25T16:45:00Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -15,19 +15,22 @@
           "id": "charts",
           "title": "Godkendte grafer og positionstal",
           "status": "verified",
-          "evidence": "PR #281 integreret på udviklingsgren."
+          "evidence": "PR #281 integreret på udviklingsgren.",
+          "owner_role": "mobile"
         },
         {
           "id": "desktop",
           "title": "Desktop-kontrol",
           "status": "review",
-          "evidence": "267:3 afsluttet uden kodeændring; samlet browseraccept udestår."
+          "evidence": "267:3 afsluttet uden kodeændring; samlet browseraccept udestår.",
+          "owner_role": "desktop"
         },
         {
           "id": "release",
           "title": "Samlet releasekontrol",
           "status": "pending",
-          "evidence": "Kontrolleres på fælles releasekandidat."
+          "evidence": "Kontrolleres på fælles releasekandidat.",
+          "owner_role": "release"
         }
       ]
     },
@@ -43,33 +46,38 @@
           "id": "feeds",
           "title": "Genbrug af markedsfeeds",
           "status": "verified",
-          "evidence": "PR #285/#287 integreret."
+          "evidence": "PR #285/#287 integreret.",
+          "owner_role": "data"
         },
         {
           "id": "features",
           "title": "Fælles featureberegning",
           "status": "verified",
           "evidence": "PR #289/#292 integreret; 1/10/100 simulerede overlap/disjoint; én validering per fælles capture, separate entitlement/parametre, ingen live gate.",
-          "updated_at": "2026-11-25T16:31:00Z"
+          "updated_at": "2026-11-25T16:31:00Z",
+          "owner_role": "data"
         },
         {
           "id": "optional",
           "title": "Uafhængige valgfrie indikatorer",
           "status": "verified",
           "evidence": "PR #292: gyldig prishistorik bevares ved stale/ukendte valgfrie quotes; risikogate afviser stadig ukendt spread. 581 tests PASS.",
-          "updated_at": "2026-11-25T16:31:00Z"
+          "updated_at": "2026-11-25T16:31:00Z",
+          "owner_role": "data"
         },
         {
           "id": "scheduler",
           "title": "Fælles scheduler og budget",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "data"
         },
         {
           "id": "live",
           "title": "Integreret datavej og belastning",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "data"
         }
       ],
       "updated_at": "2026-11-25T16:31:00Z"
@@ -86,37 +94,43 @@
           "id": "expiry",
           "title": "Udløb af gamle vurderinger",
           "status": "verified",
-          "evidence": "PR #290 integreret, test-only."
+          "evidence": "PR #290 integreret, test-only.",
+          "owner_role": "motor"
         },
         {
           "id": "dormancy",
           "title": "NO_DATA og automatisk nedprioritering",
           "status": "verified",
-          "evidence": "PR #291 integreret, test-only."
+          "evidence": "PR #291 integreret, test-only.",
+          "owner_role": "motor"
         },
         {
           "id": "pool",
           "title": "Fælles kandidatpulje og positionsbeskyttelse",
           "status": "review",
-          "evidence": "#268:4 lokal review_required; PR mangler."
+          "evidence": "#268:4 lokal review_required; PR mangler.",
+          "owner_role": "motor"
         },
         {
           "id": "replace",
           "title": "Dynamisk kandidatrotation",
           "status": "pending",
-          "evidence": "Planlagt opfølgning."
+          "evidence": "Planlagt opfølgning.",
+          "owner_role": "motor"
         },
         {
           "id": "tenants",
           "title": "Belastningstest med 100 brugere",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "data"
         },
         {
           "id": "integrate",
           "title": "Integration og funktionstest",
           "status": "pending",
-          "evidence": "Ingen live aktivering."
+          "evidence": "Ingen live aktivering.",
+          "owner_role": "motor"
         }
       ]
     },
@@ -133,26 +147,30 @@
           "title": "CPU/RAM-måling i backend",
           "status": "verified",
           "evidence": "Testet backend integreret #293 613123e0; ikke installeret eller full hosting entitlement.",
-          "updated_at": "2026-11-25T16:31:00Z"
+          "updated_at": "2026-11-25T16:31:00Z",
+          "owner_role": "data"
         },
         {
           "id": "display",
           "title": "Adminvisning og historik",
           "status": "in_progress",
           "evidence": "#14:6 klar på exact 613123e0; eksisterende admin UI, ingen faktisk start dokumenteret.",
-          "updated_at": "2026-11-25T16:31:00Z"
+          "updated_at": "2026-11-25T16:31:00Z",
+          "owner_role": "desktop"
         },
         {
           "id": "baseline",
           "title": "Faktisk måling på hosting",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "data"
         },
         {
           "id": "scale",
           "title": "Worker- og køkapacitet",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "data"
         }
       ],
       "updated_at": "2026-11-25T16:31:00Z"
@@ -169,13 +187,15 @@
           "id": "interface",
           "title": "Beslutningsinterface og isoleret simulation",
           "status": "verified",
-          "evidence": "Første kerne integreret på v2-gren."
+          "evidence": "Første kerne integreret på v2-gren.",
+          "owner_role": "motor"
         },
         {
           "id": "live",
           "title": "Kobling til samlet motor",
           "status": "pending",
-          "evidence": "Udestår; denne del er ikke dækket af den godkendte fundamentmilepæl."
+          "evidence": "Udestår; denne del er ikke dækket af den godkendte fundamentmilepæl.",
+          "owner_role": "motor"
         }
       ]
     },
@@ -191,25 +211,29 @@
           "id": "modes",
           "title": "Momentum, Early Catalyst og Swing",
           "status": "pending",
-          "evidence": "Samlet 2.0-integration udestår."
+          "evidence": "Samlet 2.0-integration udestår.",
+          "owner_role": "motor"
         },
         {
           "id": "recovery",
           "title": "Recovery og Long-Term",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "motor"
         },
         {
           "id": "crypto",
           "title": "Krypto og 24/7-markedsstatus",
           "status": "pending",
-          "evidence": "Samlet 2.0-accept udestår."
+          "evidence": "Samlet 2.0-accept udestår.",
+          "owner_role": "motor"
         },
         {
           "id": "selection",
           "title": "Valg, versionsstyring og test",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "motor"
         }
       ]
     },
@@ -225,25 +249,29 @@
           "id": "switch",
           "title": "Strategiskift i simulation",
           "status": "verified",
-          "evidence": "PR #286 integreret på v2-gren."
+          "evidence": "PR #286 integreret på v2-gren.",
+          "owner_role": "motor"
         },
         {
           "id": "storage",
           "title": "Vedvarende positionstilstand",
-          "status": "pending",
-          "evidence": "Udestår."
+          "status": "review",
+          "evidence": "PR #298, exact a98eea82, CI 45657292352 bestået. Vedvarende SQLite-historik for strategiskift i simulation; uafhængigt review/integration og live-kobling udestår.",
+          "owner_role": "data"
         },
         {
           "id": "ui",
           "title": "Visning og ændring af strategi",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "mobile"
         },
         {
           "id": "e2e",
           "title": "Integreret positionsbeskyttelse",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "motor"
         }
       ]
     },
@@ -259,19 +287,22 @@
           "id": "watch",
           "title": "Long-Term Watch-model",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "motor"
         },
         {
           "id": "ui",
           "title": "Brugerflade og genvurdering",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "desktop"
         },
         {
           "id": "test",
           "title": "Integreret test",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "motor"
         }
       ]
     },
@@ -287,7 +318,8 @@
           "id": "replay",
           "title": "Historisk replay-grundfunktion",
           "status": "verified",
-          "evidence": "PR #283/#284 integreret; begrænset dækning."
+          "evidence": "PR #283/#284 integreret; begrænset dækning.",
+          "owner_role": "data"
         }
       ]
     },
@@ -303,25 +335,29 @@
           "id": "replay",
           "title": "Replay-fundament",
           "status": "verified",
-          "evidence": "PR #283/#284 integreret på v2-gren."
+          "evidence": "PR #283/#284 integreret på v2-gren.",
+          "owner_role": "data"
         },
         {
           "id": "coverage",
           "title": "Faktisk historisk datadækning",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "data"
         },
         {
           "id": "shadow",
           "title": "Shadow-evaluering og sammenligning",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "motor"
         },
         {
           "id": "metrics",
           "title": "Dokumenterede resultater pr. strategi",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "data"
         }
       ]
     },
@@ -337,19 +373,22 @@
           "id": "provenance",
           "title": "Entry/exit-herkomst",
           "status": "pending",
-          "evidence": "Samlet verificeret kæde udestår."
+          "evidence": "Samlet verificeret kæde udestår.",
+          "owner_role": "motor"
         },
         {
           "id": "fills",
           "title": "Fills, kostpris og afstemning",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "data"
         },
         {
           "id": "ui",
           "title": "Godkendt statistikvisning",
           "status": "pending",
-          "evidence": "Samlet 2.0-accept udestår."
+          "evidence": "Samlet 2.0-accept udestår.",
+          "owner_role": "desktop"
         }
       ]
     },
@@ -365,25 +404,29 @@
           "id": "reuse",
           "title": "Genbrug godkendt layout",
           "status": "pending",
-          "evidence": "Samlet releasekontrol udestår."
+          "evidence": "Samlet releasekontrol udestår.",
+          "owner_role": "desktop"
         },
         {
           "id": "mobile",
           "title": "Mobil 2.0",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "mobile"
         },
         {
           "id": "desktop",
           "title": "Desktop 2.0",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "desktop"
         },
         {
           "id": "test",
           "title": "Fælles browsertest",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "mobile"
         }
       ]
     },
@@ -399,25 +442,29 @@
           "id": "adapter",
           "title": "Genbrug af samme instrument",
           "status": "verified",
-          "evidence": "Adaptertest med 1/10/100 syntetiske abonnenter bestået."
+          "evidence": "Adaptertest med 1/10/100 syntetiske abonnenter bestået.",
+          "owner_role": "data"
         },
         {
           "id": "queue",
           "title": "100 brugere og fair køer",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "data"
         },
         {
           "id": "resources",
           "title": "CPU/RAM/API/DB/disk",
           "status": "pending",
-          "evidence": "Faktiske målinger udestår."
+          "evidence": "Faktiske målinger udestår.",
+          "owner_role": "data"
         },
         {
           "id": "model",
           "title": "1.000/10.000 kapacitetsmodel",
           "status": "pending",
-          "evidence": "Arkitekturhorisont, ikke separat livekrav."
+          "evidence": "Arkitekturhorisont, ikke separat livekrav.",
+          "owner_role": "data"
         }
       ]
     },
@@ -433,19 +480,22 @@
           "id": "integrate",
           "title": "Samlet releasegren",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "release"
         },
         {
           "id": "preflight",
           "title": "20 GB, migration og backup",
           "status": "pending",
-          "evidence": "Verificeres på eksakt release-SHA."
+          "evidence": "Verificeres på eksakt release-SHA.",
+          "owner_role": "release"
         },
         {
           "id": "ci",
           "title": "Samlet regression og rollback",
           "status": "pending",
-          "evidence": "Udestår."
+          "evidence": "Udestår.",
+          "owner_role": "release"
         }
       ]
     },
@@ -461,13 +511,15 @@
           "id": "approval",
           "title": "Ejerens SHA-bundne GO",
           "status": "pending",
-          "evidence": "Ikke anmodet."
+          "evidence": "Ikke anmodet.",
+          "owner_role": "release"
         },
         {
           "id": "readback",
           "title": "Installation og driftstest",
           "status": "pending",
-          "evidence": "Ingen ny installation."
+          "evidence": "Ingen ny installation.",
+          "owner_role": "release"
         }
       ]
     }
