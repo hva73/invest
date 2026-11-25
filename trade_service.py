@@ -18,7 +18,9 @@ class InsufficientBuyingPower(TradeError):
 
 def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS broker_proposals(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),fingerprint TEXT NOT NULL,report_id TEXT NOT NULL,candidate_id TEXT NOT NULL,kind TEXT NOT NULL,portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),payload TEXT NOT NULL,status TEXT NOT NULL,created REAL NOT NULL,estimated REAL,review_token TEXT,estimate TEXT,asset TEXT,intent_id TEXT,response TEXT,error TEXT,UNIQUE(user_id,fingerprint))')
-    if 'sell_basis' not in {r[1] for r in c.execute('PRAGMA table_info(broker_proposals)')}:c.execute('ALTER TABLE broker_proposals ADD COLUMN sell_basis TEXT')
+    columns={r[1] for r in c.execute('PRAGMA table_info(broker_proposals)')}
+    if 'sent_identity' not in columns:c.execute('ALTER TABLE broker_proposals ADD COLUMN sent_identity TEXT')
+    if 'sell_basis' not in columns:c.execute('ALTER TABLE broker_proposals ADD COLUMN sell_basis TEXT')
     c.execute('CREATE TABLE IF NOT EXISTS manual_test_signals(user_id INTEGER PRIMARY KEY REFERENCES users(id),portfolio_id INTEGER NOT NULL REFERENCES portfolios(id),ticker TEXT NOT NULL,amount TEXT NOT NULL,expires REAL NOT NULL)')
     if 'side' not in {r[1] for r in c.execute('PRAGMA table_info(manual_test_signals)')}:c.execute("ALTER TABLE manual_test_signals ADD COLUMN side TEXT NOT NULL DEFAULT 'BUY'")
 
@@ -251,6 +253,7 @@ def view(row):
     if r['status']=='uncertain' and r['response'] and not r['intent_id']:
         reference=intent_reference(r['response'],r['payload'])
         if reference:r['status']='sent';r['intent_id']=reference;r['error']=None
+    r.pop('sent_identity',None)
     r.pop('fingerprint',None);r.pop('user_id',None)
     if r['status']!='estimated':r.pop('review_token',None)
     return r
@@ -367,14 +370,74 @@ def estimate(connect,user_id,data,factory=None):
     return {'proposal':view(get(connect,user_id,pid))}
 
 def intent_reference(raw,payload):
-    if not isinstance(raw,dict):return None
-    intent=raw.get('orderIntentId')
-    if not intent and isinstance(raw.get('orderIntents'),list):
-        items=raw['orderIntents'];orders=payload.get('orders') or []
-        if len(items)==len(orders)==1 and isinstance(items[0],dict):
-            item=items[0];order=orders[0]
-            if all(item.get(k)==order.get(k) for k in ('assetId','side','orderType','timeInForce')):intent=item.get('orderIntentId')
+    try:
+        nodes=intent_nodes(raw)
+    except TradeError:
+        return None
+    intent=nodes[-1].get('orderIntentId')
+    if 'orderIntentId' in raw:
+        if raw['orderIntentId']!=intent:return None
+    else:
+        orders=payload.get('orders') or []
+        if len(orders)!=1 or any(nodes[-1].get(k)!=orders[0].get(k)
+                                 for k in ('assetId','side','orderType','timeInForce')):
+            return None
     return intent if isinstance(intent,str) and 1<=len(intent)<=200 else None
+
+IDENTITY_ERROR='Pluto bekræftede ikke forslagsidentiteten. Kontrollér status i Pluto.'
+
+def proposal_identity(payload,reference):
+    expected={'orderIntentId':reference,'orderId':None,
+              'portfolioId':payload.get('portfolioId'),'collectionId':payload.get('collectionId')}
+    orders=payload.get('orders') or []
+    if len(orders)==1:
+        expected.update({key:orders[0].get(key) for key in ('assetId','side','orderType','timeInForce')})
+    return expected
+
+def intent_nodes(response):
+    if not isinstance(response,dict):
+        raise TradeError(IDENTITY_ERROR)
+    if 'orderIntents' not in response:
+        return [response]
+    items=response['orderIntents']
+    if (not isinstance(items,list) or len(items)!=1 or not isinstance(items[0],dict)
+            or 'orderIntentId' not in items[0]):
+        raise TradeError(IDENTITY_ERROR)
+    return [response,items[0]]
+
+def response_identity(response,expected):
+    """Read identity from the provider's root and optional single-intent envelope."""
+    identity={}
+    for node in intent_nodes(response):
+        for field in expected.keys() & node.keys():
+            value=node[field]
+            if not isinstance(value,str) or not value or identity.get(field,value)!=value:
+                raise TradeError(IDENTITY_ERROR)
+            identity[field]=value
+    return identity
+
+def sent_identity(response,payload,reference,portfolio):
+    """Snapshot the verified parent separately from IDs echoed by the receipt."""
+    extra={}
+    expected=proposal_identity(payload,reference)
+    if portfolio['kind']=='collection' and 'portfolioId' not in payload:
+        parent_id=portfolio['parent_external_id'].split(':',1)[1]
+        extra['verified_parent_id']=parent_id
+        expected['portfolioId']=parent_id
+    if not reference:
+        return extra
+    try:
+        identity=response_identity(response,expected)
+    except TradeError:
+        return extra
+    if any(value!=expected[key] for key,value in identity.items() if key!='orderId'):
+        return extra
+    extra['orderIntentId']=reference
+    if 'orderId' in identity:
+        extra['orderId']=identity['orderId']
+    if 'portfolioId' not in payload and 'portfolioId' in identity:
+        extra['portfolioId']=identity['portfolioId']
+    return extra
 
 def send(connect,user_id,data,factory=None):
     row=get(connect,user_id,int(data['id']))
@@ -407,18 +470,73 @@ def send(connect,user_id,data,factory=None):
         raw=call(cl,tools,name,json.loads(row['payload']))
         intent=intent_reference(raw,json.loads(row['payload']))
         status='sent' if intent else 'uncertain';error=None if intent else 'Pluto har svaret uden en genkendelig reference. Kontrollér i Pluto; forslaget genafsendes ikke.'
-        with connect() as c:c.execute('UPDATE broker_proposals SET status=?,intent_id=?,response=?,error=? WHERE id=? AND user_id=?',(status,intent,json.dumps(raw),error,row['id'],user_id))
+        extra=sent_identity(raw,current_payload,intent,p)
+        with connect() as c:
+            c.execute('UPDATE broker_proposals SET status=?,intent_id=?,response=?,sent_identity=?,error=? WHERE id=? AND user_id=?',
+                      (status,intent,json.dumps(raw),json.dumps(extra),error,row['id'],user_id))
     except Exception:
         with connect() as c:c.execute("UPDATE broker_proposals SET status='uncertain',error=? WHERE id=? AND user_id=?",('Afsendelsens resultat er uafklaret. Kontrollér i Pluto. Ingen automatisk genafsendelse.',row['id'],user_id))
     return {'proposal':view(get(connect,user_id,row['id']))}
 
+def disputed_identity(previous,expected,verified_reference):
+    """Require an explicit correction before discarding conflicting history."""
+    if not isinstance(previous,dict):
+        return set()
+    items=previous.get('orderIntents')
+    nested=[item for item in items if isinstance(item,dict)] if isinstance(items,list) else []
+    nodes=[previous]+[item for item in nested if 'orderIntentId' in item]
+    if not any(node.get('orderIntentId')==expected['orderIntentId'] for node in nodes):
+        return set()
+    disputed={key for node in nodes for key in expected.keys() & node.keys()
+              if expected[key] is not None and node[key]!=expected[key]}
+    if not verified_reference:
+        if 'orderIntentId' in disputed:
+            raise TradeError(IDENTITY_ERROR)
+        # Without a submission snapshot this may be the only receipt. Only
+        # discard its unverified order ID if the receipt itself is disproved.
+        if not disputed and expected['orderId'] is None and any('orderId' in node for node in [previous,*nested]):
+            raise TradeError(IDENTITY_ERROR)
+    return disputed
+
 def check(connect,user_id,pid,factory=None):
     row=get(connect,user_id,int(pid))
-    reference=view(row)['intent_id']
+    proposal=view(row)
+    reference=proposal['intent_id']
     if not reference:raise TradeError('Ingen sikker Pluto-reference. Kontrollér forslaget i Pluto-appen.')
+    payload=proposal['payload']
+    expected=proposal_identity(payload,reference)
+    # Legacy rows have no independent submission evidence for supplemental IDs.
+    receipt_ids=json.loads(row['sent_identity']) if row['sent_identity'] else {}
+    verified_reference=receipt_ids.pop('orderIntentId',None)
+    if verified_reference is not None and verified_reference!=reference:
+        raise TradeError(IDENTITY_ERROR)
+    # A collection sell omits the parent in its payload. Its verified parent
+    # constrains any reported portfolio, even when the receipt omitted it.
+    parent_id=receipt_ids.pop('verified_parent_id',None)
+    expected.update(receipt_ids)
+    if parent_id is not None:
+        expected['portfolioId']=parent_id
+    previous=proposal['response']
+    required=set(receipt_ids)
+    if not row['intent_id']:
+        # The legacy reference itself came from this response via view().
+        prior=response_identity(previous,expected)
+        if any(value!=expected[key] for key,value in prior.items()):
+            raise TradeError(IDENTITY_ERROR)
+    else:
+        required.update(disputed_identity(previous,expected,verified_reference))
+
     cl,tools=client(connect,user_id,factory);raw=call(cl,tools,'get_order_intent',{'orderIntentId':reference})
+    if not isinstance(raw,dict) or raw.get('orderIntentId')!=reference:
+        raise TradeError(IDENTITY_ERROR)
+    identity=response_identity(raw,expected)
+    if not required.issubset(identity) or any(value!=expected[key] for key,value in identity.items()):
+        raise TradeError(IDENTITY_ERROR)
+    # Do not replace evidence updated while the provider lookup was in flight.
     # Preserve exact provider status separately. Acceptance is never a fill.
-    with connect() as c:c.execute("UPDATE broker_proposals SET response=?,intent_id=?,status='sent',error=NULL WHERE id=? AND user_id=?",(json.dumps(raw),reference,row['id'],user_id))
+    with connect() as c:
+        c.execute("UPDATE broker_proposals SET response=?,intent_id=?,status='sent',error=NULL WHERE id=? AND user_id=? AND response IS ? AND intent_id IS ? AND status=?",
+                  (json.dumps(raw),reference,row['id'],user_id,row['response'],row['intent_id'],row['status']))
     return {'proposal':view(get(connect,user_id,row['id']))}
 
 def cancel_intent(connect,user_id,pid,factory=None):

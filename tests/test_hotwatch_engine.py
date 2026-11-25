@@ -21,6 +21,41 @@ def tick(at,index=0,price='100',held=False):
 def good_metrics():return {'sample_count':40,'price':'100','return_1_pct':'.1','return_3_pct':'.5','acceleration_pct_s2':'.01','relative_volume':'3','spread_pct':'.1','volatility_pct':'.3','breakout':True,'breakdown':False,'trend_up':True,'rsi':'60','macd_histogram':'.1','distance_high_pct':'0'}
 
 class HotWatch(unittest.TestCase):
+ def test_holding_origin_refresh_checks_signal_proposal_without_attributing_fill(self):
+  import hotwatch_service,portfolios,trade_service
+  payload={'portfolioId':'root','orders':[{'assetId':'synthetic-MERC','side':'BUY'}]}
+  with app.connect() as c:
+   portfolios.replace_pluto(c,1,[{'id':'portfolios:root','name':'Root','kind':'portfolio'}])
+   pid=c.execute("SELECT id FROM portfolios WHERE external_id='portfolios:root'").fetchone()[0]
+   for origin,intent in (('@hotwatch','signal-intent'),('@manual-buy','manual-intent')):
+    response={'orderIntentId':intent,'status':'PENDING','portfolioId':'root'}
+    c.execute("INSERT INTO broker_proposals(user_id,fingerprint,report_id,candidate_id,kind,portfolio_id,payload,status,created,intent_id,response) VALUES(1,?,?,'synthetic-MERC','direct',?,?,'sent',?,?,?)",
+              (intent,origin,pid,json.dumps(payload),self.now.timestamp(),intent,json.dumps(response)))
+  verified=json.dumps({'orderIntentId':'signal-intent'})
+  for history,snapshot,final in (
+      ({'orderIntentId':'manual-intent'},None,'ACCEPTED'),
+      ({'orderIntentId':'signal-intent','portfolioId':'other'},None,'ACCEPTED'),
+      ({'orderIntentId':'signal-intent','orderId':'unrelated'},verified,'ACCEPTED'),
+      ({'orderIntentId':'signal-intent','orderId':'unrelated'},None,'PENDING'),
+      ({'orderIntentId':'signal-intent','orderIntents':[{'orderIntentId':'manual-intent'}]},None,'PENDING'),
+      ({'orderIntentId':'signal-intent','orderIntents':[{}]},None,'ACCEPTED')):
+   with self.subTest(history=history,snapshot=snapshot):
+    with app.connect() as c:
+     c.execute("UPDATE broker_proposals SET response=?,sent_identity=? WHERE user_id=1 AND report_id='@hotwatch'",
+               (json.dumps(dict(history,status='PENDING')),snapshot))
+    valid={'orderIntentId':'signal-intent','status':'ACCEPTED'}
+    if 'portfolioId' in history:valid['portfolioId']='root'
+    replies=[dict(valid,orderIntentId='manual-intent'),dict(valid,orderId='unrelated'),valid]
+    with patch.object(trade_service,'client',return_value=(object(),{})),patch.object(trade_service,'call',side_effect=replies) as call:
+     for expected in ('PENDING','PENDING',final):
+      hotwatch_service.refresh_holding_origin(app.connect,1,pid,'synthetic-MERC')
+      statuses={p['report_id']:p['provider_status'] for p in trade_service.summaries(app.connect,1)}
+      self.assertEqual(statuses,{'@manual-buy':'PENDING','@hotwatch':expected})
+    expected_calls=[('get_order_intent',{'orderIntentId':'signal-intent'})]*3 if final=='ACCEPTED' else []
+    self.assertEqual([args.args[2:] for args in call.call_args_list],expected_calls)
+    with app.connect() as c:
+     self.assertIsNone(hotwatch_service.holding_origin(c,1,pid,'synthetic-MERC'))
+
  def test_sync_reads_sanitized_fallback_errors_through_existing_endpoint(self):
   import hotwatch_supervisor
   row={'created':self.now.isoformat(),'event':'site_portfolio_list','code':1}
