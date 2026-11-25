@@ -21,6 +21,29 @@ def tick(at,index=0,price='100',held=False):
 def good_metrics():return {'sample_count':40,'price':'100','return_1_pct':'.1','return_3_pct':'.5','acceleration_pct_s2':'.01','relative_volume':'3','spread_pct':'.1','volatility_pct':'.3','breakout':True,'breakdown':False,'trend_up':True,'rsi':'60','macd_histogram':'.1','distance_high_pct':'0'}
 
 class HotWatch(unittest.TestCase):
+ def test_holding_origin_refresh_checks_signal_proposal_without_attributing_fill(self):
+  import hotwatch_service,portfolios,trade_service
+  payload={'portfolioId':'root','orders':[{'assetId':'synthetic-MERC','side':'BUY'}]}
+  with app.connect() as c:
+   portfolios.replace_pluto(c,1,[{'id':'portfolios:root','name':'Root','kind':'portfolio'}])
+   pid=c.execute("SELECT id FROM portfolios WHERE external_id='portfolios:root'").fetchone()[0]
+   for origin,intent in (('@hotwatch','signal-intent'),('@manual-buy','manual-intent')):
+    response={'orderIntentId':intent,'status':'PENDING'}
+    c.execute("INSERT INTO broker_proposals(user_id,fingerprint,report_id,candidate_id,kind,portfolio_id,payload,status,created,intent_id,response) VALUES(1,?,?,'synthetic-MERC','direct',?,?,'sent',?,?,?)",
+              (intent,origin,pid,json.dumps(payload),self.now.timestamp(),intent,json.dumps(response)))
+  # A manual proposal for this asset cannot replace the signal's evidence.
+  with patch.object(trade_service,'client',return_value=(object(),{})),patch.object(trade_service,'call',side_effect=[
+      {'orderIntentId':'manual-intent','status':'ACCEPTED'},
+      {'orderIntentId':'signal-intent','status':'ACCEPTED'}]) as call:
+   hotwatch_service.refresh_holding_origin(app.connect,1,pid,'synthetic-MERC')
+   self.assertEqual([item['provider_status'] for item in trade_service.summaries(app.connect,1)],['PENDING','PENDING'])
+   hotwatch_service.refresh_holding_origin(app.connect,1,pid,'synthetic-MERC')
+  self.assertEqual([call_args.args[2:] for call_args in call.call_args_list],
+                   [('get_order_intent',{'orderIntentId':'signal-intent'})]*2)
+  self.assertEqual([item['provider_status'] for item in trade_service.summaries(app.connect,1)],['PENDING','ACCEPTED'])
+  with app.connect() as c:
+   self.assertIsNone(hotwatch_service.holding_origin(c,1,pid,'synthetic-MERC'))
+
  def test_sync_reads_sanitized_fallback_errors_through_existing_endpoint(self):
   import hotwatch_supervisor
   row={'created':self.now.isoformat(),'event':'site_portfolio_list','code':1}

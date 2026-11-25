@@ -414,11 +414,41 @@ def send(connect,user_id,data,factory=None):
 
 def check(connect,user_id,pid,factory=None):
     row=get(connect,user_id,int(pid))
-    reference=view(row)['intent_id']
+    proposal=view(row)
+    reference=proposal['intent_id']
     if not reference:raise TradeError('Ingen sikker Pluto-reference. Kontrollér forslaget i Pluto-appen.')
     cl,tools=client(connect,user_id,factory);raw=call(cl,tools,'get_order_intent',{'orderIntentId':reference})
+    identity_error='Pluto bekræftede ikke forslagsidentiteten. Kontrollér status i Pluto.'
+    if not isinstance(raw,dict) or raw.get('orderIntentId')!=reference:
+        raise TradeError(identity_error)
+    payload=proposal['payload']
+    expected={key:payload.get(key) for key in ('portfolioId','collectionId')}
+    if 'portfolioId' in raw and not expected['portfolioId']:
+        with connect() as c:
+            portfolio=c.execute("SELECT kind,external_id,parent_external_id FROM portfolios WHERE id=? AND user_id=? AND source='pluto'",
+                                (row['portfolio_id'],user_id)).fetchone()
+        if not portfolio:
+            raise TradeError(identity_error)
+        external_id=portfolio['parent_external_id'] if portfolio['kind']=='collection' else portfolio['external_id']
+        expected['portfolioId']=(external_id or '').partition(':')[2]
+    orders=payload.get('orders') or []
+    if len(orders)==1:
+        expected.update({key:orders[0].get(key) for key in ('assetId','side','orderType','timeInForce')})
+    if any(key in raw and (not value or raw[key]!=value) for key,value in expected.items()):
+        raise TradeError(identity_error)
+    previous=proposal['response']
+    # A batch proposal can carry the prior identity on its one matched intent.
+    if isinstance(previous,dict) and previous.get('orderIntentId')!=reference and intent_reference(previous,payload)==reference:
+        previous=previous['orderIntents'][0]
+    if isinstance(previous,dict) and previous.get('orderIntentId')==reference:
+        order_id=previous.get('orderId')
+        if isinstance(order_id,str) and order_id and raw.get('orderId')!=order_id:
+            raise TradeError(identity_error)
+    # Do not replace evidence updated while the provider lookup was in flight.
     # Preserve exact provider status separately. Acceptance is never a fill.
-    with connect() as c:c.execute("UPDATE broker_proposals SET response=?,intent_id=?,status='sent',error=NULL WHERE id=? AND user_id=?",(json.dumps(raw),reference,row['id'],user_id))
+    with connect() as c:
+        c.execute("UPDATE broker_proposals SET response=?,intent_id=?,status='sent',error=NULL WHERE id=? AND user_id=? AND response IS ? AND intent_id IS ? AND status=?",
+                  (json.dumps(raw),reference,row['id'],user_id,row['response'],row['intent_id'],row['status']))
     return {'proposal':view(get(connect,user_id,row['id']))}
 
 def cancel_intent(connect,user_id,pid,factory=None):

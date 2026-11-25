@@ -34,11 +34,12 @@ class Trading(unittest.TestCase):
     elif name.startswith('propose_'):
      if case.fail_send:raise TimeoutError('Synthetic timeout after request')
      result=case.write_result
-    elif name=='get_order_intent':result={'orderIntentId':'synthetic-intent','status':'accepted'}
+    elif name=='get_order_intent':result=case.intent_result
     elif name=='search_assets':result={'assets':[{'id':'asset-test','name':'Synthetic asset','ticker':'TEST','isin':'SYNTHETIC','currency':'USD'}]}
     else:raise AssertionError(name)
     return {'structuredContent':result}
   self.factory=Client
+  self.intent_result={'orderIntentId':'synthetic-intent','status':'accepted'}
  def tearDown(self):self.env.stop();app.DB=self.previous;self.tmp.cleanup()
  def estimate(self,request=None):return trade.estimate(app.connect,1,request or self.request,self.factory)['proposal']
  def send(self,proposal):return trade.send(app.connect,1,{'id':proposal['id'],'review_token':proposal['review_token'],'confirm':True},self.factory)['proposal']
@@ -323,6 +324,31 @@ class Trading(unittest.TestCase):
   self.assertTrue(trade.send(app.connect,1,{'id':q['id']},self.factory)['duplicate']);self.assertEqual(len(self.writes()),1)
   checked=trade.check(app.connect,1,q['id'],self.factory)['proposal'];self.assertEqual(checked['response']['status'],'accepted');self.assertEqual(checked['status'],'sent')
   self.assertEqual(set(c['name'] for c in self.calls),{'list_portfolios','get_accounts','list_orders','get_asset','estimate_order','propose_orders','get_order_intent'})
+ def test_check_rejects_unverified_identity_and_preserves_prior_record(self):
+  self.write_result.update(status='PENDING',orderId='original-order')
+  proposal=self.send(self.estimate())
+  pid=proposal['id'];prior=dict(trade.get(app.connect,1,pid))
+  valid={'orderIntentId':'synthetic-intent','portfolioId':'root','assetId':'asset-test','side':'BUY','orderId':'original-order','status':'accepted'}
+  replies=[[],{'status':'accepted'},dict(valid,orderIntentId='other-intent'),dict(valid,portfolioId='other-depot'),
+           dict(valid,assetId='other-asset'),dict(valid,side='SELL'),dict(valid,orderId='other-order'),
+           {key:value for key,value in valid.items() if key!='orderId'}]
+  for reply in replies:
+   with self.subTest(reply=reply):
+    self.intent_result=reply
+    with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+     trade.check(app.connect,1,pid,self.factory)
+    self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+  self.intent_result=valid
+  calls=len(self.calls)
+  with self.assertRaisesRegex(trade.TradeError,'din konto'):
+   trade.check(app.connect,2,pid,self.factory)
+  self.assertEqual(len(self.calls),calls)
+  self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+  checked=trade.check(app.connect,1,pid,self.factory)['proposal']
+  self.assertEqual(checked['response'],valid)
+  self.assertEqual(checked['status'],'sent')
+  self.assertEqual(checked['report_id'],proposal['report_id'])
+  self.assertEqual(len(self.writes()),1)
  def test_isolation_confirmation_and_expiry(self):
   q=self.estimate()
   with self.assertRaises(trade.TradeError):trade.send(app.connect,2,{'id':q['id'],'confirm':True,'review_token':q['review_token']},self.factory)
