@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-25T17:43:00Z",
+  "updated_at": "2026-11-25T17:45:30Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -405,7 +405,7 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "in_progress",
       "issue": 54,
-      "evidence": "Mobil #300 752c3a06 review HOLD på forsinket privat state/error; desktop #305 8dc16d65 draft med CI 45667433871 i gang. Ingen ny UI-liveaccept.",
+      "evidence": "Mobil #300 752c3a06 HOLD; desktop #305 8dc16d65 CI 45667433871, job 139393284194 chart/UI PASS, uafhængigt review udestår.",
       "subgoals": [
         {
           "id": "reuse",
@@ -426,9 +426,9 @@
           "id": "desktop",
           "title": "Desktop 2.0",
           "status": "review",
-          "evidence": "#305 8dc16d65 publiceret efter #67:2 STARTED/WORKING/TESTING; CI 45667433871 i gang.",
+          "evidence": "#305 8dc16d65 CI 45667433871/job 139393284194 chart/UI PASS; afventer uafhængigt review, ingen liveaccept.",
           "owner_role": "desktop",
-          "updated_at": "2026-11-25T17:43:00Z"
+          "updated_at": "2026-11-25T17:45:30Z"
         },
         {
           "id": "test",
@@ -438,7 +438,7 @@
           "owner_role": "mobile"
         }
       ],
-      "updated_at": "2026-11-25T17:43:00Z"
+      "updated_at": "2026-11-25T17:45:30Z"
     },
     {
       "id": "load",
@@ -446,7 +446,7 @@
       "title": "100 brugere og skaleringsmåling",
       "status": "in_progress",
       "issue": 14,
-      "evidence": "#302 integreret 99ba8ef6 efter lokalt uafhængigt review; SQLite discovery med 1/10/100 brugere og én attempt-query pr. bruger. #304 holdingbatch under review; samlet hostmåling udestår.",
+      "evidence": "#302 integreret 99ba8ef6 efter lokalt uafhængigt review; SQLite discovery 1/10/100 og én attempt-query pr. bruger. #304 exact 93a7859a CI 45667321404 PASS, lokal HOLD: stale retry/session state før write lock.",
       "subgoals": [
         {
           "id": "adapter",
@@ -459,9 +459,9 @@
           "id": "queue",
           "title": "100 brugere og fair køer",
           "status": "in_progress",
-          "evidence": "#302 CI 45665177195, integreret 99ba8ef6: scoped discovery query og bevaret cursor/selection. #304 93a7859a CI 45667321404 PASS afventer review. Ikke fuld fairness/workeraccept.",
+          "evidence": "#302 CI 45665177195, integreret 99ba8ef6. #304 HOLD: test mangler samtidig POSITION_CLOSED-reconciliation før første upsert. Ingen fuld fairness/workeraccept.",
           "owner_role": "data",
-          "updated_at": "2026-11-25T17:43:00Z"
+          "updated_at": "2026-11-25T17:45:30Z"
         },
         {
           "id": "resources",
@@ -478,7 +478,7 @@
           "owner_role": "data"
         }
       ],
-      "updated_at": "2026-11-25T17:43:00Z"
+      "updated_at": "2026-11-25T17:45:30Z"
     },
     {
       "id": "release",
