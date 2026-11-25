@@ -400,7 +400,11 @@ class EODHDAdapter:
  def shared_stream_identity(self,c,request,watch_id):
   """Require this user's current identity proof before using a shared stream."""
   from hotwatch_engine import verified_automatic_feed
-  if request.get('is_test') or c.execute('SELECT 1 FROM hw_provisional_feed_links WHERE watch_row_id=?',(watch_id,)).fetchone():return None
+  if request.get('is_test'):return None
+  # Shared reuse is only available to the persisted, active tenant watch.
+  # Claim() resolves this same request; reject stale or forged adapter jobs.
+  row=c.execute("SELECT s.request FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id LEFT JOIN hw_provisional_feed_links p ON p.watch_row_id=s.id WHERE s.id=? AND s.user_id=? AND s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND p.watch_row_id IS NULL",(watch_id,self.uid)).fetchone()
+  if not row or json.loads(row['request'])!=request:return None
   if not verified_automatic_feed(c,self.uid,request,utc()):return None
   link=c.execute('SELECT isin,currency,exchange FROM hw_verified_feed_links WHERE user_id=? AND asset_id=?',(self.uid,request['asset_id'])).fetchone()
   if link and re.fullmatch('[A-Z]{2}[A-Z0-9]{9}[0-9]',link['isin']):return (request['provider_symbol'],link['isin'],link['currency'],link['exchange'].upper())

@@ -70,15 +70,21 @@ class FeedReuse(unittest.TestCase):
    self.assertEqual(self.adapter.capture(client,'us_trades','MERC',self.job)['status'],'NO_MESSAGES')
   client.capture.assert_called_once()
  def shared_job(self,uid,symbol='MERC.US',isin='US1234567890',session=None):
-  job={**(session or self.job)}
+  with app.connect() as c:
+   c.execute("INSERT OR IGNORE INTO users(id,username,role,active) VALUES(?,?,'member',1)",(uid,f'shared-fixture-{uid}'))
+  if session is None:
+   self._shared_seq=getattr(self,'_shared_seq',10000)+1
+   # Real persisted sessions; keep synthetic subscribers outside the due
+   # batch until explicitly polled so capture counts remain attributable.
+   session=capacity_fixture.LiveCapacity.add(self,symbol,self._shared_seq,user=uid,due=self.now.timestamp()+3600)
+  job=dict(session)
   req=dict(job['request_data'],asset_id=f'asset-{uid}-{symbol}',provider_symbol=symbol,ticker=symbol.split('.')[0])
   job['request_data']=req
   with app.connect() as c:
    if isin:
     c.execute('INSERT OR REPLACE INTO hw_verified_feed_links VALUES(?,?,?,?,?,?,?,?)',
               (uid,req['asset_id'],req['ticker'],req['quote_currency'],req['exchange'],symbol,isin,self.now.timestamp()))
-   if session:
-    c.execute('UPDATE hw_sessions SET request=? WHERE id=?',(json.dumps(req),job['id']))
+   c.execute('UPDATE hw_sessions SET request=? WHERE id=? AND user_id=?',(json.dumps(req),job['id'],uid))
   return job
  def shared_client(self,key='feed-reuse'):
   def capture(feed,symbols,**kwargs):
@@ -144,6 +150,24 @@ class FeedReuse(unittest.TestCase):
    c.execute('UPDATE hw_verified_feed_links SET verified_epoch=0 WHERE user_id=2')
   other.capture(client,'us_trades','MERC',second)
   self.assertEqual(client.capture.call_count,7)
+ @patch.dict(os.environ,{'ESCAPE_HW_EODHD_CROSS_USER_WS_ENABLED':'1'})
+ def test_shared_capture_requires_persisted_tenant_watch_and_current_request(self):
+  first,second=self.shared_job(1),self.shared_job(2)
+  other=adapters.EODHDAdapter(app.connect,2)
+  client=self.shared_client()
+  self.adapter.capture(client,'us_trades','MERC',first)
+  with app.connect() as c:
+   self.assertIsNotNone(other.shared_stream_identity(c,second['request_data'],second['id']))
+   self.assertIsNone(other.shared_stream_identity(c,second['request_data'],first['id']))
+   self.assertIsNone(other.shared_stream_identity(c,dict(second['request_data'],profile='CRITICAL'),second['id']))
+  forged=dict(second,id=first['id'])
+  other.capture(client,'us_trades','MERC',forged)
+  self.assertEqual(client.capture.call_count,2)  # no shared cache reuse
+  other.capture(client,'us_trades','MERC',second)
+  self.assertEqual(client.capture.call_count,2)
+  with app.connect() as c:
+   c.execute("UPDATE hw_sessions SET status='EXPIRED' WHERE id=?",(second['id'],))
+   self.assertIsNone(other.shared_stream_identity(c,second['request_data'],second['id']))
  @patch.dict(os.environ,{'ESCAPE_HW_EODHD_CROSS_USER_WS_ENABLED':'1'})
  def test_cross_user_concurrent_capture_defers_only_the_matching_instrument(self):
   started,finish=threading.Event(),threading.Event()
