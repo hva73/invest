@@ -143,7 +143,34 @@ Afvigende gentagelser med en forældet forgænger afvises.
 i rækkefølge for bruger, depot, position og handelsforløb. Begge kald
 kontrollerer det fulde scope, rækkefølge, forgængerlinks og gemte digests.
 Hvert trin fastholder entry-oprindelse, strategiversioner og positions-
-evidens som et snapshot. Adapteren har ingen UI eller live-rute.
+evidens som et snapshot. Adapteren bruger journalskemaet fra #298 direkte.
+Et hul i rækkefølgen opdages. En intakt forkortet kæde eller en helt slettet
+kæde kan kun opdages med en uafhængig reference til den forventede historik.
+Adapteren har ingen UI eller live-rute.
+
+`evaluate_test_position_exit(connect, scope, snapshot_id, as_of, entry_origin,
+catalog, sample, metrics, risk, expected_head_digest=...)` bruger samme
+SQLite-adapter til exit i simulation. Kalderen skal desuden levere det
+uafhængigt attesterede seneste overgangsdigest for det autoriserede scope
+(eller eksplicit None ved verificeret fravær af skift). Referencen må ikke
+udledes af den journal, der kontrolleres; uden uafhængigt grundlag må
+evalueringen ikke kaldes. Intet nyt skema eller lager indføres.
+Kaldet leverer den oprindelige entry og aktuel positionsevidens med
+matchende scope og entry-digest. Hele kæden og forventet kædespids
+verificeres før tidsafgrænsningen; afkortning eller sletning afvises.
+Det seneste skift med `effective_at <= as_of` gælder. Før første skift
+eller ved attesteret tom historik bruges entry-strategien. En senere
+kædespids bruges kun til integritetskontrol, ikke som historisk signalinput. Den valgte
+strategis ID, version og checksum skal matche kataloget eksakt med samme
+ejerprioritet som ved skrivning. Scopefejl, ugyldig kæde og manglende
+strategimatch afbryder kaldet med `ValueError`.
+
+Kaldet sender den aktuelle observation og risiko videre til `evaluate()`.
+Det bevarer observationens kostpris og entry-digest samt entry og
+positionsevidens i journalen. Hvert skift bindes til exitbeslutningen via
+overgangens digest, når skiftet gælder. Kalderen har fortsat ansvar for
+autorisation og evidens. Funktionen læser en allerede initialiseret
+testdatabase og har ingen live-rute, migration eller ordrehandling.
 
 ## Replay i Strategy Lab
 
