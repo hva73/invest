@@ -154,6 +154,23 @@ async () => {
         'Day axis lost Copenhagen time');
  assert(root.querySelectorAll('.signal-chart-peak strong').length === 2, 'Peak display was lost');
  assert(root.querySelectorAll('.market-marker-entry').length === 2, 'Average cost markers were lost');
+
+ await click('main', 'refresh');
+ await select('month');
+ let refreshed = false;
+ const cachedRefresh = MarketUI.refreshVisible().then(() => { refreshed = true; });
+ assert(requests.length === 14, 'Cached month refresh overlapped the active week request');
+ await finish(requests[13], quote(26));
+ assert(selected('month') && [...root.querySelectorAll('.market-price')].every(n => n.textContent === '24'),
+        'Week response overwrote the cached month');
+ assert(requests.length === 15 && requests[14].period === 'ONE_MONTH' && requests[14].refresh,
+        'Cached month refresh was lost or duplicated');
+ assert(!refreshed, 'Visible refresh completed before the month response');
+ await finish(requests[14], quote(27));
+ await cachedRefresh;
+ assert(requests.length === 15 && selected('month') &&
+        [...root.querySelectorAll('.market-price')].every(n => n.textContent === '27'),
+        'Refreshed month did not update both charts');
 }
 """
 

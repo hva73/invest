@@ -50,7 +50,7 @@ window.MarketUI=(()=>{
   if(!r.owner||!current(r)||!node.isConnected||key(node)!==r.key||!connected())return;
   const requestPeriod=periodKey(r.period);
   const request=r.promise;
-  r.busy=true;r.error=null;r.attempted=now();sync(r.key);
+  r.busy=true;r.requestPeriod=requestPeriod;r.error=null;r.attempted=now();sync(r.key);
   try{
    const result=await api('market/quote',{...(node.dataset.marketHoldingPortfolio?{holding_portfolio_id:Number(node.dataset.marketHoldingPortfolio),holding_asset_id:node.dataset.marketHoldingAsset}:{report_id:node.dataset.marketReport,...(node.dataset.marketPosition?{portfolio_id:node.dataset.marketPortfolio,position_id:node.dataset.marketPosition}:{candidate_id:node.dataset.marketCandidate})}),is_test:node.dataset.marketTest==='true',period:requestPeriod,refresh,choose,...(asset?{asset_id:asset}:{})});
    if(!current(r))return;
@@ -85,7 +85,20 @@ window.MarketUI=(()=>{
   }
  }
  function drain(){while(running<2&&queue.length){const task=queue.shift();running++;const done=task.pop();run(...task).finally(()=>{done();running--;drain()})}}
- function schedule(node,refresh=false,asset=null,choose=false){if(!node.isConnected)return Promise.resolve();const r=record(node);if(r.busy||r.queued)return r.promise;if(!refresh&&(r.choices||r.attempted&&now()-r.attempted<300000))return Promise.resolve();r.queued=true;r.promise=new Promise(done=>queue.push([node,r,refresh,asset,choose,done]));drain();return r.promise}
+ function schedule(node,refresh=false,asset=null,choose=false){
+  if(!node.isConnected)return Promise.resolve();
+  const r=record(node),selectedPeriod=periodKey(r.period);
+  // A cached selection has no automatic follow-up after a different period finishes.
+  if(r.busy&&refresh&&!asset&&!choose&&selectedPeriod!==r.requestPeriod&&r.byPeriod[selectedPeriod]){
+   return r.promise.then(()=>{
+    const active=mounted(r);
+    if(active&&!r.choices&&periodKey(r.period)===selectedPeriod)return schedule(active,true);
+   });
+  }
+  if(r.busy||r.queued)return r.promise;
+  if(!refresh&&(r.choices||r.attempted&&now()-r.attempted<300000))return Promise.resolve();
+  r.queued=true;r.promise=new Promise(done=>queue.push([node,r,refresh,asset,choose,done]));drain();return r.promise;
+ }
  const observer=typeof IntersectionObserver==='undefined'?null:new IntersectionObserver(entries=>{entries.forEach(e=>{if(e.isIntersecting&&e.target.dataset.marketTest!=='true'&&!document.hidden&&connected())schedule(e.target)})},{rootMargin:'120px'});
  function mount(){if(observer)observer.disconnect();if(activeOwner!==owner()){activeOwner=owner();records.clear();queue.splice(0).forEach(task=>task[task.length-1]())}document.querySelectorAll('.market-slot').forEach(node=>{paint(node,record(node));if(observer)observer.observe(node);else if(connected()&&node.dataset.marketTest!=='true'&&!document.hidden)schedule(node)})}
  function tick(){if(document.hidden||!owner()||!connected())return;document.querySelectorAll('.market-slot').forEach(node=>{const box=node.getBoundingClientRect();if(node.dataset.marketTest!=='true'&&box.bottom>0&&box.top<innerHeight)schedule(node)})}
