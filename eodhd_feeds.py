@@ -15,6 +15,7 @@ _snapshot_locks=[threading.Lock() for _ in range(32)]
 _status_cache={}
 _status_locks=[threading.Lock() for _ in range(32)]
 STATUS_CACHE_TTL_S=60
+HISTORY_RETRY_S=20
 WS_FEEDS={'us_trades':'us','us_quotes':'us-quote','us_status':'us-status','eu_trades':'eu','eu_quotes':'eu-quote','eu_status':'eu-status'}
 _WS_LOGGER=logging.Logger('escape.eodhd.transport');_WS_LOGGER.disabled=True
 
@@ -104,11 +105,21 @@ class EODHDFeeds:
   key=(hashlib.sha256(self._key.encode()).digest(),market,symbol)
   with _history_locks[hash(key)%len(_history_locks)]:
    cached=_history_cache.get(key);now=time.monotonic()
-   if cached and 0<=now-cached[0]<20:return copy.deepcopy(cached[1])
+   minute=int(time.time())//60*60
+   if cached:
+    saved,result,complete_minute=cached
+    ttl=60 if complete_minute==minute else HISTORY_RETRY_S if complete_minute is None else 0
+    if 0<=now-saved<ttl:
+     return copy.deepcopy(result)
    result=self._minute_bars_uncached(market,symbol)
    if result.get('status')=='OK':
+    # Consumers only use closed bars. Once the preceding minute is present,
+    # faster polls cannot need another closed bar until the next boundary.
+    # Keep the short retry for delayed or otherwise incomplete history.
+    latest_closed=_timestamp(minute-60,1)
+    complete=any(bar['bar_open_at']==latest_closed and bar.get('volume') is not None and Decimal(bar['close'])>0 for bar in result['bars'])
     if len(_history_cache)>=256:_history_cache.clear()
-    _history_cache[key]=(time.monotonic(),copy.deepcopy(result))
+    _history_cache[key]=(time.monotonic(),copy.deepcopy(result),minute if complete else None)
    return result
  def _minute_bars_uncached(self,market,symbol):
   if market not in ('us','eu') or not _valid_symbol(symbol):return _result('INVALID_INPUT','/history')
@@ -204,7 +215,7 @@ class EODHDFeeds:
    if factory is None:
     try:from websockets.sync.client import connect as factory
     except ImportError:return measured('WEBSOCKET_DEPENDENCY_MISSING',path)
-   url=WS_BASE+'/'+endpoint+'?'+urlencode({'api_token':self._key});messages=[];partial_messages=[]
+   url=WS_BASE+'/'+endpoint+'?'+urlencode({'api_token':self._key});messages=[];partial_messages=[];seen=set()
    with (self._capacity.websocket(len(symbols)) if self._capacity else nullcontext()),factory(url,open_timeout=8,close_timeout=2,max_size=131072,max_queue=16,logger=_WS_LOGGER) as ws:
     transport['connections_opened']=1
     deadline=time.monotonic()+duration
@@ -237,12 +248,18 @@ class EODHDFeeds:
      if feed.endswith('trades'):
       price=_number(row.get('p'))
       if price is None or Decimal(price)<=0:continue
-      messages.append({'symbol':actual,'event_time':at,'received_at':received_at,'price':price,'trade_size':_number(row.get('v')),'market_session':row.get('ms') if row.get('ms') in ('open','closed','extended-hours','extended hours') else None})
+      event={'price':price,'trade_size':_number(row.get('v')),'market_session':row.get('ms') if row.get('ms') in ('open','closed','extended-hours','extended hours') else None}
      elif feed.endswith('quotes'):
-      messages.append({'symbol':actual,'event_time':at,'received_at':received_at,'bid':_number(row.get('bp')),'ask':_number(row.get('ap')),'bid_size':_number(row.get('bs')),'ask_size':_number(row.get('as'))})
+      event={'bid':_number(row.get('bp')),'ask':_number(row.get('ap')),'bid_size':_number(row.get('bs')),'ask_size':_number(row.get('as'))}
      else:
       status=row.get('h');reason=row.get('r')
-      messages.append({'symbol':actual,'event_time':at,'received_at':received_at,'trading_status':status if isinstance(status,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',status) else None,'reason':reason if isinstance(reason,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',reason) else None})
+      event={'trading_status':status if isinstance(status,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',status) else None,'reason':reason if isinstance(reason,str) and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',reason) else None}
+     # Replays must not crowd slower symbols out of a verified batch.
+     # Keep distinct payloads at the same source time for ambiguity checks.
+     identity=(actual,at,*event.values())
+     if identity in seen:continue
+     seen.add(identity)
+     messages.append({'symbol':actual,'event_time':at,'received_at':received_at,**event})
    # Counts describe the whole batch, before the adapter splits it by symbol.
    # Reaching the bound does not prove that an unread message exists.
    return measured('OK' if messages else 'NO_MESSAGES',path,messages=messages,message_count=len(messages),partial_messages=partial_messages,batch_valid_count=len(messages),batch_partial_count=len(partial_messages),batch_limit_reached=len(messages)>=max_messages or len(partial_messages)>=max_messages)

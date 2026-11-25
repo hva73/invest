@@ -1,12 +1,19 @@
 """Read-only candidate quotes and observed chart points from Pluto get_asset."""
-import json,time
-from datetime import datetime,timezone
+import json,re,time
+from datetime import datetime,time as wall_time,timedelta,timezone
 from decimal import Decimal,InvalidOperation
-from zoneinfo import ZoneInfo
-import oauth,report_ingest,trade_service
+from zoneinfo import ZoneInfo,ZoneInfoNotFoundError
+import display_policy,oauth,report_ingest,trade_service
 from asset_quotes import parse as parse_quote
 
 COPENHAGEN=ZoneInfo('Europe/Copenhagen')
+VENUE_CALENDARS={
+    'NASDAQ':'US','XNAS':'US','NYSE':'US','XNYS':'US',
+    'XCSE':'CO','CSE':'CO','COPENHAGEN':'CO','NASDAQ COPENHAGEN':'CO','CO':'CO',
+    'XAMS':'AS','AMS':'AS','EURONEXT AMSTERDAM':'AS','AS':'AS',
+    'XETR':'XETRA','XETRA':'XETRA','CHIX':'CHIX',
+}
+WEEKDAYS=('Mon','Tue','Wed','Thu','Fri','Sat','Sun')
 class MarketError(ValueError):pass
 
 def init(c):
@@ -26,10 +33,86 @@ def decimal(value,positive=False):
 def stamp(value):
     if not isinstance(value,str):raise MarketError('Kurshistorikken mangler et tidsstempel med tidszone.')
     try:
-        dt=datetime.fromisoformat(value.replace('Z','+00:00'))
+        # Pluto can supply nanoseconds. Preserve the original string on each
+        # point and normalize fractional seconds to datetime's precision.
+        iso=re.sub(r'(?<=:\d\d)\.(\d+)(?=Z$|[+-]\d\d:\d\d$)',
+                   lambda match:'.'+match[1][:6].ljust(6,'0'),value)
+        dt=datetime.fromisoformat(iso.replace('Z','+00:00'))
         if dt.tzinfo is None:raise ValueError()
         return dt.astimezone(timezone.utc)
     except ValueError:raise MarketError('Kurshistorikken indeholder et ukendt tidspunkt.')
+
+def copenhagen_day(now):
+    local=now.astimezone(COPENHAGEN)
+    start=datetime.combine(local.date(),wall_time.min,COPENHAGEN)
+    return start.astimezone(timezone.utc),(start+timedelta(days=1)).astimezone(timezone.utc)
+
+def calendar_day_domain(now,phase):
+    start,end=copenhagen_day(now)
+    return {'kind':'calendar_day','start':start.isoformat(),'end':end.isoformat(),
+            'phase':phase,'session_source':None,'session_source_time':None}
+
+def session_domain(result,now,db):
+    asset_type=(result.get('asset_type') or '').upper()
+    if asset_type in ('CRYPTO','CRYPTOCURRENCY'):
+        return calendar_day_domain(now,'continuous')
+    domain={'kind':'market_session','start':None,'end':None,'phase':'unknown',
+            'session_source':None,'session_source_time':None,'coverage':None}
+    exchange=VENUE_CALENDARS.get((result.get('exchange') or '').strip().upper())
+    if not exchange or db is None:return domain
+    row=db.execute('SELECT received,timezone,calendar FROM hw_exchange_calendar WHERE exchange=?',(exchange,)).fetchone()
+    if not row:return domain
+    try:
+        zone=ZoneInfo(row['timezone'])
+        local=now.astimezone(zone)
+        received=stamp(row['received'])
+        if received>now or received.astimezone(zone).date()!=local.date():return domain
+        calendar=json.loads(row['calendar'])
+        days,excluded=calendar['working_days'],calendar['excluded_dates']
+        opening,closing=wall_time.fromisoformat(calendar['open']),wall_time.fromisoformat(calendar['close'])
+        if (not isinstance(days,list) or not days or any(day not in WEEKDAYS for day in days)
+            or not isinstance(excluded,list) or opening.tzinfo or closing.tzinfo or opening>=closing):
+            return domain
+    except (KeyError,TypeError,ValueError,ZoneInfoNotFoundError):return domain
+    domain.update(session_source='EODHD exchange calendar',session_source_time=received.isoformat())
+    # The existing calendar collapses holidays and early closes into one list.
+    if local.date().isoformat() in excluded:return domain
+    if WEEKDAYS[local.weekday()] not in days:
+        domain['phase']='closed'
+        return domain
+    start,end=opening,closing
+    phase='regular' if opening<=local.time()<closing else 'unknown'
+    coverage='regular'
+    # Reuse the US chart's existing 04–20 New York convention only on a
+    # calendar-confirmed standard day. This describes the venue display window.
+    if (exchange=='US' and zone.key=='America/New_York' and asset_type in ('CS','ETF')
+        and (opening,closing)==(wall_time(9,30),wall_time(16))):
+        start,end=wall_time(4),wall_time(20)
+        clock=local.time()
+        phase=('closed' if clock<start or clock>=end else 'pre' if clock<opening
+               else 'after' if clock>=closing else 'regular')
+        coverage='extended'
+        domain['session_source']='EODHD exchange calendar + US extended chart hours'
+    domain.update(start=datetime.combine(local.date(),start,zone).astimezone(timezone.utc).isoformat(),
+                  end=datetime.combine(local.date(),end,zone).astimezone(timezone.utc).isoformat(),
+                  phase=phase,coverage=coverage)
+    return domain
+
+def chart_response(result,now,db):
+    """Project chart metadata at read time, including on old cached payloads.
+
+    Day uses the ONE_WEEK series within [start, end] and through as_of.
+    Calendar-day end is exclusive. A missing bound denotes an unknown session.
+    """
+    result['series']=[point for point in result['series'] if point['epoch']<=now.timestamp()]
+    domain=session_domain(result,now,db)
+    result['chart_domain']={**domain,'as_of':now.isoformat(),
+        'history_source':result['source'] if result['series'] else None,
+        'history_latest_at':result['series'][-1]['timestamp'] if result['series'] else None,
+        'fetched_at':result['fetched_at'],
+        'quote_freshness':display_policy.freshness('live_quote',result['price_time'],now,
+                                                   failed=bool(result.get('last_error')))}
+    return result
 
 def normalized(raw,asset_id,now=None,expected_period='ONE_WEEK'):
     now=now or datetime.now(timezone.utc)
@@ -46,7 +129,6 @@ def normalized(raw,asset_id,now=None,expected_period='ONE_WEEK'):
     result={'asset_id':asset_id,'name':asset.get('name') if isinstance(asset.get('name'),str) else asset_id,'ticker':asset.get('ticker') if isinstance(asset.get('ticker'),str) else None,'exchange':asset.get('exchange') if isinstance(asset.get('exchange'),str) else None,'currency':quote['price']['currency'],'price':quote['price']['amount'],'price_time':stamp(quote['price_time']).isoformat(timespec='milliseconds') if quote['price_time'] else None,'daily_change':change,'daily_change_percent':pct,'daily_note':change_note,'previous_close':None,'daily_comparison':None,'fetched_at':now.isoformat(timespec='milliseconds'),'source':'Pluto Markets · get_asset','asset_type':asset.get('type') if isinstance(asset.get('type'),str) else None,'display_timezone':'Europe/Copenhagen','series':[],'series_error':None,'week_change_percent':None}
     isin=asset.get('isin')
     if isinstance(isin,str):
-        import re
         if re.fullmatch(r'[A-Z]{2}[A-Z0-9]{9}[0-9]',isin):result['isin']=isin
     performance=raw.get('performance')
     if not isinstance(performance,dict) or not isinstance(performance.get('series'),list):
@@ -64,7 +146,7 @@ def normalized(raw,asset_id,now=None,expected_period='ONE_WEEK'):
             at=stamp(p.get('timestamp'));value=decimal(p.get('close'),positive=True)
             if value is None:raise MarketError('Kurspunktet mangler sin pris.')
             if at<lower or at>upper:raise MarketError('Et kurspunkt ligger uden for Plutos oplyste tidsinterval.')
-            if at.timestamp()>now.timestamp()+60:raise MarketError('Kurshistorikken indeholder fremtidige punkter.')
+            if at>now:raise MarketError('Kurshistorikken indeholder fremtidige punkter.')
             key=at.isoformat(timespec='milliseconds').replace('+00:00','Z')
             if key in by_time and by_time[key]['price']!=value:raise MarketError('Samme tidspunkt har modstridende kurser.')
             by_time[key]={'timestamp':key,'source_timestamp':p['timestamp'],'epoch':at.timestamp(),'price':value,'date':at.astimezone(COPENHAGEN).date().isoformat()}
@@ -155,7 +237,8 @@ def quote(connect,user_id,data,factory=None):
         wait=30 if data.get('refresh') is True else 300
         if cached and cached['attempted']>time.time()-wait:
             if cached['payload']:
-                response=json.loads(cached['payload']);response['cached']=True;response['last_error']=cached['last_error'];db.execute('INSERT INTO market_asset_links VALUES(?,?,?,?) ON CONFLICT(user_id,candidate_id) DO UPDATE SET expected_ticker=excluded.expected_ticker,asset_id=excluded.asset_id',(user_id,c['candidate_id'],ticker,aid));return response
+                response=json.loads(cached['payload']);response['cached']=True;response['last_error']=cached['last_error'];db.execute('INSERT INTO market_asset_links VALUES(?,?,?,?) ON CONFLICT(user_id,candidate_id) DO UPDATE SET expected_ticker=excluded.expected_ticker,asset_id=excluded.asset_id',(user_id,c['candidate_id'],ticker,aid))
+                return chart_response(response,datetime.now(timezone.utc),db)
             if not cached['last_error'] and cached['attempted']>time.time()-30:return {'pending':True,'retry_after':2}
             raise MarketError(cached['last_error'] or 'Kursopslaget er allerede i gang. Prøv igen om lidt.')
         if period_cache:db.execute('INSERT INTO market_asset_period_cache(user_id,asset_id,period,attempted) VALUES(?,?,?,?) ON CONFLICT(user_id,asset_id,period) DO UPDATE SET attempted=excluded.attempted',(*cache_key,time.time()))
@@ -163,11 +246,12 @@ def quote(connect,user_id,data,factory=None):
     try:
         if cl is None:cl,tools=trade_service.client(connect,user_id,factory)
         raw=trade_service.call(cl,tools,'get_asset',{'assetId':aid,'period':requested_period})
-        result=normalized(raw,aid,expected_period=requested_period)
+        now=datetime.now(timezone.utc)
+        result=normalized(raw,aid,now,expected_period=requested_period)
         with connect() as db:
             db.execute('INSERT INTO market_asset_links VALUES(?,?,?,?) ON CONFLICT(user_id,candidate_id) DO UPDATE SET expected_ticker=excluded.expected_ticker,asset_id=excluded.asset_id',(user_id,c['candidate_id'],ticker,aid))
             db.execute('UPDATE '+table+' SET payload=?,fetched=?,last_error=NULL WHERE '+where,(json.dumps(result),time.time(),*cache_key))
-        return result
+            return chart_response(result,now,db)
     except Exception as error:
         # A local budget denial is not a failed Pluto response. Preserve the
         # typed error and do not cache it as an outage for the next five minutes.
@@ -178,7 +262,9 @@ def quote(connect,user_id,data,factory=None):
                            (cached['attempted'] if cached else 0, cached['last_error'] if cached else None, *cache_key))
             raise
         message='Pluto-kursopslaget fejlede. Tidligere data kan være forældede.'
-        with connect() as db:db.execute('UPDATE '+table+' SET last_error=? WHERE '+where,(message,*cache_key))
-        if cached and cached['payload']:
-            response=json.loads(cached['payload']);response['cached']=True;response['last_error']=message;return response
+        with connect() as db:
+            db.execute('UPDATE '+table+' SET last_error=? WHERE '+where,(message,*cache_key))
+            if cached and cached['payload']:
+                response=json.loads(cached['payload']);response['cached']=True;response['last_error']=message
+                return chart_response(response,datetime.now(timezone.utc),db)
         raise MarketError(message)

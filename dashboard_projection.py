@@ -49,12 +49,20 @@ def remember_portfolio_value(c,uid):
 def portfolio_value_history(c,uid,now):
  """Return recorded, scope-matched points with bounded sampling per period."""
  from calendar import monthrange
- from zoneinfo import ZoneInfo
+ from market_data import COPENHAGEN,calendar_day_domain
+ local=now.astimezone(COPENHAGEN)
+ domain=calendar_day_domain(now,'not_applicable')
  current=portfolio_value_snapshot(c,uid)
- fresh_snapshot=bool(current)
+ snapshot_failed=current is None
  if not current:current=portfolio_value_snapshot(c,uid,allow_failed=True)
- if not current:return {'periods':{},'reported_result':None}
- local=now.astimezone(ZoneInfo('Europe/Copenhagen'));local_midnight=local.replace(hour=0,minute=0,second=0,microsecond=0);midnight=local_midnight.astimezone(timezone.utc);next_midnight=(local_midnight+timedelta(days=1)).astimezone(timezone.utc)
+ fresh_snapshot=bool(current and not snapshot_failed and current['observed']<=now)
+ domain.update(as_of=now.isoformat(),history_source=None,history_latest_at=None,
+               fetched_at=current['observed'].isoformat() if current and current['observed']<=now else None,
+               value_freshness=policy.freshness('snapshot',current['source_time'] if current else None,
+                                                now,failed=bool(current and snapshot_failed)))
+ bounds={'day_start':domain['start'],'day_end':domain['end'],'chart_domain':domain}
+ if not current:return {**bounds,'periods':{},'reported_result':None}
+ midnight=datetime.fromisoformat(domain['start'])
  def months_before(months):
   index=local.year*12+local.month-1-months;year,month=divmod(index,12);month+=1
   return local.replace(year=year,month=month,day=min(local.day,monthrange(year,month)[1])).astimezone(timezone.utc)
@@ -65,8 +73,10 @@ def portfolio_value_history(c,uid,now):
   rows=c.execute('SELECT observed_epoch,observed,amount,currency,source_time,reported_result FROM display_portfolio_values WHERE user_id=? AND scope=? AND observed_epoch IN (SELECT MAX(observed_epoch) FROM display_portfolio_values WHERE user_id=? AND scope=? AND observed_epoch BETWEEN ? AND ? GROUP BY CAST(observed_epoch / ? AS INTEGER)) ORDER BY observed_epoch',(uid,current['scope'],*args,bucket)).fetchall()
   points=([first] if first and (not rows or first['observed_epoch']!=rows[0]['observed_epoch']) else [])+list(rows)
   periods[name]=[{'at':r['observed'],'amount':r['amount'],'currency':r['currency'],'source_time':r['source_time'],'reported_result':r['reported_result']} for r in points]
+ if periods['year']:
+  domain.update(history_source='Pluto portfolio snapshots',history_latest_at=periods['year'][-1]['at'])
  result=current['reported_result'] if fresh_snapshot else None
- return {'periods':periods,'day_start':midnight.isoformat(),'day_end':next_midnight.isoformat(),'current_value':{'amount':str(current['amount']),'currency':current['currency']} if fresh_snapshot else None,'reported_result':{'amount':str(result),'currency':current['currency']} if result is not None else None}
+ return {**bounds,'periods':periods,'current_value':{'amount':str(current['amount']),'currency':current['currency']} if fresh_snapshot else None,'reported_result':{'amount':str(result),'currency':current['currency']} if result is not None else None}
 
 def observation(row,received_at=None):
  price=row.get('price') or {};meta=row.get('market_context') or {}
