@@ -35,6 +35,22 @@ class LocalCoordinatorTests(unittest.TestCase):
             self.assertEqual(c.replace_queue_row(old,new),new)
         self.assertEqual(rows,[new,other])
 
+    def test_review_comment_failure_does_not_repeat_rejected_review(self):
+        import subprocess
+        row=dict(self.row,local_repair=True)
+        p={"head":{"sha":"d"*40}}
+        decision={"verdict":"hold","reason":"Concrete reproducible regression"}
+        with patch.object(c,"verify_pr",return_value=(p,[],"open")),patch.object(c,"verified_ci",return_value=7),patch.object(c,"independent_review",return_value=decision) as review,patch.object(c,"comment",side_effect=subprocess.CalledProcessError(1,["gh"])),patch.object(c,"repair_review",return_value="Repaired") as repair:
+            c.run_once(self.root,self.root,[row],self.results)
+            journal=c.read(self.root/"coordinator-review.json",{})
+            self.assertEqual(journal["501"]["state"],"hold")
+            self.assertEqual(journal["501"]["repair_reason"],decision["reason"])
+            journal["501"]["at"]=0
+            c.save(self.root/"coordinator-review.json",journal)
+            c.run_once(self.root,self.root,[row],self.results)
+            review.assert_called_once()
+            repair.assert_called_once()
+
     def test_trigger_is_explicit_and_bounded(self):
         self.assertIsNone(c.trigger(self.root))
         value={"schema":1,"id":"f"*32,"requests":["b"*32],"at":c.now()}
