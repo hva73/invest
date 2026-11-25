@@ -541,7 +541,7 @@
     "generation": 3,
     "role": "motor",
     "priority": 0,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/escape-development",
     "base_sha": "bb356440186cbdb282dd8ff8b445064fcf4dc76e",
     "dependencies": [
@@ -572,5 +572,36 @@
       "docs/TRADING_ENGINE_V2_INTERFACE.md"
     ],
     "task": "Build next lean simulation batch slice on exact ee85efe7: resolve one immutable verified canonical market history/identity/entitlement snapshot once per instrument, reuse existing features() per distinct parameter set; separate per-user subscribers and individual decision context. #289 works but repeats history serialization/validation for every subscriber. Avoid repeated checksum of same immutable shared capture by accepting shared market input with separate subscriber scopes (no duplicate registry, avoid unbounded cache). Enforce actual verified observation/source and instrument/market scope, reject wrong tenant entitlement/test and stale or future input at trust boundary; preserve existing API and decision origin semantics. Benchmark 1/10/100 overlap and disjoint cases, count validation/hash and features calls; equivalent decisions, isolated risk and no broker actions. No network, persistence or live authority. Deliver actual tests and code."
+  },
+  {
+    "issue": 268,
+    "generation": 4,
+    "role": "motor",
+    "priority": 0,
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "db73c8bf6a0cddb815357f88b7adba8bddbd5b0f",
+    "dependencies": [
+      "268:3"
+    ],
+    "paths": [
+      "hotwatch_engine.py",
+      "intel_workflows.py",
+      "tests/test_hotwatch_engine.py",
+      "tests/test_hotwatch_e2e_contract.py"
+    ],
+    "local_review": true,
+    "task": "Next concrete test-only/default-off #268: separate active shared entry instrument capacity from private holding/exit/manual watch capacity. Reuse existing sessions and identity resolution; count unique verified provider instrument/venue/currency/entitlement keys only when actually verified, unknown identity remains isolated. Explicit simulation config, preserve existing live limits; do not let candidate cap prevent positions or protective exit watches; no cross-user private data, no new service or registry, no orders. Test 1/10/100 tenants overlapping and disjoint instruments, cap not target, holdings/manual/pending protected, candidate retirement frees common entry slot. Actual tests and code, no plan-only.",
+    "followups": [
+      {
+        "paths": [
+          "hotwatch_engine.py",
+          "intel_workflows.py",
+          "tests/test_hotwatch_engine.py",
+          "tests/test_hotwatch_e2e_contract.py"
+        ],
+        "task": "Use integrated simulated shared-pool capacity to verify bounded candidate replacement and fairness with overlapping and disjoint instruments. Reuse existing scoring and deadline lifecycle; stale/expired entries release slots, fresh verified candidate can enter if higher eligibility, protect user holdings and pending intents. Tests for 100 tenants and deterministic counts; no new live policy, broker calls, registry or duplicate per-user scans. Stop if prior integrated acceptance already covers this completely; do not create artificial changes."
+      }
+    ]
   }
 ]
