@@ -50,11 +50,38 @@ Evalueringen producerer alene beslutningsoprindelsen og gemmer ingen data.
 
 `strategy_lab.compare_v2(connect, uid, data)` bruger samme valg af watch,
 testkategori og op til tre strategiversioner som `compare`. Første op til
-240 beregninger læses i journalrækkefølge. Replays afviser tidsmæssige
-tilbagespring. Hver sammenligning viser det gemte signal og årsagskoder
-sammen med de simulerede udfald på samme snapshot. Katalogversionerne
-verificeres med checksum. Historiske indikatorer genberegnes ikke med
-de valgte strategiers parametre.
+240 beregninger læses i journalrækkefølge. Én SQL-forespørgsel henter op til
+241 journalpar inklusive rækken, der markerer afkortning. Replay afviser
+tidsmæssige tilbagespring. Det gemte signal og dets årsagskoder vises sammen
+med de simulerede udfald. Beregningens ID, version og checksum skal matche et
+eksakt spec i ejerens eller det fælles katalog. Manglende match blokerer
+simuleringen med `ORIGINAL_STRATEGY_UNVERIFIED`.
+
+Strategier med ens featureparametre deler de gemte metrics. Ændrede perioder
+for glidende gennemsnit, RSI, ATR, breakout/volumen eller momentum kræver
+genberegning af de berørte metrics med `features()`. Replay bruger den
+komplette, ordnede liste af op til 120 `input_sample_ids` fra beregningen,
+opløst inden for samme watch, ejer og testkategori i den allerede læste
+journal. De enkelte samples skal have intakt checksum, matchende
+markedsidentitet, verificeret kvalitet og dokumenteret tilgængelighed ved
+beregningen. Beregningens featureversion og det effektive antal samples skal
+stemme. De genberegnede værdier bindes til journalens sample- og
+beregnings-ID'er i snapshot-checksummen. En alternativ nyhedsaldersgrænse
+kan ikke genbruge den oprindelige nyhedsattestering.
+
+Manglende historik, utilstrækkelig opvarmning for ændrede regel- eller
+risikoinput og uverificerbare revisioner vises som blokering for den enkelte
+strategi. Parameterkompatible udfald bevares. Historik uden for den læste
+journal kan ikke udfylde huller. Replay kan genbruge fangede bar-metrics ved
+ens parametre og en verificerbar aktuel observation. Det kan kun
+genberegne fra bars med en dokumenteret historisk revision. Den nuværende
+journal gemmer ingen sådan reference for indlejrede EODHD trade-bars eller
+separat cachet warmup. Disse genberegninger blokeres med
+`FEATURE_BAR_REVISION_UNVERIFIED`, når selve observationen kan bruges.
+
+Regressionstesten læser 12 gemte beregninger med én journalforespørgsel.
+Med replaygrænsen sat til tre bruges henholdsvis ét, to og tre sampleinput
+pr. ændret strategi, hvorefter svaret markerer afkortning.
 
 `hw_samples.received` afgrænser markedsevidensens tilgængelighed. Det
 beregnede snapshot inklusive metrics, risiko og positionskontekst kan
