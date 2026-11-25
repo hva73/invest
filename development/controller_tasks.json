@@ -289,7 +289,7 @@
     "generation": 1,
     "role": "motor",
     "priority": 1,
-    "status": "ready",
+    "status": "blocked",
     "base_branch": "codex/escape-development",
     "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
     "dependencies": [],
@@ -299,5 +299,21 @@
       "docs/TRADING_ENGINE_V2_INTERFACE.md"
     ],
     "task": "First isolated vertical implementation of owner-approved #273, including #114 provenance. Read AGENTS.md, master contract, existing strategy catalog and position/candidate contracts. New standalone module only; no edits to existing motor or schema, no provider/production calls. Implement a minimal immutable decision/evidence interface and registry with explicit required vs optional inputs per strategy, pure evaluation with positive/negative synthetic tests (Momentum and Early Catalyst distinct; no invented live threshold, no live authority), stable instrument/strategy-version/time identity, structured observation/blocked/decision reasons, decision provenance including entry/exit origin and intent/order/fill references (not fabricated). Demonstrate one shared immutable input evaluated by both strategies, missing irrelevant indicator does not block Early Catalyst, missing mandatory data blocks, replay deterministic, no broker side effects. Compact interface note with migration seams and explicit integration follow-up; actual code/tests not just plan. Preserve existing rules; sample profiles simulated only. No changes to current production, no orders. Independent review before integration into separate v2 branch."
+  },
+  {
+    "issue": 273,
+    "generation": 2,
+    "role": "motor",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/escape-development",
+    "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
+    "dependencies": [],
+    "paths": [
+      "trading_engine_v2.py",
+      "tests/test_trading_engine_v2.py",
+      "docs/TRADING_ENGINE_V2_INTERFACE.md"
+    ],
+    "task": "Implement concrete #275 review (review_id 6057099632, exact draft 3023e172356e250369d9d3c6b3ef013000045d72). This generation SUPERSEDES gen1; reuse its useful code by read-only GitHub/git fetch if available, do not merge both. Keep this module simple and pure; use the existing versioned strategy specs/evaluator (strategy_center.py, hotwatch_strategy.py, strategy_lab.py) rather than a parallel registry or risk framework. Demonstrate actual existing Momentum and Early Catalyst rule evaluation on same data, including missing optional MACD for Early Catalyst, causal event vs availability time (required unavailable blocks; optional future not used), one common gate only at action boundary, no live authority. Scope owner/test and position identity via existing contract/digest, separate decision origin from verified order/fill linkage with distinct entry/exit strategy version; do not build persistence or a new ledger. Use existing names/semver and narrow data interface; no speculative framework, duplicate schema, or over-validation. Keep changes to three files; no changes to existing live code or strategy. Focus tests on meaningful positive/negative, causal replay and provenance. Deliver implementation and actual local test result, not another architecture report."
   }
 ]
