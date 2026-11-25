@@ -79,6 +79,31 @@ class ParallelReviewTests(unittest.TestCase):
                 cr.assert_called_once();worker.assert_called_once()
                 self.assertTrue(concurrent.is_set())
                 self.assertEqual(results["273:1"],"draft_pr")
+    def test_local_only_delivery_is_scheduled_once_without_discarding_work(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);q=root/"queue.json"
+            work=dict(self.row(268,"motor","codex/escape-development","hotwatch_engine.py"),generation=4,local_review=True)
+            d.save(q,[work])
+            d.save(d.task_record(root,work),{"row":work,"recovered":False})
+            folder=root/"issue-268-4";folder.mkdir()
+            (root/"issue-268-4.patch").write_text("preserved")
+            results={"268:4":"review_required"}
+            self.assertTrue(d.can_resume_delivery(root,work,results))
+            self.assertFalse(d.can_resume_delivery(root,dict(work,task="changed scope"),results))
+            args=SimpleNamespace(parallel=2,publish=True,remote=True,queue=q,daily_reservation=None,per_task=60000)
+            def worker(*args):
+                reservation=d.load(d.task_record(root,work),{})
+                self.assertTrue(reservation["delivery_retry"])
+                self.assertTrue(reservation["recovered"])
+                self.assertEqual((root/"issue-268-4.patch").read_text(),"preserved")
+                (root/"STOP").touch()
+                return "draft_pr"
+            with patch.object(d.controller_remote,"refresh"),patch.object(d.controller_receipts,"flush"),patch.object(d.controller_progress,"flush"),patch.object(d,"notify_result"),patch.object(d,"run_task",side_effect=worker) as call:
+                d.run_queue(args,root,root/"pilot.py",root/"budget.json",root/"results.json",{},results)
+                call.assert_called_once()
+            self.assertEqual(results["268:4"],"draft_pr")
+            self.assertFalse(d.can_resume_delivery(root,work,{"268:4":"review_required"}))
+
     def test_capacity_includes_coordinator_without_false_agent_activity(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
