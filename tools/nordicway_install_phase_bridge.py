@@ -15,7 +15,7 @@ HASHES={
  "apply_update.py":"0004cd12af2e25b8a9197d1927f18c5b831adeef308167c4dafc9345a54fd04d",
  "nordicway_deploy_adapter.py":"65d1d5d5178d3afe5092f7e61ae39cc5aabb29948ed34def395ef8d883161ad3",
  "nordicway_deploy_runner.py":"5cce220109537cc8602c3fa380d58353f91ba559e3ae9e9156aa2b96f212abe7",
- "nordicway_release_backup.py":"d8e0e93273cc9241b4b28a2cb148115c46d3b8bd3bc4563548858831457a76b",
+ "nordicway_release_backup.py":"d8e0e93273cc9241b4b28a2cb148115c46d3b8bbd3bc4563548858831457a76b",
  "nordicway_deploy_sequence.py":"4dcb28d2768b5c5d3e14f155ba77a76f317d71cf1d79aeb220b79b3efc4c5d05",
 }
 HELPER="nordicway_phase_backup.py"
