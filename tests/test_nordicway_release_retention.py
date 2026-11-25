@@ -1,4 +1,5 @@
 import hashlib
+import gzip
 import io
 import json
 from pathlib import Path
@@ -54,7 +55,137 @@ class Files:
         self.downloads += 1; Path(path).write_bytes(self.archive)
     def api(self): return self.uapi, self.request, self.download
 
+class CompressedFiles(Files):
+    directory = r.ROOT + '/' + NAME
+
+    def __init__(self):
+        super().__init__()
+        db = b'SQLite format 3\x00' + b'x' * 2048
+        self.compressed_size = len(gzip.compress(db, compresslevel=6))
+        manifest = json.loads(self.manifest)
+        manifest.update(database_encoding='gzip', database_bytes=len(db))
+        manifest['files']['static/scripts/app.js'] = hashlib.sha256(b'app').hexdigest()
+        manifest['files']['absent.py'] = None
+        manifest['keys']['push_vapid.pem'] = None
+        self.set_manifest(manifest)
+        self.rows[self.directory].extend([
+            self.row('escape.db.gz', 'file', self.compressed_size),
+            self.row('code', 'dir'), self.row('token.key', 'file', 7),
+        ])
+        self.rows[self.directory + '/code'] = [
+            self.row('BUILD_COMMIT', 'file', 40), self.row('static', 'dir'),
+        ]
+        self.rows[self.directory + '/code/static'] = [self.row('scripts', 'dir')]
+        self.rows[self.directory + '/code/static/scripts'] = [self.row('app.js', 'file', 3)]
+
+    @staticmethod
+    def row(name, kind, size=0):
+        return {'file': name, 'type': kind, 'size': str(size), 'mtime': START + 1, 'mode': '0600'}
+
+    def set_manifest(self, manifest):
+        self.manifest = json.dumps(manifest)
+        rows = self.rows[self.directory]
+        rows[:] = [row for row in rows if row['file'] not in ('escape.db', 'manifest.json')]
+        rows.append(self.row('manifest.json', 'file', len(self.manifest)))
+
+    def uapi(self, operation, params):
+        if operation == 'get_file_content':
+            assert params['file'] in ('manifest.json', 'BUILD_COMMIT')
+        else:
+            assert operation == 'list_files', operation
+        return super().uapi(operation, params)
+
+    def api(self):
+        return self.uapi, self.unexpected_call, self.unexpected_call
+
+    @staticmethod
+    def unexpected_call(*args):
+        raise AssertionError('Compressed retention must only use Fileman readbacks')
+
+
 class Retention(unittest.TestCase):
+    def test_compressed_directory_retained_without_mutations_or_transfer(self):
+        files = CompressedFiles()
+        original = {path: list(rows) for path, rows in files.rows.items()}
+        result = r.maintain(files.api(), SHA, START)
+        self.assertEqual(result, {
+            'status': 'compressed_directory_retained', 'retained_directory': NAME,
+            'verification': 'external_metadata_only', 'database_bytes': 2064,
+            'compressed_database_bytes': files.compressed_size,
+        })
+        self.assertEqual(files.rows, original)
+
+    def test_invalid_compressed_manifest(self):
+        for changes in (
+            {'format': True}, {'database_encoding': 'raw'}, {'database_bytes': '2064'},
+            {'database_bytes': 0}, {'database_sha256': 1}, {'files': {'../app.py': 'a' * 64}},
+            {'keys': {'token.key': 'bad'}},
+        ):
+            with self.subTest(changes=changes):
+                files = CompressedFiles()
+                files.set_manifest({**json.loads(files.manifest), **changes})
+                with self.assertRaisesRegex(ValueError, 'invalid_backup_manifest'):
+                    r.maintain(files.api(), SHA, START)
+
+    def test_compressed_directory_rejects_duplicate_database(self):
+        files = CompressedFiles()
+        files.rows[files.directory].append(files.row('escape.db', 'file', 2064))
+        with self.assertRaisesRegex(ValueError, 'ambiguous_backup_database'):
+            r.maintain(files.api(), SHA, START)
+
+    def test_compressed_directory_rejects_invalid_gzip_metadata(self):
+        for kind, size, error in (
+            ('dir', 50, 'compressed_inventory_mismatch'),
+            ('file', 18, 'invalid_backup_size'),
+            ('file', 20_000_000_001, 'invalid_backup_size'),
+        ):
+            with self.subTest(kind=kind, size=size):
+                files = CompressedFiles()
+                rows = files.rows[files.directory]
+                rows[:] = [row for row in rows if row['file'] != 'escape.db.gz']
+                rows.append(files.row('escape.db.gz', kind, size))
+                with self.assertRaisesRegex(ValueError, error):
+                    r.maintain(files.api(), SHA, START)
+
+    def test_invalid_compressed_inventory(self):
+        for entry, error in (
+            (CompressedFiles.row('unexpected.js', 'file', 1), 'compressed_inventory_mismatch'),
+            (CompressedFiles.row('app.js', 'symlink', 3), 'compressed_inventory_mismatch'),
+            (CompressedFiles.row('app.js', 'file', -1), 'invalid_backup_size'),
+        ):
+            with self.subTest(entry=entry):
+                files = CompressedFiles()
+                files.rows[files.directory + '/code/static/scripts'] = [entry]
+                with self.assertRaisesRegex(ValueError, error):
+                    r.maintain(files.api(), SHA, START)
+
+    def test_compressed_directory_rechecks_nested_metadata_current_sha_and_freshness(self):
+        for change, error in (
+            ('nested', 'original_backup_changed'), ('sha', 'installed_release_changed'),
+            ('new_backup', 'backup_changed_during_verification'),
+        ):
+            with self.subTest(change=change):
+                files = CompressedFiles()
+                path = files.directory + '/code/static/scripts'
+                changed = False
+
+                def readback(operation, params):
+                    nonlocal changed
+                    if params.get('dir') == path and not changed:
+                        result = files.uapi(operation, params)
+                        changed = True
+                        if change == 'nested':
+                            files.rows[path] = [files.row('app.js', 'file', 9)]
+                        if change == 'new_backup':
+                            files.rows[r.ROOT].append(files.row('20261114-200002-other', 'dir'))
+                        return result
+                    if changed and change == 'sha' and params.get('file') == 'BUILD_COMMIT':
+                        return {'content': 'b' * 40}
+                    return files.uapi(operation, params)
+
+                with self.assertRaisesRegex(ValueError, error):
+                    r.maintain((readback, files.unexpected_call, files.unexpected_call), SHA, START)
+
     def test_complete_release_preserves_latest_and_unknown_and_future(self):
         files = Files(); result = r.maintain(files.api(), SHA, START)
         self.assertEqual(result['verified_files'], 4)
