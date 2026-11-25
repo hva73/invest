@@ -151,6 +151,17 @@ stemme. De genberegnede værdier bindes til journalens sample- og
 beregnings-ID'er i snapshot-checksummen. En alternativ nyhedsaldersgrænse
 kan ikke genbruge den oprindelige nyhedsattestering.
 
+For hver beregning opløser replay historikken én gang og deler dens
+uforanderlige markedsfelter mellem alternativerne. Samme effektive
+featureperioder kræver ét kald til `features()`. Hver strategi får sine
+egne facts og sin egen beslutningsoprindelse. To journalberegninger med
+samme tidsstempel kan have forskellig historik og behandles hver for sig.
+Bars skal være lukket ved modtagelsen, og den seneste observation skal
+ligge inden for den globale datatidsgrænse for at kunne genberegnes.
+Den delte abonnentsti `shared_market_features_batch` er utilgængelig i
+Strategy Lab, da journalen kun dokumenterer den autoriserede brugers watch
+og ikke indeholder historisk evidens for en leverandørbevilling.
+
 Manglende historik, utilstrækkelig opvarmning og uverificerbare revisioner
 fjerner de berørte facts. Eksisterende treværdilogik og risikogate afgør,
 om de faktisk blokerer strategien; en sand alternativ regelgren bevares.
@@ -165,6 +176,8 @@ separat cachet warmup. Disse genberegninger blokeres med
 Regressionstesten læser 12 gemte beregninger med én journalforespørgsel.
 Med replaygrænsen sat til tre bruges henholdsvis ét, to og tre sampleinput
 pr. ændret strategi, hvorefter svaret markerer afkortning.
+Med tre strategier fordelt på to periodesæt falder antallet af featurekald
+for de 12 beregninger fra 36 ved separate replay til 24 ved ét samlet replay.
 
 `hw_samples.received` afgrænser markedsevidensens tilgængelighed. Det
 beregnede snapshot inklusive metrics, risiko og positionskontekst kan
