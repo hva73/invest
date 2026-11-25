@@ -70,6 +70,34 @@ Batchen gemmer højst 128 sæt features i hukommelsen. Når den er fuld,
 beregnes nye sæt ved behov, og alle opslag udløber ved retur.
 Grænsefladen bruges til lokal simulation. Schedulerintegration er separat.
 
+For en delt testhistorik kan kalderen bruge
+`shared_market_features_batch(history, subscribers)` med én `MarketHistory`
+pr. instrument og replaytid. Historikken indeholder en `MarketIdentity` og
+de ordnede observationer. Batchen validerer og kopierer markedsfelterne én gang
+til en uforanderlig visning. Der beregnes ingen historikchecksum i denne sti.
+Batchen grupperer modtagerne efter de effektive featureperioder og kalder
+`features()` én gang pr. gruppe. Grupperne lever kun under kaldet.
+
+Hver `MarketSubscriber` leverer sit eget `Scope` og tidsstemplet `Evidence`
+for en `MarketAccess` fra kalderens verificerede, lokale entitlement-kilde.
+Bevillingen skal være tilgængelig og uudløbet ved replaytidspunktet og matche
+bruger og hele markedsidentiteten. Scope skal matche instrument, børs og
+testkategori. Kilde-ID'er bevarer sporbarheden. Kalderens lokale resolver
+står for at attestere bevillingen og leverandørevidensen.
+
+Den delte sti kræver verificerede prisobservationer fra EODHD eller Pluto
+med matchende kilde, feed, børs, valuta og instrument. Bars skal matche
+historikkens timeframe og være lukket ved tilgængelighedstiden. Den nyeste
+prisobservation (for bars gælder lukketid) skal være inden for den globale
+datatidsgrænse. Manglende eller for gamle bid/ask-tider gør spread ukendt,
+men afviser ikke en ellers gyldig prishistorik. Historisk markedsstatus
+grupperer observationer; den dokumenterer ikke aktuel handelsadgang.
+Fremtidig evidens afvises fortsat. Individuel risikogate gælder uændret.
+Ugyldig historik giver tomme opslag for hele kaldet. En ugyldig bevilling
+eller et ugyldigt scope giver kun den pågældende modtager et tomt opslag.
+Individuelle beslutninger bruger fortsat `evaluate` med egen risiko og
+positionskontekst og beholder deres eksisterende oprindelsesformat.
+
 ## Strategiskift i Position Watch
 
 `switch_position_strategy` returnerer en uforanderlig overgang for en

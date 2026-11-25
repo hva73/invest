@@ -7,10 +7,12 @@ from unittest.mock import patch
 
 from hotwatch_contract import GLOBAL_RISK, checksum
 from hotwatch_features import features
-from hotwatch_strategy import BASELINE, EARLY_CATALYST_V1, risk_gate
+from hotwatch_strategy import BASELINE, EARLY_CATALYST_V1, risk_gate, rule_state
+import trading_engine_v2
 from trading_engine_v2 import (
-    Evidence, MarketFeatureInput, Scope, VerifiedExecution, evaluate,
-    market_features_batch, switch_position_strategy,
+    Evidence, MarketAccess, MarketFeatureInput, MarketHistory, MarketIdentity, MarketSubscriber,
+    Scope, VerifiedExecution, evaluate, market_features_batch, shared_market_features_batch,
+    switch_position_strategy,
 )
 
 
@@ -69,6 +71,7 @@ class TradingEngineV2Tests(unittest.TestCase):
                 "verification": "verified", "event_time": at.isoformat(),
                 "price": str(price), "high": str(price), "low": str(price), "close": str(price),
                 "bid": str(price - Decimal(".05")), "ask": str(price + Decimal(".05")),
+                "bid_at": at.isoformat(), "ask_at": at.isoformat(), "status_at": at.isoformat(),
                 "volume": "400" if i == 39 else "100", "volume_type": "interval",
             }
             samples.append(Evidence(row, at, at, (f"trade:{i}",)))
@@ -76,6 +79,18 @@ class TradingEngineV2Tests(unittest.TestCase):
             self.scope, self.at, tuple(samples), "eodhd", "US trades", "1m",
             "revision-1", "realtime-us", "1.3.0", BASELINE["parameters"],
         )
+
+    def shared_history(self, market):
+        identity = MarketIdentity(
+            market.scope.exchange, market.scope.asset_id, "USD", market.provider,
+            market.feed, market.timeframe, market.revision, market.entitlement,
+            market.feature_version, market.scope.is_test,
+        )
+        return MarketHistory(identity, market.as_of, market.samples)
+
+    def subscriber(self, history, scope, parameters=BASELINE["parameters"]):
+        grant = MarketAccess(scope.user_id, history.identity, self.later)
+        return MarketSubscriber(scope, self.evidence(grant), parameters)
 
     def test_market_features_fan_out_to_individual_decisions(self):
         market = self.market_input()
@@ -111,11 +126,29 @@ class TradingEngineV2Tests(unittest.TestCase):
                         risk=self.evidence(self.risk.value | {"entry_allowed": i % 3 != 1}),
                     ))
                 with patch("trading_engine_v2.features", wraps=features) as compute:
-                    shared = market_features_batch(requests)
+                    history = self.shared_history(market)
+                    subscribers = [
+                        self.subscriber(history, req.scope, req.parameters) for req in requests
+                    ]
+                    with (
+                        patch("trading_engine_v2._market_rows", wraps=trading_engine_v2._market_rows) as resolve,
+                        patch("trading_engine_v2.checksum", wraps=checksum) as digest,
+                    ):
+                        shared = shared_market_features_batch(history, subscribers)
+                        resolve.assert_called_once()
+                        digest.assert_not_called()
                     compute.assert_called_once()
+                    with (
+                        patch("trading_engine_v2._market_rows", wraps=trading_engine_v2._market_rows) as resolve,
+                        patch("trading_engine_v2.checksum", wraps=checksum) as digest,
+                    ):
+                        self.assertEqual(shared, market_features_batch(requests))
+                        self.assertEqual(resolve.call_count, count)
+                        self.assertEqual(digest.call_count, count)
+                    self.assertEqual(compute.call_count, 2)
                     self.assertNotIn("context", compute.call_args.args[0][-1])
                     separate = [market_features_batch([request])[0] for request in requests]
-                    self.assertEqual(compute.call_count, 1 + count)
+                    self.assertEqual(compute.call_count, 2 + count)
                 decisions = [
                     self.run_evaluation(**args, metrics=local_metrics | facts)
                     for args, facts in zip(evaluations, shared)
@@ -133,6 +166,150 @@ class TradingEngineV2Tests(unittest.TestCase):
                 shared[0].clear()
                 if count > 1:
                     self.assertEqual(shared[1]["sample_count"].value, 40)
+
+    def test_shared_batch_disjoint_work_and_parameter_groups(self):
+        market = self.market_input()
+        for count in (1, 10, 100):
+            with self.subTest(count=count):
+                requests = []
+                for i in range(count):
+                    scope = replace(market.scope, asset_id=f"asset-{i}")
+                    rows = tuple(replace(sample, value=sample.value | {"asset_id": scope.asset_id})
+                                 for sample in market.samples)
+                    requests.append(replace(market, scope=scope, samples=rows))
+                expected = market_features_batch(requests)
+                with (
+                    patch("trading_engine_v2._market_rows", wraps=trading_engine_v2._market_rows) as resolve,
+                    patch("trading_engine_v2.checksum", wraps=checksum) as digest,
+                    patch("trading_engine_v2.features", wraps=features) as compute,
+                ):
+                    actual = []
+                    for request in requests:
+                        history = self.shared_history(request)
+                        actual.extend(shared_market_features_batch(
+                            history, [self.subscriber(history, request.scope)],
+                        ))
+                    self.assertEqual(actual, expected)
+                    self.assertEqual(resolve.call_count, count)
+                    self.assertEqual(compute.call_count, count)
+                    digest.assert_not_called()
+
+        history = self.shared_history(market)
+        original = self.subscriber(history, self.scope)
+        variant = replace(original, parameters=original.parameters | {"short_period": 6})
+        with patch("trading_engine_v2.features", wraps=features) as compute:
+            first, second, again = shared_market_features_batch(history, [original, variant, original])
+            self.assertEqual(compute.call_count, 2)
+        self.assertEqual(first, again)
+        self.assertNotEqual(first["sma_short"], second["sma_short"])
+
+    def test_shared_batch_rejects_unverified_market_and_subscriber_inputs(self):
+        history = self.shared_history(self.market_input())
+        subscriber = self.subscriber(history, self.scope)
+        last = history.samples[-1]
+
+        def changed_row(**changes):
+            return replace(history, samples=(*history.samples[:-1],
+                                             replace(last, value=last.value | changes)))
+
+        invalid_histories = [
+            changed_row(verification="unverified"), changed_row(source="synthetic"),
+            changed_row(source="pluto"), changed_row(feed_type="other"),
+            changed_row(venue="NYSE"), changed_row(asset_id="other"),
+            changed_row(currency="EUR"), changed_row(error_code="NO_DATA"),
+            changed_row(price="NaN"), changed_row(bid_at=self.later.isoformat()),
+            changed_row(price_time_kind="bar_open"),
+            replace(history, samples=history.samples[:-1] + (replace(last, source_ids=()),)),
+            replace(history, samples=history.samples[:-1] + (replace(last, available_at=self.later),)),
+            replace(history, samples=history.samples + (last,)),
+            replace(history, as_of=self.at + timedelta(seconds=121)),
+        ]
+        access = subscriber.access
+        grant = access.value
+        denied = [
+            replace(subscriber, scope=replace(self.scope, user_id=8)),
+            replace(subscriber, scope=replace(self.scope, exchange="NYSE")),
+            replace(subscriber, scope=replace(self.scope, asset_id="other")),
+            replace(subscriber, scope=replace(self.scope, is_test=False)),
+            replace(subscriber, access=replace(access, value=replace(
+                grant, identity=replace(history.identity, entitlement="different"),
+            ))),
+            replace(subscriber, access=replace(access, value=replace(
+                grant, identity=replace(history.identity, is_test=False),
+            ))),
+            replace(subscriber, access=replace(access, source_ids=())),
+            replace(subscriber, access=replace(access, available_at=self.later)),
+            replace(subscriber, access=replace(access, value=replace(grant, expires_at=self.at))),
+        ]
+        with patch("trading_engine_v2.features", wraps=features) as compute:
+            for invalid in invalid_histories:
+                with self.subTest(history=invalid.samples[-1]):
+                    # Keep the grant valid at the tested replay time so a stale capture
+                    # cannot appear to pass simply because the entitlement expired.
+                    valid = replace(subscriber, access=replace(access, value=replace(
+                        grant, expires_at=self.at + timedelta(minutes=10),
+                    )))
+                    self.assertEqual(shared_market_features_batch(invalid, [valid]), [{}])
+            self.assertEqual(shared_market_features_batch(history, denied), [{}] * len(denied))
+            compute.assert_not_called()
+            results = shared_market_features_batch(history, [denied[0], subscriber, *denied[1:]])
+            self.assertEqual(results[1]["sample_count"].value, 40)
+            self.assertEqual(results[:1] + results[2:], [{}] * len(denied))
+            compute.assert_called_once()
+            captured_row = compute.call_args.args[0][-1]
+            last.value["price"] = "1"
+            self.assertEqual(captured_row["price"], "100.5")
+            with self.assertRaises(TypeError):
+                captured_row["price"] = "2"
+
+    def test_optional_quote_freshness_does_not_discard_price_history(self):
+        history = self.shared_history(self.market_input())
+        subscriber = self.subscriber(history, self.scope)
+        fresh = shared_market_features_batch(history, [subscriber])[0]
+        self.assertIsNotNone(fresh["spread_pct"].value)
+        stale = (self.at - timedelta(seconds=121)).isoformat()
+        last = history.samples[-1]
+        for changes in ({"ask_at": stale}, {"bid_at": None}, {"ask_at": None}):
+            with self.subTest(changes=changes):
+                altered = replace(history, samples=history.samples[:-1] +
+                                  (replace(last, value=last.value | changes),))
+                facts = shared_market_features_batch(altered, [subscriber])[0]
+                self.assertEqual(facts["sample_count"].value, 40)
+                self.assertEqual(facts["breakout"].value, fresh["breakout"].value)
+                self.assertIsNone(facts["spread_pct"].value)
+                visible = {key: item.value for key, item in facts.items()}
+                self.assertTrue(rule_state({"metric": "breakout", "operator": "==", "value": True},
+                                           visible, BASELINE["parameters"]))
+                self.assertIsNone(rule_state({"metric": "spread_pct", "operator": "<=", "value": 1},
+                                             visible, BASELINE["parameters"]))
+                _, codes, _ = risk_gate(self.sample.value, visible, self.risk.value,
+                                        self.at, "BUY", require_macd=False)
+                self.assertIn("SPREAD_UNKNOWN", codes)
+        old_status = replace(history, samples=history.samples[:-1] +
+                             (replace(last, value=last.value | {"status_at": stale}),))
+        self.assertEqual(shared_market_features_batch(old_status, [subscriber])[0], fresh)
+
+    def test_shared_batch_accepts_closed_bars_at_the_freshness_boundary(self):
+        history = self.shared_history(self.market_input())
+        as_of = self.at + timedelta(seconds=180)
+        bars = tuple(replace(
+            sample, available_at=sample.event_time + timedelta(minutes=1),
+            value=sample.value | {"price_time_kind": "bar_open"},
+        ) for sample in history.samples)
+        history = replace(history, samples=bars, as_of=as_of)
+        subscriber = self.subscriber(history, self.scope)
+        subscriber = replace(subscriber, access=replace(
+            subscriber.access, value=replace(subscriber.access.value, expires_at=as_of + timedelta(minutes=1)),
+        ))
+        self.assertEqual(shared_market_features_batch(history, [subscriber])[0]["sample_count"].value, 40)
+        self.assertEqual(shared_market_features_batch(
+            replace(history, as_of=as_of + timedelta(microseconds=1)), [subscriber],
+        ), [{}])
+        wrong_timeframe = replace(history, identity=replace(history.identity, timeframe="5m"))
+        wrong_subscriber = replace(subscriber, access=replace(
+            subscriber.access, value=replace(subscriber.access.value, identity=wrong_timeframe.identity),
+        ))
+        self.assertEqual(shared_market_features_batch(wrong_timeframe, [wrong_subscriber]), [{}])
 
     def test_market_batch_isolates_inputs_and_unavailable_history(self):
         market = self.market_input()
@@ -153,7 +330,8 @@ class TradingEngineV2Tests(unittest.TestCase):
             with_last(value=last.value | {"price": "100.6"}),
             with_last(available_at=self.at - timedelta(microseconds=1),
                       event_time=self.at - timedelta(microseconds=1),
-                      value=last.value | {"event_time": (self.at - timedelta(microseconds=1)).isoformat()}),
+                      value=last.value | {key: (self.at - timedelta(microseconds=1)).isoformat()
+                                          for key in ("event_time", "bid_at", "ask_at", "status_at")}),
         ]
         other_asset = replace(
             market, scope=replace(self.scope, asset_id="asset-2"),
