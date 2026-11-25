@@ -243,6 +243,17 @@ def rebase_disjoint(root,row,number):
     save(record,dict(rec,state="complete"))
     return result
 
+def repair_resume_archive(record):
+    """At most two explicit continuations of an interrupted local attempt.
+    The original journal and each continuation remain auditable.
+    """
+    for index in (1,2):
+        suffix=".resume-history.json" if index==1 else ".resume-history-2.json"
+        path=record.with_suffix(suffix)
+        if not path.exists():
+            return path
+    return None
+
 def repair_attempt(root,number,sha,limit=20):
     """Retain old records; an externally superseded held SHA cannot block a new head.
     Reserved attempts and held attempts on the current head remain fail-closed.
@@ -262,7 +273,7 @@ def repair_attempt(root,number,sha,limit=20):
             # An explicit drained-service recovery can reuse the final held
             # workspace once. Never skip a live or ambiguous reservation.
             next_path=root/("coordinator-repair-"+str(number)+"-"+str(i+1)+".json")
-            if value.get("state")=="held" and value.get("resume_authorized") is True and not next_path.exists() and not path.with_suffix(".resume-history.json").exists():
+            if value.get("state")=="held" and value.get("resume_authorized") is True and not next_path.exists() and repair_resume_archive(path) is not None:
                 return i
             return None
         if value.get("state")=="held":
@@ -435,11 +446,11 @@ def inspect_repair_workspace(repo_dir,row,sha,folder):
     return branch,head
 
 def authorize_repair_resume(root,repo_dir,row,number,sha):
-    """Called only while the installer holds dispatcher.lock and service is stopped.
+    """Called only under dispatcher.lock, with no running worker for this task.
     The exact open remote draft and the preserved checkout must both match.
     Never clear reserved, accepted, unrelated or already recovered records.
     """
-    if row.get("local_repair") is not True or row.get("local_review") is not True or row["role"]=="release":
+    if row.get("local_repair") is not True or row.get("local_review") is not True or row.get("base_branch") not in TARGETS or row["role"]=="release":
         raise Hold("Genoptagelse ikke godkendt for opgaven")
     p,_,state=verify_pr(row,number)
     if state!="open" or p["head"]["sha"]!=sha:
@@ -456,7 +467,7 @@ def authorize_repair_resume(root,repo_dir,row,number,sha):
             continue
         if value.get("state")!="held" or value.get("key")!=key(row):
             raise Hold("Aktuel reservation kan ikke genoptages")
-        if (root/("coordinator-repair-"+str(number)+"-"+str(i+1)+".json")).exists() or record.with_suffix(".resume-history.json").exists():
+        if (root/("coordinator-repair-"+str(number)+"-"+str(i+1)+".json")).exists() or repair_resume_archive(record) is None:
             raise Hold("Genoptagelse er allerede anvendt eller nyere forsøg findes")
         checkpoint=read(root/("review-repair-checkpoint-"+str(number)+suffix+".json"),{})
         if checkpoint.get("provider_limit"):
@@ -501,8 +512,8 @@ def repair_review(root, repo_dir, row, number, p, reason, allowance):
         raise Hold("Bevaret reparationsmappe kræver afstemning")
     if resume:
         # Keep the original held journal, including its original evidence.
-        archive=record.with_suffix(".resume-history.json")
-        if archive.exists():
+        archive=repair_resume_archive(record)
+        if archive is None:
             raise Hold("Genoptagelse allerede anvendt")
     local_branch=(resume_repair_workspace(root,repo_dir,row,number,attempt,sha,folder,record)
                   if resume else "controller/local-"+str(row["issue"])+"-"+str(time.time_ns()))
@@ -546,8 +557,8 @@ def repair_review(root, repo_dir, row, number, p, reason, allowance):
         save(record,{"key":key(row),"head":sha,"new_head":new,"state":"published","reason":reason[:800],"at":now()})
         return "Repareret PR #"+str(number)+"; afventer ny CI og uafhængigt review"
     except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as exc:
-        save(record,{"key":key(row),"head":sha,"state":"held","reason":reason[:800],"at":now()})
-        raise Hold("Reparation stoppet; arbejde bevaret ("+type(exc).__name__+")") from exc
+        save(record,{"key":key(row),"head":sha,"state":"held","reason":reason[:800],"failure":str(exc)[:300] if isinstance(exc,Hold) else type(exc).__name__,"at":now()})
+        raise Hold("Reparation stoppet; arbejde bevaret ("+(str(exc)[:300] if isinstance(exc,Hold) else type(exc).__name__)+")") from exc
 
 def run_developer_repair(root,repo_dir,row,number,sha,reason,allowance):
     """Developer worker: exact reviewed draft only, no review or integration."""
