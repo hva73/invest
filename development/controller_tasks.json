@@ -321,7 +321,7 @@
     "generation": 3,
     "role": "motor",
     "priority": 1,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/escape-development",
     "base_sha": "dbe9eda0880a9fdbcf73cd2f674abe6f20e28f91",
     "dependencies": [],
@@ -348,5 +348,23 @@
       "tests/browser_market_charts.py"
     ],
     "task": "Supersede #272 exact a4e3aeac9d7e5b9c083f6a75c8c3531f576ceafb, read/copy its scoped changes. Actual CI 45608936813 job 139187059615: 19 Python tests and Node pass; browser_market_charts.py line 25 fails old 'Førmarked' expectation. Inspect actual page and fixture; preserve owner-approved explicit verified market status and unknown when no authoritative calendar, do not fabricate data or weaken assertions merely to green CI. Coordinate with exact backend #271 d821fc42a85c751e04fa1a250e1bea4223877098 by using temporary combined checkout for local integration test, without publishing backend files in mobile PR. Fix minimal UI/fixture regression, keep Top, dashed cost basis, actual session, 00–24 overview, hover and demo/live parity. Test existing browser_market_charts and chart source selection. No redesign/production. Subsequent desktop gen3 dependency needs verified updated integration, not blind marking done."
+  },
+  {
+    "issue": 273,
+    "generation": 4,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/trading-engine-v2-integration",
+    "base_sha": "9a75db140d2b58be97b35131cf469aa616fe9c4b",
+    "dependencies": [
+      "273:3"
+    ],
+    "paths": [
+      "strategy_lab.py",
+      "tests/test_strategy_lab.py",
+      "docs/TRADING_ENGINE_V2_INTERFACE.md"
+    ],
+    "task": "Implement actual read-only vertical #273 replay adapter using accepted v2 evaluate at exact base 9a75db14. Extend existing strategy_lab.compare or a narrow explicit v2 comparison function in that module (no live route/schema/DB writes, no duplicate ledger). Reuse recorded hw_calculations/hw_samples, checksum, historical calculated/received timestamps, scope and strategy catalog; compare original recorded decision and new simulated decision on identical bounded chronological input, retain existing compare API behavior. Do not infer availability of inputs from later records or invent source IDs/positions; explicitly skip unverifiable historical data, count and explain coverage/first blocking reason. Reuse captured historical metrics/risk and context only with provenance, not current data. Show positive/negative causal examples using real persisted-schema test fixtures, multiple strategies same snapshot, no provider calls, tenant/test isolation, deterministic results, no brokerwrites. Report counts, latency and coverage; no fictional P/L without execution data. Keep bounded existing MAX_CALCULATIONS and avoid new disk/API load. Preserve existing legacy replay tests. Run actual tests, deliver draft on this separate integration base. Do not edit P0 live engine/chart files or add a production endpoint."
   }
 ]
