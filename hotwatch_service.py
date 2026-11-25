@@ -818,14 +818,20 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
     sessions={};attempts={};killed=False
     probed_keys=set();probed_assets=set();batch_end=0
     for index,(_,pid,holding) in enumerate(user_choices):
-     # Probe early holdings separately. Bound later batches even when a
-     # preceding LINKED write already holds the writer lock.
+     # Only reuse lookahead under the writer lock. In the read-only pass,
+     # a later position must see commits made before its own turn.
      if index==batch_end:
-      batch_end=index+(1 if index<3 else 24)
+      locked=c.in_transaction
+      batch_end=index+(24 if locked and index>=3 else 1)
       pending=user_choices[index:batch_end]
-      keys={(p,h['asset_id']) for _,p,h in pending}-probed_keys
-      assets={aid for _,aid in keys}-probed_assets
-      probed_keys.update(keys);probed_assets.update(assets)
+      keys={(p,h['asset_id']) for _,p,h in pending}
+      assets={aid for _,aid in keys}
+      if locked:
+       keys-=probed_keys
+       assets-=probed_assets
+       probed_keys.update(keys);probed_assets.update(assets)
+      else:
+       sessions.clear();attempts.clear()
       if keys:
        # Batch live sessions and retry state. Look up history by exact watch
        # ID only when the scan actually reaches a holding that needs it.
@@ -847,7 +853,7 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
         FROM json_each(?) k CROSS JOIN hw_holding_autowatch a
           ON a.user_id=? AND a.portfolio_id=json_extract(k.value,'$[0]') AND a.asset_id=json_extract(k.value,'$[1]')
         WHERE NOT (SELECT killed FROM tenant)
-        """,(uid,index==0,json.dumps(list(assets)),uid,json.dumps(list(keys)),uid)))
+        """,(uid,not locked or index==0,json.dumps(list(assets)),uid,json.dumps(list(keys)),uid)))
        if rows and rows[0]['kind']=='gate':
         killed=True
         break
@@ -889,16 +895,16 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
       # that could have invalidated the current user's batch.
       c.execute('BEGIN IMMEDIATE');lock_without_write=True
       if c.execute('PRAGMA data_version').fetchone()[0]!=scan_version:
-       # Repeat this user’s batch under the writer lock.
+       # Repeat this user’s scan under the writer lock.
        break
+      probed_keys.add((pid,aid));probed_assets.add(aid)
      c.execute("INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id,portfolio_id,asset_id) DO UPDATE SET status=excluded.status,watch_id=excluded.watch_id,next_attempt=excluded.next_attempt,updated=excluded.updated",(uid,pid,aid,status,linked,epoch+300,at))
      lock_without_write=False
      if status=='VERIFYING':selected=(uid,pid,holding,watch);break
      attempts[pid,aid]={'status':status,'watch_id':linked,'next_attempt':epoch+300,'updated':at}
     else:
-     # An idle decision can be refreshed once with fresh, paired reads.
-     # A commit after the refreshed read is work for the next tick. Writes
-     # still revalidate under the writer lock if the database has changed.
+     # Retry an idle tenant at most once. Each pass reads each position
+     # at its turn, so unrelated commits cannot force unbounded rescans.
      if not c.in_transaction and not refreshed:
       current_version=c.execute('PRAGMA data_version').fetchone()[0]
       if current_version!=scan_version:
