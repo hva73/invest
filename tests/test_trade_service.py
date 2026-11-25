@@ -504,14 +504,16 @@ class Trading(unittest.TestCase):
    pid=self.send(self.estimate(request))['id']
   prior=dict(trade.get(app.connect,1,pid))
   valid={'orderIntentId':'synthetic-intent','collectionId':'child','status':'ACCEPTED'}
-  for field in ('portfolioId','orderId'):
-   with self.subTest(field=field):
-    self.intent_result=dict(valid,**{field:self.write_result[field]})
+  for reply in (valid,dict(valid,portfolioId='other-depot'),dict(valid,orderId='other-order'),
+                dict(valid,portfolioId='root',orderId='other-order')):
+   with self.subTest(reply=reply):
+    self.intent_result=reply
     with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
      trade.check(app.connect,1,pid,self.factory)
     self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
-  self.intent_result=valid
-  self.assertEqual(trade.check(app.connect,1,pid,self.factory)['proposal']['response'],valid)
+  self.intent_result=dict(valid,portfolioId='root')
+  checked=trade.check(app.connect,1,pid,self.factory)['proposal']
+  self.assertEqual((checked['response'],checked['status']),(self.intent_result,'sent'))
 
  def test_verified_reply_recovers_from_malformed_historical_nesting(self):
   pid=self.send(self.estimate())['id']
@@ -565,11 +567,33 @@ class Trading(unittest.TestCase):
   self.intent_result=valid
   self.assertEqual(trade.check(app.connect,1,pid,self.factory)['proposal']['response'],valid)
 
+ def test_collection_sell_without_echo_checks_parent_verified_at_submission(self):
+  request=dict(self.request,portfolio_id=self.child,kind='collection_sell',size='25')
+  with patch('trade_service.candidate',return_value={'signal':'SÆLG'}):
+   pid=self.send(self.estimate(request))['id']
+  with app.connect() as c:
+   c.execute("UPDATE portfolios SET parent_external_id='portfolios:other-root' WHERE id=?",(self.child,))
+  prior=dict(trade.get(app.connect,1,pid))
+  valid={'orderIntentId':'synthetic-intent','status':'ACCEPTED'}
+  for depot in ('other-root',None):
+   self.intent_result=dict(valid,portfolioId=depot)
+   with self.assertRaisesRegex(trade.TradeError,'forslagsidentiteten'):
+    trade.check(app.connect,1,pid,self.factory)
+   self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+  for reply in (valid,dict(valid,portfolioId='root'),
+                dict(valid,orderIntents=[{'orderIntentId':'synthetic-intent','portfolioId':'root'}])):
+   with self.subTest(reply=reply):
+    self.intent_result=reply
+    checked=trade.check(app.connect,1,pid,self.factory)['proposal']
+    self.assertEqual((checked['response'],checked['status']),(reply,'sent'))
+
  def test_collection_sell_readback_cannot_bind_unverified_depot(self):
   request=dict(self.request,portfolio_id=self.child,kind='collection_sell',size='25')
   with patch('trade_service.candidate',return_value={'signal':'SÆLG'}):
    pid=self.send(self.estimate(request))['id']
   with app.connect() as c:
+   # Legacy proposals lack a verified parent snapshot.
+   c.execute("UPDATE broker_proposals SET sent_identity=NULL WHERE id=?",(pid,))
    c.execute("UPDATE portfolios SET parent_external_id='portfolios:other-root' WHERE id=?",(self.child,))
   prior=dict(trade.get(app.connect,1,pid))
   valid={'orderIntentId':'synthetic-intent','collectionId':'child','status':'ACCEPTED'}

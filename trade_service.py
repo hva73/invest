@@ -412,19 +412,21 @@ def response_identity(response,expected):
     return identity
 
 def sent_identity(response,payload,reference,portfolio):
-    """Keep only supplemental IDs corroborated at the single submission."""
-    if not reference:
-        return {}
+    """Snapshot the verified parent separately from IDs echoed by the receipt."""
+    extra={}
     expected=proposal_identity(payload,reference)
     if portfolio['kind']=='collection' and 'portfolioId' not in payload:
-        expected['portfolioId']=portfolio['parent_external_id'].split(':',1)[1]
+        parent_id=portfolio['parent_external_id'].split(':',1)[1]
+        extra['verified_parent_id']=parent_id
+        expected['portfolioId']=parent_id
+    if not reference:
+        return extra
     try:
         identity=response_identity(response,expected)
     except TradeError:
-        return {}
+        return extra
     if any(value!=expected[key] for key,value in identity.items() if key!='orderId'):
-        return {}
-    extra={}
+        return extra
     if 'orderId' in identity:
         extra['orderId']=identity['orderId']
     if 'portfolioId' not in payload and 'portfolioId' in identity:
@@ -481,14 +483,19 @@ def check(connect,user_id,pid,factory=None):
     payload=proposal['payload']
     expected=proposal_identity(payload,reference)
     # Legacy rows have no independent submission evidence for supplemental IDs.
-    extra=json.loads(row['sent_identity']) if row['sent_identity'] else {}
-    expected.update(extra)
+    receipt_ids=json.loads(row['sent_identity']) if row['sent_identity'] else {}
+    # A collection sell omits the parent in its payload. Its verified parent
+    # constrains any reported portfolio, even when the receipt omitted it.
+    parent_id=receipt_ids.pop('verified_parent_id',None)
+    expected.update(receipt_ids)
+    if parent_id is not None:
+        expected['portfolioId']=parent_id
     identity=response_identity(raw,expected)
     if any(value!=expected[key] for key,value in identity.items()):
         raise TradeError(IDENTITY_ERROR)
 
     previous=proposal['response']
-    required=set(extra)
+    required=set(receipt_ids)
     if not row['intent_id']:
         # The legacy reference itself came from this response via view().
         prior=response_identity(previous,expected)
