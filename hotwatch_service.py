@@ -809,6 +809,9 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
   selected=None;lock_without_write=False
   for uid,user_choices in groupby(choices,key=lambda choice:choice[0]):
    user_choices=list(user_choices)
+   # One read-only refresh per tenant per tick; unrelated database writes
+   # must not starve later tenants. Any actual write still revalidates under lock.
+   read_refreshes=0
    while not selected:
     control=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
     if control and control['killed']:break
@@ -871,8 +874,12 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
      if not c.in_transaction:
       current_version=c.execute('PRAGMA data_version').fetchone()[0]
       if current_version!=scan_version:
-       scan_version=current_version
-       continue
+       if read_refreshes==0:
+        read_refreshes+=1
+        scan_version=current_version
+        continue
+       # Keep the older version so a later write must revalidate under lock.
+       # A no-write tenant is revisited on the next scheduled tick.
      break
    # A refreshed batch may need no write. Do not retain a writer lock
    # while scanning subsequent tenants when nothing was actually changed.
