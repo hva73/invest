@@ -445,6 +445,29 @@ def inspect_repair_workspace(repo_dir,row,sha,folder):
             raise Hold("Bevaret kode uden for godkendt scope")
     return branch,head
 
+def finished_repair_can_resume(root,row,number,sha):
+    """Automatic continuation only when the previous child exited normally.
+    Older ambiguous journals require the drained-service installer check.
+    """
+    if row.get("local_repair") is not True:
+        return False
+    for i in range(1,21):
+        suffix="" if i==1 else "-"+str(i)
+        record=root/("coordinator-repair-"+str(number)+suffix+".json")
+        if not record.is_file() or record.is_symlink():
+            return False
+        value=read(record,{})
+        if value.get("key")!=key(row):
+            return False
+        if value.get("head")==sha:
+            return (value.get("state")=="held" and value.get("child_finished") is True
+                    and value.get("resume_eligible") is True
+                    and repair_resume_archive(record) is not None
+                    and not (root/("coordinator-repair-"+str(number)+"-"+str(i+1)+".json")).exists())
+        if value.get("state") not in ("held","published"):
+            return False
+    return False
+
 def authorize_repair_resume(root,repo_dir,row,number,sha):
     """Called only under dispatcher.lock, with no running worker for this task.
     The exact open remote draft and the preserved checkout must both match.
@@ -521,6 +544,8 @@ def repair_review(root, repo_dir, row, number, p, reason, allowance):
         save(archive,previous)
     # Reserve before starting; a crash cannot silently repeat model execution.
     save(record,{"key":key(row),"head":sha,"state":"reserved","reason":reason[:800],"at":now()})
+    child_finished=False
+    resume_eligible=False
     try:
         with FETCH_LOCK:
             subprocess.run(["git","-c","core.hooksPath=/dev/null","-c","credential.helper=","-c","credential.helper=!gh auth git-credential","fetch","--no-tags","https://github.com/"+REPO+".git","refs/pull/"+str(number)+"/head"],cwd=repo_dir,check=True,timeout=60)
@@ -533,6 +558,8 @@ def repair_review(root, repo_dir, row, number, p, reason, allowance):
         checkpoint=root/("review-repair-checkpoint-"+str(number)+suffix+".json")
         import sys
         result=subprocess.run([sys.executable,str(Path(__file__).with_name("controller_pilot.py")),"--role",row["role"],"--issue",str(row["issue"]),"--generation",str(row.get("generation",1)),"--task-file",str(taskfile),"--allowed-paths-json",json.dumps(row["paths"]),"--rounds","3","--minutes","20","--max-tokens",str(allowance),"--checkpoint",str(checkpoint),"--require-ready","--execute"]+(["--recover"] if resume else []),cwd=folder,timeout=1260)
+        child_finished=True
+        resume_eligible=result.returncode in (0,76)
         if result.returncode==75:
             value=read(checkpoint,{})
             if value.get("provider_limit") is True:
@@ -557,7 +584,7 @@ def repair_review(root, repo_dir, row, number, p, reason, allowance):
         save(record,{"key":key(row),"head":sha,"new_head":new,"state":"published","reason":reason[:800],"at":now()})
         return "Repareret PR #"+str(number)+"; afventer ny CI og uafhængigt review"
     except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError) as exc:
-        save(record,{"key":key(row),"head":sha,"state":"held","reason":reason[:800],"failure":str(exc)[:300] if isinstance(exc,Hold) else type(exc).__name__,"at":now()})
+        save(record,{"key":key(row),"head":sha,"state":"held","reason":reason[:800],"failure":str(exc)[:300] if isinstance(exc,Hold) else type(exc).__name__,"child_finished":child_finished,"resume_eligible":resume_eligible,"at":now()})
         raise Hold("Reparation stoppet; arbejde bevaret ("+(str(exc)[:300] if isinstance(exc,Hold) else type(exc).__name__)+")") from exc
 
 def run_developer_repair(root,repo_dir,row,number,sha,reason,allowance):
