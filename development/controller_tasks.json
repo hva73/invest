@@ -1258,7 +1258,7 @@
     "task": "Small #114 status-readback identity slice. Concrete verified defect: status_matches_proposal immediately rejects explicit null orderIntentId at root even where existing intent_reference resolves unique matching nested order. Allow explicit null root ONLY when a unique matching nested order has the exact owned reference; preserve rejection of non-null conflicting root, ambiguous/missing nested, and explicit contradictory portfolio/collection/order fields. Preserve existing ordinary root response and CAS. Add focused SQLite mocked readback tests for null root + unique valid nested, null root without valid nested, conflicting non-null root and ordinary valid root. No changes to send/cancel, provider contract, fills or schema. Run focused test_trade_service. Offline only, no broker or production calls. ESCAPE_DRAFT_READY after passing."
   },
   {
-    "status": "ready",
+    "status": "done",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "849644931579e8c970a81fdfe53c524dbc0a348c",
