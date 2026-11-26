@@ -1,5 +1,5 @@
 """Automatic holding watches use synthetic owned snapshots and no provider calls."""
-import json,os,tempfile,unittest
+import hashlib,json,os,tempfile,unittest
 from datetime import datetime,timezone,timedelta
 from unittest.mock import patch
 import app,hotwatch_engine as engine,hotwatch_service as service
@@ -205,6 +205,27 @@ class HoldingAutowatch(unittest.TestCase):
   with app.connect() as c:
    modes=[json.loads(row['request'])['watch_mode'] for row in c.execute('SELECT request FROM hw_sessions')]
   self.assertEqual(sorted(modes),['entry','exit'])
+ def test_active_watch_matches_portfolio_scope_and_decodes_each_request_once(self):
+  asset={'asset_id':self.holding['asset_id']}
+  scoped=json.dumps(dict(asset,watch_mode='exit',portfolio_ids=[self.pid]))
+  other=json.dumps(dict(asset,watch_mode='exit',portfolio_ids=[self.fixture.child]))
+  unscoped=json.dumps(asset)
+  with app.connect() as c:
+   for watch,request in [('first',scoped),('second',other)]:
+    c.execute("""INSERT INTO hw_sessions(user_id,watch_id,is_test,candidate_id,purpose,status,request,digest,strategy,state,created,updated,next_due)
+                 VALUES(1,?,0,?,'manual watch','ACTIVE',?,'x','{}','{}',?,?,0)""",
+              (watch,watch,request,self.now.isoformat(),self.now.isoformat()))
+  for first,second,expected in [(scoped,other,('LINKED','first')),
+                                (scoped,unscoped,('AMBIGUOUS',None)),
+                                (other,unscoped,('LINKED','second'))]:
+   with self.subTest(expected=expected):
+    with app.connect() as c:
+     c.executemany('UPDATE hw_sessions SET request=? WHERE watch_id=?',[(first,'first'),(second,'second')])
+    with patch.object(service.json,'loads',wraps=json.loads) as loads:
+     self.assertIsNone(self.tick(verify=self.verify,lookup=self.lookup))
+    with app.connect() as c:
+     self.assertEqual(tuple(c.execute('SELECT status,watch_id FROM hw_holding_autowatch').fetchone()),expected)
+    self.assertCountEqual([call.args[0] for call in loads.call_args_list if call.args[0] in (first,second)],[first,second])
  def test_accepted_proposal_does_not_attribute_a_preexisting_holding(self):
   import hotwatch_strategy
   entry={'asset_id':self.holding['asset_id'],'watch_mode':'entry','trade_cycle_id':'cycle-original'}
@@ -236,14 +257,19 @@ class HoldingAutowatch(unittest.TestCase):
    old=c.execute('SELECT watch_id FROM hw_sessions').fetchone()[0]
    c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':False,'observed':self.now.isoformat(),'positions':[]}),))
   self.assertEqual(service.reconcile_closed_holdings(app.connect,self.now),0)
+  self.now+=timedelta(seconds=1)
   with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[]}),))
   self.assertEqual(service.reconcile_closed_holdings(app.connect,self.now),1)
+  closed_at=self.now.isoformat()
+  self.now+=timedelta(seconds=1)
   with app.connect() as c:
    self.assertEqual(c.execute('SELECT status FROM hw_sessions WHERE watch_id=?',(old,)).fetchone()[0],'COMPLETED')
    c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps({'positions_complete':True,'observed':self.now.isoformat(),'positions':[self.holding]}),))
   self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
   with app.connect() as c:
    sessions=c.execute('SELECT watch_id,status FROM hw_sessions ORDER BY id').fetchall();self.assertEqual(len(sessions),2);self.assertNotEqual(sessions[0]['watch_id'],sessions[1]['watch_id'])
+   identity=f"1|{self.pid}|{self.holding['asset_id']}|{closed_at}"
+   self.assertEqual(sessions[1]['watch_id'],'hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28])
  def test_ambiguous_eodhd_symbol_uses_verified_pluto_instead(self):
   bad=lambda *_:{'choices':[{'symbol':'ONE.US','currency':'USD','isin':'US1234567890'},{'symbol':'TWO.US','currency':'USD','isin':'US1234567890'}]}
   self.assertEqual(self.tick(verify=self.verify,lookup=bad),'LINKED')
