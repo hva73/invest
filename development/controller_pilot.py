@@ -65,6 +65,7 @@ Work in order: reproduce or inspect the failure; choose the simplest complete fi
 edit the approved files; run targeted tests; correct failures and retest; check
 adjacent regressions. If a method fails, change the method, not the requirements.
 Turn every documented review failure into an executable regression case (including valid positive behavior). Run the complete targeted suite together before delivery. Do not repeatedly run unrelated full suites instead of fixing a failing focused test.
+Browser tests: use Playwright's bundled Chromium headless shell (chromium.launch(headless=True), no channel or executable_path). Never launch /Applications/Google Chrome.app, Chrome via open, or a headed browser from this controller. If the bundled browser is unavailable or crashes, do not retry the same launch: continue code and non-browser tests, report the actual browser blocker, and use the existing relevant GitHub CI browser suite for independent verification. Never report a skipped browser test as passing. Do not weaken browser sandbox or macOS security.
 Keep analysis internal and reporting short. Do not wait for coordinator approval
 of routine implementation decisions. Stop only for a tested delivery, a genuine
 external dependency, or the enforced resource boundary. Never invent test results.
