@@ -29,6 +29,33 @@ class AdminDiagnostics(unittest.TestCase):
   diagnostic=result['recent'][0]['metrics']['market_conflict'];self.assertEqual(diagnostic['observations']['previous']['sample_ref'],'0123456789abcdef');self.assertNotIn('sample_ref',diagnostic['observations']['incoming']);self.assertNotIn('invalid-secret',json.dumps(result))
   with app.connect() as c:c.execute("UPDATE hw_sessions SET status='EXPIRED' WHERE watch_id=?",(self.f.req['watch_id'],))
   result=hotwatch_service.admin_diagnostics(app.connect,1,self.now);self.assertEqual(result['session_count'],0);self.assertEqual(result['windows']['1h']['completed'],2)
+ def test_sqlite_phases_use_only_recorded_timings_from_the_current_tenant(self):
+  ref=hashlib.sha256(self.f.req['watch_id'].encode()).hexdigest()[:16]
+  def scan(age,metrics,user=1):
+   return {'service':'hotwatch','user_id':user,'is_test':False,'watch_ref':ref,'status':'processed',
+           'utc':(self.now-timedelta(seconds=age)).isoformat(),'metrics':metrics}
+  phases={'scope_entry_wait_ms':12,'sqlite_begin_ms':2,'begin_wait_ms':14,'work_before_commit_ms':3.125}
+  records=[scan(1,phases),scan(2,{'begin_wait_ms':17}),scan(400,{'work_before_commit_ms':0}),
+           scan(3,{'work_before_commit_ms':800},user=2)]
+  invalid=[None,'4',True,-1,float('nan'),float('inf'),86400001,10**400]
+  records.extend(scan(age,{'work_before_commit_ms':value,'queue_ms':7}) for age,value in enumerate(invalid,10))
+  path=Path(app.DB).parent/'hotwatch-scans.jsonl'
+  path.write_text('\n'.join(json.dumps(record) for record in records))
+  result=hotwatch_service.admin_diagnostics(app.connect,1,self.now)
+  metrics=[record['metrics'] for record in result['recent']]
+  self.assertEqual({key:metrics[0].get(key) for key in phases},phases)
+  self.assertNotIn('work_before_commit_ms',metrics[1])
+  self.assertEqual(len(metrics),len(records)-1)
+  for row in metrics[2:-1]:
+   self.assertNotIn('work_before_commit_ms',row)
+   self.assertEqual(row['queue_ms'],7)
+  self.assertEqual(metrics[-1]['work_before_commit_ms'],0)
+  factors=result['queue_factors']
+  self.assertEqual(factors['5m']['database_begin_wait'],{'count':2,'p50_ms':14,'p90_ms':17,'max_ms':17})
+  self.assertEqual(factors['5m']['sqlite_begin'],{'count':1,'p50_ms':2,'p90_ms':2,'max_ms':2})
+  self.assertEqual(factors['5m']['database_work_before_commit'],{'count':1,'p50_ms':3.125,'p90_ms':3.125,'max_ms':3.125})
+  for window in ('1h','24h'):
+   self.assertEqual(factors[window]['database_work_before_commit'],{'count':2,'p50_ms':0,'p90_ms':3.125,'max_ms':3.125})
  def test_entry_funnel_counts_rules_and_historical_confirmation_moves(self):
   import hotwatch_engine as engine
   strategy=engine.BASELINE;now=self.now;req=dict(self.f.req,provider='eodhd',watch_mode='entry')
