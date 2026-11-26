@@ -94,11 +94,11 @@ window.EngineUI=(()=>{
   const ticket=++generation,user=owner(),epoch=sessionEpoch(),test=mode;
   const valid=()=>n.isConnected&&root()===n&&ticket===generation&&user===owner()&&epoch===sessionEpoch()&&test===mode;
   try{
-   if(data&&data._owner!==user){showOwn=false;activeFilter='all'}
+   if(data&&(data._owner!==user||data._epoch!==epoch)){showOwn=false;activeFilter='all'}
    const [r,h,registry]=await Promise.all([api(base+'/sessions'+query()+'&limit=100&view=current'),api(base+'/sessions'+query()+'&limit=20&view=history'),api('reports/candidate-registry?is_test='+test)]);
    if(!valid())return;
-   const cached=data?._owner===user&&data._mode===test?data.sessions.filter(s=>['EXPIRED','COMPLETED'].includes(s.status)&&!h.sessions.some(n=>n.watch_id===s.watch_id)):[];
-   data={...r,sessions:[...r.sessions,...h.sessions,...cached],candidates:registry.candidates||[],history_cursor:h.next_cursor,history_truncated:h.truncated,current_truncated:r.truncated,_owner:user,_mode:test};
+   const cached=data?._owner===user&&data._epoch===epoch&&data._mode===test?data.sessions.filter(s=>['EXPIRED','COMPLETED'].includes(s.status)&&!h.sessions.some(n=>n.watch_id===s.watch_id)):[];
+   data={...r,sessions:[...r.sessions,...h.sessions,...cached],candidates:registry.candidates||[],history_cursor:h.next_cursor,history_truncated:h.truncated,current_truncated:r.truncated,_owner:user,_epoch:epoch,_mode:test};
    paint()
   }catch(error){
    if(!valid())return;
