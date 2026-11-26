@@ -2040,5 +2040,25 @@
     "follow_base": true,
     "reserve_plan_id": "ui/desktop/desktop-read-only-preview-matches-current-form-values",
     "reserve_goal": "ui/desktop"
+  },
+  {
+    "issue": 14,
+    "generation": 20,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "04cee36687e4d60bca0adbedf11acb4ed7224f74",
+    "dependencies": [],
+    "paths": [
+      "hotwatch_service.py",
+      "tests/test_hotwatch_engine.py"
+    ],
+    "task": "Approved roadmap shared_data/scheduler (F\u00e6lles scheduler og budget). Exact existing source anchor: hotwatch_service.py :: prior=c.execute('SELECT next_attempt FROM hw_exchange_status WHERE exchange=?',(item,)).fetchone(). Implement only this bounded change: In exchange_status_tick(), replace the per-exchange next_attempt SELECTs in the read-only preflight and the write transaction with one scoped SQLite lookup per phase for the eligible exchange codes. Recompute eligibility and due times inside the transaction. Keep missing rows due at zero, preserve the earliest-due selection with exchange code as the tie-breaker, and reserve at most one exchange. Keep the existing kill check, refresh interval and provider call outside the transaction.. Acceptance: Extend the existing exchange-status SQLite fixture with a stub client, several eligible exchanges, repeated subscriptions, future due times and a missing status row. Trace SQL to verify at most one next_attempt read per phase regardless of exchange count. Verify that the missing row is selected first, future rows are skipped and the existing fairness and idle writer-lock tests still pass.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_hotwatch_engine.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "shared_data/scheduler/batch-exchange-status-due-lookups",
+    "reserve_goal": "shared_data/scheduler"
   }
 ]
