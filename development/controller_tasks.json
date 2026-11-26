@@ -1198,7 +1198,7 @@
     "task": "Next narrow #114 readback identity slice after #114:5 acceptance. Inspect actual immutable collection-sell payload built in trade_service.py and status_matches_proposal. If the payload contains a collectionId, reject explicit contradictory returned collectionId at root or supported nested order while accepting omission and matching immutable identity. Do not infer a depot from current collection parent or first status response; do not add order-ID rules, rewrite send/cancel or change schema. Add focused tests via existing mocked Pluto/SQLite proposal fixture: mismatch preserves prior row, matching/omitted values refresh normally, direct proposal behavior unchanged. If already fully covered, add only meaningful missing regression; no speculative code. Run direct test_trade_service. No live calls, credentials, broker writes or production. ESCAPE_DRAFT_READY after actual passing implementation."
   },
   {
-    "status": "ready",
+    "status": "done",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "4b2914e5f40570ae4a2e5c0f021c9f426cd15d49",
