@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T17:53:08Z",
+  "updated_at": "2026-11-26T19:23:41Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -40,7 +40,7 @@
       "title": "Fælles datamotor",
       "status": "in_progress",
       "issue": 14,
-      "evidence": "PR #292 exact b942c0e3, CI 45654397233: 581 tests PASS; integreret 0a0181ee med identiske produkt/testblobs. Causal shared simulation capture; scheduler og fuld belastning udestår.",
+      "evidence": "#346 d5322847 → cbb37703, motor/data-CI 45880485623 og uafhængigt SQLite-review: forsinkede EODHD headers kan ikke genåbne debiteret budget. Ældre #292 causal capture er kilde. Fuld scheduler-/hostingaccept udestår.",
       "subgoals": [
         {
           "id": "feeds",
@@ -68,8 +68,8 @@
         {
           "id": "scheduler",
           "title": "Fælles scheduler og budget",
-          "status": "pending",
-          "evidence": "Udestår.",
+          "status": "in_progress",
+          "evidence": "#346 integreret cbb37703, motor-CI 45880485623, shared budget local-debit guard. #347 ea53a69e draft; jobs-regression skipped i CI, korrigerende #348 udestår. Ikke fuld scheduleraccept.",
           "owner_role": "data"
         },
         {
@@ -382,7 +382,7 @@
           "id": "provenance",
           "title": "Entry/exit-herkomst",
           "status": "in_progress",
-          "evidence": "#114:3–8 integreret på resetgren, senest #330 efaf9a73 → 9ae54be1, scoped motor-CI 45860311154 og uafhængigt review PASS. Identitet, readback-CAS og statusvalidering; ikke fuld fill-/provenanceaccept.",
+          "evidence": "#114:3–8 integreret, senest #330 → 9ae54be1. #345 bca524ec motor-CI 45878764434 PASS, uafhængig HOLD på modstridende order/holding identitet og envelope. Bevar eksisterende reparation; fuld provenance/fillaccept udestår.",
           "owner_role": "motor",
           "updated_at": "2026-11-26T17:23:00Z"
         },
@@ -409,7 +409,7 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "in_progress",
       "issue": 54,
-      "evidence": "#320 9762f212 (UI CI 45848898509) integreret 554e6892; #322 4b7ea0a0 (UI CI 45851825612) integreret 4b509055. Session-epoch cache og forsinket historikpagination afgrænset accepteret. #54:9 acknowledgement klar; næste kontrolhandler-reproduktion dokumenteret #54 7196787784 (2/10→10/10 isoleret). Komplet konto-isolation og samlet browseraccept udestår.",
+      "evidence": "#339 07c146d8 → 04cee366, UI-CI 45873103144 faktisk PASS og uafhængigt review: manuel søgning isoleret uden at undertrykke nødstop. #344 1c5428f6 UI-CI 45883036051 PASS, review udestår; samlet konto-isolation/browseraccept udestår.",
       "subgoals": [
         {
           "id": "reuse",
@@ -422,7 +422,7 @@
           "id": "mobile",
           "title": "Mobil 2.0",
           "status": "in_progress",
-          "evidence": "#54:7–15 integreret på resetgren, senest #337 af4dcb43 → c7ffa139, UI-CI 45865646432 PASS. #54:16 #339 6f945cd7 CI 45866376418 PASS men uafhængig HOLD: manual-search annullerer nødstop-feedback. Isoleret faktisk-source rettelsesforslag 12/14→14/14 på #339 kommentar 7199827965; lokal fuld test/review udestår. #54:17–19 allerede køsat.",
+          "evidence": "#54:16 #339 rettet og integreret 04cee366; #54:17 #344 1c5428f6 afventer review, tidligere heads HOLD på quote/pending race. #54:20 blocked:incomplete, bevaret; afgrænset #54:24 køsat.",
           "owner_role": "mobile",
           "updated_at": "2026-11-26T17:23:00Z"
         },
@@ -438,7 +438,7 @@
           "id": "test",
           "title": "Fælles browsertest",
           "status": "review",
-          "evidence": "Scoped actual-source Node og UI-regression senest #337, CI 45865646432 PASS. #339 CI PASS men HOLD; separat request-counter forslag 14/14 isoleret, ikke fuld app-test. Komplet konto-isolation og samlet browser-CI udestår.",
+          "evidence": "Scoped #339 UI 45873103144 og #344 UI 45883036051 faktisk PASS; #344 ikke accepteret. Komplet konto-isolation og samlet browser-CI udestår.",
           "owner_role": "mobile",
           "updated_at": "2026-11-26T17:23:00Z"
         }
@@ -464,7 +464,7 @@
           "id": "queue",
           "title": "100 brugere og fair køer",
           "status": "review",
-          "evidence": "#343 b9cff262 → 1a7b5305, CI 45870610673 motor/data og smoke faktisk PASS, uafhængigt review: global kill med konkurrerende writer, 0 writerforsøg, autoritativ recheck under transaktion bevares. #14:12 STARTED/WORKING (100-tenant SQLite-fixture); fuld fairness/hostingaccept udestår.",
+          "evidence": "#343 integreret 1a7b5305; #14:12 tokenparkeret, #14:13/#14:18 bevarede uafsluttede forsøg; mindre #14:22 køsat. #347 stale job failure CAS er draft, CI kun smoke; faktisk 100-bruger hostingaccept udestår.",
           "owner_role": "data",
           "updated_at": "2026-11-26T17:23:00Z"
         },
@@ -491,13 +491,13 @@
       "title": "Samlet releasekandidat, backup og migration",
       "status": "in_progress",
       "issue": 57,
-      "evidence": "Resetgren 1a7b5305: #341/#342/#343 integreret efter scoped motor/data-CI og uafhængigt review; B #339 HOLD med testet afgrænset rettelsesforslag. Samlet releaseaccept og ejer-GO udestår.",
+      "evidence": "Resetgren cbb37703: #339 og #346 integreret efter afgrænset CI og uafhængigt review. #347 har kun smoke-PASS; separat #348 d775615f retter den konkrete CI-dækningsfejl, ikke integreret. Samlet releaseaccept og ejer-GO udestår.",
       "subgoals": [
         {
           "id": "integrate",
           "title": "Samlet releasegren",
           "status": "in_progress",
-          "evidence": "Aktuel produktgren codex/architecture-reset-20261126 HEAD 1a7b5305267efe4197495550452de1db58beb563; #341→865be921, #342→0bcea2b3, #343→1a7b5305. #339 ikke integreret. Tidligere V2-komponenter er kilder, ikke automatisk genintegreret. #317/#309 HOLD bevares.",
+          "evidence": "Aktuel produktgren codex/architecture-reset-20261126 HEAD cbb37703356ffae9f3d2beba37265d17e0b706db; #339→04cee366, #346→cbb37703; #341–343 tidligere integreret. #344/#345/#347 fortsat draft. Tidligere V2-komponenter er kilder, ikke automatisk genintegreret. #317/#309 HOLD bevares.",
           "owner_role": "release",
           "updated_at": "2026-11-26T17:23:00Z"
         },
@@ -512,7 +512,7 @@
           "id": "ci",
           "title": "Samlet regression og rollback",
           "status": "review",
-          "evidence": "Scoped motor/data + smoke PASS: #341 45867598958, #342 45869452962, #343 45870610673; UI-trin skipped i disse jobs. #339 UI 45866376418 PASS men review HOLD. Ikke samlet CI på 1a7b5305; samlet regression, migration, rollback og hostingaccept udestår.",
+          "evidence": "Scoped UI #339 45873103144 og motor #346 45880485623 faktisk PASS. #347 45881051251 både motor/UI SKIPPED, kun smoke; #348 d775615f tilføjer jobs.py-scope og tests.test_jobs, afventer CI/review. Ingen samlet regression, migration, rollback eller hostingaccept på cbb37703.",
           "owner_role": "release",
           "updated_at": "2026-11-26T17:23:00Z"
         }
