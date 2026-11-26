@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T21:41:22Z",
+  "updated_at": "2026-11-26T23:22:50Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -40,7 +40,7 @@
       "title": "Fælles datamotor",
       "status": "in_progress",
       "issue": 14,
-      "evidence": "#350 70304ce1 → e611ee2a, #351 eb3fb68b → 18937bec, #352 54e392cf → 367601c6 og #354 47fec8e4 → 4530ff6f integreret efter lokal uafhængig review. #350/#351/#354 motor-CI faktisk kørt; #352 kun smoke og isoleret SQLite-evidens. Ingen fuld scheduler- eller hostingaccept.",
+      "evidence": "#350 70304ce1 → e611ee2a, #351 eb3fb68b → 18937bec, #352 54e392cf → 367601c6 og #354 47fec8e4 → 4530ff6f integreret efter lokal uafhængig review. #350/#351/#354 motor-CI faktisk kørt; #352 kun smoke og isoleret SQLite-evidens. Ingen fuld scheduler- eller hostingaccept. Efterfølgende #355/#357/#360/#361/#362/#363 integreret; seneste fælles produktbase cb7e93de. #14:36 blocked:incomplete, ingen blind genstart.",
       "subgoals": [
         {
           "id": "feeds",
@@ -69,9 +69,9 @@
           "id": "scheduler",
           "title": "Fælles scheduler og budget",
           "status": "in_progress",
-          "evidence": "#350 motor 45888111909, lokal review 7203231957 (1.103→1 eligibility reads); #351 motor 45894708437, review 7203604382; #352 smoke 45897328590, review 7203651050 (partial indexes); #354 motor 45897940975, review 7203882499. Alle integreret. #355 33b4b1de, smoke 45899349827, isoleret 5/5 owner cases, 300009→12 VDBE for absent owner, 1.347.584 bytes index; #357 a0530d06 motor 45899642953, begge draft. Ikke fuld hostingaccept.",
+          "evidence": "#350/#351/#352/#354 tidligere integreret. #355 33b4b1de → 8faa4ed9 (smoke 45899349827, isoleret 5/5 owner cases). #357 85099886 → 111e486c, motor 45901184468; #360 780c26cd → 68007963, motor 45903879690; #361 7b1f1c37 → bfaba494, smoke-only 45903366103; #362 02381859 → 5525176c, motor 45904436540; #363 614869da → 62a63d9c, motor 45905061570. Ikke fuld hostingaccept.",
           "owner_role": "data",
-          "updated_at": "2026-11-26T20:32:13Z"
+          "updated_at": "2026-11-26T23:22:50Z"
         },
         {
           "id": "live",
@@ -81,7 +81,7 @@
           "owner_role": "data"
         }
       ],
-      "updated_at": "2026-11-26T20:32:13Z"
+      "updated_at": "2026-11-26T23:22:50Z"
     },
     {
       "id": "candidate_rotation",
@@ -377,7 +377,7 @@
       "title": "Hvordan står det til? – herkomst og statistik",
       "status": "in_progress",
       "issue": 114,
-      "evidence": "#321 8ea81200, motor-CI 45849602834 PASS, integreret 6c574c65. Matchende Pluto-reference før DB-write. #323 143c914b6, motor-CI 45852442040 PASS for direkte depotidentitet; afventer lokal uafhængig review/merge. Ældre #309 bevaret.",
+      "evidence": "#321 8ea81200, motor-CI 45849602834 PASS, integreret 6c574c65. Matchende Pluto-reference før DB-write. #323 143c914b6, motor-CI 45852442040 PASS for direkte depotidentitet; afventer lokal uafhængig review/merge. Ældre #309 bevaret. #358 integreret 4d273261 (smoke-only 45901556811); #364 6dfd2260 → cb7e93de (smoke-only 45909678518), rækkeautoritative ordre-/kandidat-/cyklusidentiteter. #365 d06bd245 draft, CI smoke-only 45910076364.",
       "subgoals": [
         {
           "id": "provenance",
@@ -390,8 +390,8 @@
         {
           "id": "fills",
           "title": "Fills, kostpris og afstemning",
-          "status": "pending",
-          "evidence": "Udestår.",
+          "status": "in_progress",
+          "evidence": "#364 integreret cb7e93de, uafhængig review 7205363307 men kun smoke-CI. #365 d06bd245, isoleret koordinator-test 10/10 SQLite/tidsstempel/identitetsscenarier, kommentar 7205444244. Job 140216037611 sprang motor/UI over. Fuld applikations-/fillaccept udestår.",
           "owner_role": "data"
         },
         {
@@ -402,7 +402,7 @@
           "owner_role": "desktop"
         }
       ],
-      "updated_at": "2026-11-26T20:32:13Z"
+      "updated_at": "2026-11-26T23:22:50Z"
     },
     {
       "id": "ui",
@@ -410,7 +410,7 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "in_progress",
       "issue": 54,
-      "evidence": "#339 07c146d8 → 04cee366, UI-CI 45873103144 faktisk PASS og uafhængigt review: manuel søgning isoleret uden at undertrykke nødstop. #344 1c5428f6 UI-CI 45883036051 PASS, review udestår; samlet konto-isolation/browseraccept udestår.",
+      "evidence": "#339 07c146d8 → 04cee366, UI-CI 45873103144 faktisk PASS og uafhængigt review: manuel søgning isoleret uden at undertrykke nødstop. #344 1c5428f6 UI-CI 45883036051 PASS, review udestår; samlet konto-isolation/browseraccept udestår. #359 integreret med faktisk UI-CI; #356 fortsat under review. Tre nye små, uafhængige scopes køsat i 988a27b6 efter konkrete Node-reproduktioner.",
       "subgoals": [
         {
           "id": "reuse",
@@ -423,17 +423,17 @@
           "id": "mobile",
           "title": "Mobil 2.0",
           "status": "in_progress",
-          "evidence": "#339 integreret 04cee366; #344 bevaret under HOLD; erstatning #54:36 / #356 a65e6597 UI-CI 45899507491 faktisk PASS, uafhængig review udestår.",
+          "evidence": "#339 integreret 04cee366; #344 bevaret under HOLD. #356 f5c66ec6 draft, CI 45903686141 smoke-only; konkret stale cached-choice risiko reproduceret med Node og afgrænset rettelsesforslag 7205458904. #54:37–40 terminal incomplete; tre uafhængige næste opgaver #54:41–43 i verificeret kø 988a27b6. Ingen ny samlet UI-accept.",
           "owner_role": "mobile",
-          "updated_at": "2026-11-26T20:32:13Z"
+          "updated_at": "2026-11-26T23:22:50Z"
         },
         {
           "id": "desktop",
           "title": "Desktop 2.0",
           "status": "review",
-          "evidence": "#305/#306 integreret; #306 ce7e97e6 CI 45691588370 chart isolation/period races og desktop-browser PASS. Samlet desktop 2.0-accept udestår. #267:7 TESTING, #54:37 rapportarkiv og #267:9 observation-note klar i kø a19ed787; ikke godkendte produktleverancer.",
+          "evidence": "#305/#306 tidligere integreret. #359 6297796a → da3ed7fa, faktisk UI-CI 45902005378 PASS. #54:41/43 køsat for verificeret sektor-/graf-race, ikke produktleverance. Samlet desktopaccept udestår.",
           "owner_role": "desktop",
-          "updated_at": "2026-11-25T20:55:00Z"
+          "updated_at": "2026-11-26T23:22:50Z"
         },
         {
           "id": "test",
@@ -444,7 +444,7 @@
           "updated_at": "2026-11-26T20:32:13Z"
         }
       ],
-      "updated_at": "2026-11-26T20:32:13Z"
+      "updated_at": "2026-11-26T23:22:50Z"
     },
     {
       "id": "load",
@@ -465,9 +465,9 @@
           "id": "queue",
           "title": "100 brugere og fair køer",
           "status": "review",
-          "evidence": "#352 integreret 367601c6, lokal uafhængig review 7203651050 og tidligere 24/24 SQL-case proof; CI 45897328590 kun smoke. #355 exact 33b4b1de: 5/5 owner-resultater identiske, 100000 jobs/100 syntetiske lejere, 6190→253 og absent 300009→12 SQLite-instruktioner; indekset 1.347.584 bytes, smoke 45899349827, kommentar 7203952506. Faktisk hosting/migrationspeak udestår.",
+          "evidence": "#352 integreret 367601c6, lokal uafhængig review 7203651050 og tidligere 24/24 SQL-case proof; CI 45897328590 kun smoke. #355 exact 33b4b1de: 5/5 owner-resultater identiske, 100000 jobs/100 syntetiske lejere, 6190→253 og absent 300009→12 SQLite-instruktioner; indekset 1.347.584 bytes, smoke 45899349827, kommentar 7203952506. Faktisk hosting/migrationspeak udestår. #355 nu integreret 8faa4ed9; #14:36 terminal incomplete (7205245419), afhængige generationer tælles ikke som klar reserve. 100-bruger hostingmåling fortsat uafklaret.",
           "owner_role": "data",
-          "updated_at": "2026-11-26T20:32:13Z"
+          "updated_at": "2026-11-26T23:22:50Z"
         },
         {
           "id": "resources",
@@ -492,15 +492,15 @@
       "title": "Samlet releasekandidat, backup og migration",
       "status": "in_progress",
       "issue": 57,
-      "evidence": "Produktgren 4530ff6f007900d3b49a077b9e91c67164cef8bf. #350/#351/#352/#354 integreret; #352 kun smoke trods isoleret SQL-review. #348 dbba5ef1 faktisk motor+UI PASS 45891686618 (754 unittest-kørsler), afventer uafhængig review og serialiseret integration. Frisk Projects inventory 45899839517/job 140182639152 SUCCESS; samme modstridende Backlog for #225/#267/#268/#273/#315 trods tidligere verificerede writes. Ingen blind gentagelse. Samlet releaseaccept udestår.",
+      "evidence": "Produktgren cb7e93deb46cd236fb30d4902a5964d2a68314f2. #355/#357/#358/#359/#360/#361/#362/#363/#364 integreret efter seneste status; #355/#358/#361/#364 smoke-only. #348 dbba5ef1 faktisk motor+UI PASS 45891686618 (754 unittest-kørsler), stadig separat og ikke integreret. #232 frozen 3cc0c7be fortsat draft. Projects-inventory 45910583448/job 140217698622 SUCCESS, samme modstridende Backlog for #225/#267/#268/#273/#315; ingen blind gentagelse. Samlet releaseaccept udestår.",
       "subgoals": [
         {
           "id": "integrate",
           "title": "Samlet releasegren",
           "status": "in_progress",
-          "evidence": "Produktgren 4530ff6f: #350→e611ee2a, #351→18937bec, #352→367601c6, #354→4530ff6f. #353/#355/#356/#357 fortsat draft. #348 separat CI-rettelse dbba5ef1. Ingen konkurrerende integration; ældre V2-komponenter er kilder, ikke automatisk genintegreret.",
+          "evidence": "Produktgren cb7e93de: #355→8faa4ed9, #357→111e486c, #358→4d273261, #359→da3ed7fa, #360→68007963, #361→bfaba494, #362→5525176c, #363→62a63d9c, #364→cb7e93de. #356/#365 draft. #348 separat CI-rettelse dbba5ef1; ingen konkurrerende merge.",
           "owner_role": "release",
-          "updated_at": "2026-11-26T20:32:13Z"
+          "updated_at": "2026-11-26T23:22:50Z"
         },
         {
           "id": "preflight",
@@ -513,12 +513,12 @@
           "id": "ci",
           "title": "Samlet regression og rollback",
           "status": "review",
-          "evidence": "#348 dbba5ef1 CI 45891686618/job 140155642691 faktisk motor+UI PASS (754 unittest-kørsler, Node og browser). #352/#355 stadig smoke-only på deres eksakte PR-heads. Ingen samlet regression/migration/rollback på 4530ff6f; separat CI-rettelse ikke integreret.",
+          "evidence": "#348 dbba5ef1 CI 45891686618/job 140155642691 faktisk motor+UI PASS (754 unittest-kørsler, Node og browser). #358/#361/#364/#365/#356 nyere runs sprang motor/UI over. #357/#360/#362/#363 motor og #359 UI faktisk kørt. Ingen samlet regression/migration/rollback på cb7e93de, CI-rettelse endnu ikke integreret.",
           "owner_role": "release",
-          "updated_at": "2026-11-26T20:32:13Z"
+          "updated_at": "2026-11-26T23:22:50Z"
         }
       ],
-      "updated_at": "2026-11-26T20:32:13Z"
+      "updated_at": "2026-11-26T23:22:50Z"
     },
     {
       "id": "go",
