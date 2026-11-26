@@ -13,6 +13,7 @@ const content = document.getElementById('content');
 const pending = [];
 const userIds = {alpha: 11, beta: 22};
 let username,epoch=0,failLogout;
+let settingsAdmin=false,settingsCurrentReads=0;
 let holdCurrentLoad=false,omitHistory=false,poll,pollSchedules=0,archiveFixture;
 let archiveReads=0,clock=Date.now();
 Date.now=()=>clock;
@@ -39,6 +40,10 @@ const assert = (condition, message) => { if (!condition) throw Error(message); }
 const byId = id => document.getElementById(id);
 const api = (path, args) => {
     const user = username;
+    if (settingsAdmin && path.includes('view=current')) settingsCurrentReads++;
+    if (settingsAdmin && /^v1\/hotwatch\/(strategies|providers|kill-switch)/.test(path)) {
+        return new Promise((resolve, reject) => pending.push({path, args, user, resolve, reject}));
+    }
     if (archiveFixture?.autoHistory && path.includes('view=history')) {
         if (path.includes('&before=')) archiveReads++;
         return Promise.resolve(archiveFixture.autoHistory(new URLSearchParams(path.split('?')[1])));
@@ -97,9 +102,125 @@ const select = index => {
     target.value = index;
     return EngineUI.change({target});
 };
+const checkSettingsIsolation = async () => {
+    const find = selector => document.querySelector(selector);
+    const notice = byId('notice');
+    const report = async action => {
+        try { await action(); }
+        catch (error) { notice.textContent = error.message; }
+    };
+    const click = selector => report(() => EngineUI.click(find(selector)));
+    const flush = () => new Promise(resolve => setTimeout(resolve, 0));
+    const settings = '[data-engine-strategies]';
+    const killSwitch = '[data-engine-kill]';
+    const strategies = {strategies: [{strategy_id: 'fixture', version: 1}]};
+    const openSettings = async user => {
+        const opening = click(settings);
+        take('/strategies', user).resolve(strategies);
+        take('/providers', user).resolve({providers: {}});
+        await opening;
+        assert(find('#engine-dialog[open] #engine-strategy-file'), 'Current admin settings did not open');
+    };
+    const readFile = (text) => {
+        const target = find('#engine-strategy-file');
+        Object.defineProperty(target, 'files', {configurable: true, value: [{size: 30, text}]});
+        return report(() => EngineUI.change({target}));
+    };
+    settingsAdmin = true;
+    window.confirm = () => true;
+    const failures = [];
+    for (const outcome of ['success', 'error']) {
+        switchAccount('alpha');
+        await flush();
+        const kill = click(killSwitch);
+        const oldKill = take('/kill-switch', 'alpha');
+        await openSettings('alpha');
+        let resolveFile, rejectFile;
+        const oldFile = readFile(() => new Promise((resolve, reject) => {
+            resolveFile = resolve; rejectFile = reject;
+        }));
+        switchAccount('beta');
+        await flush();
+        await openSettings('beta');
+        const currentStatus = byId('engine-strategy-status');
+        const currentReads = settingsCurrentReads;
+        notice.textContent = 'Beta notice';
+        if (outcome === 'success') {
+            oldKill.resolve({});
+            resolveFile('{"strategy_id":"alpha-private"}');
+        } else {
+            oldKill.reject(Error('Alpha kill-switch error'));
+            rejectFile(Error('Alpha file read error'));
+        }
+        await flush();
+        const unexpected = pending.findIndex(request => request.path.endsWith('/strategies'));
+        if (unexpected >= 0) {
+            failures.push('Alpha file was sent using ' + pending[unexpected].user + ' session');
+            pending.splice(unexpected, 1)[0].resolve({checksum: 'alpha-private'});
+        }
+        await Promise.all([oldFile, kill]);
+        if (settingsCurrentReads !== currentReads) failures.push('Obsolete kill-switch success refreshed Beta watches');
+        if (notice.textContent !== 'Beta notice' || currentStatus.textContent) {
+            failures.push('Obsolete settings ' + outcome + ' changed Beta status or notice');
+        }
+    }
+    const uploadFailure = readFile(async () => '{"strategy_id":"beta-fixture"}');
+    await flush();
+    take('/strategies', 'beta').reject(Error('Current strategy upload error'));
+    await uploadFailure;
+    assert(notice.textContent === 'Current strategy upload error', 'Current upload failure was hidden');
+    const upload = readFile(async () => '{"strategy_id":"beta-fixture"}');
+    await flush();
+    const betaUpload = take('/strategies', 'beta');
+    assert(betaUpload.args.strategy_id === 'beta-fixture', 'Current file payload changed');
+    betaUpload.resolve({checksum: 'beta-checksum'});
+    await upload;
+    assert(byId('engine-strategy-status').textContent.includes('beta-checksum'), 'Current upload did not show its checksum');
+    const validate = click('[data-engine-validate]');
+    take('/validate', 'beta').resolve({valid: true});
+    await validate;
+    assert(find('[data-engine-validate]').textContent === 'Deklarationen er gyldig', 'Current validation result was lost');
+    byId('engine-dialog').close();
+    const killFailure = click(killSwitch);
+    take('/kill-switch', 'beta').reject(Error('Current kill-switch error'));
+    await killFailure;
+    assert(notice.textContent === 'Current kill-switch error', 'Current kill-switch failure was hidden');
+    const beforeRetry = settingsCurrentReads;
+    const killRetry = click(killSwitch);
+    take('/kill-switch', 'beta').resolve({});
+    await killRetry;
+    assert(settingsCurrentReads === beforeRetry + 1, 'Current kill-switch success did not refresh watches');
+
+    const staleSettings = click(settings);
+    const staleStrategies = take('/strategies', 'beta');
+    const staleProviders = take('/providers', 'beta');
+    const logout = beginLogout();
+    await finishFailedLogout(logout);
+    notice.textContent = 'New epoch notice';
+    staleStrategies.reject(Error('Obsolete strategy list error'));
+    staleProviders.resolve({providers: {}});
+    await staleSettings;
+    if (notice.textContent !== 'New epoch notice') failures.push('Obsolete strategy list reached the notice');
+    await openSettings('beta');
+    const staleValidation = click('[data-engine-validate]');
+    const validation = take('/validate', 'beta');
+    const staleUpload = readFile(async () => '{"strategy_id":"beta-old-epoch"}');
+    await flush();
+    const oldUpload = take('/strategies', 'beta');
+    const transition = beginLogout();
+    await finishFailedLogout(transition);
+    validation.resolve({valid: false});
+    oldUpload.reject(Error('Obsolete file upload error'));
+    await Promise.all([staleValidation, staleUpload]);
+    if (notice.textContent !== 'New epoch notice' ||
+        find('[data-engine-validate]').textContent !== 'Kontrollér deklarationen') {
+        failures.push('Obsolete validation or upload changed the retained settings dialog');
+    }
+    assert(!failures.length, failures.join(' | '));
+};
 const run = async () => {
     assert(innerWidth === 390, 'Expected 390px viewport');
-    EngineUI.setup({api, owner: () => username, session: () => epoch, isAdmin: () => false, editing: () => false,
+    EngineUI.setup({api, owner: () => username, session: () => epoch, isAdmin: () => settingsAdmin, editing: () => false,
         escape: value => String(value ?? '').replace(/[&<>"']/g, ch => ({
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
         })[ch]), formatTime: String});
@@ -992,25 +1113,27 @@ const run = async () => {
         }
         return stableHistory(params);
     };
-    clock += 30000;
-    cappedCurrent[0] = {...cappedCurrent[0], signal: 'SELL', display_status: 'SÆLGSSIGNAL'};
-    const archivePoll = poll();
+    EngineUI.mount(false);
     await flush();
+    check(button(loadedArchiveRow) && button(history), 'Explicit refresh lost already loaded history');
+    const archivePage = click(history);
+    cappedCurrent[0] = {...cappedCurrent[0], signal: 'SELL', display_status: 'SÆLGSSIGNAL'};
+    await poll();
     const freshSignal = '[data-engine-signal=SELL] [data-engine-detail="new-current"]';
-    check(failArchive && button(freshSignal), 'A pending archive tail blocked fresh current signals');
-    check(button(loadedArchiveRow) && !button(history), 'A pending archive tail discarded loaded history');
+    check(failArchive && button(freshSignal), 'A pending archive page blocked fresh current signals');
+    check(button(loadedArchiveRow), 'A pending archive page discarded loaded history');
     cappedCurrent[0] = {...cappedCurrent[0], signal: 'BUY', display_status: 'KØBSSIGNAL'};
     await poll();
     check(button('[data-engine-signal=BUY] [data-engine-detail="new-current"]'),
-        'A pending archive tail blocked the next current poll');
+        'A pending archive page blocked the next current poll');
     failArchive?.(Error('Synthetic archive read failure'));
-    await archivePoll;
-    await flush();
+    await archivePage;
     await poll();
-    check(tailReads === 1 && button(loadedArchiveRow) && !button(history),
-        'Archive tail failure discarded history or was retried on the next tick');
-    await poll();
-    check(tailReads === 2 && button(loadedArchiveRow), 'Archive tail did not recover on the next scheduled retry');
+    check(tailReads === 1 && button(loadedArchiveRow) && button(history) &&
+        byId('notice').textContent === 'Synthetic archive read failure',
+        'Archive page failure discarded history, hid the error or retried automatically');
+    await click(history);
+    check(tailReads === 2 && button(loadedArchiveRow) && !button(history), 'Archive page retry failed');
 
     let failHead;
     archiveFixture.autoHistory = params => params.has('before') ? stableHistory(params)
@@ -1037,7 +1160,7 @@ const run = async () => {
     check(!button('[data-engine-detail="alpha-obsolete-archive"]') && button('[data-engine-detail="beta-closed"]'),
         'A delayed alpha archive changed beta history');
 
-    for (const [currentCount, archiveCount, delayPage, delayProbe] of [
+    for (const [currentCount, archiveCount, delayPage, delayHead] of [
         [101, 21, false, false], [102, 141, false, false], [101, 21, true, false], [101, 21, false, true]
     ]) {
         const current = Array.from({length: currentCount}, (_, index) => ({
@@ -1050,7 +1173,7 @@ const run = async () => {
         // Insert outside the first page and, for deep history, inside the last loaded page.
         const insertion = archiveCount === 21 ? 21 : 130;
         expired.id = 301 - 2 * insertion;
-        let finishPage, finishProbe, holdProbe = false;
+        let finishPage, finishHead, holdHead = false;
         archiveFixture = {
             current,
             autoHistory(params) {
@@ -1065,8 +1188,8 @@ const run = async () => {
                 if (delayPage && before !== Infinity && !finishPage) {
                     return new Promise(resolve => { finishPage = () => resolve(result); });
                 }
-                if (holdProbe && before !== Infinity) {
-                    return new Promise(resolve => { finishProbe = () => resolve(result); });
+                if (holdHead && before === Infinity) {
+                    return new Promise(resolve => { finishHead = () => resolve(result); });
                 }
                 return result;
             }
@@ -1086,12 +1209,11 @@ const run = async () => {
             await poll();
             check(!button(history), 'Unchanged capped current list reopened exhausted history');
         }
-        if (delayProbe) {
-            holdProbe = true;
-            clock += 30000;
+        if (delayHead) {
+            holdHead = true;
             await poll();
-            assert(finishProbe, 'No pending background archive check');
-            holdProbe = false;
+            assert(finishHead, 'No pending first archive page');
+            holdHead = false;
         }
         current.pop();
         archived.splice(insertion, 0, {...expired, status: 'EXPIRED'});
@@ -1100,13 +1222,19 @@ const run = async () => {
             finishPage();
             await firstPage;
         }
-        if (delayProbe) {
+        if (delayHead) {
             await poll();
-            finishProbe();
+            finishHead();
             await flush();
         }
         await poll();
         await flush();
+        if (currentCount > 101) {
+            check(!button(history), 'An unchanged capped response reset pagination');
+            // The API returns identical first pages while the expired watch stays outside both caps.
+            EngineUI.mount(false);
+            await flush();
+        }
         check(button(history), 'An unseen watch expiring with ' + currentCount + ' current watches did not restore pagination');
         check(button('[data-engine-group=history] [data-engine-detail="capped-archive-20"]'),
             'Revalidating a capped archive discarded loaded rows');
@@ -1135,7 +1263,16 @@ const run = async () => {
     };
     switchAccount('alpha');
     await flush();
-    for (let i = 1; i < 26; ++i) await click(history);
+    for (let i = 1; i < 26; ++i) {
+        await click(history);
+        if (i === 3) {
+            archiveRequests.length = 0;
+            for (let tick = 0; tick < 4; ++tick) await poll();
+            check(archiveRequests.length === 4 && archiveRequests.every(r => r.before === Infinity && r.limit === 20),
+                'Polling paginated history rechecked a loaded cursor');
+            check(archivedIds().length === 80 && button(history), 'Polling changed the partially loaded archive');
+        }
+    }
     assert(archivedIds().length === 520 && !button(history), 'Large archive fixture did not exhaust history');
     archiveRequests.length = 0;
     for (let tick = 0; tick < 4; ++tick) {
@@ -1143,12 +1280,10 @@ const run = async () => {
         await poll();
         await flush();
         const reads = archiveRequests.slice(previousReads);
-        check(reads.length === 1 && reads[0].limit === 20,
-            'Capped background poll exceeded the original 20-row archive read');
+        check(reads.length === 1 && reads[0].before === Infinity && reads[0].limit === 20,
+            'Capped background poll changed the original first-page archive read');
         check(archivedIds().length === 520 && !button(history), 'Unchanged capped poll disturbed the loaded archive');
     }
-    const probeCursors = archiveRequests.filter(request => Number.isFinite(request.before)).map(request => request.before);
-    check(new Set(probeCursors).size >= 2, 'Background checks never progressed beyond one archive page');
     archiveFixture = null;
 
     omitHistory = true;
@@ -1340,6 +1475,7 @@ const run = async () => {
     testAck.resolve({});
     await testAcknowledgement;
     assert(!failures.length, failures.join(' | '));
+    await checkSettingsIsolation();
 };
 window.testResult = run().then(() => 'PASS', error => String(error) + '\\n' + (error.stack || ''));
 </script>

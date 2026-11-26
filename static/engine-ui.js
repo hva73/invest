@@ -226,45 +226,21 @@ window.EngineUI=(()=>{
  const isArchived=s=>['EXPIRED','COMPLETED'].includes(s.status);
  const historyPageSize=20;
  const historyPath=before=>base+'/sessions'+query()+'&limit='+historyPageSize+'&view=history'+(before?'&before='+before:'');
- const archiveRecheckMs=30000;
+ const historyRetryMs=30000;
  let pendingHistory=null,pendingArchive=null;
  function restartHistoryPaging(history){
-  // A new page boundary invalidates the cursor, while loaded archive rows stay visible.
+  // Restart from the first cursor while keeping already loaded rows visible.
   pendingHistory=null;
   history.pages=[];
-  history.checkedAt=undefined;
-  history.checkIndex=undefined;
-  history.recheck=undefined;
  }
  async function refreshHistory(history,scope){
   if(pendingArchive?.()||Date.now()<history.retryAt)return;
   const current=()=>scope()&&listData()?.history===history;
   pendingArchive=current;
   try{
-   // Alternate the first page with one loaded page when a capped current list may hide closures.
-   const lastIndex=history.pages.length-1;
-   // An insertion just before a partial final page can leave that page unchanged.
-   const start=lastIndex>0&&history.pages[lastIndex].sessions.length<historyPageSize?lastIndex-1:lastIndex;
-   const index=history.checkIndex??start;
-   const recheck=history.recheck;
-   const due=(listData().truncated||history.checkIndex!==undefined)&&Date.now()-history.checkedAt>=archiveRecheckMs;
-   const checked=recheck||due?history.pages[index]:null;
-   const result=await api(historyPath(checked?.before));
+   const result=await api(historyPath());
    if(!current())return;
    const page={sessions:result.sessions,next_cursor:result.next_cursor??null,truncated:result.truncated};
-   if(checked){
-    if(history.pages[index]!==checked||history.recheck!==recheck)return;
-    history.checkedAt=Date.now();
-    history.recheck=undefined;
-    const next=(index+1)%(lastIndex+1);
-    history.checkIndex=next===start?undefined:next;
-    if(page.next_cursor!==checked.next_cursor||page.sessions.length!==checked.sessions.length||
-       page.sessions.some((row,i)=>row.watch_id!==checked.sessions[i].watch_id)){
-     restartHistoryPaging(history);
-     paint();
-    }
-    return;
-   }
    if((history.head?.next_cursor??null)!==page.next_cursor)restartHistoryPaging(history);
    const changed=JSON.stringify(history.head)!==JSON.stringify(page);
    history.head=page;
@@ -275,14 +251,14 @@ window.EngineUI=(()=>{
    }
   }catch{
    if(!current())return;
-   history.retryAt=Date.now()+archiveRecheckMs;
+   history.retryAt=Date.now()+historyRetryMs;
    if(!history.head&&!history.loadFailed){
     history.loadFailed=true;
     paint();
    }
   }finally{if(pendingArchive===current)pendingArchive=null}
  }
- async function load(){
+ async function load(refreshPaging=false){
   if(!root())return;
   const ticket=++generation,user=owner(),epoch=sessionEpoch(),scope=captureScope();
   const current=()=>scope()&&ticket===generation;
@@ -295,12 +271,8 @@ window.EngineUI=(()=>{
   const previous=listData(user,epoch),history=previous?.history||{head:null,pages:[],loaded:new Map(),retryAt:0,loadFailed:false};
   if(previous&&!r.truncated){
    const ids=new Set([...r.sessions,...(history.head?.sessions||[])].map(s=>s.watch_id));
-   if(previous.sessions.some(s=>!isArchived(s)&&!ids.has(s.watch_id)))restartHistoryPaging(history);
-   else if(previous.truncated&&(history.pages.length||pendingHistory?.())){
-    history.checkIndex=undefined;
-    history.recheck=ticket;
-   }
-  }
+   if(previous.truncated||previous.sessions.some(s=>!isArchived(s)&&!ids.has(s.watch_id)))restartHistoryPaging(history);
+  }else if(refreshPaging)restartHistoryPaging(history);
   data={...r,candidates:registry.candidates||[],history,_owner:user,_mode:mode,_epoch:epoch};
   paint();
   // Archive latency and retries must not hold the current-signal poll open.
@@ -322,7 +294,7 @@ window.EngineUI=(()=>{
   timer=setTimeout(tick,15000);
   return ()=>{stopped=true;clearTimeout(timer)};
  }
- let stopListPoll;
+ let stopListPoll,mountedRoot;
  function schedule(){
   stopListPoll?.();
   stopListPoll=pollView(captureView(),async(scope,current)=>{
@@ -334,10 +306,13 @@ window.EngineUI=(()=>{
   });
  }
  function mount(value){
-  if(value!==mode)root()?.replaceChildren();
+  const node=root(),refreshPaging=node===mountedRoot&&value===mode;
+  if(value!==mode)node?.replaceChildren();
+  mountedRoot=node;
   setMode(value);
   const scope=captureScope();
-  load().catch(error=>{
+  // A manual refresh on the mounted list can find closures outside both first pages.
+  load(refreshPaging).catch(error=>{
    if(scope())root().textContent='Motorstatus kunne ikke hentes: '+reason(error.details?.code||error.message);
   });
   schedule();
@@ -480,19 +455,22 @@ window.EngineUI=(()=>{
   const cursor=(history?.pages.at(-1)||history?.head)?.next_cursor;
   if(!scope()||!cursor||pendingHistory?.())return;
   pendingHistory=scope;
-  const current=()=>pendingHistory===scope&&scope();
-  let page;
+  const current=()=>scope()&&listData()?.history===history;
+  const currentCursor=()=>current()&&pendingHistory===scope;
   try{
-   page=await api(historyPath(cursor));
+   const page=await api(historyPath(cursor));
    if(!current())return;
-  }catch(error){if(current())throw error;return}
+   const advance=currentCursor();
+   if(advance)history.pages.push({sessions:page.sessions,next_cursor:page.next_cursor??null,truncated:page.truncated});
+   // A same-session page can still supply rows after the cursor has been refreshed.
+   for(const row of page.sessions){
+    if(advance||!history.loaded.has(row.watch_id))history.loaded.set(row.watch_id,row);
+   }
+   paint();
+   const group=root().querySelector('details[data-engine-group=history]');
+   if(advance&&group)group.open=true;
+  }catch(error){if(currentCursor())throw error}
   finally{if(pendingHistory===scope)pendingHistory=null}
-  history.checkedAt??=Date.now();
-  history.pages.push({before:cursor,sessions:page.sessions,next_cursor:page.next_cursor??null,truncated:page.truncated});
-  for(const row of page.sessions)history.loaded.set(row.watch_id,row);
-  paint();
-  const group=root().querySelector('details[data-engine-group=history]');
-  if(group)group.open=true;
  }
  async function controlSession(button){
   const current=captureScope(),wid=button.dataset.engineId;
@@ -539,8 +517,43 @@ window.EngineUI=(()=>{
    release();
   }
  }
- async function click(b){if(b.isConnected===false)return false;if(b.dataset.signalManualPortfolio)return openManualSale(b);if(b.dataset.engineNotice){openNotice(JSON.parse(b.dataset.engineNotice));return true}if(b.dataset.engineAck){await acknowledgeNotice(b);return true}if(b.dataset.engineOwn){showOwn=!showOwn;paint();return true}if(b.dataset.engineManual!==undefined){await startManualWatch(b);return true}if(b.hasAttribute('data-engine-eodhd-search')){await findEodhdSymbol();return true}if(b.hasAttribute('data-engine-batch-add')){await addBatchCandidate();return true}if(b.hasAttribute('data-engine-history-more')){await moreHistory();return true}if(b.hasAttribute('data-engine-close')){dialogGeneration++;document.getElementById('engine-dialog')?.close();return true}if(b.dataset.engineDetail){const opened=await detail(b.dataset.engineDetail,false,!root());if(opened&&b.hasAttribute('data-engine-plan')){const plan=document.getElementById('engine-buy-plan'),details=plan?.closest('details');if(details){details.open=true;details.scrollIntoView({block:'nearest'});details.querySelector('summary')?.focus({preventScroll:true})}}return true}if(b.hasAttribute('data-engine-new')){await creation();return true}if(b.dataset.engineControl){await controlSession(b);return true}if(b.dataset.engineFilter){activeFilter=b.dataset.engineFilter;applyFilter(activeFilter);return true}if(b.dataset.engineKill){if(!confirm(b.dataset.engineKill==='on'?'Pause alle dine motorsessioner i BÅDE DRIFT OG TEST? Historik og Pluto-ordrer bevares.':'Ophæv nødstop? Sessionerne genoptages kun manuelt.'))return true;await api(base+'/kill-switch',{enabled:b.dataset.engineKill==='on',reason:'Manuel ændring fra ESCAPE-kontrolcenter'});await load();return true}if(b.hasAttribute('data-engine-strategies')){const ticketOwner=owner();const [s,p]=await Promise.all([api(base+'/strategies'),api(base+'/providers'+query())]);if(owner()!==ticketOwner||!b.isConnected)return true;dialog('Strategier og datakilder',`${s.strategies.map(x=>`<article class="event"><h3>${esc(x.strategy_id)} v${esc(x.version)}</h3><p>${x.validation_status==='baseline_tested'?'Testet baseline · vælges eksplicit ved start':'Uploadet · kan ikke aktiveres før kvalificering'}</p><small>${esc(x.checksum)}</small><button data-engine-validate="${esc(x.strategy_id)}" data-engine-version="${esc(x.version)}">Kontrollér deklarationen</button></article>`).join('')}<p>Backtest, shadow mode og aktivering/rollback af nye versioner er ikke implementeret i fase 1–2.</p><h3>Datakilder</h3>${Object.entries(p.providers).map(([name,v])=>`<article class="event"><h4>${esc(name)}</h4><p>${esc((v.known_limits||[]).join(' · '))}</p>${v.minimum_poll_s?`<p>Mindste pollinterval: ${esc(String(v.minimum_poll_s))} sekunder.</p>`:''}${name==='eodhd'?`<p>Active Trader oplyst · nøgle ${v.key_configured?'konfigureret':'mangler'} · REST ${v.enabled?'aktiveret':'ikke aktiveret'} · WebSocket ${v.websocket_enabled?'aktiveret for trades · adgang uverificeret':'ikke aktiveret'}.</p>`:''}</article>`).join('')}${isAdmin()?'<label>Upload ny, inaktiv strategiversion<input type="file" id="engine-strategy-file" accept="application/json,.json"></label><p id="engine-strategy-status" role="status"></p>':''}`);return true}if(b.dataset.engineValidate){const r=await api(base+'/strategies/'+encodeURIComponent(b.dataset.engineValidate)+'/'+encodeURIComponent(b.dataset.engineVersion)+'/validate',{});b.textContent=r.valid?'Deklarationen er gyldig':'Deklarationen er ugyldig';return true}return false}
- async function change(e){if(e.target.id==='engine-eodhd-select'){const f=document.getElementById('engine-create'),item=candidates[Number(f.elements.candidate.value)];if(item){const choice=(item.eodhd_choices||[]).find(x=>x.symbol===e.target.value);const expectedCurrency=item.instrument?.currency||f.elements.quote_currency.value;if(e.target.value&&(!choice||!expectedCurrency||choice.currency!==expectedCurrency)){e.target.value='';item.provider_symbol=null;f.elements.provider_symbol.value='';if(item.instrument)item.instrument.provider_symbol=null;formStatus('EODHD-instrumentets valuta er ukendt eller stemmer ikke med Pluto. Vælg et dokumenteret match.');return true}item.provider_symbol=e.target.value||null;f.elements.provider_symbol.value=e.target.value;if(item.instrument)item.instrument.provider_symbol=item.provider_symbol}return true}if(e.target.name==='provider'){if(e.target.value==='eodhd')await findEodhdSymbol();return true}if(e.target.name==='provider_symbol'){const f=document.getElementById('engine-create'),item=candidates[Number(f.elements.candidate.value)];if(item)item.provider_symbol=e.target.value.trim();return true}if(e.target.name==='candidate'){const f=document.getElementById('engine-create');instrumentRequest++;if(f){f.elements.provider_symbol.value=candidates[Number(e.target.value)]?.provider_symbol||'';for(const id of ['engine-eodhd-choice','engine-instrument-choice']){const slot=document.getElementById(id);if(slot)slot.textContent=''}}if(!mode&&await resolveInstrument(Number(e.target.value))===undefined)return true;if(f?.elements.provider.value==='eodhd')await findEodhdSymbol();return true}if(e.target.id==='engine-asset-choice'){const index=Number(new FormData(document.getElementById('engine-create')).get('candidate'));await resolveInstrument(index,e.target.value);return true}if(e.target.id!=='engine-strategy-file')return false;const f=e.target.files[0];if(!f)return true;if(f.size>131072)throw Error('Strategifilen er for stor.');const r=await api(base+'/strategies',JSON.parse(await f.text()));document.getElementById('engine-strategy-status').textContent='Strategiversionen er gemt inaktiv. Ingen algoritme er aktiveret. Checksum: '+r.checksum;return true}
+ async function click(b){if(b.isConnected===false)return false;if(b.dataset.signalManualPortfolio)return openManualSale(b);if(b.dataset.engineNotice){openNotice(JSON.parse(b.dataset.engineNotice));return true}if(b.dataset.engineAck){await acknowledgeNotice(b);return true}if(b.dataset.engineOwn){showOwn=!showOwn;paint();return true}if(b.dataset.engineManual!==undefined){await startManualWatch(b);return true}if(b.hasAttribute('data-engine-eodhd-search')){await findEodhdSymbol();return true}if(b.hasAttribute('data-engine-batch-add')){await addBatchCandidate();return true}if(b.hasAttribute('data-engine-history-more')){await moreHistory();return true}if(b.hasAttribute('data-engine-close')){dialogGeneration++;document.getElementById('engine-dialog')?.close();return true}if(b.dataset.engineDetail){const opened=await detail(b.dataset.engineDetail,false,!root());if(opened&&b.hasAttribute('data-engine-plan')){const plan=document.getElementById('engine-buy-plan'),details=plan?.closest('details');if(details){details.open=true;details.scrollIntoView({block:'nearest'});details.querySelector('summary')?.focus({preventScroll:true})}}return true}if(b.hasAttribute('data-engine-new')){await creation();return true}if(b.dataset.engineControl){await controlSession(b);return true}if(b.dataset.engineFilter){activeFilter=b.dataset.engineFilter;applyFilter(activeFilter);return true} return settingsClick(b)}
+ async function settingsClick(button){
+  const kill=button.dataset.engineKill,strategies=button.hasAttribute('data-engine-strategies'),validate=button.dataset.engineValidate;
+  if(!kill&&!strategies&&!validate)return false;
+  const scope=captureScope(),sameDialog=kill?null:captureDialog();
+  const current=()=>scope()&&(!sameDialog||sameDialog())&&(!validate||button.isConnected);
+  if(!current())return true;
+  try{
+   if(kill){
+    if(!confirm(kill==='on'?'Pause alle dine motorsessioner i BÅDE DRIFT OG TEST? Historik og Pluto-ordrer bevares.':'Ophæv nødstop? Sessionerne genoptages kun manuelt.')||!current())return true;
+    await api(base+'/kill-switch',{enabled:kill==='on',reason:'Manuel ændring fra ESCAPE-kontrolcenter'});
+    if(current())await load();
+   }else if(strategies){
+    const [s,p]=await Promise.all([api(base+'/strategies'),api(base+'/providers'+query())]);
+    if(current())dialog('Strategier og datakilder',`${s.strategies.map(x=>`<article class="event"><h3>${esc(x.strategy_id)} v${esc(x.version)}</h3><p>${x.validation_status==='baseline_tested'?'Testet baseline · vælges eksplicit ved start':'Uploadet · kan ikke aktiveres før kvalificering'}</p><small>${esc(x.checksum)}</small><button data-engine-validate="${esc(x.strategy_id)}" data-engine-version="${esc(x.version)}">Kontrollér deklarationen</button></article>`).join('')}<p>Backtest, shadow mode og aktivering/rollback af nye versioner er ikke implementeret i fase 1–2.</p><h3>Datakilder</h3>${Object.entries(p.providers).map(([name,v])=>`<article class="event"><h4>${esc(name)}</h4><p>${esc((v.known_limits||[]).join(' · '))}</p>${v.minimum_poll_s?`<p>Mindste pollinterval: ${esc(String(v.minimum_poll_s))} sekunder.</p>`:''}${name==='eodhd'?`<p>Active Trader oplyst · nøgle ${v.key_configured?'konfigureret':'mangler'} · REST ${v.enabled?'aktiveret':'ikke aktiveret'} · WebSocket ${v.websocket_enabled?'aktiveret for trades · adgang uverificeret':'ikke aktiveret'}.</p>`:''}</article>`).join('')}${isAdmin()?'<label>Upload ny, inaktiv strategiversion<input type="file" id="engine-strategy-file" accept="application/json,.json"></label><p id="engine-strategy-status" role="status"></p>':''}`);
+   }else{
+    const r=await api(base+'/strategies/'+encodeURIComponent(validate)+'/'+encodeURIComponent(button.dataset.engineVersion)+'/validate',{});
+    if(current())button.textContent=r.valid?'Deklarationen er gyldig':'Deklarationen er ugyldig';
+   }
+  }catch(error){if(current())throw error}
+  return true;
+ }
+ async function uploadStrategy(input){
+  const mounted=captureForm(input),sameDialog=captureDialog();
+  const current=()=>mounted()&&sameDialog()&&isAdmin();
+  const file=input.files[0],status=document.getElementById('engine-strategy-status');
+  if(!file||!status||!current())return true;
+  try{
+   if(file.size>131072)throw Error('Strategifilen er for stor.');
+   const text=await file.text();
+   if(!current())return true;
+   const r=await api(base+'/strategies',JSON.parse(text));
+   if(current())status.textContent='Strategiversionen er gemt inaktiv. Ingen algoritme er aktiveret. Checksum: '+r.checksum;
+  }catch(error){if(current())throw error}
+  return true;
+ }
+ async function change(e){if(e.target.id==='engine-eodhd-select'){const f=document.getElementById('engine-create'),item=candidates[Number(f.elements.candidate.value)];if(item){const choice=(item.eodhd_choices||[]).find(x=>x.symbol===e.target.value);const expectedCurrency=item.instrument?.currency||f.elements.quote_currency.value;if(e.target.value&&(!choice||!expectedCurrency||choice.currency!==expectedCurrency)){e.target.value='';item.provider_symbol=null;f.elements.provider_symbol.value='';if(item.instrument)item.instrument.provider_symbol=null;formStatus('EODHD-instrumentets valuta er ukendt eller stemmer ikke med Pluto. Vælg et dokumenteret match.');return true}item.provider_symbol=e.target.value||null;f.elements.provider_symbol.value=e.target.value;if(item.instrument)item.instrument.provider_symbol=item.provider_symbol}return true}if(e.target.name==='provider'){if(e.target.value==='eodhd')await findEodhdSymbol();return true}if(e.target.name==='provider_symbol'){const f=document.getElementById('engine-create'),item=candidates[Number(f.elements.candidate.value)];if(item)item.provider_symbol=e.target.value.trim();return true}if(e.target.name==='candidate'){const f=document.getElementById('engine-create');instrumentRequest++;if(f){f.elements.provider_symbol.value=candidates[Number(e.target.value)]?.provider_symbol||'';for(const id of ['engine-eodhd-choice','engine-instrument-choice']){const slot=document.getElementById(id);if(slot)slot.textContent=''}}if(!mode&&await resolveInstrument(Number(e.target.value))===undefined)return true;if(f?.elements.provider.value==='eodhd')await findEodhdSymbol();return true}if(e.target.id==='engine-asset-choice'){const index=Number(new FormData(document.getElementById('engine-create')).get('candidate'));await resolveInstrument(index,e.target.value);return true}return e.target.id==='engine-strategy-file'?uploadStrategy(e.target):false}
  let stopExternalPoll;
  function refreshExternal(wid){
   const mounted=captureView(true),d=document.getElementById('engine-dialog'),version=dialogGeneration;
