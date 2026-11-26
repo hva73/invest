@@ -2591,5 +2591,27 @@
     "reserve_plan_id": "ui/desktop/desktop-read-only-estimate-shows-pending-state",
     "reserve_goal": "ui/desktop",
     "reserve_reassessment": "54:27@dcc9e6346d890f6b48e8d60a464d817da4e4c8e900a934aeb820c36f1909fc3e"
+  },
+  {
+    "issue": 114,
+    "generation": 21,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [
+      "114:20"
+    ],
+    "paths": [
+      "journal_projection.py",
+      "tests/test_app.py"
+    ],
+    "task": "Approved roadmap statistics/fills (Fills, kostpris og afstemning). Exact existing source anchor: journal_projection.py :: status_time if known else r['occurred_at'],'Pluto','order'. Implement only this bounded change: Tilf\u00f8j \u00e9n SQLite-accepttest fra den eksisterende normaliserede ordrekontekst via candidate_lifecycle.observe_pluto() til journal_projection.read() med Pluto- og ordrefiltre. Brug to forskellige ordre-id'er for samme ejer med status FILLED og det samme anmodede antal. Lad den ene observation mangle udf\u00f8rt antal, og giv den anden et eksplicit positivt udf\u00f8rt antal, som matcher det anmodede antal. Brug fixturefelterne fra den interne kontekst.. Acceptance: Journalen viser begge observationer. Ordren med manglende antal har normaliseret status UNKNOWN og filled_quantity null, mens ordren med dokumenteret antal har status FILLED og bevarer det pr\u00e6cise antal. Den oprindelige status kan l\u00e6ses i begge r\u00e6kkers detaljer.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_app.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "statistics/fills/journal-filled-status-requires-quantity-evidence",
+    "reserve_goal": "statistics/fills"
   }
 ]
