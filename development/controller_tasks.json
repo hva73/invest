@@ -2028,7 +2028,7 @@
     "priority": 1,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "04cee36687e4d60bca0adbedf11acb4ed7224f74",
+    "base_sha": "cbb37703356ffae9f3d2beba37265d17e0b706db",
     "dependencies": [],
     "paths": [
       "static/trade-ui.js",
