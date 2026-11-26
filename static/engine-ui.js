@@ -109,7 +109,23 @@ window.EngineUI=(()=>{
    onError(n,error)
   }
  }
- function schedule(){clearTimeout(timer);timer=setTimeout(async()=>{if(!root())return;if(!document.hidden){const open=document.querySelector('dialog[open]');try{if(open?.id==='engine-dialog'&&open.dataset.watchId){await load();await detail(open.dataset.watchId,true)}else if(!open&&!editing())await load()}catch{}}schedule()},15000)}
+ function schedule(){
+  clearTimeout(timer);
+  timer=setTimeout(async()=>{
+   if(!root())return;
+   if(!document.hidden){
+    const open=document.querySelector('dialog[open]');
+    try{
+     if(open?.id==='engine-dialog'&&open.dataset.watchId){
+      const wid=open.dataset.watchId,valid=captureInteraction();
+      await load();
+      if(valid()&&document.querySelector('dialog[open]')===open&&open.dataset.watchId===wid)await detail(wid,true);
+     }else if(!open&&!editing())await load();
+    }catch{}
+   }
+   schedule();
+  },15000);
+ }
  function dialog(title,body,refresh=false){let d=document.getElementById('engine-dialog');if(!d){d=document.createElement('dialog');d.id='engine-dialog';d.className='overview-detail-dialog';document.getElementById('content').append(d)}if(!refresh){delete d.dataset.watchId;delete d.dataset.holdingKey;d.classList?.remove('signal-overview-dialog')}const previousScroll=d.scrollTop;d.innerHTML=`<div class="overview-detail-header"><h2 tabindex="-1">${esc(title)}</h2><button data-engine-close aria-label="Luk motordetaljer">✕</button></div>${body}`;if(!d.open)d.showModal();if(refresh)d.scrollTop=previousScroll;else d.querySelector('h2').focus();return d}
  function chart(items){const points=items.map(x=>x.data).reverse().filter(s=>s.price!==null);if(points.length<2)return '<p>Grafen kræver mindst to faktiske observationer.</p>';const prices=points.map(s=>Number(s.price)),lo=Math.min(...prices),hi=Math.max(...prices),span=Math.max(hi-lo,Math.max(hi,1)*.01),low=(hi+lo-span)/2;const times=points.map(s=>Date.parse(s.event_time)),duration=Math.max(1,times.at(-1)-times[0]);const path=points.map((s,i)=>{const gap=i&&(s.session_key!==points[i-1].session_key||times[i]-times[i-1]>s.interval_s*1500);return `${!i||gap?'M':'L'}${10+580*(times[i]-times[0])/duration},${160-140*(prices[i]-low)/span}`}).join(' ');const color=prices.at(-1)>prices[0]?'#8ddbc8':prices.at(-1)<prices[0]?'#f08d9b':'#a9bac5';return `<figure class="engine-chart"><svg viewBox="0 0 600 180" role="img" aria-label="${window.ESCAPE_DEMO?'Fiktive':'Faktiske'}, tidsstemplede kursobservationer"><path d="${path}" fill="none" stroke="${color}" stroke-width="2"/></svg><figcaption>${date(points[0].event_time)} → ${date(points.at(-1).event_time)} · interval ${text(lo)}–${text(hi)} ${esc(points[0].currency)}. Huller forbindes ikke.</figcaption></figure>`}
  function instrumentEvidence(d){
