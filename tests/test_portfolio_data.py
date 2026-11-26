@@ -71,6 +71,24 @@ class Data(unittest.TestCase):
    portfolio_data.mark_failed(c,1,self.root,'Test failure')
    summary=portfolio_data.summaries(portfolios.list_owned(c,1),portfolio_data.snapshots(c,1));self.assertEqual(summary['by_currency'],{});self.assertEqual(summary['missing_portfolios'],1)
    self.assertEqual(portfolio_data.snapshots(c,1)[str(self.root)]['data']['value']['value']['amount'],'1000')
+ def test_position_unrealized_percent_requires_known_common_currency(self):
+  import dashboard_projection
+  for currency,display_dkk,expected in [(None,False,None),(None,True,None),('USD',False,'10.0'),('USD',True,'10.0')]:
+   with self.subTest(currency=currency,display_dkk=display_dkk):
+    holding={'name':'Test stock','assetId':'test-stock','quantity':'1','currency':currency,'unrealisedPnL':'10','costBasis':'100'}
+    original={'amount':'10','currency':currency}
+    displayed={'amount':'70','currency':'DKK'} if display_dkk else original
+    if display_dkk:holding['unrealisedPnLInPortfolioCurrency']=displayed
+    positions=portfolio_data.normalize_positions([holding])
+    with app.connect() as c:
+     portfolio_data.save(c,1,self.root,{'observed':'2026-01-01T12:00:00+00:00','positions_complete':True,'positions':positions})
+     owned=portfolios.list_owned(c,1)
+     snapshots=portfolio_data.snapshots(c,1)
+    row,=dashboard_projection.build(app.connect,1,owned,snapshots)['positions']
+    self.assertEqual(row['unrealized'],displayed)
+    self.assertEqual(row['original_unrealized'],original)
+    self.assertEqual(row['cost_basis'],{'amount':'100','currency':currency})
+    self.assertEqual(row['unrealized_percent'],expected)
  def test_bad_numbers_and_missing_fields(self):
   for value in ['NaN','Infinity',True,'1,25']:
    with self.assertRaises(portfolio_data.PortfolioFormatError):portfolio_data.number(value)
