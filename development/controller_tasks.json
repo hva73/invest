@@ -1399,7 +1399,7 @@
     "task": "In auto_holdings_tick only, require positions_complete to be literal boolean true rather than truthy arbitrary values; inspect actual snapshot producer contract first. Preserve legitimate complete snapshots, skip malformed earlier tenant and continue later valid tenant. Add focused actual SQLite tests; if producer contract differs, do not change it and report evidence. Run holdings tests. Small scoped code/test only, no schema, network, live provider/broker or production, no unrelated refactor. ESCAPE_DRAFT_READY after actual tests pass."
   },
   {
-    "status": "ready",
+    "status": "done",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "a2d4a360a4897187a48acd687c7dd826859bcfcd",
