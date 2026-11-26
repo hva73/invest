@@ -1087,29 +1087,27 @@ async function checkManualSymbolReverification(sameAsset, searchFirst, fail, imp
   }
 }
 
-async function checkSymbolSearchDuringFirstQuote(currency, fail) {
+async function checkSymbolSearchDuringFirstQuote(currency, fail, explicit = false) {
   const {ui, elements, calls, call, nodes} = creationRequests();
   elements.provider.value = 'eodhd';
   elements.quote_currency.value = 'USD';
-  const verify = ui.change({target: elements.candidate});
-  const quote = call('market/quote');
+  const select = () => ui.change({target: explicit ? {id: 'engine-asset-choice', value: 'asset'} : elements.candidate});
+  let verify = explicit ? null : select();
   const search = ui.click({dataset: {}, hasAttribute: key => key === 'data-engine-eodhd-search'});
   const manual = call('market/eodhd-symbols');
+  if (explicit) verify = select();
+  const quote = calls.find(c => c.url === 'market/quote');
   quote.resolve({asset_id: 'asset', currency, exchange: 'NASDAQ', name: 'First'});
   await settle();
-  const searches = calls.filter(c => c.url === manual.url);
-  assert.deepEqual(searches.map(c => c.body.quote_currency), currency === 'USD' ? ['USD'] : ['USD', currency]);
-  if (currency !== 'USD') {
-    manual.reject(Error('obsolete currency'));
-    await search;
-    assert.doesNotMatch(nodes['engine-eodhd-choice'].textContent, /obsolete/);
-  }
-  const current = searches.at(-1);
-  if (fail) current.reject(Error('symbol search failed'));
-  else current.resolve({choices: [{symbol: 'FIRST.US', name: 'First', currency}]});
+  assert.deepEqual(calls.filter(c => c.url === manual.url).map(c => c.body.quote_currency), ['USD']);
+  if (fail) manual.reject(Error('symbol search failed'));
+  else manual.resolve({choices: [{symbol: 'FIRST.US', name: 'First', currency: 'USD'}]});
   await Promise.all([search, verify]);
   if (fail) assert.match(nodes['engine-eodhd-choice'].textContent, /symbol search failed/);
-  else assert.equal(elements.provider_symbol.value, 'FIRST.US');
+  else {
+    assert.match(nodes['engine-eodhd-choice'].innerHTML, /FIRST.US/);
+    assert.equal(elements.provider_symbol.value, currency === 'USD' ? 'FIRST.US' : '');
+  }
 }
 
 async function checkSubmittedBatch(size, fail, replacement) {
@@ -1212,12 +1210,19 @@ async function checkCreationBoundary(stage, change, fail) {
   if (fail) deferred.reject(Error('request failed'));
   else deferred.resolve({candidates: rows, selection: {}, choices: []});
   if (change) {
+    const submitted = stage === activation && nextCandidate;
+    if (submitted && !fail) {
+      session.creation = null;
+      await settle();
+      assert.equal(requests.length, 1);
+      requests.shift().succeed();
+    }
     await operation;
-    if (stage === activation && nextCandidate) {
+    if (submitted) {
       assert.equal(button.disabled, false);
-      const expected = JSON.parse(before);
-      expected[2].disabled = false;
-      assert.equal(snapshot(), JSON.stringify(expected));
+      assert.equal(Boolean(nodes['engine-dialog'].closed), !fail);
+      assert.deepEqual(notices, fail ? ['request failed'] : []);
+      assert.match(nodes['engine-form-status'].textContent, fail ? /request failed/ : /1 session\(er\) oprettet/);
     } else assert.equal(snapshot(), before, [stage, change, fail].join(' / '));
     if (nextCandidate) {
       elements.provider.value = 'pluto';
@@ -1239,7 +1244,9 @@ async function checkCreationBoundary(stage, change, fail) {
 
 async function main() {
   for (const fail of [true, false]) {
-    for (const currency of ['USD', 'EUR']) await checkSymbolSearchDuringFirstQuote(currency, fail);
+    for (const currency of ['USD', 'EUR']) {
+      for (const explicit of [false, true]) await checkSymbolSearchDuringFirstQuote(currency, fail, explicit);
+    }
     for (const size of [1, 2]) await checkSubmittedBatch(size, fail);
     for (const replacement of ['login', 'form']) await checkSubmittedBatch(2, fail, replacement);
   }

@@ -175,7 +175,8 @@ window.EngineUI=(()=>{
  }
  function verifySelection(index,assetId,valid){
   const form=document.getElementById('engine-create'),lookup=symbolLookups.get(form);
-  if(lookup&&(lookup.item!==candidates[index]||(assetId&&lookup.assetId!==assetId)))symbolLookups.delete(form);
+  const verifiedAsset=candidates[index]?.instrument?.asset_id;
+  if(lookup&&(lookup.item!==candidates[index]||(assetId&&verifiedAsset&&verifiedAsset!==assetId)))symbolLookups.delete(form);
   const result=resolveInstrument(index,assetId,valid);
   const verification={result,valid,assetId,item:candidates[index]};
   pendingVerification=verification;
@@ -238,18 +239,17 @@ window.EngineUI=(()=>{
   const f=document.getElementById('engine-create');if(!f)return;
   const index=Number(f.elements.candidate.value),item=candidates[index];if(!item)return;
   const slot=document.getElementById('engine-eodhd-choice'),context=instrumentContext(index);
-  const currency=()=>item.instrument?.currency||f.elements.quote_currency.value||null;
-  const assetId=item.instrument?.asset_id,quoteCurrency=currency();
-  // Initial Pluto verification can fill the asset ID without changing the symbol query.
-  const current=()=>context()&&quoteCurrency===currency()&&(!assetId||assetId===item.instrument?.asset_id);
+  // Share the candidate's pending search. Match its choices against the verified currency at settlement.
+  const assetId=item.instrument?.asset_id;
+  const current=()=>context()&&(!assetId||assetId===item.instrument?.asset_id);
   let lookup=symbolLookups.get(f);
   const valid=()=>current()&&lookup===symbolLookups.get(f)&&(!actionCurrent||actionCurrent());
   if(slot)slot.textContent='Søger hos EODHD …';item.eodhd_error=null;
   try{
    if(!lookup?.current()||!lookup.reply){
-    lookup={current,item,assetId};
+    lookup={current,item};
     symbolLookups.set(f,lookup);
-    lookup.reply=api('market/eodhd-symbols',{report_id:item.report_id,candidate_id:item.candidate.candidate_id,is_test:mode,quote_currency:quoteCurrency});
+    lookup.reply=api('market/eodhd-symbols',{report_id:item.report_id,candidate_id:item.candidate.candidate_id,is_test:mode,quote_currency:item.instrument?.currency||f.elements.quote_currency.value||null});
    }
    const r=await lookup.reply;
    if(!valid())return;
@@ -334,20 +334,19 @@ window.EngineUI=(()=>{
   const common={is_test:mode,purpose:f.get('purpose'),profile:f.get('profile'),priority:f.get('profile')==='CRITICAL'?'CRITICAL':'NORMAL',provider:f.get('provider'),end_at:f.get('end_at')?new Date(f.get('end_at')).toISOString():null,activation_reason:String(f.get('activation_reason')||'')+' · '+selection.reason,strategy_id:selection.strategy_id,strategy_version:selection.version,risk:{max_notional_dkk:f.get('max_notional')||'1000',max_loss_dkk:f.get('max_loss')||'100',max_spread_pct:'1',max_quote_age_s:120,max_position_fraction_pct:'20',proposed_quantity:f.get('quantity')||null,stop_price:f.get('stop')||null,exit_deadline:null}};const sessions=items.map(item=>{const instrument=item.instrument||{asset_id:f.get('asset_id'),exchange:f.get('exchange'),currency:f.get('quote_currency'),provider_symbol:f.get('provider_symbol')||null};if(!instrument.asset_id||!instrument.exchange||!instrument.currency)throw Error('Aktiv-ID, børs og valuta skal være verificeret før start.');return {...common,watch_id:item.watch_id||(item.watch_id='hw-'+crypto.randomUUID()),report_id:item.report_id,candidate_id:item.candidate.candidate_id,ticker:item.candidate.ticker,exchange:instrument.exchange,asset_id:instrument.asset_id,quote_currency:instrument.currency,provider_symbol:item.provider_symbol||instrument.provider_symbol||null,portfolio_ids:item.portfolio_ids||f.getAll('portfolios').map(Number),watch_mode:item.portfolios_verified&&!item.portfolio_ids.length?'entry':f.get('watch_mode'),reactivation_reason:f.get('reactivation_reason')||null}});const signature=JSON.stringify({is_test:mode,sessions});if(!pending||pending.signature!==signature)pending={signature,id:'hwa-'+crypto.randomUUID()};const request={request_id:pending.id,is_test:mode,sessions};
   const button=form.querySelector('.primary');
   const formCurrent=creationFormContext(form);
-  // Once posted, a queued batch belongs to this form independently of its dropdown.
-  const activationCurrent=queued?formCurrent:selectionCurrent;
+  // A posted activation belongs to the submitting form and session.
   activatingForms.set(form,formCurrent);
   button.disabled=true;
   try{
    const result=sessions.length>1?await api(base+'/activation-requests',request,{'Idempotency-Key':request.request_id}):await api(base+'/sessions',sessions[0]);
-   if(!activationCurrent())return true;
+   if(!formCurrent())return true;
    formStatus(`${result.created_count??1} session(er) oprettet. Feedforbindelse og første observation kontrolleres separat.`);
    document.getElementById('engine-dialog').close();
    pending=null;
    batchCandidates=[];
    await load();
   }catch(error){
-   if(!activationCurrent())return true;
+   if(!formCurrent())return true;
    formStatus(reason(error.details?.code||error.message)+(error.details?.errors||[]).map(e=>' '+e.path+': '+e.message).join(''));
    notice(error.details?.code||error.message,'error');
   }finally{
