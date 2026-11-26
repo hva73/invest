@@ -156,6 +156,231 @@
       ],
       "classification": "superseded",
       "product_acceptance": "not implied"
+    },
+    {
+      "row": {
+        "issue": 57,
+        "role": "release",
+        "priority": 1,
+        "status": "blocked",
+        "paths": [
+          "tools/nordicway_release_retention.py",
+          "tests/test_nordicway_release_retention.py"
+        ],
+        "dependencies": [],
+        "generation": 4,
+        "base_branch": "codex/issue57-combined-release-20261124",
+        "base_sha": "3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65",
+        "task": "Concrete independent P0 release-space work, not another offline budget helper. Installed bridge manifest is now 81/81 verified by Actions 45496977779; DB 6759829504 B, free 12723731904 B. Owner wants to stay within 20 GB for now. Implement in the EXISTING post-success retention flow a separately checked archive-creation reserve before any new cPanel compression call, so we can subsequently review whether installation snapshot and archive maintenance can be budgeted separately without weakening backup/restore safety. Use a fresh conservative measured quota input and complete bounded raw-backup inventory including code/manifest/keys (metadata only), an explicit conservative tar+gzip upper bound with overhead, and fail closed if quota, bound or inventory is unknown, changed or insufficient; preserve raw and previous verified backups, no deletion, no compression in blocked cases. For existing archive preserve hash verification and current release/metadata checks. Preserve current verified successful behavior where all gates pass; report a distinct safe deferred maintenance result if appropriate, never claim release succeeded or space recovered. Do not modify legacy server quota gate, release branch, workflows, production, credentials, owner approval, retention policy for live database or broker. No network calls, no commits. Use only the two allowlisted files and existing quota helper if suitable; test mocks for unknown/insufficient/exact-bound/headroom/race, no compression/no delete on failure, successful path and existing regressions. Run python -B -m unittest tests.test_nordicway_release_retention, verify exact file scope. Deliver draft for independent review only. This is one practical prerequisite for a safe phase-separated backup architecture; it is not itself sufficient to authorize the frozen release. Agent 4 owns dbstat and retention of DB rows; agent 3 owns HOT WATCH writes. No overlap."
+      },
+      "replaced_by": [
+        "57:7"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Obsolete raw-archive reserve approach for the replaced release architecture; compressed-directory retention accepted; legacy raw maintenance safety remains a separate requirement if used."
+    },
+    {
+      "row": {
+        "issue": 57,
+        "role": "release",
+        "priority": 1,
+        "status": "blocked",
+        "paths": [
+          "tools/nordicway_release_retention.py",
+          "tests/test_nordicway_release_retention.py"
+        ],
+        "dependencies": [],
+        "generation": 5,
+        "base_branch": "codex/issue57-combined-release-20261124",
+        "base_sha": "3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65",
+        "task": "P0 unblock current release: follow up delivered gen4 draft #247 ee271a39257d3f8259a42f2d196db55b302162c7, not retry same generation. The draft was created by this Mac; reuse its two exact files via local git show if object exists, no fetch or network. If absent, use existing implementation and address only the concrete outstanding safety gaps. Owner terminal confirms filesystem 928G available but account cap 20GB, DB 6836097024, account used upper ~7826571264, quota free ~12.65GB, old 2.2x floor ~15.04GB. Owner bridge runner/sequence explicitly never restores old database; public apply_update.py makes one locked raw snapshot and verifies integrity. Separate post-success archive from install without weakening recovery. Implement/test a fail-closed safe maintenance deferral preserving fresh raw and prior verified archive whenever compression scratch/host bound or competing writer exclusion is unverified; fix last-read race (mutation during final quota call) and existing archive full nested inventory recheck identified in #247. Prefer no compression/delete on unproven conditions; explicit measured phase reserve proof and regression of safe paths. Do not lower actual private gate, no installation, no live DB, no FTP/API calls. No new helper or speculative claims. Use synthetic tests including strict 20GB cap, recovery backup preserved, quota race and existing archive mutation. Review-only isolated worktree, no production access, network, broker, orders, workflow, merge, credentials, deployment, or changes outside exact paths. Run relevant tests and fix actual failures. Do not invent code changes if acceptance already covered. Do not claim live or integrated candidate verification."
+      },
+      "replaced_by": [
+        "57:7"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Obsolete raw backup archive deferral attempt; phase-separated compressed snapshot architecture replaces this work order, not a claim that every legacy raw maintenance condition is implemented."
+    },
+    {
+      "row": {
+        "issue": 57,
+        "role": "release",
+        "priority": 1,
+        "status": "blocked",
+        "generation": 6,
+        "base_branch": "codex/issue57-combined-release-20261124",
+        "base_sha": "3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65",
+        "paths": [
+          "tools/nordicway_release_retention.py",
+          "tests/test_nordicway_release_retention.py"
+        ],
+        "dependencies": [],
+        "task": "P0 actual executable phase-separated backup implementation, not another deferral or quota estimator. New actual private source readback Actions 45577915186 job 139080324957: adapter sha256 65d1d5d5178d3afe5092f7e61ae39cc5aabb29948ed34def395ef8d883161ad3, estimate_required_bytes base=(DB+sidecars)*2+source*2+existing then +10%; sequence under lock authorize/preflight/check_quota/stage/stop/quiescence/backup_and_apply/verify_backup/verify_installed/start/health/cleanup; raw snapshot one verified copy, no automatic DB restore. DB 6839615488, free_lower 12644040128, used_upper 7834959872, owner cap 20GB, 928G physical host free. Concrete implementation in existing retention module: locally stream a verified private raw backup into tar+gzip directly (never intermediate tar), hard output byte ceiling from caller supplied verified available quota, fsync and verify complete manifest/file hashes by streaming decompression, preserve raw + previous backup, fail closed and remove only own incomplete temporary output if cap exceeded or corruption; no deletion of original in helper, no credentials/network. Test real synthetic tar+gzip, incompressible abort, corrupt output, unexpected member, source changes, exact cap, valid recovery hashes. Document integration requirements for actual private bridge, including raw backup verification/marker/resume and journal during restart; do not lower actual private gate or claim release-ready. Gen5 #256 review hold remains, no duplication of its guard code. No production actions, workflows, commit/push, extra files. This is a real functional bounded compression primitive for phase separation, not a standalone budget calculator."
+      },
+      "replaced_by": [
+        "57:7"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Standalone raw-to-tar compression primitive superseded by compressed snapshot architecture; no claim that old primitive was delivered."
+    },
+    {
+      "row": {
+        "status": "blocked",
+        "base_branch": "codex/escape-development",
+        "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
+        "dependencies": [],
+        "issue": 267,
+        "generation": 2,
+        "role": "mobile",
+        "priority": 2,
+        "paths": [
+          "static/overview-ui.js",
+          "static/dashboard-ui.js",
+          "static/market-ui.js",
+          "static/position-ui.js",
+          "static/engine-ui.js",
+          "static/trade-ui.js",
+          "tests/test_chart_source_selection.cjs",
+          "tests/test_holding_chart_marker.cjs",
+          "tests/browser_intraday_market_chart.py",
+          "tests/browser_portfolio_value_chart.py"
+        ],
+        "task": "Implement #267 approved graph behavior in existing shared renderers, no redesign. Full local 00–24 axis overview and crypto, actual full verified session for positions, draw only real points to latest observation, future blank. Show verified Marked åbent/Pre-market/Eftermarked/Marked lukket/24/7 or unknown. Preserve Top label actual high, dashed Gns. købskurs actual value/currency, no buy line on BUY without holding, same demo/live renderer and approved layout. Use actual backend contract from gen1 when available; do not guess market times. Ensure 11:40 portfolio ~49% width, European session fraction, US premarket and data gaps. Preserve tooltip behavior and existing period controls. Implement actual scoped code/test, no app.js overlap with #263. No production orders/deploy."
+      },
+      "replaced_by": [
+        "267:3",
+        "267:4"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Superseded by integrated chart implementation and independent desktop/mobile acceptance; no new acceptance claimed."
+    },
+    {
+      "row": {
+        "issue": 268,
+        "generation": 1,
+        "role": "motor",
+        "priority": 0,
+        "status": "blocked",
+        "base_branch": "codex/escape-development",
+        "base_sha": "546dec64a6f6e22253455145866604490945c271",
+        "dependencies": [
+          "8:2"
+        ],
+        "paths": [
+          "intel_workflows.py",
+          "hotwatch_engine.py",
+          "hotwatch_service.py",
+          "tests/test_hotwatch_engine.py",
+          "tests/test_hotwatch_holdings_auto.py",
+          "tests/test_hotwatch_e2e_contract.py"
+        ],
+        "task": "P0 owner-requested dynamic lifecycle rotation, concrete issue #268. After #8 gen2 review/integration, use its integrated source (coordinator refresh base before dispatch if changed). Live 60/60 incl 19 holding exits/41 entry, 18 REVIEW_DUE all 41 NO_DATA. Existing candidate_currentness grace24h; auto req end_at=None, REPORT_ONLY never COLD, reconcile expires only COLD. Implement actual expiry/retirement of intensive entry scanning with history preserved, protect holdings/orders/manual/leases; distinguish no data backoff from reject; finite report-only and candidate prioritization policy proposed explicitly for owner approval before live, no change to trade strategy or orders. Reuse existing reconciliation, not new motor. Tests exact overdue, report-only, no expiry extension by duplicate report, genuine reassessment, capacity frees new candidates, cap is not fill target, protected holdings/exit/tenant/test. Avoid overlaps with #8 gen2; dependency only to avoid conflicts, coordinator must release after actual integration review. No production/credentials/network/orders. Draft implementation + tests. Coordinator verified #281 838817f9 integrated to development 546dec64 (identical Git tree ebdd76d7). Work directly on this base; no importing old PRs or fetching other branches. Expiry/rotation must remain simulation/test or default-off where new TTL/ranking policy needs owner approval; do not enable production behavior or change live risk/strategy. Preserve existing currentness semantics for other readers where needed. Record proposed policy separately from verified expiry."
+      },
+      "replaced_by": [
+        "268:2",
+        "268:3"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Original broad lifecycle attempt replaced by accepted default-off lifecycle slices; live activation/policy remains separately gated."
+    },
+    {
+      "row": {
+        "issue": 14,
+        "generation": 8,
+        "role": "data",
+        "priority": 1,
+        "status": "blocked",
+        "base_branch": "codex/escape-development",
+        "base_sha": "99ba8ef656fa0386ee828d14d7b9c0bae158395a",
+        "dependencies": [
+          "14:7"
+        ],
+        "paths": [
+          "hotwatch_service.py",
+          "tests/test_hotwatch_holdings_auto.py"
+        ],
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "task": "Continue accepted #302 and #273 100-user performance acceptance. Concrete next bottleneck in auto_holdings_tick: per-position repeated user kill-switch, session and autowatch lookups, including a second query for the POSITION_CLOSED generation. Reduce duplicate reads using bounded per-user data and existing indexes, preserve exact semantics, one activation per tick, transaction and tenant boundaries, retry and protected holding/exit behavior. No live calls, schema, trade or strategy changes. Test actual SQLite 1/10/100 users with overlapping asset IDs and different portfolio IDs, paused/linked/closed cases, SQL count and unchanged decisions. Add regression to existing motor CI test_hotwatch_holdings_auto.py. Deliver scoped code/tests.",
+        "followups": [
+          {
+            "paths": [
+              "hotwatch_service.py",
+              "tests/test_hotwatch_holdings_auto.py"
+            ],
+            "task": "Measure and reduce repeated JSON parsing and unnecessary database writes in auto_holdings_tick on accepted prior base. Reuse existing per-position evidence only within one tick; do not reuse stale positions across ticks or change one activation per tick, retries or protection. Actual SQLite tests for 100 users and no extra writes for already-linked positions. Implement only verified remaining waste; if already fully met, return no_changes with evidence."
+          }
+        ]
+      },
+      "replaced_by": [
+        "315:2"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Rejected broad caching approach superseded by accepted narrow optimization; further measured performance gaps remain on #14 roadmap."
+    },
+    {
+      "row": {
+        "issue": 14,
+        "generation": 9,
+        "role": "data",
+        "priority": 0,
+        "status": "blocked",
+        "base_branch": "codex/escape-development",
+        "base_sha": "99ba8ef656fa0386ee828d14d7b9c0bae158395a",
+        "dependencies": [
+          "14:7"
+        ],
+        "paths": [
+          "hotwatch_service.py",
+          "tests/test_hotwatch_holdings_auto.py"
+        ],
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "task": "Continue accepted #302 and #273 100-user performance acceptance. Concrete next bottleneck in auto_holdings_tick: per-position repeated user kill-switch, session and autowatch lookups, including a second query for the POSITION_CLOSED generation. Reduce duplicate reads using bounded per-user data and existing indexes, preserve exact semantics, one activation per tick, transaction and tenant boundaries, retry and protected holding/exit behavior. No live calls, schema, trade or strategy changes. Test actual SQLite 1/10/100 users with overlapping asset IDs and different portfolio IDs, paused/linked/closed cases, SQL count and unchanged decisions. Add regression to existing motor CI test_hotwatch_holdings_auto.py. Deliver scoped code/tests.\n\nOwner-approved fresh generation after local repair exhaustion. FRESH IMPLEMENTATION: start from the approved clean base, inspect PR #304 read-only for useful tests, do not carry forward the rejected caching design. First measure actual SQLite VM steps, returned/decoded rows, statements including PRAGMA, and writer-lock work on baseline. Prefer minimal indexed lookup/query improvement and remove duplicate reads without caching mutable gate/session state across decisions. Preserve original activation order and concurrent visibility, especially kill-switch transitions, closure/reopen, deferred retries and unrelated writes. Test one and 26 holdings per tenant at 100 tenants (paused/linked, killed, deferred, thousands of histories), plus 1/10 tenants. Require measurable improvement on target workload and no material regression on other cases; report baseline/new measurements and run tests.test_hotwatch_holdings_auto. If optimization cannot preserve semantics, do not ship regression or claim acceptance.\nPrior independent review findings (evidence, not expanded permissions):\n- The per-user batch caches session and retry state before SQLite acquires the write lock on the first upsert. If reconciliation commits POSITION_CLOSED for a later holding in that gap, the scan can overwrite the closure using stale state or skip the new generation. Previously, reads for later holdings ran inside the transaction once the first upsert acquired the lock. The 1/10/100-user regression covers tenant scoping and SQL counts but misses this interleaving.\n- hotwatch_service.py:849 changes the writer-lock boundary. If another connection commits before BEGIN IMMEDIATE and the refreshed batch needs no write, the scan keeps the writer lock while processing every remaining tenant, even if the tick ultimately writes nothing. The old path acquired that lock only at the first upsert. The 1/10/100-user test covers SQL counts and tenant decisions, but the race test still writes after refresh and misses this contention regression.\n- auto_holdings_tick eagerly loads session and retry history for every holding of the current user before evaluating the first candidate. When the first holding can activate, the baseline reads only that holding’s history, so the new path can do substantially more SQL and JSON work even with fewer statements. The 1/10/100-user test forces activation near the end and counts statements, leaving this early-activation regression unmeasured.\n- hotwatch_service.py:821–840 regresses SQLite work under the writer lock. In the existing early-activation fixture, make holding 1 link to a PAUSED watch without a prior attempt, leave holding 2 eligible, and seed completed session history for holdings 3–25. The first link acquires the writer lock, then the batch fetches and decodes all later history before activating holding 2. The base skips those later rows. Expected: keep later-history reads bounded on early activation and verify rows read in CI, since statement counts miss this lock-time regression.\n- hotwatch_service.py:821–839 adds a SQLite writer-lock regression. Seed one user with a first holding that needs a LINKED write, a second already linked, a third eligible to activate, and later holdings with session and retry history. The tick loads and decodes the entire remaining history while holding SQLite’s writer lock, even though it stops at the third holding. The base stops reading holding history at that activation. Bound the lookahead under the writer lock and cover third-position activation in test_hotwatch_holdings_auto.py.\n- hotwatch_service.py:827–863 can miss a concurrent stop. With five holdings whose autowatch rows already match their paused sessions, stop the fifth watch on another connection after the batch SELECTs finish and before the fifth holding is evaluated. The cached PAUSED row makes the scan keep LINKED and return without checking data_version. The base scan re-reads the fifth session, sees COMPLETED, and records STOPPED in that tick. Revalidate cached no-write decisions when the batch has changed and cover this interleaving in test_hotwatch_holdings_auto.py.\n- hotwatch_service.py regresses idle SQLite behavior. Seed holdings already LINKED to PAUSED watches with no writes due. During the scan, commit an unrelated row on a second connection, then hold BEGIN IMMEDIATE there through the scan's timeout. The database-wide data_version change makes the idle scan request the writer lock and raise SQLITE_BUSY. Expected behavior is to return None without waiting for the writer because no holding decision changed. The new idle test holds a writer without an intervening commit, so it misses this path.\n- hotwatch_service.py:809–873 can retry the same tenant indefinitely. Seed tenant 1 with only already-linked holdings and tenant 2 with a due holding. Commit an unrelated row from a second SQLite connection after each tenant 1 batch read and before the end-of-scan data_version check. Each commit restarts tenant 1 without a retry bound, so tenant 2 and subsequent feed maintenance never run. The prior scan completed under the same schedule. Expected: bounded per-tick work under unrelated commits, while preserving revalidation before any write.\n- hotwatch_service.py, auto_holdings_tick: Give tenant A five already-linked PAUSED holdings. Commit an unrelated write after the first scan reads holdings 4–5, then complete holding 5's watch after the refresh reads that batch. The second data_version mismatch leaves holding 5 LINKED and advances to the next tenant. The original per-position loop sees COMPLETED when that commit lands before holding 5's individual lookup and records STOPPED in the same tick. The added tests cover a relevant commit on the first scan and repeated unrelated commits, leaving this regression uncovered.\n- hotwatch_service.py regresses the idle 100-user scan. Give each enabled user one fresh holding with a matching PAUSED watch and an existing LINKED record, with no concurrent writes. The base executes 302 scan statements. This change executes 403, including 101 PRAGMA data_version reads, while eliminating zero lookups. Expected: no extra scan statements for this idle workload. The SQL-count test in tests/test_hotwatch_holdings_auto.py counts SELECTs separately from PRAGMAs and starts with a LINKED write, so it misses this path.\n- hotwatch_service.py regresses idle-scan SQL work under concurrent writes. Extend test_repeated_unrelated_commits_do_not_starve_next_tenant to 100 tenants with one already-linked holding each and commit an unrelated row update after each autowatch read. The new scan executes 8 statements per tenant (three passes), versus 3 at the base commit, with identical decisions. Expect unrelated commits to preserve the idle-scan read budget while real session or autowatch changes still trigger revalidation.\n- hotwatch_service.py: auto_holdings_tick bounds asset keys but fetches and decodes every matching historical session while holding SQLite’s writer lock. Reproduce with holding 1 creating a LINKED row, holdings 2–3 already linked, holding 4 due for activation, and thousands of completed sessions for holdings 5–27. The new scan materializes those later histories before activating holding 4. The base scan never returns or decodes them. Expected bounded work under the writer lock. The SQL-count tests miss this regression because their large batch contains minimal history.\n- hotwatch_service.py:899–908 can skip the first eligible holding. Reproduce with an idle tenant whose fifth holding has a linked automatic watch and a later tenant with a due holding. Commit an unrelated update to trigger the idle refresh. After the refreshed batch containing holdings four and five is fetched, reconcile holding five as closed and restore it in the snapshot. The cached LINKED state skips its now-due POSITION_CLOSED generation, and the later tenant gets the tick’s sole activation. The per-position path would see the closure before evaluating holding five and select its new generation first.\n- hotwatch_service.py:814–914 changes activation order. Seed a killed user with two eligible holdings and clear the kill switch from a second SQLite connection immediately after the first gate read. The baseline skips the first holding and activates the second. The new loop restarts the tenant and activates the first, consuming the tick’s only activation. Preserve the per-position resume order and test this case. The same idle rescan also raises reads from 3 to 5 per tenant with one retry-deferred holding, no active session, and an unrelated commit during the first pass.\n- hotwatch_service.py:882–888 forces one batch per position on idle ticks, repeating tenant gate and session lookups. The deferred-history branch also probes the same autowatch key twice. In an in-memory SQLite comparison with 100 users, distinct portfolios, and 26 shared assets per user (one PAUSED/LINKED, 25 deferred), scan statements fell from 7,800 to 5,200, but VM instructions rose from 144,185 to 597,923. The idle regression test covers only one holding per user. Expected bounded tenant batching to reduce duplicate reads on multi-holding idle ticks while preserving decisions.\n- hotwatch_service.py:788,890–897 regresses the 100-user scan. In an in-memory SQLite comparison of the changed lookup SQL against the base, 100 users with one shared asset, distinct portfolios and one paused/linked watch each went from 6,710 to 20,137 VM steps despite fewer statements. With 100 killed users and 26 holdings each, the gate still ran 2,600 times and steps rose from 26,000 to 213,240. Expected fewer duplicate reads and no material increase in lookup work, with link and kill-switch decisions preserved. The one-position regression test counts statements and misses the SQLite work increase.",
+        "followups": [
+          {
+            "paths": [
+              "hotwatch_service.py",
+              "tests/test_hotwatch_holdings_auto.py"
+            ],
+            "task": "Measure and reduce repeated JSON parsing and unnecessary database writes in auto_holdings_tick on accepted prior base. Reuse existing per-position evidence only within one tick; do not reuse stale positions across ticks or change one activation per tick, retries or protection. Actual SQLite tests for 100 users and no extra writes for already-linked positions. Implement only verified remaining waste; if already fully met, return no_changes with evidence."
+          }
+        ],
+        "pause_reason": "architecture_reset"
+      },
+      "replaced_by": [
+        "315:2"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Rejected retry of broad caching approach superseded by narrow integrated optimization; no claim all original benchmark targets met."
+    },
+    {
+      "row": {
+        "status": "blocked",
+        "priority": 0,
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "f18e91982e3d5aba97e39a0e51e3c76376e73746",
+        "dependencies": [],
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "issue": 315,
+        "generation": 1,
+        "role": "data",
+        "paths": [
+          "hotwatch_service.py",
+          "tests/test_hotwatch_holdings_auto.py"
+        ],
+        "task": "Implement first architecture-reset vertical slice, not documentation. On pinned clean base, simplify auto_holdings_tick by removing repeated reads only where proven safe; preserve original per-position activation order, early exit, idle no-write, tenant/test isolation, concurrent stop/kill/reopen and bounded work. Do not carry forward rejected batch-cache designs from #14. Measure SQLite VM steps and decoded rows on 1/10/100 users, one and 26 holdings, idle/killed/early-activation and thousands of historical rows. Prefer small readable functions and indexed exact lookups; no schema, strategy, mandate, new framework or external calls. Execute tests.test_hotwatch_holdings_auto and relevant existing regression tests, report exact before/after and actual counts. If optimization worsens a workload, simplify or revert it; deliver tested code, not a plan."
+      },
+      "replaced_by": [
+        "315:2"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Rejected architecture-reset scanner replaced by accepted scoped optimization; residual measurable performance work remains under #14."
     }
-  ]
+  ],
+  "last_cleanup_source_blob": "e732c89f998ade4234c541288eceda73ee5d4b44"
 }
