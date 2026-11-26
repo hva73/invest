@@ -1278,7 +1278,7 @@
     "task": "Small #114 status provenance slice: prevent a malformed explicit provider status value (non-string object/list or empty/whitespace value) from being persisted by check() as usable evidence when identity matches. Inspect existing view/check status handling and provider contract; preserve valid status strings and any supported missing status semantics, no inference of fills and no invented enum. Focused real SQLite tests demonstrating prior evidence unchanged for malformed explicit status and valid matching refresh. No send/cancel/broker actions, schema or broad rewrite. Run focused test_trade_service and deliver ESCAPE_DRAFT_READY."
   },
   {
-    "status": "ready",
+    "status": "done",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "9d0db2d34f0fe1799b03a1a738e06a94a42119c8",
