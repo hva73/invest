@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T07:40:00Z",
+  "updated_at": "2026-11-26T07:43:45Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -488,16 +488,17 @@
       "id": "release",
       "phase": 4,
       "title": "Samlet releasekandidat, backup og migration",
-      "status": "pending",
+      "status": "blocked",
       "issue": 57,
-      "evidence": "Flet produktændringer oven på installeret SHA; eksakt CI, quota og rollback.",
+      "evidence": "Ejerbeslutning #315 kommentar 7185689669: kontrolleret udviklingsreset. Installeret 3cc0c7be verificeret med frisk worker 07:43 UTC. Resetgren oprettet på eksakt installeret SHA. Koordinatorens grundlag #315 7185768536 afventer ejerreview og verificeret Mac-drain; tidligere leverancer og historik bevares, ingen ny release.",
       "subgoals": [
         {
           "id": "integrate",
           "title": "Samlet releasegren",
-          "status": "pending",
-          "evidence": "Udestår.",
-          "owner_role": "release"
+          "status": "blocked",
+          "evidence": "Ny codex/trading-engine-v2-reset gren pinned 3cc0c7be, readback OK. Udviklingsgren 99ba8ef6 og v2 e4b59436 divergerer; reuse via reviewede deltas efter #315 ejerreview/drain. Ingen ny produktintegration endnu.",
+          "owner_role": "release",
+          "updated_at": "2026-11-26T07:43:45Z"
         },
         {
           "id": "preflight",
@@ -513,7 +514,8 @@
           "evidence": "Udestår.",
           "owner_role": "release"
         }
-      ]
+      ],
+      "updated_at": "2026-11-26T07:43:45Z"
     },
     {
       "id": "go",
