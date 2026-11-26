@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T15:48:00Z",
+  "updated_at": "2026-11-26T17:23:00Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -382,9 +382,9 @@
           "id": "provenance",
           "title": "Entry/exit-herkomst",
           "status": "in_progress",
-          "evidence": "#114:3 integreret; #114:4 leveret draft #323 og eksakt scoped CI PASS. Ikke fuld fill-/provenanceaccept.",
+          "evidence": "#114:3–8 integreret på resetgren, senest #330 efaf9a73 → 9ae54be1, scoped motor-CI 45860311154 og uafhængigt review PASS. Identitet, readback-CAS og statusvalidering; ikke fuld fill-/provenanceaccept.",
           "owner_role": "motor",
-          "updated_at": "2026-11-26T15:48:00Z"
+          "updated_at": "2026-11-26T17:23:00Z"
         },
         {
           "id": "fills",
@@ -401,7 +401,7 @@
           "owner_role": "desktop"
         }
       ],
-      "updated_at": "2026-11-26T15:48:00Z"
+      "updated_at": "2026-11-26T17:23:00Z"
     },
     {
       "id": "ui",
@@ -422,9 +422,9 @@
           "id": "mobile",
           "title": "Mobil 2.0",
           "status": "in_progress",
-          "evidence": "#54:7/#54:8 leveret, uafhængigt review og squash verificeret. #54:9 klar, endnu ikke verificeret STARTED. Ingen dubletgeneration.",
+          "evidence": "#54:7–15 integreret på resetgren, senest #337 af4dcb43 → c7ffa139, UI-CI 45865646432 og review PASS. #54:16 #339 6f945cd7 scoped UI-CI 45866376418 PASS, lokal review HOLD pga. manual-search annullerer nødstop-feedback. #54:17–19 afhængighedsstyret kø; ingen dubletter.",
           "owner_role": "mobile",
-          "updated_at": "2026-11-26T15:48:00Z"
+          "updated_at": "2026-11-26T17:23:00Z"
         },
         {
           "id": "desktop",
@@ -438,12 +438,12 @@
           "id": "test",
           "title": "Fælles browsertest",
           "status": "review",
-          "evidence": "#320/#322 scoped UI-regression PASS (45848898509/45851825612); lokal actual-source Node-test rapporteret bestået. Komplet konto-isolation og samlet integreret browser-CI udestår.",
+          "evidence": "Scoped actual-source Node og UI-regression på integrerede leverancer senest #337, CI 45865646432 PASS. #339 CI PASS men uafhængig review HOLD; komplet konto-isolation og samlet browser-CI udestår.",
           "owner_role": "mobile",
-          "updated_at": "2026-11-26T15:48:00Z"
+          "updated_at": "2026-11-26T17:23:00Z"
         }
       ],
-      "updated_at": "2026-11-26T15:48:00Z"
+      "updated_at": "2026-11-26T17:23:00Z"
     },
     {
       "id": "load",
@@ -464,9 +464,9 @@
           "id": "queue",
           "title": "100 brugere og fair køer",
           "status": "review",
-          "evidence": "#319 afgrænset SQLite-optimering integreret, scoped tests og review PASS; ikke fuld fairness/100-bruger kapacitetsmåling. #317 ikke integreret.",
+          "evidence": "#319 SQLite-optimering integreret, scoped tests/review PASS; #315:3–7 snapshot-/beholdningsrobusthed integreret, senest #340 e7f7cef3 → a5c0e2fa med motor-CI 45866766655 og review. #315:8 faktisk STARTED/WORKING; ikke fuld fairness/100-bruger måling. #317 ikke integreret.",
           "owner_role": "data",
-          "updated_at": "2026-11-26T15:18:23Z"
+          "updated_at": "2026-11-26T17:23:00Z"
         },
         {
           "id": "resources",
@@ -483,7 +483,7 @@
           "owner_role": "data"
         }
       ],
-      "updated_at": "2026-11-26T15:18:23Z"
+      "updated_at": "2026-11-26T17:23:00Z"
     },
     {
       "id": "release",
@@ -497,9 +497,9 @@
           "id": "integrate",
           "title": "Samlet releasegren",
           "status": "in_progress",
-          "evidence": "Resetgren 4b509055 efter #316/#318–#322; tidligere V2 accepterede dele er kilder, ikke automatisk genintegreret. #317/#309 HOLD bevares.",
+          "evidence": "Aktuel produktgren codex/architecture-reset-20261126 HEAD a5c0e2fa; #318–#338 og #340 små integrerede leverancer (afgrænset motor/UI; #339 HOLD). Tidligere V2-komponenter er kilder, ikke automatisk genintegreret. #317/#309 HOLD bevares.",
           "owner_role": "release",
-          "updated_at": "2026-11-26T15:48:00Z"
+          "updated_at": "2026-11-26T17:23:00Z"
         },
         {
           "id": "preflight",
@@ -512,12 +512,12 @@
           "id": "ci",
           "title": "Samlet regression og rollback",
           "status": "review",
-          "evidence": "Scoped UI 45848898509/45851825612 og motor 45849602834/45852442040 PASS; ikke samlet CI på merged SHA. Samlet regression, migration, rollback og hostingaccept udestår.",
+          "evidence": "Scoped motor #340 45866766655 og UI #337 45865646432 PASS med uafhængig review og integration; #339 45866376418 PASS men review HOLD. Ikke samlet CI på a5c0e2fa. Samlet regression, migration, rollback og hostingaccept udestår.",
           "owner_role": "release",
-          "updated_at": "2026-11-26T15:48:00Z"
+          "updated_at": "2026-11-26T17:23:00Z"
         }
       ],
-      "updated_at": "2026-11-26T15:48:00Z"
+      "updated_at": "2026-11-26T17:23:00Z"
     },
     {
       "id": "go",
