@@ -188,9 +188,9 @@ window.EngineUI=(()=>{
  function sessionGroups(rows){const groups=[['critical','Kritiske driftsfejl',['ERROR']],['warning','Datakilde kræver kontrol',['DEGRADED']],['starting','Under opstart',['CREATED','VALIDATING']],['active','Aktiv overvågning',['ACTIVE']],['paused','Pauserede sessioner',['PAUSED']],['history','Afsluttede sessioner',['EXPIRED','COMPLETED']]];return groups.map(([key,title,states])=>{const items=rows.filter(r=>states.includes(r.status));if(!items.length)return '';const body=`<div class="engine-list">${items.map(sessionRow).join('')}</div>`;return ['paused','history'].includes(key)?`<details class="engine-session-group" data-engine-group="${key}"><summary>${title} · ${items.length}</summary>${body}</details>`:`<section class="engine-session-group ${key}" data-engine-group="${key}"><h3>${title} · ${items.length}</h3>${body}</section>`}).join('')}
  function candidatePanel(){const rows=(data.candidates||[]).filter(x=>showOwn||!x.has_confirmed_position);if(!rows.length)return '';return `<details class="engine-candidates"><summary>Om rapportkandidaterne · ${rows.length}</summary><p class="muted">Kandidater fra rapporterne. De kan afvente kontrol og er ikke nødvendigvis under aktiv overvågning. Tryk for at se forløbet.</p><div class="engine-candidate-list">${rows.map(x=>{const cid=x.candidate?.candidate_id,attempt=(data.discovery_attempts||[]).find(y=>y.candidate_id===cid),session=data.sessions.find(y=>(y.request?.candidate_id===cid||attempt?.watch_id===y.watch_id)&&['CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED'].includes(y.status)),states={PLUTO_IDENTITY_UNCERTAIN:'Instrumentet kræver valg',PLUTO_VERIFICATION_REQUIRED:'Instrumentet er ikke verificeret',EODHD_IDENTITY_UNCERTAIN:'Datakilden kræver kontrol',global_capacity_limit:'Afventer ledig kapacitet',DISCOVERY_VERIFICATION_FAILED:'Instrumentkontrol forsøges igen',NOT_NEW:'Tidligere afsluttet',IDENTITY_OR_DECISION_UNAVAILABLE:'Oplysninger mangler',REJECTED:'Fravalgt i rapporten',STRATEGY_UNQUALIFIED:'Strategien afventer kvalificering',STRATEGY_NOT_FOUND:'Den foreslåede strategi findes ikke',candidate_report_superseded:'En nyere rapport afventer kontrol',strategy_proposal_mismatch:'Strategiforslaget kræver ny kontrol'};return `<button class="engine-candidate-row" data-intel-history="${esc(cid)}" data-intel-test="${mode}"><span><strong>${esc(x.candidate?.ticker||'Ukendt instrument')}</strong><small>${session?'Overvågning: '+esc(labels[session.status]||session.status):esc(attempt?(states[attempt.status]||'Afventer kontrol'):'Afventer kontrol')}</small>${x.candidate?.strategy_proposal?`<small>Foreslået: ${esc(x.candidate.strategy_proposal.strategy_id)} v${esc(x.candidate.strategy_proposal.version)}${session&&session.request?.strategy_id!==x.candidate.strategy_proposal.strategy_id||session&&session.request?.strategy_version!==x.candidate.strategy_proposal.version?' · eksisterende overvågning beholder sin strategi':''}</small>`:''}</span><span>Se forløb →</span></button>`}).join('')}</div></details>`}
 
- function paint(){const n=root();if(!n||data?._owner!==owner()||data?._mode!==mode||data?._epoch!==sessionEpoch())return;const opened=[...n.querySelectorAll('details[data-engine-group][open]')].map(x=>x.dataset.engineGroup),candidatesOpen=!!n.querySelector('.engine-candidates[open]'),settingsOpen=!!n.querySelector('.engine-settings[open]');const history=data.history,lastPage=history.tail||history.head;
+ function paint(){const n=root();if(!n||data?._owner!==owner()||data?._mode!==mode||data?._epoch!==sessionEpoch())return;const opened=[...n.querySelectorAll('details[data-engine-group][open]')].map(x=>x.dataset.engineGroup),candidatesOpen=!!n.querySelector('.engine-candidates[open]'),settingsOpen=!!n.querySelector('.engine-settings[open]');const history=data.history,lastPage=history.pages.at(-1)||history.head;
  const allRows=data.sessions.slice(),ids=new Set(allRows.map(s=>s.watch_id));
- for(const row of [...(history.head?.sessions||[]),...(history.tail?.sessions||[]),...history.loaded.values()]){
+ for(const row of [...(history.head?.sessions||[]),...history.pages.flatMap(page=>page.sessions),...history.loaded.values()]){
   if(ids.has(row.watch_id))continue;
   ids.add(row.watch_id);
   allRows.push(row);
@@ -204,62 +204,56 @@ window.EngineUI=(()=>{
   return data?._owner===user&&data._mode===mode&&data._epoch===epoch?data:null;
  }
  const isArchived=s=>['EXPIRED','COMPLETED'].includes(s.status);
- const historyPath=(limit,before)=>base+'/sessions'+query()+'&limit='+limit+'&view=history'+(before?'&before='+before:'');
+ const historyPageSize=20;
+ const historyPath=before=>base+'/sessions'+query()+'&limit='+historyPageSize+'&view=history'+(before?'&before='+before:'');
  const archiveRecheckMs=30000;
- async function archiveTailChanged(cursor,rows,end,current){
-  let offset=0;
-  while(cursor&&offset<rows.length){
-   const limit=Math.min(100,rows.length-offset);
-   const page=await api(historyPath(limit,cursor));
-   if(!current())return false;
-   if(page.sessions.length!==limit||page.sessions.some((s,i)=>s.watch_id!==rows[offset+i].watch_id))return true;
-   offset+=limit;
-   cursor=page.next_cursor;
-  }
-  return offset!==rows.length||cursor!==end;
- }
  let pendingHistory=null,pendingArchive=null;
  function restartHistoryPaging(history){
   // A new page boundary invalidates the cursor, while loaded archive rows stay visible.
   pendingHistory=null;
-  history.tail=null;
+  history.pages=[];
   history.checkedAt=undefined;
-  history.recheck=false;
+  history.checkIndex=undefined;
+  history.recheck=undefined;
  }
  async function refreshHistory(history,scope){
   if(pendingArchive?.()||Date.now()<history.retryAt)return;
   const current=()=>scope()&&listData()?.history===history;
   pendingArchive=current;
   try{
-   const head=await api(historyPath(20));
+   // Alternate the first page with one loaded page when a capped current list may hide closures.
+   const lastIndex=history.pages.length-1;
+   // An insertion just before a partial final page can leave that page unchanged.
+   const start=lastIndex>0&&history.pages[lastIndex].sessions.length<historyPageSize?lastIndex-1:lastIndex;
+   const index=history.checkIndex??start;
+   const recheck=history.recheck;
+   const due=(listData().truncated||history.checkIndex!==undefined)&&Date.now()-history.checkedAt>=archiveRecheckMs;
+   const checked=recheck||due?history.pages[index]:null;
+   const result=await api(historyPath(checked?.before));
    if(!current())return;
-   const nextHead={sessions:head.sessions,next_cursor:head.next_cursor??null,truncated:head.truncated};
-   if((history.head?.next_cursor??null)!==nextHead.next_cursor)restartHistoryPaging(history);
-   const changed=JSON.stringify(history.head)!==JSON.stringify(nextHead);
-   history.head=nextHead;
-   if(changed){
-    for(const row of nextHead.sessions)history.loaded.set(row.watch_id,row);
-    paint();
-   }
-
-   const tail=history.tail;
-   // Capped current lists can hide a closure anywhere in creation-ordered history.
-   if(!tail||(!history.recheck&&!(listData().truncated&&Date.now()-history.checkedAt>=archiveRecheckMs)))return;
-   history.checkedAt=Date.now();
-   history.recheck=false;
-   const changedTail=await archiveTailChanged(head.next_cursor,tail.sessions,tail.next_cursor,current);
-   if(!current())return;
-   if(history.tail!==tail){
-    // The user loaded more rows while the check was in flight.
-    if(history.tail)history.recheck=true;
+   const page={sessions:result.sessions,next_cursor:result.next_cursor??null,truncated:result.truncated};
+   if(checked){
+    if(history.pages[index]!==checked||history.recheck!==recheck)return;
+    history.checkedAt=Date.now();
+    history.recheck=undefined;
+    const next=(index+1)%(lastIndex+1);
+    history.checkIndex=next===start?undefined:next;
+    if(page.next_cursor!==checked.next_cursor||page.sessions.length!==checked.sessions.length||
+       page.sessions.some((row,i)=>row.watch_id!==checked.sessions[i].watch_id)){
+     restartHistoryPaging(history);
+     paint();
+    }
     return;
    }
-   if(changedTail){restartHistoryPaging(history);paint()}
-  }catch{
-   if(current()){
-    history.retryAt=Date.now()+archiveRecheckMs;
-    if(history.tail)history.recheck=true;
+   if((history.head?.next_cursor??null)!==page.next_cursor)restartHistoryPaging(history);
+   const changed=JSON.stringify(history.head)!==JSON.stringify(page);
+   history.head=page;
+   if(changed){
+    for(const row of page.sessions)history.loaded.set(row.watch_id,row);
+    paint();
    }
+  }catch{
+   if(current())history.retryAt=Date.now()+archiveRecheckMs;
   }finally{if(pendingArchive===current)pendingArchive=null}
  }
  async function load(){
@@ -272,11 +266,14 @@ window.EngineUI=(()=>{
   try{[r,registry]=await Promise.all([api(base+'/sessions'+query()+'&limit=100&view=current'),api('reports/candidate-registry?is_test='+mode)])}
   catch(error){if(current())throw error;return}
   if(!current())return;
-  const previous=listData(user,epoch),history=previous?.history||{head:null,tail:null,loaded:new Map(),retryAt:0};
+  const previous=listData(user,epoch),history=previous?.history||{head:null,pages:[],loaded:new Map(),retryAt:0};
   if(previous&&!r.truncated){
    const ids=new Set([...r.sessions,...(history.head?.sessions||[])].map(s=>s.watch_id));
    if(previous.sessions.some(s=>!isArchived(s)&&!ids.has(s.watch_id)))restartHistoryPaging(history);
-   else if(previous.truncated&&(history.tail||pendingHistory?.()))history.recheck=true;
+   else if(previous.truncated&&(history.pages.length||pendingHistory?.())){
+    history.checkIndex=undefined;
+    history.recheck=ticket;
+   }
   }
   data={...r,candidates:registry.candidates||[],history,_owner:user,_mode:mode,_epoch:epoch};
   paint();
@@ -345,21 +342,45 @@ window.EngineUI=(()=>{
  function localDeadline(){const d=new Date(Date.now()+8*3600000),local=new Date(d.getTime()-d.getTimezoneOffset()*60000);return local.toISOString().slice(0,16)}
  function candidatePortfolios(assetId){const snapshots=portfolios.map(p=>portfolioSnapshots[String(p.id)]);return {ids:portfolios.filter((p,i)=>snapshots[i]?.data?.positions_complete&&(snapshots[i].data.positions||[]).some(row=>row.kind==='holding'&&row.asset_id===assetId&&Number(row.quantity)>0)).map(p=>p.id),complete:snapshots.length>0&&snapshots.every(x=>x?.data?.positions_complete&&!x?.last_error)}}
  function formStatus(message){const n=document.getElementById('engine-form-status');if(n)n.textContent=message}
+ let pendingInstrument;
  async function resolveInstrument(index,assetId=null){const f=document.getElementById('engine-create'),item=candidates[index],scope=captureForm(f);
   if(!scope())return;
   if(!item)throw Error('Vælg en kandidat.');
   const ticket=++instrumentRequest;
   const current=()=>scope()&&ticket===instrumentRequest&&candidates[index]===item&&Number(f.elements.candidate.value)===index;
   if(!current())return;
+  pendingInstrument=current;
+  const symbolSlot=document.getElementById('engine-eodhd-choice');
+  if(symbolSlot)symbolSlot.textContent='';
+  item.eodhd_lookup=null;
+  item.eodhd_choices=[];
+  item.eodhd_error=null;
   formStatus('Kontrollerer instrumentet hos Pluto …');const args={report_id:item.report_id,candidate_id:item.candidate.candidate_id,is_test:mode};if(assetId)args.asset_id=assetId;let result;
   try{result=await api('market/quote',args)}
   catch(error){if(!current())return;formStatus(reason(error.details?.code||error.message));return null}
+  finally{if(pendingInstrument===current)pendingInstrument=null}
   if(!current())return;
-  if(result.selection_required){const choices=result.choices||[];const slot=document.getElementById('engine-instrument-choice');if(slot)slot.innerHTML=`<label>Vælg verificeret Pluto-instrument<select id="engine-asset-choice"><option value="">Vælg instrument</option>${choices.map(x=>`<option value="${esc(x.asset_id)}">${esc([x.ticker,x.exchange,x.currency,x.name].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>`;item.resolution_choices=choices;formStatus('Flere Pluto-instrumenter matcher. Vælg det korrekte aktiv; intet er valgt automatisk.');return null}if(!result.asset_id||!result.currency||!result.exchange){formStatus('Pluto-opslaget mangler verificeret aktiv-ID, valuta eller børs. Sessionen kan ikke startes.');return null}item.instrument={asset_id:result.asset_id,currency:result.currency,exchange:result.exchange,name:result.name||null,isin:result.isin||null,provider_symbol:item.provider_symbol||item.candidate.provider_symbol||item.candidate.eodhd_symbol||null};const portfolioMatch=candidatePortfolios(result.asset_id);item.portfolio_ids=portfolioMatch.ids;item.portfolios_verified=portfolioMatch.complete;f.elements.exchange.value=result.exchange;f.elements.asset_id.value=result.asset_id;f.elements.quote_currency.value=result.currency;f.elements.provider_symbol.value=item.provider_symbol||f.elements.provider_symbol.value||item.instrument.provider_symbol||'';const select=f.elements.portfolios;[...select.options].forEach(option=>option.selected=item.portfolio_ids.includes(Number(option.value)));if(f.elements.watch_mode.value==='both'&&!item.portfolio_ids.length&&item.portfolios_verified)f.elements.watch_mode.value='entry';formStatus(`Pluto bekræftede ${result.ticker||item.candidate.ticker} · ${result.exchange} · ${result.currency} · aktiv ${result.asset_id}. ${item.portfolio_ids.length} matchende depot(er)${item.portfolios_verified?' verificeret i komplette snapshots.':' fundet; øvrige depot-snapshots er ufuldstændige eller mangler.'}`);return item.instrument}
+  if(result.selection_required){const choices=result.choices||[];const slot=document.getElementById('engine-instrument-choice');if(slot)slot.innerHTML=`<label>Vælg verificeret Pluto-instrument<select id="engine-asset-choice"><option value="">Vælg instrument</option>${choices.map(x=>`<option value="${esc(x.asset_id)}">${esc([x.ticker,x.exchange,x.currency,x.name].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>`;item.resolution_choices=choices;formStatus('Flere Pluto-instrumenter matcher. Vælg det korrekte aktiv; intet er valgt automatisk.');return null}
+  if(!result.asset_id||!result.currency||!result.exchange){formStatus('Pluto-opslaget mangler verificeret aktiv-ID, valuta eller børs. Sessionen kan ikke startes.');return null}
+  const previous=item.instrument,isin=result.isin||null;
+  const changed=previous&&(previous.asset_id!==result.asset_id||previous.currency!==result.currency||previous.exchange!==result.exchange||(previous.isin||null)!==isin);
+  if(changed){item.provider_symbol=null;f.elements.provider_symbol.value=''}
+  item.instrument={asset_id:result.asset_id,currency:result.currency,exchange:result.exchange,name:result.name||null,isin,
+   provider_symbol:item.provider_symbol||(!previous&&(item.candidate.provider_symbol||item.candidate.eodhd_symbol))||(!changed&&previous?.provider_symbol)||null};
+  const portfolioMatch=candidatePortfolios(result.asset_id);
+  item.portfolio_ids=portfolioMatch.ids;item.portfolios_verified=portfolioMatch.complete;
+  f.elements.exchange.value=result.exchange;f.elements.asset_id.value=result.asset_id;f.elements.quote_currency.value=result.currency;
+  f.elements.provider_symbol.value=item.provider_symbol||f.elements.provider_symbol.value||item.instrument.provider_symbol||'';
+  const select=f.elements.portfolios;[...select.options].forEach(option=>option.selected=item.portfolio_ids.includes(Number(option.value)));
+  if(f.elements.watch_mode.value==='both'&&!item.portfolio_ids.length&&item.portfolios_verified)f.elements.watch_mode.value='entry';
+  formStatus(`Pluto bekræftede ${result.ticker||item.candidate.ticker} · ${result.exchange} · ${result.currency} · aktiv ${result.asset_id}. ${item.portfolio_ids.length} matchende depot(er)${item.portfolios_verified?' verificeret i komplette snapshots.':' fundet; øvrige depot-snapshots er ufuldstændige eller mangler.'}`);
+  return item.instrument;
+ }
  const issuerKey=v=>String(v||'').normalize('NFKD').toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu,'');
  async function findEodhdSymbol(){
-  const f=document.getElementById('engine-create');if(!f)return;
-  const index=Number(f.elements.candidate.value),item=candidates[index];if(!item)return;
+  // During a Pluto lookup the form may still show the previous listing.
+  const f=document.getElementById('engine-create');if(!f||pendingInstrument?.())return;
+  const index=Number(f.elements.candidate.value),item=candidates[index];if(!item||!mode&&!item.instrument)return;
   const slot=document.getElementById('engine-eodhd-choice'),scope=captureForm(f),test=mode,ticket=instrumentRequest;
   const current=()=>scope()&&ticket===instrumentRequest&&candidates[index]===item&&Number(f.elements.candidate.value)===index;
   if(!current())return;
@@ -421,19 +442,18 @@ window.EngineUI=(()=>{
 
  async function moreHistory(){
   const scope=captureScope(),history=listData()?.history;
-  const cursor=(history?.tail||history?.head)?.next_cursor;
+  const cursor=(history?.pages.at(-1)||history?.head)?.next_cursor;
   if(!scope()||!cursor||pendingHistory?.())return;
   pendingHistory=scope;
   const current=()=>pendingHistory===scope&&scope();
   let page;
   try{
-   page=await api(historyPath(20,cursor));
+   page=await api(historyPath(cursor));
    if(!current())return;
   }catch(error){if(current())throw error;return}
   finally{if(pendingHistory===scope)pendingHistory=null}
   history.checkedAt??=Date.now();
-  history.tail={next_cursor:page.next_cursor??null,truncated:page.truncated,
-   sessions:[...(history.tail?.sessions||[]),...page.sessions]};
+  history.pages.push({before:cursor,sessions:page.sessions,next_cursor:page.next_cursor??null,truncated:page.truncated});
   for(const row of page.sessions)history.loaded.set(row.watch_id,row);
   paint();
   const group=root().querySelector('details[data-engine-group=history]');

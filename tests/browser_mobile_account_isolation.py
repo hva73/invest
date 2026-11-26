@@ -166,6 +166,34 @@ const run = async () => {
     const takeEodhd = () => take('market/eodhd-symbols', 'beta');
     const noEodhdPending = () => !pending.some(request => request.path === 'market/eodhd-symbols');
     const symbol = name => ({choices: [{symbol: name, name, isin: 'DK0000000001', currency: 'DKK'}]});
+    form.elements.provider_symbol.value = 'OLD.CO';
+    await EngineUI.change({target: form.elements.provider_symbol});
+    const assetChoice = document.createElement('select');
+    assetChoice.id = 'engine-asset-choice';
+    assetChoice.add(new Option('Alternate listing', 'beta-alternate'));
+    form.append(assetChoice);
+    const oldListing = findEodhd();
+    const oldListingRequest = takeEodhd();
+    const newListing = EngineUI.change({target: assetChoice});
+    const listingQuote = take('market/quote', 'beta');
+    const duringVerification = findEodhd();
+    const premature = pending.findIndex(request => request.path === 'market/eodhd-symbols');
+    const prematureRequest = premature < 0 ? null : pending.splice(premature, 1)[0];
+    listingQuote.resolve({asset_id: 'beta-alternate', currency: 'USD', exchange: 'XNYS', isin: 'US0000000001'});
+    await newListing;
+    const verifiedStatus = byId('engine-form-status').textContent;
+    oldListingRequest.resolve(symbol('OLD.CO'));
+    prematureRequest?.resolve(symbol('WRONG.CO'));
+    await Promise.all([oldListing, duringVerification]);
+    assert(!prematureRequest && !byId('engine-eodhd-select') && !form.elements.provider_symbol.value &&
+        byId('engine-form-status').textContent === verifiedStatus && form.elements.asset_id.value === 'beta-alternate',
+        'An EODHD lookup for the previous Pluto listing changed the verified form');
+    const newSymbols = findEodhd();
+    const newSymbolRequest = takeEodhd();
+    assert(newSymbolRequest.args.quote_currency === 'USD', 'EODHD retried with the previous listing currency');
+    newSymbolRequest.resolve({choices: [{symbol: 'FRESH.US', name: 'Alternate listing', isin: 'US0000000001', currency: 'USD'}]});
+    await newSymbols;
+    assert(byId('engine-eodhd-select').value === 'FRESH.US', 'The verified listing could not select its EODHD symbol');
     for (const [index, interrupt, outcome] of [
         [0, 'logout', 'success'], [1, 'logout', 'error'], [0, 'mode', 'success']
     ]) {
@@ -940,7 +968,9 @@ const run = async () => {
     check(!button('[data-engine-detail="alpha-obsolete-archive"]') && button('[data-engine-detail="beta-closed"]'),
         'A delayed alpha archive changed beta history');
 
-    for (const [currentCount, archiveCount, delayPage] of [[101, 21, false], [102, 141, false], [101, 21, true]]) {
+    for (const [currentCount, archiveCount, delayPage, delayProbe] of [
+        [101, 21, false, false], [102, 141, false, false], [101, 21, true, false], [101, 21, false, true]
+    ]) {
         const current = Array.from({length: currentCount}, (_, index) => ({
             id: 500 - index, ...session('capped-current-' + index)
         }));
@@ -951,7 +981,7 @@ const run = async () => {
         // Insert outside the first page and, for deep history, inside the last loaded page.
         const insertion = archiveCount === 21 ? 21 : 130;
         expired.id = 301 - 2 * insertion;
-        let finishPage;
+        let finishPage, finishProbe, holdProbe = false;
         archiveFixture = {
             current,
             autoHistory(params) {
@@ -965,6 +995,9 @@ const run = async () => {
                 };
                 if (delayPage && before !== Infinity && !finishPage) {
                     return new Promise(resolve => { finishPage = () => resolve(result); });
+                }
+                if (holdProbe && before !== Infinity) {
+                    return new Promise(resolve => { finishProbe = () => resolve(result); });
                 }
                 return result;
             }
@@ -984,12 +1017,24 @@ const run = async () => {
             await poll();
             check(!button(history), 'Unchanged capped current list reopened exhausted history');
         }
+        if (delayProbe) {
+            holdProbe = true;
+            clock += 30000;
+            await poll();
+            assert(finishProbe, 'No pending background archive check');
+            holdProbe = false;
+        }
         current.pop();
         archived.splice(insertion, 0, {...expired, status: 'EXPIRED'});
         if (delayPage) {
             await poll();
             finishPage();
             await firstPage;
+        }
+        if (delayProbe) {
+            await poll();
+            finishProbe();
+            await flush();
         }
         await poll();
         await flush();
@@ -1002,6 +1047,39 @@ const run = async () => {
         await poll();
         check(button(expiredButton) && !button(history), 'Capped refresh lost the expired watch after pagination');
     }
+    archiveFixture = null;
+
+    const largeCurrent = Array.from({length: 101}, (_, i) => session('large-current-' + i));
+    const largeArchive = Array.from({length: 520}, (_, i) => ({
+        id: 2000 - 2 * i, ...session('large-archive-' + i, 'COMPLETED')
+    }));
+    const archiveRequests = [];
+    archiveFixture = {
+        current: largeCurrent,
+        autoHistory(params) {
+            const before = Number(params.get('before')) || Infinity;
+            const limit = Number(params.get('limit'));
+            archiveRequests.push({before, limit});
+            const rows = largeArchive.filter(row => row.id < before).slice(0, limit + 1);
+            return {sessions: rows.slice(0, limit), next_cursor: rows.length > limit ? rows[limit - 1].id : null};
+        }
+    };
+    switchAccount('alpha');
+    await flush();
+    for (let i = 1; i < 26; ++i) await click(history);
+    assert(archivedIds().length === 520 && !button(history), 'Large archive fixture did not exhaust history');
+    archiveRequests.length = 0;
+    for (let tick = 0; tick < 4; ++tick) {
+        const previousReads = archiveRequests.length;
+        await poll();
+        await flush();
+        const reads = archiveRequests.slice(previousReads);
+        check(reads.length === 1 && reads[0].limit === 20,
+            'Capped background poll exceeded the original 20-row archive read');
+        check(archivedIds().length === 520 && !button(history), 'Unchanged capped poll disturbed the loaded archive');
+    }
+    const probeCursors = archiveRequests.filter(request => Number.isFinite(request.before)).map(request => request.before);
+    check(new Set(probeCursors).size >= 2, 'Background checks never progressed beyond one archive page');
     archiveFixture = null;
 
     omitHistory = true;
