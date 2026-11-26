@@ -117,8 +117,11 @@ class Capacity:
    if limit and limit>0:state['http_provider_limit']=limit;state['limit_source']='response_header'
    if remaining is not None:
     row=c.execute("SELECT used FROM hw_request_budget WHERE user_id=0 AND source='eodhd' AND window=?",(window,)).fetchone()
-    if state.get('header_window')==window:remaining=min(remaining,state.get('header_remaining',remaining))
-    state.update(header_window=window,header_remaining=remaining,header_local_used=row['used'] if row else 0)
+    used=row['used'] if row else 0
+    if state.get('header_window')==window and state.get('header_remaining') is not None:
+     charged=max(0,used-state.get('header_local_used',0))
+     remaining=min(remaining,state['header_remaining']-charged)
+    state.update(header_window=window,header_remaining=remaining,header_local_used=used)
    if status==429:
     state['http_429']=state.get('http_429',0)+1
     state['http_retry_at']=max(state.get('http_retry_at',0),now+retry_seconds(headers,now))
