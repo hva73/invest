@@ -157,7 +157,35 @@ window.EngineUI=(()=>{
  if(f.get('provider')==='eodhd'&&items.some(x=>!x.provider_symbol&&!x.instrument?.provider_symbol)){formStatus(selected.eodhd_error||'Vælg det korrekte EODHD-instrument på listen før start.');(document.getElementById('engine-eodhd-select')||form.elements.provider_symbol)?.focus();return true;}const selection=(await api('strategy-center')).selection;if(owner()!==ticketOwner||mode!==ticketMode||!form.isConnected)return true;const common={is_test:mode,purpose:f.get('purpose'),profile:f.get('profile'),priority:f.get('profile')==='CRITICAL'?'CRITICAL':'NORMAL',provider:f.get('provider'),end_at:f.get('end_at')?new Date(f.get('end_at')).toISOString():null,activation_reason:String(f.get('activation_reason')||'')+' · '+selection.reason,strategy_id:selection.strategy_id,strategy_version:selection.version,risk:{max_notional_dkk:f.get('max_notional')||'1000',max_loss_dkk:f.get('max_loss')||'100',max_spread_pct:'1',max_quote_age_s:120,max_position_fraction_pct:'20',proposed_quantity:f.get('quantity')||null,stop_price:f.get('stop')||null,exit_deadline:null}};const sessions=items.map(item=>{const instrument=item.instrument||{asset_id:f.get('asset_id'),exchange:f.get('exchange'),currency:f.get('quote_currency'),provider_symbol:f.get('provider_symbol')||null};if(!instrument.asset_id||!instrument.exchange||!instrument.currency)throw Error('Aktiv-ID, børs og valuta skal være verificeret før start.');return {...common,watch_id:item.watch_id||(item.watch_id='hw-'+crypto.randomUUID()),report_id:item.report_id,candidate_id:item.candidate.candidate_id,ticker:item.candidate.ticker,exchange:instrument.exchange,asset_id:instrument.asset_id,quote_currency:instrument.currency,provider_symbol:item.provider_symbol||instrument.provider_symbol||null,portfolio_ids:item.portfolio_ids||f.getAll('portfolios').map(Number),watch_mode:item.portfolios_verified&&!item.portfolio_ids.length?'entry':f.get('watch_mode'),reactivation_reason:f.get('reactivation_reason')||null}});const signature=JSON.stringify({is_test:mode,sessions});if(!pending||pending.signature!==signature)pending={signature,id:'hwa-'+crypto.randomUUID()};const request={request_id:pending.id,is_test:mode,sessions};const button=form.querySelector('.primary');button.disabled=true;try{const result=sessions.length>1?await api(base+'/activation-requests',request,{'Idempotency-Key':request.request_id}):await api(base+'/sessions',sessions[0]);if(owner()!==ticketOwner||mode!==ticketMode||!form.isConnected)return true;formStatus(`${result.created_count??1} session(er) oprettet. Feedforbindelse og første observation kontrolleres separat.`);document.getElementById('engine-dialog').close();pending=null;batchCandidates=[];await load()}catch(error){formStatus(reason(error.details?.code||error.message)+(error.details?.errors||[]).map(e=>' '+e.path+': '+e.message).join(''));throw error}finally{button.disabled=false}return true}
  function applyFilter(filter){const scope=root();if(!scope)return;let visible=0;scope.querySelectorAll('.engine-list-row').forEach(n=>{const state=n.dataset.engineState,open=['CREATED','VALIDATING','ACTIVE','DEGRADED'].includes(state),match=filter==='all'||filter==='critical'&&n.dataset.engineCritical==='true'||filter==='active'&&open||open&&n.dataset.engineCategory===filter;n.hidden=!match;if(match)visible++});scope.querySelectorAll('[data-engine-group]').forEach(group=>{group.hidden=!group.querySelector('.engine-list-row:not([hidden])');if(!group.hidden&&filter!=='all'&&group.tagName==='DETAILS')group.open=true});scope.querySelectorAll('[data-engine-filter]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.engineFilter===filter)));const empty=scope.querySelector('.engine-filter-empty');if(empty)empty.hidden=visible>0||!scope.querySelector('.engine-list-row')&&filter==='all'}
 
- async function click(b){if(b.dataset.engineNotice){openNotice(JSON.parse(b.dataset.engineNotice));return true}if(b.dataset.engineAck){await acknowledgeNotice(b);return true}if(b.dataset.engineOwn){showOwn=!showOwn;paint();return true}if(b.dataset.engineManual!==undefined){const item=manualChoices[Number(b.dataset.engineManual)],status=document.getElementById('engine-manual-status'),user=owner();if(!item)return true;b.disabled=true;status.textContent='Kontrollerer instrument og starter overvågning …';try{const result=await api(base+'/manual-start?is_test=false',{asset_id:item.asset_id,ticker:item.ticker});if(owner()!==user)return true;document.getElementById('engine-dialog')?.close();await load();await detail(result.session.watch_id)}catch(error){status.textContent=reason(error.details?.code||error.message);b.disabled=false}return true}if(b.hasAttribute('data-engine-eodhd-search')){await findEodhdSymbol();return true}if(b.hasAttribute('data-engine-batch-add')){await addBatchCandidate();return true}if(b.hasAttribute('data-engine-history-more')){
+ async function click(b){if(b.dataset.engineNotice){openNotice(JSON.parse(b.dataset.engineNotice));return true}if(b.dataset.engineAck){await acknowledgeNotice(b);return true}if(b.dataset.engineOwn){showOwn=!showOwn;paint();return true}if(b.dataset.engineManual!==undefined){
+  const item=manualChoices[Number(b.dataset.engineManual)],dialog=b.closest('#engine-dialog');
+  const status=dialog?.querySelector('#engine-manual-status');
+  const origin=()=>document.getElementById('engine-dialog')===dialog&&b.isConnected&&dialog.contains(b);
+  if(!item||!status||!dialog.open||!origin())return true;
+  let current=captureInteraction();
+  b.disabled=true;
+  status.textContent='Kontrollerer instrument og starter overvågning …';
+  try{
+   const result=await api(base+'/manual-start?is_test=false',{asset_id:item.asset_id,ticker:item.ticker});
+   if(!current()||!origin()||!dialog.open)return true;
+   dialog.close();
+   current=captureInteraction();
+   const startRoot=root();
+   await load();
+   if(!current()||dialog.open)return true;
+   const view=root();
+   if(!view?.isConnected)return true;
+   // A same-view render replaces both the engine root and the closed dialog.
+   if(view===startRoot&&!origin())return true;
+   if(view!==startRoot&&document.getElementById('engine-dialog'))return true;
+   const opening=detail(result.session.watch_id);
+   current=captureInteraction();
+   await opening;
+  }catch(error){
+   if(current()&&origin()){status.textContent=reason(error.details?.code||error.message);b.disabled=false}
+  }
+  return true
+ }if(b.hasAttribute('data-engine-eodhd-search')){await findEodhdSymbol();return true}if(b.hasAttribute('data-engine-batch-add')){await addBatchCandidate();return true}if(b.hasAttribute('data-engine-history-more')){
   const snapshot=data,n=root(),cursor=snapshot?.history_cursor;
   const valid=()=>n?.isConnected&&root()===n&&b.isConnected&&data===snapshot&&snapshot.history_cursor===cursor&&snapshot._epoch===sessionEpoch()&&snapshot._owner===owner()&&snapshot._mode===mode;
   if(!cursor||!valid())return true;
