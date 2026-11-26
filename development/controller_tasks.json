@@ -2527,5 +2527,49 @@
     "follow_base": true,
     "reserve_plan_id": "learning/shadow/strategy-lab-replay-keeps-last-evaluated-time-after-gap",
     "reserve_goal": "learning/shadow"
+  },
+  {
+    "issue": 14,
+    "generation": 27,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [
+      "14:24"
+    ],
+    "paths": [
+      "jobs.py",
+      "tests/test_jobs.py"
+    ],
+    "task": "Approved roadmap shared_data/scheduler (F\u00e6lles scheduler og budget). Exact existing source anchor: jobs.py :: FROM jobs WHERE user_id=? ORDER BY id DESC LIMIT 20. Implement only this bounded change: Tilf\u00f8j et idempotent SQLite-indeks p\u00e5 jobs(user_id, id DESC) i jobs.init(), s\u00e5 status() kan hente de seneste 20 job for \u00e9n ejer uden at genneml\u00f8be andre ejeres historik. Bevar foresp\u00f8rgslens felter, sortering og gr\u00e6nse. P\u00e5 den fastl\u00e5ste jobs-tabel viser SQLite SCAN jobs for foresp\u00f8rgslen og et ejerafgr\u00e6nset indeksopslag med indekset.. Acceptance: Brug den eksisterende SQLite-fixture med flettet historik for flere ejere og over 20 job for den valgte ejer. Verific\u00e9r indeksopslag p\u00e5 user_id med EXPLAIN QUERY PLAN og pr\u00e6cis de seneste 20 egne job i faldende id-r\u00e6kkef\u00f8lge fra jobs.status().. Focused existing tests: python3 -m unittest discover -s tests -p 'test_jobs.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "shared_data/scheduler/index-cron-job-history-by-owner",
+    "reserve_goal": "shared_data/scheduler"
+  },
+  {
+    "issue": 54,
+    "generation": 29,
+    "role": "desktop",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [
+      "54:27"
+    ],
+    "paths": [
+      "static/trade-ui.js",
+      "tests/browser_desktop_trade.py"
+    ],
+    "task": "Approved roadmap ui/desktop (Desktop 2.0). Exact existing source anchor: static/trade-ui.js :: async function previewSearch(b). Implement only this bounded change: Afgr\u00e6ns \u00e6ndringen til aktivs\u00f8gningen i det eksisterende skrivebeskyttede estimatpanel. Gem foresp\u00f8rgslens tekst og den oprindelige formular ved start. Kontroll\u00e9r generation, aktuel formular og foresp\u00f8rgsel f\u00f8r b\u00e5de resultat og fejl vises. Ved redigering under opslaget skal den stadig aktive formular rydde opslagets ventetekst, n\u00e5r det gamle opslag afsluttes. Bevar det nuv\u00e6rende aktivvalg og lad brugeren s\u00f8ge igen.. Acceptance: I desktop-fixturen forsinkes trade/search, mens s\u00f8geteksten \u00e6ndres. Hverken det gamle svar eller en gammel fejl \u00e6ndrer aktivlisten eller viser en fejl. En efterf\u00f8lgende s\u00f8gning med den aktuelle tekst viser de korrekte aktiver. Fixturen registrerer kun de forventede skrivebeskyttede opslag.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_trade.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "ui/desktop/desktop-preview-search-discards-outdated-query",
+    "reserve_goal": "ui/desktop"
   }
 ]
