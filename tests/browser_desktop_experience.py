@@ -19,6 +19,79 @@ class DesktopTestHandler(app.Handler):
         return super()._get()
 
 
+def desktop_geometry(page):
+    return page.evaluate("""() => {
+        const aside = document.querySelector('body > aside').getBoundingClientRect();
+        const main = document.querySelector('main').getBoundingClientRect();
+        const nav = document.querySelector('nav [data-view=overview]').getBoundingClientRect();
+        return [aside.width, main.left, main.width, nav.width, nav.height];
+    }""")
+
+
+def review_release_status(page):
+    """Run with --release-status after integrating the #263 gen2 frontend."""
+    status_path = '**/escape-release/status.json'
+    overlay = page.locator('#release-overlay')
+    expect(overlay).to_be_attached()
+    before = desktop_geometry(page)
+    state = 'maintenance'
+    status = 404
+    sent = []
+
+    def public_status(route):
+        route.fulfill(status=status, json={'state': state}, headers={'Cache-Control': 'no-store'})
+
+    def reject_trade(route):
+        sent.append(route.request.method)
+        route.abort()
+
+    page.route(status_path, public_status)
+    page.route('**/api/trade/send', reject_trade)
+    for status in (404, 503):
+        message = f'Fixture HTTP {status}'
+        page.route('**/api/state', lambda route: route.fulfill(status=status, json={'error': message}))
+        try:
+            assert page.evaluate("""async () => {
+                try { await api('state'); }
+                catch (error) { return [error.status, error.message]; }
+            }""") == [status, message]
+            # A failed status response must not turn the API error into maintenance.
+            page.evaluate('() => checkReleaseStatus()')
+            expect(overlay).to_be_hidden()
+        finally:
+            page.unroute('**/api/state')
+
+    status = 200
+    # The first send must discover maintenance in preflight, and the second is stale.
+    for _ in range(2):
+        assert page.evaluate("""async () => {
+            try { await api('trade/send', {}); }
+            catch (error) { return error.message; }
+        }""") == 'ESCAPE er midlertidigt utilgængelig.'
+        assert not sent, sent
+    expect(overlay).to_be_visible()
+    expect(overlay.locator('#release-title')).to_have_text('Vi opdaterer ESCAPE')
+    expect(overlay.locator('#release-reconnect')).to_have_text('Forbindelsen genoprettes automatisk.')
+    page.keyboard.press('Escape')
+    expect(overlay).to_be_visible()
+    assert page.locator('nav [data-view=portfolios]').evaluate(
+        'button => !button.dispatchEvent(new MouseEvent("click", {bubbles: true, cancelable: true}))'
+    )
+    expect(page.locator('.dashboard-v1')).to_be_visible()
+    assert desktop_geometry(page) == before
+
+    # Publishing normal must let the scheduled probe reload the authenticated page.
+    with page.expect_event('framenavigated', predicate=lambda frame: frame == page.main_frame,
+                           timeout=20000):
+        state = 'normal'
+    expect(overlay).to_be_hidden()
+    expect(page.locator('.dashboard-v1')).to_be_visible()
+    expect(page.locator('.dash-holdings')).to_contain_text('ALFA')
+    assert desktop_geometry(page) == before
+    assert not sent, sent
+    print('PASS: #263 desktop maintenance, HTTP errors, stale action and automatic recovery')
+
+
 external_review = os.environ.get('ESCAPE_DESKTOP_EXTERNAL_REVIEW') == '1'
 case = PortfolioValueChart()
 case.setUp()
@@ -123,6 +196,8 @@ try:
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1'), width
             if width in (320, 390, 768, 1024, 1280, 1440, 1920):
                 page.screenshot(path=str(screens / f'overview-after-{width}.png'), full_page=True)
+            if width == 1440 and '--release-status' in sys.argv:
+                review_release_status(page)
             assert not errors, (width, errors)
             page.close()
         browser.close()
