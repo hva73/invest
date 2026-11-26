@@ -2375,5 +2375,27 @@
     "reserve_plan_id": "ui/test/design-browser-reaches-journal-for-width-check",
     "reserve_goal": "ui/test",
     "reserve_reassessment": "54:26@6d23b3f4033d2d2a196d5fb698315db4b0baa9c69656cd4adf5f35f0c2f23857"
+  },
+  {
+    "issue": 114,
+    "generation": 17,
+    "role": "motor",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [
+      "114:14"
+    ],
+    "paths": [
+      "journal_projection.py",
+      "tests/test_app.py"
+    ],
+    "task": "Approved roadmap statistics/provenance (Entry/exit-herkomst). Exact existing source anchor: journal_projection.py :: SELECT * FROM candidate_execution_events WHERE user_id=? AND is_test=0 ORDER BY id DESC LIMIT 2000. Implement only this bounded change: Tilf\u00f8j \u00e9n lokal SQLite-accepttest i tests/test_app.py, der kalder journal_projection.read() direkte med fast tid og filtrene Pluto og order. Brug det eksisterende normaliserede format for kandidatens ordreh\u00e6ndelser. Giv to brugere og den f\u00f8rste brugers testkategori samme kandidat- og ordre-id, men hver sin genkendelige udf\u00f8rte m\u00e6ngde. Medtag ogs\u00e5 en observation i den f\u00f8rste brugers almindelige kategori uden Pluto-verifikation for at afpr\u00f8ve verifikationsfilteret s\u00e6rskilt.. Acceptance: Hver bruger f\u00e5r pr\u00e6cis sin egen Pluto-verificerede observation fra den almindelige kategori. Den udf\u00f8rte m\u00e6ngde har u\u00e6ndret decimalpr\u00e6cision. Testr\u00e6kken og r\u00e6kken uden Pluto-verifikation udelades. Testen bruger en lokal database og kr\u00e6ver ingen antagelser om Plutos r\u00e5 svarformat.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_app.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "statistics/provenance/journal-execution-evidence-isolated-by-owner-and-mode",
+    "reserve_goal": "statistics/provenance"
   }
 ]
