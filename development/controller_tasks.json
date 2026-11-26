@@ -2613,5 +2613,48 @@
     "follow_base": true,
     "reserve_plan_id": "statistics/fills/journal-filled-status-requires-quantity-evidence",
     "reserve_goal": "statistics/fills"
+  },
+  {
+    "issue": 14,
+    "generation": 28,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [
+      "14:26"
+    ],
+    "paths": [
+      "eodhd_capacity.py",
+      "tests/test_eodhd_capacity.py"
+    ],
+    "task": "Approved roadmap shared_data/scheduler (F\u00e6lles scheduler og budget). Exact existing source anchor: eodhd_capacity.py :: state.get('ws_leases',{}).pop(token,None);write(c,state,time.time()). Implement only this bounded change: Afgr\u00e6ns \u00e6ndringen til oprydningen i Capacity.websocket(). N\u00e5r en senere reservation allerede har fjernet den udl\u00f8bne sessions token, skal oprydningen kunne afsluttes efter et l\u00e6seopslag uden at anmode om SQLite-skrivel\u00e5sen. Hvis token stadig findes, skal tilstanden genl\u00e6ses under den eksisterende skrivetransaktion og kun gemmes, hvis denne oprydning fjernede token.. Acceptance: Brug fast tid og den eksisterende SQLite-fixture. Lad en ny reservation fjerne den gamle udl\u00f8bne lease. Hold en anden skrivel\u00e5s, n\u00e5r den gamle kontekst afsluttes, og kontroll\u00e9r, at afslutningen lykkes uden en skrivetransaktion. Den nye lease best\u00e5r, og dens egen normale oprydning fjerner den.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_eodhd_capacity.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "shared_data/scheduler/skip-writer-for-pruned-websocket-lease",
+    "reserve_goal": "shared_data/scheduler"
+  },
+  {
+    "issue": 114,
+    "generation": 22,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [],
+    "paths": [
+      "journal_projection.py",
+      "tests/test_app.py"
+    ],
+    "task": "Approved roadmap statistics/fills (Fills, kostpris og afstemning). Exact existing source anchor: journal_projection.py :: if r['verification']!='pluto':continue. Implement only this bounded change: Genvurd\u00e9r kun NULL-tilf\u00e6ldet fra den bevarede 114:20-diff. N\u00e5r en Pluto-verificeret observations lagrede cycle_id er NULL, og dens gamle payload indeholder et cycle_id, skal l\u00e6seprojektionen erstatte den vildledende reference med null. Afgr\u00e6ns \u00e6ndringen til en journalpost uden lagret cyklustilknytning. Den bevarede checkout og det s\u00e6rskilte tilf\u00e6lde med en lagret cyklus indg\u00e5r ikke i denne genvurdering.. Acceptance: L\u00e6s \u00e9n verificeret ordreh\u00e6ndelse fra en midlertidig SQLite-fixture med NULL i kolonnen og en vildledende cyklus i payload. Forvent null i journalens details.cycle_id, samme rapporterede m\u00e6ngde og u\u00e6ndret lagret payload.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_app.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 114:20; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "statistics/fills/unlinked-pluto-observation-clears-legacy-cycle-claim",
+    "reserve_goal": "statistics/fills",
+    "reserve_reassessment": "114:20@0efdda3f19095bf15528e13f7a037769ffce2bf9bfb01bb78a1944426962ca76"
   }
 ]
