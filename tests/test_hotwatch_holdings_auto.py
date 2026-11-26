@@ -101,18 +101,18 @@ class HoldingScanPerformance(unittest.TestCase):
      request=json.dumps({'asset_id':aid,'portfolio_ids':[pid],'watch_mode':'exit'})
      if case=='early' and uid==1 and i>=activation:
       c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(uid,pid,aid,'POSITION_CLOSED',None,0,at))
-     elif case in ('linked','automatic') or (case=='early' and uid==1) or (case=='mixed' and i==0):
+     elif case in ('linked','automatic','unlinked') or (case=='early' and uid==1) or (case=='mixed' and i==0):
       watch=('hw-holding-'+hashlib.sha256(f'{uid}|{pid}|{aid}'.encode()).hexdigest()[:28]
              if case=='automatic' else f'watch-{i}')
       c.execute(insert_session,(uid,watch,aid,'PAUSED',request,at,at))
-      if case!='early' or uid!=1 or i!=0:
+      if case!='unlinked' and (case!='early' or uid!=1 or i!=0):
        c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(uid,pid,aid,'LINKED',watch,0,at))
      elif case!='killed':
       c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(uid,pid,aid,'IDENTITY_UNVERIFIED',None,self.now.timestamp()+600,at))
     request=json.dumps({'asset_id':self.assets[-1],'portfolio_ids':[pid],'watch_mode':'exit'})
     c.executemany(insert_session,((uid,f'old-{i}','old','COMPLETED',request,at,at) for i in range(history)))
 
- def scan(self,verify=None,statements=None):
+ def scan(self,verify=None,statements=None,warm_schema=False):
   # Profile the full tick and its selection phase separately. Fixture setup
   # and assertions are outside both counters.
   stats=dict(steps=0,rows=0,decodes=0,writes=0,reads=0,locked_steps=0,locked_rows=0,lookup_steps=0,
@@ -124,6 +124,9 @@ class HoldingScanPerformance(unittest.TestCase):
    stats['connections']+=1
    if stats['connections']>1:selecting=False
    c=app.connect()
+   if warm_schema:
+    # Exclude schema parsing on each new connection, as in the pinned VM profile.
+    c.execute('SELECT 1 FROM users LIMIT 1').fetchall()
    at_position=False
    def progress():
     stats['total_steps']+=1
@@ -213,6 +216,54 @@ class HoldingScanPerformance(unittest.TestCase):
       self.assertLessEqual(stats['reads'],2+users*size*reads_per_position)
       self.doCleanups()
 
+ def test_first_reopened_holding_stays_within_pinned_tick_budget(self):
+  # Full-tick counts on f18e919, SQLite 3.51.0, for the two verifier outcomes.
+  for verified,expected,max_steps,max_rows,max_decodes in (
+    (False,'IDENTITY_UNVERIFIED',316,5,1),(True,'LINKED',1110,11,3)):
+   with self.subTest(verified=verified):
+    self.seed(1,1,'early')
+    aid=self.assets[0]
+    instrument={'asset_id':aid,'ticker':'TEST','exchange':'NASDAQ','currency':'USD'}
+    result,visits,stats=self.scan(verify=lambda *_:instrument if verified else None,warm_schema=True)
+    self.assertEqual((result,visits),(expected,[(1,aid)]))
+    self.assertLessEqual(stats['total_steps'],max_steps)
+    self.assertLessEqual(stats['total_rows'],max_rows)
+    self.assertLessEqual(stats['total_decodes'],max_decodes)
+    with app.connect() as c:
+     attempt=c.execute('SELECT status,watch_id,next_attempt FROM hw_holding_autowatch').fetchone()
+     self.assertEqual((attempt['status'],attempt['next_attempt']),(expected,self.now.timestamp()+300))
+     sessions=c.execute('SELECT watch_id,request FROM hw_sessions').fetchall()
+     if verified:
+      self.assertEqual([row['watch_id'] for row in sessions],[attempt['watch_id']])
+      request=json.loads(sessions[0]['request'])
+      self.assertEqual((request['portfolio_ids'],request['asset_id'],request['watch_mode']),([2],aid,'exit'))
+     else:self.assertEqual((sessions,attempt['watch_id']),([],None))
+    self.doCleanups()
+
+ def test_paused_positions_link_in_one_commit_within_pinned_budget(self):
+  # Pinned full-tick VM counts with no history or pre-existing links.
+  for users,size,max_steps in ((1,1,196),(10,1,1402),(100,1,13462),
+                              (1,26,7646),(10,26,76127),(100,26,760937)):
+   with self.subTest(users=users,size=size):
+    self.seed(users,size,'unlinked')
+    statements=[]
+    result,visits,stats=self.scan(statements=statements,warm_schema=True)
+    self.assertEqual((result,visits,statements.count('COMMIT')),(None,[],1))
+    self.assertLessEqual(stats['total_steps'],max_steps)
+    self.assertLessEqual(stats['total_rows'],1+users*(1+size))
+    self.assertEqual(stats['total_decodes'],users*(1+size))
+    self.assertEqual(stats['locked_rows'],0)
+    with app.connect() as c:
+     rows=c.execute("""SELECT a.user_id,a.portfolio_id,a.asset_id,a.watch_id,a.status,s.status
+                       FROM hw_holding_autowatch a JOIN hw_sessions s
+                       ON s.user_id=a.user_id AND s.watch_id=a.watch_id AND s.is_test=0
+                       ORDER BY a.user_id,a.asset_id""").fetchall()
+     self.assertEqual(list(map(tuple,rows)),[(uid,2*uid,aid,f'watch-{i}','LINKED','PAUSED')
+                      for uid in range(1,users+1) for i,aid in enumerate(self.assets)])
+    result,visits,idle=self.scan()
+    self.assertEqual((result,visits,idle['writes']),(None,[],0))
+    self.doCleanups()
+
  def test_early_activation_bounds_work_while_writing(self):
   for users in (1,10,100):
    for size,activation in ((1,0),(26,0),(26,1),(26,2),(26,3)):
@@ -236,6 +287,68 @@ class HoldingScanPerformance(unittest.TestCase):
       self.assertEqual(runs[0][key],runs[1][key],key)
      self.assertLessEqual(runs[1]['locked_steps'],runs[0]['locked_steps']+10)
      self.assertLessEqual(runs[1]['steps'],runs[0]['steps']+10)
+
+ def test_duplicate_position_observes_the_link_from_its_first_visit(self):
+  self.seed(1,2,'unlinked')
+  with app.connect() as c:
+   payload=json.loads(c.execute('SELECT payload FROM portfolio_snapshots').fetchone()[0])
+   payload['positions'].insert(1,payload['positions'][0])
+   c.execute('UPDATE portfolio_snapshots SET payload=?',(json.dumps(payload),))
+  statements=[]
+  self.assertEqual(self.scan(statements=statements)[:2],(None,[]))
+  self.assertEqual(sum(q.startswith('INSERT INTO hw_holding_autowatch') for q in statements),2)
+  with app.connect() as c:
+   rows=c.execute('SELECT asset_id,status,watch_id FROM hw_holding_autowatch ORDER BY asset_id')
+   self.assertEqual(list(map(tuple,rows)),[(aid,'LINKED',f'watch-{i}') for i,aid in enumerate(self.assets)])
+
+ def test_invalid_system_switch_leaves_reopened_position_untouched(self):
+  self.seed(1,1,'early')
+  with app.connect() as c:c.execute("UPDATE hw_system_control SET killed='unknown'")
+  result,visits,stats=self.scan()
+  self.assertEqual((result,visits,stats['writes'],stats['decodes']),(None,[],0,0))
+  with app.connect() as c:c.execute('UPDATE hw_system_control SET killed=0')
+  self.assertEqual(self.scan()[:2],('IDENTITY_UNVERIFIED',[(1,self.assets[0])]))
+
+ def test_pending_links_recheck_kill_and_reopen_in_order(self):
+  self.seed(4,1,'unlinked')
+  aid=self.assets[0]
+  execute=app.DatabaseConnection.execute
+  raced=False
+  def change(c,sql,*args):
+   nonlocal raced
+   if sql=='BEGIN IMMEDIATE' and not raced:
+    raced=True
+    with app.connect() as other:
+     other.execute("INSERT INTO hw_control VALUES(2,1,?,'fixture')",(self.now.isoformat(),))
+     other.execute("UPDATE hw_sessions SET status='COMPLETED' WHERE user_id=3")
+     other.execute("INSERT INTO hw_holding_autowatch VALUES(3,6,?,'POSITION_CLOSED','watch-0',0,?)",
+                   (aid,self.now.isoformat()))
+   return execute(c,sql,*args)
+  with patch.object(app.DatabaseConnection,'execute',change):
+   self.assertEqual(self.scan()[:2],('IDENTITY_UNVERIFIED',[(3,aid)]))
+  with app.connect() as c:
+   rows=c.execute('SELECT user_id,status,watch_id FROM hw_holding_autowatch ORDER BY user_id')
+   self.assertEqual(list(map(tuple,rows)),[(1,'LINKED','watch-0'),(3,'IDENTITY_UNVERIFIED',None)])
+   c.execute('UPDATE hw_control SET killed=0 WHERE user_id=2')
+  self.assertEqual(self.scan()[:2],(None,[]))
+  with app.connect() as c:
+   rows=c.execute("SELECT user_id,watch_id FROM hw_holding_autowatch WHERE status='LINKED' ORDER BY user_id")
+   self.assertEqual(list(map(tuple,rows)),[(1,'watch-0'),(2,'watch-0'),(4,'watch-0')])
+
+ def test_idle_position_reopened_at_gate_follows_committed_link(self):
+  self.seed(1,3,'linked')
+  with app.connect() as c:
+   c.execute('DELETE FROM hw_holding_autowatch WHERE asset_id=?',(self.assets[0],))
+  def reopen(position):
+   if position!=2:return
+   with app.connect() as other:
+    self.assertEqual(other.execute('SELECT status FROM hw_holding_autowatch WHERE asset_id=?',
+                                   (self.assets[0],)).fetchone()[0],'LINKED')
+    other.execute("UPDATE hw_sessions SET status='COMPLETED' WHERE watch_id='watch-1'")
+    other.execute("UPDATE hw_holding_autowatch SET status='POSITION_CLOSED',next_attempt=0 WHERE asset_id=?",
+                  (self.assets[1],))
+  with self.at_user_gate(reopen):
+   self.assertEqual(self.scan()[:2],('IDENTITY_UNVERIFIED',[(1,self.assets[1])]))
 
  def test_competing_tick_claims_same_position_before_first_write(self):
   self.seed(1,1,'early')
@@ -447,7 +560,7 @@ class HoldingScanPerformance(unittest.TestCase):
   for expected_write in (True,False):
    result,verified,stats=self.scan()
    self.assertEqual((result,verified,stats['decodes']),(None,[],3))
-   # An unchanged preflight version is checked inside the upsert.
+   # An unchanged version lets the writer use the exact preflight decision.
    self.assertEqual(stats['locked_rows'],0)
    self.assertLessEqual(stats['rows']-stats['locked_rows'],5)
    self.assertEqual(bool(stats['writes']),expected_write)

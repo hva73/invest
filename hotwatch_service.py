@@ -790,8 +790,8 @@ def refresh_holding_origin(connect,uid,pid,asset_id):
  try:trade_service.check(connect,uid,matches[0])
  except Exception:pass  # No proof remains no link; the ordinary holding monitor still runs.
 
-_HOLDING_SNAPSHOTS = """FROM portfolios p JOIN users u ON u.id=p.user_id
-                        JOIN portfolio_snapshots s ON s.portfolio_id=p.id AND s.user_id=p.user_id
+_HOLDING_SNAPSHOTS = """FROM users u JOIN portfolios p NOT INDEXED ON p.user_id=u.id
+                        JOIN portfolio_snapshots s ON s.portfolio_id=p.id AND s.user_id=u.id
                         WHERE p.active=1 AND p.source='pluto' AND u.active=1 AND s.last_error IS NULL"""
 
 def snapshot_holdings(raw,now):
@@ -868,9 +868,9 @@ def holding_watch_decision(c,uid,pid,aid,epoch):
   if not stopped and automatic and matches_holding(automatic,pid,aid):stopped=watch
   if stopped:status,linked='STOPPED',stopped
   elif prior and prior['next_attempt']>epoch:return None
-  else:return 'VERIFYING',None,watch
+  else:return 'VERIFYING',None,watch,prior is not None
  if prior and previous==status and prior['watch_id']==linked:return None
- return status,linked,watch
+ return status,linked,watch,prior is not None
 
 def historical_holding_watch(c,uid,pid,aid,watch,terminal_only=False):
  row=c.execute('SELECT status,request FROM hw_sessions WHERE user_id IS ? AND watch_id IS ? AND is_test=0',
@@ -878,40 +878,71 @@ def historical_holding_watch(c,uid,pid,aid,watch,terminal_only=False):
  if row and (not terminal_only or row['status'] in ('COMPLETED','EXPIRED','ERROR')) and matches_holding(row['request'],pid,aid):
   return watch
 
-def record_holding_decision(c,uid,pid,aid,decision,now,version=None):
- status,linked,_=decision
- # An unchanged version lets the write itself validate the preflight. After
- # a concurrent commit the caller recomputes the decision under this lock.
- return c.execute("""INSERT INTO hw_holding_autowatch
-                     SELECT ?,?,?,?,?,?,? WHERE ?8 IS NULL OR ?8=(SELECT data_version FROM pragma_data_version)
-                     ON CONFLICT(user_id,portfolio_id,asset_id) DO UPDATE SET status=excluded.status,
-                       watch_id=excluded.watch_id,next_attempt=excluded.next_attempt,updated=excluded.updated""",
-                  (uid,pid,aid,status,linked,now.timestamp()+300,now.isoformat(),version)).rowcount
+def holding_changes(c,snapshots,version,now):
+ """Yield ordered link writes, stopping at each position that needs verification."""
+ epoch=now.timestamp()
+ changes={}
+ for snap in snapshots:
+  uid,pid=snap['user_id'],snap['id']
+  pending_here=False
+  for holding in snapshot_holdings(snap['payload'],now):
+   aid=holding['asset_id']
+   key=uid,pid,aid
+   # Within a portfolio, publish earlier links before the next reservation's
+   # user gate. Only distinct reconciliation writes may be grouped together.
+   inspected=pending_here and key not in changes
+   decision=holding_watch_decision(c,uid,pid,aid,epoch) if inspected else None
+   if key in changes or (pending_here and (not decision or decision[0]=='VERIFYING')):
+    yield changes.values()
+    changes.clear()
+    pending_here=False
+   if inspected and (not decision or decision[0]!='VERIFYING'):
+    # An external commit invalidates the lookahead. NULL asks for a fresh
+    # decision after this gate. A killed user always takes precedence.
+    control=c.execute("""SELECT killed FROM hw_control WHERE user_id=? AND killed<>0
+                         UNION ALL SELECT NULL FROM pragma_data_version WHERE data_version<>? LIMIT 1""",
+                      (uid,version)).fetchone()
+    if control and control[0] is None:inspected=False
+   else:
+    control=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
+   if control and control[0]:
+    pending_here=False
+    continue
+   if not inspected:decision=holding_watch_decision(c,uid,pid,aid,epoch)
+   if not decision:continue
+   change=snap,holding,decision
+   if decision[0]=='VERIFYING':
+    if changes:
+     yield changes.values()
+     changes.clear()
+    yield (change,)
+    pending_here=False
+   else:
+    changes[key]=change
+    pending_here=True
+ if changes:yield changes.values()
 
 def select_holding(c,now):
  epoch=now.timestamp()
- # Read the global switch and the connection's change counter at the same
- # instant. Keep the cursor closed while visiting positions so writers can commit.
+ at=now.isoformat()
  gate=c.execute("""SELECT killed,(SELECT data_version FROM pragma_data_version) AS version
                    FROM hw_system_control WHERE id=1 AND NOT killed""").fetchone()
  if not gate or gate['killed']!=0:return None
- snapshots=c.execute('SELECT p.user_id,p.id,s.payload '+_HOLDING_SNAPSHOTS).fetchall()
+ version=gate['version']
+ snapshots=c.execute('SELECT s.user_id,s.portfolio_id AS id,s.payload '+_HOLDING_SNAPSHOTS).fetchall()
  snapshots.sort(key=lambda row:(row['user_id'],row['id']))
- for snap in snapshots:
-  uid,pid=snap['user_id'],snap['id']
-  for holding in snapshot_holdings(snap['payload'],now):
-   aid=holding['asset_id']
-   control=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
-   if control and control['killed']:continue
-   decision=holding_watch_decision(c,uid,pid,aid,epoch)
-   if not decision:continue
-   c.execute('BEGIN IMMEDIATE')
-   if not record_holding_decision(c,uid,pid,aid,decision,now,gate['version']):
-    # The version belongs to the original scan, including later portfolios.
-    # A missing gate row stops the tick. A missing payload skips this holding.
+ for changes in holding_changes(c,snapshots,version,now):
+  c.execute('BEGIN IMMEDIATE')
+  changed=c.execute('SELECT 1 FROM pragma_data_version WHERE data_version<>?',(version,)).fetchone()
+  for snap,holding,decision in changes:
+   uid,pid,aid=snap['user_id'],snap['id'],holding['asset_id']
+   if changed:
+    # Revalidate only the affected key. Release the writer between disputed
+    # positions so an unrelated commit cannot turn discovery into a locked scan.
+    if not c.in_transaction:c.execute('BEGIN IMMEDIATE')
     current=c.execute("""SELECT (SELECT s.payload """+_HOLDING_SNAPSHOTS+"""
-                       AND p.id=? AND p.user_id=? AND NOT EXISTS
-                       (SELECT 1 FROM hw_control WHERE user_id=p.user_id AND killed<>0)) AS payload
+                       AND s.portfolio_id=? AND s.user_id=? AND NOT EXISTS
+                       (SELECT 1 FROM hw_control WHERE user_id=s.user_id AND killed<>0)) AS payload
                        FROM hw_system_control WHERE id=1 AND killed=0""",(pid,uid)).fetchone()
     if current is None:return None
     if current['payload']!=snap['payload']:
@@ -920,10 +951,18 @@ def select_holding(c,now):
     if not decision:
      c.commit()
      continue
-    record_holding_decision(c,uid,pid,aid,decision,now)
-   status,_,watch=decision
-   c.commit()
-   if status=='VERIFYING':return uid,pid,holding,watch
+   status,linked,watch,exists=decision
+   if exists:
+    c.execute("""UPDATE hw_holding_autowatch SET status=?,watch_id=?,next_attempt=?,updated=?
+                 WHERE user_id IS ? AND portfolio_id IS ? AND asset_id IS ?""",
+              (status,linked,epoch+300,at,uid,pid,aid))
+   else:
+    c.execute('INSERT INTO hw_holding_autowatch VALUES(?,?,?,?,?,?,?)',(uid,pid,aid,status,linked,epoch+300,at))
+   if status=='VERIFYING':
+    c.commit()
+    return uid,pid,holding,watch
+   if changed:c.commit()
+  c.commit()
 
 def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
  """Activate at most one owned position per tick, with persistent bounded retries."""
@@ -934,7 +973,7 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
   if selected is None:return None
   uid,pid,holding,watch=selected
   try:
-   count=c.execute("SELECT count(*) FROM hw_sessions WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]
+   count=c.execute("SELECT count(*) FROM hw_sessions INDEXED BY hw_active_identity WHERE status IN ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')").fetchone()[0]
    if count>=engine.capacity() and not engine.entry_for_holding(c,uid,now):
     return finish_holding_attempt(c,uid,pid,holding['asset_id'],now,'CAPACITY_LIMIT')
   except (sqlite3.Error,ValueError,TypeError):
