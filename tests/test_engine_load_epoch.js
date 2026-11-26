@@ -268,7 +268,7 @@ function settingsFixture() {
   return {...engine, button, dialog, records};
 }
 
-async function checkKillWhileOpeningSettings(fail) {
+async function checkKillWhileOpeningDialog(fail, manualSearch = false) {
   const {session, context, requests, click, button, dialog} = settingsFixture();
   context.confirm = () => true;
   let resolve, reject;
@@ -279,7 +279,26 @@ async function checkKillWhileOpeningSettings(fail) {
   };
   const pending = click({dataset: {engineKill: 'on'}, hasAttribute: () => false});
   session.settings = url => url.endsWith('/strategies') ? {strategies: []} : {providers: {}};
-  assert.equal(await click(button), true);
+  if (manualSearch) {
+    context.document.querySelector = () => null;
+    await click({dataset: {}, hasAttribute: name => name === 'data-engine-new'});
+    assert.match(dialog.innerHTML, /id="engine-manual-search"/);
+    const form = {id: 'engine-manual-search', isConnected: true};
+    const status = {}, results = {};
+    const nodes = {[form.id]: form, 'engine-manual-status': status, 'engine-manual-results': results};
+    const lookup = context.document.getElementById;
+    context.document.getElementById = id => nodes[id] || lookup(id);
+    context.FormData = class { get() { return 'TEST'; } };
+    session.control = (url, body) => {
+      assert.equal(url, 'v1/hotwatch/manual-search?is_test=false');
+      assert.deepEqual({...body}, {query: 'TEST'});
+      return {assets: []};
+    };
+    assert.equal(await context.window.EngineUI.submit({target: form, preventDefault() {}}), true);
+    assert.match(results.innerHTML, /Ingen resultater/);
+  } else {
+    assert.equal(await click(button), true);
+  }
   assert.equal(dialog.open, true);
   if (fail) {
     const error = new Error('kill switch offline');
@@ -637,8 +656,10 @@ async function main() {
     await checkValidation(change, 'error');
   }
   await checkValidation(null, 'invalid');
-  await checkKillWhileOpeningSettings(true);
-  await checkKillWhileOpeningSettings(false);
+  for (const fail of [false, true]) {
+    await checkKillWhileOpeningDialog(fail);
+    await checkKillWhileOpeningDialog(fail, true);
+  }
   for (const change of ['epoch', 'owner', 'mode', 'dialog', 'newer', 'detached', null]) {
     await checkSettings(change, false);
     await checkSettings(change, true);
