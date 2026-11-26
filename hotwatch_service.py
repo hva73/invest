@@ -808,11 +808,14 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
    control=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()
    if control and control['killed']:continue
    existing=c.execute("SELECT watch_id,status,request FROM hw_sessions WHERE user_id=? AND is_test=0 AND json_extract(request,'$.asset_id')=? ORDER BY id DESC",(uid,aid)).fetchall()
-   matches=[row for row in existing if json.loads(row['request']).get('watch_mode','both')!='entry' and (not json.loads(row['request']).get('portfolio_ids') or pid in json.loads(row['request'])['portfolio_ids'])]
+   matches=[]
+   for row in existing:
+    request=json.loads(row['request'])
+    if request.get('watch_mode','both')!='entry' and (not request.get('portfolio_ids') or pid in request['portfolio_ids']):
+     matches.append(row)
    active=[row for row in matches if row['status'] in ('CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED')]
-   prior=c.execute('SELECT status,watch_id,next_attempt FROM hw_holding_autowatch WHERE user_id=? AND portfolio_id=? AND asset_id=?',(uid,pid,aid)).fetchone()
-   generation=c.execute('SELECT updated FROM hw_holding_autowatch WHERE user_id=? AND portfolio_id=? AND asset_id=?',(uid,pid,aid)).fetchone() if prior and prior['status']=='POSITION_CLOSED' else None
-   identity=str(uid)+'|'+str(pid)+'|'+aid+('|'+generation['updated'] if generation else '')
+   prior=c.execute('SELECT status,watch_id,next_attempt,updated FROM hw_holding_autowatch WHERE user_id=? AND portfolio_id=? AND asset_id=?',(uid,pid,aid)).fetchone()
+   identity=str(uid)+'|'+str(pid)+'|'+aid+('|'+prior['updated'] if prior and prior['status']=='POSITION_CLOSED' else '')
    watch='hw-holding-'+hashlib.sha256(identity.encode()).hexdigest()[:28]
    if len(active)==1:status='LINKED';linked=active[0]['watch_id']
    elif len(active)>1:status='AMBIGUOUS';linked=None
