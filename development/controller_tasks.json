@@ -2933,5 +2933,87 @@
     "follow_base": true,
     "reserve_plan_id": "ui/mobile/radar-desk-poll-respects-login-epoch",
     "reserve_goal": "ui/mobile"
+  },
+  {
+    "issue": 14,
+    "generation": 33,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+    "dependencies": [],
+    "paths": [
+      "hotwatch_engine.py",
+      "tests/test_hotwatch_engine.py"
+    ],
+    "task": "Approved roadmap load/queue (100 brugere og fair k\u00f8er). Exact existing source anchor: tests/test_hotwatch_engine.py :: def test_leases_protect_pause_and_worker_restart(self):. Implement only this bounded change: Reassess only the exact-deadline reclaim setup from the preserved 14:22 diff. Add one SQLite test using the existing single-watch fixture and a concurrency limit of one. Claim the watch, read its persisted lease deadline, and call claim again for the same watch immediately before and exactly at that deadline. Leave the stale release call and whole-row comparison in the preserved checkout.. Acceptance: The watch cannot be claimed just before its persisted deadline. At the deadline, claim returns the same row ID with a fresh token even with one worker slot. The existing pause and restart regression still passes.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_hotwatch_engine.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 14:22; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "load/queue/hotwatch-exact-lease-deadline-permits-reclaim",
+    "reserve_goal": "load/queue",
+    "reserve_reassessment": "14:22@bc15154dadfb9eb86ca22514298a1d7f01878a7117943b012e2b8613c70d7dae"
+  },
+  {
+    "issue": 114,
+    "generation": 27,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+    "dependencies": [],
+    "paths": [
+      "journal_projection.py",
+      "tests/test_app.py"
+    ],
+    "task": "Approved roadmap statistics/fills (Fills, kostpris og afstemning). Exact existing source anchor: journal_projection.py :: if r['verification']!='pluto':continue. Implement only this bounded change: Reassess the single conflicting legacy-payload case from the preserved 114:22 diff. When a Pluto-verified execution row has a NULL stored cycle_id and its decoded details already contain a cycle_id, clear that detail in the returned projection. Use one row in the app test's initialized temporary database and call journal_projection.read() directly with a fixed clock and Pluto/order filters. Leave the second fixture variant in the preserved checkout.. Acceptance: An owned partial-fill observation with NULL in the stored cycle column and an obsolete cycle ID in its payload remains visible with details.cycle_id set to null and its exact filled_quantity intact. The stored payload remains unchanged.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_app.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 114:22; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "statistics/fills/journal-ignores-legacy-cycle-when-stored-link-is-null",
+    "reserve_goal": "statistics/fills",
+    "reserve_reassessment": "114:22@9f0028d3a9d145c226d1020e17c6e608ed54f687d4a45c5558a2546375d26f38"
+  },
+  {
+    "issue": 54,
+    "generation": 34,
+    "role": "mobile",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+    "dependencies": [],
+    "paths": [
+      "tests/browser_design_v1.py"
+    ],
+    "task": "Approved roadmap ui/test (F\u00e6lles browsertest). Exact existing source anchor: tests/browser_design_v1.py :: page.locator('nav [data-view='+target+']').click();page.wait_for_timeout(200). Implement only this bounded change: Reassess the journal navigation hunk from the preserved 54:28 diff as one mobile browser assertion. At the trade step of the existing fixture, set the viewport to 320 px, open Handelsjournal through its visible button in the trade panel, and wait for the journal heading before measuring document width. Replace the unreachable journal navigation step with this single-width check and retain the existing width sweep for the other sections.. Acceptance: At 320 px, clicking the trade panel button makes the Handelsjournal heading visible and the document fits the viewport within the existing one-pixel tolerance.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_design_v1.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:28; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "ui/test/mobile-journal-width-check-via-trade-panel-at-320",
+    "reserve_goal": "ui/test",
+    "reserve_reassessment": "54:28@921ffe68063cbcbfc4d2e228caecddb32436b893752feddb5b7e4e5c44769a13"
+  },
+  {
+    "issue": 54,
+    "generation": 35,
+    "role": "desktop",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+    "dependencies": [],
+    "paths": [
+      "tests/browser_desktop_trade.py"
+    ],
+    "task": "Approved roadmap ui/desktop (Desktop 2.0). Exact existing source anchor: tests/browser_desktop_trade.py :: if(name === 'trade/preview') return {};. Implement only this bounded change: Reassess only the clearing order from the preserved 54:32 diff. In the existing browser fixture, mount the real trade panel, fill one valid preview form, and seed a recognizable old result after the form changes settle. Have the trade/preview stub record whether that result is present at the instant the stub receives the request. Return a local response immediately so this test needs neither a pending promise nor assertions about pending or completed rendering.. Acceptance: The old result is visible before submission and absent when the stub receives the single trade/preview call. No send call is recorded. The existing desktop buy and sell dialog checks still pass.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_trade.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:32; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "ui/desktop/desktop-preview-clears-old-result-before-request",
+    "reserve_goal": "ui/desktop",
+    "reserve_reassessment": "54:32@98be8dc6cf180281ca44ab0246f48ff21733ef21516f451095fd0a6c31e16528"
   }
 ]
