@@ -282,6 +282,33 @@ class Trading(unittest.TestCase):
     self.assertEqual(json.loads(trade.get(app.connect,1,proposal['id'])['response']),self.intent_status)
     self.assertEqual((refreshed['intent_id'],refreshed['status']),(reference,'sent'))
     self.assertEqual(self.calls,[{'name':'get_order_intent','arguments':root}])
+ def test_check_validates_explicit_status_before_replacing_evidence(self):
+  proposal=self.estimate()
+  pid=proposal['id']
+  root={'orderIntentId':'synthetic-intent'}
+  item={**root,**proposal['payload']['orders'][0]}
+  prior={**root,'status':'PENDING'}
+  with app.connect() as c:
+   c.execute("UPDATE broker_proposals SET status='uncertain',response=?,error=? WHERE id=?",
+             (json.dumps(prior),'Awaiting reconciliation',pid))
+  before=dict(trade.get(app.connect,1,pid))
+  for value in ({'state':'accepted'},['accepted'],None,False,1,'',' \t\n'):
+   for reply in ({**root,'status':value},
+                 {**prior,'orderIntents':[{**item,'status':value}]}):
+    with self.subTest(reply=reply):
+     self.intent_status=reply
+     with self.assertRaises(trade.TradeError):
+      trade.check(app.connect,1,pid,self.factory)
+     self.assertEqual(dict(trade.get(app.connect,1,pid)),before)
+  for reply in (root,{'orderIntents':[{**item,'status':'PendingReview'}]},
+                {**root,'status':' Accepted '}, {'orderIntents':[item]}):
+   with self.subTest(reply=reply):
+    self.intent_status=reply
+    refreshed=trade.check(app.connect,1,pid,self.factory)['proposal']
+    stored=trade.get(app.connect,1,pid)
+    self.assertEqual(json.loads(stored['response']),reply)
+    self.assertEqual((stored['intent_id'],stored['status'],stored['error']),(root['orderIntentId'],'sent',None))
+    self.assertEqual(refreshed,trade.view(stored))
  def test_check_collection_sell_matches_saved_collection_id(self):
   request=dict(self.request,portfolio_id=self.child,kind='collection_sell',size='25')
   with patch('trade_service.candidate',return_value={'signal':'SÆLG'}):

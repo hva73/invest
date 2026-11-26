@@ -444,6 +444,11 @@ def check(connect,user_id,pid,factory=None):
     cl,tools=client(connect,user_id,factory);raw=call(cl,tools,'get_order_intent',{'orderIntentId':reference})
     if not status_matches_proposal(raw,json.loads(row['payload']),reference):
         raise TradeError('Plutos statussvar kunne ikke knyttes til forslaget.')
+    for intent in (raw,*raw.get('orderIntents',[])):
+        if 'status' in intent:
+            status=intent['status']
+            if not isinstance(status,str) or not status.strip():
+                raise TradeError('Pluto returnerede en ugyldig forslagsstatus.')
     # Preserve exact provider status separately. Acceptance is never a fill.
     with connect() as c:
         c.execute("""UPDATE broker_proposals SET response=?,intent_id=?,status='sent',error=NULL
