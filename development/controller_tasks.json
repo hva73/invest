@@ -2082,5 +2082,91 @@
     "follow_base": true,
     "reserve_plan_id": "shared_data/scheduler/skip-sqlite-writer-during-eodhd-websocket-cooldown",
     "reserve_goal": "shared_data/scheduler"
+  },
+  {
+    "issue": 14,
+    "generation": 22,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "cbb37703356ffae9f3d2beba37265d17e0b706db",
+    "dependencies": [
+      "14:20"
+    ],
+    "paths": [
+      "hotwatch_engine.py",
+      "tests/test_hotwatch_engine.py"
+    ],
+    "task": "Approved roadmap load/queue (100 brugere og fair k\u00f8er). Exact existing source anchor: hotwatch_engine.py :: def release(connect,job,now=None,sample=None,pending_feed=False):. Implement only this bounded change: Reassess only the stale invocation from the preserved 14:18 diff. Use one due watch and the injected clock to claim it, advance to the original lease deadline, and reclaim the same row with a fresh token. Call normal release() with the original job object and compare the persisted row immediately before and after. This smaller regression omits the second tenant, the valid-token release branch and its scheduling assertions. The preserved checkout stays intact.. Acceptance: The reclaimed row has a different lease token. Calling release() with the expired job leaves the row byte-for-byte unchanged, including the new token, lease deadline, next_due and serialized state. The existing restart and pause lease checks still pass.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_hotwatch_engine.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 14:18; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "load/queue/reclaimed-lease-ignores-stale-release",
+    "reserve_goal": "load/queue",
+    "reserve_reassessment": "14:18@054cd6be238536e0d9ec7df4bddfb9704b98218f1dc68bf2619364db39063db0"
+  },
+  {
+    "issue": 54,
+    "generation": 24,
+    "role": "mobile",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "cbb37703356ffae9f3d2beba37265d17e0b706db",
+    "dependencies": [],
+    "paths": [
+      "static/journal-ui.js",
+      "tests/browser_design_v1.py"
+    ],
+    "task": "Approved roadmap ui/test (F\u00e6lles browsertest). Exact existing source anchor: static/journal-ui.js :: async function load(append=false). Implement only this bounded change: Reassess only the old pagination rejection case from the preserved 54:20 diff. In JournalUI.load(), apply the existing success-path ticket, owner and connected-root checks before writing an error. In the browser fixture, enter the journal through the current Handelsmotor button and exercise one pending older-page request overtaken by a period change. This smaller split omits session-epoch wiring, root replacement and the broader race matrix. The preserved checkout stays intact.. Acceptance: After the new period renders, reject the previous period's older-page request. The rows, critical section, coverage and current pagination remain intact. A subsequent failure for the current request still displays the existing journal error.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_design_v1.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:20; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "ui/test/journal-filter-survives-old-page-rejection",
+    "reserve_goal": "ui/test",
+    "reserve_reassessment": "54:20@5a767fbab31132f71e353e55c0a7c3714eb7dc2e99644658c51627d271dd9f71"
+  },
+  {
+    "issue": 273,
+    "generation": 15,
+    "role": "mobile",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "cbb37703356ffae9f3d2beba37265d17e0b706db",
+    "dependencies": [],
+    "paths": [
+      "static/app.js",
+      "tests/browser_mobile_navigation_app.py"
+    ],
+    "task": "Approved roadmap position/ui (Visning og \u00e6ndring af strategi). Exact existing source anchor: static/app.js :: if(e.target.id==='strategy-lab-form'). Implement only this bounded change: Scope the existing read-only Strategy Lab comparison result and error to the originating session, form, and submitted watch and strategy-version selections. When the user edits a selection while the comparison is pending, discard the settled outcome, clear the obsolete pending message and let the current form submit again. Keep the replay request and rendering for a current comparison unchanged.. Acceptance: In the existing mobile browser fixture, intercept a delayed comparison, change one strategy version while the form stays mounted, then settle the old request. Neither its result nor its error appears for the edited selection. Submitting the new selection shows the matching comparison and restores the button state.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_mobile_navigation_app.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "position/ui/strategy-lab-result-matches-current-selection",
+    "reserve_goal": "position/ui"
+  },
+  {
+    "issue": 267,
+    "generation": 6,
+    "role": "desktop",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "cbb37703356ffae9f3d2beba37265d17e0b706db",
+    "dependencies": [
+      "54:24"
+    ],
+    "paths": [
+      "static/dashboard-ui.js",
+      "tests/browser_design_v1.py"
+    ],
+    "task": "Approved roadmap stabilization/desktop (Desktop-kontrol). Exact existing source anchor: static/dashboard-ui.js :: if(b.dataset.dashboardHistory!==undefined). Implement only this bounded change: Scope DashboardUI's inline report-history lookup to the open holding-dialog interaction that started it. Capture the initiating control and result region, and invalidate pending work when that dialog closes or its contents are replaced. Apply the same validity check to success and rejection before writing history or propagating an error. Keep the existing report-history request and the separate PositionUI history route intact.. Acceptance: Using the desktop fixture's report-linked holding, close the dialog while its history request is pending. A late success leaves the closed dialog untouched, and a late rejection raises no notice. Reopening the holding and requesting history displays the expected report links.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_design_v1.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "stabilization/desktop/dashboard-history-stops-at-holding-dialog-close",
+    "reserve_goal": "stabilization/desktop"
   }
 ]
