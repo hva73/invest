@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-25T23:46:42Z",
+  "updated_at": "2026-11-26T01:46:39Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -284,7 +284,7 @@
       "title": "Long-Term Watch",
       "status": "in_progress",
       "issue": 12,
-      "evidence": "#310 9b8e605b CI 45720671047 PASS, HOLD 7177527235 på identitet/budget/installer. Koordinator #312 9217152d leverer manifestrettelse med install-only og missing-module tests; CI 45723773835 SKIPPED, uafhængig fokuseret updater-test udestår. Ingen integration.",
+      "evidence": "#310 9b8e605b CI 45720671047 PASS; HOLD 7177527235 på identitet og faktisk adapterbudget. #312 9217152d: 8/8 isolerede updater-tests PASS dokumenteret 7178999052; CI 45723773835 SKIPPED. To fuld-checkout tests og uafhængig accept udestår; ingen integration.",
       "subgoals": [
         {
           "id": "watch",
@@ -306,12 +306,12 @@
           "id": "test",
           "title": "Integreret test",
           "status": "review",
-          "evidence": "#310 HTTP/SQLite ikke endeligt accepteret. #312 manifest og test leveret; CI SKIPPED, afventer faktisk updater-test.",
+          "evidence": "#312 8/8 faktiske fixture-tests PASS; manifest import-check og installeret-only Passenger-start udestår. #310 fortsat HOLD.",
           "owner_role": "motor",
-          "updated_at": "2026-11-25T23:46:42Z"
+          "updated_at": "2026-11-26T01:46:39Z"
         }
       ],
-      "updated_at": "2026-11-25T23:46:42Z"
+      "updated_at": "2026-11-26T01:46:39Z"
     },
     {
       "id": "replay",
@@ -409,7 +409,7 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "in_progress",
       "issue": 54,
-      "evidence": "#306 integreret; #300 aaf9b0db controller CI 45721228259 PASS; dedikerede mobile workflows skipped; ny eksakt accept udestår.",
+      "evidence": "#306 integreret; #300 aa05b49c CI 45737304161 chart/UI PASS, dedikerede mobile workflows 45737304211/45737304217 SKIPPED. Eksakt uafhængigt HOLD 7180092462 på dialog-epoch/fokus.",
       "subgoals": [
         {
           "id": "reuse",
@@ -422,9 +422,9 @@
           "id": "mobile",
           "title": "Mobil 2.0",
           "status": "review",
-          "evidence": "#300 aaf9b0db; CI 45721228259 PASS, særskilte mobile tests ikke verificeret, forrige HOLD 7177371877.",
+          "evidence": "#300 aa05b49c: regression PASS, HOLD 7180092462: åbning/lukning af anden beholdning og ny historikdialog skal invalidere gamle asynkrone resultater. Dedikeret mobiltest udestår.",
           "owner_role": "mobile",
-          "updated_at": "2026-11-25T23:42:42Z"
+          "updated_at": "2026-11-26T01:46:39Z"
         },
         {
           "id": "desktop",
@@ -442,7 +442,7 @@
           "owner_role": "mobile"
         }
       ],
-      "updated_at": "2026-11-25T23:42:42Z"
+      "updated_at": "2026-11-26T01:46:39Z"
     },
     {
       "id": "load",
@@ -450,7 +450,7 @@
       "title": "100 brugere og skaleringsmåling",
       "status": "in_progress",
       "issue": 14,
-      "evidence": "#311 b10c3145 exact CI 45723415514/job 139587114592: 399+28+191 tests PASS (holdings_auto inkluderet); uafhængigt review udestår. Ingen produktions-/hostingmåling.",
+      "evidence": "#311 b10c3145 CI 45723415514: 618 testkørsler PASS, uafhængigt HOLD 7178220845: ændret aktiveringsrækkefølge ved samtidig SQLite retry-reset og VM steps 69052→85347 i 100-tenant scenarie. Ingen hostingmåling.",
       "subgoals": [
         {
           "id": "adapter",
@@ -463,9 +463,9 @@
           "id": "queue",
           "title": "100 brugere og fair køer",
           "status": "review",
-          "evidence": "#311 b10c3145: bounded SQLite scan med 1/10/100 syntetiske scenarier, 618 testkørsler PASS. Uafhængig accept og faktisk hostingmåling udestår.",
+          "evidence": "#311 b10c3145: 618 testkørsler PASS, HOLD 7178220845; prioritet ved SQLite-interleaving og idle VM-step regression skal rettes før integration.",
           "owner_role": "data",
-          "updated_at": "2026-11-25T23:46:42Z"
+          "updated_at": "2026-11-26T01:46:39Z"
         },
         {
           "id": "resources",
@@ -482,7 +482,7 @@
           "owner_role": "data"
         }
       ],
-      "updated_at": "2026-11-25T23:46:42Z"
+      "updated_at": "2026-11-26T01:46:39Z"
     },
     {
       "id": "release",
