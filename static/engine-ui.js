@@ -240,7 +240,8 @@ window.EngineUI=(()=>{
   const slot=document.getElementById('engine-eodhd-choice'),context=instrumentContext(index);
   const currency=()=>item.instrument?.currency||f.elements.quote_currency.value||null;
   const assetId=item.instrument?.asset_id,quoteCurrency=currency();
-  const current=()=>context()&&assetId===item.instrument?.asset_id&&quoteCurrency===currency();
+  // Initial Pluto verification can fill the asset ID without changing the symbol query.
+  const current=()=>context()&&quoteCurrency===currency()&&(!assetId||assetId===item.instrument?.asset_id);
   let lookup=symbolLookups.get(f);
   const valid=()=>current()&&lookup===symbolLookups.get(f)&&(!actionCurrent||actionCurrent());
   if(slot)slot.textContent='Søger hos EODHD …';item.eodhd_error=null;
@@ -303,7 +304,8 @@ window.EngineUI=(()=>{
   const latestChoices=await api(base+'/start-candidates'+query());
   if(!selectionCurrent())return true;
   const availableIds=new Set(latestChoices.candidates.map(x=>x.candidate.candidate_id));
-  const items=batchCandidates.length?batchCandidates.slice():[selected];
+  const queued=batchCandidates.length>0;
+  const items=queued?batchCandidates.slice():[selected];
   if(items.some(x=>!availableIds.has(x.candidate.candidate_id))){
    formStatus('En valgt kandidat har nu en åben eller pauseret HOT WATCH, eller er ikke længere aktiv. Luk vinduet og vælg igen.');
    return true;
@@ -332,20 +334,22 @@ window.EngineUI=(()=>{
   const common={is_test:mode,purpose:f.get('purpose'),profile:f.get('profile'),priority:f.get('profile')==='CRITICAL'?'CRITICAL':'NORMAL',provider:f.get('provider'),end_at:f.get('end_at')?new Date(f.get('end_at')).toISOString():null,activation_reason:String(f.get('activation_reason')||'')+' · '+selection.reason,strategy_id:selection.strategy_id,strategy_version:selection.version,risk:{max_notional_dkk:f.get('max_notional')||'1000',max_loss_dkk:f.get('max_loss')||'100',max_spread_pct:'1',max_quote_age_s:120,max_position_fraction_pct:'20',proposed_quantity:f.get('quantity')||null,stop_price:f.get('stop')||null,exit_deadline:null}};const sessions=items.map(item=>{const instrument=item.instrument||{asset_id:f.get('asset_id'),exchange:f.get('exchange'),currency:f.get('quote_currency'),provider_symbol:f.get('provider_symbol')||null};if(!instrument.asset_id||!instrument.exchange||!instrument.currency)throw Error('Aktiv-ID, børs og valuta skal være verificeret før start.');return {...common,watch_id:item.watch_id||(item.watch_id='hw-'+crypto.randomUUID()),report_id:item.report_id,candidate_id:item.candidate.candidate_id,ticker:item.candidate.ticker,exchange:instrument.exchange,asset_id:instrument.asset_id,quote_currency:instrument.currency,provider_symbol:item.provider_symbol||instrument.provider_symbol||null,portfolio_ids:item.portfolio_ids||f.getAll('portfolios').map(Number),watch_mode:item.portfolios_verified&&!item.portfolio_ids.length?'entry':f.get('watch_mode'),reactivation_reason:f.get('reactivation_reason')||null}});const signature=JSON.stringify({is_test:mode,sessions});if(!pending||pending.signature!==signature)pending={signature,id:'hwa-'+crypto.randomUUID()};const request={request_id:pending.id,is_test:mode,sessions};
   const button=form.querySelector('.primary');
   const formCurrent=creationFormContext(form);
+  // Once posted, a queued batch belongs to this form independently of its dropdown.
+  const activationCurrent=queued?formCurrent:selectionCurrent;
   activatingForms.set(form,formCurrent);
   button.disabled=true;
   try{
    const result=sessions.length>1?await api(base+'/activation-requests',request,{'Idempotency-Key':request.request_id}):await api(base+'/sessions',sessions[0]);
-   if(!selectionCurrent())return true;
+   if(!activationCurrent())return true;
    formStatus(`${result.created_count??1} session(er) oprettet. Feedforbindelse og første observation kontrolleres separat.`);
    document.getElementById('engine-dialog').close();
    pending=null;
    batchCandidates=[];
    await load();
   }catch(error){
-   if(!selectionCurrent())return true;
+   if(!activationCurrent())return true;
    formStatus(reason(error.details?.code||error.message)+(error.details?.errors||[]).map(e=>' '+e.path+': '+e.message).join(''));
-   throw error;
+   notice(error.details?.code||error.message,'error');
   }finally{
    if(activatingForms.get(form)===formCurrent){
     activatingForms.delete(form);

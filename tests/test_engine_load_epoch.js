@@ -1087,6 +1087,86 @@ async function checkManualSymbolReverification(sameAsset, searchFirst, fail, imp
   }
 }
 
+async function checkSymbolSearchDuringFirstQuote(currency, fail) {
+  const {ui, elements, calls, call, nodes} = creationRequests();
+  elements.provider.value = 'eodhd';
+  elements.quote_currency.value = 'USD';
+  const verify = ui.change({target: elements.candidate});
+  const quote = call('market/quote');
+  const search = ui.click({dataset: {}, hasAttribute: key => key === 'data-engine-eodhd-search'});
+  const manual = call('market/eodhd-symbols');
+  quote.resolve({asset_id: 'asset', currency, exchange: 'NASDAQ', name: 'First'});
+  await settle();
+  const searches = calls.filter(c => c.url === manual.url);
+  assert.deepEqual(searches.map(c => c.body.quote_currency), currency === 'USD' ? ['USD'] : ['USD', currency]);
+  if (currency !== 'USD') {
+    manual.reject(Error('obsolete currency'));
+    await search;
+    assert.doesNotMatch(nodes['engine-eodhd-choice'].textContent, /obsolete/);
+  }
+  const current = searches.at(-1);
+  if (fail) current.reject(Error('symbol search failed'));
+  else current.resolve({choices: [{symbol: 'FIRST.US', name: 'First', currency}]});
+  await Promise.all([search, verify]);
+  if (fail) assert.match(nodes['engine-eodhd-choice'].textContent, /symbol search failed/);
+  else assert.equal(elements.provider_symbol.value, 'FIRST.US');
+}
+
+async function checkSubmittedBatch(size, fail, replacement) {
+  const {ui, context, rows, form, elements, nodes, session, notices, call, button, requests} = creationRequests();
+  const add = () => dispatchInstrumentEvent(context, 'batch', form);
+  for (let index = 0; index < size; index++) {
+    elements.candidate.value = String(index);
+    const verify = ui.change({target: elements.candidate});
+    call('market/quote').resolve({asset_id: 'asset-' + index, currency: 'USD', exchange: 'NYSE'});
+    await verify;
+    await add();
+  }
+  const start = dispatchInstrumentEvent(context, 'submit', form);
+  await settle();
+  call('v1/hotwatch/start-candidates?is_test=false').resolve({candidates: rows});
+  await settle();
+  call('strategy-center').resolve({selection: {}});
+  await settle();
+  const post = call(size === 1 ? 'v1/hotwatch/sessions' : 'v1/hotwatch/activation-requests');
+  assert.deepEqual(Array.from(post.body.sessions || [post.body], s => s.asset_id),
+    rows.slice(0, size).map((_, i) => 'asset-' + i));
+  elements.candidate.value = String(size % 2);
+  const next = ui.change({target: elements.candidate});
+  call('market/quote').resolve({asset_id: 'next', currency: 'USD', exchange: 'NYSE'});
+  await next;
+  assert.equal(button.disabled, true);
+  if (replacement) {
+    if (replacement === 'login') session.epoch++;
+    else nodes['engine-create'] = {...form};
+    const previousStatus = nodes['engine-form-status'].textContent;
+    if (fail) post.reject(Error('obsolete batch'));
+    else post.resolve({created_count: size});
+    await start;
+    assert.equal(nodes['engine-form-status'].textContent, previousStatus);
+    assert.equal(nodes['engine-dialog'].closed, undefined);
+    assert.deepEqual(notices, []);
+    assert.equal(call('market/quote').body.candidate_id, rows[size % 2].candidate.candidate_id);
+    return;
+  }
+  if (fail) post.reject(Error('batch failed'));
+  else {
+    session.creation = null;
+    post.resolve({created_count: size});
+    await settle();
+    assert.equal(requests.length, 1, 'successful batch refreshes the engine');
+    requests.shift().succeed();
+  }
+  await start;
+  assert.equal(button.disabled, false);
+  assert.equal(Boolean(nodes['engine-dialog'].closed), !fail);
+  assert.deepEqual(notices, fail ? ['batch failed'] : []);
+  assert.match(nodes['engine-form-status'].textContent, fail ? /batch failed/ : /session\(er\) oprettet/);
+  elements.candidate.value = '0';
+  await add();
+  assert.match(nodes['engine-form-status'].textContent, fail ? /allerede i batchen/ : /føjet til batch/);
+}
+
 async function checkCreationBoundary(stage, change, fail) {
   const {context, ui, form, rows, elements, nodes, session, notices, calls, call, button, requests} = creationRequests();
   const availability = 'v1/hotwatch/start-candidates?is_test=false', activation = 'v1/hotwatch/sessions';
@@ -1158,6 +1238,11 @@ async function checkCreationBoundary(stage, change, fail) {
 }
 
 async function main() {
+  for (const fail of [true, false]) {
+    for (const currency of ['USD', 'EUR']) await checkSymbolSearchDuringFirstQuote(currency, fail);
+    for (const size of [1, 2]) await checkSubmittedBatch(size, fail);
+    for (const replacement of ['login', 'form']) await checkSubmittedBatch(2, fail, replacement);
+  }
   for (const first of [true, false]) {
     for (const fail of [true, false]) {
       await checkManualSymbolReverification(true, first, fail, true);
