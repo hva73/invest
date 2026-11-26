@@ -62,6 +62,11 @@ def schedule(connect,at=None):
 def run_one(connect,fetcher=None,at=None):
     stamp=time.time() if at is None else at;lease=uuid.uuid4().hex
     with connect() as c:
+        pending=c.execute("""SELECT 1 FROM jobs
+                             WHERE (status='queued' AND available<=?)
+                                OR (status='running' AND lease_until<?)
+                             LIMIT 1""",(stamp,stamp)).fetchone()
+        if not pending:return False
         c.execute('BEGIN IMMEDIATE')
         # Expired work can be retried after a process crash. Old completions cannot commit.
         c.execute("UPDATE jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'queued' END,lease=NULL,lease_until=NULL WHERE status='running' AND lease_until<?",(stamp,))
