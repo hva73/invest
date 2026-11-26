@@ -138,13 +138,26 @@ CHECK_MANUAL_SALE_SESSION = """async () => {
   await nextTask();
   check(notice.textContent === 'Current manual sale error' && manualButton(),
    'Current manual sale failure did not leave the dialog retryable');
+
+  const unverified = await readManualSale();
+  const currentAccount = state.portfolios;
+  unverified(answer({portfolios: [{...portfolio, active: false}]}));
+  await nextTask();
+  check(view === 'overview' && state.portfolios === currentAccount && manualButton() &&
+   notice.textContent.includes('Depotet kan ikke bekræftes'),
+   'An inactive depot replaced current account data or opened holdings');
+
   const finishRetry = await readManualSale();
   const updated = {...portfolio, name: 'Current verified depot'};
-  finishRetry(answer({portfolios: [updated], dashboard: state.dashboard, portfolio_snapshots: state.portfolio_snapshots}));
+  const dashboard = {...state.dashboard, manual_sale_fixture: true};
+  const snapshots = {...state.portfolio_snapshots, manual_sale_fixture: true};
+  finishRetry(answer({portfolios: [updated], dashboard, portfolio_snapshots: snapshots}));
   await nextTask();
   const holdings = portfolioSection === 'holdings' || document.activeElement?.dataset.portfolioSection === 'holdings';
-  check(view === 'portfolio-detail' && selectedPortfolio === Number(portfolio.id) && holdings &&
-   document.querySelector('.portfolio-detail-hero h2')?.textContent === updated.name,
+  check(view === 'portfolio-detail' && selectedPortfolio === Number(portfolio.id) &&
+   holdings && !manualButton() &&
+   document.querySelector('.portfolio-detail-hero h2')?.textContent === updated.name &&
+   state.dashboard.manual_sale_fixture && state.portfolio_snapshots.manual_sale_fixture,
    'Current manual sale did not open the verified depot holdings');
  } finally { window.fetch = originalFetch; }
 }"""
