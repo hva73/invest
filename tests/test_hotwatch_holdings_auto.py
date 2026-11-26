@@ -1143,6 +1143,25 @@ class HoldingAutowatch(unittest.TestCase):
   self.assertEqual(sample['price'],'100');self.assertEqual(sample['event_time'],self.now.isoformat())
   self.assertEqual(sample['context']['status'],'unknown');self.assertEqual(sample['context']['tradability'],'unknown')
   self.assertEqual(sample['context']['diagnostic'],'PROVIDER_RATE_BUDGET')
+ def test_malformed_snapshots_do_not_block_next_tenants_first_valid_holding(self):
+  at=self.now.isoformat()
+  def snapshot(positions):
+   return json.dumps({'positions_complete':True,'observed':at,'positions':positions})
+  with app.connect() as c:
+   c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(snapshot(None),self.pid))
+   c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?)',
+             (self.fixture.child,1,at,snapshot([self.holding,None]),at))
+   c.execute("INSERT INTO users(id,username,active) VALUES(2,'later-tenant',1)")
+   later_pid=c.execute("INSERT INTO portfolios(user_id,name,source,external_id,updated) VALUES(2,'Later','pluto','portfolios:later',?)",
+                       (self.now.timestamp(),)).lastrowid
+   positions=[dict(self.holding,quantity='0'),self.holding,dict(self.holding,asset_id='second-asset')]
+   c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?)',(later_pid,2,at,snapshot(positions),at))
+  with patch.object(self,'verify',wraps=self.verify) as verify:
+   self.assertEqual(self.tick(verify=verify,lookup=self.lookup),'LINKED')
+   verify.assert_called_once_with(app.connect,2,self.holding)
+  with app.connect() as c:
+   rows=c.execute('SELECT user_id,portfolio_id,asset_id,status FROM hw_holding_autowatch').fetchall()
+   self.assertEqual([tuple(row) for row in rows],[(2,later_pid,self.holding['asset_id'],'LINKED')])
  def test_old_snapshot_is_not_used(self):
   with app.connect() as c:
    payload={'positions_complete':True,'observed':(self.now-timedelta(minutes=6)).isoformat(),'positions':[self.holding]}
