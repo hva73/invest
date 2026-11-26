@@ -364,14 +364,22 @@ async function checkValidation(change, outcome) {
 }
 
 async function checkManualStart(change, stage, fail) {
-  const {context, session, requests, click, mount, dialog, records} = settingsFixture();
+  const {context, session, requests, click, mount, dialog, records, root} = settingsFixture();
   const status = {}, results = {};
   const button = {dataset: {engineManual: '0'}, isConnected: true, closest: () => dialog};
   let activeDialog = dialog;
   const lookup = context.document.getElementById;
-  context.document.getElementById = id => ({
-    'engine-dialog': activeDialog, 'engine-manual-results': results, 'engine-manual-status': status
-  })[id] || lookup(id);
+  let activeRoot = root;
+  context.document.getElementById = id => {
+    if (id === 'engine-root') return activeRoot;
+    if (id === 'engine-dialog') return activeDialog;
+    if (id === 'content') return {append(node) { activeDialog = node; }};
+    return {'engine-manual-results': results, 'engine-manual-status': status}[id] || lookup(id);
+  };
+  context.document.createElement = tag => {
+    assert.equal(tag, 'dialog');
+    return {dataset: {}, open: false, querySelector: query, showModal: dialog.showModal};
+  };
   dialog.contains = node => node === button;
   const query = dialog.querySelector;
   dialog.querySelector = selector => selector === '#engine-manual-status' ? status : query(selector);
@@ -408,6 +416,15 @@ async function checkManualStart(change, stage, fail) {
   assert.equal(button.disabled, true);
   const busy = status.textContent;
   const response = {session: {watch_id: 'manual/1'}};
+  const replaceView = () => {
+    assert.equal(dialog.open, false);
+    button.isConnected = false;
+    activeDialog = null;
+    root.isConnected = false;
+    activeRoot = change === 'navigate' ? null : {...root, isConnected: true};
+    if (activeRoot) mount().succeed();
+  };
+  const queuedRender = ['remount', 'remount-login', 'navigate'].includes(change) ? replaceView : null;
   let reload;
   if (stage !== 'start') {
     resolve(response);
@@ -416,6 +433,8 @@ async function checkManualStart(change, stage, fail) {
     assert.equal(requests.length, 1);
     reload = requests.shift();
   }
+  if (queuedRender) queuedRender();
+  if (change === 'remount-login') session.epoch++;
   if (change === 'epoch') session.epoch++;
   if (change === 'owner') session.owner = 'other-owner';
   if (change === 'mode') mount(true).succeed();
@@ -429,7 +448,7 @@ async function checkManualStart(change, stage, fail) {
   } else if (fail) reject(error);
   else resolve(response);
   await settle();
-  const success = !change && !fail;
+  const success = (!change || change === 'remount') && !fail;
   assert.equal(requests.length, Number(success && stage === 'start'));
   if (requests.length) requests.shift().succeed();
   assert.equal(await pending, true);
@@ -439,12 +458,13 @@ async function checkManualStart(change, stage, fail) {
   assert.equal(detailReads.length, stage === 'detail' && fail ? 1 : success ? 4 : 0);
   if (success) {
     assert.equal(detailReads[0], 'v1/hotwatch/sessions/manual%2F1?is_test=false');
-    assert.match(dialog.innerHTML, /TEST · motorforløb/);
-    assert.equal(dialog.open, true);
+    assert.match(activeDialog.innerHTML, /TEST · motorforløb/);
+    assert.equal(activeDialog.open, true);
   }
 }
 
 async function main() {
+  for (const change of ['remount', 'remount-login', 'navigate']) await checkManualStart(change, 'reload', false);
   await checkManualStart(null, 'detail', true);
   for (const stage of ['start', 'reload']) {
     for (const change of ['epoch', 'owner', 'mode', 'dialog', 'replaced', 'detached', null]) {

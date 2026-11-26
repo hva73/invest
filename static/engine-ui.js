@@ -170,8 +170,14 @@ window.EngineUI=(()=>{
    if(!current()||!origin()||!dialog.open)return true;
    dialog.close();
    current=captureInteraction();
+   const startRoot=root();
    await load();
-   if(!current()||!origin()||dialog.open)return true;
+   if(!current()||dialog.open)return true;
+   const view=root();
+   if(!view?.isConnected)return true;
+   // A same-view render replaces both the engine root and the closed dialog.
+   if(view===startRoot&&!origin())return true;
+   if(view!==startRoot&&document.getElementById('engine-dialog'))return true;
    const opening=detail(result.session.watch_id);
    current=captureInteraction();
    await opening;
