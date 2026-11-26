@@ -279,6 +279,33 @@ class Trading(unittest.TestCase):
     self.assertEqual(refreshed['response'],self.intent_status)
     self.assertEqual((refreshed['intent_id'],refreshed['status']),(reference,'sent'))
     self.assertEqual(self.calls,[{'name':'get_order_intent','arguments':root}])
+ def test_check_preserves_changes_committed_during_lookup(self):
+  proposal=self.send(self.estimate())
+  pid=proposal['id']
+  reference=proposal['intent_id']
+  newer_response=json.dumps({'orderIntentId':reference,'status':'CANCELLED'})
+  for field,value in [('response',newer_response),('status','uncertain'),('error','Awaiting reconciliation'),('intent_id','replacement')]:
+   with self.subTest(field=field):
+    before=dict(trade.get(app.connect,1,pid))
+    def lookup(client,method,args):
+     self.assertEqual(args,{'name':'get_order_intent','arguments':{'orderIntentId':reference}})
+     with app.connect() as c:
+      c.execute(f'UPDATE broker_proposals SET {field}=? WHERE id=? AND user_id=?',(value,pid,1))
+     return {'structuredContent':{'orderIntentId':reference,'status':'PENDING'}}
+    with patch.object(self.factory,'request',lookup):
+     refreshed=trade.check(app.connect,1,pid,self.factory)['proposal']
+    expected={**before,field:value}
+    self.assertEqual(dict(trade.get(app.connect,1,pid)),expected)
+    self.assertEqual(refreshed,trade.view(expected))
+ def test_check_refreshes_reference_recovered_from_response(self):
+  proposal=self.send(self.estimate())
+  with app.connect() as c:
+   c.execute("UPDATE broker_proposals SET intent_id=NULL,status='uncertain',error='Unconfirmed' WHERE id=?",(proposal['id'],))
+  refreshed=trade.check(app.connect,1,proposal['id'],self.factory)['proposal']
+  stored=trade.get(app.connect,1,proposal['id'])
+  self.assertEqual((stored['intent_id'],stored['status'],stored['error']),(proposal['intent_id'],'sent',None))
+  self.assertEqual(json.loads(stored['response']),self.intent_status)
+  self.assertEqual(refreshed,trade.view(stored))
  def test_check_rejects_unverified_status_and_preserves_entire_row(self):
   proposal=self.send(self.estimate())
   root={'orderIntentId':proposal['intent_id']}
