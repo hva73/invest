@@ -2700,5 +2700,45 @@
     "follow_base": true,
     "reserve_plan_id": "ui/desktop/quick-trade-asset-search-discards-edited-query",
     "reserve_goal": "ui/desktop"
+  },
+  {
+    "issue": 114,
+    "generation": 23,
+    "role": "desktop",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [],
+    "paths": [
+      "static/journal-ui.js",
+      "tests/browser_desktop_experience.py"
+    ],
+    "task": "Approved roadmap statistics/ui (Godkendt statistikvisning). Exact existing source anchor: static/journal-ui.js :: if(append&&cursor)query.set('before',cursor). Implement only this bounded change: Afgr\u00e6ns \u00e6ndringen til journalens sideskift. Ved filterskift nulstilles cursor allerede, men den gamle knap til \u00e6ldre h\u00e6ndelser kan stadig starte et kald, som tilf\u00f8jer den nye f\u00f8rsteside til de gamle r\u00e6kker. Skjul knappen, n\u00e5r filteret nulstilles, og afvis append uden cursor, f\u00f8r kaldet \u00f8ger request-t\u00e6lleren. Lad f\u00f8rstesidens svar bestemme, om knappen igen vises.. Acceptance: Hold svaret for Pluto- og ordrefiltrenes nye f\u00f8rsteside tilbage, mens forrige udvalg har en synlig sideknap. Et klik p\u00e5 den gamle knap m\u00e5 hverken sende et kald eller tilsides\u00e6tte f\u00f8rstesiden. Efter svaret vises kun det nye udvalgs r\u00e6kker. Et efterf\u00f8lgende klik sender den nye sides cursor og tilf\u00f8jer de \u00e6ldre r\u00e6kker \u00e9n gang.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_experience.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "statistics/ui/journal-pagination-requires-current-filter-cursor",
+    "reserve_goal": "statistics/ui"
+  },
+  {
+    "issue": 267,
+    "generation": 8,
+    "role": "desktop",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [],
+    "paths": [
+      "tests/browser_positions.py"
+    ],
+    "task": "Approved roadmap stabilization/desktop (Desktop-kontrol). Exact existing source anchor: tests/browser_positions.py :: assert 'Tidligere positionsposter' in page.locator('.positions-panel').inner_text(). Implement only this bounded change: Genvurd\u00e9r kun den afsluttende testhunk fra den bevarede 267:5-diff. Udvid det eksisterende browserforl\u00f8b efter den fulde rapport, der lukker test-main.TSLA. \u00c5bn \u00abTidligere positionsposter\u00bb, og brug den lukkede TSLA-positions egen historikknap. Afgr\u00e6ns testen til dette almindelige opslag fra rapporten.. Acceptance: TSLA er fjernet fra den aktive positionsliste. Historikdialogen viser den lukkede TSLA-post og den tidligere TSLA-post for test-main. Kontroll\u00e9r den pr\u00e6cise depot- og positionsidentitet i det lokale historikkald og bevar fixturens kontrol af, at ingen forslag blev oprettet.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_positions.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 267:5; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "stabilization/desktop/closed-position-history-opens-from-report",
+    "reserve_goal": "stabilization/desktop",
+    "reserve_reassessment": "267:5@436e725211c2623f4d7c2c6c8f5f766a9c4d8198ca80840d9b34a5b4ab68d023"
   }
 ]
