@@ -2397,5 +2397,27 @@
     "follow_base": true,
     "reserve_plan_id": "statistics/provenance/journal-execution-evidence-isolated-by-owner-and-mode",
     "reserve_goal": "statistics/provenance"
+  },
+  {
+    "issue": 114,
+    "generation": 18,
+    "role": "motor",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [
+      "114:17"
+    ],
+    "paths": [
+      "journal_projection.py",
+      "tests/test_app.py"
+    ],
+    "task": "Approved roadmap statistics/provenance (Entry/exit-herkomst). Exact existing source anchor: journal_projection.py :: events.sort(key=lambda e:(policy.stamp(e['timestamp']),e['id']),reverse=True). Implement only this bounded change: Tilf\u00f8j \u00e9n fokuseret accepttest af journal_projection.read() med eksisterende normaliserede SQLite-ordreh\u00e6ndelser for samme ejer. Giv to verificerede Pluto-observationer forskellige status og id'er, men samme status\u00f8jeblik skrevet med to forskellige UTC-offsets. L\u00e6s med Pluto- og ordrefiltre og sidest\u00f8rrelse \u00e9n. Bevar den eksisterende cursoradf\u00e6rd og de oprindelige tidsstrenge.. Acceptance: F\u00f8rste side har en cursor. N\u00e6ste side returnerer den anden observation pr\u00e6cis \u00e9n gang, med dens oprindelige status, tidsstreng og rapporterede antal. R\u00e6kkef\u00f8lgen f\u00f8lger det eksisterende id-baserede tie-break, og sidste side har ingen cursor.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_app.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "statistics/provenance/journal-order-cursor-preserves-same-instant-evidence",
+    "reserve_goal": "statistics/provenance"
   }
 ]
