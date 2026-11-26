@@ -1,7 +1,9 @@
 """Provider limits are exercised against real temporary SQLite connections."""
 import json,os,time,unittest,urllib.error
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import patch
+from datetime import datetime,timezone
+from io import BytesIO
+from unittest.mock import Mock,patch
 import app,eodhd_capacity as capacity,eodhd_feeds
 import hotwatch_engine
 import test_hotwatch_engine as fixtures
@@ -141,6 +143,31 @@ class CapacityTests(unittest.TestCase):
    state=capacity.read(c);state.update(local_day='2026-11-10',known_units=0,unknown_cost_requests=0,unknown_at_account=0,account={'apiRequests':79,'dailyRateLimit':100,'apiRequestsDate':'2026-11-10'},units_at_account=0);capacity.write(c,state,now)
   self.cap.reserve(None,now)
   with self.assertRaisesRegex(EngineError,'EODHD_DAILY_BUDGET'):self.cap.reserve(None,now+1)
+ def check_account_refresh_daily_boundary(self,started,received):
+  self.cap.reserve(5,started.timestamp())
+  self.cap.reserve(None,started.timestamp())
+  payload={'apiRequests':77,'dailyRateLimit':100,'extraLimit':0,'apiRequestsDate':received.isoformat()}
+  with patch('eodhd_capacity.time.time',return_value=started.timestamp()) as clock:
+   def respond(request,timeout):
+    clock.return_value=received.timestamp()
+    return BytesIO(json.dumps(payload).encode())
+   opener=Mock()
+   opener.open.side_effect=respond
+   capacity.refresh_account(app.connect,opener)
+   opener.open.assert_called_once()
+   state=self.state()
+   self.assertEqual(state['account']['apiRequestsDate'],received.date().isoformat())
+   self.assertEqual(state['local_day'],started.date().isoformat())
+   self.assertEqual((state['known_units'],state['unknown_cost_requests'],state['requests']),(5,1,3))
+   self.cap.reserve(2)
+   self.cap.reserve(None)
+   with self.assertRaisesRegex(EngineError,'EODHD_DAILY_BUDGET'):self.cap.reserve(1)
+ def test_account_refresh_crossing_utc_midnight_counts_new_day_charges(self):
+  self.check_account_refresh_daily_boundary(datetime(2026,11,25,23,59,59,tzinfo=timezone.utc),
+                                            datetime(2026,11,26,0,0,1,tzinfo=timezone.utc))
+ def test_account_refresh_same_day_counts_only_subsequent_charges(self):
+  self.check_account_refresh_daily_boundary(datetime(2026,11,26,12,0,0,tzinfo=timezone.utc),
+                                            datetime(2026,11,26,12,0,2,tzinfo=timezone.utc))
  def test_realtime_history_breakdown_does_not_expose_symbol_or_token(self):
   class Response:
    status=200;headers={}
