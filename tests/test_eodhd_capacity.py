@@ -188,3 +188,44 @@ class CapacityTests(unittest.TestCase):
    with capacity.Capacity(app.connect).websocket(1):self.fail('must honor shared cooldown')
   self.cap.reserve(1)
   self.assertEqual(self.state()['ws_429'],1)
+ def test_websocket_cooldown_under_competing_writer_and_at_expiry(self):
+  statements=[]
+  def connect():
+   c=app.connect()
+   c.execute('PRAGMA busy_timeout=0')
+   c.set_trace_callback(statements.append)
+   return c
+  client=capacity.Capacity(connect)
+  with patch('eodhd_capacity.time.time',return_value=self.now) as clock:
+   self.cap.ws_limited({'Retry-After':'7'})
+   clock.return_value=self.now+2.5
+   with app.connect() as writer:
+    writer.execute('BEGIN IMMEDIATE')
+    with self.assertRaises(EngineError) as caught,client.websocket(40):
+     self.fail('lease granted during cooldown')
+   self.assertEqual((caught.exception.code,caught.exception.status,caught.exception.retry_after_s),
+                    ('EODHD_WS_CAPACITY',429,4.5))
+   self.assertNotIn('BEGIN IMMEDIATE',[sql.strip().upper() for sql in statements])
+   self.cap.reserve(1)
+   self.assertEqual(self.state()['requests'],1)
+   clock.return_value=self.now+7
+   with client.websocket(40):
+    self.assertEqual(list(self.state()['ws_leases'].values()),[{'symbols':40,'until':self.now+37}])
+   self.assertEqual(self.state()['ws_leases'],{})
+ def test_websocket_cooldown_committed_between_preflight_and_write(self):
+  def before_statement(sql):
+   # SQLite traces BEGIN before taking the writer lock.
+   if sql.strip().upper()=='BEGIN IMMEDIATE':
+    self.cap.ws_limited({'Retry-After':'11'})
+  def connect():
+   c=app.connect()
+   c.set_trace_callback(before_statement)
+   return c
+  with patch('eodhd_capacity.time.time',return_value=self.now):
+   with self.assertRaises(EngineError) as caught,capacity.Capacity(connect).websocket(1):
+    self.fail('lease granted after another worker recorded a cooldown')
+  self.assertEqual((caught.exception.code,caught.exception.status,caught.exception.retry_after_s),
+                   ('EODHD_WS_CAPACITY',429,11))
+  state=self.state()
+  self.assertEqual(state['ws_retry_at'],self.now+11)
+  self.assertFalse(state.get('ws_leases'))
