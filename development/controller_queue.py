@@ -4,6 +4,10 @@ import json
 import sys
 
 ROLES=("release","mobile","motor","data","desktop")
+# Stable historical roles remain authorization scopes, not separate workers.
+TEAM={"motor":"A","data":"A","mobile":"B","desktop":"B","release":"B"}
+def worker(role):
+    return TEAM[role]
 
 @dataclass(frozen=True)
 class Task:
@@ -52,7 +56,7 @@ def plan(rows,max_parallel=2):
             break
         if t.status!="ready" or any(d not in tasks or tasks[d].status!="done" for d in t.dependencies):
             continue
-        if any(t.role==o.role or t.issue==o.issue or any(overlap(a,b) for a in t.paths for b in o.paths) for o in active+result):
+        if any(worker(t.role)==worker(o.role) or t.issue==o.issue or any(overlap(a,b) for a in t.paths for b in o.paths) for o in active+result):
             continue
         result.append(t)
     return result
