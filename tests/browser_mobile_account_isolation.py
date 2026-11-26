@@ -804,6 +804,48 @@ const run = async () => {
     await poll();
     check(!button(history), 'Refresh restored pagination after the last page');
 
+    const initialHistory = [];
+    archiveFixture = {
+        current: [],
+        autoHistory: () => new Promise((resolve, reject) => initialHistory.push({resolve, reject}))
+    };
+    const historyError = () => byId('engine-root').textContent.includes('Historikken kunne ikke hentes');
+    const emptyList = () => Boolean(button('.engine-no-sessions'));
+    switchAccount('alpha');
+    await flush();
+    assert(initialHistory.length === 1, 'The initial archive request was not started');
+    check(!emptyList(), 'The list reported no watches while initial history was pending');
+    initialHistory.shift().reject(Error('Synthetic initial archive failure'));
+    await flush();
+    check(historyError() && !emptyList(), 'An initial archive failure was reported as an empty watch list');
+
+    const currentDuringArchiveFailure = '[data-engine-detail="current-during-archive-failure"]';
+    archiveFixture.current = [session('current-during-archive-failure')];
+    await poll();
+    check(button(currentDuringArchiveFailure) && historyError() && initialHistory.length === 0,
+        'Archive failure blocked current watches or retried before backoff');
+    await poll();
+    assert(initialHistory.length === 1, 'The initial archive request was not retried');
+    initialHistory.shift().resolve({sessions: [session('recovered-archive', 'COMPLETED')]});
+    await flush();
+    check(!historyError() && button(currentDuringArchiveFailure) && button('[data-engine-detail="recovered-archive"]'),
+        'A successful archive retry did not restore history alongside current watches');
+
+    archiveFixture.current = [];
+    switchAccount('beta');
+    await flush();
+    assert(initialHistory.length === 1, 'The new account did not request its own archive');
+    const staleInitialHistory = initialHistory.shift();
+    switchAccount('alpha');
+    await flush();
+    staleInitialHistory.reject(Error('Obsolete beta archive failure'));
+    await flush();
+    check(!historyError() && !emptyList(), 'An archive failure from the previous account changed the new account');
+    assert(initialHistory.length === 1, 'The archive request did not restart after switching accounts');
+    initialHistory.shift().resolve({sessions: []});
+    await flush();
+    check(!historyError() && emptyList(), 'Empty current and archive results did not show the empty state');
+
     const newest = session('alpha-loaded-41');
     const loaded = Array.from({length: 40}, (_, index) => session('alpha-loaded-' + (40 - index), 'COMPLETED'));
     const orderedArchive = [...loaded];
