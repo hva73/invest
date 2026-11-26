@@ -1,6 +1,7 @@
 """Provider limits are exercised against real temporary SQLite connections."""
 import json,os,time,unittest,urllib.error
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from datetime import datetime,timezone
 from io import BytesIO
 from unittest.mock import Mock,patch
@@ -188,6 +189,42 @@ class CapacityTests(unittest.TestCase):
   with self.assertRaises(ValueError):
    with self.cap.websocket(40):raise ValueError('test release')
   self.assertFalse(self.state()['ws_leases'])
+ def test_websocket_cleanup_of_pruned_lease_under_competing_writer(self):
+  statements=[]
+  def connect():
+   c=app.connect()
+   c.execute('PRAGMA busy_timeout=0')
+   c.set_trace_callback(statements.append)
+   return c
+  with patch('eodhd_capacity.time.time',return_value=self.now) as clock,ExitStack() as old:
+   old.enter_context(capacity.Capacity(connect).websocket(40))
+   clock.return_value=self.now+30
+   with self.cap.websocket(3):
+    replacement=self.state()['ws_leases']
+    self.assertEqual(list(replacement.values()),[{'symbols':3,'until':self.now+60}])
+    statements.clear()
+    with app.connect() as writer:
+     writer.execute('BEGIN IMMEDIATE')
+     old.close()
+    self.assertFalse(any(sql.lstrip().upper().startswith('BEGIN') for sql in statements))
+    self.assertEqual(self.state()['ws_leases'],replacement)
+   self.assertEqual(self.state()['ws_leases'],{})
+ def test_websocket_cleanup_rechecks_lease_under_write_lock(self):
+  statements=[]
+  with patch('eodhd_capacity.time.time',return_value=self.now) as clock,ExitStack() as newer:
+   def trace(sql):
+    statements.append(sql)
+    if sql=='BEGIN IMMEDIATE' and clock.return_value==self.now+30:
+     newer.enter_context(self.cap.websocket(3))
+   def connect():
+    c=app.connect()
+    c.set_trace_callback(trace)
+    return c
+   with capacity.Capacity(connect).websocket(40):
+    statements.clear()
+    clock.return_value=self.now+30
+   self.assertFalse(any(sql.lstrip().upper().startswith(('INSERT','UPDATE')) for sql in statements))
+   self.assertEqual(list(self.state()['ws_leases'].values()),[{'symbols':3,'until':self.now+60}])
  @patch('eodhd_capacity.TEMPORARY_DAILY_LIMIT_DAY','')
  def test_account_refresh_sanitized_and_daily_budget_does_not_stop_websockets(self):
   from datetime import datetime,timezone

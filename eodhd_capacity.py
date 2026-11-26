@@ -174,7 +174,11 @@ class Capacity:
   try:yield
   finally:
    with self.connect() as c:
-    c.execute('BEGIN IMMEDIATE');state=read(c);state.get('ws_leases',{}).pop(token,None);write(c,state,time.time())
+    if token in read(c).get('ws_leases',{}):
+     c.execute('BEGIN IMMEDIATE')
+     state=read(c)
+     if state.get('ws_leases',{}).pop(token,None) is not None:
+      write(c,state,time.time())
  def ws_limited(self,headers=None):
   now=time.time();seconds=retry_seconds(headers,now)
   with self.connect() as c:
