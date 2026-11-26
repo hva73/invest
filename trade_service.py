@@ -204,7 +204,7 @@ def inactive_order_readback(connect,user_id,portfolio_id,factory=None):
                 if status.strip().upper() in ('ACTIVE','ACTIVE_BUY'):
                     raise TradeError('Pluto returnerede en aktiv ordre i opslaget for inaktive ordrer.')
         if (record.get('collectionId') is not None
-                or (collection is not None and collection.get('id') is not None)
+                or (collection is not None and any(collection.get(key) is not None for key in ('id','collectionId')))
                 or active_buy(record)
                 or any(key in record and record[key]!=value for key,value in scope.items())):
             raise TradeError('Plutos ordresvar stemmer ikke med det valgte depot eller opslag.')

@@ -52,7 +52,7 @@ class Trading(unittest.TestCase):
    db.execute("UPDATE portfolios SET name='Renamed',external_id='portfolios:root:stable',can_trade=0 WHERE id=?",(self.root,))
   scope={'portfolioId':'root:stable','scope':'DIRECT','statusGroup':'INACTIVE','limit':50}
   raw=[{'orderId':'one','status':'CANCELLED','filledQuantity':'0'},
-       {'id':'two','portfolioId':'root:stable','collectionId':None,'collection':{'id':None},'status':'FILLED','providerDetail':{'fee':None}},
+       {'id':'two','portfolioId':'root:stable','collectionId':None,'collection':{'id':None,'collectionId':None},'status':'FILLED','providerDetail':{'fee':None}},
        {'orderId':'three','collection':None},
        {'orderId':'four','type':'ACTIVE_BUY','status':'FILLED'}]
   boundary=[{'orderId':str(i)} for i in range(50)]
@@ -95,7 +95,8 @@ class Trading(unittest.TestCase):
            {'orders':[{**order,'status':'ACTIVE_BUY'}]},
            {'orders':[{**order,'status':'ACTIVE_BUY','orderStatus':'FILLED'}]}]
   for field,value in (('portfolioId','other'),('scope','COLLECTION'),('collectionId','child'),
-                      ('collection',{'id':'child'}),('collection','child'),('statusGroup','ACTIVE'),
+                      ('collection',{'id':'child'}),('collection',{'collectionId':'child'}),
+                      ('collection',{'id':None,'collectionId':'child'}),('collection','child'),('statusGroup','ACTIVE'),
                       ('status','ACTIVE_BUY'),('orderStatus','active_buy'),('state','ACTIVE'),
                       ('status',None),('status',{}),('status',' '),
                       ('holding',{'type':'ACTIVE_BUY'})):
