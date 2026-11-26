@@ -2168,5 +2168,47 @@
     "follow_base": true,
     "reserve_plan_id": "stabilization/desktop/dashboard-history-stops-at-holding-dialog-close",
     "reserve_goal": "stabilization/desktop"
+  },
+  {
+    "issue": 114,
+    "generation": 15,
+    "role": "desktop",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "cbb37703356ffae9f3d2beba37265d17e0b706db",
+    "dependencies": [
+      "267:6"
+    ],
+    "paths": [
+      "static/journal-ui.js",
+      "tests/browser_design_v1.py"
+    ],
+    "task": "Approved roadmap statistics/ui (Godkendt statistikvisning). Exact existing source anchor: static/journal-ui.js :: function event(e){return `<article class=\"journal-row. Implement only this bounded change: M\u00e6rk det viste tidspunkt p\u00e5 Pluto-ordrer\u00e6kker ud fra journalens eksisterende details.time_basis. Vis \u00abObserveret af ESCAPE\u00bb for observed_not_execution og \u00abStatustid hos Pluto\u00bb for provider_status_time. Genbrug r\u00e6kkens eksisterende tidsfelt og formattering. Bevar den eksisterende visning for r\u00e6kker uden en kendt tidsbasis, herunder forslag, og behold r\u00e5detaljerne i den sammenfoldede visning.. Acceptance: Brug den indloggede browsertest med et lokalt journalsvar, der indeholder to Pluto-ordrer\u00e6kker med hver sin tidsbasis og en App/system-r\u00e6kke. Kontroll\u00e9r, at de to tidsetiketter vises p\u00e5 de rigtige r\u00e6kker, at ingen af tiderne kaldes udf\u00f8relsestid, og at App/system-r\u00e6kken beholder sin almindelige visning.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_design_v1.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "statistics/ui/journal-labels-pluto-order-timestamp-basis",
+    "reserve_goal": "statistics/ui"
+  },
+  {
+    "issue": 267,
+    "generation": 7,
+    "role": "desktop",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "cbb37703356ffae9f3d2beba37265d17e0b706db",
+    "dependencies": [],
+    "paths": [
+      "static/candidate-ui.js",
+      "tests/browser_hotwatch_engine.py"
+    ],
+    "task": "Approved roadmap stabilization/desktop (Desktop-kontrol). Exact existing source anchor: static/candidate-ui.js :: async function click(b){if(b.dataset.candidateOlder){. Implement only this bounded change: Tillad kun \u00e9t igangv\u00e6rende opslag pr. \u00abIndl\u00e6s \u00e6ldre statush\u00e6ndelser\u00bb-knap i CandidateUI.click(). Deaktiv\u00e9r knappen f\u00f8r opslaget, fasthold den oprindelige kandidat, testkategori, cursor og journal til opslagets afslutning, og behold ejer- og DOM-kontrollen f\u00f8r inds\u00e6ttelse. Genaktiv\u00e9r den aktuelle knap efter en fejl, s\u00e5 samme side kan pr\u00f8ves igen. Bevar den eksisterende r\u00e6kkef\u00f8lge og fjern knappen, n\u00e5r svaret ikke har en ny cursor.. Acceptance: \u00c5bn det eksisterende kandidatforl\u00f8b i browsertesten med lokale API-fixtures. Hold svaret p\u00e5 den \u00e6ldre side tilbage, aktiv\u00e9r samme knap hurtigt to gange, og kontroll\u00e9r \u00e9t opslag for cursoren samt \u00e9n inds\u00e6ttelse af hver h\u00e6ndelse. Afvis n\u00e6ste opslag, kontroll\u00e9r at samme cursor kan pr\u00f8ves igen, og return\u00e9r derefter sidste side uden cursor. Kontroll\u00e9r, at knappen fjernes.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_hotwatch_engine.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "stabilization/desktop/candidate-history-loads-each-pending-cursor-once",
+    "reserve_goal": "stabilization/desktop"
   }
 ]
