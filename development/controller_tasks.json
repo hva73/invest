@@ -578,7 +578,7 @@
     "generation": 4,
     "role": "motor",
     "priority": 0,
-    "status": "ready",
+    "status": "blocked",
     "base_branch": "codex/escape-development",
     "base_sha": "db73c8bf6a0cddb815357f88b7adba8bddbd5b0f",
     "dependencies": [
@@ -664,7 +664,7 @@
     "generation": 2,
     "role": "mobile",
     "priority": 1,
-    "status": "ready",
+    "status": "blocked",
     "base_branch": "codex/escape-development",
     "base_sha": "99ba8ef656fa0386ee828d14d7b9c0bae158395a",
     "dependencies": [
@@ -888,7 +888,7 @@
     "generation": 2,
     "role": "motor",
     "priority": 0,
-    "status": "ready",
+    "status": "blocked",
     "base_branch": "codex/trading-engine-v2-integration",
     "base_sha": "e4b59436f7abc5fc154a65c8fd9a9de65281e4a8",
     "dependencies": [],
@@ -907,7 +907,7 @@
     "generation": 9,
     "role": "data",
     "priority": 0,
-    "status": "ready",
+    "status": "blocked",
     "base_branch": "codex/escape-development",
     "base_sha": "99ba8ef656fa0386ee828d14d7b9c0bae158395a",
     "dependencies": [
@@ -936,7 +936,7 @@
     "generation": 2,
     "role": "motor",
     "priority": 2,
-    "status": "ready",
+    "status": "blocked",
     "base_branch": "codex/trading-engine-v2-integration",
     "base_sha": "e4b59436f7abc5fc154a65c8fd9a9de65281e4a8",
     "dependencies": [],
@@ -949,5 +949,43 @@
     "local_repair": true,
     "follow_base": true,
     "task": "Implement #12 next vertical slice on accepted #308: authenticated Long-Term Watch list/add/status/remove/reopen routes using existing app.py session and CSRF, server-side verified Pluto asset identity via existing read-only instrument resolution (never trust caller identity, uid, price or claimed fill); use existing SQLite init under migration lock, on the development integration branch only. Missing/unverified identity fails without writing; no automatic price fetch, no broker proposals/orders, no change to holdings/P&L; no background polling. Keep reference price missing unless existing authoritative verified evidence is available. Preserve existing response and layout contracts; no UI changes. Actual authenticated HTTP and SQLite regression tests in tests/test_strategy_lab.py with two tenants, forged metadata/user, unauthenticated and CSRF failure, idempotency and removal/reopen, no holdings or trades changed. Run tests directly and existing motor CI. No production installation."
+  },
+  {
+    "status": "ready",
+    "priority": 0,
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "b84679a697fdd348ad6043e57f0a6b5e7fb4aad5",
+    "dependencies": [],
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "issue": 315,
+    "generation": 1,
+    "role": "data",
+    "paths": [
+      "hotwatch_service.py",
+      "tests/test_hotwatch_holdings_auto.py"
+    ],
+    "task": "Implement first architecture-reset vertical slice, not documentation. On pinned clean base, simplify auto_holdings_tick by removing repeated reads only where proven safe; preserve original per-position activation order, early exit, idle no-write, tenant/test isolation, concurrent stop/kill/reopen and bounded work. Do not carry forward rejected batch-cache designs from #14. Measure SQLite VM steps and decoded rows on 1/10/100 users, one and 26 holdings, idle/killed/early-activation and thousands of historical rows. Prefer small readable functions and indexed exact lookups; no schema, strategy, mandate, new framework or external calls. Execute tests.test_hotwatch_holdings_auto and relevant existing regression tests, report exact before/after and actual counts. If optimization worsens a workload, simplify or revert it; deliver tested code, not a plan."
+  },
+  {
+    "status": "ready",
+    "priority": 0,
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "b84679a697fdd348ad6043e57f0a6b5e7fb4aad5",
+    "dependencies": [],
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "issue": 315,
+    "generation": 2,
+    "role": "mobile",
+    "paths": [
+      "static/engine-ui.js",
+      "static/app.js",
+      "tests/browser_mobile_navigation_app.py",
+      "tests/browser_mobile_account_isolation.py"
+    ],
+    "task": "Complete first architecture-reset UI vertical slice on pinned base including captureInteraction/currentResult already implemented. Use one shared session and interaction lifecycle for async UI state/DOM/error writes and deferred POSTs; preserve actual design, API, archive pagination and polling. Audit every awaited continuation in engine-ui.js; prevent stale response after account switch or same-user relogin, mode changes, newer dialogs, open-close, upload, manual start and kill-switch errors. Prevent duplicate manual POST and stale detail/plan actions. Preserve ordinary same-account success and polling. Readable source, no new framework, no live broker calls. Add actual Chromium 390px and desktop regression on real application fixture with delayed success/errors, two accounts, same-user relogin, strategy file upload, archive pages, manual start, normal positive flow. Run relevant browser tests and syntax checks. Deliver tested code, no documentation-only work."
   }
 ]
