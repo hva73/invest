@@ -17,7 +17,13 @@ def read(connect,uid,now=None,days=7,source='all',kind='all',before=None,limit=1
    for entry in d.get('journal',[]):add('report:'+str(r['id'])+':'+entry['entry_id'],entry.get('occurred_at') or d['generated_at'],'Trading Radar','analysis',entry['text'],{'report_id':r['report_id'],'reported':True})
   for r in c.execute('SELECT * FROM candidate_execution_events WHERE user_id=? AND is_test=0 ORDER BY id DESC LIMIT 2000',(uid,)):
    if r['verification']!='pluto':continue
-   payload=json.loads(r['payload']);status_time=payload.get('status_time');known=bool(policy.stamp(status_time));payload['time_basis']='provider_status_time' if known else 'observed_not_execution';payload['observed_at']=r['occurred_at']
+   payload=json.loads(r['payload'])
+   status_time=payload.get('status_time')
+   provider_at=policy.stamp(status_time)
+   observed_at=policy.stamp(r['occurred_at'])
+   known=provider_at is not None and observed_at is not None and provider_at<=observed_at
+   payload['time_basis']='provider_status_time' if known else 'observed_not_execution'
+   payload['observed_at']=r['occurred_at']
    payload.update(order_id=r['order_id'], candidate_id=r['candidate_id'], cycle_id=r['cycle_id'])
    add('execution:'+str(r['id']),status_time if known else r['occurred_at'],'Pluto','order',r['status'] if known else 'Observeret ordrestatus: '+r['status'],payload)
   for r in c.execute('SELECT * FROM candidate_lifecycle_events WHERE user_id=? AND is_test=0 ORDER BY id DESC LIMIT 2000',(uid,)):
