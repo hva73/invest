@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T09:12:00Z",
+  "updated_at": "2026-11-26T09:18:38Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -510,8 +510,8 @@
         {
           "id": "ci",
           "title": "Samlet regression og rollback",
-          "status": "pending",
-          "evidence": "Udestår.",
+          "status": "review",
+          "evidence": "Resetbasen b84679a6 havde CI-filter kun for codex/escape-development; koordinatorens enfil-PR #316 exact 3062ad97 retter godkendt reset-branch, fokuseret motor/trade/Strategy Lab og faktisk mobilbrowser-suite. Run 45790780479 in_progress; ingen bestået CI eller integration endnu. Bevar A/B-worktrees på pinned base indtil sikker afstemning.",
           "owner_role": "release"
         }
       ],
