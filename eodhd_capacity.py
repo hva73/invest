@@ -210,6 +210,9 @@ def refresh_account(connect,opener=None):
   if result['status']=='OK' and isinstance(data,dict) and all(_integer(data.get(k)) is not None for k in ('apiRequests','dailyRateLimit','extraLimit')) and isinstance(data.get('apiRequestsDate'),str):
    # Do not persist name, email, API key, payment or invitation fields.
    state['account']={k:_integer(data[k]) for k in ('apiRequests','dailyRateLimit','extraLimit')}
-   state['account']['apiRequestsDate']=data['apiRequestsDate'][:10];state['units_at_account']=state.get('known_units',0);state['unknown_at_account']=state.get('unknown_cost_requests',0)
+   state['account']['apiRequestsDate']=data['apiRequestsDate'][:10]
+   same_day=state.get('local_day')==state['account']['apiRequestsDate']
+   state['units_at_account']=state.get('known_units',0) if same_day else 0
+   state['unknown_at_account']=state.get('unknown_cost_requests',0) if same_day else 0
   elif result['status']=='OK':state['account_status']='INVALID_RESPONSE'
   write(c,state,time.time())
