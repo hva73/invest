@@ -1359,7 +1359,7 @@
     "task": "In auto_holdings_tick only, reject non-finite holding quantities (Decimal Infinity, -Infinity, NaN) before positive comparison. Preserve finite positive holdings, ordering, tenant scoping and one activation. Add actual SQLite regression for malformed quantity before valid later holding. Run focused holdings tests. Small scoped code/test only, no schema, network, live provider/broker or production, no unrelated refactor. ESCAPE_DRAFT_READY after actual tests pass."
   },
   {
-    "status": "ready",
+    "status": "done",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "481e94079a3cbceb38f67599464997dfd2a5a894",
