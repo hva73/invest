@@ -190,7 +190,7 @@ window.EngineUI=(()=>{
 
  function paint(){const n=root();if(!n||data?._owner!==owner()||data?._mode!==mode||data?._epoch!==sessionEpoch())return;const opened=[...n.querySelectorAll('details[data-engine-group][open]')].map(x=>x.dataset.engineGroup),candidatesOpen=!!n.querySelector('.engine-candidates[open]'),settingsOpen=!!n.querySelector('.engine-settings[open]');const history=data.history,lastPage=history.tail||history.head;
  const allRows=data.sessions.slice(),ids=new Set(allRows.map(s=>s.watch_id));
- for(const row of [...(history.head?.sessions||[]),...(history.tail?.sessions||[])]){
+ for(const row of [...(history.head?.sessions||[]),...(history.tail?.sessions||[]),...history.loaded.values()]){
   if(ids.has(row.watch_id))continue;
   ids.add(row.watch_id);
   allRows.push(row);
@@ -219,7 +219,8 @@ window.EngineUI=(()=>{
   return offset!==rows.length||cursor!==end;
  }
  let pendingHistory=null,pendingArchive=null;
- function resetHistory(history){
+ function restartHistoryPaging(history){
+  // A new page boundary invalidates the cursor, while loaded archive rows stay visible.
   pendingHistory=null;
   history.tail=null;
   history.checkedAt=undefined;
@@ -233,10 +234,13 @@ window.EngineUI=(()=>{
    const head=await api(historyPath(20));
    if(!current())return;
    const nextHead={sessions:head.sessions,next_cursor:head.next_cursor??null,truncated:head.truncated};
-   if((history.head?.next_cursor??null)!==nextHead.next_cursor)resetHistory(history);
+   if((history.head?.next_cursor??null)!==nextHead.next_cursor)restartHistoryPaging(history);
    const changed=JSON.stringify(history.head)!==JSON.stringify(nextHead);
    history.head=nextHead;
-   if(changed)paint();
+   if(changed){
+    for(const row of nextHead.sessions)history.loaded.set(row.watch_id,row);
+    paint();
+   }
 
    const tail=history.tail;
    // Capped current lists can hide a closure anywhere in creation-ordered history.
@@ -250,7 +254,7 @@ window.EngineUI=(()=>{
     if(history.tail)history.recheck=true;
     return;
    }
-   if(changedTail){resetHistory(history);paint()}
+   if(changedTail){restartHistoryPaging(history);paint()}
   }catch{
    if(current()){
     history.retryAt=Date.now()+archiveRecheckMs;
@@ -268,10 +272,10 @@ window.EngineUI=(()=>{
   try{[r,registry]=await Promise.all([api(base+'/sessions'+query()+'&limit=100&view=current'),api('reports/candidate-registry?is_test='+mode)])}
   catch(error){if(current())throw error;return}
   if(!current())return;
-  const previous=listData(user,epoch),history=previous?.history||{head:null,tail:null,retryAt:0};
+  const previous=listData(user,epoch),history=previous?.history||{head:null,tail:null,loaded:new Map(),retryAt:0};
   if(previous&&!r.truncated){
    const ids=new Set([...r.sessions,...(history.head?.sessions||[])].map(s=>s.watch_id));
-   if(previous.sessions.some(s=>!isArchived(s)&&!ids.has(s.watch_id)))resetHistory(history);
+   if(previous.sessions.some(s=>!isArchived(s)&&!ids.has(s.watch_id)))restartHistoryPaging(history);
    else if(previous.truncated&&(history.tail||pendingHistory?.()))history.recheck=true;
   }
   data={...r,candidates:registry.candidates||[],history,_owner:user,_mode:mode,_epoch:epoch};
@@ -430,6 +434,7 @@ window.EngineUI=(()=>{
   history.checkedAt??=Date.now();
   history.tail={next_cursor:page.next_cursor??null,truncated:page.truncated,
    sessions:[...(history.tail?.sessions||[]),...page.sessions]};
+  for(const row of page.sessions)history.loaded.set(row.watch_id,row);
   paint();
   const group=root().querySelector('details[data-engine-group=history]');
   if(group)group.open=true;

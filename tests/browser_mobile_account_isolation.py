@@ -776,6 +776,47 @@ const run = async () => {
     await poll();
     check(!button(history), 'Refresh restored pagination after the last page');
 
+    const newest = session('alpha-loaded-41');
+    const loaded = Array.from({length: 40}, (_, index) => session('alpha-loaded-' + (40 - index), 'COMPLETED'));
+    const orderedArchive = [...loaded];
+    const pageCursors = [];
+    archiveFixture = {
+        current: [newest],
+        autoHistory(params) {
+            const before = Number(params.get('before'));
+            const limit = Number(params.get('limit'));
+            if (before) pageCursors.push(before);
+            const remaining = orderedArchive.filter(s => !before || Number(s.watch_id.split('-').at(-1)) < before);
+            const rows = remaining.slice(0, limit);
+            return {sessions: rows, next_cursor: remaining.length > limit ? Number(rows.at(-1).watch_id.split('-').at(-1)) : null};
+        }
+    };
+    switchAccount('alpha');
+    await flush();
+    await click(history);
+    const historyGroup = '[data-engine-group="history"]';
+    const archivedIds = () => [...document.querySelectorAll(historyGroup + ' .engine-list-identity')]
+        .map(row => row.dataset.engineDetail);
+    assert(archivedIds().length === 40 && !button(history), 'Fixture did not load all 40 archived watches');
+    archiveFixture.current = [];
+    orderedArchive.unshift({...newest, status: 'EXPIRED'});
+    await poll();
+    const retained = archivedIds();
+    check(retained.length === 41 && retained[0] === newest.watch_id && loaded.every(s => retained.includes(s.watch_id)) &&
+        document.querySelector(historyGroup).open, 'A new archive cursor discarded loaded rows or collapsed history');
+    check(button(history), 'History did not expose the refreshed first-page cursor');
+    if (button(history)) {
+        await click(history);
+        check(pageCursors.join(',') === '21,22' && archivedIds().length === 41,
+            'Pagination used the obsolete cursor or duplicated loaded rows');
+        if (button(history)) await click(history);
+        check(archivedIds().length === 41 && !button(history), 'Refreshed pagination did not reach the end');
+    }
+    archiveFixture = null;
+    EngineUI.mount(true);
+    await flush();
+    check(!archivedIds().some(id => id.startsWith('alpha-loaded-')), 'Changing mode reused loaded live archive rows');
+
     const oldest = session('alpha-oldest');
     const secondOldest = session('alpha-older-active');
     const closed = Array.from({length: 21}, (_, index) => session('alpha-archive-' + (22 - index), 'COMPLETED'));
@@ -800,6 +841,8 @@ const run = async () => {
     closed.push({...oldest, status: 'COMPLETED'});
     await poll();
     check(button(history), 'Archiving an older watch did not restore history pagination');
+    check(button('[data-engine-group=history] [data-engine-detail="alpha-archive-2"]'),
+        'Reopening pagination discarded the already loaded last page');
     if (button(history)) {
         const obsoletePage = click(history);
         const obsoleteRequest = take('&before=3', 'alpha');
@@ -951,6 +994,8 @@ const run = async () => {
         await poll();
         await flush();
         check(button(history), 'An unseen watch expiring with ' + currentCount + ' current watches did not restore pagination');
+        check(button('[data-engine-group=history] [data-engine-detail="capped-archive-20"]'),
+            'Revalidating a capped archive discarded loaded rows');
         if (button(history)) await readPages();
         check(button('[data-engine-group=history] ' + expiredButton) && !button(history),
             'An unseen expired watch was missing from the reopened last page');
