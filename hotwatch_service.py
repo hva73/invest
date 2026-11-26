@@ -1096,7 +1096,12 @@ def admin_diagnostics(connect,uid,now=None):
   if row['last_error'] and re.fullmatch(r'[A-Za-z0-9_]{1,100}',row['last_error']):errors[row['last_error']]+=1
   if row['status']!='PAUSED' and row['next_due']<=epoch and row['lease_until']<=epoch:overdue.append({'ticker':watches[ref],'late_s':round(epoch-row['next_due'],1)})
  records=[];files_read=0
- numeric=('queue_ms','claim_ms','provider_ms','ingest_compute_ms','adapter_to_journal_ms','warmup_ms','worker_busy_ms','pluto_context_ms','eodhd_http_ms','websocket_capture_ms','begin_wait_ms','scope_entry_wait_ms','sqlite_begin_ms','occupied_workers','due_sessions','quiet_avoided_estimate')
+ # Worker ingest timings in milliseconds: scope_entry_wait_ms covers entry into
+ # the connection context (including the worker gate and connection setup).
+ # sqlite_begin_ms covers BEGIN IMMEDIATE until it returns. begin_wait_ms spans both.
+ # work_before_commit_ms runs from that return through the session update, ending
+ # when ingest builds its response, before the optional session view and commit.
+ numeric=('queue_ms','claim_ms','provider_ms','ingest_compute_ms','adapter_to_journal_ms','warmup_ms','worker_busy_ms','pluto_context_ms','eodhd_http_ms','websocket_capture_ms','begin_wait_ms','scope_entry_wait_ms','sqlite_begin_ms','work_before_commit_ms','occupied_workers','due_sessions','quiet_avoided_estimate')
  for item in (path,Path(str(path)+'.1'),Path(str(path)+'.2'),Path(str(path)+'.3')):
   try:
    with item.open('rb') as f:f.seek(0,2);f.seek(max(0,f.tell()-1048576));lines=f.read().decode('utf-8',errors='replace').splitlines()
@@ -1106,7 +1111,7 @@ def admin_diagnostics(connect,uid,now=None):
    try:
     rec=json.loads(line);ref=rec.get('watch_ref');at=stamp(rec['utc']);age=epoch-at.timestamp()
     if rec.get('service')!='hotwatch' or rec.get('user_id')!=uid or rec.get('is_test') is not False or ref not in watches or not 0<=age<=86400:continue
-    metrics=rec.get('metrics') or {};clean={k:round(metrics[k],3) for k in numeric if isinstance(metrics.get(k),(int,float)) and not isinstance(metrics.get(k),bool) and math.isfinite(metrics[k]) and 0<=metrics[k]<=86400000}
+    metrics=rec.get('metrics') or {};clean={k:round(metrics[k],3) for k in numeric if type(metrics.get(k)) in (int,float) and 0<=metrics[k]<=86400000}
     clean['warmup_deferred']=metrics.get('warmup_deferred') is True
     clean['intraday_cache_hit']=metrics.get('intraday_cache_hit') is True
     for key in ('websocket_trade_status','websocket_quote_status','websocket_status_status','minute_bars_status','bar_history_status','intraday_status'):
@@ -1175,7 +1180,10 @@ def admin_diagnostics(connect,uid,now=None):
   def phase_stat(key):
    vals=sorted(x['metrics'][key] for x in subset if key in x['metrics'])
    return {'count':len(vals),'p50_ms':vals[(len(vals)-1)//2],'p90_ms':vals[math.ceil(.9*len(vals))-1],'max_ms':vals[-1]} if vals else None
-  queue_factors[label]={'queue_by_occupied_workers':{k:{'count':len(v),'average_ms':round(sum(v)/len(v),2),'max_ms':max(v)} for k,v in by_busy.items()},'deferred_by_reason':dict(retry),'worker_busy':phase_stat('worker_busy_ms'),'websocket_wait':phase_stat('websocket_ms'),'database_begin_wait':phase_stat('begin_wait_ms'),'note':'Besættelse er målt ved claim; komponenter kan overlappe og summeres ikke til køtiden.'}
+  queue_factors[label]={'queue_by_occupied_workers':{k:{'count':len(v),'average_ms':round(sum(v)/len(v),2),'max_ms':max(v)} for k,v in by_busy.items()},'deferred_by_reason':dict(retry),'worker_busy':phase_stat('worker_busy_ms'),'websocket_wait':phase_stat('websocket_ms'),
+                        'database_begin_wait':phase_stat('begin_wait_ms'),'sqlite_begin':phase_stat('sqlite_begin_ms'),
+                        'database_work_before_commit':phase_stat('work_before_commit_ms'),
+                        'note':'Besættelse er målt ved claim; komponenter kan overlappe og summeres ikke til køtiden.'}
  ready={}
  for item in readiness:
   key=item['market'];entry=ready.setdefault(key,{'signals':Counter(),'blockers':Counter()});entry['signals'][item['signal']]+=1
