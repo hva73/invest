@@ -3,6 +3,7 @@ import json,os,time,unittest,urllib.error
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 import app,eodhd_capacity as capacity,eodhd_feeds
+import hotwatch_engine
 import test_hotwatch_engine as fixtures
 from hotwatch_contract import EngineError
 
@@ -14,6 +15,24 @@ class CapacityTests(unittest.TestCase):
  def tearDown(self):self.env.stop();self.f.tearDown()
  def state(self):
   with app.connect() as c:return capacity.read(c)
+ def test_reservation_uses_window_index_and_preserves_budget_boundary(self):
+  window=self.now//60
+  cutoff=window-2
+  rows=[(uid,source,minute,7) for uid in range(100) for source in ('pluto','eodhd')
+        for minute in range(cutoff-1,window+2)]
+  with app.connect() as c:
+   c.executemany('INSERT INTO hw_request_budget VALUES(?,?,?,?)',rows)
+   hotwatch_engine.init(c)
+   plan=c.execute('EXPLAIN QUERY PLAN DELETE FROM hw_request_budget WHERE window<?',(cutoff,)).fetchall()
+   self.assertRegex(' '.join(row['detail'] for row in plan),
+                    r'SEARCH hw_request_budget USING INDEX \w+ \(window<\?\)')
+  self.cap.reserve(1,self.now)
+  expected={(uid,source,minute):used for uid,source,minute,used in rows if minute>=cutoff}
+  expected[0,'eodhd',window]+=1
+  with app.connect() as c:
+   actual={(uid,source,minute):used for uid,source,minute,used in
+           c.execute('SELECT user_id,source,window,used FROM hw_request_budget')}
+  self.assertEqual(actual,expected)
  def test_eighty_percent_no_compounded_buffer_and_parallel_shared_budget(self):
   started=time.perf_counter()
   def send(_):
