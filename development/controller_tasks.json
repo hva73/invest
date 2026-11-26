@@ -2760,5 +2760,71 @@
     "reserve_plan_id": "ui/desktop/desktop-preview-clears-previous-result-while-pending",
     "reserve_goal": "ui/desktop",
     "reserve_reassessment": "54:30@83dc793d751010cf3f6bc04fc1b0d981e76b03a020386f4771043d50561470c3"
+  },
+  {
+    "issue": 14,
+    "generation": 30,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+    "dependencies": [
+      "14:27"
+    ],
+    "paths": [
+      "jobs.py",
+      "tests/test_jobs.py"
+    ],
+    "task": "Approved roadmap load/queue (100 brugere og fair k\u00f8er). Exact existing source anchor: jobs.py :: SELECT 1 FROM jobs WHERE id=? AND lease=? AND status='running'. Implement only this bounded change: Tilf\u00f8j \u00e9n SQLite-accepttest af successporet i run_one() med den eksisterende pluto_data-jobfixture. Lad en stubbet l\u00e6sning k\u00f8re forbi leasen, gennemf\u00f8r en ny claim og gem dens snapshot, og return\u00e9r derefter et andet gyldigt payload fra den oprindelige invocation. Giv det forsinkede payload et senere observed, s\u00e5 snapshotlagets egen tidskontrol ikke kan skjule en manglende lease-kontrol.. Acceptance: Kun den nye lease gemmer et snapshot. Jobbet st\u00e5r som done med to fors\u00f8g og ryddet lease, og den oprindelige succes \u00e6ndrer hverken det gemte snapshot eller jobresultatet. Testen bruger stubbede l\u00e6sninger.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_jobs.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "load/queue/reclaimed-cron-refresh-discards-late-success",
+    "reserve_goal": "load/queue"
+  },
+  {
+    "issue": 114,
+    "generation": 24,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+    "dependencies": [
+      "114:22"
+    ],
+    "paths": [
+      "journal_projection.py",
+      "tests/test_app.py"
+    ],
+    "task": "Approved roadmap statistics/fills (Fills, kostpris og afstemning). Exact existing source anchor: journal_projection.py :: payload['observed_at']=r['occurred_at']. Implement only this bounded change: Tilf\u00f8j \u00e9n SQLite-accepttest af read() med to Pluto-verificerede, normaliserede eksekveringsr\u00e6kker. Angiv average_fill_price som en decimalstreng p\u00e5 den ene r\u00e6kke og som null p\u00e5 den anden. Giv begge r\u00e6kker forskellige limit_price og stop_price, s\u00e5 testen kan p\u00e5vise enhver fejlagtig erstatning af den gennemsnitlige udf\u00f8relseskurs med en ordrepris. Brug den lagrede ESCAPE-kontrakt i fixturen.. Acceptance: Med filtrene Pluto og order bevarer journalen den eksakte decimalstreng p\u00e5 f\u00f8rste r\u00e6kke og null p\u00e5 den anden. Limit- og stoppriser forbliver selvst\u00e6ndige felter.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_app.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "statistics/fills/journal-preserves-normalized-average-fill-price",
+    "reserve_goal": "statistics/fills"
+  },
+  {
+    "issue": 273,
+    "generation": 18,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+    "dependencies": [
+      "273:17"
+    ],
+    "paths": [
+      "strategy_lab.py",
+      "tests/test_strategy_lab.py"
+    ],
+    "task": "Approved roadmap learning/coverage (Faktisk historisk datad\u00e6kning). Exact existing source anchor: strategy_lab.py :: WHERE s.user_id=? GROUP BY s.id ORDER BY s.updated DESC LIMIT 100. Implement only this bounded change: I available() skal ejerens op til 100 senest opdaterede sessioner med mindst \u00e9n gemt beregning udv\u00e6lges f\u00f8rst. Beregn derefter det eksisterende calculations-tal kun for de valgte sessionsr\u00e6kker via indekset p\u00e5 watch_row_id. Bevar ejerscope, testflag, sortering, svarfelter og sammenligningens replay-gr\u00e6nse.. Acceptance: En SQLite-fixture med over 100 kvalificerede sessioner, en nyere session uden beregninger og en nyere session fra en anden ejer returnerer pr\u00e6cis de 100 forventede sessioner med korrekte opt\u00e6llinger. Foresp\u00f8rgslen afgr\u00e6nser sessionslisten f\u00f8r den fulde opt\u00e6lling.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_strategy_lab.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "learning/coverage/strategy-lab-counts-only-listed-session-history",
+    "reserve_goal": "learning/coverage"
   }
 ]
