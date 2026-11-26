@@ -155,15 +155,19 @@ window.EngineUI=(()=>{
  function formStatus(message){const n=document.getElementById('engine-form-status');if(n)n.textContent=message}
  let instrumentSelection=0,pendingVerification=null;
  const latestInstrumentAction={batch:0,submit:0};
+ const inFlightQuotes=new Set();
+ function instrumentContext(index){
+  const item=candidates[index],form=document.getElementById('engine-create');
+  const epoch=sessionEpoch(),user=owner(),test=mode,version=interaction;
+  return ()=>epoch===sessionEpoch()&&user===owner()&&test===mode&&version===interaction&&
+   form?.isConnected&&document.getElementById('engine-create')===form&&
+   Number(form.elements.candidate.value)===index&&candidates[index]===item;
+ }
  function captureInstrumentRequest(index,action){
   if(!action)instrumentSelection++;
   const selection=instrumentSelection,ticket=action&&++latestInstrumentAction[action];
-  const item=candidates[index],form=document.getElementById('engine-create');
-  const epoch=sessionEpoch(),user=owner(),test=mode,version=interaction;
-  return ()=>selection===instrumentSelection&&(!action||ticket===latestInstrumentAction[action])&&
-   epoch===sessionEpoch()&&user===owner()&&test===mode&&version===interaction&&
-   form?.isConnected&&document.getElementById('engine-create')===form&&
-   Number(form.elements.candidate.value)===index&&candidates[index]===item;
+  const current=instrumentContext(index);
+  return ()=>current()&&selection===instrumentSelection&&(!action||ticket===latestInstrumentAction[action]);
  }
  function verifySelection(index,assetId,valid){
   const result=resolveInstrument(index,assetId,valid);
@@ -182,11 +186,22 @@ window.EngineUI=(()=>{
   if(!verification)formStatus('Kontrollerer instrumentet hos Pluto …');
   const args={report_id:item.report_id,candidate_id:item.candidate.candidate_id,is_test:mode};
   if(assetId)args.asset_id=assetId;
+  // Keep provider replies separate from the UI actions allowed to consume them.
+  // A pending reply can refer to an earlier, still outstanding identical lookup.
+  const previous=[...inFlightQuotes].reverse().find(q=>q.item===item&&q.assetId===assetId&&q.current());
+  const quote={item,assetId,current:instrumentContext(index),previous};
   let result;
-  try{result=await api('market/quote',args)}catch(error){
+  try{
+   quote.reply=api('market/quote',args);
+   inFlightQuotes.add(quote);
+   result=await quote.reply;
+   for(let prior=previous;prior&&valid()&&result?.pending&&!verification;prior=prior.previous){
+    result=await prior.reply;
+   }
+  }catch(error){
    if(!valid())return;
    if(!verification?.assetId)throw error;
-  }
+  }finally{inFlightQuotes.delete(quote)}
   if(!valid())return;
   // An explicit choice owns instrument identity. A pending duplicate has no identity of its own.
   if(verification&&(verification.assetId||result?.pending)){

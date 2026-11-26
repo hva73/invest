@@ -840,7 +840,7 @@ async function checkPendingSubmitLookup(sameCandidate, quoteFirst) {
   if (!sameCandidate) assert.equal(rows[0].instrument, undefined);
 }
 
-async function checkOverlappingQuotes(callers, verificationFirst, implicitOutcome, {stale, repeat, candidateLookup} = {}) {
+async function checkOverlappingQuotes(callers, verificationFirst, implicitOutcome, {stale, repeat, candidateLookup, repeatedLookup} = {}) {
   const {context, session, ui, rows, elements, form, status, slot, nodes, requests, QuotePromise} = instrumentFixture();
   const quotes = [], notices = [];
   context.notice = message => notices.push(message);
@@ -862,9 +862,19 @@ async function checkOverlappingQuotes(callers, verificationFirst, implicitOutcom
   };
   const verified = {asset_id: 'asset', currency: 'USD', exchange: 'NASDAQ'};
   const choices = {selection_required: true, choices: [verified]};
-  const initial = ui.change({target: elements.candidate});
-  let verification = initial;
-  if (!candidateLookup) {
+  const select = value => ui.change({target: {id: 'engine-asset-choice', value}});
+  const chooseCandidate = index => {
+    elements.candidate.value = String(index);
+    return ui.change({target: elements.candidate});
+  };
+  let verification;
+  if (repeatedLookup === 'action') {
+    verification = dispatchInstrumentEvent(context, callers[0], form);
+    await settle();
+  } else if (candidateLookup) {
+    verification = chooseCandidate(0);
+  } else {
+    const initial = chooseCandidate(0);
     quotes[0].resolve(choices);
     await initial;
     assert.match(slot.innerHTML, /value="asset"/);
@@ -872,15 +882,27 @@ async function checkOverlappingQuotes(callers, verificationFirst, implicitOutcom
     await settle();
   }
   const primary = quotes.at(-1);
+  const extraLookups = [];
+  let otherQuote;
+  if (repeatedLookup === 'selection') {
+    const other = candidateLookup ? chooseCandidate(1) : select('other');
+    const back = candidateLookup ? chooseCandidate(0) : select('asset');
+    otherQuote = quotes.at(-2);
+    assert.deepEqual(quotes.at(-1).body, primary.body);
+    extraLookups.push(other, back);
+  }
   const actions = [];
   for (const action of callers) {
     actions.push(dispatchInstrumentEvent(context, action, form));
     await settle();
   }
-  const duplicates = quotes.slice(quotes.indexOf(primary) + 1);
+  const duplicates = quotes.slice(quotes.indexOf(primary) + 1).filter(q => q !== otherQuote);
   const args = {report_id: 'report', candidate_id: 'FIRST', is_test: false};
-  assert.deepEqual(quotes.map(q => q.body), [args, ...(candidateLookup ? [] : [{...args, asset_id: 'asset'}]),
-    ...callers.map(() => args)]);
+  const selectedArgs = candidateLookup ? args : {...args, asset_id: 'asset'};
+  const expected = [args];
+  if (!candidateLookup && repeatedLookup !== 'action') expected.push(selectedArgs);
+  if (otherQuote) expected.push(candidateLookup ? {...args, candidate_id: 'SECOND'} : {...args, asset_id: 'other'}, selectedArgs);
+  assert.deepEqual(quotes.map(q => q.body), [...expected, ...callers.map(() => args)]);
   let repeated;
   if (repeat) {
     repeated = dispatchInstrumentEvent(context, callers[0], form);
@@ -892,9 +914,15 @@ async function checkOverlappingQuotes(callers, verificationFirst, implicitOutcom
     primary.resolve(verified);
     await verification;
   };
+  if (otherQuote) {
+    otherQuote.resolve({...verified, asset_id: 'other'});
+    await extraLookups[0];
+    assert.equal(elements.asset_id.value, undefined);
+    assert.equal(rows[1].instrument, undefined);
+  }
   if (verificationFirst) {
     await finishVerification();
-    assert.match(status.textContent, /1 matchende depot/);
+    if (!repeatedLookup) assert.match(status.textContent, /1 matchende depot/);
     if (stale) session.epoch++;
   }
   for (const duplicate of duplicates) {
@@ -913,7 +941,7 @@ async function checkOverlappingQuotes(callers, verificationFirst, implicitOutcom
   assert.deepEqual(started, submits ? [['FIRST', 'asset', [2]]] : []);
   assert.equal(requests.length, submits ? 1 : 0);
   if (submits) requests.shift().succeed();
-  await Promise.all([...actions, repeated]);
+  await Promise.all([...actions, repeated, ...extraLookups]);
   assert.equal(elements.asset_id.value, 'asset');
   assert.equal(elements.exchange.value, 'NASDAQ');
   assert.equal(elements.quote_currency.value, 'USD');
@@ -925,9 +953,40 @@ async function checkOverlappingQuotes(callers, verificationFirst, implicitOutcom
   assert.equal(Boolean(nodes['engine-dialog'].closed), submits);
 }
 
+async function checkDuplicateQuoteContext(change, rejectOld) {
+  const {ui, session, elements, nodes, form, rows, status, QuotePromise} = instrumentFixture();
+  const quotes = [];
+  session.control = () => new QuotePromise((resolve, reject) => quotes.push({resolve, reject}));
+  const select = () => ui.change({target: elements.candidate});
+  const old = select();
+  if (change === 'session') session.epoch++;
+  if (change === 'owner') session.owner = 'other';
+  if (change === 'form') nodes['engine-create'] = {...form};
+  const current = select();
+  quotes[1].resolve({pending: true});
+  await current;
+  assert.match(status.textContent, /mangler verificeret aktiv-ID/);
+  const before = status.textContent;
+  if (rejectOld) quotes[0].reject(Error('old lookup failed'));
+  else quotes[0].resolve({asset_id: 'old', currency: 'USD', exchange: 'NASDAQ'});
+  await old;
+  assert.equal(status.textContent, before);
+  assert.equal(rows[0].instrument, undefined);
+  assert.equal(elements.asset_id.value, undefined);
+}
+
 async function main() {
+  for (const change of ['session', 'owner', 'form']) {
+    for (const rejectOld of [false, true]) await checkDuplicateQuoteContext(change, rejectOld);
+  }
   for (const first of [true, false]) {
-    for (const caller of ['batch', 'submit']) await checkOverlappingQuotes([caller], first, 'pending', {candidateLookup: true});
+    for (const caller of ['batch', 'submit']) {
+      await checkOverlappingQuotes([caller], first, 'pending', {candidateLookup: true});
+      await checkOverlappingQuotes([caller], first, 'pending', {repeatedLookup: 'action'});
+      for (const candidateLookup of [false, true]) {
+        await checkOverlappingQuotes([caller], first, 'pending', {candidateLookup, repeatedLookup: 'selection'});
+      }
+    }
     for (const callers of [['batch', 'submit'], ['submit', 'batch']]) await checkOverlappingQuotes(callers, first, 'verified');
   }
   for (const caller of ['batch', 'submit']) {
