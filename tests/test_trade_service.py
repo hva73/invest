@@ -271,7 +271,8 @@ class Trading(unittest.TestCase):
   item={**root,'assetId':order['assetId'],'side':order['side'],'orderType':order['orderType'],'timeInForce':order['timeInForce']}
   depot={'portfolioId':proposal['payload']['portfolioId']}
   for identity in (root,{**root,'orderIntents':[]},{'orderIntents':[item]},{**root,'orderIntents':[item]},item,
-                   {**root,**depot},{'orderIntents':[{**item,**depot}]},{**root,**depot,'orderIntents':[{**item,**depot}]}):
+                   {**root,**depot},{'orderIntents':[{**item,**depot}]},{**root,**depot,'orderIntents':[{**item,**depot}]},
+                   {**root,'collectionId':'extra-root','orderIntents':[{**item,'collectionId':'extra-item'}]}):
    with self.subTest(identity=identity):
     self.intent_status={**identity,'status':'accepted'}
     self.calls.clear()
@@ -279,6 +280,29 @@ class Trading(unittest.TestCase):
     self.assertEqual(refreshed['response'],self.intent_status)
     self.assertEqual((refreshed['intent_id'],refreshed['status']),(reference,'sent'))
     self.assertEqual(self.calls,[{'name':'get_order_intent','arguments':root}])
+ def test_check_collection_sell_matches_saved_collection_id(self):
+  request=dict(self.request,portfolio_id=self.child,kind='collection_sell',size='25')
+  with patch('trade_service.candidate',return_value={'signal':'SÆLG'}):
+   proposal=self.send(self.estimate(request))
+  pid=proposal['id']
+  reference={'orderIntentId':proposal['intent_id']}
+  collection=proposal['payload']['collectionId']
+  self.assertEqual(collection,'child')
+  for identity in ({'collectionId':collection,'portfolioId':'reported-parent'},{'orderIntents':[]}):
+   with self.subTest(identity=identity):
+    self.intent_status={**reference,**identity,'status':'PENDING'}
+    refreshed=trade.check(app.connect,1,pid,self.factory)['proposal']
+    self.assertEqual(refreshed['response'],self.intent_status)
+    self.assertEqual(json.loads(trade.get(app.connect,1,pid)['response']),self.intent_status)
+  before=dict(trade.get(app.connect,1,pid))
+  for identity in ({'collectionId':'other'},{'collectionId':None},
+                   {'collectionId':collection,'orderIntents':[{**reference,'collectionId':'other'}]},
+                   {'collectionId':collection,'orderIntents':[{**reference,'collectionId':collection}]}):
+   with self.subTest(identity=identity):
+    self.intent_status={**reference,**identity,'status':'accepted'}
+    with self.assertRaises(trade.TradeError):
+     trade.check(app.connect,1,pid,self.factory)
+    self.assertEqual(dict(trade.get(app.connect,1,pid)),before)
  def test_check_preserves_changes_committed_during_lookup(self):
   proposal=self.send(self.estimate())
   pid=proposal['id']
