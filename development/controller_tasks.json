@@ -1379,7 +1379,7 @@
     "task": "In reconcile_closed_holdings absent() only, validate all holding quantities as finite decimals before treating snapshot as evidence of absence; malformed quantities or asset identity must not close a watch. Preserve valid complete empty snapshot and zero quantity semantics, existing transaction and recheck. Add focused SQLite negative and positive regression in holdings tests. Small scoped code/test only, no schema, network, live provider/broker or production, no unrelated refactor. ESCAPE_DRAFT_READY after actual tests pass."
   },
   {
-    "status": "ready",
+    "status": "done",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "c7ffa1398c09ae2d883ce2138cd737aec9e53eb4",
