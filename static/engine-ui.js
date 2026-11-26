@@ -53,11 +53,24 @@ window.EngineUI=(()=>{
   const modal=document.getElementById('engine-dialog');
   return modal?.open?modal:null;
  }
+ let dialogObserver,dialogTransitions=0;
+ function recordDialogTransitions(records){
+  if(records.some(({target})=>target.tagName==='DIALOG'))dialogTransitions++;
+ }
+ function dialogTransitionVersion(){
+  // Include dialogs owned by other modules, even if they opened and closed before the response.
+  if(!dialogObserver&&typeof MutationObserver!=='undefined'&&document.documentElement){
+   dialogObserver=new MutationObserver(recordDialogTransitions);
+   dialogObserver.observe(document.documentElement,{subtree:true,attributes:true,attributeFilter:['open']});
+  }
+  if(dialogObserver)recordDialogTransitions(dialogObserver.takeRecords());
+  return dialogTransitions;
+ }
  function captureDialog(){
-  // A newer dialog may belong to Overview or another module.
-  const version=dialogGeneration,open=[...document.querySelectorAll('dialog[open]')];
+  const version=dialogGeneration,transitions=dialogTransitionVersion();
+  const open=[...document.querySelectorAll('dialog[open]')];
   return ()=>{
-   if(version!==dialogGeneration)return false;
+   if(version!==dialogGeneration||transitions!==dialogTransitionVersion())return false;
    const current=document.querySelectorAll('dialog[open]');
    return current.length===open.length&&open.every((modal,index)=>modal===current[index]);
   };
@@ -496,25 +509,32 @@ window.EngineUI=(()=>{
  async function startManualWatch(button){
   const form=document.getElementById('engine-manual-search');
   const scope=captureScope(),formMounted=captureForm(form,captureView()),search=manualSearchRequest;
+  const sameDialog=captureDialog(),detailVersion=detailRequest;
   const mounted=()=>formMounted()&&search===manualSearchRequest&&button.isConnected;
   const current=()=>scope()&&mounted();
+  const canContinue=()=>sameDialog()&&detailVersion===detailRequest;
   const item=manualChoices[Number(button.dataset.engineManual)];
   if(!item||!current()||button.disabled||pendingManualStarts.get(form)?.())return;
   const session=captureSession();
   pendingManualStarts.set(form,session);
   const status=document.getElementById('engine-manual-status');
+  const previousStatus=status.textContent;
   const release=lockAction(button,mounted,status);
   status.textContent='Kontrollerer instrument og starter overvågning …';
   try{
    const result=await api(base+'/manual-start?is_test=false',{asset_id:item.asset_id,ticker:item.ticker});
-   if(!current())return;
-   const modal=document.getElementById('engine-dialog'),version=dialogGeneration,detailVersion=detailRequest;
-   modal?.close();
+   if(!current()||!canContinue())return;
+   openEngineDialog()?.close();
+   const sameClosedDialog=captureDialog();
    await load();
-   if(scope()&&version===dialogGeneration&&detailVersion===detailRequest&&modal===document.getElementById('engine-dialog')&&!modal?.open)await detail(result.session.watch_id);
+   if(scope()&&sameClosedDialog()&&detailVersion===detailRequest)await detail(result.session.watch_id);
   }catch(error){
-   if(current()){status.textContent=reason(error.details?.code||error.message);button.disabled=false}
+   if(current()&&canContinue())status.textContent=reason(error.details?.code||error.message);
   }finally{
+   if(current()){
+    button.disabled=false;
+    if(!canContinue())status.textContent=previousStatus;
+   }
    if(pendingManualStarts.get(form)===session)pendingManualStarts.delete(form);
    release();
   }

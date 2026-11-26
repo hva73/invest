@@ -68,10 +68,17 @@ CHECK_HOLDING_DIALOG = """async () => {
  const holdingA = {...sample, key: 'holding-a', asset_id: 'holding-a', ticker: 'HOLDING A', hot_watch: {session}};
  const holdingB = {...sample, key: 'holding-b', asset_id: 'holding-b', ticker: 'HOLDING B', hot_watch: {}};
  const answer = (data, status = 200) => new Response(JSON.stringify(data), {status});
- let finishState;
+ const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
+ const notice = document.getElementById('notice');
+ const originalNotice = notice.textContent;
+ const originalNoticeKind = notice.dataset.kind;
+ let action, receiveRead;
  window.fetch = (url, options) => {
-  if (url === '/api/state') return new Promise(resolve => { finishState = resolve; });
+  if (url === '/api/state' && action === 'dashboardWatch') {
+   return new Promise(resolve => receiveRead(resolve));
+  }
   if (url.startsWith('/api/v1/hotwatch/sessions/' + watch)) {
+   if (action === 'dashboardDecision') return new Promise(resolve => receiveRead(resolve));
    return Promise.resolve(answer(url.includes('/samples?') || url.includes('/events?') ? {items: []} : {session}));
   }
   return originalFetch(url, options);
@@ -79,25 +86,161 @@ CHECK_HOLDING_DIALOG = """async () => {
  try {
   state.dashboard = {...originalDashboard, positions: [holdingA, holdingB], overview_positions: [holdingA, holdingB]};
   const failures = [];
-  for (const outcome of ['success', 'error']) {
-   render();
-   const watchButton = document.querySelector('[data-dashboard-watch="' + watch + '"]');
-   const holdingButton = document.querySelector('.mobile-holding[data-dashboard-open="1"]');
-   if (!watchButton || !holdingButton) throw Error('Missing fixture holdings on Overview');
-   const opening = DashboardUI.click(watchButton).catch(error => failures.push(error.message));
-   holdingButton.click();
-   await new Promise(resolve => setTimeout(resolve, 0));
-   const holding = document.querySelector('#dashboard-detail[open]');
-   if (!holding?.querySelector('h2').textContent.includes('HOLDING B')) throw Error('Holding B did not open');
-   finishState(outcome === 'success' ? answer(state) : answer({error: 'Obsolete holding error'}, 500));
-   await opening;
-   if (!holding.open || document.querySelector('#engine-dialog[open]')) failures.push(outcome);
-   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+  for (action of ['dashboardWatch', 'dashboardDecision']) {
+   for (const outcome of ['success', 'error']) {
+    for (const dismissed of [false, true]) {
+     render();
+     const watchButton = document.querySelector('[data-dashboard-watch="' + watch + '"]');
+     const holdingButton = document.querySelector('.mobile-holding[data-dashboard-open="1"]');
+     if (!watchButton || !holdingButton) throw Error('Missing fixture holdings on Overview');
+     watchButton.dataset[action] = watch;
+     if (action === 'dashboardDecision') delete watchButton.dataset.dashboardWatch;
+     const reading = new Promise(resolve => { receiveRead = resolve; });
+     watchButton.click();
+     const finishRead = await reading;
+     holdingButton.click();
+     await nextTask();
+     const holding = document.querySelector('#dashboard-detail[open]');
+     if (!holding?.querySelector('h2').textContent.includes('HOLDING B')) throw Error('Holding B did not open');
+     if (dismissed) {
+      holding.querySelector('[data-dashboard-close]').click();
+      await nextTask();
+     }
+     const previousNotice = 'Holding B · ' + [action, outcome, dismissed].join('/');
+     notice.textContent = previousNotice;
+     finishRead(outcome === 'success' ? answer(action === 'dashboardWatch' ? state : {session}) :
+       answer({error: 'Obsolete holding error'}, 500));
+     await nextTask();
+     if (notice.textContent !== previousNotice || holding.open === dismissed ||
+         document.querySelector('#engine-dialog[open]')) {
+      failures.push([action, outcome, dismissed].join('/'));
+     }
+     document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+    }
+   }
   }
-  if (failures.length) throw Error('Obsolete HOT WATCH detail reached holding B: ' + failures.join(', '));
+  if (failures.length) throw Error('Obsolete HOT WATCH response reached holding B: ' + failures.join(', '));
  } finally {
   window.fetch = originalFetch;
   state.dashboard = originalDashboard;
+  notice.textContent = originalNotice;
+  if (originalNoticeKind === undefined) delete notice.dataset.kind;
+  else notice.dataset.kind = originalNoticeKind;
+  render();
+ }
+}"""
+
+CHECK_MANUAL_START_FOCUS = """async () => {
+ const originalFetch = window.fetch;
+ const candidateId = 'fixture-history';
+ const watch = 'fixture-manual-start';
+ const answer = data => new Response(JSON.stringify(data));
+ const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
+ const list = {sessions: [], kill_switch: {}};
+ const session = {watch_id: watch, status: 'ACTIVE', signal: 'WAIT',
+   request: {ticker: 'MANUAL', watch_mode: 'entry', portfolio_ids: []}};
+ let receiveStart, receiveList, receiveDetail, detailReads = 0;
+ window.fetch = (url, options) => {
+  if (url.includes('view=current')) {
+   if (!receiveList) return Promise.resolve(answer(list));
+   const receive = receiveList;
+   receiveList = null;
+   return new Promise(resolve => receive(() => resolve(answer(list))));
+  }
+  if (url.includes('view=history')) return Promise.resolve(answer({sessions: []}));
+  if (url.startsWith('/api/reports/candidate-registry?')) return Promise.resolve(answer({candidates: []}));
+  if (url.startsWith('/api/v1/hotwatch/manual-search?')) {
+   return Promise.resolve(answer({assets: [{asset_id: 'fixture-asset', ticker: 'MANUAL'}]}));
+  }
+  if (url.startsWith('/api/v1/hotwatch/manual-start?')) {
+   if (receiveStart) return new Promise(resolve => receiveStart(() => {
+    resolve(new Response(JSON.stringify({error: 'Obsolete start error'}), {status: 500}));
+   }));
+   return Promise.resolve(answer({session}));
+  }
+  if (url.startsWith('/api/v1/hotwatch/sessions/' + watch)) {
+   if (url.includes('/samples?') || url.includes('/events?')) return Promise.resolve(answer({items: []}));
+   detailReads++;
+   if (receiveDetail) {
+    const receive = receiveDetail;
+    receiveDetail = null;
+    return new Promise(resolve => receive(() => resolve(answer({session}))));
+   }
+   return Promise.resolve(answer({session}));
+  }
+  if (url.startsWith('/api/reports/candidate-history?')) return Promise.resolve(answer({events: []}));
+  if (url.startsWith('/api/reports/hot-watch?')) return Promise.resolve(answer({groups: []}));
+  return originalFetch(url, options);
+ };
+ try {
+  view = 'hot-watch';
+  render();
+  await nextTask();
+  const historyButton = document.createElement('button');
+  historyButton.dataset.intelHistory = candidateId;
+  document.getElementById('watch-content').append(historyButton);
+  const failures = [];
+  async function search() {
+   await EngineUI.click(document.querySelector('[data-engine-new]'));
+   const form = document.getElementById('engine-manual-search');
+   form.elements.query.value = 'MANUAL';
+   await EngineUI.submit({target: form, preventDefault() {}});
+   return document.querySelector('[data-engine-manual]');
+  }
+  async function openHistory() {
+   await IntelUI.click(historyButton);
+   const history = document.querySelector('#intel-detail-dialog[open]');
+   if (!history?.textContent.includes(candidateId)) throw Error('Candidate history did not open');
+   return history;
+  }
+  {
+   const button = await search();
+   const status = document.getElementById('engine-manual-status');
+   const previousStatus = status.textContent;
+   const startPending = new Promise(resolve => { receiveStart = resolve; });
+   const start = EngineUI.click(button);
+   const finishStart = await startPending;
+   receiveStart = null;
+   const history = await openHistory();
+   await IntelUI.click(history.querySelector('[data-intel-close]'));
+   finishStart();
+   await start;
+   if (button.disabled || status.textContent !== previousStatus) failures.push('start error after dismissal');
+   button.closest('dialog').close();
+  }
+  for (const phase of ['refresh', 'refresh after dismissal', 'detail', 'uninterrupted']) {
+   const button = await search();
+   const listPending = new Promise(resolve => { receiveList = resolve; });
+   const start = EngineUI.click(button);
+   const finishList = await listPending;
+   const priorReads = detailReads;
+   let finishDetail;
+   if (phase === 'detail') {
+    const detailPending = new Promise(resolve => { receiveDetail = resolve; });
+    finishList();
+    finishDetail = await detailPending;
+   }
+   let history;
+   if (phase !== 'uninterrupted') {
+    history = await openHistory();
+    if (phase === 'refresh after dismissal') await IntelUI.click(history.querySelector('[data-intel-close]'));
+   }
+   (finishDetail || finishList)();
+   await start;
+   const detail = document.querySelector('#engine-dialog[open]');
+   if (phase === 'uninterrupted') {
+    if (detail?.dataset.watchId !== watch || detailReads !== priorReads + 1) failures.push(phase);
+   } else if (detail || detailReads !== priorReads + Number(phase === 'detail') ||
+              (history.open && document.activeElement !== history.querySelector('h2')) ||
+              history.open !== (phase !== 'refresh after dismissal')) {
+    failures.push(phase);
+   }
+   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+  }
+  if (failures.length) throw Error('Manual start interfered with candidate history: ' + failures.join(', '));
+ } finally {
+  window.fetch = originalFetch;
+  view = 'overview';
   render();
  }
 }"""
@@ -259,6 +402,7 @@ try:
     if width==390:
      page.evaluate(CHECK_STORED_POLL)
      page.evaluate(CHECK_HOLDING_DIALOG)
+     page.evaluate(CHECK_MANUAL_START_FOCUS)
      page.evaluate(CHECK_MANUAL_SALE_SESSION)
    else:
     expect(page.locator('#mobile-more')).to_be_hidden();assert page.locator('main > header #logout').count()==1;nav.locator('[data-view=trade]').click();expect(page.locator('.broker-trade')).to_be_visible()
