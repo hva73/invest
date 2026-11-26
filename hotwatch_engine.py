@@ -195,6 +195,7 @@ def init(c):
  c.execute("INSERT OR IGNORE INTO hw_system_control VALUES(1,0,'','')")
  c.execute('CREATE TABLE IF NOT EXISTS hw_control(user_id INTEGER PRIMARY KEY REFERENCES users(id),killed INTEGER NOT NULL,changed TEXT NOT NULL,reason TEXT NOT NULL)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_request_budget(user_id INTEGER NOT NULL,source TEXT NOT NULL,window INTEGER NOT NULL,used INTEGER NOT NULL,PRIMARY KEY(user_id,source,window))')
+ c.execute('CREATE INDEX IF NOT EXISTS hw_request_budget_window ON hw_request_budget(window)')
  c.execute('CREATE TABLE IF NOT EXISTS hw_pluto_budget_lane(user_id INTEGER NOT NULL,window INTEGER NOT NULL,lane TEXT NOT NULL,used INTEGER NOT NULL,PRIMARY KEY(user_id,window,lane))')
  c.execute('CREATE TABLE IF NOT EXISTS hw_provider_health(user_id INTEGER NOT NULL,is_test INTEGER NOT NULL,source TEXT NOT NULL,attempted TEXT NOT NULL,succeeded TEXT,code TEXT,payload TEXT NOT NULL,PRIMARY KEY(user_id,is_test,source))')
  c.execute('CREATE TABLE IF NOT EXISTS hw_heartbeat(id INTEGER PRIMARY KEY CHECK(id=1),updated TEXT NOT NULL,status TEXT NOT NULL)')
