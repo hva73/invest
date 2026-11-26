@@ -13,10 +13,10 @@ import threading
 
 from datetime import datetime, timezone
 try:
-    from .controller_queue import plan
+    from .controller_queue import plan, worker
     from . import controller_remote, controller_publish, controller_receipts, controller_progress, controller_coordinator
 except ImportError:
-    from controller_queue import plan
+    from controller_queue import plan, worker
     import controller_remote, controller_publish, controller_receipts, controller_progress, controller_coordinator
 
 FETCH_LOCK = controller_coordinator.FETCH_LOCK
@@ -344,7 +344,7 @@ def coordinate(root, repo_dir, rows, results, waiting, review, reserve_review=la
 def developer_conflict(row, other):
     # Separate draft branches may be edited simultaneously when scopes are
     # independent. Integration, unlike development, changes the base branch.
-    if row["issue"]==other["issue"] or row["role"]==other["role"]:
+    if row["issue"]==other["issue"] or worker(row["role"])==worker(other["role"]):
         return True
     return any(controller_coordinator.path_overlap(a,b) for a in row["paths"] for b in other["paths"])
 
