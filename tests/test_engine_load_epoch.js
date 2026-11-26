@@ -631,7 +631,7 @@ async function checkPolling(change) {
   if (!change) assert.match(dialog.innerHTML, /POLL · motorforløb/);
 }
 
-async function checkInstrument(change, outcome) {
+async function checkInstrument(change, outcome, afterSettlement = false) {
   const seeded = source.replace('return {openHoldingStatus,',
     'return {seed(rows,accounts,snapshots){candidates=rows;portfolios=accounts;portfolioSnapshots=snapshots},openHoldingStatus,');
   const {context, session, mount} = fixture(seeded);
@@ -651,18 +651,38 @@ async function checkInstrument(change, outcome) {
   const lookup = context.document.getElementById;
   context.document.getElementById = id => nodes[id] || lookup(id);
   context.FormData = class { constructor(target) { this.target = target; } get(k) { return this.target.elements[k].value; } };
+  const QuotePromise = vm.runInNewContext('Promise', context);
+  if (afterSettlement) elements.provider.value = 'eodhd';
   const calls = [];
   session.control = (url, body) => {
     if (url !== 'market/quote') {
-      calls.push({url});
+      calls.push({url, body: {...body}});
+      if (afterSettlement && !change && url === 'market/eodhd-symbols') return {choices: []};
       throw Error('Unexpected provider request: ' + url);
     }
-    return new Promise((resolve, reject) => calls.push({url, body: {...body}, resolve, reject}));
+    return new QuotePromise((resolve, reject) => calls.push({url, body: {...body}, resolve, reject}));
   };
   const pending = ui.change({target: elements.candidate});
   assert.equal(calls[0].url, 'market/quote');
   assert.deepEqual(calls[0].body, {report_id: 'report', candidate_id: 'FIRST', is_test: false});
   const verified = {asset_id: 'asset', ticker: 'FIRST', exchange: 'NASDAQ', currency: 'USD', name: 'First', isin: 'id'};
+  const choices = [{...verified}];
+  const settleQuote = () => {
+    if (outcome === 'error') calls[0].reject(new Error('quote offline'));
+    else calls[0].resolve(outcome === 'choices' ? {selection_required: true, choices} : verified);
+  };
+  if (afterSettlement) {
+    settleQuote();
+    await Promise.resolve();
+    if (outcome === 'verified') assert.equal(rows[0].instrument.asset_id, 'asset');
+    if (change === 'replacement-session') {
+      session.epoch++;
+      form.isConnected = false;
+      nodes['engine-create'] = {isConnected: true, elements: {...elements, candidate: {value: '1'}}};
+      nodes['engine-form-status'] = {textContent: 'Ny session'};
+      nodes['engine-eodhd-choice'] = {textContent: 'Nyt instrument'};
+    }
+  }
   if (change === 'candidate') elements.candidate.value = '1';
   if (change === 'epoch') session.epoch++;
   if (change === 'owner') session.owner = 'other';
@@ -677,13 +697,14 @@ async function checkInstrument(change, outcome) {
     assert.equal(rows[0].instrument.asset_id, 'selected');
   }
   if (change) elements.provider.value = 'eodhd';
-  const snapshot = () => JSON.stringify([rows, elements, status, slot]);
+  const snapshot = () => JSON.stringify([rows, elements, nodes]);
   const before = snapshot();
-  const choices = [{...verified}];
-  if (outcome === 'error') calls[0].reject(new Error('quote offline'));
-  else calls[0].resolve(outcome === 'choices' ? {selection_required: true, choices} : verified);
+  if (!afterSettlement) settleQuote();
   assert.equal(await pending, true);
-  assert.equal(calls.length, change === 'newer' ? 2 : 1);
+  if (afterSettlement && !change) {
+    assert.deepEqual(calls.slice(1), [{url: 'market/eodhd-symbols', body: {...calls[0].body,
+      quote_currency: outcome === 'verified' ? 'USD' : null}}]);
+  } else assert.equal(calls.length, change === 'newer' ? 2 : 1, change + ' / ' + outcome);
   if (change) assert.equal(snapshot(), before, change + ' / ' + outcome);
   else if (outcome === 'error') assert.match(status.textContent, /quote offline/);
   else if (outcome === 'choices') {
@@ -704,6 +725,9 @@ async function checkInstrument(change, outcome) {
 }
 
 async function main() {
+  for (const change of ['replacement-session', 'epoch', 'owner', 'mode', 'candidate', 'newer', null]) {
+    for (const outcome of ['verified', 'choices', 'error']) await checkInstrument(change, outcome, true);
+  }
   for (const change of ['candidate', 'epoch', 'owner', 'mode', 'replaced', 'detached', 'newer', null]) {
     for (const outcome of ['verified', 'choices', 'error']) await checkInstrument(change, outcome);
   }
