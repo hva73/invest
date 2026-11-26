@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T01:46:39Z",
+  "updated_at": "2026-11-26T03:45:00Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -284,7 +284,7 @@
       "title": "Long-Term Watch",
       "status": "in_progress",
       "issue": 12,
-      "evidence": "#310 9b8e605b CI 45720671047 PASS; HOLD 7177527235 på identitet og faktisk adapterbudget. #312 9217152d: 8/8 isolerede updater-tests PASS dokumenteret 7178999052; CI 45723773835 SKIPPED. To fuld-checkout tests og uafhængig accept udestår; ingen integration.",
+      "evidence": "#310 9b8e605b CI 45720671047 PASS; HOLD 7177527235 på identitet og faktisk adapterbudget. #312 d6ed2519 tilføjer også manglende trading_engine_v2.py: 75/75 unikke manifestfiler i Git-træ, 9/9 isolerede updater-tests PASS dokumenteret 7181987892; CI 45750768317 SKIPPED. To fuld-checkout tests og uafhængig accept udestår; ingen integration.",
       "subgoals": [
         {
           "id": "watch",
@@ -306,12 +306,12 @@
           "id": "test",
           "title": "Integreret test",
           "status": "review",
-          "evidence": "#312 8/8 faktiske fixture-tests PASS; manifest import-check og installeret-only Passenger-start udestår. #310 fortsat HOLD.",
+          "evidence": "#312 d6ed2519: 9/9 faktiske fixture-tests PASS, inklusive manglende v2-modul; 75/75 filer statisk verificeret. Fuld manifest-importcheck og installeret-only Passenger/Strategy Lab-start udestår. #310 fortsat HOLD.",
           "owner_role": "motor",
-          "updated_at": "2026-11-26T01:46:39Z"
+          "updated_at": "2026-11-26T03:45:00Z"
         }
       ],
-      "updated_at": "2026-11-26T01:46:39Z"
+      "updated_at": "2026-11-26T03:45:00Z"
     },
     {
       "id": "replay",
