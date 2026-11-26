@@ -1150,7 +1150,36 @@ async function checkSymbolSearchDuringFirstQuote(currency, fail, explicit = fals
   }
 }
 
-async function checkSubmittedBatch(size, fail, replacement) {
+async function checkReturnedSymbolSearch(fail) {
+  const {ui, elements, rows, calls, call, nodes} = creationRequests();
+  const select = async index => {
+    elements.candidate.value = String(index);
+    const change = ui.change({target: elements.candidate});
+    call('market/quote').resolve({asset_id: 'asset-' + index, currency: 'USD', exchange: 'NYSE'});
+    await change;
+  };
+  const search = () => ui.click({dataset: {}, hasAttribute: key => key === 'data-engine-eodhd-search'});
+  const url = 'market/eodhd-symbols';
+  await select(0);
+  const first = search(), a = call(url);
+  await select(1);
+  const second = search(), b = call(url);
+  await select(0);
+  const returned = search();
+  assert.deepEqual(calls.filter(c => c.url === url).map(c => c.body.candidate_id), ['FIRST', 'SECOND']);
+  const slot = nodes['engine-eodhd-choice'];
+  b.reject(Error('obsolete search'));
+  await second;
+  assert.equal(slot.textContent, 'Søger hos EODHD …');
+  assert.equal(rows[1].eodhd_error, null);
+  if (fail) a.reject(Error('current search failed'));
+  else a.resolve({choices: [{symbol: 'FIRST.US', currency: 'USD'}]});
+  await Promise.all([first, returned]);
+  if (fail) assert.match(slot.textContent, /current search failed/);
+  else assert.match(slot.innerHTML, /FIRST.US/);
+}
+
+async function checkSubmittedBatch(size, fail, replacement, switchDuringStrategy = false) {
   const {ui, context, rows, form, elements, nodes, session, notices, call, button, requests} = creationRequests();
   const add = () => dispatchInstrumentEvent(context, 'batch', form);
   for (let index = 0; index < size; index++) {
@@ -1164,7 +1193,14 @@ async function checkSubmittedBatch(size, fail, replacement) {
   await settle();
   call('v1/hotwatch/start-candidates?is_test=false').resolve({candidates: rows});
   await settle();
-  call('strategy-center').resolve({selection: {}});
+  const strategy = call('strategy-center');
+  if (switchDuringStrategy) {
+    elements.candidate.value = String(size % 2);
+    const next = ui.change({target: elements.candidate});
+    call('market/quote').resolve({asset_id: 'other', currency: 'USD', exchange: 'NYSE'});
+    await next;
+  }
+  strategy.resolve({selection: {}});
   await settle();
   const post = call(size === 1 ? 'v1/hotwatch/sessions' : 'v1/hotwatch/activation-requests');
   assert.deepEqual(Array.from(post.body.sessions || [post.body], s => s.asset_id),
@@ -1291,6 +1327,8 @@ async function main() {
     for (const currency of ['USD', 'EUR']) {
       for (const explicit of [false, true]) await checkSymbolSearchDuringFirstQuote(currency, fail, explicit);
     }
+    await checkReturnedSymbolSearch(fail);
+    await checkSubmittedBatch(1, fail, null, true);
     for (const size of [1, 2]) await checkSubmittedBatch(size, fail);
     for (const replacement of ['login', 'form']) await checkSubmittedBatch(2, fail, replacement);
   }

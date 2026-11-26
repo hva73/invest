@@ -156,7 +156,7 @@ window.EngineUI=(()=>{
  let instrumentSelection=0,pendingVerification=null;
  const latestInstrumentAction={batch:0,submit:0};
  const inFlightQuotes=new Set();
- const symbolLookups=new WeakMap();
+ const symbolLookups=new WeakMap(),pendingSymbolRequests=new WeakMap();
  function creationFormContext(form){
   const epoch=sessionEpoch(),user=owner(),test=mode,version=interaction;
   return ()=>epoch===sessionEpoch()&&user===owner()&&test===mode&&version===interaction&&
@@ -172,8 +172,8 @@ window.EngineUI=(()=>{
    inFlightQuotes.clear();
   }
   const selection=instrumentSelection,ticket=action&&++latestInstrumentAction[action];
-  const current=instrumentContext(index);
-  return ()=>current()&&selection===instrumentSelection&&(!action||ticket===latestInstrumentAction[action]);
+  const current=index===null?creationFormContext(document.getElementById('engine-create')):instrumentContext(index);
+  return ()=>current()&&(index===null||selection===instrumentSelection)&&(!action||ticket===latestInstrumentAction[action]);
  }
  function verifySelection(index,assetId,valid){
   const item=candidates[index],lookup=symbolLookups.get(document.getElementById('engine-create'));
@@ -253,8 +253,16 @@ window.EngineUI=(()=>{
     symbolLookups.set(f,lookup);
    }
    version=lookup.version;
-   if(!lookup.reply)lookup.reply=api('market/eodhd-symbols',{report_id:item.report_id,candidate_id:item.candidate.candidate_id,is_test:mode,quote_currency:item.instrument?.currency||f.elements.quote_currency.value||null});
-   let r;try{r=await lookup.reply}finally{lookup.reply=null}
+   let request=pendingSymbolRequests.get(item);
+   if(!request?.current()){
+    request={current:creationFormContext(f),reply:api('market/eodhd-symbols',{report_id:item.report_id,candidate_id:item.candidate.candidate_id,is_test:mode,quote_currency:item.instrument?.currency||f.elements.quote_currency.value||null})};
+    pendingSymbolRequests.set(item,request);
+   }
+   lookup.reply=request.reply;
+   let r;try{r=await request.reply}finally{
+    if(pendingSymbolRequests.get(item)===request)pendingSymbolRequests.delete(item);
+    lookup.reply=null;
+   }
    if(!valid())return;
    if(choice&&assetId!==item.instrument?.asset_id){
     const instrument=await choice.result.catch(()=>null);
@@ -307,14 +315,13 @@ window.EngineUI=(()=>{
  if(button?.disabled)return true;
  if(!selected)throw Error('Vælg en kandidat.');
  // Checking availability must not supersede an instrument lookup.
- const selectionCurrent=captureInstrumentRequest(index,'submit');
+ const queued=batchCandidates.length>0,items=queued?batchCandidates.slice():[selected];
+ const selectionCurrent=captureInstrumentRequest(queued?null:index,'submit');
  let request;
  try{
   const latestChoices=await api(base+'/start-candidates'+query());
   if(!selectionCurrent())return true;
   const availableIds=new Set(latestChoices.candidates.map(x=>x.candidate.candidate_id));
-  const queued=batchCandidates.length>0;
-  const items=queued?batchCandidates.slice():[selected];
   if(items.some(x=>!availableIds.has(x.candidate.candidate_id))){
    formStatus('En valgt kandidat har nu en åben eller pauseret HOT WATCH, eller er ikke længere aktiv. Luk vinduet og vælg igen.');
    return true;
@@ -327,7 +334,7 @@ window.EngineUI=(()=>{
    if(!selectionCurrent()||instrument===undefined)return true;
    if(!instrument){notice('Pluto kunne ikke verificere alle instrumenter.','error');return true}
   }
-  if(f.get('provider')==='eodhd'&&!batchCandidates.length&&!selected.provider_symbol&&!selected.instrument?.provider_symbol){
+  if(f.get('provider')==='eodhd'&&!queued&&!selected.provider_symbol&&!selected.instrument?.provider_symbol){
    await findEodhdSymbol(selectionCurrent);
    if(!selectionCurrent())return true;
    selected.provider_symbol=String(form.elements.provider_symbol.value||'').trim()||selected.provider_symbol||null;
