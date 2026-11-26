@@ -2253,5 +2253,47 @@
     "reserve_plan_id": "ui/desktop/desktop-preview-discards-success-after-amount-edit",
     "reserve_goal": "ui/desktop",
     "reserve_reassessment": "54:23@d934617933d15a484bf7d7884778297cd1006bda43022dc28918f43e6b1d7805"
+  },
+  {
+    "issue": 273,
+    "generation": 16,
+    "role": "mobile",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "d1f7bc0333c2cf9889ffb387469d635ecec3667c",
+    "dependencies": [
+      "273:15"
+    ],
+    "paths": [
+      "static/app.js",
+      "tests/browser_mobile_navigation_app.py"
+    ],
+    "task": "Approved roadmap position/ui (Visning og \u00e6ndring af strategi). Exact existing source anchor: static/app.js :: const r=await api('strategy-center/simulate'. Implement only this bounded change: Scope the Strategy Center\u2019s fictional example response to the authenticated session, originating .strategy-example form, and submitted metrics. Before displaying either the result or an error, check the captured session epoch, connected form and current values. Keep the existing submit-button recovery and request payload. Exercise the branch through HOT WATCH \u2192 Strategy Center in the mobile browser fixture with a fixture strategy that supports examples and a deferred simulation response.. Acceptance: Editing a metric before the deferred response settles suppresses both a stale success and a stale error. Submitting the edited values displays the current result, and a failure for an unchanged submission displays the existing error. The strategy preference and Lab comparison flows require no changes.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_mobile_navigation_app.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "position/ui/strategy-example-result-matches-current-inputs",
+    "reserve_goal": "position/ui"
+  },
+  {
+    "issue": 54,
+    "generation": 26,
+    "role": "mobile",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "d1f7bc0333c2cf9889ffb387469d635ecec3667c",
+    "dependencies": [],
+    "paths": [
+      "tests/browser_design_v1.py"
+    ],
+    "task": "Approved roadmap ui/test (F\u00e6lles browsertest). Exact existing source anchor: tests/browser_design_v1.py :: page.locator('nav [data-view='+target+']').click();page.wait_for_timeout(200). Implement only this bounded change: Split out only the navigation hunk from the preserved 54:24 diff. In the existing design browser fixture, use the Handelsmotor panel\u2019s \u00ab\u00c5bn handelsjournal\u00bb button for the journal step because the journal has no sidebar entry. Add a focused round-trip check through the journal\u2019s existing back button. Leave the pagination race, request handling and browser launch configuration outside this reassessment.. Acceptance: The browser enters Handelsjournal from Handelsmotor, observes the seven-day default and a populated coverage note, and returns to Handelsmotor through the visible back button. The navigation check is independent of asynchronous pagination.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_design_v1.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:24; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "ui/test/journal-navigation-roundtrip-through-trade-panel",
+    "reserve_goal": "ui/test",
+    "reserve_reassessment": "54:24@5108cf26399f15325a0547ecde9c390e4dff9538337c484b292c7ea8237172fe"
   }
 ]
