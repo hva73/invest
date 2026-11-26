@@ -18,6 +18,7 @@ function fixture(engineSource = source) {
   const ui = context.window.EngineUI;
   ui.setup({
     api(url, body) {
+      if (session.creation) return session.creation(url, body);
       if (session.settings && (url.endsWith('/strategies') || url.includes('/providers?'))) return session.settings(url);
       if (body && session.control) return session.control(url, body);
       if (session.detail && (url.includes('/sessions/') || url === 'state')) return session.detail(url);
@@ -631,10 +632,10 @@ async function checkPolling(change) {
   if (!change) assert.match(dialog.innerHTML, /POLL · motorforløb/);
 }
 
-async function checkInstrument(change, outcome, afterSettlement = false) {
+function instrumentFixture() {
   const seeded = source.replace('return {openHoldingStatus,',
     'return {seed(rows,accounts,snapshots){candidates=rows;portfolios=accounts;portfolioSnapshots=snapshots},openHoldingStatus,');
-  const {context, session, mount} = fixture(seeded);
+  const {context, session, mount, requests} = fixture(seeded);
   const ui = context.window.EngineUI;
   const rows = ['FIRST', 'SECOND'].map(ticker => ({report_id: 'report', candidate: {candidate_id: ticker, ticker}}));
   ui.seed(rows, [{id: 1}, {id: 2}], {
@@ -646,12 +647,17 @@ async function checkInstrument(change, outcome, afterSettlement = false) {
     exchange: {}, asset_id: {}, quote_currency: {}, watch_mode: {value: 'both'},
     portfolios: {options: [{value: '1'}, {value: '2'}]}
   };
-  const form = {isConnected: true, elements}, status = {}, slot = {};
+  const form = {id: 'engine-create', isConnected: true, elements}, status = {}, slot = {};
   const nodes = {'engine-create': form, 'engine-form-status': status, 'engine-instrument-choice': slot};
   const lookup = context.document.getElementById;
   context.document.getElementById = id => nodes[id] || lookup(id);
-  context.FormData = class { constructor(target) { this.target = target; } get(k) { return this.target.elements[k].value; } };
+  context.FormData = class { constructor(target) { this.target = target; } get(k) { return this.target.elements[k]?.value; } };
   const QuotePromise = vm.runInNewContext('Promise', context);
+  return {context, session, mount, requests, ui, rows, elements, form, status, slot, nodes, QuotePromise};
+}
+
+async function checkInstrument(change, outcome, afterSettlement = false) {
+  const {session, mount, ui, rows, elements, form, status, slot, nodes, QuotePromise} = instrumentFixture();
   if (afterSettlement) elements.provider.value = 'eodhd';
   const calls = [];
   session.control = (url, body) => {
@@ -724,7 +730,71 @@ async function checkInstrument(change, outcome, afterSettlement = false) {
   }
 }
 
+async function checkInstrumentCaller(caller, stale, outcome) {
+  const {context, session, requests, ui, rows, form, nodes, QuotePromise} = instrumentFixture();
+  const calls = [], button = {};
+  let resolveQuote, rejectQuote;
+  nodes['engine-batch-list'] = {textContent: ''};
+  nodes['engine-dialog'] = {close() { this.closed = true; }};
+  context.crypto = {randomUUID: () => 'test-id'};
+  form.querySelector = () => button;
+  session.creation = (url, body) => {
+    calls.push(url);
+    switch (url) {
+      case 'v1/hotwatch/start-candidates?is_test=false': return {candidates: rows};
+      case 'market/quote':
+        assert.deepEqual({...body}, {report_id: 'report', candidate_id: 'FIRST', is_test: false,
+          ...(caller === 'asset' ? {asset_id: 'asset'} : {})});
+        return new QuotePromise((yes, no) => { resolveQuote = yes; rejectQuote = no; });
+      case 'strategy-center': return {selection: {strategy_id: 'test', version: '1'}};
+      case 'v1/hotwatch/sessions':
+        assert.equal(body.candidate_id, 'FIRST');
+        assert.equal(body.asset_id, 'asset');
+        assert.deepEqual([...body.portfolio_ids], [2]);
+        session.creation = null;
+        return {};
+      default: throw Error('Unexpected request: ' + url);
+    }
+  };
+  const pending = caller === 'submit' ? ui.submit({target: form, preventDefault() {}}) :
+    caller === 'batch' ? ui.click({dataset: {}, hasAttribute: key => key === 'data-engine-batch-add'}) :
+    ui.change({target: {id: 'engine-asset-choice', value: 'asset'}});
+  await settle();
+  const error = new Error('quote offline');
+  const initialCalls = caller === 'submit' ? ['v1/hotwatch/start-candidates?is_test=false', 'market/quote'] : ['market/quote'];
+  assert.deepEqual(calls, initialCalls);
+  if (outcome === 'error') rejectQuote(error);
+  else resolveQuote(outcome === 'choices' ? {selection_required: true, choices: []} :
+    {asset_id: 'asset', exchange: 'NASDAQ', currency: 'USD'});
+  await Promise.resolve(); // resolveInstrument has resumed, its caller is still queued.
+  if (outcome === 'verified') assert.equal(rows[0].instrument.asset_id, 'asset');
+  if (stale) session.epoch++;
+  const before = JSON.stringify([nodes, rows]);
+  if (!stale && outcome === 'error') await assert.rejects(pending, e => e === error);
+  else if (!stale && caller === 'submit' && outcome === 'choices') {
+    await assert.rejects(pending, /Pluto kunne ikke verificere/);
+  } else {
+    if (caller === 'submit' && outcome === 'verified') {
+      await settle();
+      assert.equal(requests.length, stale ? 0 : 1);
+      if (!stale) requests.shift().succeed();
+    }
+    assert.equal(await pending, true);
+  }
+  const verified = !stale && outcome === 'verified';
+  assert.deepEqual(calls, verified && caller === 'submit' ?
+    [...initialCalls, 'strategy-center', 'v1/hotwatch/sessions'] : initialCalls);
+  assert.equal(nodes['engine-batch-list'].textContent, verified && caller === 'batch' ? '1/40 kandidat(er) klar: FIRST · asset' : '');
+  assert.equal(Boolean(nodes['engine-dialog'].closed), verified && caller === 'submit');
+  if (stale) assert.equal(JSON.stringify([nodes, rows]), before);
+}
+
 async function main() {
+  for (const caller of ['batch', 'submit', 'asset']) {
+    for (const stale of [true, false]) {
+      for (const outcome of ['verified', 'choices', 'error']) await checkInstrumentCaller(caller, stale, outcome);
+    }
+  }
   for (const change of ['replacement-session', 'epoch', 'owner', 'mode', 'candidate', 'newer', null]) {
     for (const outcome of ['verified', 'choices', 'error']) await checkInstrument(change, outcome, true);
   }
