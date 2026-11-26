@@ -17,7 +17,8 @@ function fixture() {
   const session = {epoch: 1, owner: 'same-owner', history: [], older: []};
   const ui = context.window.EngineUI;
   ui.setup({
-    api(url) {
+    api(url, body) {
+      if (url.endsWith('/ack-signal')) return session.ack(url, body);
       if (url.includes('view=current')) {
         return new Promise((resolve, reject) => requests.push({
           succeed: () => resolve({sessions: [], kill_switch: {}}), reject
@@ -30,7 +31,7 @@ function fixture() {
     },
     escape: String, isAdmin: () => false, owner: () => session.owner, sessionEpoch: () => session.epoch
   });
-  return {root, historyGroup, session, click: ui.click, mount(mode = false) { ui.mount(mode); return requests.shift(); }};
+  return {root, historyGroup, session, context, click: ui.click, mount(mode = false) { ui.mount(mode); return requests.shift(); }};
 }
 
 async function checkHistoryScope(change, freshHistory) {
@@ -112,7 +113,69 @@ async function checkPagination(change, rejectPage) {
   }
 }
 
+async function checkAcknowledgement(change, rejectAck) {
+  const {session, context, click, mount} = fixture();
+  const row = (watch_id, event_id, is_test) => ({
+    watch_id, is_test, status: 'COMPLETED', request: {ticker: 'TEST'}, last_action_signal: {event_id}
+  });
+  const wid = 'watch/1', event = 'event-1';
+  const rows = [row(wid, event, true), row('other', event, true), row(wid, 'other', true), row(wid, event, false)];
+  session.history = rows;
+  mount().succeed();
+  await settle();
+
+  const icons = rows.map(s => ({
+    dataset: {engineNotice: JSON.stringify(s)}, className: 'unread',
+    setAttribute(name, value) { this[name] = value; }
+  }));
+  context.document.querySelectorAll = selector => {
+    assert.equal(selector, '[data-engine-notice]');
+    return icons;
+  };
+  const dashboard = [];
+  context.window.DashboardUI = {acknowledgeSignal: (...args) => dashboard.push(args)};
+  const dialog = {open: true, contains: node => node === button, close() { this.open = false; }};
+  const button = {
+    dataset: {engineAck: wid, eventId: event, isTest: 'true'}, isConnected: true,
+    textContent: 'Kvittér advarsel', closest: () => dialog,
+    setAttribute(name, value) { this[name] = value; }
+  };
+  let resolve, reject;
+  session.ack = (url, body) => {
+    assert.equal(url, 'v1/hotwatch/sessions/watch%2F1/ack-signal');
+    assert.deepEqual({...body}, {event_id: event, is_test: true});
+    return new Promise((yes, no) => { resolve = yes; reject = no; });
+  };
+  const pending = click(button);
+  assert.equal(button.disabled, true);
+  if (change === 'epoch') session.epoch++;
+  if (change === 'owner') session.owner = 'other-owner';
+  if (change === 'mode') mount(true);
+  const error = new Error('ack offline');
+  if (rejectAck) reject(error);
+  else resolve({});
+  if (!change && rejectAck) await assert.rejects(pending, e => e === error);
+  else assert.equal(await pending, true);
+
+  const marked = !change && !rejectAck;
+  assert.deepEqual(dashboard, marked ? [[wid, event, true]] : []);
+  for (const [i, icon] of icons.entries()) {
+    const expected = marked && i === 0;
+    assert.equal(Boolean(rows[i].last_action_signal.acknowledged), expected);
+    assert.equal(Boolean(JSON.parse(icon.dataset.engineNotice).last_action_signal.acknowledged), expected);
+    assert.equal(icon.className, expected ? 'signal-alert signal-alert--read' : 'unread');
+  }
+  assert.equal(dialog.open, !marked);
+  assert.equal(button.textContent, marked ? 'Kvitteret' : 'Kvittér advarsel');
+  assert.equal(button['aria-label'], marked ? 'Advarslen er kvitteret' : undefined);
+  assert.equal(button.disabled, Boolean(change) || !rejectAck);
+}
+
 async function main() {
+  for (const change of ['epoch', 'owner', 'mode', null]) {
+    await checkAcknowledgement(change, false);
+    await checkAcknowledgement(change, true);
+  }
   for (const change of ['login', 'epoch', 'owner', 'mode', 'refresh', 'cursor', null]) {
     await checkPagination(change, false);
     await checkPagination(change, true);
