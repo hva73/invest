@@ -18,6 +18,8 @@ function fixture() {
   const ui = context.window.EngineUI;
   ui.setup({
     api(url, body) {
+      if (body && session.control) return session.control(url, body);
+      if (session.detail && (url.includes('/sessions/') || url === 'state')) return session.detail(url);
       if (url.endsWith('/ack-signal')) return session.ack(url, body);
       if (url.includes('view=current')) {
         return new Promise((resolve, reject) => requests.push({
@@ -31,7 +33,7 @@ function fixture() {
     },
     escape: String, isAdmin: () => false, owner: () => session.owner, sessionEpoch: () => session.epoch
   });
-  return {root, historyGroup, session, context, click: ui.click, mount(mode = false) { ui.mount(mode); return requests.shift(); }};
+  return {root, historyGroup, session, context, requests, click: ui.click, mount(mode = false) { ui.mount(mode); return requests.shift(); }};
 }
 
 async function checkHistoryScope(change, freshHistory) {
@@ -171,7 +173,90 @@ async function checkAcknowledgement(change, rejectAck) {
   assert.equal(button.disabled, Boolean(change) || !rejectAck);
 }
 
+async function checkControl(change, stage, fail, action = 'pause') {
+  const {session, context, requests, click, mount} = fixture();
+  const wid = 'watch/1';
+  const dialog = {
+    open: change !== 'list', dataset: {watchId: wid}, innerHTML: '',
+    querySelector: selector => selector === 'h2' ? {focus() {}} : null
+  };
+  const records = [];
+  context.MutationObserver = class {
+    observe() {}
+    takeRecords() { return records.splice(0); }
+  };
+  const lookup = context.document.getElementById;
+  context.document.getElementById = id => id === 'engine-dialog' ? dialog : lookup(id);
+  const testMode = action === 'resume';
+  mount(testMode).succeed();
+  await settle();
+
+  let resolve, reject;
+  session.control = (url, body) => {
+    assert.equal(url, 'v1/hotwatch/sessions/watch%2F1/' + action);
+    assert.deepEqual({...body}, {is_test: testMode});
+    return new Promise((yes, no) => { resolve = yes; reject = no; });
+  };
+  const detailReads = [];
+  session.detail = url => {
+    detailReads.push(url);
+    if (url.includes('/samples?') || url.includes('/events?')) return {items: []};
+    if (url === 'state') return {portfolios: []};
+    assert.equal(url, 'v1/hotwatch/sessions/watch%2F1?is_test=' + testMode);
+    return {session: {request: {ticker: 'TEST'}, status: 'PAUSED'}};
+  };
+  const pending = click({dataset: {engineControl: action, engineId: wid}, hasAttribute: () => false});
+  const error = new Error('control flow offline');
+  let reload;
+  if (stage === 'reload') {
+    resolve({});
+    await settle();
+    assert.equal(requests.length, 1);
+    reload = requests.shift();
+  }
+  if (change === 'epoch') session.epoch++;
+  if (change === 'owner') session.owner = 'other-owner';
+  if (change === 'mode') mount(!testMode).succeed();
+  if (change === 'dialog') {
+    dialog.open = false;
+    records.push({type: 'attributes', target: {matches: selector => selector === 'dialog'}});
+  }
+
+  if (change === 'notice') {
+    const notice = {watch_id: wid, last_action_signal: {event_id: 'alert', state: 'ACTIVE', signal: 'SELL'}};
+    await click({dataset: {engineNotice: JSON.stringify(notice)}});
+    assert.equal(dialog.open, true);
+    assert.match(dialog.innerHTML, /Signaladvarsel/);
+    assert.equal(dialog.dataset.watchId, undefined);
+  }
+  const previousHtml = dialog.innerHTML;
+  const current = !change || change === 'list';
+  const outcome = current && fail ? assert.rejects(pending, e => e === error) : pending;
+  if (reload) {
+    if (fail) reload.reject(error);
+    else reload.succeed();
+  } else if (fail) reject(error);
+  else resolve({});
+  await settle();
+  const success = current && !fail;
+  assert.equal(requests.length, Number(success && stage === 'control'), 'unexpected reload: ' + change);
+  if (requests.length) requests.shift().succeed();
+  if (current && fail) await outcome;
+  else assert.equal(await outcome, true);
+  const showDetail = success && change !== 'list';
+  assert.equal(detailReads.length, showDetail ? 4 : 0);
+  if (showDetail) assert.match(dialog.innerHTML, /TEST · motorforløb/);
+  else assert.equal(dialog.innerHTML, previousHtml);
+}
+
 async function main() {
+  for (const change of ['epoch', 'owner', 'mode', 'dialog', 'notice', 'list', null]) {
+    for (const stage of ['control', 'reload']) {
+      await checkControl(change, stage, false);
+      await checkControl(change, stage, true);
+    }
+  }
+  for (const action of ['resume', 'stop']) await checkControl(null, 'control', false, action);
   for (const change of ['epoch', 'owner', 'mode', null]) {
     await checkAcknowledgement(change, false);
     await checkAcknowledgement(change, true);
