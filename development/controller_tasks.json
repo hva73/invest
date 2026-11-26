@@ -3015,5 +3015,28 @@
     "reserve_plan_id": "ui/desktop/desktop-preview-clears-old-result-before-request",
     "reserve_goal": "ui/desktop",
     "reserve_reassessment": "54:32@98be8dc6cf180281ca44ab0246f48ff21733ef21516f451095fd0a6c31e16528"
+  },
+  {
+    "issue": 14,
+    "generation": 34,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+    "dependencies": [
+      "14:32",
+      "14:33"
+    ],
+    "paths": [
+      "hotwatch_adapters.py",
+      "tests/test_hotwatch_engine.py"
+    ],
+    "task": "Approved roadmap shared_data/scheduler (F\u00e6lles scheduler og budget). Exact existing source anchor: hotwatch_adapters.py :: if row and row['used']>=limit:raise DataUnavailable('PROVIDER_RATE_BUDGET',429). Implement only this bounded change: Afgr\u00e6ns \u00e6ndringen til Pluto-grenen i hotwatch_adapters.reserve(). L\u00e6s t\u00e6lleren for den aktuelle ejer, kilde og det allerede beregnede minutvindue, f\u00f8r funktionen fors\u00f8ger BEGIN IMMEDIATE. Hvis t\u00e6lleren allerede har n\u00e5et den konfigurerede gr\u00e6nse, return\u00e9r den eksisterende DataUnavailable med PROVIDER_RATE_BUDGET og status 429. Bevar den autoritative kontrol under skrivel\u00e5sen, s\u00e5 en konkurrerende reservation ikke kan f\u00e5 t\u00e6lleren over gr\u00e6nsen. Bevar de eksisterende gr\u00e6nser, oprydning og debitering ved vellykket reservation.. Acceptance: Brug eksisterende SQLite-fixture med en Pluto-gr\u00e6nse p\u00e5 \u00e9t kald. Efter f\u00f8rste reservation holder en separat forbindelse skrivel\u00e5sen. Med busy_timeout=0 skal en ny reservation i samme minut give PROVIDER_RATE_BUDGET/429 uden BEGIN IMMEDIATE. Test ogs\u00e5, at en konkurrerende reservation af sidste plads mellem l\u00e6sning og skrivel\u00e5s afvises under l\u00e5sen, og at n\u00e6ste minut kan debiteres pr\u00e6cis \u00e9n gang efter frigivelse af l\u00e5sen.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_hotwatch_engine.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "shared_data/scheduler/pluto-saturated-minute-skips-sqlite-writer",
+    "reserve_goal": "shared_data/scheduler"
   }
 ]
