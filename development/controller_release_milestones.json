@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T09:18:38Z",
+  "updated_at": "2026-11-26T09:51:13Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -511,11 +511,11 @@
           "id": "ci",
           "title": "Samlet regression og rollback",
           "status": "review",
-          "evidence": "Resetbasen b84679a6 havde CI-filter kun for codex/escape-development; koordinatorens enfil-PR #316 exact 3062ad97 retter godkendt reset-branch, fokuseret motor/trade/Strategy Lab og faktisk mobilbrowser-suite. Run 45790780479 in_progress; ingen bestået CI eller integration endnu. Bevar A/B-worktrees på pinned base indtil sikker afstemning.",
+          "evidence": "PR #316 exact 3062ad97, run 45790780479/job 139808958011 SUCCESS: 682 unittest-kørsler (ikke unikke), chart/desktop/mobilnavigation browser PASS, eksakt checkout. Account-isolation fixture findes ikke endnu. CI-rettelsen afventer sikker integration; ingen fælles produkt-CI eller ny base mens A/B har bevaret incomplete-worktrees. #314 90a17fce offline CI 45794329945: 106 PASS; disjoint recovery-rettelse i kilde, faktisk Mac-genoptagelse ikke verificeret.",
           "owner_role": "release"
         }
       ],
-      "updated_at": "2026-11-26T09:12:00Z"
+      "updated_at": "2026-11-26T09:51:13Z"
     },
     {
       "id": "go",
