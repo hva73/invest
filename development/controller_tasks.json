@@ -2419,5 +2419,27 @@
     "follow_base": true,
     "reserve_plan_id": "statistics/provenance/journal-order-cursor-preserves-same-instant-evidence",
     "reserve_goal": "statistics/provenance"
+  },
+  {
+    "issue": 114,
+    "generation": 19,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [
+      "114:18"
+    ],
+    "paths": [
+      "journal_projection.py",
+      "tests/test_app.py"
+    ],
+    "task": "Approved roadmap statistics/fills (Fills, kostpris og afstemning). Exact existing source anchor: journal_projection.py :: add('execution:'+str(r['id']),status_time if known else r['occurred_at'],'Pluto','order'. Implement only this bounded change: Add one offline SQLite acceptance test that feeds normalized verified order observations through candidate_lifecycle.observe_pluto() and reads the resulting Pluto order history through journal_projection.read(). For the same order, send an ACCEPTED observation with zero filled quantity, a FILLED observation with an exact decimal quantity equal to the requested quantity, and a replay of the identical fill at a later observation time. Omit optional fill-price evidence. Exercise the existing producer and projection so the test covers persistence and deduplication as well as readback.. Acceptance: The journal contains exactly one SUBMITTED event with zero filled quantity and one FILLED event with the original decimal quantity. Replaying the fill preserves its first observation timestamp and creates no extra row. Fill price, fees and realised result remain absent or unknown. The fixture makes no provider calls.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_app.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "statistics/fills/journal-deduplicates-observed-fill-without-inventing-cost",
+    "reserve_goal": "statistics/fills"
   }
 ]
