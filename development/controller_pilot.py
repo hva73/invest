@@ -242,7 +242,7 @@ def main():
     p.add_argument("--recover", action="store_true", help="Continue a verified interrupted checkout")
     p.add_argument("--verify-smoke", action="store_true")
     p.add_argument("--require-ready", action="store_true", help="Exit unsuccessfully unless the bounded task explicitly reached tested draft readiness")
-    p.add_argument("--max-tokens", type=int, default=60000)
+    p.add_argument("--max-tokens", type=int, default=0, help="Optional continuation budget; zero disables local token ceiling")
     p.add_argument("--generation",type=int,default=1)
     p.add_argument("--progress-root",type=Path)
     p.add_argument("--checkpoint",type=Path)
@@ -273,8 +273,8 @@ def main():
         check = subprocess.run(["codex", "login", "status"], env=env, capture_output=True, text=True, timeout=30)
         if check.returncode or "logged in using chatgpt" not in (check.stdout + check.stderr).lower():
             p.error("existing ChatGPT login required; run codex login locally")
-    if a.max_tokens <= 0:
-        p.error("positive token ceiling required")
+    if a.max_tokens < 0 or (a.auth == "api" and a.max_tokens == 0):
+        p.error("API mode requires a positive token ceiling; ChatGPT mode permits zero")
     print("MODEL_POLICY:", a.role, *MODEL_POLICY[a.role], flush=True)
     session = None
     usage = 0
@@ -282,7 +282,7 @@ def main():
     draft_ready = False
     provider_limit = False
     handed_over = False
-    fresh_approach = False
+    fresh_approach = a.recover
     def phase(name):
         if a.progress_root:
             try:
@@ -302,9 +302,9 @@ def main():
         nonlocal session, usage, gross_usage, draft_ready, provider_limit, handed_over, fresh_approach
         if remaining <= 0:
             return 124
-        if usage >= a.max_tokens:
+        if a.max_tokens and usage >= a.max_tokens:
             print("TOKEN_LIMIT: no further calls", flush=True)
-            return 75
+            return 76
         mode="fresh" if fresh_approach else "continue" if session or i else "initial"
         prompt=execution_prompt(a.issue,a.role,task,paths,i+1,mode)
         fresh_approach=False
@@ -352,13 +352,16 @@ def main():
     deadline = time.monotonic()+60*a.minutes
     result = loop(step, fingerprint, a.rounds, deadline,
                   verify=smoke_verified if a.verify_smoke else (lambda: draft_ready),
-                  exhausted=lambda: usage >= a.max_tokens,
+                  exhausted=lambda: bool(a.max_tokens and usage >= a.max_tokens),
                   on_stall=on_stall if a.require_ready else None)
     print("STOP:", result, "- inspect diff and test independently; not release approval")
     if provider_limit:
         print("PROVIDER_LIMIT: no automatic account-limit retry",flush=True)
         raise SystemExit(75)
     if result == "execution_failed":
+        if a.require_ready and paths and scoped_changes(paths,a.role):
+            print("INCOMPLETE: preserved scoped checkout after execution failure",flush=True)
+            raise SystemExit(76)
         raise SystemExit(1)
     if a.require_ready and result != "verified":
         print("INCOMPLETE: preserved checkout; no publication",flush=True)
