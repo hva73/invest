@@ -269,7 +269,9 @@ class Trading(unittest.TestCase):
   root={'orderIntentId':reference}
   order=proposal['payload']['orders'][0]
   item={**root,'assetId':order['assetId'],'side':order['side'],'orderType':order['orderType'],'timeInForce':order['timeInForce']}
-  for identity in (root,{**root,'orderIntents':[]},{'orderIntents':[item]},{**root,'orderIntents':[item]},item):
+  depot={'portfolioId':proposal['payload']['portfolioId']}
+  for identity in (root,{**root,'orderIntents':[]},{'orderIntents':[item]},{**root,'orderIntents':[item]},item,
+                   {**root,**depot},{'orderIntents':[{**item,**depot}]},{**root,**depot,'orderIntents':[{**item,**depot}]}):
    with self.subTest(identity=identity):
     self.intent_status={**identity,'status':'accepted'}
     self.calls.clear()
@@ -282,10 +284,15 @@ class Trading(unittest.TestCase):
   root={'orderIntentId':proposal['intent_id']}
   item={**proposal['payload']['orders'][0],**root}
   foreign={'orderIntentId':'foreign'}
+  depot={'portfolioId':proposal['payload']['portfolioId']}
+  other_depot={'portfolioId':'other-root'}
   invalid=[
    [],'accepted',{'status':'accepted'},foreign,{'orderIntents':[]},
    {**foreign,'orderIntents':[item]},{'orderIntentId':None,'orderIntents':[item]},
    {**root,'assetId':'other'},{**root,'side':'SELL'},
+   {**root,**other_depot},{'orderIntents':[{**item,**other_depot}]},
+   {**root,**depot,'orderIntents':[{**item,**other_depot}]},
+   {**root,**other_depot,'orderIntents':[{**item,**depot}]},
   ]
   for nested in (None,{},[None],[item,item],[{**item,**foreign}],
                  [proposal['payload']['orders'][0]],[root],[{**item,'assetId':'other'}],
@@ -404,6 +411,14 @@ class Trading(unittest.TestCase):
   sell=copy.deepcopy(self.report);sell.update(report_id='sell-report',generated_at='2027-01-01T00:00:00Z');sell['candidates'][0]['signal']='SÆLG';report_ingest.save(app.connect,1,sell)
   req=dict(self.request,report_id='sell-report',portfolio_id=self.child,kind='collection_sell',size='25')
   q=self.estimate(req);self.assertEqual(q['payload']['percentage'],25);self.send(q);self.assertEqual(self.writes()[0]['name'],'propose_sell_collection')
+  self.assertNotIn('portfolioId',q['payload'])
+  for depot in ({'portfolioId':'provider-depot'},{},{'portfolioId':'second-depot'}):
+   with self.subTest(depot=depot):
+    self.intent_status={'orderIntentId':'synthetic-intent','status':'accepted',**depot}
+    checked=trade.check(app.connect,1,q['id'],self.factory)['proposal']
+    self.assertEqual(checked['response'],self.intent_status)
+    self.assertEqual(checked['payload'],q['payload'])
+    self.assertEqual(checked['status'],'sent')
   with self.assertRaises(trade.TradeError):self.estimate(dict(req,size='101'))
   with self.assertRaises(trade.TradeError):self.estimate(dict(self.request,report_id='sell-report',size_mode='amount'))
  def test_pending_identical_order_from_new_report_is_not_duplicated(self):
