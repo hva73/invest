@@ -421,10 +421,16 @@ def status_matches_proposal(raw,payload,reference):
     if len(orders)==1 and any(raw[key]!=orders[0].get(key) for key in INTENT_ORDER_FIELDS if key in raw):
         return False
     items=raw.get('orderIntents',[])
+    locations=[raw]
     if items==[]:
-        return raw.get('orderIntentId')==reference
-    # Check the batch independently so a matching root cannot mask a conflicting order.
-    return intent_reference({'orderIntents':items},payload)==reference
+        if raw.get('orderIntentId')!=reference:return False
+    else:
+        # A matching root cannot mask a conflicting order.
+        if intent_reference({'orderIntents':items},payload)!=reference:return False
+        locations.extend(items)
+    if orders and 'portfolioId' in payload:
+        return all(item['portfolioId']==payload['portfolioId'] for item in locations if 'portfolioId' in item)
+    return True
 
 def check(connect,user_id,pid,factory=None):
     row=get(connect,user_id,int(pid))
