@@ -1158,7 +1158,7 @@
     "task": "Next small #54 slice: fix acknowledgeNotice() only in static/engine-ui.js. Capture authenticated session epoch, owner, mode at request start; after await ack-signal suppress stale response/error on same-owner relogin or other account/mode switch before marking data, dashboard icons, dialog or button. Preserve legitimate same-session acknowledgement, exact event/watch/test identity, current error handling and no broker writes. Use existing simple session guard; do not rewrite other functions. Extend tests/test_engine_load_epoch.js actual-source Node VM fixture with deferred stale success and rejection and ordinary current success/error; run node --check static/engine-ui.js and node tests/test_engine_load_epoch.js. Small tested implementation; ESCAPE_DRAFT_READY. No browser install, live calls, production, credentials, network, git writes or workflows."
   },
   {
-    "status": "ready",
+    "status": "done",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "14980c611731dc01756b3a8fc31c9f180c02fcbc",
