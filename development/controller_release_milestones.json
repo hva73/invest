@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T11:05:29Z",
+  "updated_at": "2026-11-26T12:01:00Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -511,12 +511,12 @@
           "id": "ci",
           "title": "Samlet regression og rollback",
           "status": "review",
-          "evidence": "PR #316 exact 3062ad97, run 45790780479/job 139808958011 SUCCESS: 682 unittest-kørsler (ikke unikke), chart/desktop/mobilnavigation browser PASS, eksakt checkout. Account-isolation fixture findes ikke endnu. CI-rettelsen afventer sikker integration; ingen fælles produkt-CI eller ny base mens A/B har bevaret incomplete-worktrees. #314 90a17fce offline CI 45794329945: 106 PASS; disjoint recovery-rettelse i kilde, faktisk Mac-genoptagelse ikke verificeret. Ny uafhængig review-HOLD på #314 90a17fce: 4/4 ændrede terminalstatusser efter incomplete recovery bevarer fejlagtigt gammel receipt; samme-state retry korrekt. Reproduktion og konkret rettelse på #314 kommentar 7190288043. Ingen ny Mac-installation.",
+          "evidence": "PR #316 exact 3062ad97, run 45790780479/job 139808958011 SUCCESS: 682 unittest-kørsler (ikke unikke), chart/desktop/mobilnavigation browser PASS, eksakt checkout. Account-isolation fixture findes ikke endnu. CI-rettelsen afventer sikker integration; ingen fælles produkt-CI eller ny base mens A/B har bevaret incomplete-worktrees. #314 90a17fce offline CI 45794329945: 106 PASS; disjoint recovery-rettelse i kilde, faktisk Mac-genoptagelse ikke verificeret. Ny uafhængig review-HOLD på #314 90a17fce: 4/4 ændrede terminalstatusser efter incomplete recovery bevarer fejlagtigt gammel receipt; samme-state retry korrekt. Reproduktion og konkret rettelse på #314 kommentar 7190288043. Ingen ny Mac-installation. Koordinatorens konkrete receipt-transition kodeforslag fra eksakt blob 0c688587: 9/9 isolerede unittest PASS, herunder tabt POST-svar og senere draft-promotion; afleveret på #314 kommentar 7191460933. Dispatcher-integration, fuld CI og lokal recovery udestår.",
           "owner_role": "release",
-          "updated_at": "2026-11-26T11:05:29Z"
+          "updated_at": "2026-11-26T12:01:00Z"
         }
       ],
-      "updated_at": "2026-11-26T11:05:29Z"
+      "updated_at": "2026-11-26T12:01:00Z"
     },
     {
       "id": "go",
