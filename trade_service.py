@@ -195,11 +195,13 @@ def inactive_order_readback(connect,user_id,portfolio_id,factory=None):
                 or record.get('success',True) is not True):
             raise TradeError('Pluto returnerede en fejl eller en ugyldig ordrepost.')
         collection=record.get('collection')
-        # A terminal status can resolve a type hint, but cannot override an explicit active status.
         for part in (record,record.get('holding'),collection):
             if part is None:continue
             if not isinstance(part,dict):
                 raise TradeError('Plutos ordresvar har et ukendt format.')
+            if part.get('collectionId') is not None or any(key in part and part[key]!=value for key,value in scope.items()):
+                raise TradeError('Plutos ordresvar stemmer ikke med det valgte depot eller opslag.')
+            # A terminal status can resolve a type hint, but cannot override an explicit active status.
             for key in ('status','orderStatus','state'):
                 if key not in part:continue
                 status=part[key]
@@ -207,10 +209,7 @@ def inactive_order_readback(connect,user_id,portfolio_id,factory=None):
                     raise TradeError('Pluto returnerede en ugyldig ordrestatus.')
                 if status.strip().upper() in ('ACTIVE','ACTIVE_BUY'):
                     raise TradeError('Pluto returnerede en aktiv ordre i opslaget for inaktive ordrer.')
-        if (record.get('collectionId') is not None
-                or (collection is not None and any(collection.get(key) is not None for key in ('id','collectionId')))
-                or active_buy(record)
-                or any(key in record and record[key]!=value for key,value in scope.items())):
+        if (collection is not None and collection.get('id') is not None) or active_buy(record):
             raise TradeError('Plutos ordresvar stemmer ikke med det valgte depot eller opslag.')
     for row in rows:
         order_id=row.get('orderId',row.get('id'))

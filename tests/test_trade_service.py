@@ -51,11 +51,13 @@ class Trading(unittest.TestCase):
   with app.connect() as db:
    db.execute("UPDATE portfolios SET name='Renamed',external_id='portfolios:root:stable',can_trade=0 WHERE id=?",(self.root,))
   scope={'portfolioId':'root:stable','scope':'DIRECT','statusGroup':'INACTIVE','limit':50}
+  matching={'portfolioId':'root:stable','scope':'DIRECT','statusGroup':'INACTIVE','collectionId':None}
   raw=[{'orderId':'one','status':'CANCELLED','filledQuantity':'0'},
        {'id':'two','portfolioId':'root:stable','collectionId':None,'collection':{'id':None,'collectionId':None},'status':'FILLED','providerDetail':{'fee':None}},
        {'orderId':'three','collection':None},
        {'orderId':'four','type':'ACTIVE_BUY','status':'FILLED'},
-       {'orderId':'five','success':True,'status':'FILLED','holding':{'status':'FILLED'}}]
+       {'orderId':'five','success':True,'status':'FILLED','holding':{'status':'FILLED'}},
+       {'orderId':'six','holding':{**matching,'id':'holding-six'},'collection':{**matching,'id':None}}]
   boundary=[{'orderId':str(i)} for i in range(50)]
   with app.connect() as witness:
    before=witness.execute('PRAGMA data_version').fetchone()[0]
@@ -96,6 +98,10 @@ class Trading(unittest.TestCase):
            {'orders':[{**order,'status':'ACTIVE_BUY'}]},
            {'orders':[{**order,'status':'ACTIVE_BUY','orderStatus':'FILLED'}]}]
   for container in ('holding','collection'):
+   for field,value in (('portfolioId','other'),('scope','COLLECTION'),('statusGroup','ACTIVE'),('collectionId','child')):
+    nested={container:{field:value}}
+    conflicting={'orderId':'two','portfolioId':'root','scope':'DIRECT','statusGroup':'INACTIVE',**nested}
+    invalid.extend([{'orders':[order],**nested},{'orders':[order,conflicting]}])
    for status_key in ('status','orderStatus','state'):
     conflicting={'orderId':'two','status':'FILLED',container:{status_key:'ACTIVE_BUY'}}
     invalid.append({'orders':[order,conflicting]})
