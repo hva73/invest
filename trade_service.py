@@ -388,8 +388,8 @@ def intent_identity(raw,payload):
     if not isinstance(raw,dict):
         return identity,{'orderIntentId'}
     nodes=[raw]
-    if 'orderIntents' in raw:
-        items=raw['orderIntents']
+    items=raw.get('orderIntents',[])
+    if not isinstance(items,list) or items:
         if isinstance(items,list) and len(items)==1 and isinstance(items[0],dict) and items[0].get('orderIntentId'):
             nodes.append(items[0])
         else:
@@ -420,9 +420,12 @@ def intent_identity(raw,payload):
 
 def intent_reference(raw,payload,context=None):
     identity,conflicts=intent_identity(raw,payload)
-    if context is not None:
-        conflicts.update(key for key,value in identity.items()
-                         if key not in ('orderIntentId','orderId') and value!=context.get(key))
+    # Even a root reference must describe the submitted order. Recovery of
+    # a missing local reference additionally requires compatible depot scope.
+    fields=ORDER_FIELDS if context is None else ('portfolioId','collectionId',*ORDER_FIELDS)
+    if context is None:
+        context=proposal_context(payload,{})
+    conflicts.update(key for key in fields if key in identity and identity[key]!=context.get(key))
     if not conflicts:
         return identity.get('orderIntentId')
 
@@ -465,6 +468,20 @@ def send(connect,user_id,data,factory=None):
         with connect() as c:c.execute("UPDATE broker_proposals SET status='uncertain',error=? WHERE id=? AND user_id=?",('Afsendelsens resultat er uafklaret. Kontrollér i Pluto. Ingen automatisk genafsendelse.',row['id'],user_id))
     return {'proposal':view(get(connect,user_id,row['id']))}
 
+def pending_legacy_order(raw,payload,expected):
+    """Return an order ID to compare on a status-only refresh, never a fill link."""
+    identity,conflicts=intent_identity(raw,payload)
+    if identity.get('orderIntentId')!=expected['orderIntentId']:
+        return None
+    if 'orderId' not in identity and 'orderId' not in conflicts:
+        return None
+    if conflicts.intersection(expected) or any(
+            value!=expected.get(key) for key,value in identity.items() if key!='orderId'):
+        return None
+    if conflicts or str(raw.get('status')).upper()!='PENDING':
+        raise TradeError(IDENTITY_ERROR)
+    return identity['orderId']
+
 def check(connect,user_id,pid,factory=None):
     row=get(connect,user_id,int(pid))
     proposal=view(row)
@@ -476,6 +493,7 @@ def check(connect,user_id,pid,factory=None):
     expected={**proposal_context(payload,snapshot),'orderIntentId':reference}
 
     required={'orderIntentId'}
+    scope_fields=set()
     prior,problems=intent_identity(proposal['response'],payload)
     # Legacy check() always stored intent_id when it replaced response. A
     # recoverable receipt on an uncertain row has never undergone that refresh.
@@ -491,8 +509,9 @@ def check(connect,user_id,pid,factory=None):
             if 'orderId' in receipt:
                 expected['orderId']=receipt['orderId']
                 required.add('orderId')
-            if 'portfolioId' not in payload and 'portfolioId' in receipt:
-                required.add('portfolioId')
+            if row['kind']=='collection_sell' and 'portfolioId' in receipt:
+                # Either identifier confirms the collection scope verified at send.
+                scope_fields={'collectionId','portfolioId'}
     elif 'orderIntentId' in problems and prior.get('orderIntentId'):
         # An ambiguous legacy submission cannot select its own lookup ID.
         raise TradeError(IDENTITY_ERROR)
@@ -500,21 +519,33 @@ def check(connect,user_id,pid,factory=None):
     if not row['intent_id'] and (problems or any(v!=expected.get(k) for k,v in prior.items())):
         raise TradeError(IDENTITY_ERROR)
     if prior.get('orderIntentId')==reference:
-        disputed={key for key,value in expected.items()
-                  if value is not None and (key in problems or (key in prior and prior[key]!=value))}
-        required.update(disputed)
-    else:
-        disputed=set()
+        required.update(key for key,value in expected.items()
+                        if value is not None and (key in problems or (key in prior and prior[key]!=value)))
+
+    # An old send and an old unchecked lookup used the same response column.
+    # An exact repeat of a pending pair can confirm the intent's status only.
+    # Archive the complete legacy response and never promote its order ID
+    # to submission evidence, even on a second successful status check.
+    legacy_order=None
+    if not original:
+        historical=snapshot.get('legacy_response',proposal['response'])
+        legacy_order=pending_legacy_order(historical,payload,expected)
+        if legacy_order is not None:
+            expected['orderId']=legacy_order
+            required.add('orderId')
+
     cl,tools=client(connect,user_id,factory)
     raw=call(cl,tools,'get_order_intent',{'orderIntentId':reference})
     identity,conflicts=intent_identity(raw,payload)
     if conflicts or not required.issubset(identity) or any(value!=expected.get(key) for key,value in identity.items()):
         raise TradeError(IDENTITY_ERROR)
-    if (not original and prior.get('orderIntentId')==reference and not disputed
-            and ('orderId' in prior or 'orderId' in problems)):
-        # The mutable legacy response could be either a receipt or an unchecked
-        # lookup. It cannot establish an order link, nor can we drop its order ID.
+    if scope_fields and scope_fields.isdisjoint(identity):
         raise TradeError(IDENTITY_ERROR)
+    if legacy_order is not None:
+        status=raw.get('status')
+        if not isinstance(status,str) or not status.strip():
+            raise TradeError(IDENTITY_ERROR)
+        raw={'orderIntentId':reference,'status':status}
 
     # Preserve the first surviving legacy response without upgrading its trust.
     # A concurrent cancellation or refresh wins over this stale lookup.
@@ -522,9 +553,9 @@ def check(connect,user_id,pid,factory=None):
     with connect() as c:
         c.execute("""UPDATE broker_proposals SET response=?,intent_id=?,status='sent',error=NULL,
                      sent_identity=COALESCE(sent_identity,?) WHERE id=? AND user_id=?
-                     AND response IS ? AND intent_id IS ? AND status=?""",
+                     AND response IS ? AND intent_id IS ? AND status=? AND sent_identity IS ?""",
                   (json.dumps(raw),reference,archive,row['id'],user_id,
-                   row['response'],row['intent_id'],row['status']))
+                   row['response'],row['intent_id'],row['status'],row['sent_identity']))
     return {'proposal':view(get(connect,user_id,row['id']))}
 
 def cancel_intent(connect,user_id,pid,factory=None):
