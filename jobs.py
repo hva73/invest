@@ -15,6 +15,7 @@ def init(c):
     if 'portfolio_id' not in {r['name'] for r in c.execute('PRAGMA table_info(jobs)')}:c.execute('ALTER TABLE jobs ADD COLUMN portfolio_id INTEGER REFERENCES portfolios(id)')
     c.execute("CREATE INDEX IF NOT EXISTS jobs_queued_available ON jobs(available) WHERE status='queued'")
     c.execute("CREATE INDEX IF NOT EXISTS jobs_running_lease_until ON jobs(lease_until) WHERE status='running'")
+    c.execute('CREATE INDEX IF NOT EXISTS jobs_user_id_id_desc ON jobs(user_id, id DESC)')
     c.execute('CREATE TABLE IF NOT EXISTS fx_snapshots(id INTEGER PRIMARY KEY, source_date TEXT NOT NULL, observed TEXT NOT NULL, payload TEXT NOT NULL, digest TEXT NOT NULL UNIQUE)')
     c.execute('CREATE TABLE IF NOT EXISTS reports(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), slot TEXT NOT NULL, created TEXT NOT NULL, body TEXT NOT NULL, UNIQUE(user_id,slot))')
     c.execute('CREATE TABLE IF NOT EXISTS news_items(id INTEGER PRIMARY KEY,title TEXT NOT NULL,url TEXT NOT NULL,published TEXT NOT NULL,summary TEXT NOT NULL,observed TEXT NOT NULL,digest TEXT NOT NULL UNIQUE)')

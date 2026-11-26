@@ -31,6 +31,28 @@ class Jobs(unittest.TestCase):
    jobs.enqueue(c,'ecb',1,'crash',0);c.execute("UPDATE jobs SET status='running',attempts=1,lease='old',lease_until=1")
   jobs.run_one(app.connect,self.payload,at=2)
   with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM jobs').fetchone()[0],'done')
+ def test_status_searches_owner_history_for_latest_twenty_jobs(self):
+  own_ids=[]
+  with app.connect() as c:
+   owner=c.execute("INSERT INTO users(username,salt,hash) VALUES('other','test','test')").lastrowid
+   for i in range(25):
+    for uid in (owner,self.uid):
+     job=c.execute("""INSERT INTO jobs(kind,user_id,dedupe,status,available,created)
+                      VALUES('report',?,?,'done',0,0)""",(uid,f'history-{uid}-{i}'))
+     if uid==owner:
+      own_ids.append(job.lastrowid)
+
+  statements=[]
+  def traced_connect():
+   c=app.connect()
+   c.set_trace_callback(statements.append)
+   return c
+  rows=jobs.status(traced_connect,owner)['jobs']
+  self.assertEqual([row['id'] for row in rows],list(reversed(own_ids[-20:])))
+  query,=[sql for sql in statements if 'FROM jobs ' in sql]
+  with app.connect() as c:
+   plan='\n'.join(row['detail'] for row in c.execute('EXPLAIN QUERY PLAN '+query))
+  self.assertRegex(plan,r'SEARCH jobs USING INDEX jobs_user_id_id_desc \(user_id=\?\)')
  def test_idle_preflight_searches_both_queue_indexes(self):
   with app.connect() as c:
    c.executemany("""INSERT INTO jobs(kind,user_id,dedupe,status,available,created)
