@@ -1459,7 +1459,7 @@
     "task": "Only engine-ui.js data-engine-plan continuation after await detail: ensure stale interaction cannot expand or scroll a newer dialog; preserve ordinary same-session behavior. Actual-source Node VM regression for stale and current path, node syntax and focused test. No unrelated changes, live calls or production. ESCAPE_DRAFT_READY."
   },
   {
-    "status": "ready",
+    "status": "done",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "de261261edd04d3bc9c70fd051a2dcc186314ca2",
