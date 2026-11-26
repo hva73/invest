@@ -109,6 +109,8 @@ class LocalCoordinatorTests(unittest.TestCase):
         c.save(record.with_suffix(".resume-history.json"),old)
         self.assertEqual(c.repair_attempt(root,501,sha),1)
         c.save(record.with_suffix(".resume-history-2.json"),old)
+        c.save(record.with_suffix(".resume-history-3.json"),old)
+        c.save(record.with_suffix(".resume-history-4.json"),old)
         self.assertIsNone(c.repair_attempt(root,501,sha))
 
     def test_automatic_recovery_requires_finished_child_and_is_bounded(self):
@@ -126,6 +128,8 @@ class LocalCoordinatorTests(unittest.TestCase):
         c.save(record.with_suffix(".resume-history.json"),held)
         self.assertTrue(c.finished_repair_can_resume(self.root,row,501,head))
         c.save(record.with_suffix(".resume-history-2.json"),held)
+        c.save(record.with_suffix(".resume-history-3.json"),held)
+        c.save(record.with_suffix(".resume-history-4.json"),held)
         self.assertFalse(c.finished_repair_can_resume(self.root,row,501,head))
 
     def test_coordinator_defers_repair_to_developer_scheduler(self):
@@ -195,7 +199,7 @@ class LocalCoordinatorTests(unittest.TestCase):
             with self.assertRaises(c.Hold):
                 c.verified_ci(sha,files)
 
-    def test_owner_reset_grants_one_extra_exact_114_continuation(self):
+    def test_four_continuations_apply_to_all_tasks(self):
         head="b32e473553d233b616e8f57f88350327c8ab41a8"
         record=self.root/"coordinator-repair-303.json"
         held={"key":"114:1","head":head,"state":"held","child_finished":True,"resume_eligible":True}
@@ -206,6 +210,8 @@ class LocalCoordinatorTests(unittest.TestCase):
         c.save(record,dict(held,resume_authorized=True))
         self.assertEqual(c.repair_attempt(self.root,303,head),1)
         c.save(record.with_suffix(".resume-history-3.json"),held)
+        self.assertEqual(c.repair_attempt(self.root,303,head),1)
+        c.save(record.with_suffix(".resume-history-4.json"),held)
         self.assertIsNone(c.repair_attempt(self.root,303,head))
         c.save(record,dict(held,state="reserved"))
         self.assertIsNone(c.repair_attempt(self.root,303,head))
