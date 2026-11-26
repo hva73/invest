@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T13:14:30Z",
+  "updated_at": "2026-11-26T14:18:39Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -407,9 +407,9 @@
       "id": "ui",
       "phase": 3,
       "title": "Samlet mobil/desktop 2.0",
-      "status": "in_progress",
+      "status": "blocked",
       "issue": 54,
-      "evidence": "#54:3/#54:4 bevaret blocked:incomplete (7192238064); ejerafgrænset ny #54:5 på f18e9198 er faktisk STARTED 7193038747 og WORKING 7193042833. Kun load/mount session-epoch scope; ingen ny PR eller browseraccept. Ældre #300 ae7c2724 ikke integreret.",
+      "evidence": "#54:5 terminal blocked:incomplete 7193131075 efter TESTING/CONTINUING; gen3/4/5 bevares. Koordinator testede afgrænset load/mount-epoch/cache/error-rettelse på f18e9198: isoleret Chromium 390/1280, baseline 7/14 → forslag 14/14 hver; kode og cases i #54 kommentar 7194658891. Faktisk app-browseraccept og publiceret produktpatch udestår. Ældre #300 ikke integreret.",
       "subgoals": [
         {
           "id": "reuse",
@@ -421,8 +421,8 @@
         {
           "id": "mobile",
           "title": "Mobil 2.0",
-          "status": "in_progress",
-          "evidence": "#54:5 STARTED/WORKING 7193038747/7193042833 på f18e9198, afgrænset load/mount session-epoch. #54:3/#54:4 bevaret; ingen dublet eller blind genstart.",
+          "status": "blocked",
+          "evidence": "#54:5 blocked:incomplete receipt 7193131075. Afgrænset testet kodeforslag 7194658891, 14/14 isolerede cases ved begge viewports; ingen publiceret produktpatch eller fuld app-test. Bevar worktree, ingen dublet.",
           "owner_role": "mobile",
           "updated_at": "2026-11-26T13:14:30Z"
         },
@@ -490,7 +490,7 @@
       "title": "Samlet releasekandidat, backup og migration",
       "status": "blocked",
       "issue": 57,
-      "evidence": "Godkendt reset #315: CI-rettelse #316 integreret f18e9198; A #315:1 leveret draft #317 cc44d938, review-HOLD; B #54:5 STARTED/WORKING 7193038747/7193042833, gen3/4 bevaret. Ældre accepterede V2-dele er kilder, ikke fælles release. Ingen ejer-GO.",
+      "evidence": "Godkendt reset #315: #316 integreret f18e9198; A #315:1 draft #317 cc44d938, review-HOLD; B #54:5 blocked:incomplete 7193131075, testet afgrænset kodeforslag 7194658891. Gen3/4/5 bevares. Ældre accepterede V2-dele er kilder, ikke fælles release. Ingen ejer-GO.",
       "subgoals": [
         {
           "id": "integrate",
