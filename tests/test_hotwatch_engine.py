@@ -1052,6 +1052,47 @@ class HotWatch(unittest.TestCase):
    holder.execute('BEGIN IMMEDIATE')
    self.assertIsNone(engine.claim(quick_connect,self.now))
   finally:holder.rollback();holder.close()
+ def test_global_kill_skips_writer_and_clearing_it_preserves_claim_order_and_lease(self):
+  older=dict(self.req,watch_id='older-due-watch',purpose='older due watch')
+  engine.create(app.connect,1,older,self.now-timedelta(seconds=1))
+  # Isolate the global gate: both rows must remain eligible for a lease.
+  with app.connect() as c:
+   c.execute('UPDATE hw_system_control SET killed=1 WHERE id=1')
+  statements=[]
+  def traced_connect():
+   c=app.connect()
+   c.execute('PRAGMA busy_timeout=0')
+   c.set_trace_callback(statements.append)
+   return c
+  with app.connect() as holder:
+   holder.execute('BEGIN IMMEDIATE')
+   self.assertIsNone(engine.claim(traced_connect,self.now))
+  self.assertFalse(any(sql.startswith('BEGIN') for sql in statements),statements)
+  with app.connect() as c:
+   c.execute('UPDATE hw_system_control SET killed=0 WHERE id=1')
+  first=engine.claim(app.connect,self.now)
+  self.assertEqual(first['watch_id'],older['watch_id'])
+  with app.connect() as c:
+   row=engine.row_for(c,1,older['watch_id'],True)
+   self.assertTrue(first['lease_owner'])
+   self.assertEqual((row['lease_owner'],row['lease_until']),(first['lease_owner'],self.now.timestamp()+120))
+   other=engine.row_for(c,1,self.req['watch_id'],True)
+   self.assertIsNone(other['lease_owner'])
+ def test_global_kill_committed_after_preflight_blocks_due_claim(self):
+  def kill_before_writer_acquisition(sql):
+   if sql=='BEGIN IMMEDIATE':
+    with app.connect() as operator:
+     operator.execute('UPDATE hw_system_control SET killed=1 WHERE id=1')
+  def racing_connect():
+   c=app.connect()
+   c.set_trace_callback(kill_before_writer_acquisition)
+   return c
+  self.assertIsNone(engine.claim(racing_connect,self.now))
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0],1)
+   row=engine.row_for(c,1,self.req['watch_id'],True)
+   self.assertIsNone(row['lease_owner'])
+   self.assertEqual(row['lease_until'],0)
  def test_stale_data_rechecks_at_budgeted_cadence_without_enabling_signal(self):
   with app.connect() as c:
    row=engine.row_for(c,1,self.req['watch_id'],True);req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol='MERC.US')
