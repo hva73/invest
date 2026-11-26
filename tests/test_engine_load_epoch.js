@@ -975,7 +975,138 @@ async function checkDuplicateQuoteContext(change, rejectOld) {
   assert.equal(elements.asset_id.value, undefined);
 }
 
+// Drive the real delegated events and stop at a chosen API boundary.
+function creationRequests() {
+  const fixture = instrumentFixture();
+  const {context, nodes, session, form, QuotePromise} = fixture;
+  const calls = [], notices = [], button = {};
+  context.notice = message => notices.push(message);
+  context.crypto = {randomUUID: () => 'test-id'};
+  form.querySelector = () => button;
+  nodes['engine-dialog'] = {close() { this.closed = true; }};
+  nodes['engine-batch-list'] = {textContent: ''};
+  nodes['engine-eodhd-choice'] = {};
+  session.creation = (url, body) => new QuotePromise((resolve, reject) =>
+    calls.push({url, body, resolve, reject}));
+  const call = url => {
+    const last = calls.at(-1);
+    assert.equal(last?.url, url);
+    return last;
+  };
+  return {...fixture, calls, notices, button, call};
+}
+
+async function checkCachedChoice(action, verified, beforeAvailability) {
+  const {context, ui, session, rows, form, nodes, requests, notices, call, calls} = creationRequests();
+  const select = value => ui.change({target: {id: 'engine-asset-choice', value}});
+  const quote = asset_id => ({asset_id, currency: 'USD', exchange: 'NASDAQ'});
+  const first = select('old');
+  call('market/quote').resolve(quote('old'));
+  await first;
+  const second = select('asset');
+  const pendingQuote = call('market/quote');
+  const pendingAction = dispatchInstrumentEvent(context, action, form);
+  await settle();
+  const availability = action === 'submit' && call('v1/hotwatch/start-candidates?is_test=false');
+  if (availability && !beforeAvailability) availability.resolve({candidates: rows});
+  await settle();
+  assert.equal(calls.length, availability ? 3 : 2);
+  assert.equal(nodes['engine-batch-list'].textContent, '');
+  if (verified) pendingQuote.resolve(quote('asset'));
+  else pendingQuote.reject(Error('explicit choice failed'));
+  await second;
+  if (availability && beforeAvailability) availability.resolve({candidates: rows});
+  await settle();
+  if (verified && availability) {
+    call('strategy-center').resolve({selection: {}});
+    await settle();
+    const start = call('v1/hotwatch/sessions');
+    assert.deepEqual([start.body.asset_id, ...start.body.portfolio_ids], ['asset', 2]);
+    session.creation = null;
+    start.resolve({});
+    await settle();
+    requests.shift().succeed();
+  }
+  await pendingAction;
+  if (!verified) {
+    assert.equal(calls.length, availability ? 3 : 2);
+    assert.ok(notices.includes('explicit choice failed'));
+  } else assert.deepEqual(notices, []);
+  assert.equal(nodes['engine-batch-list'].textContent,
+    verified && action === 'batch' ? '1/40 kandidat(er) klar: FIRST · asset' : '');
+}
+
+async function checkCreationBoundary(stage, change, fail) {
+  const {context, ui, form, rows, elements, nodes, session, notices, calls, call, button, requests} = creationRequests();
+  const availability = 'v1/hotwatch/start-candidates?is_test=false', activation = 'v1/hotwatch/sessions';
+  elements.provider.value = stage === 'market/eodhd-symbols' ? 'eodhd' : 'pluto';
+  const verification = ui.change({target: elements.candidate});
+  call('market/quote').resolve({asset_id: 'asset', currency: 'USD', exchange: 'NASDAQ'});
+  await settle();
+  let operation = verification;
+  if (stage !== 'market/eodhd-symbols') {
+    operation = dispatchInstrumentEvent(context, 'submit', form);
+    await settle();
+    if (stage !== availability) {
+      call(availability).resolve({candidates: rows});
+      await settle();
+    }
+    if (stage === activation) {
+      call('strategy-center').resolve({selection: {}});
+      await settle();
+      assert.equal(button.disabled, true);
+    }
+  }
+  const deferred = call(stage);
+  let nextCandidate;
+  if (change === 'candidate') {
+    elements.candidate.value = '1';
+    nextCandidate = ui.change({target: elements.candidate});
+    if (stage === activation) assert.equal(button.disabled, false);
+  }
+  if (change === 'session') session.epoch++;
+  if (change === 'form') {
+    nodes['engine-create'] = {...form};
+    nodes['engine-form-status'] = {textContent: 'Ny formular'};
+  }
+  const snapshot = () => JSON.stringify([rows, nodes, button, notices, calls.length, requests.length]);
+  const before = snapshot();
+  if (fail) deferred.reject(Error('request failed'));
+  else deferred.resolve({candidates: rows, selection: {}, choices: []});
+  if (change) {
+    await operation;
+    assert.equal(snapshot(), before, [stage, change, fail].join(' / '));
+    if (nextCandidate) {
+      elements.provider.value = 'pluto';
+      call('market/quote').resolve({asset_id: 'second', exchange: 'NYSE', currency: 'USD'});
+      await nextCandidate;
+      assert.equal(rows[1].instrument.asset_id, 'second');
+    }
+  } else {
+    await operation;
+    if (stage === 'market/eodhd-symbols') assert.match(nodes['engine-eodhd-choice'].textContent,
+      fail ? /request failed/ : /ingen sikker instrumentmatch/);
+    else assert.deepEqual(notices, ['request failed']);
+    if (stage === activation) {
+      assert.equal(button.disabled, false);
+      assert.match(nodes['engine-form-status'].textContent, /request failed/);
+    }
+  }
+}
+
 async function main() {
+  for (const verified of [true, false]) {
+    await checkCachedChoice('batch', verified, false);
+    for (const quoteFirst of [true, false]) await checkCachedChoice('submit', verified, quoteFirst);
+  }
+  for (const stage of ['v1/hotwatch/start-candidates?is_test=false', 'strategy-center',
+    'v1/hotwatch/sessions', 'market/eodhd-symbols']) {
+    for (const change of ['session', 'candidate', 'form']) {
+      for (const fail of [true, false]) await checkCreationBoundary(stage, change, fail);
+    }
+    await checkCreationBoundary(stage, null, true);
+  }
+  await checkCreationBoundary('market/eodhd-symbols', null, false);
   for (const change of ['session', 'owner', 'form']) {
     for (const rejectOld of [false, true]) await checkDuplicateQuoteContext(change, rejectOld);
   }
