@@ -2748,7 +2748,7 @@
     "priority": 1,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "4530ff6f007900d3b49a077b9e91c67164cef8bf",
+    "base_sha": "8faa4ed91fca5743253428d2a333fc340906c347",
     "dependencies": [],
     "paths": [
       "dashboard_projection.py",
