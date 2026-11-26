@@ -5,10 +5,15 @@ window.EngineUI=(()=>{
  let pendingDetail=null;
  let modeGeneration=0,dialogGeneration=0,detailRequest=0,creationRequest=0,instrumentRequest=0,manualSearchRequest=0;
  function setMode(value){if(mode!==value){mode=value;modeGeneration++}}
+ function viewNode(){
+  // Navigation replaces the rendered content even when neither view has an engine root.
+  const node=root()||document.getElementById('content')?.firstElementChild;
+  return node?.tagName==='DIALOG'?null:node??null;
+ }
  // A failed logout invalidates requests while leaving the mounted view in place.
  function captureView(){
-  const user=owner(),node=root(),version=modeGeneration;
-  return ()=>Boolean(user)&&user===owner()&&node===root()&&(!node||node.isConnected)&&version===modeGeneration;
+  const user=owner(),node=viewNode(),version=modeGeneration;
+  return ()=>Boolean(user)&&user===owner()&&node===viewNode()&&(!node||node.isConnected)&&version===modeGeneration;
  }
  function captureSession(){
   const user=owner(),epoch=sessionEpoch(),authenticated=Boolean(user)&&!logoutRequests;

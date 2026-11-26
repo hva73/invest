@@ -355,6 +355,40 @@ const run = async () => {
     staleSameState.resolve(account('beta'));
     await staleSame;
     assert(!byId('engine-dialog'),'Prior same-user session opened a dashboard dialog');
+
+    // Overview and Settings both render into content without an engine root.
+    const overview = '<section class="dashboard-v1">Overview</section>';
+    const settings = '<section class="push-settings">Settings</section>';
+    const openDashboardDetail = async () => {
+        try { await EngineUI.openDetail('beta-holding'); }
+        catch (error) { byId('notice').textContent = error.message; }
+    };
+    for (const destination of ['Settings', 'Overview again']) {
+        for (const rejected of [false, true]) {
+            content.innerHTML = overview;
+            const opening = openDashboardDetail();
+            const stateRequest = take('state', 'beta');
+            content.innerHTML = settings;
+            if (destination === 'Overview again') content.innerHTML = overview;
+            const destinationView = content.innerHTML;
+            byId('notice').textContent = 'Destination notice';
+            if (rejected) stateRequest.reject(Error('Late detail error'));
+            else stateRequest.resolve(account('beta'));
+            await opening;
+            assert(content.innerHTML === destinationView && byId('notice').textContent === 'Destination notice',
+                'Delayed detail ' + (rejected ? 'error' : 'success') + ' changed ' + destination);
+        }
+    }
+    const currentDashboardError = openDashboardDetail();
+    take('state', 'beta').reject(Error('Current detail error'));
+    await currentDashboardError;
+    assert(byId('notice').textContent === 'Current detail error', 'Current dashboard detail error was hidden');
+    const currentDashboardDetail = openDashboardDetail();
+    take('state', 'beta').resolve(account('beta'));
+    await currentDashboardDetail;
+    assert(byId('engine-dialog')?.dataset.watchId === 'beta-holding', 'Current dashboard detail did not open');
+    content.innerHTML = '';
+
     const ack=document.createElement('button');
     ack.dataset.engineAck='beta-watch';ack.dataset.eventId='event';ack.dataset.isTest='false';content.append(ack);
     const delayedAck=EngineUI.click(ack);
