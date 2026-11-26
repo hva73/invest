@@ -1030,13 +1030,13 @@ async function checkCachedChoice(action, verified, beforeAvailability) {
   await pendingAction;
   if (!verified) {
     assert.equal(calls.length, availability ? 3 : 2);
-    assert.ok(notices.includes('explicit choice failed'));
+    assert.deepEqual(notices, ['explicit choice failed']);
   } else assert.deepEqual(notices, []);
   assert.equal(nodes['engine-batch-list'].textContent,
     verified && action === 'batch' ? '1/40 kandidat(er) klar: FIRST · asset' : '');
 }
 
-async function checkReturnedSelection(candidate, oldFirst, oldOutcome) {
+async function checkReturnedSelection(candidate, oldFirst, oldOutcome, verified = false) {
   const {ui, elements, rows, notices, status, slot, call} = creationRequests();
   const select = value => {
     if (!candidate) return ui.change({target: {id: 'engine-asset-choice', value}});
@@ -1048,15 +1048,17 @@ async function checkReturnedSelection(candidate, oldFirst, oldOutcome) {
   call('market/quote').reject(Error('obsolete other'));
   const back = select(candidate ? '0' : 'asset'), latest = call('market/quote');
   const finishOld = () => oldOutcome === 'error' ? old.reject(Error('obsolete first')) :
-    old.resolve({selection_required: true, choices: [{asset_id: 'obsolete'}]});
+    old.resolve(oldOutcome === 'verified' ? {asset_id: 'asset', currency: 'USD', exchange: 'NYSE'} :
+      {selection_required: true, choices: [{asset_id: 'obsolete'}]});
   if (oldFirst) { finishOld(); await first; }
-  latest.resolve({pending: true, retry_after: 2});
-  if (!oldFirst) { await settle(); finishOld(); }
+  latest.resolve(verified ? {asset_id: 'asset', currency: 'USD', exchange: 'NASDAQ'} : {pending: true, retry_after: 2});
+  await back;
+  if (!oldFirst) finishOld();
   await Promise.all([first, other, back]);
   assert.deepEqual(notices, []);
-  assert.match(status.textContent, /mangler verificeret aktiv-ID/);
+  assert.match(status.textContent, verified ? /NASDAQ/ : /mangler verificeret aktiv-ID/);
   assert.equal(slot.innerHTML, undefined);
-  assert.equal(rows[0].instrument, undefined);
+  assert.equal(rows[0].instrument?.exchange, verified ? 'NASDAQ' : undefined);
 }
 
 async function checkManualSymbolReverification(sameAsset, searchFirst, fail, implicit = false) {
@@ -1085,6 +1087,33 @@ async function checkManualSymbolReverification(sameAsset, searchFirst, fail, imp
     assert.equal(rows[0].eodhd_choices, undefined);
     assert.equal(rows[0].eodhd_error, null);
   }
+}
+
+async function checkSharedSymbolRequest(fail, searchFirst) {
+  const {ui, call, calls, elements, nodes} = creationRequests();
+  const select = value => ui.change({target: {id: 'engine-asset-choice', value}});
+  const search = () => ui.click({dataset: {}, hasAttribute: key => key === 'data-engine-eodhd-search'});
+  const quote = asset_id => ({asset_id, currency: 'USD', exchange: 'NYSE', name: 'First'});
+  const first = select('old');
+  call('market/quote').resolve(quote('old'));
+  await first;
+  const oldSearch = search(), lookup = call('market/eodhd-symbols');
+  const change = select('asset'), verification = call('market/quote');
+  const newSearch = search();
+  assert.equal(calls.filter(c => c.url === lookup.url).length, 1);
+  const finishSearch = () => fail ? lookup.reject(Error('symbol search failed')) :
+    lookup.resolve({choices: [{symbol: 'FIRST.US', name: 'First', currency: 'USD'}]});
+  if (searchFirst) {
+    finishSearch();
+    await oldSearch;
+    assert.equal(elements.provider_symbol.value, '');
+  }
+  verification.resolve(quote('asset'));
+  await change;
+  if (!searchFirst) finishSearch();
+  await Promise.all([oldSearch, newSearch]);
+  if (fail) assert.match(nodes['engine-eodhd-choice'].textContent, /symbol search failed/);
+  else assert.equal(elements.provider_symbol.value, 'FIRST.US');
 }
 
 async function checkSymbolSearchDuringFirstQuote(currency, fail, explicit = false) {
@@ -1244,6 +1273,7 @@ async function checkCreationBoundary(stage, change, fail) {
 
 async function main() {
   for (const fail of [true, false]) {
+    for (const searchFirst of [true, false]) await checkSharedSymbolRequest(fail, searchFirst);
     for (const currency of ['USD', 'EUR']) {
       for (const explicit of [false, true]) await checkSymbolSearchDuringFirstQuote(currency, fail, explicit);
     }
@@ -1256,7 +1286,8 @@ async function main() {
       for (const sameAsset of [true, false]) await checkManualSymbolReverification(sameAsset, first, fail);
     }
     for (const candidate of [true, false]) {
-      for (const outcome of ['error', 'choices']) await checkReturnedSelection(candidate, first, outcome);
+      await checkReturnedSelection(candidate, first, 'verified', true);
+      for (const outcome of ['verified', 'error', 'choices']) await checkReturnedSelection(candidate, first, outcome);
     }
   }
   for (const verified of [true, false]) {

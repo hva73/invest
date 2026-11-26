@@ -157,7 +157,6 @@ window.EngineUI=(()=>{
  const latestInstrumentAction={batch:0,submit:0};
  const inFlightQuotes=new Set();
  const symbolLookups=new WeakMap();
- const activatingForms=new WeakMap();
  function creationFormContext(form){
   const epoch=sessionEpoch(),user=owner(),test=mode,version=interaction;
   return ()=>epoch===sessionEpoch()&&user===owner()&&test===mode&&version===interaction&&
@@ -176,9 +175,10 @@ window.EngineUI=(()=>{
  function verifySelection(index,assetId,valid){
   const form=document.getElementById('engine-create'),lookup=symbolLookups.get(form);
   const verifiedAsset=candidates[index]?.instrument?.asset_id;
-  if(lookup&&(lookup.item!==candidates[index]||(assetId&&verifiedAsset&&verifiedAsset!==assetId)))symbolLookups.delete(form);
-  const result=resolveInstrument(index,assetId,valid);
-  const verification={result,valid,assetId,item:candidates[index]};
+  if(lookup&&(lookup.item!==candidates[index]||(assetId&&verifiedAsset&&verifiedAsset!==assetId)))lookup.version++;
+  const verification={valid,assetId,item:candidates[index]};
+  const result=resolveInstrument(index,assetId,valid,verification);
+  verification.result=result;
   pendingVerification=verification;
   const clear=instrument=>{
    // A failed explicit choice must not expose the previously verified asset to an action.
@@ -192,7 +192,7 @@ window.EngineUI=(()=>{
   const choice=pendingVerification;
   return item.instrument&&choice?.item===item&&choice.assetId&&choice.valid()?choice:null;
  }
- async function resolveInstrument(index,assetId=null,valid=captureInstrumentRequest(index)){
+ async function resolveInstrument(index,assetId=null,valid=captureInstrumentRequest(index),selection=null){
   const item=candidates[index],form=document.getElementById('engine-create');
   if(!item)throw Error('Vælg en kandidat.');
   if(!valid())return;
@@ -205,16 +205,12 @@ window.EngineUI=(()=>{
   // A pending reply can refer to an earlier, still outstanding identical lookup.
   const previous=[...inFlightQuotes].reverse().find(q=>q.item===item&&q.assetId===assetId&&q.current());
   const quote={item,assetId,current:instrumentContext(index),previous};
+  if(selection)selection.previous=previous;
   let result;
   try{
    quote.reply=api('market/quote',args);
    inFlightQuotes.add(quote);
    result=await quote.reply;
-   for(let prior=previous;prior&&valid()&&result?.pending&&!verification;prior=prior.previous){
-    // Only verified data from a matching request can satisfy this pending reply.
-    const match=await Promise.resolve(prior.reply).catch(()=>null);
-    if(match?.asset_id&&match.currency&&match.exchange)result=match;
-   }
   }catch(error){
    if(!valid())return;
    if(!verification?.assetId)throw error;
@@ -222,7 +218,19 @@ window.EngineUI=(()=>{
   if(!valid())return;
   // An explicit choice owns instrument identity. A pending duplicate has no identity of its own.
   if(verification&&(verification.assetId||result?.pending)){
-   try{return await verification.result}catch{return}
+   let instrument;
+   try{instrument=await verification.result}catch{return}
+   if(!valid()||instrument||!verification.pending||!result?.pending)return instrument;
+  }
+  if(selection)selection.pending=Boolean(result?.pending);
+  // Only an independent Add or Start can consume an outstanding matching quote.
+  // A selection itself is resolved exclusively by its own response.
+  if(!selection&&result?.pending){
+   for(let prior=verification?verification.previous:previous;prior&&valid();prior=prior.previous){
+    const match=await Promise.resolve(prior.reply).catch(()=>null);
+    if(match?.asset_id&&match.currency&&match.exchange){result=match;break}
+   }
+   if(!valid())return;
   }
   if(result.pending&&item.instrument&&item.instrument!==previousInstrument)return item.instrument;
   if(result.selection_required){const choices=result.choices||[];const slot=document.getElementById('engine-instrument-choice');if(slot)slot.innerHTML=`<label>Vælg verificeret Pluto-instrument<select id="engine-asset-choice"><option value="">Vælg instrument</option>${choices.map(x=>`<option value="${esc(x.asset_id)}">${esc([x.ticker,x.exchange,x.currency,x.name].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>`;item.resolution_choices=choices;formStatus('Flere Pluto-instrumenter matcher. Vælg det korrekte aktiv; intet er valgt automatisk.');return null}if(!result.asset_id||!result.currency||!result.exchange){formStatus('Pluto-opslaget mangler verificeret aktiv-ID, valuta eller børs. Sessionen kan ikke startes.');return null}item.instrument={asset_id:result.asset_id,currency:result.currency,exchange:result.exchange,name:result.name||null,isin:result.isin||null,provider_symbol:item.provider_symbol||item.candidate.provider_symbol||item.candidate.eodhd_symbol||null};const portfolioMatch=candidatePortfolios(result.asset_id);item.portfolio_ids=portfolioMatch.ids;item.portfolios_verified=portfolioMatch.complete;
@@ -240,18 +248,24 @@ window.EngineUI=(()=>{
   const index=Number(f.elements.candidate.value),item=candidates[index];if(!item)return;
   const slot=document.getElementById('engine-eodhd-choice'),context=instrumentContext(index);
   // Share the candidate's pending search. Match its choices against the verified currency at settlement.
-  const assetId=item.instrument?.asset_id;
-  const current=()=>context()&&(!assetId||assetId===item.instrument?.asset_id);
+  const choice=explicitVerification(item),assetId=choice?.assetId||item.instrument?.asset_id;
   let lookup=symbolLookups.get(f);
-  const valid=()=>current()&&lookup===symbolLookups.get(f)&&(!actionCurrent||actionCurrent());
+  let version;
+  const valid=()=>context()&&lookup===symbolLookups.get(f)&&version===lookup.version&&
+   (!assetId||assetId===item.instrument?.asset_id)&&(!actionCurrent||actionCurrent());
   if(slot)slot.textContent='Søger hos EODHD …';item.eodhd_error=null;
   try{
    if(!lookup?.current()||!lookup.reply){
-    lookup={current,item};
+    lookup={current:context,item,version:0};
     symbolLookups.set(f,lookup);
     lookup.reply=api('market/eodhd-symbols',{report_id:item.report_id,candidate_id:item.candidate.candidate_id,is_test:mode,quote_currency:item.instrument?.currency||f.elements.quote_currency.value||null});
    }
-   const r=await lookup.reply;
+   version=lookup.version;
+   let r;
+   try{r=await lookup.reply}finally{
+    lookup.reply=null;
+    if(choice&&assetId!==item.instrument?.asset_id&&choice.valid())await choice.result.catch(()=>null);
+   }
    if(!valid())return;
    item.eodhd_choices=r.choices;
    if(!r.choices.length){if(slot)slot.textContent='EODHD fandt ingen sikker instrumentmatch. Kontrollér navn og marked hos EODHD.';item.eodhd_error='EODHD fandt ingen sikker instrumentmatch.';return}
@@ -262,7 +276,6 @@ window.EngineUI=(()=>{
    if(slot)slot.innerHTML=`<label>EODHD-instrument<select id="engine-eodhd-select"><option value="">Vælg instrument</option>${r.choices.map(x=>`<option value="${esc(x.symbol)}" ${x.symbol===item.provider_symbol?'selected':''}>${esc([x.symbol,x.name,x.exchange,x.currency,x.isin].filter(Boolean).join(' · '))}</option>`).join('')}</select></label><small>Kontrollér navn, marked og valuta. EODHD-markedet kan være forskelligt fra Pluto-markedet.</small>`;
    if(!item.provider_symbol)formStatus('Vælg det korrekte instrument i EODHD-listen før start.');
   }catch(error){if(!valid())return;item.eodhd_error='EODHD-opslag fejlede: '+reason(error.details?.code||error.details?.error||error.message)+'. Du kan indtaste et kendt EODHD-symbol i symbolfeltet.';if(slot)slot.textContent=item.eodhd_error;formStatus(item.eodhd_error)}
-  finally{if(lookup)lookup.reply=null}
  }
  async function legacyCreation(){const user=owner(),currentMode=mode;const [r,s,providers]=await Promise.all([api(base+'/start-candidates'+query()),api('state'),api(base+'/providers'+query()).catch(()=>null)]);if(user!==owner()||mode!==currentMode||!root())return;candidates=r.candidates||[];portfolios=s.portfolios.filter(p=>p.source==='pluto'&&p.active);portfolioSnapshots=s.portfolio_snapshots||{};batchCandidates=[];if(!candidates.length){dialog('Start overvågning',`<p>Ingen kandidater med en aktuel vurdering kan startes lige nu.</p><p>Allerede overvåget: ${esc(r.already_watched||0)} · mangler aktuel vurdering: ${esc(r.without_current_assessment||0)} · gentagne instrumenter: ${esc(r.duplicates||0)}.</p>`);return}dialog('Start HOT WATCH',`<p>Listen viser kandidater med en aktuel KØB- eller AFVENT-vurdering. Allerede overvåget: ${esc(r.already_watched||0)} · mangler aktuel vurdering: ${esc(r.without_current_assessment||0)} · gentagne instrumenter: ${esc(r.duplicates||0)}. Historikken er bevaret.</p><p>Analysemotor · ingen ordre eller handelsgodkendelse. Pluto-instrument og depoter kontrolleres før start.</p><form id="engine-create"><div class="formgrid"><label>Kandidat<select name="candidate" required>${candidates.map((x,i)=>({x,i})).filter(v=>v.x.candidate.candidate_id).map(({x,i})=>`<option value="${i}">${esc(x.candidate.ticker)} · ${esc(x.candidate.company_name||'')}${x.candidate.decision?.decided_at?' · vurderet '+esc(date(x.candidate.decision.decided_at)):x.generated_at?' · rapport '+esc(date(x.generated_at)):''}${x.candidate.decision?.deadline&&Date.parse(x.candidate.decision.deadline)<Date.now()?' · deadline overskredet':''}</option>`).join('')}</select></label><label>Datakilde<select name="provider"><option value="pluto">Pluto · verificeret læsekontrakt</option><option value="eodhd" ${!mode&&providers?.providers?.eodhd?.enabled&&providers?.providers?.eodhd?.key_configured?'selected':''}>EODHD · markedsdata</option><option value="report_inbox">Rapportmålinger · ingen nye købssignaler</option>${mode?'<option value="synthetic">Syntetisk testadapter</option>':''}</select></label><label>Børs / venue<input name="exchange" required maxlength="200"></label><label>Pluto asset-ID<input name="asset_id" required maxlength="100"></label><label>Aktivets verificerede valuta<input name="quote_currency" required pattern="[A-Z]{3}" maxlength="3" placeholder="ISO-valuta fra datakilden"></label><label>EODHD-symbol<input name="provider_symbol" placeholder="Vælg via EODHD-opslag" maxlength="80"></label><label>Overvågningsområde<select name="watch_mode"><option value="both">Kandidat og eksisterende position</option><option value="entry">Kun nye køb</option><option value="exit">Kun eksisterende position / exit</option></select></label><label>Genaktiveringsgrund, hvis kandidaten er lukket<input name="reactivation_reason" maxlength="4000"></label><label>Overvågningsformål<input name="purpose" required value="momentum" maxlength="200"></label><label>Profil<select name="profile">${['NORMAL','ACTIVE','CRITICAL','IDLE'].map(x=>`<option>${x}</option>`).join('')}</select></label><label>Sluttid (lokal tid)<input type="datetime-local" name="end_at" value="${localDeadline()}"></label></div><div id="engine-instrument-choice"></div><div id="engine-eodhd-choice"></div><button type="button" data-engine-eodhd-search>Find EODHD-instrument</button><button type="button" data-engine-batch-add>Tilføj valgt kandidat til batch</button><p id="engine-batch-list" class="muted">Ingen kandidater tilføjet endnu. Du kan starte 1–40 kandidater samlet.</p><label>Depoter med aktivet i seneste snapshot<select name="portfolios" multiple>${portfolios.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></label><label>Hvorfor aktiveres overvågningen?<textarea name="activation_reason" required maxlength="4000">Manuel, udtrykkelig HOT WATCH-aktivering fra ESCAPE.</textarea></label><details><summary>Avancerede instrumentfelter og risikogrænser</summary><div class="formgrid"><label>Planlagt antal<input name="quantity" type="number" min="0" step="any"></label><label>Stoppris i aktivets valuta<input name="stop" type="number" min="0" step="any"></label><label>Maksimal størrelse (DKK)<input name="max_notional" value="1000" type="number" min="1" max="1000"></label><label>Maksimalt tab (DKK)<input name="max_loss" value="100" type="number" min="1" max="100"></label></div><p>Asset-ID, børs, valuta og symbol vises her efter opslag og kan ikke udledes fra ticker alene.</p></details><p class="muted">Baseline: escape_momentum v1.0.0. EODHD-pollgulv ${esc(String(providers?.providers?.eodhd?.minimum_poll_s??'ukendt'))} sek. · Pluto mindst 300 sek. Intervaller garanterer ikke friske kurser. Ukendt spread, handelsstatus, gebyrer eller valuta kan blokere KØB.</p><button class="primary">Start overvågning</button><p id="engine-form-status" role="status"></p></form>`);if(!mode){const f=document.getElementById('engine-create'),index=Number(f.elements.candidate.value);const valid=captureInstrumentRequest(index);
   verifySelection(index,null,valid).then(instrument=>{
@@ -272,7 +285,7 @@ window.EngineUI=(()=>{
  function paintBatch(){const n=document.getElementById('engine-batch-list');if(n)n.textContent=batchCandidates.length?`${batchCandidates.length}/40 kandidat(er) klar: ${batchCandidates.map(x=>x.candidate.ticker+' · '+x.instrument.asset_id).join(', ')}`:'Ingen kandidater tilføjet endnu. Du kan starte 1–40 kandidater samlet.'}
  async function addBatchCandidate(){const form=document.getElementById('engine-create');if(!form)return;const index=Number(new FormData(form).get('candidate'));let item=candidates[index];if(item){item.provider_symbol=form.elements.provider_symbol.value.trim()||item.provider_symbol||null;}if(!item)throw Error('Vælg en kandidat.');if(batchCandidates.some(x=>x.candidate.candidate_id===item.candidate.candidate_id)){formStatus('Kandidaten er allerede i batchen.');return}const valid=captureInstrumentRequest(index,'batch'),choice=explicitVerification(item);if(!mode&&(choice||!item.instrument)){
   try{
-   const instrument=await (choice?choice.result:resolveInstrument(index,null,valid));
+   const instrument=await (choice?choice.result.catch(()=>undefined):resolveInstrument(index,null,valid));
    if(!valid()||!instrument)return;
   }catch(error){if(valid())notice(error.message,'error');return}
  }if(batchCandidates.length>=40){notice('Batchen kan indeholde højst 40 kandidater.','error');return}if(form.elements.provider.value==='eodhd'&&!item.provider_symbol&&!item.instrument?.provider_symbol){await findEodhdSymbol(valid);if(!valid())return;item.provider_symbol=String(form.elements.provider_symbol.value||'').trim()||item.provider_symbol||null;if(!item.provider_symbol&&!item.instrument?.provider_symbol){formStatus(item.eodhd_error||'Vælg EODHD-instrumentet på listen før det tilføjes.');document.getElementById('engine-eodhd-select')?.focus();return}}batchCandidates.push({...item,instrument:{...item.instrument,provider_symbol:item.provider_symbol||item.instrument?.provider_symbol||null}});paintBatch();formStatus('Kandidat føjet til batch. Vælg næste kandidat for at fortsætte.')}
@@ -296,7 +309,8 @@ window.EngineUI=(()=>{
   return true;
  }if(e.target.id!=='engine-create')return false;e.preventDefault();const form=e.target,f=new FormData(form),index=Number(f.get('candidate')),selected=candidates[index];
  if(document.getElementById('engine-create')!==form||!form.isConnected)return true;
- if(activatingForms.get(form)?.())return true;
+ const button=form.querySelector?.('.primary');
+ if(button?.disabled)return true;
  if(!selected)throw Error('Vælg en kandidat.');
  // Checking availability must not supersede an instrument lookup.
  const selectionCurrent=captureInstrumentRequest(index,'submit');
@@ -314,7 +328,7 @@ window.EngineUI=(()=>{
   for(const item of items){
    const choice=explicitVerification(item);
    if(mode||(!choice&&item.instrument))continue;
-   const instrument=await (choice?choice.result:resolveInstrument(candidates.indexOf(item),null,selectionCurrent));
+   const instrument=await (choice?choice.result.catch(()=>undefined):resolveInstrument(candidates.indexOf(item),null,selectionCurrent));
    if(!selectionCurrent()||instrument===undefined)return true;
    if(!instrument){notice('Pluto kunne ikke verificere alle instrumenter.','error');return true}
   }
@@ -332,10 +346,8 @@ window.EngineUI=(()=>{
   if(!selectionCurrent())return true;
   const selection=strategy.selection;
   const common={is_test:mode,purpose:f.get('purpose'),profile:f.get('profile'),priority:f.get('profile')==='CRITICAL'?'CRITICAL':'NORMAL',provider:f.get('provider'),end_at:f.get('end_at')?new Date(f.get('end_at')).toISOString():null,activation_reason:String(f.get('activation_reason')||'')+' · '+selection.reason,strategy_id:selection.strategy_id,strategy_version:selection.version,risk:{max_notional_dkk:f.get('max_notional')||'1000',max_loss_dkk:f.get('max_loss')||'100',max_spread_pct:'1',max_quote_age_s:120,max_position_fraction_pct:'20',proposed_quantity:f.get('quantity')||null,stop_price:f.get('stop')||null,exit_deadline:null}};const sessions=items.map(item=>{const instrument=item.instrument||{asset_id:f.get('asset_id'),exchange:f.get('exchange'),currency:f.get('quote_currency'),provider_symbol:f.get('provider_symbol')||null};if(!instrument.asset_id||!instrument.exchange||!instrument.currency)throw Error('Aktiv-ID, børs og valuta skal være verificeret før start.');return {...common,watch_id:item.watch_id||(item.watch_id='hw-'+crypto.randomUUID()),report_id:item.report_id,candidate_id:item.candidate.candidate_id,ticker:item.candidate.ticker,exchange:instrument.exchange,asset_id:instrument.asset_id,quote_currency:instrument.currency,provider_symbol:item.provider_symbol||instrument.provider_symbol||null,portfolio_ids:item.portfolio_ids||f.getAll('portfolios').map(Number),watch_mode:item.portfolios_verified&&!item.portfolio_ids.length?'entry':f.get('watch_mode'),reactivation_reason:f.get('reactivation_reason')||null}});const signature=JSON.stringify({is_test:mode,sessions});if(!pending||pending.signature!==signature)pending={signature,id:'hwa-'+crypto.randomUUID()};const request={request_id:pending.id,is_test:mode,sessions};
-  const button=form.querySelector('.primary');
   const formCurrent=creationFormContext(form);
   // A posted activation belongs to the submitting form and session.
-  activatingForms.set(form,formCurrent);
   button.disabled=true;
   try{
    const result=sessions.length>1?await api(base+'/activation-requests',request,{'Idempotency-Key':request.request_id}):await api(base+'/sessions',sessions[0]);
@@ -350,10 +362,7 @@ window.EngineUI=(()=>{
    formStatus(reason(error.details?.code||error.message)+(error.details?.errors||[]).map(e=>' '+e.path+': '+e.message).join(''));
    notice(error.details?.code||error.message,'error');
   }finally{
-   if(activatingForms.get(form)===formCurrent){
-    activatingForms.delete(form);
-    if(formCurrent())button.disabled=false;
-   }
+   if(formCurrent())button.disabled=false;
   }
  }catch(error){if(selectionCurrent())notice(error.details?.code||error.message,'error')}
  return true}
