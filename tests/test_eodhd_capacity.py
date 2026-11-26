@@ -52,6 +52,37 @@ class CapacityTests(unittest.TestCase):
   self.assertEqual(caught.exception.retry_after_s,60)
   self.cap.reserve(1,self.now+120)
   self.assertEqual(self.state()['http_429'],1)
+ def test_http_cooldown_under_competing_writer_and_at_expiry(self):
+  def connect():
+   c=app.connect()
+   c.execute('PRAGMA busy_timeout=0')
+   return c
+  def counters():
+   with app.connect() as c:
+    state=capacity.snapshot(c,self.now)
+   return (state['http_used_this_minute'],state['requests'],state['known_units'],state['unknown_cost_requests'])
+  other=capacity.Capacity(connect)
+  self.cap.reserve(1,self.now)
+  self.cap.observe(429,{'Retry-After':'7'},2,now=self.now)
+  with app.connect() as writer:
+   writer.execute('BEGIN IMMEDIATE')
+   with self.assertRaises(EngineError) as caught:other.reserve(5,self.now+2.5)
+   self.assertEqual((caught.exception.code,caught.exception.status,caught.exception.retry_after_s),
+                    ('PROVIDER_RATE_BUDGET',429,4.5))
+   self.assertEqual(counters(),(1,1,1,0))
+  other.reserve(5,self.now+7)
+  self.assertEqual(counters(),(2,2,6,0))
+ def test_http_cooldown_committed_between_preflight_and_write(self):
+  def before_statement(sql):
+   if sql.strip().upper()=='BEGIN IMMEDIATE':
+    self.cap.observe(429,{'Retry-After':'11'},2,now=self.now)
+  def connect():
+   c=app.connect()
+   c.set_trace_callback(before_statement)
+   return c
+  with self.assertRaises(EngineError) as caught:capacity.Capacity(connect).reserve(1,self.now)
+  self.assertEqual((caught.exception.code,caught.exception.retry_after_s),('PROVIDER_RATE_BUDGET',11))
+  with app.connect() as c:self.assertEqual(capacity.snapshot(c,self.now)['http_used_this_minute'],0)
  def test_same_minute_headers_preserve_charged_reservations(self):
   other=capacity.Capacity(app.connect)
   cases=[(21,1,21,20),(21,1,90,20),(25,2,24,23),(25,2,21,21)]
