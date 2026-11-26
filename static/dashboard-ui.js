@@ -51,7 +51,13 @@ window.DashboardUI=(()=>{
   return ''
  }
  function openingLabel(next,status){if(next?.kind!=='REGULAR'||!next.expected_at)return '';const at=new Date(next.expected_at);if(!Number.isFinite(at.getTime()))return '';const opts={timeZone:'Europe/Copenhagen',hour:'2-digit',minute:'2-digit',hourCycle:'h23',...(next.same_day_copenhagen?{}:{day:'2-digit',month:'2-digit'})};const prefix=status==='REVURDERING FORFALDET'?'REVURDÉR':status==='MANGLER VURDERING'?'MANGLER VURDERING':status==='KURSKILDE IKKE BEKRÆFTET'?'KILDE IKKE BEKRÆFTET':'AFVENT';return prefix+' · ÅBNER '+new Intl.DateTimeFormat('da-DK',opts).format(at)}
- function observationNote(o){return o?.kind==='RISING'&&Number.isFinite(Number(o.change_pct))&&Number.isInteger(o.window_minutes)?`<small class="market-observation">Stiger ${percent(o.change_pct)} på ${text(o.window_minutes)} min. · observation</small>`:''}
+ function observationNote(o){
+  if(o?.kind!=='RISING'||!Number.isInteger(o.window_minutes)||o.window_minutes<=0)return '';
+  if(typeof o.change_pct!=='number'&&typeof o.change_pct!=='string')return '';
+  const change=Number(o.change_pct);
+  if(!Number.isFinite(change)||change<=0)return '';
+  return `<small class="market-observation">Stiger ${percent(change)} på ${text(o.window_minutes)} min. · observation</small>`;
+ }
  function watchControl(s,ticker){return `<span class="signal-control"><button class="dash-action-badge${watchColor(s)}" data-signal-help-attached="true" ${actionableWatch(s)?'data-trade-watch':'data-dashboard-watch'}="${text(s.watch_id)}"${actionableWatch(s)?` data-trade-signal="${text(s.signal)}"${s.last_action_signal?.event_id?` data-trade-event="${text(s.last_action_signal.event_id)}"`:""}`:''}>${text(openingLabel(s.next_market_session,watchStatus(s))||watchStatus(s))} →</button><button type="button" class="signal-help" data-explain-watch="${text(s.watch_id)}" aria-label="Hvorfor denne status?">?</button>${window.EngineUI?.actionNotice?.({...s,ticker})||''}</span>${signalTiming(s)}${observationNote(s.market_observation)}`}/** Shared server action history; never promote it to a trade button. */
  function signalTiming(s){if(!s)return '';const live=actionableWatch(s);const last=s.last_action_signal||{},labels={BUY_SIGNAL:'Køb',SELL_SIGNAL:'Salg',REDUCE_SIGNAL:'Reducér'};if(live)return `<small class="signal-timing">${window.ESCAPE_DEMO?'Simuleret':'Aktuelt'} · beregnet ${text(s.last_calculation_at?shortStamp(s.last_calculation_at):'tidspunkt mangler')}</small>`;if(last.event_type&&labels[last.event_type]&&last.created)return `<small class="signal-timing">Tidligere ${text(labels[last.event_type])} · ${text(shortStamp(last.created))} · ikke aktuelt</small>`;return ''}
  // Mobile overview uses the same position objects and detail handler as the desktop table.
