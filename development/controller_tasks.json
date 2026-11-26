@@ -1178,7 +1178,7 @@
     "task": "Small #114 readback integrity slice on the accepted branch. trade_service.check() captures the owned row and intent reference before remote status read, then unconditionally updates by id/user. A later local status/response update during the lookup can be overwritten by an older in-flight readback. Use a single compare-and-swap UPDATE matching the original immutable intent reference and captured mutable status/response/error (SQLite null-safe comparisons), or the existing equivalent conditional update; when the captured row has changed, return the latest owned view without overwriting it. Keep matching ordinary status readback, current identity validation, tenant scoping and no inferred fills. Add a focused synthetic SQLite test with a mocked get_order_intent that updates the owned row during lookup, assert newer response survives; normal readback regression. No change to submission/cancellation/mandate/schema, no network or live broker calls. Run direct focused test_trade_service and fix failures; deliver tested code with ESCAPE_DRAFT_READY."
   },
   {
-    "status": "ready",
+    "status": "done",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "45386028d519eb61cf225c14a30ca071e96d051e",
