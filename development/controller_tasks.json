@@ -2441,5 +2441,91 @@
     "follow_base": true,
     "reserve_plan_id": "statistics/fills/journal-deduplicates-observed-fill-without-inventing-cost",
     "reserve_goal": "statistics/fills"
+  },
+  {
+    "issue": 14,
+    "generation": 25,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [
+      "14:23"
+    ],
+    "paths": [
+      "hotwatch_engine.py",
+      "eodhd_capacity.py",
+      "tests/test_eodhd_capacity.py"
+    ],
+    "task": "Approved roadmap shared_data/scheduler (F\u00e6lles scheduler og budget). Exact existing source anchor: hotwatch_engine.py :: CREATE TABLE IF NOT EXISTS hw_request_budget(user_id INTEGER NOT NULL,source TEXT NOT NULL,window INTEGER NOT NULL. Implement only this bounded change: Tilf\u00f8j et idempotent SQLite-indeks med window som f\u00f8rste kolonne i motorens eksisterende databaseinitialisering. Capacity.reserve() sletter udl\u00f8bne r\u00e6kker p\u00e5 tv\u00e6rs af brugere og kilder under BEGIN IMMEDIATE. Den eksisterende prim\u00e6rn\u00f8gle begynder med user_id og source. Bevar den nuv\u00e6rende slettegr\u00e6nse, transaktion og sammensatte n\u00f8gle til debitering.. Acceptance: I en midlertidig SQLite-fixture med budgetr\u00e6kker for 100 brugere og flere kilder bruger den eksisterende DELETE et indeksopslag p\u00e5 window if\u00f8lge EXPLAIN QUERY PLAN. En reservation fjerner r\u00e6kker under gr\u00e6nsen, bevarer r\u00e6kker p\u00e5 og over gr\u00e6nsen og debiterer den aktuelle EODHD-r\u00e6kke \u00e9n gang. Gentagen initialisering lykkes.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_eodhd_capacity.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "shared_data/scheduler/index-request-budget-expiry-by-window",
+    "reserve_goal": "shared_data/scheduler"
+  },
+  {
+    "issue": 14,
+    "generation": 26,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [
+      "14:25"
+    ],
+    "paths": [
+      "eodhd_capacity.py",
+      "tests/test_eodhd_capacity.py"
+    ],
+    "task": "Approved roadmap shared_data/scheduler (F\u00e6lles scheduler og budget). Exact existing source anchor: eodhd_capacity.py :: state['units_at_account']=state.get('known_units',0);state['unknown_at_account']=state.get('unknown_cost_requests',0). Implement only this bounded change: I refresh_account() skal baselines for kendte enheder og kald med ukendt pris kun kopieres fra de lokale t\u00e6llere, n\u00e5r local_day matcher den normaliserede apiRequestsDate i det accepterede svar. Brug nul som baseline ved forskellige datoer, s\u00e5 et kontosvar hen over UTC-midnat ikke skjuler nye lokale debiteringer. Bevar de eksisterende kvoter, nulpris for kontoopslag og reservationens writer-transaktion.. Acceptance: En lokal transportfixture starter kontoopslaget f\u00f8r UTC-midnat og leverer den nye dags snapshot efter midnat, mens SQLite stadig har g\u00e5rsdagens t\u00e6llere. Efterf\u00f8lgende kendte enheder og kald med ukendt pris t\u00e6ller frem mod den eksisterende dagsgr\u00e6nse. Et samme-dags kontosvar fastholder korrekt baseline og undg\u00e5r dobbeltregning.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_eodhd_capacity.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "shared_data/scheduler/scope-eodhd-account-debit-baselines-to-utc-day",
+    "reserve_goal": "shared_data/scheduler"
+  },
+  {
+    "issue": 114,
+    "generation": 20,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [],
+    "paths": [
+      "journal_projection.py",
+      "tests/test_app.py"
+    ],
+    "task": "Approved roadmap statistics/fills (Fills, kostpris og afstemning). Exact existing source anchor: journal_projection.py :: if r['verification']!='pluto':continue. Implement only this bounded change: Genvurd\u00e9r kun cycle_id-hunken i den bevarede 114:11-diff. S\u00e6t details.cycle_id p\u00e5 den eksisterende Pluto-ordrepost fra SQLite-r\u00e6kkens nullable cycle_id. Kolonnen har forrang, hvis et \u00e6ldre payload indeholder en anden v\u00e6rdi. Afgr\u00e6ns \u00e6ndringen til denne ene reference i journalens l\u00e6seprojektion.. Acceptance: L\u00e6s journalen fra den eksisterende midlertidige SQLite-fixture med \u00e9n verificeret observation med en lagret cyklus og \u00e9n med NULL. Begge payloads indeholder en vildledende cycle_id. Journalen viser henholdsvis den faktisk lagrede cyklus og null og bevarer den rapporterede m\u00e6ngde.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_app.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 114:11; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "statistics/fills/journal-uses-stored-cycle-link-for-pluto-order",
+    "reserve_goal": "statistics/fills",
+    "reserve_reassessment": "114:11@728bfd6b35c29f4f75a5fe15587c38560777d734c9c30bab67cb2522bbea4ea4"
+  },
+  {
+    "issue": 273,
+    "generation": 17,
+    "role": "motor",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [],
+    "paths": [
+      "strategy_lab.py",
+      "tests/test_strategy_lab.py"
+    ],
+    "task": "Approved roadmap learning/shadow (Shadow-evaluering og sammenligning). Exact existing source anchor: strategy_lab.py :: skipped+=1;states=[{} for _ in specs];window=[];previous_id=None;previous_time=None. Implement only this bounded change: I den eksisterende read-only compare() skal tidspunktet for seneste gennemf\u00f8rte evaluering bevares som kronologisk gr\u00e6nse, ogs\u00e5 n\u00e5r et ugyldigt input nulstiller observationsvinduet, sample-referencen og strategiernes midlertidige tilstand. Opdat\u00e9r f\u00f8rst gr\u00e6nsen, n\u00e5r alle valgte strategier har kunnet evaluere r\u00e6kken. Bevar fremadrettet genoptagelse og de eksisterende regler for checksums og historiske inputs.. Acceptance: Brug den eksisterende SQLite-replayfixture med \u00e9n gyldig beregning, et efterf\u00f8lgende hul i den gemte kontekst og derefter en ellers gyldig beregning med tidligere tidspunkt end seneste gennemf\u00f8rte evaluering. Begge problemr\u00e6kker t\u00e6lles i skipped. En efterf\u00f8lgende kronologisk gyldig r\u00e6kke evalueres, tidslinjen g\u00e5r aldrig bagl\u00e6ns, og databasen er u\u00e6ndret efter kaldet.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_strategy_lab.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "learning/shadow/strategy-lab-replay-keeps-last-evaluated-time-after-gap",
+    "reserve_goal": "learning/shadow"
   }
 ]
