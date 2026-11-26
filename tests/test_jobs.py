@@ -31,6 +31,36 @@ class Jobs(unittest.TestCase):
    jobs.enqueue(c,'ecb',1,'crash',0);c.execute("UPDATE jobs SET status='running',attempts=1,lease='old',lease_until=1")
   jobs.run_one(app.connect,self.payload,at=2)
   with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM jobs').fetchone()[0],'done')
+ def test_idle_preflight_searches_both_queue_indexes(self):
+  with app.connect() as c:
+   c.executemany("""INSERT INTO jobs(kind,user_id,dedupe,status,available,created)
+                    VALUES('report',1,?,'done',0,0)""",[(f'history-{i}',) for i in range(128)])
+   jobs.enqueue(c,'report',1,'future',20)
+   jobs.enqueue(c,'report',1,'occupied',0)
+   c.execute("UPDATE jobs SET status='running',attempts=1,lease='owner',lease_until=20 WHERE dedupe='occupied'")
+
+  statements=[]
+  def traced_connect():
+   c=app.connect()
+   c.set_trace_callback(statements.append)
+   return c
+  self.assertFalse(jobs.run_one(traced_connect,at=10))
+  preflight,=[sql for sql in statements if sql.lstrip().upper().startswith('SELECT')]
+  with app.connect() as c:
+   plan='\n'.join(row['detail'] for row in c.execute('EXPLAIN QUERY PLAN '+preflight))
+   for index,column in [('jobs_queued_available','available'),('jobs_running_lease_until','lease_until')]:
+    self.assertRegex(plan,rf'SEARCH jobs USING (?:COVERING )?INDEX {index} \({column}<\?\)')
+    self.assertEqual(c.execute("SELECT partial FROM pragma_index_list('jobs') WHERE name=?",(index,)).fetchone()[0],1)
+ def test_due_jobs_run_in_available_then_id_order(self):
+  with app.connect() as c:
+   for key,available in [('later',10),('first-tie',5),('second-tie',5),('future',11)]:
+    jobs.enqueue(c,'report',1,key,available)
+  for _ in range(3):
+   self.assertTrue(jobs.run_one(app.connect,at=10))
+  self.assertFalse(jobs.run_one(app.connect,at=10))
+  with app.connect() as c:
+   slots=[row['slot'] for row in c.execute('SELECT slot FROM reports ORDER BY id')]
+   self.assertEqual(slots,['first-tie','second-tie','later'])
  def test_idle_poll_with_another_writer(self):
   statements=[]
   def worker_connect():
