@@ -415,7 +415,10 @@ def send(connect,user_id,data,factory=None):
     return {'proposal':view(get(connect,user_id,row['id']))}
 
 def status_matches_proposal(raw,payload,reference):
-    if not isinstance(raw,dict) or raw.get('orderIntentId',reference)!=reference:
+    if not isinstance(raw,dict):
+        return False
+    root_reference=raw.get('orderIntentId')
+    if root_reference is not None and root_reference!=reference:
         return False
     orders=payload.get('orders') or []
     if len(orders)==1 and any(raw[key]!=orders[0].get(key) for key in INTENT_ORDER_FIELDS if key in raw):
@@ -423,7 +426,7 @@ def status_matches_proposal(raw,payload,reference):
     items=raw.get('orderIntents',[])
     locations=[raw]
     if items==[]:
-        if raw.get('orderIntentId')!=reference:return False
+        if root_reference!=reference:return False
     else:
         # A matching root cannot mask a conflicting order.
         if intent_reference({'orderIntents':items},payload)!=reference:return False
