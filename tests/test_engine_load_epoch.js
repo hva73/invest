@@ -840,7 +840,55 @@ async function checkPendingSubmitLookup(sameCandidate, quoteFirst) {
   if (!sameCandidate) assert.equal(rows[0].instrument, undefined);
 }
 
+async function checkPendingAssetChoice(caller, explicitFirst, implicitOutcome) {
+  const {context, session, ui, rows, elements, form, status, slot, nodes, QuotePromise} = instrumentFixture();
+  const quotes = [], notices = [];
+  context.notice = message => notices.push(message);
+  nodes['engine-batch-list'] = {textContent: ''};
+  session.creation = (url, body) => {
+    if (caller === 'submit' && url === 'v1/hotwatch/start-candidates?is_test=false') return {candidates: rows};
+    assert.equal(url, 'market/quote');
+    return new QuotePromise((resolve, reject) => quotes.push({body: {...body}, resolve, reject}));
+  };
+  const verified = {asset_id: 'asset', currency: 'USD', exchange: 'NASDAQ'};
+  const choices = {selection_required: true, choices: [verified]};
+  const initial = ui.change({target: elements.candidate});
+  quotes[0].resolve(choices);
+  await initial;
+  assert.match(slot.innerHTML, /value="asset"/);
+  const explicit = dispatchInstrumentEvent(context, 'asset', form);
+  await settle();
+  assert.equal(quotes.length, 2);
+  const implicit = dispatchInstrumentEvent(context, caller, form);
+  await settle();
+  const args = {report_id: 'report', candidate_id: 'FIRST', is_test: false};
+  assert.deepEqual(quotes.map(q => q.body), [args, {...args, asset_id: 'asset'}, args]);
+  const finishChoice = async () => {
+    quotes[1].resolve(verified);
+    await explicit;
+  };
+  if (explicitFirst) await finishChoice();
+  if (implicitOutcome === 'error') quotes[2].reject(Error('implicit lookup failed'));
+  else quotes[2].resolve(implicitOutcome === 'choices' ? choices : {...verified, asset_id: 'other'});
+  await implicit;
+  if (!explicitFirst) await finishChoice();
+  assert.equal(elements.asset_id.value, 'asset');
+  assert.equal(elements.exchange.value, 'NASDAQ');
+  assert.equal(elements.quote_currency.value, 'USD');
+  assert.equal(rows[0].instrument.asset_id, 'asset');
+  assert.deepEqual([...rows[0].portfolio_ids], [2]);
+  assert.deepEqual(elements.portfolios.options.map(option => option.selected), [false, true]);
+  assert.match(status.textContent, /1 matchende depot/);
+  assert.deepEqual(notices, []);
+  assert.equal(nodes['engine-batch-list'].textContent, '');
+}
+
 async function main() {
+  for (const caller of ['batch', 'submit']) {
+    for (const explicitFirst of [false, true]) {
+      for (const outcome of ['choices', 'verified', 'error']) await checkPendingAssetChoice(caller, explicitFirst, outcome);
+    }
+  }
   for (const sameCandidate of [false, true]) {
     for (const quoteFirst of [false, true]) await checkPendingSubmitLookup(sameCandidate, quoteFirst);
   }
