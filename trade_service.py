@@ -4,6 +4,7 @@ from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
 import oauth,report_ingest
 from mcp_client import MCP,decode_result,normalize,compatible
+from pending_orders import active_buy
 
 CONTRACT=json.loads((Path(__file__).parent/'pluto_trade_contract.json').read_text())
 class TradeError(ValueError):pass
@@ -195,8 +196,16 @@ def inactive_order_readback(connect,user_id,portfolio_id,factory=None):
         collection=record.get('collection')
         if collection is not None and not isinstance(collection,dict):
             raise TradeError('Plutos ordresvar har et ukendt Collection-format.')
+        for key in ('status','orderStatus','state'):
+            if key in record:
+                status=record[key]
+                if not isinstance(status,str) or not status.strip():
+                    raise TradeError('Pluto returnerede en ugyldig ordrestatus.')
+                if status.strip().upper() in ('ACTIVE','ACTIVE_BUY'):
+                    raise TradeError('Pluto returnerede en aktiv ordre i opslaget for inaktive ordrer.')
         if (record.get('collectionId') is not None
                 or (collection is not None and collection.get('id') is not None)
+                or active_buy(record)
                 or any(key in record and record[key]!=value for key,value in scope.items())):
             raise TradeError('Plutos ordresvar stemmer ikke med det valgte depot eller opslag.')
     for row in rows:

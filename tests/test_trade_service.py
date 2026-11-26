@@ -53,7 +53,8 @@ class Trading(unittest.TestCase):
   scope={'portfolioId':'root:stable','scope':'DIRECT','statusGroup':'INACTIVE','limit':50}
   raw=[{'orderId':'one','status':'CANCELLED','filledQuantity':'0'},
        {'id':'two','portfolioId':'root:stable','collectionId':None,'collection':{'id':None},'status':'FILLED','providerDetail':{'fee':None}},
-       {'orderId':'three','collection':None}]
+       {'orderId':'three','collection':None},
+       {'orderId':'four','type':'ACTIVE_BUY','status':'FILLED'}]
   boundary=[{'orderId':str(i)} for i in range(50)]
   with app.connect() as witness:
    before=witness.execute('PRAGMA data_version').fetchone()[0]
@@ -90,9 +91,14 @@ class Trading(unittest.TestCase):
   order={'orderId':'one'}
   invalid=[{},'unavailable',{'orders':None},{'orders':{}},{'unknown':[order]},{'orders':[order],'items':[]},
            {'orders':[order],'error':'denied'},{'orders':[],'success':False},[order,None],[{}],[{'id':3}],
-           [{'id':'fallback','orderId':None}],[{**order,'isError':True}],[order]*51]
+           [{'id':'fallback','orderId':None}],[{**order,'isError':True}],[order]*51,
+           {'orders':[{**order,'status':'ACTIVE_BUY'}]},
+           {'orders':[{**order,'status':'ACTIVE_BUY','orderStatus':'FILLED'}]}]
   for field,value in (('portfolioId','other'),('scope','COLLECTION'),('collectionId','child'),
-                      ('collection',{'id':'child'}),('collection','child'),('statusGroup','ACTIVE')):
+                      ('collection',{'id':'child'}),('collection','child'),('statusGroup','ACTIVE'),
+                      ('status','ACTIVE_BUY'),('orderStatus','active_buy'),('state','ACTIVE'),
+                      ('status',None),('status',{}),('status',' '),
+                      ('holding',{'type':'ACTIVE_BUY'})):
    conflicting={'orderId':'two','portfolioId':'root','collectionId':None,field:value}
    invalid.extend([{'orders':[order],field:value},[order,conflicting],{'orders':[order,conflicting]}])
   with app.connect() as witness:
