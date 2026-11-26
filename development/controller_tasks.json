@@ -1218,7 +1218,7 @@
     "task": "Next narrow #54 slice after #54:9 accepted. Only data-engine-control branch in static/engine-ui.js: after asynchronous pause/resume/stop API response, do not reload or open detail in a changed authenticated session epoch/owner/mode or superseded dialog; suppress stale rejection, preserve legitimate current errors and same-session success. Guard each deferred continuation using existing session/interaction helpers, including after load() before detail(); do not change the actual control request or other handlers. Extend existing actual-source Node VM tests/test_engine_load_epoch.js with deferred old success/error and current normal flow. Run node --check static/engine-ui.js and node tests/test_engine_load_epoch.js. No browser setup, broad UI redesign, production, live calls, or broker actions. Deliver small tested code with ESCAPE_DRAFT_READY."
   },
   {
-    "status": "ready",
+    "status": "done",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "4fa823b59a74c6dbbb35e4fd1d335a2a5f0d8de7",
