@@ -306,14 +306,15 @@ class HotWatch(unittest.TestCase):
   with app.connect() as c:
    row=engine.row_for(c,1,req['watch_id'],True);interval=engine.effective_poll_interval(c,req)
    self.assertEqual(row['last_error'],'EODHD_DAILY_BUDGET');self.assertAlmostEqual(row['next_due'],(self.now+timedelta(seconds=6+interval)).timestamp())
+ def exchange_subscriptions(self,*symbols):
+  for index,symbol in enumerate(symbols):
+   req=self.req if index==0 else dict(self.req,watch_id=f'exchange-{index}',purpose=f'exchange subscription {index}')
+   if index:engine.create(app.connect,1,req,self.now)
+   with app.connect() as c:
+    c.execute("UPDATE hw_sessions SET is_test=0,request=json_set(request,'$.provider','eodhd','$.provider_symbol',?) WHERE user_id=1 AND watch_id=?",(symbol,req['watch_id']))
  def test_exchange_status_refresh_does_not_starve_later_exchange(self):
   import hotwatch_service as service
-  second=copy.deepcopy(self.req);second.update(watch_id='other-exchange',purpose='other exchange')
-  engine.create(app.connect,1,second,self.now)
-  with app.connect() as c:
-   for wid,symbol in ((self.req['watch_id'],'MERC.CO'),(second['watch_id'],'LHA.XETRA')):
-    row=c.execute('SELECT id,request FROM hw_sessions WHERE watch_id=?',(wid,)).fetchone();req=json.loads(row['request']);req.update(provider='eodhd',provider_symbol=symbol)
-    c.execute('UPDATE hw_sessions SET is_test=0,request=? WHERE id=?',(json.dumps(req),row['id']))
+  self.exchange_subscriptions('MERC.CO','LHA.XETRA')
   calls=[]
   class Client:
    def market_status(client,exchange):
@@ -323,6 +324,74 @@ class HotWatch(unittest.TestCase):
     with patch('hotwatch_engine.utc',return_value=at):self.assertEqual(service.exchange_status_tick(app.connect,lambda:Client(),at),'OK')
   self.assertEqual(calls,['CO','XETRA'])
   with app.connect() as c:self.assertIsNotNone(c.execute("SELECT received FROM hw_exchange_calendar WHERE exchange='XETRA'").fetchone())
+ def test_exchange_status_reads_due_times_once_per_phase(self):
+  import hotwatch_service as service
+  self.exchange_subscriptions('A.CO','B.US','C.XETRA','D.xetra','E.LSE','F.BE','G.US')
+  epoch=self.now.timestamp()
+  initial={'CO':epoch+90,'US':epoch,'LSE':epoch,'UNUSED':0}
+  with app.connect() as c:
+   # The second tenant is the only subscriber to BE and shares US with the first.
+   c.execute("INSERT INTO users(id,username) VALUES(2,'second-test-tenant')")
+   c.execute("UPDATE hw_sessions SET user_id=2 WHERE watch_id IN ('exchange-5','exchange-6')")
+   c.execute('INSERT INTO hw_control VALUES(?,?,?,?)',(2,1,self.now.isoformat(),'test'))
+   c.executemany('INSERT INTO hw_exchange_status(exchange,next_attempt) VALUES(?,?)',initial.items())
+  reads=[];calls=[]
+  def traced_connect():
+   c=app.connect()
+   def trace(sql):
+    if sql.lstrip().upper().startswith('SELECT') and 'hw_exchange_status' in sql.lower() and 'next_attempt' in sql.lower():
+     reads.append(c.in_transaction)
+   c.set_trace_callback(trace)
+   return c
+  class Client:
+   def market_status(client,exchange):
+    # A second writer can already see the reservation when provider I/O starts.
+    with app.connect() as observer:
+     observer.execute('PRAGMA busy_timeout=0')
+     observer.execute('BEGIN IMMEDIATE')
+     reserved=observer.execute('SELECT next_attempt FROM hw_exchange_status WHERE exchange=?',(exchange,)).fetchone()
+     calls.append((exchange,reserved['next_attempt']))
+    return {'status':'OK','exchange':exchange,'exchange_open':False,'received_at':self.now.isoformat()}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}),patch.object(engine,'utc',return_value=self.now):
+   expected=dict(initial)
+   for exchange in ('XETRA','LSE','US',None):
+    with self.subTest(exchange=exchange):
+     reads.clear();calls.clear()
+     result=service.exchange_status_tick(traced_connect,Client,self.now)
+     self.assertEqual(result,'OK' if exchange else None)
+     self.assertEqual(calls,[(exchange,epoch+60)] if exchange else [])
+     self.assertEqual(reads,[False,True] if exchange else [False])
+     if exchange:expected[exchange]=epoch+60
+     with app.connect() as c:self.assertEqual(dict(c.execute('SELECT exchange,next_attempt FROM hw_exchange_status')),expected)
+ def test_exchange_status_rechecks_eligibility_reservations_and_kill_under_lock(self):
+  import hotwatch_service as service
+  self.exchange_subscriptions('A.CO','B.US','C.XETRA')
+  epoch=self.now.timestamp()
+  def racing_connect():
+   c=app.connect()
+   def before_lock(sql):
+    if sql=='BEGIN IMMEDIATE':
+     with app.connect() as other:
+      if killed:other.execute('UPDATE hw_system_control SET killed=1 WHERE id=1')
+      else:
+       other.execute("UPDATE hw_sessions SET status='PAUSED' WHERE watch_id=?",(self.req['watch_id'],))
+       other.execute("INSERT INTO hw_exchange_status(exchange,next_attempt) VALUES('US',?)",(epoch+120,))
+   c.set_trace_callback(before_lock)
+   return c
+  calls=[]
+  class Client:
+   def market_status(client,exchange):
+    calls.append(exchange)
+    return {'status':'LOCAL_BUDGET_EXHAUSTED'}
+  with patch.dict(os.environ,{'ESCAPE_HW_EODHD_REST_ENABLED':'1','ESCAPE_EODHD_API_KEY':'synthetic'}):
+   for killed in (True,False):
+    with self.subTest(killed=killed):
+     with app.connect() as c:c.execute('UPDATE hw_system_control SET killed=0 WHERE id=1')
+     result=service.exchange_status_tick(racing_connect,Client,self.now)
+     self.assertEqual(result,None if killed else 'LOCAL_BUDGET_EXHAUSTED')
+     self.assertEqual(calls,[] if killed else ['XETRA'])
+     expected={} if killed else {'US':epoch+120,'XETRA':epoch+60}
+     with app.connect() as c:self.assertEqual(dict(c.execute('SELECT exchange,next_attempt FROM hw_exchange_status')),expected)
  def test_exchange_status_refresh_is_cached_and_failed_read_does_not_refresh_old_evidence(self):
   import hotwatch_service as service
   with app.connect() as c:
