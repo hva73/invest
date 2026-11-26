@@ -277,6 +277,28 @@ const run = async () => {
     const manualResult = () => byId('engine-manual-results').querySelector('[data-engine-manual]');
     const manualStatus = () => byId('engine-manual-status').textContent;
     const sameForm = byId('engine-manual-search');
+    const multipleResults = searchManual('Two listings');
+    take('manual-search', 'beta').resolve({assets: [
+        {asset_id: 'first-listing', ticker: 'FIRST'}, {asset_id: 'second-listing', ticker: 'SECOND'}
+    ]});
+    await multipleResults;
+    const [firstResult, secondResult] = byId('engine-manual-results').querySelectorAll('[data-engine-manual]');
+    const firstStart = EngineUI.click(firstResult);
+    const firstRequest = take('manual-start', 'beta');
+    const secondStart = EngineUI.click(secondResult);
+    const duplicateStart = pending.some(request => request.path.includes('manual-start'));
+    if (duplicateStart) take('manual-start', 'beta').reject(Error('Unexpected concurrent start'));
+    await secondStart;
+    firstRequest.reject(Error('First listing unavailable'));
+    await firstStart;
+    assert(!duplicateStart && firstRequest.args.asset_id === 'first-listing' &&
+        manualStatus() === 'First listing unavailable', 'Two results started concurrently or lost the first result status');
+    const alternateStart = EngineUI.click(secondResult);
+    const alternateRequest = take('manual-start', 'beta');
+    assert(alternateRequest.args.asset_id === 'second-listing', 'Another listing could not start after failure');
+    alternateRequest.reject(Error('Second listing unavailable'));
+    await alternateStart;
+
     for (const outcome of ['success', 'error']) {
         const searchA = searchManual('AAA');
         resolveSearch('AAA');
@@ -294,6 +316,11 @@ const run = async () => {
         await searchB;
         const resultB = manualResult(), statusB = manualStatus();
         if (outcome === 'success') {
+            const overlappingStart = EngineUI.click(resultB);
+            const duplicate = pending.some(request => request.path.includes('manual-start'));
+            if (duplicate) take('manual-start', 'beta').reject(Error('Unexpected start from a new search'));
+            await overlappingStart;
+            assert(!duplicate, 'Searching again bypassed the form start lock');
             pendingA.resolve({session:{watch_id:'aaa-watch'}});
             await new Promise(resolve=>setTimeout(resolve,0));
             assert(!pending.some(request => request.path === 'state'), 'Old start fetched instrument detail');
@@ -1285,6 +1312,33 @@ const run = async () => {
     await external;
     check(dialog.open && !ackButton.isConnected && dialog.dataset.watchId === 'alpha-recovered',
         'External detail polling did not recover after failed logout');
+
+    const modeSignal = is_test => ({
+        ...session(is_test ? 'test-alert' : 'live-alert'), is_test,
+        last_action_signal: {event_id: 'mode-event', event_type: 'SELL_SIGNAL', state: 'ACTIVE'}
+    });
+    archiveFixture = {current: [modeSignal(false)], page: () => ({sessions: []})};
+    switchAccount('alpha');
+    await flush();
+    const alert = () => button('#engine-root [data-engine-notice]');
+    const liveAlert = alert();
+    assert(liveAlert, 'Missing the live alert before switching modes');
+    holdCurrentLoad = true;
+    EngineUI.mount(true);
+    const testLoad = take('is_test=true', 'alpha');
+    check(!alert(), 'Switching to Testdata left a live alert visible while the test list loaded');
+    await EngineUI.click(liveAlert);
+    check(!document.querySelector('#engine-dialog[open]'), 'An obsolete live alert opened in Testdata');
+    holdCurrentLoad = false;
+    testLoad.resolve({sessions: [modeSignal(true)], kill_switch: {}});
+    await flush();
+    await EngineUI.click(alert());
+    const testAcknowledgement = EngineUI.click(button('[data-engine-ack]'));
+    const testAck = take('/ack-signal', 'alpha');
+    check(testAck.path.includes('/test-alert/') && testAck.args.is_test === true,
+        'The new mode did not acknowledge its own alert');
+    testAck.resolve({});
+    await testAcknowledgement;
     assert(!failures.length, failures.join(' | '));
 };
 window.testResult = run().then(() => 'PASS', error => String(error) + '\\n' + (error.stack || ''));

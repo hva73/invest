@@ -56,6 +56,52 @@ CHECK_STORED_POLL = """async () => {
  } finally { window.fetch = originalFetch; }
 }"""
 
+CHECK_HOLDING_DIALOG = """async () => {
+ const originalFetch = window.fetch;
+ const originalDashboard = state.dashboard;
+ const watch = 'fixture-holding-watch';
+ const session = {watch_id: watch, status: 'ACTIVE', signal: 'WAIT', display_status: 'AFVENT',
+   request: {ticker: 'HOLDING A', watch_mode: 'exit', portfolio_ids: []}};
+ const portfolio = state.portfolios.find(row => row.source === 'pluto' && row.kind === 'portfolio');
+ const sample = {portfolio_id: portfolio.id, portfolio_kind: portfolio.kind, portfolio_name: portfolio.name,
+   quantity: '1', verification: 'broker_snapshot', raw: {}, missing: {}, conflicts: []};
+ const holdingA = {...sample, key: 'holding-a', asset_id: 'holding-a', ticker: 'HOLDING A', hot_watch: {session}};
+ const holdingB = {...sample, key: 'holding-b', asset_id: 'holding-b', ticker: 'HOLDING B', hot_watch: {}};
+ const answer = (data, status = 200) => new Response(JSON.stringify(data), {status});
+ let finishState;
+ window.fetch = (url, options) => {
+  if (url === '/api/state') return new Promise(resolve => { finishState = resolve; });
+  if (url.startsWith('/api/v1/hotwatch/sessions/' + watch)) {
+   return Promise.resolve(answer(url.includes('/samples?') || url.includes('/events?') ? {items: []} : {session}));
+  }
+  return originalFetch(url, options);
+ };
+ try {
+  state.dashboard = {...originalDashboard, positions: [holdingA, holdingB], overview_positions: [holdingA, holdingB]};
+  const failures = [];
+  for (const outcome of ['success', 'error']) {
+   render();
+   const watchButton = document.querySelector('[data-dashboard-watch="' + watch + '"]');
+   const holdingButton = document.querySelector('.mobile-holding[data-dashboard-open="1"]');
+   if (!watchButton || !holdingButton) throw Error('Missing fixture holdings on Overview');
+   const opening = DashboardUI.click(watchButton).catch(error => failures.push(error.message));
+   holdingButton.click();
+   await new Promise(resolve => setTimeout(resolve, 0));
+   const holding = document.querySelector('#dashboard-detail[open]');
+   if (!holding?.querySelector('h2').textContent.includes('HOLDING B')) throw Error('Holding B did not open');
+   finishState(outcome === 'success' ? answer(state) : answer({error: 'Obsolete holding error'}, 500));
+   await opening;
+   if (!holding.open || document.querySelector('#engine-dialog[open]')) failures.push(outcome);
+   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
+  }
+  if (failures.length) throw Error('Obsolete HOT WATCH detail reached holding B: ' + failures.join(', '));
+ } finally {
+  window.fetch = originalFetch;
+  state.dashboard = originalDashboard;
+  render();
+ }
+}"""
+
 CHECK_MANUAL_SALE_SESSION = """async () => {
  const originalFetch = window.fetch;
  const watch = 'fixture-manual-sale';
@@ -212,6 +258,7 @@ try:
     assert abs(before['y']-after['y'])<2,(width,before,after)
     if width==390:
      page.evaluate(CHECK_STORED_POLL)
+     page.evaluate(CHECK_HOLDING_DIALOG)
      page.evaluate(CHECK_MANUAL_SALE_SESSION)
    else:
     expect(page.locator('#mobile-more')).to_be_hidden();assert page.locator('main > header #logout').count()==1;nav.locator('[data-view=trade]').click();expect(page.locator('.broker-trade')).to_be_visible()
