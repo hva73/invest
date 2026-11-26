@@ -366,6 +366,8 @@ def estimate(connect,user_id,data,factory=None):
         c.execute("UPDATE broker_proposals SET status='estimated',estimated=?,review_token=?,estimate=?,asset=?,sell_basis=?,error=NULL WHERE id=? AND user_id=? AND status IN ('draft','estimated')",(time.time(),secrets.token_urlsafe(24),json.dumps(result),json.dumps(asset),json.dumps(basis) if basis else None,pid,user_id))
     return {'proposal':view(get(connect,user_id,pid))}
 
+INTENT_ORDER_FIELDS=('assetId','side','orderType','timeInForce')
+
 def intent_reference(raw,payload):
     if not isinstance(raw,dict):return None
     intent=raw.get('orderIntentId')
@@ -373,7 +375,7 @@ def intent_reference(raw,payload):
         items=raw['orderIntents'];orders=payload.get('orders') or []
         if len(items)==len(orders)==1 and isinstance(items[0],dict):
             item=items[0];order=orders[0]
-            if all(item.get(k)==order.get(k) for k in ('assetId','side','orderType','timeInForce')):intent=item.get('orderIntentId')
+            if all(item.get(k)==order.get(k) for k in INTENT_ORDER_FIELDS):intent=item.get('orderIntentId')
     return intent if isinstance(intent,str) and 1<=len(intent)<=200 else None
 
 def send(connect,user_id,data,factory=None):
@@ -412,11 +414,25 @@ def send(connect,user_id,data,factory=None):
         with connect() as c:c.execute("UPDATE broker_proposals SET status='uncertain',error=? WHERE id=? AND user_id=?",('Afsendelsens resultat er uafklaret. Kontrollér i Pluto. Ingen automatisk genafsendelse.',row['id'],user_id))
     return {'proposal':view(get(connect,user_id,row['id']))}
 
+def status_matches_proposal(raw,payload,reference):
+    if not isinstance(raw,dict) or raw.get('orderIntentId',reference)!=reference:
+        return False
+    orders=payload.get('orders') or []
+    if len(orders)==1 and any(raw[key]!=orders[0].get(key) for key in INTENT_ORDER_FIELDS if key in raw):
+        return False
+    items=raw.get('orderIntents',[])
+    if items==[]:
+        return raw.get('orderIntentId')==reference
+    # Check the batch independently so a matching root cannot mask a conflicting order.
+    return intent_reference({'orderIntents':items},payload)==reference
+
 def check(connect,user_id,pid,factory=None):
     row=get(connect,user_id,int(pid))
     reference=view(row)['intent_id']
     if not reference:raise TradeError('Ingen sikker Pluto-reference. Kontrollér forslaget i Pluto-appen.')
     cl,tools=client(connect,user_id,factory);raw=call(cl,tools,'get_order_intent',{'orderIntentId':reference})
+    if not status_matches_proposal(raw,json.loads(row['payload']),reference):
+        raise TradeError('Plutos statussvar kunne ikke knyttes til forslaget.')
     # Preserve exact provider status separately. Acceptance is never a fill.
     with connect() as c:c.execute("UPDATE broker_proposals SET response=?,intent_id=?,status='sent',error=NULL WHERE id=? AND user_id=?",(json.dumps(raw),reference,row['id'],user_id))
     return {'proposal':view(get(connect,user_id,row['id']))}
