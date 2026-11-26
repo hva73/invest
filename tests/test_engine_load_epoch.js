@@ -937,11 +937,21 @@ async function checkOverlappingQuotes(callers, verificationFirst, implicitOutcom
     await finishVerification();
   }
   await settle();
-  const submits = callers.includes('submit') && !stale;
+  const superseded = repeatedLookup === 'selection';
+  const submits = callers.includes('submit') && !stale && !superseded;
   assert.deepEqual(started, submits ? [['FIRST', 'asset', [2]]] : []);
   assert.equal(requests.length, submits ? 1 : 0);
   if (submits) requests.shift().succeed();
   await Promise.all([...actions, repeated, ...extraLookups]);
+  if (superseded) {
+    assert.equal(rows[0].instrument, undefined);
+    assert.deepEqual([elements.asset_id.value, elements.exchange.value, elements.quote_currency.value],
+      [undefined, undefined, undefined]);
+    assert.equal(nodes['engine-batch-list'].textContent, '');
+    assert.equal(nodes['engine-dialog'].closed, undefined);
+    assert.deepEqual(notices, callers.includes('submit') ? ['Pluto kunne ikke verificere alle instrumenter.'] : []);
+    return;
+  }
   assert.equal(elements.asset_id.value, 'asset');
   assert.equal(elements.exchange.value, 'NASDAQ');
   assert.equal(elements.quote_currency.value, 'USD');
@@ -1089,7 +1099,7 @@ async function checkManualSymbolReverification(sameAsset, searchFirst, fail, imp
   }
 }
 
-async function checkSharedSymbolRequest(fail, searchFirst) {
+async function checkSharedSymbolRequest(fail, searchFirst, quoteFails = false) {
   const {ui, call, calls, elements, nodes} = creationRequests();
   const select = value => ui.change({target: {id: 'engine-asset-choice', value}});
   const search = () => ui.click({dataset: {}, hasAttribute: key => key === 'data-engine-eodhd-search'});
@@ -1108,7 +1118,8 @@ async function checkSharedSymbolRequest(fail, searchFirst) {
     await oldSearch;
     assert.equal(elements.provider_symbol.value, '');
   }
-  verification.resolve(quote('asset'));
+  if (quoteFails) verification.reject(Error('choice failed'));
+  else verification.resolve(quote('asset'));
   await change;
   if (!searchFirst) finishSearch();
   await Promise.all([oldSearch, newSearch]);
@@ -1273,7 +1284,10 @@ async function checkCreationBoundary(stage, change, fail) {
 
 async function main() {
   for (const fail of [true, false]) {
-    for (const searchFirst of [true, false]) await checkSharedSymbolRequest(fail, searchFirst);
+    for (const searchFirst of [true, false]) {
+      await checkSharedSymbolRequest(fail, searchFirst);
+      if (fail) await checkSharedSymbolRequest(fail, searchFirst, true);
+    }
     for (const currency of ['USD', 'EUR']) {
       for (const explicit of [false, true]) await checkSymbolSearchDuringFirstQuote(currency, fail, explicit);
     }
