@@ -502,7 +502,59 @@ async function checkPlanClick(newerWatch, planClick = true) {
   assert.deepEqual(effects, expanded ? ['nearest', true] : []);
 }
 
+async function checkPolling(change) {
+  const {context, session, dialog, requests, mount, records} = settingsFixture();
+  let tick;
+  context.setTimeout = (callback, delay) => {
+    assert.equal(delay, 15000);
+    tick = callback;
+  };
+  const wid = 'poll/1';
+  Object.assign(dialog, {id: 'engine-dialog', open: true});
+  dialog.dataset.watchId = wid;
+  let active = dialog;
+  const lookup = context.document.getElementById;
+  context.document.getElementById = id => id === 'engine-dialog' ? active : lookup(id);
+  context.document.querySelector = selector => {
+    assert.equal(selector, 'dialog[open]');
+    return active.open ? active : null;
+  };
+  const reads = [];
+  session.detail = url => {
+    reads.push(url);
+    if (url === 'state') return {portfolios: []};
+    if (url.includes('/samples?') || url.includes('/events?')) return {items: []};
+    return {session: {request: {ticker: 'POLL'}, status: 'ACTIVE'}};
+  };
+  mount().succeed();
+  await settle();
+  const pending = tick();
+  assert.equal(requests.length, 1);
+  const reload = requests.shift();
+  if (change === 'epoch') session.epoch++;
+  if (change === 'owner') session.owner = 'new-owner';
+  if (change === 'mode') mount(true).succeed();
+  if (change === 'closed') dialog.open = false;
+  if (change === 'reopened') records.push({type: 'attributes', target: {matches: s => s === 'dialog'}});
+  if (change === 'replaced') active = {...dialog};
+  if (change === 'watch') dialog.dataset.watchId = 'poll/2';
+  tick = null;
+  reload.succeed();
+  await pending;
+  assert.equal(typeof tick, 'function', 'polling must continue');
+  assert.equal(requests.length, 0);
+  const endpoint = 'v1/hotwatch/sessions/poll%2F1';
+  assert.deepEqual(reads, change ? [] : [
+    endpoint + '?is_test=false', endpoint + '/samples?is_test=false&limit=100&order=desc',
+    endpoint + '/events?is_test=false&limit=50&order=desc', 'state'
+  ], change);
+  if (!change) assert.match(dialog.innerHTML, /POLL · motorforløb/);
+}
+
 async function main() {
+  for (const change of ['epoch', 'owner', 'mode', 'closed', 'reopened', 'replaced', 'watch', null]) {
+    await checkPolling(change);
+  }
   await checkPlanClick('second');
   await checkPlanClick('first');
   await checkPlanClick(null);
