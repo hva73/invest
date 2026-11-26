@@ -2998,7 +2998,7 @@
     "generation": 9,
     "role": "desktop",
     "priority": 1,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "4d273261961add990d33dff1457f5d0d61979c4c",
     "dependencies": [],
