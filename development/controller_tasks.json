@@ -1339,7 +1339,7 @@
     "task": "Next small #54 session isolation slice: only data-engine-manual branch in static/engine-ui.js. Capture epoch, owner, mode and originating dialog/button before awaiting manual-start; suppress stale response/error and guard after load before detail. Preserve legitimate current manual-start request/response and approved layout. No duplicate request design changes, no actual provider/broker calls. Extend actual-source Node VM tests for delayed previous login success/error and ordinary current path using stub API. Run node syntax and focused Node test, deliver ESCAPE_DRAFT_READY. Do not audit unrelated functions."
   },
   {
-    "status": "ready",
+    "status": "done",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "0ba54a084311482de9137532885a99b7a87be29a",
