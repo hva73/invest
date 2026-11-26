@@ -874,16 +874,19 @@ def reconcile_closed_holdings(connect,now=None):
  now=now or engine.utc();closed=0
  def absent(c,row):
   req=json.loads(row['request']);pids=req.get('portfolio_ids',[]);aid=req.get('asset_id')
-  if len(pids)!=1 or not aid:return None
+  if len(pids)!=1 or not isinstance(aid,str) or not aid or aid!=aid.strip():return None
   snap=c.execute("SELECT s.payload,s.last_error FROM portfolios p JOIN portfolio_snapshots s ON s.portfolio_id=p.id AND s.user_id=p.user_id WHERE p.id=? AND p.user_id=? AND p.active=1 AND p.source='pluto'",(pids[0],row['user_id'])).fetchone()
   if not snap or snap['last_error']:return None
   try:
-   payload=json.loads(snap['payload']);observed=stamp(payload['observed']);positions=payload['positions']
+   payload=json.loads(snap['payload'],parse_float=Decimal);observed=stamp(payload['observed']);positions=payload['positions']
    if not payload.get('positions_complete') or not isinstance(positions,list) or not 0<=(now-observed).total_seconds()<=300 or observed<stamp(row['created']):return None
-   if any(not isinstance(p,dict) or not p.get('kind') for p in positions):return None
-   holdings=[p for p in positions if p.get('kind')=='holding']
-   if any(not p.get('asset_id') or p.get('quantity') is None for p in holdings):return None
-   if any(p['asset_id']==aid and Decimal(str(p['quantity']))!=0 for p in holdings):return None
+   for position in positions:
+    if not isinstance(position,dict) or not position.get('kind'):return None
+    if position['kind']!='holding':continue
+    asset_id=position.get('asset_id')
+    if not isinstance(asset_id,str) or not asset_id or asset_id!=asset_id.strip():return None
+    quantity=Decimal(str(position['quantity']))
+    if not quantity.is_finite() or (asset_id==aid and quantity!=0):return None
    return pids[0],aid,observed
   except (AttributeError,KeyError,TypeError,ValueError,InvalidOperation):return None
  with connect() as preflight:
