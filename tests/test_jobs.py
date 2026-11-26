@@ -31,6 +31,54 @@ class Jobs(unittest.TestCase):
    jobs.enqueue(c,'ecb',1,'crash',0);c.execute("UPDATE jobs SET status='running',attempts=1,lease='old',lease_until=1")
   jobs.run_one(app.connect,self.payload,at=2)
   with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM jobs').fetchone()[0],'done')
+ def test_idle_poll_with_another_writer(self):
+  statements=[]
+  def worker_connect():
+   c=app.connect()
+   c.execute('PRAGMA busy_timeout=0')
+   c.set_trace_callback(statements.append)
+   return c
+  for state,stamp in (('empty',0),('future',9),('unexpired',9),('lease deadline',10)):
+   with self.subTest(state=state), app.connect() as writer:
+    if state=='future':
+     jobs.enqueue(writer,'report',1,'future',12)
+    elif state=='unexpired':
+     jobs.enqueue(writer,'report',1,'occupied',0)
+     writer.execute("UPDATE jobs SET status='running',attempts=1,lease='owner',lease_until=10 WHERE dedupe='occupied'")
+    writer.commit()
+    writer.execute('BEGIN IMMEDIATE')
+    statements.clear()
+    self.assertFalse(jobs.run_one(worker_connect,at=stamp))
+    self.assertFalse(any(sql.lstrip().upper().startswith('BEGIN') for sql in statements))
+  self.assertTrue(jobs.run_one(app.connect,at=12))
+  self.assertTrue(jobs.run_one(app.connect,at=12))
+  with app.connect() as c:
+   rows=c.execute('SELECT dedupe,status,attempts,lease FROM jobs ORDER BY id').fetchall()
+   self.assertEqual([tuple(row) for row in rows],[('future','done',1,None),('occupied','done',2,None)])
+ def test_expired_final_attempt_is_failed_without_due_work(self):
+  with app.connect() as c:
+   jobs.enqueue(c,'report',1,'crashed',0)
+   c.execute("UPDATE jobs SET status='running',attempts=3,lease='old',lease_until=10")
+  self.assertFalse(jobs.run_one(app.connect,at=11))
+  with app.connect() as c:
+   row=c.execute('SELECT status,attempts,lease,lease_until FROM jobs').fetchone()
+   self.assertEqual(tuple(row),('failed',3,None,None))
+ def test_due_job_claimed_between_preflight_and_writer_lock(self):
+  with app.connect() as c:jobs.enqueue(c,'report',1,'contested',10)
+  competing_claims=[]
+  def before_statement(sql):
+   if sql.upper()=='BEGIN IMMEDIATE':
+    competing_claims.append(jobs.run_one(app.connect,at=10))
+  def worker_connect():
+   c=app.connect()
+   c.set_trace_callback(before_statement)
+   return c
+  self.assertFalse(jobs.run_one(worker_connect,at=10))
+  self.assertEqual(competing_claims,[True])
+  with app.connect() as c:
+   row=c.execute('SELECT status,attempts,lease,lease_until FROM jobs').fetchone()
+   self.assertEqual(tuple(row),('done',1,None,None))
+   self.assertEqual(c.execute('SELECT count(*) FROM reports').fetchone()[0],1)
  def enqueue_pluto(self):
   with app.connect() as c:
    pid=c.execute("INSERT INTO portfolios(user_id,name,source,updated) VALUES(?,'Fixture','pluto',0)",(self.uid,)).lastrowid
