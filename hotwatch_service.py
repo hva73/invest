@@ -798,7 +798,9 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
    try:fresh=0<=(now-stamp(payload['observed'])).total_seconds()<=300
    except (KeyError,TypeError,ValueError):fresh=False
    if not fresh:continue
-   for holding in payload.get('positions',[]):
+   positions=payload.get('positions')
+   if not isinstance(positions,list) or any(not isinstance(position,dict) for position in positions):continue
+   for holding in positions:
     aid=holding.get('asset_id')
     try:valid=holding.get('kind')=='holding' and isinstance(aid,str) and bool(aid) and Decimal(str(holding.get('quantity')))>0
     except (InvalidOperation,ValueError,TypeError):valid=False
