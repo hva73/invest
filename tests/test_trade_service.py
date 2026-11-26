@@ -15,6 +15,7 @@ class Trading(unittest.TestCase):
   self.report=json.loads((ROOT/'examples/report-v2-test.json').read_text());self.report.update(report_id='trade-source',is_test=False);self.report['data_quality']['status']='mixed';self.report['candidates'][0]['signal']='KØB';report_ingest.save(app.connect,1,self.report)
   self.request={'report_id':'trade-source','candidate_id':self.report['candidates'][0]['candidate_id'],'portfolio_id':self.root,'kind':'direct','asset_id':'asset-test','size_mode':'shares','size':'2','currency':'DKK','order_type':'LIMIT','time_in_force':'DAY','limit_price':'100.50'}
   self.account_data={'accounts':[{'currency':'DKK','balance':'1000','buyingPower':'900','reservedForOrders':'100'}]};self.calls=[];self.can_trade=True;self.write_result={'orderIntentId':'synthetic-intent'};self.fail_send=False;self.changed=False
+  self.intent_status={'orderIntentId':'synthetic-intent','status':'accepted'}
   case=self
   class Client:
    def __init__(self,token):assert token=='synthetic'
@@ -34,7 +35,7 @@ class Trading(unittest.TestCase):
     elif name.startswith('propose_'):
      if case.fail_send:raise TimeoutError('Synthetic timeout after request')
      result=case.write_result
-    elif name=='get_order_intent':result={'orderIntentId':'synthetic-intent','status':'accepted'}
+    elif name=='get_order_intent':result=case.intent_status
     elif name=='search_assets':result={'assets':[{'id':'asset-test','name':'Synthetic asset','ticker':'TEST','isin':'SYNTHETIC','currency':'USD'}]}
     else:raise AssertionError(name)
     return {'structuredContent':result}
@@ -262,6 +263,51 @@ class Trading(unittest.TestCase):
   self.assertIsNone(trade.intent_reference({'orderIntents':raw['orderIntents']*2},{'orders':[order]}))
   row={'payload':json.dumps({'orders':[order]}),'response':json.dumps(raw),'estimate':None,'asset':None,'sell_basis':None,'status':'uncertain','intent_id':None,'error':'uafklaret'}
   self.assertEqual(trade.view(row)['status'],'sent');self.assertEqual(trade.view(row)['intent_id'],'intent-1')
+ def test_check_refreshes_status_for_matching_reference(self):
+  proposal=self.send(self.estimate())
+  reference=proposal['intent_id']
+  root={'orderIntentId':reference}
+  order=proposal['payload']['orders'][0]
+  item={**root,'assetId':order['assetId'],'side':order['side'],'orderType':order['orderType'],'timeInForce':order['timeInForce']}
+  for identity in (root,{**root,'orderIntents':[]},{'orderIntents':[item]},{**root,'orderIntents':[item]},item):
+   with self.subTest(identity=identity):
+    self.intent_status={**identity,'status':'accepted'}
+    self.calls.clear()
+    refreshed=trade.check(app.connect,1,proposal['id'],self.factory)['proposal']
+    self.assertEqual(refreshed['response'],self.intent_status)
+    self.assertEqual((refreshed['intent_id'],refreshed['status']),(reference,'sent'))
+    self.assertEqual(self.calls,[{'name':'get_order_intent','arguments':root}])
+ def test_check_rejects_unverified_status_and_preserves_entire_row(self):
+  proposal=self.send(self.estimate())
+  root={'orderIntentId':proposal['intent_id']}
+  item={**proposal['payload']['orders'][0],**root}
+  foreign={'orderIntentId':'foreign'}
+  invalid=[
+   [],'accepted',{'status':'accepted'},foreign,{'orderIntents':[]},
+   {**foreign,'orderIntents':[item]},{'orderIntentId':None,'orderIntents':[item]},
+   {**root,'assetId':'other'},{**root,'side':'SELL'},
+  ]
+  for nested in (None,{},[None],[item,item],[{**item,**foreign}],
+                 [proposal['payload']['orders'][0]],[root],[{**item,'assetId':'other'}],
+                 [{**item,'side':'SELL'}],[{**item,'orderType':'MARKET'}],[{**item,'timeInForce':'GTC'}]):
+   invalid.extend([{'orderIntents':nested},{**root,'orderIntents':nested}])
+  before=tuple(trade.get(app.connect,1,proposal['id']))
+  for reply in invalid:
+   with self.subTest(reply=reply):
+    self.intent_status=reply
+    self.calls.clear()
+    with self.assertRaises(trade.TradeError):
+     trade.check(app.connect,1,proposal['id'],self.factory)
+    self.assertEqual(tuple(trade.get(app.connect,1,proposal['id'])),before)
+    self.assertEqual(self.calls,[{'name':'get_order_intent','arguments':root}])
+ def test_check_rejects_other_tenant_before_provider_lookup(self):
+  proposal=self.send(self.estimate())
+  before=tuple(trade.get(app.connect,1,proposal['id']))
+  self.calls.clear()
+  with self.assertRaisesRegex(trade.TradeError,'konto'):
+   trade.check(app.connect,2,proposal['id'],self.factory)
+  self.assertEqual(self.calls,[])
+  self.assertEqual(tuple(trade.get(app.connect,1,proposal['id'])),before)
  def test_cancel_only_own_pending_intent_and_confirm_provider_status(self):
   proposal=self.send(self.estimate());original=self.factory;state={'status':'PENDING','calls':0}
   class CancelClient(original):
