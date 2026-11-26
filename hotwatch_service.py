@@ -802,9 +802,11 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
    if not isinstance(positions,list) or any(not isinstance(position,dict) for position in positions):continue
    for holding in positions:
     aid=holding.get('asset_id')
-    try:valid=holding.get('kind')=='holding' and isinstance(aid,str) and bool(aid) and Decimal(str(holding.get('quantity')))>0
-    except (InvalidOperation,ValueError,TypeError):valid=False
-    if valid:choices.append((snap['user_id'],snap['id'],holding))
+    if holding.get('kind')!='holding' or not isinstance(aid,str) or not aid:continue
+    try:quantity=Decimal(str(holding.get('quantity')))
+    except (InvalidOperation,ValueError,TypeError):continue
+    if quantity.is_finite() and quantity>0:
+     choices.append((snap['user_id'],snap['id'],holding))
   for uid,pid,holding in choices:
    aid=holding['asset_id']
    control=c.execute('SELECT killed FROM hw_control WHERE user_id=?',(uid,)).fetchone()

@@ -1162,6 +1162,20 @@ class HoldingAutowatch(unittest.TestCase):
   with app.connect() as c:
    rows=c.execute('SELECT user_id,portfolio_id,asset_id,status FROM hw_holding_autowatch').fetchall()
    self.assertEqual([tuple(row) for row in rows],[(2,later_pid,self.holding['asset_id'],'LINKED')])
+ def test_nonfinite_quantities_are_skipped_before_first_positive_holding(self):
+  positions=[dict(self.holding,asset_id='invalid-'+value,quantity=value) for value in ('Infinity','-Infinity','NaN')]
+  first=dict(self.holding,quantity='0.25')
+  positions.extend([first,dict(self.holding,asset_id='later-positive')])
+  payload={'positions_complete':True,'observed':self.now.isoformat(),'positions':positions}
+  with app.connect() as c:
+   c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=? AND user_id=1',(json.dumps(payload),self.pid))
+  with patch.object(self,'verify',wraps=self.verify) as verify:
+   self.assertEqual(self.tick(verify=verify,lookup=self.lookup),'LINKED')
+   verify.assert_called_once_with(app.connect,1,first)
+  with app.connect() as c:
+   rows=c.execute('SELECT user_id,portfolio_id,asset_id,status FROM hw_holding_autowatch').fetchall()
+   self.assertEqual([tuple(row) for row in rows],[(1,self.pid,first['asset_id'],'LINKED')])
+   self.assertEqual(c.execute('SELECT count(*) FROM hw_sessions').fetchone()[0],1)
  def test_old_snapshot_is_not_used(self):
   with app.connect() as c:
    payload={'positions_complete':True,'observed':(self.now-timedelta(minutes=6)).isoformat(),'positions':[self.holding]}
