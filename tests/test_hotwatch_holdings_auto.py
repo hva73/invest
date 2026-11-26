@@ -1203,10 +1203,14 @@ class HoldingAutowatch(unittest.TestCase):
    c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(snapshot(None),self.pid))
    c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?)',
              (self.fixture.child,1,at,snapshot([self.holding,None]),at))
-   for i,flag in enumerate(('false','true',1,0.5,[True],{'complete':True},False,None)):
+   invalid_payloads=[snapshot([self.holding],flag) for flag in ('false','true',1,0.5,[True],{'complete':True},False,None)]
+   # Construct the nested array as JSON so the test exercises the snapshot reader's decoder.
+   for observed in ('null','42','true','{}','[]','['*2000+'null'+']'*2000):
+    invalid_payloads.append('{"positions_complete":true,"positions":%s,"observed":%s}'%(json.dumps([self.holding]),observed))
+   for i,payload in enumerate(invalid_payloads):
     pid=c.execute("INSERT INTO portfolios(user_id,name,source,external_id,updated) VALUES(1,?,'pluto',?,?)",
-                  (f'Invalid flag {i}',f'portfolios:flag-{i}',self.now.timestamp())).lastrowid
-    c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?)',(pid,1,at,snapshot([self.holding],flag),at))
+                  (f'Invalid snapshot {i}',f'portfolios:invalid-{i}',self.now.timestamp())).lastrowid
+    c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?)',(pid,1,at,payload,at))
    c.execute("INSERT INTO users(id,username,active) VALUES(2,'later-tenant',1)")
    later_pid=c.execute("INSERT INTO portfolios(user_id,name,source,external_id,updated) VALUES(2,'Later','pluto','portfolios:later',?)",
                        (self.now.timestamp(),)).lastrowid

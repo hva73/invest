@@ -793,7 +793,7 @@ def auto_holdings_tick(connect,verify=None,lookup=None,now=None):
   choices=[]
   for snap in snapshots:
    try:payload=json.loads(snap['payload'])
-   except (ValueError,TypeError):continue
+   except (ValueError,TypeError,RecursionError):continue
    if not isinstance(payload,dict) or payload.get('positions_complete') is not True:continue
    try:fresh=0<=(now-stamp(payload['observed'])).total_seconds()<=300
    except (KeyError,TypeError,ValueError):fresh=False
