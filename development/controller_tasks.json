@@ -2210,5 +2210,27 @@
     "follow_base": true,
     "reserve_plan_id": "stabilization/desktop/candidate-history-loads-each-pending-cursor-once",
     "reserve_goal": "stabilization/desktop"
+  },
+  {
+    "issue": 14,
+    "generation": 23,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "cbb37703356ffae9f3d2beba37265d17e0b706db",
+    "dependencies": [
+      "14:21"
+    ],
+    "paths": [
+      "eodhd_capacity.py",
+      "tests/test_eodhd_capacity.py"
+    ],
+    "task": "Approved roadmap shared_data/scheduler (F\u00e6lles scheduler og budget). Exact existing source anchor: eodhd_capacity.py :: if state.get('http_retry_at',0)>now:. Implement only this bounded change: In Capacity.reserve(), use the existing capacity state reader before acquiring BEGIN IMMEDIATE to check the shared HTTP Retry-After deadline recorded by observe(). If the cooldown is active, return the existing PROVIDER_RATE_BUDGET error with the remaining retry_after_s. Use the same captured time for both checks and retain the authoritative cooldown recheck under the writer lock before applying the existing minute and daily budgets.. Acceptance: With real temporary SQLite, record an HTTP 429 through observe(), hold BEGIN IMMEDIATE on a separate connection, and attempt a reservation through a second Capacity instance with zero SQLite busy timeout. Assert PROVIDER_RATE_BUDGET with the exact remaining delay and unchanged reservation counters. After releasing the writer, assert that a reservation at the retry deadline succeeds and is charged once.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_eodhd_capacity.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "shared_data/scheduler/skip-sqlite-writer-during-eodhd-http-cooldown",
+    "reserve_goal": "shared_data/scheduler"
   }
 ]
