@@ -1183,12 +1183,16 @@ class HoldingAutowatch(unittest.TestCase):
   self.assertEqual(sample['context']['diagnostic'],'PROVIDER_RATE_BUDGET')
  def test_malformed_snapshots_do_not_block_next_tenants_first_valid_holding(self):
   at=self.now.isoformat()
-  def snapshot(positions):
-   return json.dumps({'positions_complete':True,'observed':at,'positions':positions})
+  def snapshot(positions,complete=True):
+   return json.dumps({'positions_complete':complete,'observed':at,'positions':positions})
   with app.connect() as c:
    c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(snapshot(None),self.pid))
    c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?)',
              (self.fixture.child,1,at,snapshot([self.holding,None]),at))
+   for i,flag in enumerate(('false','true',1,0.5,[True],{'complete':True},False,None)):
+    pid=c.execute("INSERT INTO portfolios(user_id,name,source,external_id,updated) VALUES(1,?,'pluto',?,?)",
+                  (f'Invalid flag {i}',f'portfolios:flag-{i}',self.now.timestamp())).lastrowid
+    c.execute('INSERT INTO portfolio_snapshots VALUES(?,?,?,?,NULL,?)',(pid,1,at,snapshot([self.holding],flag),at))
    c.execute("INSERT INTO users(id,username,active) VALUES(2,'later-tenant',1)")
    later_pid=c.execute("INSERT INTO portfolios(user_id,name,source,external_id,updated) VALUES(2,'Later','pluto','portfolios:later',?)",
                        (self.now.timestamp(),)).lastrowid
