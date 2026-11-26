@@ -15,6 +15,7 @@ class Trading(unittest.TestCase):
   self.report=json.loads((ROOT/'examples/report-v2-test.json').read_text());self.report.update(report_id='trade-source',is_test=False);self.report['data_quality']['status']='mixed';self.report['candidates'][0]['signal']='KØB';report_ingest.save(app.connect,1,self.report)
   self.request={'report_id':'trade-source','candidate_id':self.report['candidates'][0]['candidate_id'],'portfolio_id':self.root,'kind':'direct','asset_id':'asset-test','size_mode':'shares','size':'2','currency':'DKK','order_type':'LIMIT','time_in_force':'DAY','limit_price':'100.50'}
   self.account_data={'accounts':[{'currency':'DKK','balance':'1000','buyingPower':'900','reservedForOrders':'100'}]};self.calls=[];self.can_trade=True;self.write_result={'orderIntentId':'synthetic-intent'};self.fail_send=False;self.changed=False
+  self.readback={'orderIntentId':'synthetic-intent','status':'accepted'}
   case=self
   class Client:
    def __init__(self,token):assert token=='synthetic'
@@ -34,7 +35,7 @@ class Trading(unittest.TestCase):
     elif name.startswith('propose_'):
      if case.fail_send:raise TimeoutError('Synthetic timeout after request')
      result=case.write_result
-    elif name=='get_order_intent':result={'orderIntentId':'synthetic-intent','status':'accepted'}
+    elif name=='get_order_intent':result=case.readback
     elif name=='search_assets':result={'assets':[{'id':'asset-test','name':'Synthetic asset','ticker':'TEST','isin':'SYNTHETIC','currency':'USD'}]}
     else:raise AssertionError(name)
     return {'structuredContent':result}
@@ -262,6 +263,241 @@ class Trading(unittest.TestCase):
   self.assertIsNone(trade.intent_reference({'orderIntents':raw['orderIntents']*2},{'orders':[order]}))
   row={'payload':json.dumps({'orders':[order]}),'response':json.dumps(raw),'estimate':None,'asset':None,'sell_basis':None,'status':'uncertain','intent_id':None,'error':'uafklaret'}
   self.assertEqual(trade.view(row)['status'],'sent');self.assertEqual(trade.view(row)['intent_id'],'intent-1')
+ def check_reply(self,pid,raw):
+  self.readback=raw
+  return trade.check(app.connect,1,pid,self.factory)['proposal']
+ def assert_rejected_unchanged(self,pid,raw):
+  prior=dict(trade.get(app.connect,1,pid))
+  with self.assertRaises(trade.TradeError):self.check_reply(pid,raw)
+  self.assertEqual(dict(trade.get(app.connect,1,pid)),prior)
+ def seed_previous(self,pid,response,legacy=False):
+  with app.connect() as c:
+   c.execute('UPDATE broker_proposals SET response=? WHERE id=?',(json.dumps(response),pid))
+   if legacy:
+    c.execute('UPDATE broker_proposals SET sent_identity=NULL WHERE id=?',(pid,))
+ def test_status_cannot_cross_tenant_or_replace_receipt_on_bad_identity(self):
+  self.write_result.update(orderId='order-A',status='PENDING')
+  proposal=self.send(self.estimate());pid=proposal['id']
+  with app.connect() as c:
+   c.execute("INSERT INTO users(id,username) VALUES(2,'other')")
+   portfolios.replace_pluto(c,2,[{'id':'portfolios:root','name':'Other','kind':'portfolio'}])
+   other_pid=c.execute('SELECT id FROM portfolios WHERE user_id=2').fetchone()[0]
+   other=c.execute("""INSERT INTO broker_proposals(user_id,portfolio_id,fingerprint,report_id,candidate_id,
+    kind,payload,status,created,intent_id,response) SELECT 2,?,fingerprint,'@manual-buy',candidate_id,
+    kind,payload,status,created,'other-intent',? FROM broker_proposals WHERE id=?""",
+    (other_pid,json.dumps({'orderIntentId':'other-intent','status':'PENDING'}),pid)).lastrowid
+  untouched=dict(trade.get(app.connect,2,other));self.calls.clear()
+  with self.assertRaises(trade.TradeError):trade.check(app.connect,1,other,self.factory)
+  self.assertEqual(self.calls,[])
+  valid={'orderIntentId':proposal['intent_id'],'orderId':'order-A','status':'ACCEPTED'}
+  for change in ({'orderIntentId':'other-intent'},{'portfolioId':'other'},{'orderId':'other'},
+                 {'assetId':'other'},{'collectionId':'other'},{'side':'SELL'},
+                 {'orderType':'MARKET'},{'timeInForce':'GTC'},{'orderId':None}):
+   for reply in (dict(valid,**change),dict(valid,orderIntents=[dict(valid,**change)])):
+    with self.subTest(reply=reply):self.assert_rejected_unchanged(pid,reply)
+  for reply in ({'status':'ACCEPTED'},dict(self.readback,orderIntentId=None),
+                {'orderIntentId':proposal['intent_id'],'status':'ACCEPTED'},
+                dict(valid,orderIntents=[{}]),dict(valid,orderIntents=[valid,valid])):
+   with self.subTest(reply=reply):self.assert_rejected_unchanged(pid,reply)
+  refreshed=self.check_reply(pid,valid)
+  self.assertEqual((refreshed['status'],refreshed['response']),('sent',valid))
+  self.assertEqual(dict(trade.get(app.connect,2,other)),untouched)
+  self.assertEqual({call['name'] for call in self.calls},{'get_order_intent'})
+ def test_null_root_recovers_one_matching_nested_order(self):
+  proposal=self.estimate();order=dict(proposal['payload']['orders'][0],orderIntentId='signal')
+  self.write_result={'orderIntentId':None,'orderIntents':[order]}
+  sent=self.send(proposal)
+  self.assertEqual((sent['status'],sent['intent_id']),('sent','signal'))
+  reply=dict(self.write_result,status='PENDING')
+  self.assertEqual(self.check_reply(sent['id'],reply)['response'],reply)
+  self.assert_rejected_unchanged(sent['id'],dict(reply,orderIntents=[dict(order,side='SELL')]))
+ def test_conflicting_submission_references_cannot_select_a_lookup(self):
+  second=self.estimate(dict(self.request,size='3'))
+  order=dict(second['payload']['orders'][0],orderIntentId='signal')
+  self.write_result={'orderIntentId':'manual','orderIntents':[order]}
+  sent=self.send(second)
+  self.assertEqual((sent['status'],sent['intent_id'],sent['response']),('uncertain',None,self.write_result))
+  for ref in (None,'manual','signal'):
+   self.seed_previous(sent['id'],self.write_result,legacy=True)
+   with app.connect() as c:c.execute('UPDATE broker_proposals SET intent_id=? WHERE id=?',(ref,sent['id']))
+   self.calls.clear()
+   self.assert_rejected_unchanged(sent['id'],{'orderIntentId':ref or 'manual','status':'ACCEPTED'})
+   self.assertEqual(self.calls,[])
+ def test_root_reference_survives_empty_order_intents(self):
+  self.write_result={'orderIntentId':'i','orderIntents':[]}
+  proposal=self.send(self.estimate())
+  self.assertEqual((proposal['status'],proposal['intent_id']),('sent','i'))
+  reply=dict(self.write_result,status='ACCEPTED')
+  self.assertEqual(self.check_reply(proposal['id'],reply)['response'],reply)
+  summary=trade.summaries(app.connect,1)[0]
+  self.assertEqual((summary['intent_id'],summary['provider_status'],summary['status']),('i','ACCEPTED','sent'))
+  self.assertEqual(json.loads(trade.get(app.connect,1,proposal['id'])['sent_identity'])['receipt'],self.write_result)
+  self.assert_rejected_unchanged(proposal['id'],{'orderIntents':[],'status':'ACCEPTED'})
+  for malformed in (None,{},[{}]):
+   with self.subTest(orderIntents=malformed):
+    self.assert_rejected_unchanged(proposal['id'],dict(reply,orderIntents=malformed))
+ def test_refresh_requires_explicit_correction_of_owned_history(self):
+  pid=self.send(self.estimate())['id'];ref={'orderIntentId':'synthetic-intent'}
+  for field,correct in [('portfolioId','root'),('assetId','asset-test'),('side','BUY'),
+                        ('orderType','LIMIT'),('timeInForce','DAY')]:
+   for nested in (True,False):
+    with self.subTest(field=field,nested=nested):
+     wrong=dict(ref,orderId='unrelated',**{field:'other'})
+     previous=dict(ref,status='PENDING',orderIntents=[wrong]) if nested else dict(wrong,status='PENDING')
+     self.seed_previous(pid,previous)
+     valid=dict(ref,status='ACCEPTED',**{field:correct})
+     for reply in (dict(ref,status='ACCEPTED'),dict(ref,orderId='unrelated',status='ACCEPTED'),
+                   dict(valid,orderId='unrelated')):
+      self.assert_rejected_unchanged(pid,reply)
+     self.assertEqual(self.check_reply(pid,valid)['response'],valid)
+ def test_clean_status_recovers_from_foreign_or_malformed_history(self):
+  pid=self.send(self.estimate())['id'];valid={'orderIntentId':'synthetic-intent','portfolioId':'root','status':'PENDING'}
+  for previous in ({'orderIntentId':'other','orderId':'other','status':'ACCEPTED'},
+                   {'orderId':'other','status':'ACCEPTED'},dict(valid,orderIntents=[{}],status='ACCEPTED')):
+   with self.subTest(previous=previous):
+    self.seed_previous(pid,previous,legacy=True)
+    self.assert_rejected_unchanged(pid,dict(valid,orderId='other'))
+    self.assertEqual(self.check_reply(pid,valid)['response'],valid)
+    self.assertEqual(trade.summaries(app.connect,1)[0]['provider_status'],'PENDING')
+ def test_first_order_id_and_repeated_unchecked_order_id_cannot_establish_link(self):
+  self.write_result.update(status='PENDING')
+  pid=self.send(self.estimate())['id'];valid=dict(self.write_result,status='ACCEPTED')
+  for extra in ({'orderId':'unrelated'},{'orderId':None},
+                {'orderIntents':[dict(self.write_result,orderId='unrelated')]}):
+   self.assert_rejected_unchanged(pid,dict(valid,**extra))
+  self.assertEqual(self.check_reply(pid,valid)['response'],valid)
+  # The actual submission receipt did not include this order.
+  unchecked=dict(self.write_result,orderId='unrelated')
+  self.seed_previous(pid,unchecked)
+  self.assert_rejected_unchanged(pid,dict(valid,orderId='unrelated'))
+  self.seed_previous(pid,dict(unchecked,status='ACCEPTED'),legacy=True)
+  for reply in (valid,dict(valid,orderId='unrelated')):
+   self.assert_rejected_unchanged(pid,reply)
+  self.assertEqual(self.calls[-1],{'name':'get_order_intent','arguments':{'orderIntentId':'synthetic-intent'}})
+ def test_legacy_pending_exact_pair_refreshes_status_and_preserves_receipt(self):
+  self.write_result={'orderIntentId':'i','orderId':'o','status':'PENDING','message':'submission'}
+  sent=self.send(self.estimate())
+  pid=sent['id']
+  with app.connect() as c:c.execute('UPDATE broker_proposals SET sent_identity=NULL WHERE id=?',(pid,))
+  accepted={'orderIntentId':'i','orderId':'o','status':'ACCEPTED'}
+  self.assert_rejected_unchanged(pid,dict(accepted,orderId='other'))
+  self.assert_rejected_unchanged(pid,{'orderIntentId':'i','status':'ACCEPTED'})
+  for status in ('PENDING','ACCEPTED'):
+   reply=dict(accepted,status=status)
+   refreshed=self.check_reply(pid,reply)
+   self.assertEqual((refreshed['status'],refreshed['intent_id'],refreshed['response']['status']),
+                    ('sent','i',status))
+   original=json.loads(trade.get(app.connect,1,pid)['sent_identity'])
+   self.assertEqual(original,{'legacy_response':self.write_result})
+   self.assertEqual(trade.summaries(app.connect,1)[0]['provider_status'],status)
+   self.assertNotIn('orderId',refreshed['response'])
+  self.assert_rejected_unchanged(pid,dict(accepted,orderId='different'))
+  self.assert_rejected_unchanged(pid,{'orderIntentId':'i','status':'ACCEPTED'})
+ def test_repeated_order_in_unchecked_pending_history_is_not_imported_as_order_evidence(self):
+  # The old writer could overwrite a receipt with exactly the same shape as
+  # an original PENDING receipt. Keep the observation with its unknown origin.
+  pid=self.send(self.estimate())['id']
+  old=dict(self.write_result,status='PENDING',orderId='unrelated')
+  self.seed_previous(pid,old,legacy=True)
+  self.assert_rejected_unchanged(pid,dict(old,assetId='other',status='ACCEPTED'))
+  checked=self.check_reply(pid,dict(old,status='ACCEPTED',filledQuantity='100'))
+  self.assertEqual(checked['response'],dict(self.write_result,status='ACCEPTED'))
+  self.assertEqual(json.loads(trade.get(app.connect,1,pid)['sent_identity']),{'legacy_response':old})
+  self.assertEqual(checked['status'],'sent')
+ def test_missing_or_conflicting_verified_order_preserves_all_evidence(self):
+  self.write_result={'orderIntentId':'i','orderId':'o','status':'PENDING'}
+  pid=self.send(self.estimate())['id']
+  for change in ({},{'orderId':'other'},{'orderId':None}):
+   self.assert_rejected_unchanged(pid,dict(orderIntentId='i',status='ACCEPTED',**change))
+  valid=dict(self.write_result,status='ACCEPTED')
+  self.assertEqual(self.check_reply(pid,valid)['response'],valid)
+ def test_prior_conflicting_depot_or_asset_cannot_corroborate_legacy_order(self):
+  pid=self.send(self.estimate())['id']
+  for field,correct in [('portfolioId','root'),('assetId','asset-test')]:
+   wrong=dict(self.write_result,orderId='o',**{field:'other'})
+   for history in (dict(wrong,status='PENDING'),
+                   dict(self.write_result,status='PENDING',orderIntents=[wrong],**{field:correct})):
+    with self.subTest(history=history):
+     self.seed_previous(pid,history,legacy=True)
+     valid=dict(self.write_result,status='ACCEPTED')
+     self.assert_rejected_unchanged(pid,valid)
+     self.assert_rejected_unchanged(pid,dict(valid,orderId='o'))
+     corrected=dict(valid,**{field:correct})
+     self.assert_rejected_unchanged(pid,dict(corrected,orderId='o'))
+     self.assertEqual(self.check_reply(pid,corrected)['response'],corrected)
+ def test_duplicate_or_wrong_asset_or_side_at_submission_cannot_confirm_status(self):
+  for idx,change in enumerate(({}, {'assetId':'other'}, {'side':'SELL'})):
+   with self.subTest(change=change):
+    draft=self.estimate(dict(self.request,size=str(idx+3)))
+    order={**draft['payload']['orders'][0],**change,'orderIntentId':'i'}
+    self.write_result={'orderIntentId':'i','orderIntents':[order] if change else [order,order]}
+    sent=self.send(draft)
+    self.assertEqual((sent['status'],sent['intent_id']),('uncertain',None))
+    self.assert_rejected_unchanged(sent['id'],{'orderIntentId':'i','status':'ACCEPTED'})
+ def test_immutable_receipt_and_legacy_receipt_recovery(self):
+  q=self.estimate();order=dict(q['payload']['orders'][0],orderIntentId='signal',orderId='order-A')
+  self.write_result={'orderIntentId':None,'orderIntents':[order],'message':'original receipt'}
+  pid=self.send(q)['id'];reply={'orderIntentId':'signal','orderId':'order-A','status':'PENDING'}
+  self.assertEqual(self.check_reply(pid,reply)['response'],reply)
+  self.assertEqual(json.loads(trade.get(app.connect,1,pid)['sent_identity'])['receipt'],self.write_result)
+  # Pre-refresh uncertain rows retain the original batch receipt: the old
+  # readback and cancellation writers both set status=sent and intent_id.
+  self.seed_previous(pid,self.write_result,legacy=True)
+  with app.connect() as c:
+   c.execute("UPDATE broker_proposals SET status='uncertain',intent_id=NULL WHERE id=?",(pid,))
+  self.assert_rejected_unchanged(pid,{'orderIntentId':'signal','status':'ACCEPTED'})
+  reply['status']='ACCEPTED'
+  refreshed=self.check_reply(pid,reply)
+  self.assertEqual((refreshed['status'],refreshed['intent_id'],refreshed['response']),('sent','signal',reply))
+  self.assertEqual(json.loads(trade.get(app.connect,1,pid)['sent_identity'])['receipt'],self.write_result)
+ def test_untrusted_receipt_cannot_recover_its_own_reference(self):
+  pid=self.send(self.estimate())['id']
+  previous=dict(self.write_result,status='PENDING',portfolioId='wrong')
+  self.seed_previous(pid,previous)
+  with app.connect() as c:c.execute("UPDATE broker_proposals SET intent_id=NULL,status='uncertain' WHERE id=?",(pid,))
+  self.assert_rejected_unchanged(pid,dict(previous,status='ACCEPTED',portfolioId='root'))
+ def test_foreign_legacy_intent_is_replaced_by_owned_pending_status(self):
+  pid=self.send(self.estimate())['id']
+  foreign={'orderIntentId':'foreign','status':'ACCEPTED'}
+  self.seed_previous(pid,foreign,legacy=True)
+  valid=dict(self.write_result,status='PENDING')
+  self.assertEqual(self.check_reply(pid,valid)['response'],valid)
+  self.assertEqual(trade.summaries(app.connect,1)[0]['provider_status'],'PENDING')
+  self.assertEqual(json.loads(trade.get(app.connect,1,pid)['sent_identity']),{'legacy_response':foreign})
+ def test_refresh_preserves_a_concurrent_final_status(self):
+  pid=self.send(self.estimate())['id'];final=dict(self.write_result,status='CANCELLED')
+  def concurrent_readback(*args):
+   self.seed_previous(pid,final)
+   return dict(self.write_result,status='PENDING')
+  with patch.object(trade,'call',side_effect=concurrent_readback):
+   self.assertEqual(trade.check(app.connect,1,pid,self.factory)['proposal']['response'],final)
+ def test_collection_sell_binds_submission_parent_even_without_provider_echo(self):
+  request=dict(self.request,portfolio_id=self.child,kind='collection_sell')
+  for size,receipt in [('20',{}),('21',{'portfolioId':'root'}),('22',{'portfolioId':'wrong','orderId':'foreign'}),
+                       ('23',{'portfolioId':'root','collectionId':'child'})]:
+   with self.subTest(receipt=receipt):
+    with app.connect() as c:c.execute("UPDATE portfolios SET parent_external_id='portfolios:root' WHERE id=?",(self.child,))
+    self.write_result={'orderIntentId':'i'+size,'status':'PENDING',**receipt}
+    with patch.object(trade,'candidate',return_value={'signal':'SÆLG'}):proposal=self.send(self.estimate(dict(request,size=size)))
+    pid=proposal['id'];valid={'orderIntentId':self.write_result['orderIntentId'],'collectionId':'child','status':'ACCEPTED'}
+    with app.connect() as c:c.execute("UPDATE portfolios SET parent_external_id='portfolios:new' WHERE id=?",(self.child,))
+    for change in ({'portfolioId':'new'},{'portfolioId':'wrong'},{'collectionId':'other'},
+                   {'portfolioId':None},{'portfolioId':'root','orderId':'foreign'}):
+     self.assert_rejected_unchanged(pid,dict(valid,**change))
+    snapshot=trade.get(app.connect,1,pid)['sent_identity']
+    self.assertEqual(json.loads(snapshot),{'portfolioId':'root','receipt':self.write_result})
+    if receipt:
+     self.assert_rejected_unchanged(pid,{'orderIntentId':proposal['intent_id'],'status':'ACCEPTED'})
+    if receipt.get('portfolioId')=='wrong':
+     self.assert_rejected_unchanged(pid,valid)
+    else:
+     self.assertEqual(self.check_reply(pid,valid)['response'],valid)
+     self.assertEqual(trade.get(app.connect,1,pid)['sent_identity'],snapshot)
+     self.assert_rejected_unchanged(pid,dict(valid,portfolioId='new'))
+    valid['portfolioId']='root'
+    self.assertEqual(self.check_reply(pid,valid)['response'],valid)
+    self.seed_previous(pid,dict(valid,status='PENDING',portfolioId='wrong'),legacy=True)
+    for depot in ('wrong','root','new'):self.assert_rejected_unchanged(pid,dict(valid,portfolioId=depot))
  def test_cancel_only_own_pending_intent_and_confirm_provider_status(self):
   proposal=self.send(self.estimate());original=self.factory;state={'status':'PENDING','calls':0}
   class CancelClient(original):

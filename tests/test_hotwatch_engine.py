@@ -21,6 +21,27 @@ def tick(at,index=0,price='100',held=False):
 def good_metrics():return {'sample_count':40,'price':'100','return_1_pct':'.1','return_3_pct':'.5','acceleration_pct_s2':'.01','relative_volume':'3','spread_pct':'.1','volatility_pct':'.3','breakout':True,'breakdown':False,'trend_up':True,'rsi':'60','macd_histogram':'.1','distance_high_pct':'0'}
 
 class HotWatch(unittest.TestCase):
+ def test_holding_origin_refresh_keeps_manual_and_signal_proposals_distinct(self):
+  import hotwatch_service,portfolios,trade_service
+  asset='synthetic-MERC'
+  payload={'portfolioId':'root','orders':[{'assetId':asset,'side':'BUY'}]}
+  with app.connect() as c:
+   portfolios.replace_pluto(c,1,[{'id':'portfolios:root','name':'Root','kind':'portfolio'}])
+   pid=c.execute("SELECT id FROM portfolios WHERE user_id=1 AND external_id='portfolios:root'").fetchone()[0]
+   for origin,ref in (('@manual-buy','manual'),('@hotwatch','signal')):
+    pending={'orderIntentId':ref,'status':'PENDING'}
+    c.execute("""INSERT INTO broker_proposals(user_id,fingerprint,report_id,candidate_id,kind,portfolio_id,
+     payload,status,created,intent_id,response) VALUES(1,?,?,?,'direct',?,?,'sent',?,?,?)""",
+     (ref,origin,asset,pid,json.dumps(payload),self.now.timestamp(),ref,json.dumps(pending)))
+  replies=[{'orderIntentId':ref,'status':'ACCEPTED'} for ref in ('manual','signal')]
+  with patch.object(trade_service,'client',return_value=(None,{})),patch.object(trade_service,'call',side_effect=replies) as lookup:
+   for expected in ('PENDING','ACCEPTED'):
+    hotwatch_service.refresh_holding_origin(app.connect,1,pid,asset)
+    statuses={p['report_id']:p['provider_status'] for p in trade_service.summaries(app.connect,1)}
+    self.assertEqual(statuses,{'@manual-buy':'PENDING','@hotwatch':expected})
+    with app.connect() as c:self.assertIsNone(hotwatch_service.holding_origin(c,1,pid,asset))
+   self.assertEqual([c.args[2:] for c in lookup.call_args_list],[('get_order_intent',{'orderIntentId':'signal'})]*2)
+
  def test_sync_reads_sanitized_fallback_errors_through_existing_endpoint(self):
   import hotwatch_supervisor
   row={'created':self.now.isoformat(),'event':'site_portfolio_list','code':1}
