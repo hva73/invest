@@ -2826,5 +2826,47 @@
     "follow_base": true,
     "reserve_plan_id": "learning/coverage/strategy-lab-counts-only-listed-session-history",
     "reserve_goal": "learning/coverage"
+  },
+  {
+    "issue": 14,
+    "generation": 31,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+    "dependencies": [
+      "14:22"
+    ],
+    "paths": [
+      "hotwatch_engine.py",
+      "tests/test_hotwatch_engine.py"
+    ],
+    "task": "Approved roadmap resources/scale (Worker- og k\u00f8kapacitet). Exact existing source anchor: hotwatch_engine.py :: SELECT s.is_test,s.request,p.symbol AS provisional_symbol FROM hw_sessions s. Implement only this bounded change: Afgr\u00e6ns \u00e6ndringen til effective_poll_interval(). Lad SQLite returnere de forskellige kombinationer af testkategori, anmodningens provider_symbol og det tilknyttede forel\u00f8bige symbol. Funktionen henter og afkoder i dag hele anmodningen for hver \u00e5ben EODHD-watch, selv n\u00e5r mange abonnenter bidrager med samme feed. Bevar statusudvalget, h\u00e5ndteringen af tomt symbol og de eksisterende beregninger for REST, historik og b\u00f8rskalender.. Acceptance: Udvid den eksisterende SQLite-test for delt pollingbudget med gentagne abonnenter og samme symbol i b\u00e5de almindelig og forel\u00f8big feedkontekst. Bekr\u00e6ft, at foresp\u00f8rgslen afleverer \u00e9n r\u00e6kke pr. kombination, og at b\u00e5de historik- og REST-bidraget stadig t\u00e6lles, hvor de begge g\u00e6lder. De eksisterende tests for b\u00f8rskalender, forel\u00f8bige feeds og BTC bevarer deres intervaller.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_hotwatch_engine.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "resources/scale/poll-budget-projects-distinct-feed-inputs",
+    "reserve_goal": "resources/scale"
+  },
+  {
+    "issue": 114,
+    "generation": 25,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+    "dependencies": [],
+    "paths": [
+      "dashboard_projection.py",
+      "tests/test_portfolio_data.py"
+    ],
+    "task": "Approved roadmap statistics/fills (Fills, kostpris og afstemning). Exact existing source anchor: dashboard_projection.py :: if pnl and pnl.get('currency')==cost.get('currency'). Implement only this bounded change: Ret kun beregningen af urealiseret procent for en enkelt position i dashboard_projection.build(). Kr\u00e6v en kendt, f\u00e6lles valuta for b\u00e5de den viste P/L og fallbacken til oprindelig P/L, f\u00f8r bel\u00f8bet divideres med kostbasis. I dag kan to manglende valutakoder opfylde lighedstjekket og give en procent uden dokumenteret sammenligningsgrundlag. Bevar de indl\u00e6ste bel\u00f8b og deres valutafelter.. Acceptance: Brug den eksisterende portef\u00f8ljefixture til at gemme normaliserede beholdninger og l\u00e6se dem gennem build(). P/L 10 og kostbasis 100 med ukendt valuta giver null i procentfeltet, mens bel\u00f8bene stadig er tilg\u00e6ngelige. Samme tal med kendt f\u00e6lles valuta giver 10 procent, ogs\u00e5 n\u00e5r den viste P/L er i DKK og den oprindelige P/L og kostbasis begge er i USD.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_portfolio_data.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "statistics/fills/position-cost-return-requires-known-currency",
+    "reserve_goal": "statistics/fills"
   }
 ]
