@@ -91,11 +91,14 @@ def provider_buying_power_error(message,args):
         return InsufficientBuyingPower(format(available.quantize(Decimal('0.01'),rounding=ROUND_DOWN),'f'),args['currency'],message)
     except ArithmeticError:return None
 
-def call(client,tools,name,args):
+def _tool_response(client,tools,name,args):
     expected=CONTRACT.get(name);actual=tools.get(name,{})
     if not expected or actual.get('annotations',{}).get('readOnlyHint') is not expected['readOnlyHint'] or structural(actual.get('inputSchema'))!=expected['inputSchema']:
         raise TradeError('Plutos værktøjskontrakt for '+name+' skal gennemgås før brug.')
-    response=client.request('tools/call',{'name':name,'arguments':args})
+    return client.request('tools/call',{'name':name,'arguments':args})
+
+def call(client,tools,name,args):
+    response=_tool_response(client,tools,name,args)
     if name.startswith('estimate_') and isinstance(response,dict) and response.get('isError'):
         message=estimate_error(response,client)
         raise provider_buying_power_error(message,args) or TradeError(message)
@@ -169,6 +172,61 @@ def owned(connect,user_id,pid):
     if not row:raise TradeError('Vælg en aktiv Pluto-enhed på din egen konto.')
     return dict(row)
 
+_ACTIVE_ORDER_STATES={'ACTIVE','ACTIVE_BUY','ACTIVE_SELL','NEW','OPEN','PENDING','ACCEPTED','SUBMITTED','PARTIALLY_FILLED'}
+_TERMINAL_ORDER_STATES={'FILLED':'FILLED','EXECUTED':'FILLED','CANCELLED':'CANCELLED',
+                        'CANCELED':'CANCELLED','REJECTED':'REJECTED','EXPIRED':'EXPIRED'}
+
+def _successful_order_response(part):
+    return (isinstance(part,dict) and part.get('success',True) is True
+            and part.get('isError',False) is False
+            and (part.get('error') is None or part['error'] is False))
+
+def _validate_inactive_order_context(record,scope,parent_refs,*,order=False):
+    if not isinstance(record,dict):
+        raise TradeError('Pluto returnerede en ugyldig ordrepost.')
+
+    # Only a row's own id is an alias for orderId. A holding has its own id.
+    references=parent_refs.copy()
+    if order and 'orderId' not in record and 'id' not in record:
+        raise TradeError('Ordreposten mangler et ordre-ID.')
+    terminal=set()
+    for section in (None,'holding','collection'):
+        part=record if section is None else record.get(section)
+        if part is None:continue
+        if not _successful_order_response(part):
+            raise TradeError('Pluto returnerede en fejl eller en ugyldig ordrepost.')
+        if any(key in part and part[key]!=value for key,value in scope.items()):
+            raise TradeError('Plutos ordresvar stemmer ikke med det valgte depot eller opslag.')
+        if part.get('collectionId') is not None or (section=='collection' and part.get('id') is not None):
+            raise TradeError('Pluto returnerede en Collection i opslaget for direkte ordrer.')
+        if section=='holding' and part.get('id') is not None:
+            if not isinstance(part['id'],str) or not part['id'].strip():
+                raise TradeError('Pluto returnerede et ugyldigt beholdnings-ID.')
+        keys=('orderId','tradeId','id') if order and section is None else ('orderId','tradeId')
+        for key in keys:
+            if key not in part:continue
+            value=part[key]
+            ref='orderId' if key=='id' else key
+            if not isinstance(value,str) or not value.strip() or (ref in references and references[ref]!=value):
+                raise TradeError('Pluto returnerede en ugyldig eller modstridende ordreference.')
+            references[ref]=value
+        for key in ('status','state','orderStatus'):
+            if key not in part:continue
+            value=part[key]
+            if not isinstance(value,str) or not value.strip():
+                raise TradeError('Pluto returnerede en ugyldig ordrestatus.')
+            status=value.strip().upper()
+            if status in _ACTIVE_ORDER_STATES:
+                raise TradeError('Pluto returnerede en aktiv ordre i opslaget for inaktive ordrer.')
+            if status in _TERMINAL_ORDER_STATES:
+                terminal.add(_TERMINAL_ORDER_STATES[status])
+    if len(terminal)>1:
+        raise TradeError('Pluto returnerede modstridende slutstatusser for samme ordre.')
+    # Keep the adapter's distinction between a historical type hint and an explicit lifecycle.
+    if active_buy(record):
+        raise TradeError('Pluto returnerede en aktiv ordre i opslaget for inaktive ordrer.')
+    return references
+
 def inactive_order_readback(connect,user_id,portfolio_id,factory=None):
     """Read one bounded page of direct order records. INACTIVE alone says nothing about execution."""
     portfolio=owned(connect,user_id,portfolio_id)
@@ -181,40 +239,24 @@ def inactive_order_readback(connect,user_id,portfolio_id,factory=None):
     scope={'portfolioId':provider_id,'statusGroup':'INACTIVE','scope':'DIRECT'}
     limit=50
     cl,tools=client(connect,user_id,factory,allow_token_refresh=False)
-    page=call(cl,tools,'list_orders',{**scope,'limit':limit})
-    rows=page
-    if isinstance(page,dict):
-        fields=[key for key in ('orders','items','data') if key in page]
+    response=_tool_response(cl,tools,'list_orders',{**scope,'limit':limit})
+    try:
+        references=_validate_inactive_order_context(response,scope,{})
+    except TradeError as exc:
+        raise oauth.SetupRequired('Pluto returnerede et ugyldigt svar ved ordreopslaget.') from exc
+    rows=decode_result(response,'list_orders')
+    # Match portfolio_data.list_data's three supported wrapper levels, checking each before unwrapping.
+    for _ in range(3):
+        if not isinstance(rows,dict):break
+        references=_validate_inactive_order_context(rows,scope,references)
+        fields=[key for key in ('orders','items','data') if key in rows]
         if len(fields)!=1:
             raise TradeError('Pluto returnerede ikke en entydig ordreliste.')
-        rows=page[fields[0]]
+        rows=rows[fields[0]]
     if not isinstance(rows,list) or len(rows)>limit:
         raise TradeError('Plutos ordreliste har et ukendt format eller overskrider grænsen.')
-    for record in ([page] if isinstance(page,dict) else []) + rows:
-        if (not isinstance(record,dict) or record.get('isError') or record.get('error')
-                or record.get('success',True) is not True):
-            raise TradeError('Pluto returnerede en fejl eller en ugyldig ordrepost.')
-        collection=record.get('collection')
-        for part in (record,record.get('holding'),collection):
-            if part is None:continue
-            if not isinstance(part,dict):
-                raise TradeError('Plutos ordresvar har et ukendt format.')
-            if part.get('collectionId') is not None or any(key in part and part[key]!=value for key,value in scope.items()):
-                raise TradeError('Plutos ordresvar stemmer ikke med det valgte depot eller opslag.')
-            # A terminal status can resolve a type hint, but cannot override an explicit active status.
-            for key in ('status','orderStatus','state'):
-                if key not in part:continue
-                status=part[key]
-                if not isinstance(status,str) or not status.strip():
-                    raise TradeError('Pluto returnerede en ugyldig ordrestatus.')
-                if status.strip().upper() in ('ACTIVE','ACTIVE_BUY'):
-                    raise TradeError('Pluto returnerede en aktiv ordre i opslaget for inaktive ordrer.')
-        if (collection is not None and collection.get('id') is not None) or active_buy(record):
-            raise TradeError('Plutos ordresvar stemmer ikke med det valgte depot eller opslag.')
     for row in rows:
-        order_id=row.get('orderId',row.get('id'))
-        if not isinstance(order_id,str) or not order_id.strip():
-            raise TradeError('Plutos ordreliste indeholder en post uden gyldigt ordre-ID.')
+        _validate_inactive_order_context(row,scope,references,order=True)
     return {'records':rows,'verified':False,'coverage':{**scope,'limit':limit,'complete':False}}
 
 def build(connect,user_id,data,preview=False):
