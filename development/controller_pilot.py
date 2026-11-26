@@ -21,12 +21,13 @@ ROLES = {"mobile": "Mobile UI only; preserve approved layout.",
 def git(*args):
     return subprocess.check_output(["git", *args])
 
-def fingerprint():
+def fingerprint(folder=None):
     # Include untracked files, exclude ignored files, distinguish content.
-    h = hashlib.sha256(git("diff", "--binary", "HEAD"))
-    for raw in sorted(git("ls-files", "--others", "--exclude-standard", "-z").split(b"\0")):
+    read_git = git if folder is None else lambda *args: controller_publish.git(folder, *args)
+    h = hashlib.sha256(read_git("diff", "--binary", "HEAD"))
+    for raw in sorted(read_git("ls-files", "--others", "--exclude-standard", "-z").split(b"\0")):
         if raw:
-            p = Path(os.fsdecode(raw))
+            p = Path(os.fsdecode(raw)) if folder is None else folder / os.fsdecode(raw)
             h.update(raw + b"\0")
             if p.is_symlink():
                 h.update(os.fsencode(os.readlink(p)))
