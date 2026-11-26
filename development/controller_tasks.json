@@ -2854,7 +2854,7 @@
     "priority": 1,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+    "base_sha": "da3ed7fa0ffb6733ad555c3d8b7bddb21bbe2d1a",
     "dependencies": [],
     "paths": [
       "journal_projection.py",
