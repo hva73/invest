@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T13:10:36Z",
+  "updated_at": "2026-11-26T13:14:30Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -409,7 +409,7 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "in_progress",
       "issue": 54,
-      "evidence": "#54:3 bevaret blocked; ejerafgrænset #54:4 på f18e9198 nåede WORKING/TESTING/CONTINUING, men terminal blocked:incomplete 7192238064. Ingen ny PR eller samlet browseraccept; bevar begge worktrees. Ældre #300 ae7c2724 ikke integreret.",
+      "evidence": "#54:3/#54:4 bevaret blocked:incomplete (7192238064); ejerafgrænset ny #54:5 på f18e9198 er faktisk STARTED 7193038747 og WORKING 7193042833. Kun load/mount session-epoch scope; ingen ny PR eller browseraccept. Ældre #300 ae7c2724 ikke integreret.",
       "subgoals": [
         {
           "id": "reuse",
@@ -421,10 +421,10 @@
         {
           "id": "mobile",
           "title": "Mobil 2.0",
-          "status": "blocked",
-          "evidence": "#54:4 blocked:incomplete 7192238064 efter TESTING 7192124503; ingen ny PR. #54:3 bevaret, ingen blind genstart eller dublet.",
+          "status": "in_progress",
+          "evidence": "#54:5 STARTED/WORKING 7193038747/7193042833 på f18e9198, afgrænset load/mount session-epoch. #54:3/#54:4 bevaret; ingen dublet eller blind genstart.",
           "owner_role": "mobile",
-          "updated_at": "2026-11-26T13:10:36Z"
+          "updated_at": "2026-11-26T13:14:30Z"
         },
         {
           "id": "desktop",
@@ -442,7 +442,7 @@
           "owner_role": "mobile"
         }
       ],
-      "updated_at": "2026-11-26T13:10:36Z"
+      "updated_at": "2026-11-26T13:14:30Z"
     },
     {
       "id": "load",
@@ -490,7 +490,7 @@
       "title": "Samlet releasekandidat, backup og migration",
       "status": "blocked",
       "issue": 57,
-      "evidence": "Godkendt reset #315: CI-rettelse #316 integreret f18e9198; A #315:1 leveret draft #317 cc44d938, review-HOLD; B #54:4 terminal incomplete, bevaret. Ældre accepterede V2-dele forbliver kilder, ikke fælles release. Ingen ejer-GO.",
+      "evidence": "Godkendt reset #315: CI-rettelse #316 integreret f18e9198; A #315:1 leveret draft #317 cc44d938, review-HOLD; B #54:5 STARTED/WORKING 7193038747/7193042833, gen3/4 bevaret. Ældre accepterede V2-dele er kilder, ikke fælles release. Ingen ejer-GO.",
       "subgoals": [
         {
           "id": "integrate",
@@ -516,7 +516,7 @@
           "updated_at": "2026-11-26T13:10:36Z"
         }
       ],
-      "updated_at": "2026-11-26T13:10:36Z"
+      "updated_at": "2026-11-26T13:14:30Z"
     },
     {
       "id": "go",
