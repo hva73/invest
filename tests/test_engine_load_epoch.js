@@ -176,7 +176,10 @@ async function checkAcknowledgement(change, rejectAck) {
 async function checkControl(change, stage, fail, action = 'pause') {
   const {session, context, requests, click, mount} = fixture();
   const wid = 'watch/1';
-  const dialog = {open: true, dataset: {watchId: wid}, innerHTML: ''};
+  const dialog = {
+    open: change !== 'list', dataset: {watchId: wid}, innerHTML: '',
+    querySelector: selector => selector === 'h2' ? {focus() {}} : null
+  };
   const records = [];
   context.MutationObserver = class {
     observe() {}
@@ -215,29 +218,39 @@ async function checkControl(change, stage, fail, action = 'pause') {
   if (change === 'owner') session.owner = 'other-owner';
   if (change === 'mode') mount(!testMode).succeed();
   if (change === 'dialog') {
-    dialog.dataset.watchId = 'new-watch';
+    dialog.open = false;
     records.push({type: 'attributes', target: {matches: selector => selector === 'dialog'}});
   }
 
-  const outcome = !change && fail ? assert.rejects(pending, e => e === error) : pending;
+  if (change === 'notice') {
+    const notice = {watch_id: wid, last_action_signal: {event_id: 'alert', state: 'ACTIVE', signal: 'SELL'}};
+    await click({dataset: {engineNotice: JSON.stringify(notice)}});
+    assert.equal(dialog.open, true);
+    assert.match(dialog.innerHTML, /Signaladvarsel/);
+    assert.equal(dialog.dataset.watchId, undefined);
+  }
+  const previousHtml = dialog.innerHTML;
+  const current = !change || change === 'list';
+  const outcome = current && fail ? assert.rejects(pending, e => e === error) : pending;
   if (reload) {
     if (fail) reload.reject(error);
     else reload.succeed();
   } else if (fail) reject(error);
   else resolve({});
   await settle();
-  const success = !change && !fail;
+  const success = current && !fail;
   assert.equal(requests.length, Number(success && stage === 'control'), 'unexpected reload: ' + change);
   if (requests.length) requests.shift().succeed();
-  if (!change && fail) await outcome;
+  if (current && fail) await outcome;
   else assert.equal(await outcome, true);
-  assert.equal(detailReads.length, success ? 4 : 0);
-  if (success) assert.match(dialog.innerHTML, /TEST · motorforløb/);
-  else assert.equal(dialog.innerHTML, '');
+  const showDetail = success && change !== 'list';
+  assert.equal(detailReads.length, showDetail ? 4 : 0);
+  if (showDetail) assert.match(dialog.innerHTML, /TEST · motorforløb/);
+  else assert.equal(dialog.innerHTML, previousHtml);
 }
 
 async function main() {
-  for (const change of ['epoch', 'owner', 'mode', 'dialog', null]) {
+  for (const change of ['epoch', 'owner', 'mode', 'dialog', 'notice', 'list', null]) {
     for (const stage of ['control', 'reload']) {
       await checkControl(change, stage, false);
       await checkControl(change, stage, true);
