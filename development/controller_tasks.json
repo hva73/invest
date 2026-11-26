@@ -2656,5 +2656,49 @@
     "reserve_plan_id": "statistics/fills/unlinked-pluto-observation-clears-legacy-cycle-claim",
     "reserve_goal": "statistics/fills",
     "reserve_reassessment": "114:20@0efdda3f19095bf15528e13f7a037769ffce2bf9bfb01bb78a1944426962ca76"
+  },
+  {
+    "issue": 14,
+    "generation": 29,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [
+      "14:28"
+    ],
+    "paths": [
+      "eodhd_capacity.py",
+      "tests/test_eodhd_capacity.py"
+    ],
+    "task": "Approved roadmap shared_data/scheduler (F\u00e6lles scheduler og budget). Exact existing source anchor: eodhd_capacity.py :: if len(leases)>=64*UTILIZATION//100 or sum(v['symbols'] for v in leases.values())+count>50*UTILIZATION//100:. Implement only this bounded change: In Capacity.websocket(), use a read-only SQLite preflight to reject requests that exceed either existing limit for unexpired WebSocket leases. Use the same captured time and capacity predicates for preflight and for the authoritative check under BEGIN IMMEDIATE. An active cooldown takes precedence over saturation and retains its retry_after_s. Keep lease creation, cleanup, expiry and both capacity limits as they are.. Acceptance: Extend the temporary SQLite capacity fixture. With two leases consuming all 40 symbol slots and another connection holding BEGIN IMMEDIATE, a further reservation returns EODHD_WS_CAPACITY without attempting a write transaction or changing the lease state. Verify an active cooldown still supplies the retry delay and that capacity becomes available at the lease expiry boundary.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_eodhd_capacity.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "shared_data/scheduler/eodhd-websocket-saturation-skips-writer-lock",
+    "reserve_goal": "shared_data/scheduler"
+  },
+  {
+    "issue": 54,
+    "generation": 31,
+    "role": "desktop",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [
+      "54:30"
+    ],
+    "paths": [
+      "static/trade-ui.js",
+      "tests/browser_desktop_trade.py"
+    ],
+    "task": "Approved roadmap ui/desktop (Desktop 2.0). Exact existing source anchor: static/trade-ui.js :: const r=await api('trade/search',{query:$('#quick-trade-query').value});. Implement only this bounded change: In quickClick(), scope only the quick trade dialog\u2019s read-only asset search to the submitted query, original input, and originating dialog interaction. Keep the existing owner and source checks and apply the same validity check before rendering search success or rejection. If the query was edited while the lookup was pending, discard the stale outcome and leave the search usable for the new text. Preserve the normal option rendering and keep the estimate panel and proposal handling outside this change.. Acceptance: Extend the existing desktop quick-dialog fixture with a deferred search stub. Edit the query before resolving one lookup and before rejecting another. Neither stale outcome changes the options or displays an error for the edited query. A fresh search renders its returned asset and leaves the search button usable.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_trade.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "ui/desktop/quick-trade-asset-search-discards-edited-query",
+    "reserve_goal": "ui/desktop"
   }
 ]
