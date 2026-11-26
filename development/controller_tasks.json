@@ -1299,7 +1299,7 @@
     "task": "Next small data robustness slice in hotwatch_service.auto_holdings_tick snapshot collection only. A complete snapshot with positions not a list or a non-dict position entry currently throws TypeError/AttributeError before later tenants are considered. Reject malformed snapshot as a whole (do not activate any partial malformed snapshot), continue with other fresh complete valid snapshots, preserve current ordering, valid holding filtering, transaction and one activation per tick. Add focused SQLite test with malformed snapshot for earlier tenant and valid later tenant, plus existing valid snapshot path. Run test_hotwatch_holdings_auto.py. No changes to retry semantics, trading strategy, schema, live data/provider/broker calls. ESCAPE_DRAFT_READY after passing."
   },
   {
-    "status": "ready",
+    "status": "done",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "9ae54be18c4b0d1382fedb9d351b35c7f12f8aea",
