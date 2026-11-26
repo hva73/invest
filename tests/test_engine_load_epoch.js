@@ -7,17 +7,18 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../static/engine-ui.js'), 'utf8');
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
-function fixture() {
+function fixture(engineSource = source) {
   const historyGroup = {open: false};
   const root = {isConnected: true, innerHTML: '', textContent: '', querySelector: selector => selector === 'details[data-engine-group=history]' ? historyGroup : null, querySelectorAll: () => []};
   const context = {window: {}, document: {getElementById: id => id === 'engine-root' ? root : null},
     setTimeout() {}, clearTimeout() {}};
-  vm.runInNewContext(source, context);
+  vm.runInNewContext(engineSource, context);
   const requests = [];
   const session = {epoch: 1, owner: 'same-owner', history: [], older: []};
   const ui = context.window.EngineUI;
   ui.setup({
     api(url, body) {
+      if (session.creation) return session.creation(url, body);
       if (session.settings && (url.endsWith('/strategies') || url.includes('/providers?'))) return session.settings(url);
       if (body && session.control) return session.control(url, body);
       if (session.detail && (url.includes('/sessions/') || url === 'state')) return session.detail(url);
@@ -631,7 +632,764 @@ async function checkPolling(change) {
   if (!change) assert.match(dialog.innerHTML, /POLL · motorforløb/);
 }
 
+function instrumentFixture() {
+  const seeded = source.replace('return {openHoldingStatus,',
+    'return {seed(rows,accounts,snapshots){candidates=rows;portfolios=accounts;portfolioSnapshots=snapshots},openHoldingStatus,');
+  const {context, session, mount, requests} = fixture(seeded);
+  const ui = context.window.EngineUI;
+  const rows = ['FIRST', 'SECOND'].map(ticker => ({report_id: 'report', candidate: {candidate_id: ticker, ticker}}));
+  ui.seed(rows, [{id: 1}, {id: 2}], {
+    1: {data: {positions_complete: true, positions: []}},
+    2: {data: {positions_complete: true, positions: [{kind: 'holding', asset_id: 'asset', quantity: 3}]}}
+  });
+  const elements = {
+    candidate: {name: 'candidate', value: '0'}, provider: {value: 'pluto'}, provider_symbol: {value: ''},
+    exchange: {}, asset_id: {}, quote_currency: {}, watch_mode: {value: 'both'},
+    portfolios: {options: [{value: '1'}, {value: '2'}]}
+  };
+  const form = {id: 'engine-create', isConnected: true, elements}, status = {}, slot = {};
+  const nodes = {'engine-create': form, 'engine-form-status': status, 'engine-instrument-choice': slot};
+  const lookup = context.document.getElementById;
+  context.document.getElementById = id => nodes[id] || lookup(id);
+  context.FormData = class { constructor(target) { this.target = target; } get(k) { return this.target.elements[k]?.value; } };
+  const QuotePromise = vm.runInNewContext('Promise', context);
+  return {context, session, mount, requests, ui, rows, elements, form, status, slot, nodes, QuotePromise};
+}
+
+async function checkInstrument(change, outcome, afterSettlement = false) {
+  const {session, mount, ui, rows, elements, form, status, slot, nodes, QuotePromise} = instrumentFixture();
+  if (afterSettlement) elements.provider.value = 'eodhd';
+  const calls = [];
+  session.control = (url, body) => {
+    if (url !== 'market/quote') {
+      calls.push({url, body: {...body}});
+      if (afterSettlement && !change && url === 'market/eodhd-symbols') return {choices: []};
+      throw Error('Unexpected provider request: ' + url);
+    }
+    return new QuotePromise((resolve, reject) => calls.push({url, body: {...body}, resolve, reject}));
+  };
+  const pending = ui.change({target: elements.candidate});
+  assert.equal(calls[0].url, 'market/quote');
+  assert.deepEqual(calls[0].body, {report_id: 'report', candidate_id: 'FIRST', is_test: false});
+  const verified = {asset_id: 'asset', ticker: 'FIRST', exchange: 'NASDAQ', currency: 'USD', name: 'First', isin: 'id'};
+  const choices = [{...verified}];
+  const settleQuote = () => {
+    if (outcome === 'error') calls[0].reject(new Error('quote offline'));
+    else calls[0].resolve(outcome === 'choices' ? {selection_required: true, choices} : verified);
+  };
+  if (afterSettlement) {
+    settleQuote();
+    await Promise.resolve();
+    if (outcome === 'verified') assert.equal(rows[0].instrument.asset_id, 'asset');
+    if (change === 'replacement-session') {
+      session.epoch++;
+      form.isConnected = false;
+      nodes['engine-create'] = {isConnected: true, elements: {...elements, candidate: {value: '1'}}};
+      nodes['engine-form-status'] = {textContent: 'Ny session'};
+      nodes['engine-eodhd-choice'] = {textContent: 'Nyt instrument'};
+    }
+  }
+  if (change === 'candidate') elements.candidate.value = '1';
+  if (change === 'epoch') session.epoch++;
+  if (change === 'owner') session.owner = 'other';
+  if (change === 'mode') mount(true).succeed();
+  if (change === 'replaced') nodes['engine-create'] = {...form};
+  if (change === 'detached') form.isConnected = false;
+  if (change === 'newer') {
+    const second = ui.change({target: {id: 'engine-asset-choice', value: 'selected'}});
+    assert.deepEqual(calls[1].body, {...calls[0].body, asset_id: 'selected'});
+    calls[1].resolve({...verified, asset_id: 'selected'});
+    await second;
+    assert.equal(rows[0].instrument.asset_id, 'selected');
+  }
+  if (change) elements.provider.value = 'eodhd';
+  const snapshot = () => JSON.stringify([rows, elements, nodes]);
+  const before = snapshot();
+  if (!afterSettlement) settleQuote();
+  assert.equal(await pending, true);
+  if (afterSettlement && !change) {
+    assert.deepEqual(calls.slice(1), [{url: 'market/eodhd-symbols', body: {...calls[0].body,
+      quote_currency: outcome === 'verified' ? 'USD' : null}}]);
+  } else assert.equal(calls.length, change === 'newer' ? 2 : 1, change + ' / ' + outcome);
+  if (change) assert.equal(snapshot(), before, change + ' / ' + outcome);
+  else if (outcome === 'error') assert.match(status.textContent, /quote offline/);
+  else if (outcome === 'choices') {
+    assert.deepEqual(rows[0].resolution_choices, choices);
+    assert.match(slot.innerHTML, /<option value="">Vælg instrument<\/option><option value="asset">/);
+    assert.equal(rows[0].instrument, undefined);
+    assert.equal(elements.asset_id.value, undefined);
+  } else {
+    assert.deepEqual({...rows[0].instrument}, {asset_id: 'asset', currency: 'USD', exchange: 'NASDAQ',
+      name: 'First', isin: 'id', provider_symbol: null});
+    assert.deepEqual([...rows[0].portfolio_ids], [2]);
+    assert.equal(rows[0].portfolios_verified, true);
+    assert.deepEqual(elements.portfolios.options.map(option => option.selected), [false, true]);
+    assert.deepEqual([elements.asset_id.value, elements.exchange.value, elements.quote_currency.value,
+      elements.watch_mode.value], ['asset', 'NASDAQ', 'USD', 'both']);
+    assert.match(status.textContent, /1 matchende depot/);
+  }
+}
+
+const appSource = fs.readFileSync(path.join(__dirname, '../static/app.js'), 'utf8');
+
+function dispatchInstrumentEvent(context, caller, form) {
+  const type = {submit: 'submit', batch: 'click', asset: 'change'}[caller];
+  const listener = appSource.split('\n').find(line =>
+    line.startsWith(`document.addEventListener('${type}',`) && line.includes(`window.EngineUI.${type}(`));
+  let handle;
+  context.document.addEventListener = (_, fn) => { handle = fn; };
+  vm.runInNewContext(listener, context);
+  const pass = () => false;
+  Object.assign(context.window, {JournalUI: {click: pass, change: pass}, DashboardUI: {click: pass, changeSort: pass},
+    CandidateUI: {click: pass}, TradeUI: {change: pass}});
+  context.userRefreshBusy = false;
+  form.matches = pass;
+  form.classList = {contains: pass};
+  const button = {dataset: {}, hasAttribute: key => key === 'data-engine-batch-add'};
+  const target = {submit: form, asset: {id: 'engine-asset-choice', value: 'asset'},
+    batch: {closest: selector => selector === 'button' ? button : null}}[caller];
+  return handle({target, preventDefault() {}});
+}
+
+async function checkInstrumentCaller(caller, stale, outcome) {
+  const {context, session, requests, rows, form, nodes, QuotePromise} = instrumentFixture();
+  const calls = [], button = {};
+  let resolveQuote, rejectQuote;
+  nodes['engine-batch-list'] = {textContent: ''};
+  nodes['engine-dialog'] = {close() { this.closed = true; }};
+  context.crypto = {randomUUID: () => 'test-id'};
+  form.querySelector = () => button;
+  session.creation = (url, body) => {
+    calls.push(url);
+    switch (url) {
+      case 'v1/hotwatch/start-candidates?is_test=false': return {candidates: rows};
+      case 'market/quote':
+        assert.deepEqual({...body}, {report_id: 'report', candidate_id: 'FIRST', is_test: false,
+          ...(caller === 'asset' ? {asset_id: 'asset'} : {})});
+        return new QuotePromise((yes, no) => { resolveQuote = yes; rejectQuote = no; });
+      case 'strategy-center': return {selection: {strategy_id: 'test', version: '1'}};
+      case 'v1/hotwatch/sessions':
+        assert.equal(body.candidate_id, 'FIRST');
+        assert.equal(body.asset_id, 'asset');
+        assert.deepEqual([...body.portfolio_ids], [2]);
+        session.creation = null;
+        return {};
+      default: throw Error('Unexpected request: ' + url);
+    }
+  };
+  const notices = [];
+  context.notice = (message, kind) => notices.push([session.epoch, message, kind]);
+  const pending = dispatchInstrumentEvent(context, caller, form);
+  await settle();
+  const error = Object.assign(new Error('quote offline'), {details: {code: 'quote_unavailable'}});
+  const initialCalls = caller === 'submit' ? ['v1/hotwatch/start-candidates?is_test=false', 'market/quote'] : ['market/quote'];
+  assert.deepEqual(calls, initialCalls);
+  if (outcome === 'error') rejectQuote(error);
+  else resolveQuote(outcome === 'choices' ? {selection_required: true, choices: []} :
+    {asset_id: 'asset', exchange: 'NASDAQ', currency: 'USD'});
+  await Promise.resolve(); // resolveInstrument has resumed, its caller is still queued.
+  if (outcome === 'verified') assert.equal(rows[0].instrument.asset_id, 'asset');
+  if (stale === 'after-caller') await Promise.resolve();
+  if (stale) session.epoch++;
+  const before = JSON.stringify([nodes, rows]);
+  if (caller === 'submit' && outcome === 'verified') {
+    await settle();
+    assert.equal(requests.length, stale ? 0 : 1);
+    if (!stale) requests.shift().succeed();
+  }
+  await pending;
+  const expectedError = outcome === 'error' ? (caller === 'submit' ? error.details.code : error.message) :
+    caller === 'submit' && outcome === 'choices' ? 'Pluto kunne ikke verificere alle instrumenter.' : null;
+  const expectedNotices = expectedError && stale !== true ? [[1, expectedError, 'error']] : [];
+  assert.deepEqual(notices, expectedNotices, caller + ' / ' + stale + ' / ' + outcome);
+  const verified = !stale && outcome === 'verified';
+  assert.deepEqual(calls, verified && caller === 'submit' ?
+    [...initialCalls, 'strategy-center', 'v1/hotwatch/sessions'] : initialCalls);
+  assert.equal(nodes['engine-batch-list'].textContent, verified && caller === 'batch' ? '1/40 kandidat(er) klar: FIRST · asset' : '');
+  assert.equal(Boolean(nodes['engine-dialog'].closed), verified && caller === 'submit');
+  if (stale) assert.equal(JSON.stringify([nodes, rows]), before);
+}
+
+async function checkPendingSubmitLookup(sameCandidate, quoteFirst) {
+  const {ui, rows, elements, form, status, session, QuotePromise} = instrumentFixture();
+  const calls = [];
+  session.creation = (url, body) => new QuotePromise(resolve => calls.push({url, body, resolve}));
+  const submit = ui.submit({target: form, preventDefault() {}});
+  const index = sameCandidate ? 0 : 1;
+  elements.candidate.value = String(index);
+  const target = sameCandidate ? {id: 'engine-asset-choice', value: 'asset'} : elements.candidate;
+  const lookup = ui.change({target});
+  assert.deepEqual(calls.map(call => call.url), ['v1/hotwatch/start-candidates?is_test=false', 'market/quote']);
+  assert.deepEqual({...calls[1].body}, {report_id: 'report', candidate_id: rows[index].candidate.candidate_id,
+    is_test: false, ...(sameCandidate ? {asset_id: 'asset'} : {})});
+  const finishLookup = async () => {
+    calls[1].resolve({asset_id: 'asset', currency: 'USD', exchange: 'NASDAQ'});
+    await lookup;
+  };
+  if (quoteFirst) await finishLookup();
+  calls[0].resolve({candidates: rows});
+  await settle();
+  assert.equal(calls.length, 2, 'obsolete submit started another request');
+  assert.equal(await submit, true);
+  if (!quoteFirst) await finishLookup();
+  assert.match(status.textContent, /1 matchende depot/);
+  assert.deepEqual([elements.asset_id.value, elements.exchange.value, elements.quote_currency.value],
+    ['asset', 'NASDAQ', 'USD']);
+  assert.deepEqual([...rows[index].portfolio_ids], [2]);
+  assert.deepEqual(elements.portfolios.options.map(option => option.selected), [false, true]);
+  if (!sameCandidate) assert.equal(rows[0].instrument, undefined);
+}
+
+async function checkOverlappingQuotes(callers, verificationFirst, implicitOutcome, {stale, repeat, candidateLookup, repeatedLookup} = {}) {
+  const {context, session, ui, rows, elements, form, status, slot, nodes, requests, QuotePromise} = instrumentFixture();
+  const quotes = [], notices = [];
+  context.notice = message => notices.push(message);
+  nodes['engine-batch-list'] = {textContent: ''};
+  const started = [];
+  context.crypto = {randomUUID: () => 'test-id'};
+  form.querySelector = () => ({});
+  nodes['engine-dialog'] = {close() { this.closed = true; }};
+  session.creation = (url, body) => {
+    if (url === 'strategy-center') return {selection: {strategy_id: 'test', version: '1'}};
+    if (url === 'v1/hotwatch/sessions') {
+      started.push([body.candidate_id, body.asset_id, [...body.portfolio_ids]]);
+      session.creation = null;
+      return {};
+    }
+    if (callers.includes('submit') && url === 'v1/hotwatch/start-candidates?is_test=false') return {candidates: rows};
+    assert.equal(url, 'market/quote');
+    return new QuotePromise((resolve, reject) => quotes.push({body: {...body}, resolve, reject}));
+  };
+  const verified = {asset_id: 'asset', currency: 'USD', exchange: 'NASDAQ'};
+  const choices = {selection_required: true, choices: [verified]};
+  const select = value => ui.change({target: {id: 'engine-asset-choice', value}});
+  const chooseCandidate = index => {
+    elements.candidate.value = String(index);
+    return ui.change({target: elements.candidate});
+  };
+  let verification;
+  if (repeatedLookup === 'action') {
+    verification = dispatchInstrumentEvent(context, callers[0], form);
+    await settle();
+  } else if (candidateLookup) {
+    verification = chooseCandidate(0);
+  } else {
+    const initial = chooseCandidate(0);
+    quotes[0].resolve(choices);
+    await initial;
+    assert.match(slot.innerHTML, /value="asset"/);
+    verification = dispatchInstrumentEvent(context, 'asset', form);
+    await settle();
+  }
+  const primary = quotes.at(-1);
+  const extraLookups = [];
+  let otherQuote;
+  if (repeatedLookup === 'selection') {
+    const other = candidateLookup ? chooseCandidate(1) : select('other');
+    const back = candidateLookup ? chooseCandidate(0) : select('asset');
+    otherQuote = quotes.at(-2);
+    assert.deepEqual(quotes.at(-1).body, primary.body);
+    extraLookups.push(other, back);
+  }
+  const actions = [];
+  for (const action of callers) {
+    actions.push(dispatchInstrumentEvent(context, action, form));
+    await settle();
+  }
+  const duplicates = quotes.slice(quotes.indexOf(primary) + 1).filter(q => q !== otherQuote);
+  const args = {report_id: 'report', candidate_id: 'FIRST', is_test: false};
+  const selectedArgs = candidateLookup ? args : {...args, asset_id: 'asset'};
+  const expected = [args];
+  if (!candidateLookup && repeatedLookup !== 'action') expected.push(selectedArgs);
+  if (otherQuote) expected.push(candidateLookup ? {...args, candidate_id: 'SECOND'} : {...args, asset_id: 'other'}, selectedArgs);
+  assert.deepEqual(quotes.map(q => q.body), [...expected, ...callers.map(() => args)]);
+  let repeated;
+  if (repeat) {
+    repeated = dispatchInstrumentEvent(context, callers[0], form);
+    await settle();
+    assert.deepEqual(quotes[3].body, args);
+    quotes[3].resolve(choices);
+  }
+  const finishVerification = async () => {
+    primary.resolve(verified);
+    await verification;
+  };
+  if (otherQuote) {
+    otherQuote.resolve({...verified, asset_id: 'other'});
+    await extraLookups[0];
+    assert.equal(elements.asset_id.value, undefined);
+    assert.equal(rows[1].instrument, undefined);
+  }
+  if (verificationFirst) {
+    await finishVerification();
+    if (!repeatedLookup) assert.match(status.textContent, /1 matchende depot/);
+    if (stale) session.epoch++;
+  }
+  for (const duplicate of duplicates) {
+    if (implicitOutcome === 'error') duplicate.reject(Error('implicit lookup failed'));
+    else if (implicitOutcome === 'pending') duplicate.resolve({pending: true, retry_after: 2});
+    else duplicate.resolve(implicitOutcome === 'choices' ? choices : {...verified, asset_id: 'other'});
+  }
+  if (!verificationFirst) {
+    await settle();
+    assert.deepEqual(started, []);
+    assert.equal(nodes['engine-batch-list'].textContent, '');
+    await finishVerification();
+  }
+  await settle();
+  const superseded = repeatedLookup === 'selection';
+  const submits = callers.includes('submit') && !stale && !superseded;
+  assert.deepEqual(started, submits ? [['FIRST', 'asset', [2]]] : []);
+  assert.equal(requests.length, submits ? 1 : 0);
+  if (submits) requests.shift().succeed();
+  await Promise.all([...actions, repeated, ...extraLookups]);
+  if (superseded) {
+    assert.equal(rows[0].instrument, undefined);
+    assert.deepEqual([elements.asset_id.value, elements.exchange.value, elements.quote_currency.value],
+      [undefined, undefined, undefined]);
+    assert.equal(nodes['engine-batch-list'].textContent, '');
+    assert.equal(nodes['engine-dialog'].closed, undefined);
+    assert.deepEqual(notices, callers.includes('submit') ? ['Pluto kunne ikke verificere alle instrumenter.'] : []);
+    return;
+  }
+  assert.equal(elements.asset_id.value, 'asset');
+  assert.equal(elements.exchange.value, 'NASDAQ');
+  assert.equal(elements.quote_currency.value, 'USD');
+  assert.equal(rows[0].instrument.asset_id, 'asset');
+  assert.deepEqual([...rows[0].portfolio_ids], [2]);
+  assert.deepEqual(elements.portfolios.options.map(option => option.selected), [false, true]);
+  assert.deepEqual(notices, []);
+  assert.equal(nodes['engine-batch-list'].textContent, callers.includes('batch') && !stale ? '1/40 kandidat(er) klar: FIRST · asset' : '');
+  assert.equal(Boolean(nodes['engine-dialog'].closed), submits);
+}
+
+async function checkDuplicateQuoteContext(change, rejectOld) {
+  const {ui, session, elements, nodes, form, rows, status, QuotePromise} = instrumentFixture();
+  const quotes = [];
+  session.control = () => new QuotePromise((resolve, reject) => quotes.push({resolve, reject}));
+  const select = () => ui.change({target: elements.candidate});
+  const old = select();
+  if (change === 'session') session.epoch++;
+  if (change === 'owner') session.owner = 'other';
+  if (change === 'form') nodes['engine-create'] = {...form};
+  const current = select();
+  quotes[1].resolve({pending: true});
+  await current;
+  assert.match(status.textContent, /mangler verificeret aktiv-ID/);
+  const before = status.textContent;
+  if (rejectOld) quotes[0].reject(Error('old lookup failed'));
+  else quotes[0].resolve({asset_id: 'old', currency: 'USD', exchange: 'NASDAQ'});
+  await old;
+  assert.equal(status.textContent, before);
+  assert.equal(rows[0].instrument, undefined);
+  assert.equal(elements.asset_id.value, undefined);
+}
+
+// Drive the real delegated events and stop at a chosen API boundary.
+function creationRequests() {
+  const fixture = instrumentFixture();
+  const {context, nodes, session, form, QuotePromise} = fixture;
+  const calls = [], notices = [], button = {};
+  context.notice = message => notices.push(message);
+  context.crypto = {randomUUID: () => 'test-id'};
+  form.querySelector = () => button;
+  nodes['engine-dialog'] = {close() { this.closed = true; }};
+  nodes['engine-batch-list'] = {textContent: ''};
+  nodes['engine-eodhd-choice'] = {};
+  session.creation = (url, body) => new QuotePromise((resolve, reject) =>
+    calls.push({url, body, resolve, reject}));
+  const call = url => {
+    const last = calls.at(-1);
+    assert.equal(last?.url, url);
+    return last;
+  };
+  return {...fixture, calls, notices, button, call};
+}
+
+async function checkCachedChoice(action, verified, beforeAvailability) {
+  const {context, ui, session, rows, form, nodes, requests, notices, call, calls} = creationRequests();
+  const select = value => ui.change({target: {id: 'engine-asset-choice', value}});
+  const quote = asset_id => ({asset_id, currency: 'USD', exchange: 'NASDAQ'});
+  const first = select('old');
+  call('market/quote').resolve(quote('old'));
+  await first;
+  const second = select('asset');
+  const pendingQuote = call('market/quote');
+  const pendingAction = dispatchInstrumentEvent(context, action, form);
+  await settle();
+  const availability = action === 'submit' && call('v1/hotwatch/start-candidates?is_test=false');
+  if (availability && !beforeAvailability) availability.resolve({candidates: rows});
+  await settle();
+  assert.equal(calls.length, availability ? 3 : 2);
+  assert.equal(nodes['engine-batch-list'].textContent, '');
+  if (verified) pendingQuote.resolve(quote('asset'));
+  else pendingQuote.reject(Error('explicit choice failed'));
+  await second;
+  if (availability && beforeAvailability) availability.resolve({candidates: rows});
+  await settle();
+  if (verified && availability) {
+    call('strategy-center').resolve({selection: {}});
+    await settle();
+    const start = call('v1/hotwatch/sessions');
+    assert.deepEqual([start.body.asset_id, ...start.body.portfolio_ids], ['asset', 2]);
+    session.creation = null;
+    start.resolve({});
+    await settle();
+    requests.shift().succeed();
+  }
+  await pendingAction;
+  if (!verified) {
+    assert.equal(calls.length, availability ? 3 : 2);
+    assert.deepEqual(notices, ['explicit choice failed']);
+  } else assert.deepEqual(notices, []);
+  assert.equal(nodes['engine-batch-list'].textContent,
+    verified && action === 'batch' ? '1/40 kandidat(er) klar: FIRST · asset' : '');
+}
+
+async function checkReturnedSelection(candidate, oldFirst, oldOutcome, verified = false) {
+  const {ui, elements, rows, notices, status, slot, call} = creationRequests();
+  const select = value => {
+    if (!candidate) return ui.change({target: {id: 'engine-asset-choice', value}});
+    elements.candidate.value = value;
+    return ui.change({target: elements.candidate});
+  };
+  const first = select(candidate ? '0' : 'asset'), old = call('market/quote');
+  const other = select(candidate ? '1' : 'other');
+  call('market/quote').reject(Error('obsolete other'));
+  const back = select(candidate ? '0' : 'asset'), latest = call('market/quote');
+  const finishOld = () => oldOutcome === 'error' ? old.reject(Error('obsolete first')) :
+    old.resolve(oldOutcome === 'verified' ? {asset_id: 'asset', currency: 'USD', exchange: 'NYSE'} :
+      {selection_required: true, choices: [{asset_id: 'obsolete'}]});
+  if (oldFirst) { finishOld(); await first; }
+  latest.resolve(verified ? {asset_id: 'asset', currency: 'USD', exchange: 'NASDAQ'} : {pending: true, retry_after: 2});
+  await back;
+  if (!oldFirst) finishOld();
+  await Promise.all([first, other, back]);
+  assert.deepEqual(notices, []);
+  assert.match(status.textContent, verified ? /NASDAQ/ : /mangler verificeret aktiv-ID/);
+  assert.equal(slot.innerHTML, undefined);
+  assert.equal(rows[0].instrument?.exchange, verified ? 'NASDAQ' : undefined);
+}
+
+async function checkManualSymbolReverification(sameAsset, searchFirst, fail, implicit = false) {
+  const {ui, rows, nodes, elements, calls, call} = creationRequests();
+  const select = value => ui.change({target: {id: 'engine-asset-choice', value}});
+  const quote = asset_id => ({asset_id, currency: 'USD', exchange: 'NASDAQ', name: 'First'});
+  const initial = select('asset');
+  call('market/quote').resolve(quote('asset'));
+  await initial;
+  const search = ui.click({dataset: {}, hasAttribute: key => key === 'data-engine-eodhd-search'});
+  const lookup = call('market/eodhd-symbols');
+  const id = sameAsset ? 'asset' : 'other';
+  const verify = implicit ? ui.change({target: elements.candidate}) : select(id), deferred = call('market/quote');
+  if (!searchFirst) { deferred.resolve(quote(id)); await verify; }
+  if (fail) lookup.reject(Error('symbol lookup failed'));
+  else lookup.resolve({choices: [{symbol: 'FIRST.US', name: 'First', currency: 'USD'}]});
+  await search;
+  if (searchFirst) { deferred.resolve(quote(id)); await verify; }
+  assert.equal(calls.length, 3);
+  assert.equal(rows[0].instrument.asset_id, id);
+  assert.equal(elements.provider_symbol.value, sameAsset && !fail ? 'FIRST.US' : '');
+  if (sameAsset) {
+    if (fail) assert.match(nodes['engine-eodhd-choice'].textContent, /symbol lookup failed/);
+    else assert.match(nodes['engine-eodhd-choice'].innerHTML, /FIRST.US/);
+  } else {
+    assert.equal(rows[0].eodhd_choices, undefined);
+    assert.equal(rows[0].eodhd_error, null);
+  }
+}
+
+async function checkSharedSymbolRequest(fail, searchFirst, quoteFails = false) {
+  const {ui, call, calls, elements, nodes} = creationRequests();
+  const select = value => ui.change({target: {id: 'engine-asset-choice', value}});
+  const search = () => ui.click({dataset: {}, hasAttribute: key => key === 'data-engine-eodhd-search'});
+  const quote = asset_id => ({asset_id, currency: 'USD', exchange: 'NYSE', name: 'First'});
+  const first = select('old');
+  call('market/quote').resolve(quote('old'));
+  await first;
+  const oldSearch = search(), lookup = call('market/eodhd-symbols');
+  const change = select('asset'), verification = call('market/quote');
+  const newSearch = search();
+  assert.equal(calls.filter(c => c.url === lookup.url).length, 1);
+  const finishSearch = () => fail ? lookup.reject(Error('symbol search failed')) :
+    lookup.resolve({choices: [{symbol: 'FIRST.US', name: 'First', currency: 'USD'}]});
+  if (searchFirst) {
+    finishSearch();
+    await oldSearch;
+    assert.equal(elements.provider_symbol.value, '');
+  }
+  if (quoteFails) verification.reject(Error('choice failed'));
+  else verification.resolve(quote('asset'));
+  await change;
+  if (!searchFirst) finishSearch();
+  await Promise.all([oldSearch, newSearch]);
+  if (fail) assert.match(nodes['engine-eodhd-choice'].textContent, /symbol search failed/);
+  else assert.equal(elements.provider_symbol.value, 'FIRST.US');
+}
+
+async function checkSymbolSearchDuringFirstQuote(currency, fail, explicit = false) {
+  const {ui, elements, calls, call, nodes} = creationRequests();
+  elements.provider.value = 'eodhd';
+  elements.quote_currency.value = 'USD';
+  const select = () => ui.change({target: explicit ? {id: 'engine-asset-choice', value: 'asset'} : elements.candidate});
+  let verify = explicit ? null : select();
+  const search = ui.click({dataset: {}, hasAttribute: key => key === 'data-engine-eodhd-search'});
+  const manual = call('market/eodhd-symbols');
+  if (explicit) verify = select();
+  const quote = calls.find(c => c.url === 'market/quote');
+  quote.resolve({asset_id: 'asset', currency, exchange: 'NASDAQ', name: 'First'});
+  await settle();
+  assert.deepEqual(calls.filter(c => c.url === manual.url).map(c => c.body.quote_currency), ['USD']);
+  if (fail) manual.reject(Error('symbol search failed'));
+  else manual.resolve({choices: [{symbol: 'FIRST.US', name: 'First', currency: 'USD'}]});
+  await Promise.all([search, verify]);
+  if (fail) assert.match(nodes['engine-eodhd-choice'].textContent, /symbol search failed/);
+  else {
+    assert.match(nodes['engine-eodhd-choice'].innerHTML, /FIRST.US/);
+    assert.equal(elements.provider_symbol.value, currency === 'USD' ? 'FIRST.US' : '');
+  }
+}
+
+async function checkReturnedSymbolSearch(fail) {
+  const {ui, elements, rows, calls, call, nodes} = creationRequests();
+  const select = async index => {
+    elements.candidate.value = String(index);
+    const change = ui.change({target: elements.candidate});
+    call('market/quote').resolve({asset_id: 'asset-' + index, currency: 'USD', exchange: 'NYSE'});
+    await change;
+  };
+  const search = () => ui.click({dataset: {}, hasAttribute: key => key === 'data-engine-eodhd-search'});
+  const url = 'market/eodhd-symbols';
+  await select(0);
+  const first = search(), a = call(url);
+  await select(1);
+  const second = search(), b = call(url);
+  await select(0);
+  const returned = search();
+  assert.deepEqual(calls.filter(c => c.url === url).map(c => c.body.candidate_id), ['FIRST', 'SECOND']);
+  const slot = nodes['engine-eodhd-choice'];
+  b.reject(Error('obsolete search'));
+  await second;
+  assert.equal(slot.textContent, 'Søger hos EODHD …');
+  assert.equal(rows[1].eodhd_error, null);
+  if (fail) a.reject(Error('current search failed'));
+  else a.resolve({choices: [{symbol: 'FIRST.US', currency: 'USD'}]});
+  await Promise.all([first, returned]);
+  if (fail) assert.match(slot.textContent, /current search failed/);
+  else assert.match(slot.innerHTML, /FIRST.US/);
+}
+
+async function checkSubmittedBatch(size, fail, replacement, switchDuringStrategy = false) {
+  const {ui, context, rows, form, elements, nodes, session, notices, call, button, requests} = creationRequests();
+  const add = () => dispatchInstrumentEvent(context, 'batch', form);
+  for (let index = 0; index < size; index++) {
+    elements.candidate.value = String(index);
+    const verify = ui.change({target: elements.candidate});
+    call('market/quote').resolve({asset_id: 'asset-' + index, currency: 'USD', exchange: 'NYSE'});
+    await verify;
+    await add();
+  }
+  const start = dispatchInstrumentEvent(context, 'submit', form);
+  await settle();
+  call('v1/hotwatch/start-candidates?is_test=false').resolve({candidates: rows});
+  await settle();
+  const strategy = call('strategy-center');
+  if (switchDuringStrategy) {
+    elements.candidate.value = String(size % 2);
+    const next = ui.change({target: elements.candidate});
+    call('market/quote').resolve({asset_id: 'other', currency: 'USD', exchange: 'NYSE'});
+    await next;
+  }
+  strategy.resolve({selection: {}});
+  await settle();
+  const post = call(size === 1 ? 'v1/hotwatch/sessions' : 'v1/hotwatch/activation-requests');
+  assert.deepEqual(Array.from(post.body.sessions || [post.body], s => s.asset_id),
+    rows.slice(0, size).map((_, i) => 'asset-' + i));
+  elements.candidate.value = String(size % 2);
+  const next = ui.change({target: elements.candidate});
+  call('market/quote').resolve({asset_id: 'next', currency: 'USD', exchange: 'NYSE'});
+  await next;
+  assert.equal(button.disabled, true);
+  if (replacement) {
+    if (replacement === 'login') session.epoch++;
+    else nodes['engine-create'] = {...form};
+    const previousStatus = nodes['engine-form-status'].textContent;
+    if (fail) post.reject(Error('obsolete batch'));
+    else post.resolve({created_count: size});
+    await start;
+    assert.equal(nodes['engine-form-status'].textContent, previousStatus);
+    assert.equal(nodes['engine-dialog'].closed, undefined);
+    assert.deepEqual(notices, []);
+    assert.equal(call('market/quote').body.candidate_id, rows[size % 2].candidate.candidate_id);
+    return;
+  }
+  if (fail) post.reject(Error('batch failed'));
+  else {
+    session.creation = null;
+    post.resolve({created_count: size});
+    await settle();
+    assert.equal(requests.length, 1, 'successful batch refreshes the engine');
+    requests.shift().succeed();
+  }
+  await start;
+  assert.equal(button.disabled, false);
+  assert.equal(Boolean(nodes['engine-dialog'].closed), !fail);
+  assert.deepEqual(notices, fail ? ['batch failed'] : []);
+  assert.match(nodes['engine-form-status'].textContent, fail ? /batch failed/ : /session\(er\) oprettet/);
+  elements.candidate.value = '0';
+  await add();
+  assert.match(nodes['engine-form-status'].textContent, fail ? /allerede i batchen/ : /føjet til batch/);
+}
+
+async function checkCreationBoundary(stage, change, fail) {
+  const {context, ui, form, rows, elements, nodes, session, notices, calls, call, button, requests} = creationRequests();
+  const availability = 'v1/hotwatch/start-candidates?is_test=false', activation = 'v1/hotwatch/sessions';
+  elements.provider.value = stage === 'market/eodhd-symbols' ? 'eodhd' : 'pluto';
+  const verification = ui.change({target: elements.candidate});
+  call('market/quote').resolve({asset_id: 'asset', currency: 'USD', exchange: 'NASDAQ'});
+  await settle();
+  let operation = verification;
+  if (stage !== 'market/eodhd-symbols') {
+    operation = dispatchInstrumentEvent(context, 'submit', form);
+    await settle();
+    if (stage !== availability) {
+      call(availability).resolve({candidates: rows});
+      await settle();
+    }
+    if (stage === activation) {
+      call('strategy-center').resolve({selection: {}});
+      await settle();
+      assert.equal(button.disabled, true);
+    }
+  }
+  const deferred = call(stage);
+  let nextCandidate;
+  if (change === 'candidate') {
+    elements.candidate.value = '1';
+    nextCandidate = ui.change({target: elements.candidate});
+    if (stage === activation) {
+      assert.equal(button.disabled, true);
+      const count = calls.length;
+      const duplicate = dispatchInstrumentEvent(context, 'submit', form);
+      await settle();
+      assert.equal(calls.length, count);
+      await duplicate;
+    }
+  }
+  if (change === 'session') session.epoch++;
+  if (change === 'form') {
+    nodes['engine-create'] = {...form};
+    nodes['engine-form-status'] = {textContent: 'Ny formular'};
+  }
+  const snapshot = () => JSON.stringify([rows, nodes, button, notices, calls.length, requests.length]);
+  const before = snapshot();
+  if (fail) deferred.reject(Error('request failed'));
+  else deferred.resolve({candidates: rows, selection: {}, choices: []});
+  if (change) {
+    const submitted = stage === activation && nextCandidate;
+    if (submitted && !fail) {
+      session.creation = null;
+      await settle();
+      assert.equal(requests.length, 1);
+      requests.shift().succeed();
+    }
+    await operation;
+    if (submitted) {
+      assert.equal(button.disabled, false);
+      assert.equal(Boolean(nodes['engine-dialog'].closed), !fail);
+      assert.deepEqual(notices, fail ? ['request failed'] : []);
+      assert.match(nodes['engine-form-status'].textContent, fail ? /request failed/ : /1 session\(er\) oprettet/);
+    } else assert.equal(snapshot(), before, [stage, change, fail].join(' / '));
+    if (nextCandidate) {
+      elements.provider.value = 'pluto';
+      call('market/quote').resolve({asset_id: 'second', exchange: 'NYSE', currency: 'USD'});
+      await nextCandidate;
+      assert.equal(rows[1].instrument.asset_id, 'second');
+    }
+  } else {
+    await operation;
+    if (stage === 'market/eodhd-symbols') assert.match(nodes['engine-eodhd-choice'].textContent,
+      fail ? /request failed/ : /ingen sikker instrumentmatch/);
+    else assert.deepEqual(notices, ['request failed']);
+    if (stage === activation) {
+      assert.equal(button.disabled, false);
+      assert.match(nodes['engine-form-status'].textContent, /request failed/);
+    }
+  }
+}
+
 async function main() {
+  for (const fail of [true, false]) {
+    for (const searchFirst of [true, false]) {
+      await checkSharedSymbolRequest(fail, searchFirst);
+      if (fail) await checkSharedSymbolRequest(fail, searchFirst, true);
+    }
+    for (const currency of ['USD', 'EUR']) {
+      for (const explicit of [false, true]) await checkSymbolSearchDuringFirstQuote(currency, fail, explicit);
+    }
+    await checkReturnedSymbolSearch(fail);
+    await checkSubmittedBatch(1, fail, null, true);
+    for (const size of [1, 2]) await checkSubmittedBatch(size, fail);
+    for (const replacement of ['login', 'form']) await checkSubmittedBatch(2, fail, replacement);
+  }
+  for (const first of [true, false]) {
+    for (const fail of [true, false]) {
+      await checkManualSymbolReverification(true, first, fail, true);
+      for (const sameAsset of [true, false]) await checkManualSymbolReverification(sameAsset, first, fail);
+    }
+    for (const candidate of [true, false]) {
+      await checkReturnedSelection(candidate, first, 'verified', true);
+      for (const outcome of ['verified', 'error', 'choices']) await checkReturnedSelection(candidate, first, outcome);
+    }
+  }
+  for (const verified of [true, false]) {
+    await checkCachedChoice('batch', verified, false);
+    for (const quoteFirst of [true, false]) await checkCachedChoice('submit', verified, quoteFirst);
+  }
+  for (const stage of ['v1/hotwatch/start-candidates?is_test=false', 'strategy-center',
+    'v1/hotwatch/sessions', 'market/eodhd-symbols']) {
+    for (const change of ['session', 'candidate', 'form']) {
+      for (const fail of [true, false]) await checkCreationBoundary(stage, change, fail);
+    }
+    await checkCreationBoundary(stage, null, true);
+  }
+  await checkCreationBoundary('market/eodhd-symbols', null, false);
+  for (const change of ['session', 'owner', 'form']) {
+    for (const rejectOld of [false, true]) await checkDuplicateQuoteContext(change, rejectOld);
+  }
+  for (const first of [true, false]) {
+    for (const caller of ['batch', 'submit']) {
+      await checkOverlappingQuotes([caller], first, 'pending', {candidateLookup: true});
+      await checkOverlappingQuotes([caller], first, 'pending', {repeatedLookup: 'action'});
+      for (const candidateLookup of [false, true]) {
+        await checkOverlappingQuotes([caller], first, 'pending', {candidateLookup, repeatedLookup: 'selection'});
+      }
+    }
+    for (const callers of [['batch', 'submit'], ['submit', 'batch']]) await checkOverlappingQuotes(callers, first, 'verified');
+  }
+  for (const caller of ['batch', 'submit']) {
+    await checkOverlappingQuotes([caller], true, 'choices', {stale: true});
+    await checkOverlappingQuotes([caller], false, 'choices', {repeat: true});
+    for (const explicitFirst of [true, false]) {
+      for (const outcome of ['choices', 'verified', 'error']) await checkOverlappingQuotes([caller], explicitFirst, outcome);
+    }
+  }
+  for (const sameCandidate of [false, true]) {
+    for (const quoteFirst of [false, true]) await checkPendingSubmitLookup(sameCandidate, quoteFirst);
+  }
+  for (const caller of ['batch', 'submit', 'asset']) {
+    await checkInstrumentCaller(caller, 'after-caller', 'error');
+    if (caller === 'submit') await checkInstrumentCaller(caller, 'after-caller', 'choices');
+    for (const stale of [true, false]) {
+      for (const outcome of ['verified', 'choices', 'error']) await checkInstrumentCaller(caller, stale, outcome);
+    }
+  }
+  for (const change of ['replacement-session', 'epoch', 'owner', 'mode', 'candidate', 'newer', null]) {
+    for (const outcome of ['verified', 'choices', 'error']) await checkInstrument(change, outcome, true);
+  }
+  for (const change of ['candidate', 'epoch', 'owner', 'mode', 'replaced', 'detached', 'newer', null]) {
+    for (const outcome of ['verified', 'choices', 'error']) await checkInstrument(change, outcome);
+  }
   for (const change of ['epoch', 'owner', 'mode', 'newer', 'detached', 'replaced', null]) {
     await checkManualSearch(change, false);
     await checkManualSearch(change, true);
@@ -708,4 +1466,8 @@ async function main() {
   assert.equal(root.textContent, 'Motorstatus kunne ikke hentes: offline');
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1; });
+const incomplete = () => { throw Error('Engine UI suite ended with a pending test'); };
+process.once('beforeExit', incomplete);
+main().then(() => console.log('PASS: Engine UI request and session isolation'))
+  .catch(error => { console.error(error); process.exitCode = 1; })
+  .finally(() => process.removeListener('beforeExit', incomplete));
