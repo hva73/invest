@@ -52,6 +52,21 @@ class CapacityTests(unittest.TestCase):
   self.assertEqual(caught.exception.retry_after_s,60)
   self.cap.reserve(1,self.now+120)
   self.assertEqual(self.state()['http_429'],1)
+ def test_same_minute_headers_preserve_charged_reservations(self):
+  other=capacity.Capacity(app.connect)
+  cases=[(21,1,21,20),(21,1,90,20),(25,2,24,23),(25,2,21,21)]
+  for minute,(initial,charged,reported,expected) in enumerate(cases):
+   with self.subTest(initial=initial,charged=charged,reported=reported):
+    now=self.now+60*minute
+    self.cap.reserve(1,now)
+    self.cap.observe(200,{'X-RateLimit-Limit':'100','X-RateLimit-Remaining':str(initial)},2,now)
+    for _ in range(charged):other.reserve(1,now)
+    other.observe(200,{'X-RateLimit-Remaining':str(reported)},2,now+59)
+    state=self.state()
+    self.assertEqual((state['header_remaining'],state['header_local_used']),(expected,1+charged))
+    for _ in range(expected-20):self.cap.reserve(1,now+59)
+    with self.assertRaisesRegex(EngineError,'PROVIDER_RATE_BUDGET'):other.reserve(1,now+59)
+  other.reserve(1,self.now+60*len(cases))
  def test_cost_units_are_not_http_requests_and_unknown_is_explicit(self):
   for path,expected in [('real-time/AAPL.US',1),('intraday/AAPL.US',5),('screener',5),('fundamentals/AAPL.US',10),('exchange-symbol-list/US',1),('user',0)]:
    self.assertEqual(capacity.cost('https://eodhd.com/api/'+path),expected)
