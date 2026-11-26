@@ -335,7 +335,40 @@ async function checkSettings(change, fail) {
   }
 }
 
+async function checkValidation(change, outcome) {
+  const {session, click, mount, dialog} = settingsFixture();
+  dialog.open = true;
+  const label = 'Kontrollér deklarationen';
+  const button = {
+    dataset: {engineValidate: 'early/catalyst', engineVersion: '1+2'},
+    isConnected: true, hasAttribute: () => false, textContent: label
+  };
+  let resolve, reject;
+  session.control = (url, body) => {
+    assert.equal(url, 'v1/hotwatch/strategies/early%2Fcatalyst/1%2B2/validate');
+    assert.deepEqual({...body}, {});
+    return new Promise((yes, no) => { resolve = yes; reject = no; });
+  };
+  const pending = click(button);
+  if (change === 'epoch') session.epoch++;
+  if (change === 'owner') session.owner = 'other-owner';
+  if (change === 'mode') mount(true).succeed();
+  if (change === 'detached') button.isConnected = false;
+  const error = new Error('validation offline');
+  if (outcome === 'error') reject(error);
+  else resolve({valid: outcome === 'valid'});
+  if (!change && outcome === 'error') await assert.rejects(pending, e => e === error);
+  else assert.equal(await pending, true);
+  const expected = {valid: 'Deklarationen er gyldig', invalid: 'Deklarationen er ugyldig', error: label};
+  assert.equal(button.textContent, change ? label : expected[outcome], String(change));
+}
+
 async function main() {
+  for (const change of ['epoch', 'owner', 'mode', 'detached', null]) {
+    await checkValidation(change, 'valid');
+    await checkValidation(change, 'error');
+  }
+  await checkValidation(null, 'invalid');
   await checkKillWhileOpeningSettings(true);
   await checkKillWhileOpeningSettings(false);
   for (const change of ['epoch', 'owner', 'mode', 'dialog', 'newer', 'detached', null]) {
