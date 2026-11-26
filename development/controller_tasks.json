@@ -2335,5 +2335,45 @@
     "reserve_plan_id": "ui/desktop/desktop-preview-renders-current-read-only-estimate",
     "reserve_goal": "ui/desktop",
     "reserve_reassessment": "54:25@ef3a7ca2b627962427160ed9a27d4feb2434dde6ed1c1cf4e05468eb1cab62ef"
+  },
+  {
+    "issue": 14,
+    "generation": 24,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [],
+    "paths": [
+      "jobs.py",
+      "tests/test_jobs.py"
+    ],
+    "task": "Approved roadmap shared_data/scheduler (F\u00e6lles scheduler og budget). Exact existing source anchor: jobs.py :: WHERE (status='queued' AND available<=?). Implement only this bounded change: Add two idempotent partial SQLite indexes in jobs.init(), keyed by available for queued jobs and lease_until for running jobs. On the pinned schema, run_one()'s read preflight scans the jobs table because the existing unique dedupe index cannot serve either predicate. The partial indexes let the existing preflight look up eligible work without traversing completed history. Keep the claim order, lease boundary, retry rules and write transaction intact.. Acceptance: With a SQLite fixture containing completed history, future queued jobs and unexpired leases, verify the actual preflight query can use indexed searches for both predicates. Then verify that due jobs still run in available/id order and that a running lease is recoverable only after its deadline. The existing contention and retry tests still pass.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_jobs.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "shared_data/scheduler/cron-queue-indexes-due-and-expired-work",
+    "reserve_goal": "shared_data/scheduler"
+  },
+  {
+    "issue": 54,
+    "generation": 28,
+    "role": "mobile",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [],
+    "paths": [
+      "tests/browser_design_v1.py"
+    ],
+    "task": "Approved roadmap ui/test (F\u00e6lles browsertest). Exact existing source anchor: tests/browser_design_v1.py :: page.locator('nav [data-view='+target+']').click();page.wait_for_timeout(200). Implement only this bounded change: Reassess only the journal-entry selector hunk from the preserved 54:26 diff. In the existing responsive sweep, enter Handelsjournal from Handelsmotor through its visible \u00ab\u00c5bn handelsjournal\u00bb button, then wait for the journal heading before applying the existing width assertions. Limit this split to getting the responsive check onto the correct view. The original parked checkout stays preserved.. Acceptance: The browser reaches the actual Handelsjournal view through the trade panel and checks the journal for horizontal overflow at the nine existing widths. Back navigation, coverage text and pagination are outside this focused check.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_design_v1.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:26; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "ui/test/design-browser-reaches-journal-for-width-check",
+    "reserve_goal": "ui/test",
+    "reserve_reassessment": "54:26@6d23b3f4033d2d2a196d5fb698315db4b0baa9c69656cd4adf5f35f0c2f23857"
   }
 ]
