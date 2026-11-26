@@ -1889,5 +1889,49 @@
     "follow_base": true,
     "reserve_plan_id": "position/ui/strategy-center-load-respects-authenticated-session",
     "reserve_goal": "position/ui"
+  },
+  {
+    "issue": 14,
+    "generation": 17,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "04cee36687e4d60bca0adbedf11acb4ed7224f74",
+    "dependencies": [
+      "14:16"
+    ],
+    "paths": [
+      "jobs.py",
+      "tests/test_jobs.py"
+    ],
+    "task": "Approved roadmap shared_data/scheduler (F\u00e6lles scheduler og budget). Exact existing source anchor: jobs.py :: def run_one(connect,fetcher=None,at=None):. Implement only this bounded change: Add a read-only preflight to run_one() before BEGIN IMMEDIATE. Return False when the queue has neither a due queued job nor an expired running lease, using the same captured timestamp and comparison operators as the existing transaction. Retain the authoritative lease recovery and claim inside the writer transaction, including recovery when an expired lease has exhausted its attempts.. Acceptance: With a second SQLite connection holding BEGIN IMMEDIATE, an empty queue and a queue containing only future work or an unexpired lease return False without attempting a writer transaction. After the lock is released, a due job runs and an expired final-attempt lease is cleared and marked failed even when no queued job is due.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_jobs.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "shared_data/scheduler/skip-idle-cron-job-writer",
+    "reserve_goal": "shared_data/scheduler"
+  },
+  {
+    "issue": 114,
+    "generation": 13,
+    "role": "motor",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "04cee36687e4d60bca0adbedf11acb4ed7224f74",
+    "dependencies": [
+      "114:11"
+    ],
+    "paths": [
+      "journal_projection.py",
+      "tests/test_app.py"
+    ],
+    "task": "Approved roadmap statistics/provenance (Entry/exit-herkomst). Exact existing source anchor: journal_projection.py :: status_time=payload.get('status_time');known=bool(policy.stamp(status_time)). Implement only this bounded change: In the existing journal projection of persisted Pluto execution observations, use a parsed status_time for timeline placement only when it is at or before the row's recorded observation time. A later timestamp currently makes the observation disappear until that timestamp arrives because the journal excludes future events. Use the existing observed_not_execution time basis and observation timestamp for that case. Preserve the raw status_time, normalized status and quantities, and the separate proposal projection.. Acceptance: With a fixed clock and SQLite fixtures, an owned Pluto execution row marked FILLED with status_time later than occurred_at appears at occurred_at with observed_not_execution and unchanged raw status time and quantity. A row with causal provider status time still uses provider_status_time. A separate accepted proposal remains an App/system event with proposal_not_fill.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_app.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "statistics/provenance/keep-execution-visible-with-post-observation-status-time",
+    "reserve_goal": "statistics/provenance"
   }
 ]
