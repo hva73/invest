@@ -1086,7 +1086,7 @@
     "task": "On the accepted #318 + #319 reset base fix ONE verified residual: load() now guards deferred responses by sessionEpoch, but cached history is still keyed only by owner/mode; a new login of the same owner inherits completed/expired rows from the previous epoch even after a fresh successful response. Coordinator isolated execution of the exact load function: baseline 4/6, add _epoch to the data snapshot and require it in the cached-history predicate (and reset showOwn/filter on changed owner/epoch) 6/6. Preserve same-epoch loaded pagination and all existing load validity/error handling. Extend existing actual-source Node VM test with prior completed/expired data, fresh same-owner epoch returning empty/new history, same-epoch cache preservation and other owner/mode. Only load cache scope, no other handlers, browser framework, workflow, network or production. Run node --check static/engine-ui.js and node tests/test_engine_load_epoch.js. Stop with tested ESCAPE_DRAFT_READY. Old #54:3/4/5 and #300 remain preserved, no edits or replay. Independent real browser CI remains mandatory; further async handlers separate."
   },
   {
-    "status": "ready",
+    "status": "done",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "554e6892e395af872a2eb54d4d128410c6fe6e50",
