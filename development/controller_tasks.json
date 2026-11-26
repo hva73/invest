@@ -1382,7 +1382,7 @@
     "status": "ready",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "de261261edd04d3bc9c70fd051a2dcc186314ca2",
+    "base_sha": "c7ffa1398c09ae2d883ce2138cd737aec9e53eb4",
     "dependencies": [
       "315:5"
     ],
