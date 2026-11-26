@@ -879,7 +879,7 @@ def reconcile_closed_holdings(connect,now=None):
   if not snap or snap['last_error']:return None
   try:
    payload=json.loads(snap['payload'],parse_float=Decimal);observed=stamp(payload['observed']);positions=payload['positions']
-   if not payload.get('positions_complete') or not isinstance(positions,list) or not 0<=(now-observed).total_seconds()<=300 or observed<stamp(row['created']):return None
+   if payload.get('positions_complete') is not True or not isinstance(positions,list) or not 0<=(now-observed).total_seconds()<=300 or observed<stamp(row['created']):return None
    for position in positions:
     if not isinstance(position,dict) or not position.get('kind'):return None
     if position['kind']!='holding':continue
