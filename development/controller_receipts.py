@@ -48,7 +48,7 @@ def promote_local_delivery(root,key):
     url=(root/f"issue-{issue}-{generation}.pr").read_text().strip()
     if item.get("status")=="draft_pr" and item.get("pr")==url:
         return
-    if item.get("status")!="review_required" or item.get("issue")!=issue or item.get("generation")!=generation or not PR.fullmatch(url):
+    if item.get("status") not in ("review_required","blocked:incomplete") or item.get("issue")!=issue or item.get("generation")!=generation or not PR.fullmatch(url):
         raise ValueError("invalid local delivery promotion")
     archive=folder/(f"{issue}-{generation}.local-only.history")
     if not archive.exists():

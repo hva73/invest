@@ -203,5 +203,50 @@ class ParallelReviewTests(unittest.TestCase):
             self.assertEqual(s["active"],["273:1"])
             self.assertEqual(s["coordinator_task"],"14:1")
 
+class IncompleteRecoveryTests(unittest.TestCase):
+    def test_progress_not_attempt_count_controls_recovery(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            base="a"*40
+            row=dict(issue=315,generation=1,role="motor",status="ready",
+                     local_review=True,follow_base=True,base_branch="codex/architecture-reset-20261126",
+                     base_sha=base,paths=["hotwatch_engine.py"],task="approved")
+            key="315-1"
+            (root/("issue-"+key)).mkdir()
+            (root/("task-"+key+".txt")).write_text(row["task"])
+            (root/"receipts").mkdir()
+            d.save(root/("receipts/"+key+".json"),dict(issue=315,generation=1,status="blocked:incomplete",pr=None))
+            record=dict(row=row,recovered=True,incomplete_fingerprints=["old","older","old"])
+            d.save(d.task_record(root,row),record)
+            results={"315:1":"blocked:incomplete"}
+            branch="controller/local-315-123"
+            compare={"behind_by":0,"merge_base_commit":{"sha":base},"files":[{"filename":"static/app.js"}]}
+            def remote(endpoint):
+                return compare if "/compare/" in endpoint else []
+            with patch.object(d.controller_coordinator,"inspect_repair_workspace",return_value=(branch,base)), patch.object(d.controller_publish,"git",return_value=b" M hotwatch_engine.py"), patch.object(d.controller_coordinator,"branch_head",return_value="b"*40), patch.object(d.controller_coordinator,"gh",side_effect=remote), patch.object(d.controller_pilot,"fingerprint",return_value="new") as fp:
+                self.assertTrue(d.can_resume_incomplete(root,root,row,results))
+                fp.return_value="old"
+                self.assertFalse(d.can_resume_incomplete(root,root,row,results))
+                fp.return_value="new"
+                compare["files"]=[{"filename":"hotwatch_engine.py"}]
+                self.assertFalse(d.can_resume_incomplete(root,root,row,results))
+                compare["files"]=[{"filename":"static/app.js"}]
+                compare["behind_by"]=1
+                self.assertFalse(d.can_resume_incomplete(root,root,row,results))
+                compare["behind_by"]=0
+                d.save(root/"provider-pause.json",{"reset_at":None})
+                self.assertFalse(d.can_resume_incomplete(root,root,row,results))
+                (root/"provider-pause.json").unlink()
+                d.save(root/("checkpoint-"+key+".json"),{"provider_limit":True})
+                self.assertFalse(d.can_resume_incomplete(root,root,row,results))
+                (root/("checkpoint-"+key+".json")).unlink()
+                (root/("issue-"+key+".pr")).touch()
+                self.assertFalse(d.can_resume_incomplete(root,root,row,results))
+                (root/("issue-"+key+".pr")).unlink()
+                with patch.object(d.controller_coordinator,"gh",side_effect=lambda endpoint: compare if "/compare/" in endpoint else [{"ref":"refs/heads/"+branch}]):
+                    self.assertFalse(d.can_resume_incomplete(root,root,row,results))
+                self.assertTrue(d.can_resume_incomplete(root,root,row,results))
+
+
 if __name__ == "__main__":
     unittest.main()

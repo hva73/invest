@@ -47,7 +47,12 @@ class RemoteRecoveryTests(unittest.TestCase):
             ):
                 controller_remote.refresh(root, queue)
                 snapshot = json.loads(queue.read_text())
-                self.assertEqual([t.issue for t in plan(snapshot)], [1, 2])
+                self.assertEqual([t.issue for t in plan(snapshot)], [1])
+                # Both motor and data now belong to A; B is independent.
+                snapshot[0]["status"]="done"
+                self.assertEqual([t.issue for t in plan(snapshot)], [1, 3])
+                snapshot[1]["status"]="done"
+                self.assertEqual([t.issue for t in plan(snapshot)], [2, 3])
 
     def test_closed_issue_stays_blocked(self):
         with tempfile.TemporaryDirectory() as tmp:

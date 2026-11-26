@@ -23,7 +23,7 @@ class QueueTests(unittest.TestCase):
     def test_parallel_limit_counts_existing_active_workers(self):
         rows = [task(1,status="active"),task(2,"motor",paths=("motor.py",)),task(3,"data",paths=("feed.py",))]
         self.assertEqual([t.issue for t in plan(rows)],[2])
-        self.assertEqual([t.issue for t in plan(rows,max_parallel=3)],[2,3])
+        self.assertEqual([t.issue for t in plan(rows,max_parallel=3)],[2])
         self.assertEqual(plan(rows,max_parallel=1),[])
         for bad in (0,6,True):
             with self.assertRaises(ValueError): plan(rows,max_parallel=bad)
@@ -39,3 +39,7 @@ class QueueTests(unittest.TestCase):
         first=dict(task(57,role="release"),generation=1,status="blocked")
         second=dict(task(57,role="release"),generation=2)
         self.assertEqual([t.key for t in plan([first,second])],[(57,2)])
+
+    def test_two_owners_preserve_roles_and_skip_blocked(self):
+        rows=[task(114,"motor",status="blocked",paths=("trade_service.py",)),task(14,"data",paths=("hotwatch_service.py",)),task(12,"motor",paths=("long_term_watch.py",)),task(54,"mobile",paths=("static/engine-ui.js",)),task(67,"desktop",paths=("static/app.js",))]
+        self.assertEqual([(t.issue,t.role) for t in plan(rows)],[(12,"motor"),(54,"mobile")])

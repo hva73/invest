@@ -13,11 +13,11 @@ import threading
 
 from datetime import datetime, timezone
 try:
-    from .controller_queue import plan
-    from . import controller_remote, controller_publish, controller_receipts, controller_progress, controller_coordinator
+    from .controller_queue import plan, worker
+    from . import controller_remote, controller_publish, controller_receipts, controller_progress, controller_coordinator, controller_pilot
 except ImportError:
-    from controller_queue import plan
-    import controller_remote, controller_publish, controller_receipts, controller_progress, controller_coordinator
+    from controller_queue import plan, worker
+    import controller_remote, controller_publish, controller_receipts, controller_progress, controller_coordinator, controller_pilot
 
 FETCH_LOCK = controller_coordinator.FETCH_LOCK
 
@@ -77,6 +77,42 @@ def can_recover(root,row,boot):
                     and not (root/f"receipts/{key}.json").exists()
                     and not load(root/f"checkpoint-{key}.json",{}).get("provider_limit"))
     except (OSError,ValueError,TypeError,AttributeError):
+        return False
+
+def recovery_base_ok(row, latest):
+    base = row["base_sha"]
+    return latest == base or (row.get("follow_base") is True
+        and controller_coordinator.disjoint_base_changes(
+            controller_coordinator.gh(controller_coordinator.PREFIX+"/compare/"+base+"..."+latest),
+            base,row["paths"]))
+
+def can_resume_incomplete(root,repo_dir,row,results):
+    """Continue verified exited scoped work; stop repeated identical/oscillating diffs."""
+    k=task_key(row).replace(":","-")
+    if results.get(task_key(row))!="blocked:incomplete" or row["status"]!="ready" or row.get("local_review") is not True or row.get("base_branch") not in controller_coordinator.TARGETS or row["role"]=="release":
+        return False
+    try:
+        record=load(task_record(root,row),{})
+        folder=root/("issue-"+k)
+        receipt=load(root/("receipts/"+k+".json"),{})
+        if record.get("row")!=row or receipt.get("status")!="blocked:incomplete" or receipt.get("issue")!=row["issue"] or receipt.get("generation")!=row.get("generation",1) or receipt.get("pr") is not None or (root/("issue-"+k+".pr")).exists() or load(root/("checkpoint-"+k+".json"),{}).get("provider_limit"):
+            return False
+        taskfile=root/("task-"+k+".txt")
+        if taskfile.is_symlink() or taskfile.read_text()!=row["task"]:
+            return False
+        branch,head=controller_coordinator.inspect_repair_workspace(repo_dir,row,row["base_sha"],folder)
+        if head!=row["base_sha"] or not controller_publish.git(folder,"status","--porcelain"):
+            return False
+        if provider_pause_active(root) or not recovery_base_ok(row,controller_coordinator.branch_head(row["base_branch"])):
+            return False
+        history=record.get("incomplete_fingerprints",[])
+        if not isinstance(history,list) or not all(isinstance(x,str) for x in history):
+            return False
+        if history.count(controller_pilot.fingerprint(folder))>=2:
+            return False
+        remote=controller_coordinator.gh(controller_coordinator.PREFIX+"/git/matching-refs/heads/"+branch)
+        return isinstance(remote,list) and not any(x.get("ref")=="refs/heads/"+branch for x in remote)
+    except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError):
         return False
 
 def can_resume_delivery(root,row,results):
@@ -162,7 +198,7 @@ def run_task(root, script, row, allowance, publish=False):
             subprocess.run(["git", "fetch", "--no-tags", "https://github.com/hva73/invest.git", target], cwd=script.parent.parent, check=True, timeout=90)
             actual = subprocess.check_output(["git", "rev-parse", "FETCH_HEAD"], cwd=script.parent.parent).decode().strip()
         if actual != base:
-            if not (recover and record.get("delivery_retry") and row.get("follow_base") is True and controller_coordinator.disjoint_base_changes(controller_coordinator.gh(controller_coordinator.PREFIX+"/compare/"+base+"..."+actual),base,row["paths"])):
+            if not (recover and (record.get("delivery_retry") or record.get("incomplete_retry")) and recovery_base_ok(row,actual)):
                 return "stale_base"
     taskfile = root / ("task-" + str(issue) + "-" + str(generation) + ".txt")
     resume=folder.exists()
@@ -175,6 +211,16 @@ def run_task(root, script, row, allowance, publish=False):
         branch=controller_publish.git(folder,"branch","--show-current").decode().strip()
         if not re.fullmatch(r"controller/local-"+str(issue)+r"-[0-9]+",branch):
             return "blocked:interrupted"
+        if record.get("incomplete_retry"):
+            try:
+                checked_branch,checked_head=controller_coordinator.inspect_repair_workspace(script.parent.parent,row,base,folder)
+                remote=controller_coordinator.gh(controller_coordinator.PREFIX+"/git/matching-refs/heads/"+branch)
+                if (checked_branch!=branch or checked_head!=base or not isinstance(remote,list)
+                    or any(x.get("ref")=="refs/heads/"+branch for x in remote)
+                    or provider_pause_active(root)):
+                    return "blocked:interrupted"
+            except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError):
+                return "blocked:interrupted"
         progress(root,row,"HANDOVER",publish)
     else:
         subprocess.run(["git", "worktree", "add", "-b", branch, str(folder), base],
@@ -196,13 +242,22 @@ def run_task(root, script, row, allowance, publish=False):
             str(allowance), "--rounds", "3", "--minutes", "20", "--generation", str(generation),
             "--allowed-paths-json", json.dumps(row["paths"]), "--progress-root", str(root), "--checkpoint", str(root / ("checkpoint-"+str(issue)+"-"+str(generation)+".json")), "--execute"]
             + (["--recover"] if resume else [])
-            + (["--require-ready"] if record.get("delivery_retry") else []),
+            + (["--require-ready"] if row.get("local_review") is True or record.get("delivery_retry") else []),
             cwd=folder, stdout=out, stderr=subprocess.STDOUT).returncode
     finally:
         finished.set()
         reporter.join()
     if rc == 75:
         return "blocked:provider_limit"
+    if rc == 76 or rc == 1:
+        # Child has exited. Preserve incomplete scoped code, never publish it.
+        try:
+            controller_coordinator.inspect_repair_workspace(script.parent.parent,row,base,folder)
+            if subprocess.check_output(["git","status","--porcelain"],cwd=folder):
+                return "blocked:incomplete"
+        except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError):
+            pass
+        return "blocked"
     if rc != 0:
         return "blocked"
     changed = subprocess.check_output(["git", "status", "--porcelain"], cwd=folder)
@@ -236,7 +291,7 @@ def notify_result(root,row,status,publish):
     try:
         phase="REVIEW_REQUIRED" if status in ("draft_pr","review_required","no_changes") else "BLOCKED"
         progress(root,row,phase,True)
-        if status=="draft_pr" and load(task_record(root,row),{}).get("delivery_retry"):
+        if status=="draft_pr" and load(task_record(root,row),{}).get("recovered"):
             controller_receipts.promote_local_delivery(root,task_key(row))
         controller_receipts.record(root,task_key(row),status)
         controller_receipts.flush(root)
@@ -311,7 +366,7 @@ def coordinate(root, repo_dir, rows, results, waiting, review, reserve_review=la
 def developer_conflict(row, other):
     # Separate draft branches may be edited simultaneously when scopes are
     # independent. Integration, unlike development, changes the base branch.
-    if row["issue"]==other["issue"] or row["role"]==other["role"]:
+    if row["issue"]==other["issue"] or worker(row["role"])==worker(other["role"]):
         return True
     return any(controller_coordinator.path_overlap(a,b) for a in row["paths"] for b in other["paths"])
 
@@ -481,6 +536,8 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                             interrupted.remove(key)
                 delivery_retry={task_key(row) for row in rows if capable and can_resume_delivery(root,row,results)}
                 recoverable.update(delivery_retry)
+                incomplete_retry={task_key(row) for row in rows if capable and can_resume_incomplete(root,script.parent.parent,row,results)}
+                recoverable.update(incomplete_retry)
                 review=[task_key(row) for row in rows if row["status"]=="ready" and results.get(task_key(row)) in ("draft_pr","review_required","no_changes")]
                 rows_before_effective=rows
                 rows=effective_rows(rows,{k:v for k,v in results.items() if k not in recoverable},active.values())
@@ -541,6 +598,7 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                 rows=[]
                 recoverable=set()
                 delivery_retry=set()
+                incomplete_retry=set()
                 reason="queue_unavailable"
             day=datetime.now(timezone.utc).date().isoformat()
             for task in selected:
@@ -558,7 +616,17 @@ def run_queue(a,root,script,statefile,donefile,state,results):
                     break
                 key=task_key(row)
                 recovering=key in recoverable
-                save(task_record(root,row),{"row":row,"boot":boot,"recovered":recovering,"delivery_retry":key in delivery_retry})
+                if recovering:
+                    previous=task_record(root,row)
+                    archive=previous.with_suffix(".before-recovery.json")
+                    if not archive.exists():
+                        save(archive,load(previous,{}))
+                previous_record=load(task_record(root,row),{}) if recovering else {}
+                history=list(previous_record.get("incomplete_fingerprints",[]))
+                if key in incomplete_retry:
+                    history.append(controller_pilot.fingerprint(root/("issue-"+key.replace(":","-"))))
+                save(task_record(root,row),{"row":row,"boot":boot,"recovered":recovering,"delivery_retry":key in delivery_retry,
+                    "incomplete_retry":key in incomplete_retry,"incomplete_fingerprints":history})
                 results[key]="reserved"
                 save(donefile,results)
                 interrupted.discard(key)
@@ -583,13 +651,13 @@ def main():
     p.add_argument("--queue", required=True, type=Path)
     p.add_argument("--root", required=True, type=Path)
     p.add_argument("--daily-reservation", type=int, default=None)
-    p.add_argument("--per-task", type=int, default=60000)
+    p.add_argument("--per-task", type=int, default=0, help="Optional token ceiling per turn; zero for ChatGPT subscription")
     p.add_argument("--parallel", type=int, default=2, choices=(1,2))
     p.add_argument("--execute", action="store_true")
     p.add_argument("--remote", action="store_true")
     p.add_argument("--publish", action="store_true")
     a = p.parse_args()
-    if a.per_task <= 0 or (a.daily_reservation is not None and a.daily_reservation < a.per_task):
+    if a.per_task < 0 or (a.daily_reservation is not None and (a.per_task == 0 or a.daily_reservation < a.per_task)):
         p.error("invalid budget")
     if not a.execute:
         print([t.issue for t in plan(load(a.queue, []), max_parallel=a.parallel)])
