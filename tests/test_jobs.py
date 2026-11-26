@@ -1,7 +1,7 @@
 import tempfile,time,unittest
 from datetime import datetime,timezone
 from unittest.mock import patch
-import app,jobs
+import app,jobs,portfolio_data
 # Synthetic XML fixture used only in tests, never shipped as application data.
 XML=b'<Envelope><Cube><Cube time="2026-01-02"><Cube currency="DKK" rate="7.5"/><Cube currency="USD" rate="1.1"/></Cube></Cube></Envelope>'
 class Jobs(unittest.TestCase):
@@ -31,6 +31,49 @@ class Jobs(unittest.TestCase):
    jobs.enqueue(c,'ecb',1,'crash',0);c.execute("UPDATE jobs SET status='running',attempts=1,lease='old',lease_until=1")
   jobs.run_one(app.connect,self.payload,at=2)
   with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM jobs').fetchone()[0],'done')
+ def enqueue_pluto(self):
+  with app.connect() as c:
+   pid=c.execute("INSERT INTO portfolios(user_id,name,source,updated) VALUES(?,'Fixture','pluto',0)",(self.uid,)).lastrowid
+   jobs.enqueue(c,'pluto_data',self.uid,'pluto-fixture',0,pid)
+  return pid
+ def test_late_pluto_failure_preserves_reclaimed_success(self):
+  pid=self.enqueue_pluto()
+  fresh={'observed':'2026-01-02T12:00:00+00:00','errors':[]}
+  claims=[]
+  def late_failure(connect,user_id,portfolio_id):
+   with patch('portfolio_data.read',return_value=fresh):
+    claims.append(jobs.run_one(connect,at=600))  # Still leased at the exact deadline.
+    claims.append(jobs.run_one(connect,at=601))
+   raise OSError('original read failed')
+  with patch('portfolio_data.read',side_effect=late_failure):
+   self.assertTrue(jobs.run_one(app.connect,at=0))
+  self.assertEqual(claims,[False,True])
+  with app.connect() as c:
+   job=c.execute('SELECT status,attempts,result,available,lease,lease_until FROM jobs').fetchone()
+   self.assertEqual(tuple(job),('done',2,'Pluto-data hentet',0,None,None))
+   snapshot=portfolio_data.snapshots(c,self.uid)[str(pid)]
+   self.assertEqual(snapshot,{'data':fresh,'last_error':None,'last_attempt':fresh['observed']})
+ def test_current_pluto_failure_marks_snapshot_and_retries(self):
+  pid=self.enqueue_pluto()
+  saved={'observed':'2026-01-01T12:00:00+00:00','errors':[]}
+  with app.connect() as c:
+   portfolio_data.save(c,self.uid,pid,saved)
+   other=c.execute("INSERT INTO users(username,salt,hash) VALUES('other','test','test')").lastrowid
+   other_pid=c.execute("INSERT INTO portfolios(user_id,name,source,updated) VALUES(?,'Fixture','pluto',0)",(other,)).lastrowid
+   portfolio_data.save(c,other,other_pid,saved)
+  with patch('portfolio_data.read',side_effect=OSError('secret-never-log-this')):
+   for attempt,when in enumerate((0,900,1800),1):
+    self.assertFalse(jobs.run_one(app.connect,at=when-1))
+    self.assertTrue(jobs.run_one(app.connect,at=when))
+    with app.connect() as c:
+     job=c.execute('SELECT status,attempts,available,lease,lease_until,result FROM jobs').fetchone()
+     self.assertEqual(tuple(job),('failed' if attempt==3 else 'queued',attempt,when+900,None,None,
+                                  'Kørslen fejlede; kontrollér datakilde og serveropsætning'))
+     snapshot=portfolio_data.snapshots(c,self.uid)[str(pid)]
+     self.assertEqual(snapshot['data'],saved)
+     self.assertEqual(snapshot['last_error'],'Automatisk Pluto-læsning fejlede; gemte data kan være forældede')
+     self.assertEqual(portfolio_data.snapshots(c,other)[str(other_pid)],
+                      {'data':saved,'last_error':None,'last_attempt':saved['observed']})
  def test_schedule_handles_danish_summer_time(self):
   for stamp in ['2026-01-05T07:00:00+00:00','2026-07-05T06:00:00+00:00']:
    at=datetime.fromisoformat(stamp);jobs.schedule(app.connect,at);jobs.schedule(app.connect,at)
