@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T21:38:11Z",
+  "updated_at": "2026-11-26T21:41:22Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -343,7 +343,7 @@
           "id": "replay",
           "title": "Replay-fundament",
           "status": "verified",
-          "evidence": "#283/#284/#297 integreret; #297 f7a0861a, CI 45655349632, autoriseret causal SQLite replay og 36→24 kald; begrænset historisk dækning.",
+          "evidence": "#283/#284/#297 integreret; #297 f7a0861a, CI 45655349632, autoriseret causal SQLite replay og 36→24 kald; begrænset historisk dækning. #353 d644830a, CI 45897356401 faktisk motor PASS, replay-gap og bevaret sidste tidsstempel; ny afgrænset draft afventer lokal uafhængig review, ikke integreret.",
           "owner_role": "data",
           "updated_at": "2026-11-25T17:43:00Z"
         },
@@ -357,8 +357,8 @@
         {
           "id": "shadow",
           "title": "Shadow-evaluering og sammenligning",
-          "status": "review",
-          "evidence": "#353 d644830a CI 45897356401 faktisk motor PASS, replay-gap og bevaret sidste tidsstempel; lokal uafhængig review/integration udestår. Ikke fuld shadow- eller afkastaccept.",
+          "status": "pending",
+          "evidence": "Fuld parallel shadow og afkastaccept udestår.",
           "owner_role": "motor"
         },
         {
@@ -423,7 +423,7 @@
           "id": "mobile",
           "title": "Mobil 2.0",
           "status": "in_progress",
-          "evidence": "#339 integreret 04cee366; #344 bevaret under HOLD; erstatning #54:36 / #356 a65e6597 UI-CI 45899507491 faktisk PASS, uafhængig review udestår. #54:37 scoped rapportarkiv og #267:9 observation-note klar i kø a19ed787, ikke godkendte produktleverancer.",
+          "evidence": "#339 integreret 04cee366; #344 bevaret under HOLD; erstatning #54:36 / #356 a65e6597 UI-CI 45899507491 faktisk PASS, uafhængig review udestår.",
           "owner_role": "mobile",
           "updated_at": "2026-11-26T20:32:13Z"
         },
@@ -431,7 +431,7 @@
           "id": "desktop",
           "title": "Desktop 2.0",
           "status": "review",
-          "evidence": "#305/#306 integreret; #306 ce7e97e6 CI 45691588370 chart isolation/period races og desktop-browser PASS. Samlet desktop 2.0-accept udestår.",
+          "evidence": "#305/#306 integreret; #306 ce7e97e6 CI 45691588370 chart isolation/period races og desktop-browser PASS. Samlet desktop 2.0-accept udestår. #267:7 TESTING, #54:37 rapportarkiv og #267:9 observation-note klar i kø a19ed787; ikke godkendte produktleverancer.",
           "owner_role": "desktop",
           "updated_at": "2026-11-25T20:55:00Z"
         },
@@ -492,7 +492,7 @@
       "title": "Samlet releasekandidat, backup og migration",
       "status": "in_progress",
       "issue": 57,
-      "evidence": "Produktgren 4530ff6f007900d3b49a077b9e91c67164cef8bf. #350/#351/#352/#354 integreret; #352 kun smoke trods isoleret SQL-review. #348 dbba5ef1 faktisk motor+UI PASS 45891686618 (754 unittest-kørsler), afventer uafhængig review og serialiseret integration. Projects inventory 45891736400 læst; tidligere verificerede tavlestatusser modstrider readback, ingen gentagne writes. Frisk inventory bestilt 7203964466. Samlet releaseaccept udestår.",
+      "evidence": "Produktgren 4530ff6f007900d3b49a077b9e91c67164cef8bf. #350/#351/#352/#354 integreret; #352 kun smoke trods isoleret SQL-review. #348 dbba5ef1 faktisk motor+UI PASS 45891686618 (754 unittest-kørsler), afventer uafhængig review og serialiseret integration. Frisk Projects inventory 45899839517/job 140182639152 SUCCESS; samme modstridende Backlog for #225/#267/#268/#273/#315 trods tidligere verificerede writes. Ingen blind gentagelse. Samlet releaseaccept udestår.",
       "subgoals": [
         {
           "id": "integrate",
