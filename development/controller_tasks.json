@@ -2232,5 +2232,26 @@
     "follow_base": true,
     "reserve_plan_id": "shared_data/scheduler/skip-sqlite-writer-during-eodhd-http-cooldown",
     "reserve_goal": "shared_data/scheduler"
+  },
+  {
+    "issue": 54,
+    "generation": 25,
+    "role": "desktop",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "d1f7bc0333c2cf9889ffb387469d635ecec3667c",
+    "dependencies": [],
+    "paths": [
+      "static/trade-ui.js",
+      "tests/browser_desktop_trade.py"
+    ],
+    "task": "Approved roadmap ui/desktop (Desktop 2.0). Exact existing source anchor: static/trade-ui.js :: async function previewSubmit(event){. Implement only this bounded change: Afgr\u00e6ns genvurderingen af den bevarede diff fra 54:23 til et vellykket estimatsvar efter redigering af bel\u00f8bet. Gem formularen og de v\u00e6rdier, der sendes med trade/preview. F\u00f8r resultatet vises, skal den eksisterende generationskontrol stadig g\u00e6lde, formularen skal v\u00e6re den aktuelle, og dens v\u00e6rdier skal svare til de indsendte. Hvis v\u00e6rdierne er \u00e6ndret i den samme formular, fjern kun denne foresp\u00f8rgsels ventebesked og lad den eksisterende oprydning genaktivere knappen. Bevar foresp\u00f8rgslen og visningen af et aktuelt estimat.. Acceptance: Udvid desktop-fixturen med det eksisterende TradeUI.panel og et forsinket, stubbet trade/preview-svar. Indsend 100 DKK, ret bel\u00f8bet til 150 DKK, og frigiv det f\u00f8rste svar. Resultatfeltet ved siden af formularen forbliver tomt, ventebeskeden forsvinder, og knappen kan bruges igen. En ny indsendelse viser estimatet for 150 DKK. Fixturens kaldsliste for scenariet indeholder pr\u00e6cis de to estimatopslag.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_trade.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:23; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "ui/desktop/desktop-preview-discards-success-after-amount-edit",
+    "reserve_goal": "ui/desktop",
+    "reserve_reassessment": "54:23@d934617933d15a484bf7d7884778297cd1006bda43022dc28918f43e6b1d7805"
   }
 ]
