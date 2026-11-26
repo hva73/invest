@@ -2295,5 +2295,45 @@
     "reserve_plan_id": "ui/test/journal-navigation-roundtrip-through-trade-panel",
     "reserve_goal": "ui/test",
     "reserve_reassessment": "54:24@5108cf26399f15325a0547ecde9c390e4dff9538337c484b292c7ea8237172fe"
+  },
+  {
+    "issue": 114,
+    "generation": 16,
+    "role": "desktop",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [],
+    "paths": [
+      "static/journal-ui.js",
+      "tests/browser_desktop_experience.py"
+    ],
+    "task": "Approved roadmap statistics/ui (Godkendt statistikvisning). Exact existing source anchor: static/journal-ui.js :: function event(e){return `<article class=\"journal-row. Implement only this bounded change: Vis \u00abUdf\u00f8rt antal\u00bb p\u00e5 Pluto-ordrer\u00e6kker fra journalens eksisterende execution-h\u00e6ndelser. Brug `details.filled_quantity` fra den normaliserede journalpost, og bevar decimalpr\u00e6cisionen som tekst. Vis \u00abIkke oplyst\u00bb ved null eller udeladt v\u00e6rdi, og vis eksplicit nul som nul. Bevar r\u00e6kkens status, tidsstempel og detaljevisning. Afgr\u00e6ns visningen til poster med execution-id, Pluto som kilde og ordre som type.. Acceptance: \u00c5bn Handelsjournal fra Handelsmotor i desktop-fixturen med et stubbet svar i appens eksisterende journalformat. En deludf\u00f8rt ordre viser 0.125, en observation med eksplicit nul viser 0, og en observation med null viser \u00abIkke oplyst\u00bb. Et godkendt forslag fra App/system har ingen udf\u00f8rt-m\u00e6ngde, og ordredetaljerne kan stadig \u00e5bnes.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_experience.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "statistics/ui/journal-shows-reported-filled-quantity",
+    "reserve_goal": "statistics/ui"
+  },
+  {
+    "issue": 54,
+    "generation": 27,
+    "role": "desktop",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [],
+    "paths": [
+      "tests/browser_desktop_trade.py"
+    ],
+    "task": "Approved roadmap ui/desktop (Desktop 2.0). Exact existing source anchor: tests/browser_desktop_trade.py :: if(name === 'trade/preview') return {};. Implement only this bounded change: Genvurd\u00e9r kun det positive renderingsscenarie fra den bevarede 54:25-diff som en selvst\u00e6ndig browsertest. Mont\u00e9r det eksisterende TradeUI.panel, \u00e5bn estimatsektionen, v\u00e6lg fixturens aktiv og depot, og indsend \u00e9t estimat p\u00e5 150 DKK. Frigiv det stub\u00adbede read-only-svar, mens formularen stadig viser de indsendte v\u00e6rdier. Afgr\u00e6ns arbejdet til fixturen og den ene indsendelse.. Acceptance: Ventebeskeden vises under opslaget. Efter svaret viser den eksisterende resultatboks 150 DKK og m\u00e6rket \u00abKun opslag \u00b7 ingen afsendelse\u00bb, og knappen er aktiv igen. Kaldslisten for scenariet indeholder pr\u00e6cis \u00e9t trade/preview-opslag. De eksisterende scenarier for k\u00f8b og salg k\u00f8rer videre.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_trade.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:25; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "ui/desktop/desktop-preview-renders-current-read-only-estimate",
+    "reserve_goal": "ui/desktop",
+    "reserve_reassessment": "54:25@ef3a7ca2b627962427160ed9a27d4feb2434dde6ed1c1cf4e05468eb1cab62ef"
   }
 ]
