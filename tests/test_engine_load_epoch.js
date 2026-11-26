@@ -18,6 +18,7 @@ function fixture() {
   const ui = context.window.EngineUI;
   ui.setup({
     api(url, body) {
+      if (session.settings && (url.endsWith('/strategies') || url.includes('/providers?'))) return session.settings(url);
       if (body && session.control) return session.control(url, body);
       if (session.detail && (url.includes('/sessions/') || url === 'state')) return session.detail(url);
       if (url.endsWith('/ack-signal')) return session.ack(url, body);
@@ -249,7 +250,63 @@ async function checkControl(change, stage, fail, action = 'pause') {
   else assert.equal(dialog.innerHTML, previousHtml);
 }
 
+async function checkSettings(change, fail) {
+  const {session, context, click, mount} = fixture();
+  const dialog = {
+    dataset: {}, innerHTML: '', open: false,
+    showModal() { this.open = true; }, querySelector: () => ({focus() {}})
+  };
+  const lookup = context.document.getElementById;
+  context.document.getElementById = id => id === 'engine-dialog' ? dialog : lookup(id);
+  const records = [];
+  context.MutationObserver = class {
+    observe() {}
+    takeRecords() { return records.splice(0); }
+  };
+  const button = {dataset: {}, isConnected: true, hasAttribute: name => name === 'data-engine-strategies'};
+  const strategy = {strategies: [{strategy_id: 'baseline', version: '1'}]};
+  const provider = {providers: {example: {known_limits: ['Testgrænse']}}};
+  let resolve, reject;
+  session.settings = url => {
+    if (url === 'v1/hotwatch/strategies') return strategy;
+    assert.equal(url, 'v1/hotwatch/providers?is_test=false');
+    return new Promise((yes, no) => { resolve = yes; reject = no; });
+  };
+  const pending = click(button);
+  if (change === 'epoch') session.epoch++;
+  if (change === 'owner') session.owner = 'other-owner';
+  if (change === 'mode') mount(true).succeed();
+  if (change === 'detached') button.isConnected = false;
+  if (change === 'dialog') {
+    dialog.open = true;
+    dialog.innerHTML = 'En anden dialog';
+    records.push({type: 'attributes', target: {matches: selector => selector === 'dialog'}});
+  }
+  if (change === 'newer') {
+    session.settings = url => url.endsWith('/strategies') ? {strategies: []} : provider;
+    assert.equal(await click(button), true);
+    assert.match(dialog.innerHTML, /Strategier og datakilder/);
+  }
+  const before = [dialog.open, dialog.innerHTML];
+  const error = new Error('provider offline');
+  if (fail) reject(error);
+  else resolve(provider);
+  if (!change && fail) await assert.rejects(pending, e => e === error);
+  else assert.equal(await pending, true);
+  if (change || fail) assert.deepEqual([dialog.open, dialog.innerHTML], before, String(change));
+  else {
+    assert.equal(dialog.open, true);
+    assert.match(dialog.innerHTML, /Strategier og datakilder/);
+    assert.match(dialog.innerHTML, /baseline v1/);
+    assert.match(dialog.innerHTML, /Testgrænse/);
+  }
+}
+
 async function main() {
+  for (const change of ['epoch', 'owner', 'mode', 'dialog', 'newer', 'detached', null]) {
+    await checkSettings(change, false);
+    await checkSettings(change, true);
+  }
   for (const change of ['epoch', 'owner', 'mode', 'dialog', 'notice', 'list', null]) {
     for (const stage of ['control', 'reload']) {
       await checkControl(change, stage, false);
