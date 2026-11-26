@@ -67,6 +67,13 @@ def cost(url):
  if endpoint in ('search','exchanges-list','exchange-details','exchange-symbol-list','calendar','eod','splits','div'):return 1
  return None
 
+def _check_ws_cooldown(state,now):
+ retry_at=state.get('ws_retry_at',0)
+ if retry_at>now:
+  error=EngineError('EODHD_WS_CAPACITY',429)
+  error.retry_after_s=retry_at-now
+  raise error
+
 class Capacity:
  def __init__(self,connect,priority='routine'):
   self.connect=connect;self.priority='essential' if priority=='essential' else 'routine'
@@ -148,9 +155,11 @@ class Capacity:
   # consume HTTP requests or daily call units. Expiry handles a killed worker.
   token=secrets.token_hex(12);now=time.time()
   with self.connect() as c:
+   c.execute('PRAGMA query_only=ON')
+   _check_ws_cooldown(read(c),now)
+  with self.connect() as c:
    c.execute('BEGIN IMMEDIATE');state=read(c)
-   if state.get('ws_retry_at',0)>now:
-    error=EngineError('EODHD_WS_CAPACITY',429);error.retry_after_s=state['ws_retry_at']-now;raise error
+   _check_ws_cooldown(state,now)
    leases={k:v for k,v in state.get('ws_leases',{}).items() if v['until']>now}
    if len(leases)>=64*UTILIZATION//100 or sum(v['symbols'] for v in leases.values())+count>50*UTILIZATION//100:raise EngineError('EODHD_WS_CAPACITY',429)
    leases[token]={'until':now+30,'symbols':count};state['ws_leases']=leases;write(c,state,now)
