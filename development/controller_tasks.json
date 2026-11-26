@@ -2535,7 +2535,7 @@
     "priority": 1,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "367601c613cf364ee94fb26e7615d05bb23a5a20",
+    "base_sha": "4530ff6f007900d3b49a077b9e91c67164cef8bf",
     "dependencies": [
       "14:24"
     ],
