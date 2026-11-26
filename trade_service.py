@@ -440,7 +440,12 @@ def check(connect,user_id,pid,factory=None):
     if not status_matches_proposal(raw,json.loads(row['payload']),reference):
         raise TradeError('Plutos statussvar kunne ikke knyttes til forslaget.')
     # Preserve exact provider status separately. Acceptance is never a fill.
-    with connect() as c:c.execute("UPDATE broker_proposals SET response=?,intent_id=?,status='sent',error=NULL WHERE id=? AND user_id=?",(json.dumps(raw),reference,row['id'],user_id))
+    with connect() as c:
+        c.execute("""UPDATE broker_proposals SET response=?,intent_id=?,status='sent',error=NULL
+                     WHERE id=? AND user_id=? AND intent_id IS ? AND status IS ?
+                       AND response IS ? AND error IS ?""",
+                  (json.dumps(raw),reference,row['id'],user_id,
+                   row['intent_id'],row['status'],row['response'],row['error']))
     return {'proposal':view(get(connect,user_id,row['id']))}
 
 def cancel_intent(connect,user_id,pid,factory=None):
