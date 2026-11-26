@@ -463,7 +463,50 @@ async function checkManualStart(change, stage, fail) {
   }
 }
 
+async function checkPlanClick(newerWatch, planClick = true) {
+  const {session, click, context, dialog} = settingsFixture();
+  const effects = [];
+  const details = {
+    open: false,
+    scrollIntoView(options) { effects.push(options.block); },
+    querySelector: selector => selector === 'summary' ? {
+      focus(options) { effects.push(options.preventScroll); }
+    } : null
+  };
+  const plan = {closest: selector => selector === 'details' ? details : null};
+  const renderedPlan = () => dialog.innerHTML.includes('id="engine-buy-plan"') ? plan : null;
+  const lookup = context.document.getElementById;
+  context.document.getElementById = id => id === 'engine-buy-plan' ? renderedPlan() : lookup(id);
+  const query = dialog.querySelector;
+  dialog.querySelector = selector => selector === '#engine-buy-plan' ? renderedPlan() : query(selector);
+  const row = wid => ({session: {watch_id: wid, status: 'ACTIVE', request: {ticker: wid, watch_mode: 'entry'}}});
+  let finish;
+  session.detail = url => {
+    if (url.includes('/samples?') || url.includes('/events?')) return {items: []};
+    if (url === 'state') return {portfolios: []};
+    const wid = url.split('/').pop().split('?')[0];
+    if (!finish) return new Promise(resolve => { finish = () => resolve(row(wid)); });
+    return row(wid);
+  };
+  const open = (wid, expand) => click({
+    dataset: {engineDetail: wid}, hasAttribute: name => expand && name === 'data-engine-plan'
+  });
+  const pending = open('first', planClick);
+  if (newerWatch) assert.equal(await open(newerWatch, false), true);
+  finish();
+  assert.equal(await pending, true);
+  assert.equal(dialog.dataset.watchId, newerWatch || 'first');
+  assert.ok(renderedPlan());
+  const expanded = !newerWatch && planClick;
+  assert.equal(details.open, expanded);
+  assert.deepEqual(effects, expanded ? ['nearest', true] : []);
+}
+
 async function main() {
+  await checkPlanClick('second');
+  await checkPlanClick('first');
+  await checkPlanClick(null);
+  await checkPlanClick(null, false);
   for (const change of ['remount', 'remount-login', 'navigate']) await checkManualStart(change, 'reload', false);
   await checkManualStart(null, 'detail', true);
   for (const stage of ['start', 'reload']) {
