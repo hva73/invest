@@ -7,12 +7,12 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../static/engine-ui.js'), 'utf8');
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
-function fixture() {
+function fixture(engineSource = source) {
   const historyGroup = {open: false};
   const root = {isConnected: true, innerHTML: '', textContent: '', querySelector: selector => selector === 'details[data-engine-group=history]' ? historyGroup : null, querySelectorAll: () => []};
   const context = {window: {}, document: {getElementById: id => id === 'engine-root' ? root : null},
     setTimeout() {}, clearTimeout() {}};
-  vm.runInNewContext(source, context);
+  vm.runInNewContext(engineSource, context);
   const requests = [];
   const session = {epoch: 1, owner: 'same-owner', history: [], older: []};
   const ui = context.window.EngineUI;
@@ -631,7 +631,82 @@ async function checkPolling(change) {
   if (!change) assert.match(dialog.innerHTML, /POLL · motorforløb/);
 }
 
+async function checkInstrument(change, outcome) {
+  const seeded = source.replace('return {openHoldingStatus,',
+    'return {seed(rows,accounts,snapshots){candidates=rows;portfolios=accounts;portfolioSnapshots=snapshots},openHoldingStatus,');
+  const {context, session, mount} = fixture(seeded);
+  const ui = context.window.EngineUI;
+  const rows = ['FIRST', 'SECOND'].map(ticker => ({report_id: 'report', candidate: {candidate_id: ticker, ticker}}));
+  ui.seed(rows, [{id: 1}, {id: 2}], {
+    1: {data: {positions_complete: true, positions: []}},
+    2: {data: {positions_complete: true, positions: [{kind: 'holding', asset_id: 'asset', quantity: 3}]}}
+  });
+  const elements = {
+    candidate: {name: 'candidate', value: '0'}, provider: {value: 'pluto'}, provider_symbol: {value: ''},
+    exchange: {}, asset_id: {}, quote_currency: {}, watch_mode: {value: 'both'},
+    portfolios: {options: [{value: '1'}, {value: '2'}]}
+  };
+  const form = {isConnected: true, elements}, status = {}, slot = {};
+  const nodes = {'engine-create': form, 'engine-form-status': status, 'engine-instrument-choice': slot};
+  const lookup = context.document.getElementById;
+  context.document.getElementById = id => nodes[id] || lookup(id);
+  context.FormData = class { constructor(target) { this.target = target; } get(k) { return this.target.elements[k].value; } };
+  const calls = [];
+  session.control = (url, body) => {
+    if (url !== 'market/quote') {
+      calls.push({url});
+      throw Error('Unexpected provider request: ' + url);
+    }
+    return new Promise((resolve, reject) => calls.push({url, body: {...body}, resolve, reject}));
+  };
+  const pending = ui.change({target: elements.candidate});
+  assert.equal(calls[0].url, 'market/quote');
+  assert.deepEqual(calls[0].body, {report_id: 'report', candidate_id: 'FIRST', is_test: false});
+  const verified = {asset_id: 'asset', ticker: 'FIRST', exchange: 'NASDAQ', currency: 'USD', name: 'First', isin: 'id'};
+  if (change === 'candidate') elements.candidate.value = '1';
+  if (change === 'epoch') session.epoch++;
+  if (change === 'owner') session.owner = 'other';
+  if (change === 'mode') mount(true).succeed();
+  if (change === 'replaced') nodes['engine-create'] = {...form};
+  if (change === 'detached') form.isConnected = false;
+  if (change === 'newer') {
+    const second = ui.change({target: {id: 'engine-asset-choice', value: 'selected'}});
+    assert.deepEqual(calls[1].body, {...calls[0].body, asset_id: 'selected'});
+    calls[1].resolve({...verified, asset_id: 'selected'});
+    await second;
+    assert.equal(rows[0].instrument.asset_id, 'selected');
+  }
+  if (change) elements.provider.value = 'eodhd';
+  const snapshot = () => JSON.stringify([rows, elements, status, slot]);
+  const before = snapshot();
+  const choices = [{...verified}];
+  if (outcome === 'error') calls[0].reject(new Error('quote offline'));
+  else calls[0].resolve(outcome === 'choices' ? {selection_required: true, choices} : verified);
+  assert.equal(await pending, true);
+  assert.equal(calls.length, change === 'newer' ? 2 : 1);
+  if (change) assert.equal(snapshot(), before, change + ' / ' + outcome);
+  else if (outcome === 'error') assert.match(status.textContent, /quote offline/);
+  else if (outcome === 'choices') {
+    assert.deepEqual(rows[0].resolution_choices, choices);
+    assert.match(slot.innerHTML, /<option value="">Vælg instrument<\/option><option value="asset">/);
+    assert.equal(rows[0].instrument, undefined);
+    assert.equal(elements.asset_id.value, undefined);
+  } else {
+    assert.deepEqual({...rows[0].instrument}, {asset_id: 'asset', currency: 'USD', exchange: 'NASDAQ',
+      name: 'First', isin: 'id', provider_symbol: null});
+    assert.deepEqual([...rows[0].portfolio_ids], [2]);
+    assert.equal(rows[0].portfolios_verified, true);
+    assert.deepEqual(elements.portfolios.options.map(option => option.selected), [false, true]);
+    assert.deepEqual([elements.asset_id.value, elements.exchange.value, elements.quote_currency.value,
+      elements.watch_mode.value], ['asset', 'NASDAQ', 'USD', 'both']);
+    assert.match(status.textContent, /1 matchende depot/);
+  }
+}
+
 async function main() {
+  for (const change of ['candidate', 'epoch', 'owner', 'mode', 'replaced', 'detached', 'newer', null]) {
+    for (const outcome of ['verified', 'choices', 'error']) await checkInstrument(change, outcome);
+  }
   for (const change of ['epoch', 'owner', 'mode', 'newer', 'detached', 'replaced', null]) {
     await checkManualSearch(change, false);
     await checkManualSearch(change, true);
