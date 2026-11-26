@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T07:43:45Z",
+  "updated_at": "2026-11-26T09:12:00Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -376,15 +376,15 @@
       "title": "Hvordan står det til? – herkomst og statistik",
       "status": "in_progress",
       "issue": 114,
-      "evidence": "#114:1 supersederet; #114:2 PR #309 exact 14e20758 CI 45717195794: 592 motor-tests PASS, uafhængigt HOLD 7176987304, direkte trade_service suite ikke kørt.",
+      "evidence": "Ældre #309 ny HEAD 004af36f, controller CI 45778051173 SUCCESS; målrettet trade_service-suite og uafhængig accept ikke bevist. Bevares som kilde til #315, ingen konkurrerende integration.",
       "subgoals": [
         {
           "id": "provenance",
           "title": "Entry/exit-herkomst",
           "status": "review",
-          "evidence": "#309 14e20758 HOLD: root intent med tom liste, historisk depot og eksakt legacy receipt; ingen integration før reparation og målrettet test.",
+          "evidence": "#309 004af36f ændrer root/empty-list, legacy status-only og collection-scope samt regressionstests. CI 45778051173 SUCCESS; fokuseret trade_service test og ny uafhængig accept udestår. Bevares på gammel branch.",
           "owner_role": "motor",
-          "updated_at": "2026-11-25T23:08:54Z"
+          "updated_at": "2026-11-26T09:12:00Z"
         },
         {
           "id": "fills",
@@ -401,7 +401,7 @@
           "owner_role": "desktop"
         }
       ],
-      "updated_at": "2026-11-25T23:08:54Z"
+      "updated_at": "2026-11-26T09:12:00Z"
     },
     {
       "id": "ui",
@@ -409,7 +409,7 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "in_progress",
       "issue": 54,
-      "evidence": "#306 integreret; ny faktisk #300 controllerrevision 9171ca65 efter publiceringspausen. CI 45775385225 chart/UI faktisk kørt PASS; dedikeret mobil CI 45775385222/45775385229 SKIPPED. Uafhængigt HOLD 7185694043 på kontoepoch ved strategifil/kill-switch og arkivpolling. Ingen samlet browseraccept.",
+      "evidence": "Ny ejer-godkendt resetopgave #54:3 på b84679a6: STARTED/WORKING, incomplete 7186623292, efterfølgende TESTING/CONTINUING 7186847306. Tidligere #300 ae7c2724 bevaret, dedikeret mobil CI 45777839331 SKIPPED; ingen samlet browseraccept.",
       "subgoals": [
         {
           "id": "reuse",
@@ -421,10 +421,10 @@
         {
           "id": "mobile",
           "title": "Mobil 2.0",
-          "status": "review",
-          "evidence": "#300 9171ca65: dialog-activity og manual-start fokus ændret med nye browserfixtures. CI 45775385225 PASS, men HOLD 7185694043: gammel strategifil kan bruge ny kontos CSRF, gammel kill-switch fejl kan nå ny konto, arkivpolling ændret. Reparation på samme PR, ingen integration endnu.",
+          "status": "in_progress",
+          "evidence": "#54:3 på resetbase b84679a6 er genoptaget efter incomplete receipt (CONTINUING 7186847306). Tidligere #300 ae7c2724 bevaret; ikke integreret og mobil CI skipped. Ingen ny generation.",
           "owner_role": "mobile",
-          "updated_at": "2026-11-26T07:40:00Z"
+          "updated_at": "2026-11-26T09:12:00Z"
         },
         {
           "id": "desktop",
@@ -442,7 +442,7 @@
           "owner_role": "mobile"
         }
       ],
-      "updated_at": "2026-11-26T07:40:00Z"
+      "updated_at": "2026-11-26T09:12:00Z"
     },
     {
       "id": "load",
@@ -450,7 +450,7 @@
       "title": "100 brugere og skaleringsmåling",
       "status": "in_progress",
       "issue": 14,
-      "evidence": "#311 b10c3145 CI 45723415514: 618 testkørsler PASS, uafhængigt HOLD 7178220845: ændret aktiveringsrækkefølge ved samtidig SQLite retry-reset og VM steps 69052→85347 i 100-tenant scenarie. Ingen hostingmåling. Alternativ read-path målt isoleret på 1/10/100 tenants, #311 kommentar 7183673346; HOLD uændret.",
+      "evidence": "#315:1 arbejder på ren resetbase b84679a6 med samme krav til korrekthed/SQLite-arbejde; blocked:incomplete receipt 7186621071. Ingen ny PR eller målt accept. Tidligere #311 b10c3145 HOLD og isoleret read-path proof 7183673346 bevares.",
       "subgoals": [
         {
           "id": "adapter",
@@ -462,10 +462,10 @@
         {
           "id": "queue",
           "title": "100 brugere og fair køer",
-          "status": "review",
-          "evidence": "#311 b10c3145: 618 testkørsler PASS, HOLD 7178220845; prioritet ved SQLite-interleaving og idle VM-step regression skal rettes før integration. Uafhængig SQLite-read-path-måling 7183673346: uændret baseline SQL + forsøgsindeks, 100×26 holdings/34 historikrækker pr. tenant: 864974→135599 VM steps; identiske rækker. Ikke integreret; kræver separat migrations-/writebudgetaccept.",
+          "status": "blocked",
+          "evidence": "#315:1 incomplete 7186621071, HANDOVER 7186629068; bevaret lokalt arbejde, ingen blind genstart. Tidligere #311 b10c3145 CI 45723415514 PASS, HOLD 7178220845; forsøgsindeks 7183673346 ikke integreret.",
           "owner_role": "data",
-          "updated_at": "2026-11-26T05:39:21.704Z"
+          "updated_at": "2026-11-26T09:12:00Z"
         },
         {
           "id": "resources",
@@ -482,7 +482,7 @@
           "owner_role": "data"
         }
       ],
-      "updated_at": "2026-11-26T05:39:21.704Z"
+      "updated_at": "2026-11-26T09:12:00Z"
     },
     {
       "id": "release",
@@ -490,15 +490,15 @@
       "title": "Samlet releasekandidat, backup og migration",
       "status": "blocked",
       "issue": 57,
-      "evidence": "Ejerbeslutning #315 kommentar 7185689669: kontrolleret udviklingsreset. Installeret 3cc0c7be verificeret med frisk worker 07:43 UTC. Resetgren oprettet på eksakt installeret SHA. Koordinatorens grundlag #315 7185768536 afventer ejerreview og verificeret Mac-drain; tidligere leverancer og historik bevares, ingen ny release.",
+      "evidence": "Kontrolleret reset #315. Ejer har efter DRAIN bekræftet genstart af A #315:1 og B #54:3. Faktisk købase b84679a6 på codex/architecture-reset-20261126. Begge leverancer har incomplete-receipts; B efterfølgende CONTINUING. Ingen fælles kandidat eller produktions-GO. Tidligere accepterede dele bevares som kilder.",
       "subgoals": [
         {
           "id": "integrate",
           "title": "Samlet releasegren",
-          "status": "blocked",
-          "evidence": "Ny codex/trading-engine-v2-reset gren pinned 3cc0c7be, readback OK. Udviklingsgren 99ba8ef6 og v2 e4b59436 divergerer; reuse via reviewede deltas efter #315 ejerreview/drain. Ingen ny produktintegration endnu.",
+          "status": "in_progress",
+          "evidence": "Aktuel resetbase b84679a6 vs v2 e4b59436: 14 V2-only/11 reset-only commits. Eksakt blob-afstemning #315 kommentar 7187616065: Strategy Lab og dens test har uændret fælles base; market UI, chart-test og CI kræver afgrænset integration. Ingen merge eller samlet CI endnu.",
           "owner_role": "release",
-          "updated_at": "2026-11-26T07:43:45Z"
+          "updated_at": "2026-11-26T09:12:00Z"
         },
         {
           "id": "preflight",
@@ -515,7 +515,7 @@
           "owner_role": "release"
         }
       ],
-      "updated_at": "2026-11-26T07:43:45Z"
+      "updated_at": "2026-11-26T09:12:00Z"
     },
     {
       "id": "go",
