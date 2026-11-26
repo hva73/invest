@@ -730,8 +730,29 @@ async function checkInstrument(change, outcome, afterSettlement = false) {
   }
 }
 
+const appSource = fs.readFileSync(path.join(__dirname, '../static/app.js'), 'utf8');
+
+function dispatchInstrumentEvent(context, caller, form) {
+  const type = {submit: 'submit', batch: 'click', asset: 'change'}[caller];
+  const listener = appSource.split('\n').find(line =>
+    line.startsWith(`document.addEventListener('${type}',`) && line.includes(`window.EngineUI.${type}(`));
+  let handle;
+  context.document.addEventListener = (_, fn) => { handle = fn; };
+  vm.runInNewContext(listener, context);
+  const pass = () => false;
+  Object.assign(context.window, {JournalUI: {click: pass, change: pass}, DashboardUI: {click: pass, changeSort: pass},
+    CandidateUI: {click: pass}, TradeUI: {change: pass}});
+  context.userRefreshBusy = false;
+  form.matches = pass;
+  form.classList = {contains: pass};
+  const button = {dataset: {}, hasAttribute: key => key === 'data-engine-batch-add'};
+  const target = {submit: form, asset: {id: 'engine-asset-choice', value: 'asset'},
+    batch: {closest: selector => selector === 'button' ? button : null}}[caller];
+  return handle({target, preventDefault() {}});
+}
+
 async function checkInstrumentCaller(caller, stale, outcome) {
-  const {context, session, requests, ui, rows, form, nodes, QuotePromise} = instrumentFixture();
+  const {context, session, requests, rows, form, nodes, QuotePromise} = instrumentFixture();
   const calls = [], button = {};
   let resolveQuote, rejectQuote;
   nodes['engine-batch-list'] = {textContent: ''};
@@ -756,11 +777,11 @@ async function checkInstrumentCaller(caller, stale, outcome) {
       default: throw Error('Unexpected request: ' + url);
     }
   };
-  const pending = caller === 'submit' ? ui.submit({target: form, preventDefault() {}}) :
-    caller === 'batch' ? ui.click({dataset: {}, hasAttribute: key => key === 'data-engine-batch-add'}) :
-    ui.change({target: {id: 'engine-asset-choice', value: 'asset'}});
+  const notices = [];
+  context.notice = (message, kind) => notices.push([session.epoch, message, kind]);
+  const pending = dispatchInstrumentEvent(context, caller, form);
   await settle();
-  const error = new Error('quote offline');
+  const error = Object.assign(new Error('quote offline'), {details: {code: 'quote_unavailable'}});
   const initialCalls = caller === 'submit' ? ['v1/hotwatch/start-candidates?is_test=false', 'market/quote'] : ['market/quote'];
   assert.deepEqual(calls, initialCalls);
   if (outcome === 'error') rejectQuote(error);
@@ -768,19 +789,19 @@ async function checkInstrumentCaller(caller, stale, outcome) {
     {asset_id: 'asset', exchange: 'NASDAQ', currency: 'USD'});
   await Promise.resolve(); // resolveInstrument has resumed, its caller is still queued.
   if (outcome === 'verified') assert.equal(rows[0].instrument.asset_id, 'asset');
+  if (stale === 'after-caller') await Promise.resolve();
   if (stale) session.epoch++;
   const before = JSON.stringify([nodes, rows]);
-  if (!stale && outcome === 'error') await assert.rejects(pending, e => e === error);
-  else if (!stale && caller === 'submit' && outcome === 'choices') {
-    await assert.rejects(pending, /Pluto kunne ikke verificere/);
-  } else {
-    if (caller === 'submit' && outcome === 'verified') {
-      await settle();
-      assert.equal(requests.length, stale ? 0 : 1);
-      if (!stale) requests.shift().succeed();
-    }
-    assert.equal(await pending, true);
+  if (caller === 'submit' && outcome === 'verified') {
+    await settle();
+    assert.equal(requests.length, stale ? 0 : 1);
+    if (!stale) requests.shift().succeed();
   }
+  await pending;
+  const expectedError = outcome === 'error' ? (caller === 'submit' ? error.details.code : error.message) :
+    caller === 'submit' && outcome === 'choices' ? 'Pluto kunne ikke verificere alle instrumenter.' : null;
+  const expectedNotices = expectedError && stale !== true ? [[1, expectedError, 'error']] : [];
+  assert.deepEqual(notices, expectedNotices, caller + ' / ' + stale + ' / ' + outcome);
   const verified = !stale && outcome === 'verified';
   assert.deepEqual(calls, verified && caller === 'submit' ?
     [...initialCalls, 'strategy-center', 'v1/hotwatch/sessions'] : initialCalls);
@@ -791,6 +812,8 @@ async function checkInstrumentCaller(caller, stale, outcome) {
 
 async function main() {
   for (const caller of ['batch', 'submit', 'asset']) {
+    await checkInstrumentCaller(caller, 'after-caller', 'error');
+    if (caller === 'submit') await checkInstrumentCaller(caller, 'after-caller', 'choices');
     for (const stale of [true, false]) {
       for (const outcome of ['verified', 'choices', 'error']) await checkInstrumentCaller(caller, stale, outcome);
     }
@@ -877,4 +900,8 @@ async function main() {
   assert.equal(root.textContent, 'Motorstatus kunne ikke hentes: offline');
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1; });
+const incomplete = () => { throw Error('Engine UI suite ended with a pending test'); };
+process.once('beforeExit', incomplete);
+main().then(() => console.log('PASS: Engine UI request and session isolation'))
+  .catch(error => { console.error(error); process.exitCode = 1; })
+  .finally(() => process.removeListener('beforeExit', incomplete));
