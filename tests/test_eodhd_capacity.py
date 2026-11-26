@@ -189,6 +189,50 @@ class CapacityTests(unittest.TestCase):
   with self.assertRaises(ValueError):
    with self.cap.websocket(40):raise ValueError('test release')
   self.assertFalse(self.state()['ws_leases'])
+ def test_websocket_saturation_under_competing_writer_and_at_expiry(self):
+  statements=[]
+  def connect():
+   c=app.connect()
+   c.execute('PRAGMA busy_timeout=0')
+   c.set_trace_callback(statements.append)
+   return c
+  client=capacity.Capacity(connect)
+  for minute,(limit,counts) in enumerate([('symbols',[20,20]),('connections',[0]*51)]):
+   now=self.now+minute*60
+   with self.subTest(limit=limit),patch('eodhd_capacity.time.time',return_value=now) as clock,ExitStack() as held:
+    for count in counts:held.enter_context(self.cap.websocket(count))
+    leases=self.state()['ws_leases']
+    for cooldown in (False,True):
+     if cooldown:
+      self.cap.ws_limited({'Retry-After':'7'})
+      clock.return_value=now+2.5
+     statements.clear()
+     with app.connect() as writer:
+      writer.execute('BEGIN IMMEDIATE')
+      with self.assertRaises(EngineError) as caught,client.websocket(1):
+       self.fail('lease granted at capacity')
+     self.assertEqual((caught.exception.code,caught.exception.status),('EODHD_WS_CAPACITY',429))
+     if cooldown:self.assertEqual(caught.exception.retry_after_s,4.5)
+     self.assertFalse(any(sql.lstrip().upper().startswith('BEGIN') for sql in statements))
+     self.assertEqual(self.state()['ws_leases'],leases)
+    clock.return_value=now+30
+    with client.websocket(40):
+     self.assertEqual(list(self.state()['ws_leases'].values()),[{'symbols':40,'until':now+60}])
+    self.assertEqual(self.state()['ws_leases'],{})
+ def test_websocket_saturation_committed_between_preflight_and_write(self):
+  with patch('eodhd_capacity.time.time',return_value=self.now) as clock,ExitStack() as held:
+   def before_statement(sql):
+    if sql=='BEGIN IMMEDIATE':
+     held.enter_context(self.cap.websocket(40))
+     clock.return_value=self.now+30
+   def connect():
+    c=app.connect()
+    c.set_trace_callback(before_statement)
+    return c
+   with self.assertRaises(EngineError) as caught,capacity.Capacity(connect).websocket(1):
+    self.fail('concurrent reservation exceeded capacity')
+   self.assertEqual(caught.exception.code,'EODHD_WS_CAPACITY')
+   self.assertEqual(list(self.state()['ws_leases'].values()),[{'symbols':40,'until':self.now+30}])
  def test_websocket_cleanup_of_pruned_lease_under_competing_writer(self):
   statements=[]
   def connect():

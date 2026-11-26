@@ -74,12 +74,16 @@ def _check_http_cooldown(state,now):
   error.retry_after_s=retry_at-now
   raise error
 
-def _check_ws_cooldown(state,now):
+def _available_ws_leases(state,now,count):
  retry_at=state.get('ws_retry_at',0)
  if retry_at>now:
   error=EngineError('EODHD_WS_CAPACITY',429)
   error.retry_after_s=retry_at-now
   raise error
+ leases={k:v for k,v in state.get('ws_leases',{}).items() if v['until']>now}
+ if len(leases)>=64*UTILIZATION//100 or sum(v['symbols'] for v in leases.values())+count>50*UTILIZATION//100:
+  raise EngineError('EODHD_WS_CAPACITY',429)
+ return leases
 
 class Capacity:
  def __init__(self,connect,priority='routine'):
@@ -164,12 +168,10 @@ class Capacity:
   token=secrets.token_hex(12);now=time.time()
   with self.connect() as c:
    c.execute('PRAGMA query_only=ON')
-   _check_ws_cooldown(read(c),now)
+   _available_ws_leases(read(c),now,count)
   with self.connect() as c:
    c.execute('BEGIN IMMEDIATE');state=read(c)
-   _check_ws_cooldown(state,now)
-   leases={k:v for k,v in state.get('ws_leases',{}).items() if v['until']>now}
-   if len(leases)>=64*UTILIZATION//100 or sum(v['symbols'] for v in leases.values())+count>50*UTILIZATION//100:raise EngineError('EODHD_WS_CAPACITY',429)
+   leases=_available_ws_leases(state,now,count)
    leases[token]={'until':now+30,'symbols':count};state['ws_leases']=leases;write(c,state,now)
   try:yield
   finally:
