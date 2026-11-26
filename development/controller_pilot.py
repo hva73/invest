@@ -64,6 +64,7 @@ a defect, or have encountered a failing test. Use tools to fix it in this turn.
 Work in order: reproduce or inspect the failure; choose the simplest complete fix;
 edit the approved files; run targeted tests; correct failures and retest; check
 adjacent regressions. If a method fails, change the method, not the requirements.
+Turn every documented review failure into an executable regression case (including valid positive behavior). Run the complete targeted suite together before delivery. Do not repeatedly run unrelated full suites instead of fixing a failing focused test.
 Keep analysis internal and reporting short. Do not wait for coordinator approval
 of routine implementation decisions. Stop only for a tested delivery, a genuine
 external dependency, or the enforced resource boundary. Never invent test results.
@@ -85,7 +86,7 @@ marker. A report, partial implementation, or failed test is not readiness.
     return common + f"\\nRound {round_number}: {guidance}\\n"
 
 MODEL_POLICY = {
-    "release": ("gpt-6.2-sol", "medium"),
+    "release": ("gpt-6.2-sol", "high"),
     "mobile": ("gpt-6.2-sol", "high"),
     "motor": ("gpt-6.2-astra", "high"),
     "data": ("gpt-6.2-astra", "high"),
@@ -249,7 +250,9 @@ def main():
     p.add_argument("--allowed-paths-json",default="[]")
     p.add_argument("--auth", choices=("chatgpt", "api"), default="chatgpt")
     a = p.parse_args()
-    task = a.task_file.read_text()[:20000]
+    task = a.task_file.read_text()
+    if len(task)>50000:
+        p.error("task exceeds bounded context; preserve original scope")
     paths=json.loads(a.allowed_paths_json)
     if not isinstance(paths,list) or any(not isinstance(p,str) for p in paths):
         p.error("invalid scope")
