@@ -2868,5 +2868,70 @@
     "follow_base": true,
     "reserve_plan_id": "statistics/fills/position-cost-return-requires-known-currency",
     "reserve_goal": "statistics/fills"
+  },
+  {
+    "issue": 14,
+    "generation": 32,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+    "dependencies": [],
+    "paths": [
+      "hotwatch_engine.py",
+      "tests/test_hotwatch_engine.py"
+    ],
+    "task": "Approved roadmap resources/scale (Worker- og k\u00f8kapacitet). Exact existing source anchor: hotwatch_engine.py :: SELECT count(*) FROM hw_sessions WHERE lease_owner IS NOT NULL AND lease_until>?. Implement only this bounded change: Tilf\u00f8j \u00e9t idempotent partialindeks i hotwatch_engine.init() p\u00e5 hw_sessions(lease_until) med pr\u00e6dikatet lease_owner IS NOT NULL. P\u00e5 checkoutens SQLite-skema bruger claim() en fuld tabelskanning til at t\u00e6lle optagne leases, mens samme foresp\u00f8rgsel med indekset bruger et intervalopslag. Bevar den autoritative opt\u00e6lling i writer-transaktionen og dens strenge tidsgr\u00e6nse.. Acceptance: En SQLite-test med afsluttede historikr\u00e6kker og leases f\u00f8r, p\u00e5 og efter den injicerede tidsgr\u00e6nse viser, at opt\u00e6llingen kun omfatter r\u00e6kker med token og lease efter gr\u00e6nsen. EXPLAIN QUERY PLAN viser et intervalopslag via det nye indeks, og claim() returnerer fortsat ingen ny lease, n\u00e5r de eksisterende leases fylder kapaciteten.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_hotwatch_engine.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "resources/scale/index-hotwatch-occupied-lease-count",
+    "reserve_goal": "resources/scale"
+  },
+  {
+    "issue": 114,
+    "generation": 26,
+    "role": "desktop",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+    "dependencies": [
+      "114:23"
+    ],
+    "paths": [
+      "static/journal-ui.js",
+      "tests/browser_desktop_experience.py"
+    ],
+    "task": "Approved roadmap statistics/ui (Godkendt statistikvisning). Exact existing source anchor: static/journal-ui.js :: function event(e){return `<article class=\"journal-row. Implement only this bounded change: Genvurd\u00e9r kun visningen af en oplyst decimalstreng fra den bevarede 114:16-diff. Vis \u00abUdf\u00f8rt antal\u00bb p\u00e5 den eksisterende Pluto-ordrer\u00e6kke med numerisk execution-id, n\u00e5r detaljer indeholder en ikke-tom normaliseret filled_quantity-streng. Render den escapede streng direkte uden talkonvertering. Begr\u00e6ns browsertesten til \u00e9n stubbede deludf\u00f8rt ordreh\u00e6ndelse og dens eksisterende detaljevisning. Nul, manglende m\u00e6ngde og forslagsscenarier ligger uden for denne afgr\u00e6nsning.. Acceptance: Ved 1280 px \u00e5bnes Handelsjournal fra Handelsmotor. En normaliseret PARTIALLY_FILLED-h\u00e6ndelse viser hele decimalstrengen 0.12345678901234567890 under \u00abUdf\u00f8rt antal\u00bb, og den eksisterende detaljevisning kan stadig \u00e5bnes og viser den samme v\u00e6rdi.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_experience.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 114:16; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "statistics/ui/journal-renders-precise-partial-fill-quantity",
+    "reserve_goal": "statistics/ui",
+    "reserve_reassessment": "114:16@0026d194377affd9b55b4843e46847aa3ec751c7b27a1669caad24a8acda2c5b"
+  },
+  {
+    "issue": 54,
+    "generation": 33,
+    "role": "mobile",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+    "dependencies": [
+      "273:16"
+    ],
+    "paths": [
+      "static/app.js",
+      "tests/browser_mobile_navigation_app.py"
+    ],
+    "task": "Approved roadmap ui/mobile (Mobil 2.0). Exact existing source anchor: static/app.js :: let deskPollBusy=false;setInterval(async()=>{. Implement only this bounded change: Afgr\u00e6ns rettelsen til den eksisterende periodiske l\u00e6sning af reports/desk. Gem sessionEpoch f\u00f8r kaldet, og kontroll\u00e9r den sammen med en fortsat aktiv state, f\u00f8r svaret sammenlignes eller anvendes. Bevar intervallet og de eksisterende startbetingelser. Udvid den lokale mobilbrowserfixture til at udl\u00f8se den registrerede pollingcallback deterministisk og holde \u00e9t svar tilbage hen over logout og nyt login med samme bruger.. Acceptance: P\u00e5 mobil forbliver Radars rapportpanel fra det nye login synligt, n\u00e5r det gamle pollingsvar leveres. Et efterf\u00f8lgende aktuelt svar opdaterer panelet. Browserforl\u00f8bet registrerer ingen sidefejl og bruger kun lokale fixtures.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_mobile_navigation_app.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "ui/mobile/radar-desk-poll-respects-login-epoch",
+    "reserve_goal": "ui/mobile"
   }
 ]
