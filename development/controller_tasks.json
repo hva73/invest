@@ -956,7 +956,7 @@
     "pause_reason": "architecture_reset"
   },
   {
-    "status": "ready",
+    "status": "blocked",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "f18e91982e3d5aba97e39a0e51e3c76376e73746",
@@ -1013,7 +1013,7 @@
     "task": "Owner-directed bounded continuation of #54 generation 3, which is blocked after excessive token use. Preserve its original checkout and do not resume its model session. Start on exact architecture-reset baseline f18e9198; if a useful exact scoped change is available locally from the preserved generation-3 worktree, inspect and reuse only the independently testable portion, without editing that worktree or importing unrelated changes. First deliver ONE narrow vertical slice: prevent HOT WATCH strategy-file upload and account kill-switch asynchronous continuations from crossing authenticated session epoch, including errors and deferred POST after file read. Reuse existing captureInteraction/currentResult or the existing equivalent session-epoch guard, no framework, no app.js changes, no archive/polling redesign. Inspect actual code to see whether those operations exist on this baseline; if already fixed, add only missing regression coverage rather than inventing code. Add focused delayed account A→B and same-user relogin negative tests plus normal success positive test on existing real browser fixture; run syntax and focused browser tests, then stop with tested draft. If an operation is absent on this baseline, do not recreate it; test the existing equivalent stale async settings path and report exact evidence. Preserve approved UI, API, tenant and broker safety. No live calls, credentials, network, commits, workflow changes or production. Remaining #54 interactions are separate follow-up after independent review. Do not repeat broad architecture audits. Local controller uses Medium and bounded token allowance; no automatic restart after nonfunctional progress."
   },
   {
-    "status": "ready",
+    "status": "blocked",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "f18e91982e3d5aba97e39a0e51e3c76376e73746",
@@ -1030,5 +1030,41 @@
       "tests/browser_mobile_account_isolation.py"
     ],
     "task": "Owner-approved replacement of B after the preserved #54 generation 4 exhausted its budget. Do not resume any Sol session or edit prior worktrees. Deliver exactly ONE small vertical slice on the pinned architecture-reset base: in static/engine-ui.js, guard the load() async HOT WATCH session/history/registry read against a changed authenticated session epoch (including same-user relogin), mode or superseded load, including stale error rendering from the mount() continuation. Preserve normal same-account success, current/history pagination, existing polling and approved design. Reuse existing sessionEpoch/captureInteraction/currentResult where appropriate; no new framework, no unrelated dialog/manual-start/strategy-upload rewrite. First inspect only these functions and the existing real app browser navigation fixture. Implement a small regression in tests/browser_mobile_navigation_app.py or a focused new tests/browser_mobile_account_isolation.py using the real application fixture and delayed response, with same-user relogin or equivalent epoch change, stale rejection and normal success. No live broker or provider calls. Run node --check static/engine-ui.js and the focused real Chromium test with python3 tests/browser_mobile_account_isolation.py (or python3 tests/browser_mobile_navigation_app.py if extending it); never report a skipped test as passed. Existing local generation-4 checkout may be read only for this exact function if useful; preserve it and never import unrelated changes. Do not audit the entire frontend. Deliver a small tested change and the existing ESCAPE_DRAFT_READY marker. If baseline already satisfies the invariant, add genuinely missing regression only. No production, credentials, network, git commits/push, workflow edits, broker or strategy changes. Stop after the focused delivery; other #54 issues remain separate follow-ups."
+  },
+  {
+    "status": "ready",
+    "priority": 0,
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "f18e91982e3d5aba97e39a0e51e3c76376e73746",
+    "dependencies": [],
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "issue": 315,
+    "generation": 2,
+    "role": "data",
+    "paths": [
+      "hotwatch_service.py",
+      "tests/test_hotwatch_holdings_auto.py"
+    ],
+    "task": "Implement a SMALL safe performance improvement to auto_holdings_tick in hotwatch_service.py on the pinned architecture-reset base. Do not import rejected PR #317's replacement scanner. Keep the original ordered loop, transaction boundary, selection and activation logic exactly intact. In the existing matches filtering, decode each request once instead of up to three times; select updated in the existing prior SELECT and eliminate the additional generation SELECT, preserving the exact POSITION_CLOSED identity construction. No other optimization or refactor. Add targeted regression tests in tests/test_hotwatch_holdings_auto.py for portfolio-scoped versus unscoped active matches and reopened POSITION_CLOSED watch identity, only if not already covered; demonstrate reduced request decodes or removed SQL read using a small fixture. Run python3 -m unittest discover -s tests -p test_hotwatch_holdings_auto.py (use existing project test setup as necessary). Fix actual failures. Deliver code and tests, ESCAPE_DRAFT_READY after pass. Do not benchmark unrelated workloads, repeat broad audits, create new architecture, or edit old worktrees. Existing rejected PR #317 stays preserved, not merged. No live/provider/broker/production calls, credentials, network, git writes, or workflow edits. Keep approved trading semantics."
+  },
+  {
+    "status": "ready",
+    "priority": 0,
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "f18e91982e3d5aba97e39a0e51e3c76376e73746",
+    "dependencies": [],
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "issue": 54,
+    "generation": 6,
+    "role": "mobile",
+    "paths": [
+      "static/engine-ui.js",
+      "tests/test_engine_load_epoch.js"
+    ],
+    "task": "Fix ONLY stale HOT WATCH load results/errors in static/engine-ui.js. Concrete starting point: load() currently captures ticket and owner but not sessionEpoch or mode; mount() catch writes an error to the current root without validating the originating load. Capture epoch, mode, owner, root and generation at load start; use a single local validity check before success/error rendering, suppress stale rejections, preserve current genuine failure reporting and existing pagination/polling. Do not rewrite other functions or audit other files. Add tests/test_engine_load_epoch.js using Node's built-in assert/vm and a minimal DOM/API stub to exercise the actual EngineUI.mount/load path: deferred old response after same-owner epoch change, deferred old rejection after a newer mount, and normal current success/error. No browser installation required for this focused test; independent existing CI still checks real browser regressions. Run node --check static/engine-ui.js and node tests/test_engine_load_epoch.js; fix failures and deliver with ESCAPE_DRAFT_READY. Do not touch preserved generations or resume old sessions. No new framework, production, credentials, network, broker, workflow changes or git writes. Keep existing design and API."
   }
 ]
