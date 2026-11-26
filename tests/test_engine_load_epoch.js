@@ -1036,6 +1036,57 @@ async function checkCachedChoice(action, verified, beforeAvailability) {
     verified && action === 'batch' ? '1/40 kandidat(er) klar: FIRST · asset' : '');
 }
 
+async function checkReturnedSelection(candidate, oldFirst, oldOutcome) {
+  const {ui, elements, rows, notices, status, slot, call} = creationRequests();
+  const select = value => {
+    if (!candidate) return ui.change({target: {id: 'engine-asset-choice', value}});
+    elements.candidate.value = value;
+    return ui.change({target: elements.candidate});
+  };
+  const first = select(candidate ? '0' : 'asset'), old = call('market/quote');
+  const other = select(candidate ? '1' : 'other');
+  call('market/quote').reject(Error('obsolete other'));
+  const back = select(candidate ? '0' : 'asset'), latest = call('market/quote');
+  const finishOld = () => oldOutcome === 'error' ? old.reject(Error('obsolete first')) :
+    old.resolve({selection_required: true, choices: [{asset_id: 'obsolete'}]});
+  if (oldFirst) { finishOld(); await first; }
+  latest.resolve({pending: true, retry_after: 2});
+  if (!oldFirst) { await settle(); finishOld(); }
+  await Promise.all([first, other, back]);
+  assert.deepEqual(notices, []);
+  assert.match(status.textContent, /mangler verificeret aktiv-ID/);
+  assert.equal(slot.innerHTML, undefined);
+  assert.equal(rows[0].instrument, undefined);
+}
+
+async function checkManualSymbolReverification(sameAsset, searchFirst, fail, implicit = false) {
+  const {ui, rows, nodes, elements, calls, call} = creationRequests();
+  const select = value => ui.change({target: {id: 'engine-asset-choice', value}});
+  const quote = asset_id => ({asset_id, currency: 'USD', exchange: 'NASDAQ', name: 'First'});
+  const initial = select('asset');
+  call('market/quote').resolve(quote('asset'));
+  await initial;
+  const search = ui.click({dataset: {}, hasAttribute: key => key === 'data-engine-eodhd-search'});
+  const lookup = call('market/eodhd-symbols');
+  const id = sameAsset ? 'asset' : 'other';
+  const verify = implicit ? ui.change({target: elements.candidate}) : select(id), deferred = call('market/quote');
+  if (!searchFirst) { deferred.resolve(quote(id)); await verify; }
+  if (fail) lookup.reject(Error('symbol lookup failed'));
+  else lookup.resolve({choices: [{symbol: 'FIRST.US', name: 'First', currency: 'USD'}]});
+  await search;
+  if (searchFirst) { deferred.resolve(quote(id)); await verify; }
+  assert.equal(calls.length, 3);
+  assert.equal(rows[0].instrument.asset_id, id);
+  assert.equal(elements.provider_symbol.value, sameAsset && !fail ? 'FIRST.US' : '');
+  if (sameAsset) {
+    if (fail) assert.match(nodes['engine-eodhd-choice'].textContent, /symbol lookup failed/);
+    else assert.match(nodes['engine-eodhd-choice'].innerHTML, /FIRST.US/);
+  } else {
+    assert.equal(rows[0].eodhd_choices, undefined);
+    assert.equal(rows[0].eodhd_error, null);
+  }
+}
+
 async function checkCreationBoundary(stage, change, fail) {
   const {context, ui, form, rows, elements, nodes, session, notices, calls, call, button, requests} = creationRequests();
   const availability = 'v1/hotwatch/start-candidates?is_test=false', activation = 'v1/hotwatch/sessions';
@@ -1062,7 +1113,14 @@ async function checkCreationBoundary(stage, change, fail) {
   if (change === 'candidate') {
     elements.candidate.value = '1';
     nextCandidate = ui.change({target: elements.candidate});
-    if (stage === activation) assert.equal(button.disabled, false);
+    if (stage === activation) {
+      assert.equal(button.disabled, true);
+      const count = calls.length;
+      const duplicate = dispatchInstrumentEvent(context, 'submit', form);
+      await settle();
+      assert.equal(calls.length, count);
+      await duplicate;
+    }
   }
   if (change === 'session') session.epoch++;
   if (change === 'form') {
@@ -1075,7 +1133,12 @@ async function checkCreationBoundary(stage, change, fail) {
   else deferred.resolve({candidates: rows, selection: {}, choices: []});
   if (change) {
     await operation;
-    assert.equal(snapshot(), before, [stage, change, fail].join(' / '));
+    if (stage === activation && nextCandidate) {
+      assert.equal(button.disabled, false);
+      const expected = JSON.parse(before);
+      expected[2].disabled = false;
+      assert.equal(snapshot(), JSON.stringify(expected));
+    } else assert.equal(snapshot(), before, [stage, change, fail].join(' / '));
     if (nextCandidate) {
       elements.provider.value = 'pluto';
       call('market/quote').resolve({asset_id: 'second', exchange: 'NYSE', currency: 'USD'});
@@ -1095,6 +1158,15 @@ async function checkCreationBoundary(stage, change, fail) {
 }
 
 async function main() {
+  for (const first of [true, false]) {
+    for (const fail of [true, false]) {
+      await checkManualSymbolReverification(true, first, fail, true);
+      for (const sameAsset of [true, false]) await checkManualSymbolReverification(sameAsset, first, fail);
+    }
+    for (const candidate of [true, false]) {
+      for (const outcome of ['error', 'choices']) await checkReturnedSelection(candidate, first, outcome);
+    }
+  }
   for (const verified of [true, false]) {
     await checkCachedChoice('batch', verified, false);
     for (const quoteFirst of [true, false]) await checkCachedChoice('submit', verified, quoteFirst);
