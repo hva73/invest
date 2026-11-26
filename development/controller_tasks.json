@@ -1107,7 +1107,7 @@
     "status": "ready",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "6c574c65823c9d8b4c786ffeb35fb77bddd269b8",
+    "base_sha": "4b5090550d1de97873ae91ec984643dd30183351",
     "dependencies": [],
     "local_review": true,
     "local_repair": true,
