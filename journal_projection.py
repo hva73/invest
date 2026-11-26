@@ -18,6 +18,7 @@ def read(connect,uid,now=None,days=7,source='all',kind='all',before=None,limit=1
   for r in c.execute('SELECT * FROM candidate_execution_events WHERE user_id=? AND is_test=0 ORDER BY id DESC LIMIT 2000',(uid,)):
    if r['verification']!='pluto':continue
    payload=json.loads(r['payload']);status_time=payload.get('status_time');known=bool(policy.stamp(status_time));payload['time_basis']='provider_status_time' if known else 'observed_not_execution';payload['observed_at']=r['occurred_at']
+   payload.update(order_id=r['order_id'], candidate_id=r['candidate_id'], cycle_id=r['cycle_id'])
    add('execution:'+str(r['id']),status_time if known else r['occurred_at'],'Pluto','order',r['status'] if known else 'Observeret ordrestatus: '+r['status'],payload)
   for r in c.execute('SELECT * FROM candidate_lifecycle_events WHERE user_id=? AND is_test=0 ORDER BY id DESC LIMIT 2000',(uid,)):
    add('lifecycle:'+str(r['id']),r['occurred_at'],'Pluto' if r['evidence'] in ['pluto','pluto_snapshot'] else 'Trading Radar','analysis',r['status'],{'candidate_id':r['candidate_id'],'reason':r['reason'],'origin':r['origin'],'evidence':r['evidence']})
