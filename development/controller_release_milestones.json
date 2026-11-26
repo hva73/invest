@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T06:47:00Z",
+  "updated_at": "2026-11-26T07:40:00Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -409,7 +409,7 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "in_progress",
       "issue": 54,
-      "evidence": "#306 integreret; #300 aa05b49c CI 45737304161 chart/UI PASS, dedikerede mobile workflows 45737304211/45737304217 SKIPPED. Eksakt uafhængigt HOLD 7180092462 på dialog-epoch/fokus. Koordinator isoleret Chromium 390px: gammel guard 6/10, foreslået dialog-activity guard 10/10 (7182977486); endnu ikke indarbejdet eller fuldt testet.",
+      "evidence": "#306 integreret; ny faktisk #300 controllerrevision 9171ca65 efter publiceringspausen. CI 45775385225 chart/UI faktisk kørt PASS; dedikeret mobil CI 45775385222/45775385229 SKIPPED. Uafhængigt HOLD 7185694043 på kontoepoch ved strategifil/kill-switch og arkivpolling. Ingen samlet browseraccept.",
       "subgoals": [
         {
           "id": "reuse",
@@ -422,9 +422,9 @@
           "id": "mobile",
           "title": "Mobil 2.0",
           "status": "review",
-          "evidence": "#300 aa05b49c: regression PASS, HOLD 7180092462: åbning/lukning af anden beholdning og ny historikdialog skal invalidere gamle asynkrone resultater. Dedikeret mobiltest udestår. Testet konkret rettelsesforslag i 7182977486; fuld browseraccept og faktisk controllerleverance udestår.",
+          "evidence": "#300 9171ca65: dialog-activity og manual-start fokus ændret med nye browserfixtures. CI 45775385225 PASS, men HOLD 7185694043: gammel strategifil kan bruge ny kontos CSRF, gammel kill-switch fejl kan nå ny konto, arkivpolling ændret. Reparation på samme PR, ingen integration endnu.",
           "owner_role": "mobile",
-          "updated_at": "2026-11-26T04:51:00Z"
+          "updated_at": "2026-11-26T07:40:00Z"
         },
         {
           "id": "desktop",
@@ -442,7 +442,7 @@
           "owner_role": "mobile"
         }
       ],
-      "updated_at": "2026-11-26T04:51:00Z"
+      "updated_at": "2026-11-26T07:40:00Z"
     },
     {
       "id": "load",
