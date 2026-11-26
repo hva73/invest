@@ -428,6 +428,8 @@ def status_matches_proposal(raw,payload,reference):
         # A matching root cannot mask a conflicting order.
         if intent_reference({'orderIntents':items},payload)!=reference:return False
         locations.extend(items)
+    if 'collectionId' in payload and any(item['collectionId']!=payload['collectionId'] for item in locations if 'collectionId' in item):
+        return False
     if orders and 'portfolioId' in payload:
         return all(item['portfolioId']==payload['portfolioId'] for item in locations if 'portfolioId' in item)
     return True
