@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T14:18:39Z",
+  "updated_at": "2026-11-26T15:18:23Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -376,15 +376,15 @@
       "title": "Hvordan står det til? – herkomst og statistik",
       "status": "in_progress",
       "issue": 114,
-      "evidence": "Ældre #309 ny HEAD 004af36f, controller CI 45778051173 SUCCESS; målrettet trade_service-suite og uafhængig accept ikke bevist. Bevares som kilde til #315, ingen konkurrerende integration.",
+      "evidence": "#114:3 køsat på 05d0349a, df3304d2: verificeret manglende identitetskontrol i check() før DB-write; afgrænset fix/test. Ældre #309 bevaret, ikke integreret.",
       "subgoals": [
         {
           "id": "provenance",
           "title": "Entry/exit-herkomst",
-          "status": "review",
-          "evidence": "#309 004af36f ændrer root/empty-list, legacy status-only og collection-scope samt regressionstests. CI 45778051173 SUCCESS; fokuseret trade_service test og ny uafhængig accept udestår. Bevares på gammel branch.",
+          "status": "in_progress",
+          "evidence": "#114:3 klar, kommentar 7196128832. Matchende intent-readback før write, syntetisk SQLite negative/positive, ingen live handler. Efterfølgende receipt/depot-kontrakt udestår.",
           "owner_role": "motor",
-          "updated_at": "2026-11-26T09:12:00Z"
+          "updated_at": "2026-11-26T15:18:23Z"
         },
         {
           "id": "fills",
@@ -401,15 +401,15 @@
           "owner_role": "desktop"
         }
       ],
-      "updated_at": "2026-11-26T09:12:00Z"
+      "updated_at": "2026-11-26T15:18:23Z"
     },
     {
       "id": "ui",
       "phase": 3,
       "title": "Samlet mobil/desktop 2.0",
-      "status": "blocked",
+      "status": "in_progress",
       "issue": 54,
-      "evidence": "#54:5 terminal blocked:incomplete 7193131075 efter TESTING/CONTINUING; gen3/4/5 bevares. Koordinator testede afgrænset load/mount-epoch/cache/error-rettelse på f18e9198: isoleret Chromium 390/1280, baseline 7/14 → forslag 14/14 hver; kode og cases i #54 kommentar 7194658891. Faktisk app-browseraccept og publiceret produktpatch udestår. Ældre #300 ikke integreret.",
+      "evidence": "#54:6 PR #318 exact 22198996, UI CI 45844448768, integreret 684ee30f. Ny verificeret cache-epoch-restfejl 4/6 → 6/6 isoleret Node; #54:7 køsat på 05d0349a (df3304d2). Faktisk komplet konto-isolation og samlet 2.0 browseraccept udestår.",
       "subgoals": [
         {
           "id": "reuse",
@@ -421,10 +421,10 @@
         {
           "id": "mobile",
           "title": "Mobil 2.0",
-          "status": "blocked",
-          "evidence": "#54:5 blocked:incomplete receipt 7193131075. Afgrænset testet kodeforslag 7194658891, 14/14 isolerede cases ved begge viewports; ingen publiceret produktpatch eller fuld app-test. Bevar worktree, ingen dublet.",
+          "status": "in_progress",
+          "evidence": "#318 integreret; tidligere #54:3/4/5 bevares. #54:7 klar med konkret cached-history epoch regression, kommentar 7196128048; ikke STARTED eller færdig.",
           "owner_role": "mobile",
-          "updated_at": "2026-11-26T13:14:30Z"
+          "updated_at": "2026-11-26T15:18:23Z"
         },
         {
           "id": "desktop",
@@ -437,12 +437,13 @@
         {
           "id": "test",
           "title": "Fælles browsertest",
-          "status": "pending",
-          "evidence": "Udestår.",
-          "owner_role": "mobile"
+          "status": "review",
+          "evidence": "#318 real app navigation, desktop/chart PASS i CI 45844448768. Fokuseret Node-test kørt lokalt ifølge review; komplet konto-isolation og samlet browser-CI på integreret SHA udestår.",
+          "owner_role": "mobile",
+          "updated_at": "2026-11-26T15:18:23Z"
         }
       ],
-      "updated_at": "2026-11-26T13:14:30Z"
+      "updated_at": "2026-11-26T15:18:23Z"
     },
     {
       "id": "load",
@@ -450,7 +451,7 @@
       "title": "100 brugere og skaleringsmåling",
       "status": "in_progress",
       "issue": 14,
-      "evidence": "#315:1 genoptaget, draft #317 cc44d938 på f18e9198, exact CI 45825719688 motor PASS. Uafhængig lokal HOLD 7192983957: tværtenant aktiveringsrækkefølge og SQLite-work regression. Koordinator reproducerede rækkefølge og testede afgrænset simplere alternativ, kommentar 7193043758. Ikke integreret eller kapacitetsaccept.",
+      "evidence": "#315:2 PR #319 a525138e, motor CI 45845698897 (392+74+191 tests), integreret 05d0349a. Bevarer per-position rækkefølge og transaktion; færre JSON-decodes/én fjernet genåbningsquery. #317 HOLD bevares uden merge. 100-bruger hostingaccept udestår.",
       "subgoals": [
         {
           "id": "adapter",
@@ -463,9 +464,9 @@
           "id": "queue",
           "title": "100 brugere og fair køer",
           "status": "review",
-          "evidence": "#317 cc44d938 CI 45825719688 SUCCESS, men HOLD 7192983957. Isoleret SQLite-reproduktion: base vælger tenant 2, draft tenant 3 ved close/reopen før første write; simplere per-position alternativ vælger tenant 2 og reducerer VM-arbejde i 100-bruger normaltilfælde. Kodevej/7 scenarier afleveret 7193043758; fuld test udestår.",
+          "evidence": "#319 afgrænset SQLite-optimering integreret, scoped tests og review PASS; ikke fuld fairness/100-bruger kapacitetsmåling. #317 ikke integreret.",
           "owner_role": "data",
-          "updated_at": "2026-11-26T13:10:36Z"
+          "updated_at": "2026-11-26T15:18:23Z"
         },
         {
           "id": "resources",
@@ -482,23 +483,23 @@
           "owner_role": "data"
         }
       ],
-      "updated_at": "2026-11-26T13:10:36Z"
+      "updated_at": "2026-11-26T15:18:23Z"
     },
     {
       "id": "release",
       "phase": 4,
       "title": "Samlet releasekandidat, backup og migration",
-      "status": "blocked",
+      "status": "in_progress",
       "issue": 57,
-      "evidence": "Godkendt reset #315: #316 integreret f18e9198; A #315:1 draft #317 cc44d938, review-HOLD; B #54:5 blocked:incomplete 7193131075, testet afgrænset kodeforslag 7194658891. Gen3/4/5 bevares. Ældre accepterede V2-dele er kilder, ikke fælles release. Ingen ejer-GO.",
+      "evidence": "To faktiske controllerleverancer gennemført med lokal uafhængig review, CI og squash: #318→684ee30f, #319→05d0349a. Aktiv resetgren verificeret identisk 05d0349a; næste to disjunkte scopes #54:7/#114:3 køsat df3304d2. Ingen samlet release eller ejer-GO.",
       "subgoals": [
         {
           "id": "integrate",
           "title": "Samlet releasegren",
           "status": "in_progress",
-          "evidence": "Ny aktiv resetbase f18e91982e3d5aba97e39a0e51e3c76376e73746 (#316 merged). Tidligere reuse-afstemning #315 7187616065: Strategy Lab + tests kan genbruges med runtime-module manifest, market UI/chart-test/CI kræver afgrænset integration. #317 ikke integreret.",
+          "evidence": "Resetgren 05d0349a efter #316/#318/#319; tidligere V2 accepterede dele bevares som kilder, ikke genintegreret. #317/#309 HOLD bevares.",
           "owner_role": "release",
-          "updated_at": "2026-11-26T13:10:36Z"
+          "updated_at": "2026-11-26T15:18:23Z"
         },
         {
           "id": "preflight",
@@ -511,12 +512,12 @@
           "id": "ci",
           "title": "Samlet regression og rollback",
           "status": "review",
-          "evidence": "#316 exact 3062ad97 integreret f18e9198; run 45818341794 job 139903784282 motor og UI-regression faktisk PASS. #317 cc44d938 run 45825719688 job 139929222813 motor PASS, review HOLD 7192983957; ikke samlet produktaccept. #314 90a17fce offline CI 45794329945 106 PASS, receipt-transition HOLD 7190288043 og testet rettelsesforslag 9/9 i 7191460933, ikke verificeret installeret. Account-isolation og fælles release-CI udestår.",
+          "evidence": "#318 UI 45844448768 PASS; #319 motor 45845698897 PASS (392+74+191), eksakt PR-head; ikke samlet CI på merge-SHA 05d0349a. #314 tidligere receipt-transition HOLD stadig ikke verificeret rettet i source. Samlet regression/rollback og releaseaccept udestår.",
           "owner_role": "release",
-          "updated_at": "2026-11-26T13:10:36Z"
+          "updated_at": "2026-11-26T15:18:23Z"
         }
       ],
-      "updated_at": "2026-11-26T13:14:30Z"
+      "updated_at": "2026-11-26T15:18:23Z"
     },
     {
       "id": "go",
