@@ -2198,7 +2198,7 @@
     "priority": 1,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "cbb37703356ffae9f3d2beba37265d17e0b706db",
+    "base_sha": "4530ff6f007900d3b49a077b9e91c67164cef8bf",
     "dependencies": [],
     "paths": [
       "static/candidate-ui.js",
