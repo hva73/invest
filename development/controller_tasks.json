@@ -1579,7 +1579,7 @@
     "task": "Return to #14 measurable queue/SQLite performance, not further generic validation. In existing admin_diagnostics bounded scan log projection only: identify and expose the existing worker-recorded work_before_commit_ms timing, currently generated but omitted from numeric allowlist, and distinguish it from existing begin_wait_ms/sqlite_begin_ms. Reuse existing aggregation and bounded tenant filtering; no new DB queries, writes or extra sampling. Add actual fixture regression for valid numeric values, missing and invalid values, foreign tenant exclusion, and preserve existing response keys. Run focused test_admin_diagnostics.py. Document exactly what each measured interval represents in code/test output; no claim of live improvement. Bounded scope, existing tests, no credentials, network, production, workflow or broker mutations. ESCAPE_DRAFT_READY after actual pass."
   },
   {
-    "status": "ready",
+    "status": "done",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "0bcea2b3adde245d014a20a45ff1b0c8e3bb56d0",
