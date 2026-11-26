@@ -250,8 +250,9 @@ async function checkControl(change, stage, fail, action = 'pause') {
   else assert.equal(dialog.innerHTML, previousHtml);
 }
 
-async function checkSettings(change, fail) {
-  const {session, context, click, mount} = fixture();
+function settingsFixture() {
+  const engine = fixture();
+  const {context} = engine;
   const dialog = {
     dataset: {}, innerHTML: '', open: false,
     showModal() { this.open = true; }, querySelector: () => ({focus() {}})
@@ -264,6 +265,38 @@ async function checkSettings(change, fail) {
     takeRecords() { return records.splice(0); }
   };
   const button = {dataset: {}, isConnected: true, hasAttribute: name => name === 'data-engine-strategies'};
+  return {...engine, button, dialog, records};
+}
+
+async function checkKillWhileOpeningSettings(fail) {
+  const {session, context, requests, click, button, dialog} = settingsFixture();
+  context.confirm = () => true;
+  let resolve, reject;
+  session.control = (url, body) => {
+    assert.equal(url, 'v1/hotwatch/kill-switch');
+    assert.equal(body.enabled, true);
+    return new Promise((yes, no) => { resolve = yes; reject = no; });
+  };
+  const pending = click({dataset: {engineKill: 'on'}, hasAttribute: () => false});
+  session.settings = url => url.endsWith('/strategies') ? {strategies: []} : {providers: {}};
+  assert.equal(await click(button), true);
+  assert.equal(dialog.open, true);
+  if (fail) {
+    const error = new Error('kill switch offline');
+    reject(error);
+    await assert.rejects(pending, e => e === error);
+    assert.equal(requests.length, 0);
+  } else {
+    resolve({});
+    await settle();
+    assert.equal(requests.length, 1, 'confirmed kill switch must reload status');
+    requests.shift().succeed();
+    assert.equal(await pending, true);
+  }
+}
+
+async function checkSettings(change, fail) {
+  const {session, click, mount, button, dialog, records} = settingsFixture();
   const strategy = {strategies: [{strategy_id: 'baseline', version: '1'}]};
   const provider = {providers: {example: {known_limits: ['Testgrænse']}}};
   let resolve, reject;
@@ -303,6 +336,8 @@ async function checkSettings(change, fail) {
 }
 
 async function main() {
+  await checkKillWhileOpeningSettings(true);
+  await checkKillWhileOpeningSettings(false);
   for (const change of ['epoch', 'owner', 'mode', 'dialog', 'newer', 'detached', null]) {
     await checkSettings(change, false);
     await checkSettings(change, true);

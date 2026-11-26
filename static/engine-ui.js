@@ -2,6 +2,7 @@
 window.EngineUI=(()=>{
  let api,esc,money,time,owner,editing,isAdmin,getState,sessionEpoch=()=>0,mode=false,generation=0,timer=null,data=null,candidates=[],portfolios=[],portfolioSnapshots={},batchCandidates=[],pending=null,activeFilter='all',showOwn=false,manualChoices=[];
  let interaction=0,dialogActivity=0,observer;
+ let latestSettingsRequest=0;
  function recordDialogs(records){
   for(const r of records){
    if(r.type==='attributes'&&r.target.matches('dialog'))dialogActivity++;
@@ -189,8 +190,8 @@ window.EngineUI=(()=>{
   }catch(error){if(valid())throw error}
   return true
  }if(b.dataset.engineFilter){activeFilter=b.dataset.engineFilter;applyFilter(activeFilter);return true}if(b.dataset.engineKill){if(!confirm(b.dataset.engineKill==='on'?'Pause alle dine motorsessioner i BÅDE DRIFT OG TEST? Historik og Pluto-ordrer bevares.':'Ophæv nødstop? Sessionerne genoptages kun manuelt.'))return true;const valid=captureInteraction({begin:true,dialogBound:false});const result=await currentResult(api(base+'/kill-switch',{enabled:b.dataset.engineKill==='on',reason:'Manuel ændring fra ESCAPE-kontrolcenter'}),valid);if(result===null)return true;await load();return true}if(b.hasAttribute('data-engine-strategies')){
-  const current=captureInteraction({begin:true});
-  const valid=()=>b.isConnected&&current();
+  const request=++latestSettingsRequest,current=captureInteraction();
+  const valid=()=>request===latestSettingsRequest&&b.isConnected&&current();
   const result=await currentResult(Promise.all([api(base+'/strategies'),api(base+'/providers'+query())]),valid);
   if(!result||!valid())return true;
   const [s,p]=result;
