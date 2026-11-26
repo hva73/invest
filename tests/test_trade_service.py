@@ -52,7 +52,8 @@ class Trading(unittest.TestCase):
    db.execute("UPDATE portfolios SET name='Renamed',external_id='portfolios:root:stable',can_trade=0 WHERE id=?",(self.root,))
   scope={'portfolioId':'root:stable','scope':'DIRECT','statusGroup':'INACTIVE','limit':50}
   raw=[{'orderId':'one','status':'CANCELLED','filledQuantity':'0'},
-       {'id':'two','portfolioId':'root:stable','collectionId':None,'status':'FILLED','providerDetail':{'fee':None}}]
+       {'id':'two','portfolioId':'root:stable','collectionId':None,'collection':{'id':None},'status':'FILLED','providerDetail':{'fee':None}},
+       {'orderId':'three','collection':None}]
   boundary=[{'orderId':str(i)} for i in range(50)]
   with app.connect() as witness:
    before=witness.execute('PRAGMA data_version').fetchone()[0]
@@ -90,8 +91,10 @@ class Trading(unittest.TestCase):
   invalid=[{},'unavailable',{'orders':None},{'orders':{}},{'unknown':[order]},{'orders':[order],'items':[]},
            {'orders':[order],'error':'denied'},{'orders':[],'success':False},[order,None],[{}],[{'id':3}],
            [{'id':'fallback','orderId':None}],[{**order,'isError':True}],[order]*51]
-  for field,value in (('portfolioId','other'),('scope','COLLECTION'),('collectionId','child'),('statusGroup','ACTIVE')):
-   invalid.extend([{'orders':[order],field:value},[order,{**order,field:value}]])
+  for field,value in (('portfolioId','other'),('scope','COLLECTION'),('collectionId','child'),
+                      ('collection',{'id':'child'}),('collection','child'),('statusGroup','ACTIVE')):
+   conflicting={'orderId':'two','portfolioId':'root','collectionId':None,field:value}
+   invalid.extend([{'orders':[order],field:value},[order,conflicting],{'orders':[order,conflicting]}])
   with app.connect() as witness:
    before=witness.execute('PRAGMA data_version').fetchone()[0]
    for page in invalid:

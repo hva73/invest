@@ -192,7 +192,12 @@ def inactive_order_readback(connect,user_id,portfolio_id,factory=None):
     for record in ([page] if isinstance(page,dict) else []) + rows:
         if not isinstance(record,dict) or record.get('isError') or record.get('error') or record.get('success') is False:
             raise TradeError('Pluto returnerede en fejl eller en ugyldig ordrepost.')
-        if any(key in record and record[key]!=value for key,value in scope.items()) or record.get('collectionId') is not None:
+        collection=record.get('collection')
+        if collection is not None and not isinstance(collection,dict):
+            raise TradeError('Plutos ordresvar har et ukendt Collection-format.')
+        if (record.get('collectionId') is not None
+                or (collection is not None and collection.get('id') is not None)
+                or any(key in record and record[key]!=value for key,value in scope.items())):
             raise TradeError('Plutos ordresvar stemmer ikke med det valgte depot eller opslag.')
     for row in rows:
         order_id=row.get('orderId',row.get('id'))
