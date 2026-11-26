@@ -52,7 +52,7 @@ class OptimizationTests(unittest.TestCase):
         self.assertEqual(loop(lambda *_: self.fail(),lambda:"initial",3,100,
                               lambda:0,verify=lambda:True),"verified")
     def test_explicit_model_policy_for_every_role(self):
-        expected={"release":("sol","medium"),"mobile":("sol","high"),
+        expected={"release":("sol","high"),"mobile":("sol","high"),
                   "motor":("astra","high"),"data":("astra","high"),
                   "desktop":("sol","high"),"coordinator":("sol","medium")}
         self.assertEqual(set(MODEL_POLICY),set(expected))
