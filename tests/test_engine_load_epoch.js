@@ -7,17 +7,19 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../static/engine-ui.js'), 'utf8');
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
-function fixture() {
+function fixture(script = source) {
   const historyGroup = {open: false};
   const root = {isConnected: true, innerHTML: '', textContent: '', querySelector: selector => selector === 'details[data-engine-group=history]' ? historyGroup : null, querySelectorAll: () => []};
   const context = {window: {}, document: {getElementById: id => id === 'engine-root' ? root : null},
     setTimeout() {}, clearTimeout() {}};
-  vm.runInNewContext(source, context);
+  vm.runInNewContext(script, context);
   const requests = [];
   const session = {epoch: 1, owner: 'same-owner', history: [], older: []};
   const ui = context.window.EngineUI;
   ui.setup({
     api(url, body) {
+      if (session.strategy && url === 'strategy-center') return session.strategy;
+      if (session.startCandidates && url.includes('/start-candidates?')) return session.startCandidates();
       if (session.settings && (url.endsWith('/strategies') || url.includes('/providers?'))) return session.settings(url);
       if (body && session.control) return session.control(url, body);
       if (session.detail && (url.includes('/sessions/') || url === 'state')) return session.detail(url);
@@ -631,7 +633,239 @@ async function checkPolling(change) {
   if (!change) assert.match(dialog.innerHTML, /POLL · motorforløb/);
 }
 
+// Seed the private legacy candidate list, then exercise the production event handlers.
+function quoteFixture() {
+  const {context, session, mount, requests} = fixture(source.replace('return {openHoldingStatus',
+    'return {seed(items){candidates=items},openHoldingStatus'));
+  const ui = context.window.EngineUI;
+  const items = ['A', 'B'].map(ticker => ({report_id: 'report', candidate: {candidate_id: ticker, ticker}}));
+  ui.seed(items);
+  const elements = Object.fromEntries(['candidate', 'exchange', 'asset_id', 'quote_currency',
+    'provider_symbol', 'watch_mode'].map(name => [name, {name, value: ''}]));
+  elements.candidate.value = '0';
+  elements.provider = {value: 'eodhd'};
+  elements.provider_symbol.focus = () => {};
+  elements.portfolios = {options: []};
+  const form = {id: 'engine-create', elements, isConnected: true};
+  const status = {}, choice = {};
+  const button = {};
+  form.querySelector = () => button;
+  context.crypto = require('node:crypto');
+  const nodes = {'engine-dialog': {close() {}}, 'engine-batch-list': {}, 'engine-create': form, 'engine-form-status': status, 'engine-instrument-choice': choice};
+  const lookup = context.document.getElementById;
+  context.document.getElementById = id => nodes[id] || lookup(id);
+  context.FormData = class {
+    constructor(f) { this.f = f; }
+    get(name) { return this.f.elements[name]?.value; }
+  };
+  context.MutationObserver = class { observe() {} takeRecords() { return []; } };
+  const quotes = [], providers = [], posts = [];
+  session.startCandidates = () => ({candidates: items});
+  session.strategy = {selection: {strategy_id: 'test', version: '1', reason: 'fixture'}};
+  session.control = (url, args) => {
+    if (url === 'market/eodhd-symbols') { providers.push(args.candidate_id); return {choices: []}; }
+    if (url === 'v1/hotwatch/sessions' || url === 'v1/hotwatch/activation-requests') {
+      posts.push({url, args});
+      return {created_count: args.sessions?.length || 1};
+    }
+    assert.equal(url, 'market/quote');
+    return new Promise((resolve, reject) => quotes.push({args, resolve, reject}));
+  };
+  function select(index) {
+    elements.candidate.value = String(index);
+    return ui.change({target: elements.candidate});
+  }
+  const add = () => ui.click({dataset: {}, hasAttribute: name => name === 'data-engine-batch-add'});
+  const start = () => ui.submit({target: form, preventDefault() {}});
+  async function finish(action) {
+    await settle();
+    requests.shift()?.succeed();
+    await action;
+  }
+  return {ui, session, mount, form, nodes, items, status, choice, quotes, providers, select, posts, add, start, finish};
+}
+
+async function checkQuote(change, outcome) {
+  const {ui, session, mount, form, nodes, items, status, choice, quotes, providers, select} = quoteFixture();
+  const first = select(0);
+  const reply = {asset_id: 'verified', currency: 'DKK', exchange: 'XCSE'};
+  if (change === 'epoch') session.epoch++;
+  if (change === 'owner') session.owner = 'new owner';
+  if (change === 'mode') mount(true).succeed();
+  if (change === 'detached') form.isConnected = false;
+  if (change === 'replaced') nodes['engine-create'] = {...form};
+  if (change === 'candidate' || change === 'ABA') {
+    const second = select(1);
+    if (change === 'ABA') {
+      const third = select(0);
+      quotes[2].resolve({...reply, asset_id: 'winner'});
+      await third;
+    }
+    quotes[1].resolve({...reply, asset_id: 'B'});
+    await second;
+  }
+  const snapshot = () => JSON.stringify([items, form.elements, status, choice, providers]);
+  const before = snapshot();
+  if (outcome === 'error') quotes[0].reject(Error('quote offline'));
+  else if (outcome === 'choices') quotes[0].resolve({selection_required: true, choices: [reply]});
+  else quotes[0].resolve(reply);
+  await first;
+  if (change) { assert.equal(snapshot(), before, change + ' ' + outcome); return; }
+  assert.deepEqual(providers, ['A']);
+  if (outcome === 'success') {
+    assert.equal(items[0].instrument.asset_id, reply.asset_id);
+    assert.equal(form.elements.exchange.value, reply.exchange);
+  } else if (outcome === 'choices') {
+    assert.match(choice.innerHTML, /value="verified"/);
+    const explicit = ui.change({target: {id: 'engine-asset-choice', value: reply.asset_id}});
+    assert.equal(quotes[1].args.asset_id, reply.asset_id);
+    quotes[1].resolve(reply);
+    await explicit;
+    assert.equal(form.elements.asset_id.value, reply.asset_id);
+    assert.match(status.textContent, /Pluto bekræftede A/);
+  } else assert.match(status.textContent, /quote offline/);
+}
+
+async function checkQuoteAction(action, change, outcome) {
+  const {ui, session, form, items, status, quotes, providers, select} = quoteFixture();
+  let release;
+  session.startCandidates = () => new Promise(resolve => { release = () => resolve({candidates: items}); });
+  const add = () => ui.click({dataset: {}, hasAttribute: name => name === 'data-engine-batch-add'});
+  const pending = action === 'submit' ? ui.submit({target: form, preventDefault() {}}) : add();
+  if (action === 'submit' && change !== 'preflight') {
+    release();
+    await settle();
+  }
+  const reply = {asset_id: 'chosen', exchange: 'XCSE', currency: 'DKK'};
+  if (change) {
+    const other = select(1);
+    quotes.at(-1).resolve(reply);
+    await other;
+    const back = select(0);
+    quotes.at(-1).resolve(reply);
+    await back;
+  }
+  const before = status.textContent;
+  const count = providers.length;
+  if (change === 'preflight') release();
+  else if (outcome === 'error') quotes[0].reject(Error('stale action'));
+  else quotes[0].resolve(reply);
+  await pending;
+  if (change) {
+    assert.equal(quotes.length, change === 'preflight' ? 2 : 3);
+    assert.equal(status.textContent, before);
+    assert.equal(providers.length, count);
+  } else {
+    assert.equal(items[0].instrument.asset_id, 'chosen');
+    assert.deepEqual(providers, ['A']);
+    assert.match(status.textContent, /EODHD fandt ingen sikker instrumentmatch/);
+  }
+}
+
+async function checkSupersededRequest(outcome) {
+  const {ui, form, items, status, quotes, providers, select} = quoteFixture();
+  const old = select(0);
+  // Adding the same candidate starts a newer lookup without changing the selection.
+  form.elements.provider.value = 'pluto';
+  const add = ui.click({dataset: {}, hasAttribute: name => name === 'data-engine-batch-add'});
+  quotes[1].resolve({asset_id: 'winner', exchange: 'XCSE', currency: 'DKK'});
+  await add;
+  const added = status.textContent;
+  assert.match(added, /Kandidat føjet til batch/);
+  if (outcome === 'error') quotes[0].reject(Error('old request'));
+  else quotes[0].resolve({selection_required: true, choices: []});
+  await old;
+  assert.equal(items[0].instrument.asset_id, 'winner');
+  assert.equal(items[0].resolution_choices, undefined);
+  assert.equal(status.textContent, added);
+  assert.deepEqual(providers, []);
+}
+
+async function checkExplicitChoiceDuringAction(explicitFirst, submit, doubleAdd = false) {
+  const {ui, form, items, status, quotes, select, posts, add, start, finish} = quoteFixture();
+  form.elements.provider.value = 'pluto';
+  const chosen = {asset_id: 'chosen', exchange: 'XCSE', currency: 'DKK'};
+  const ambiguous = {selection_required: true, choices: [chosen, {...chosen, asset_id: 'other'}]};
+  const initial = select(0);
+  quotes[0].resolve(ambiguous);
+  await initial;
+
+  const explicit = ui.change({target: {id: 'engine-asset-choice', value: chosen.asset_id}});
+  const action = submit ? start() : add();
+  const secondAdd = doubleAdd && add();
+  await settle();
+  assert.equal(quotes[1].args.asset_id, chosen.asset_id);
+  assert.equal(quotes[2].args.asset_id, undefined);
+  if (explicitFirst) {
+    quotes[1].resolve(chosen);
+    await explicit;
+    quotes[2].resolve(ambiguous);
+    await finish(action);
+    if (doubleAdd) {
+      quotes[3].resolve(ambiguous);
+      await secondAdd;
+      assert.match(status.textContent, /allerede i batchen/);
+    }
+  } else {
+    quotes[2].resolve(ambiguous);
+    await finish(action);
+    quotes[1].resolve(chosen);
+    await explicit;
+  }
+  assert.equal(form.elements.asset_id.value, chosen.asset_id);
+  assert.equal(items[0].instrument.asset_id, chosen.asset_id);
+  if (!explicitFirst) {
+    assert.match(status.textContent, /Pluto bekræftede A/);
+    assert.equal(posts.length, 0);
+    await finish(submit ? start() : add());
+  }
+  if (submit) {
+    assert.deepEqual(posts.map(p => [p.url, p.args.candidate_id, p.args.asset_id]),
+      [['v1/hotwatch/sessions', 'A', chosen.asset_id]]);
+  } else {
+    if (!doubleAdd) assert.match(status.textContent, /Kandidat føjet til batch/);
+    await add();
+    assert.match(status.textContent, /allerede i batchen/);
+  }
+  assert.equal(quotes.length, doubleAdd ? 4 : 3);
+}
+
+async function checkVerifiedBatchDuringSelection() {
+  const {session, form, items, quotes, posts, select, add, start, finish} = quoteFixture();
+  form.elements.provider.value = 'pluto';
+  for (const [i, item] of items.entries()) {
+    const change = select(i);
+    quotes.at(-1).resolve({asset_id: item.candidate.ticker, exchange: 'XCSE', currency: 'DKK'});
+    await change;
+    await add();
+  }
+  let release;
+  session.startCandidates = () => new Promise(resolve => { release = () => resolve({candidates: items}); });
+  const submitted = start();
+  const change = select(0);
+  quotes.at(-1).resolve({asset_id: 'new-A', exchange: 'XCSE', currency: 'DKK'});
+  await change;
+  release();
+  await finish(submitted);
+  assert.deepEqual(posts.map(p => [p.url, Array.from(p.args.sessions, s => [s.candidate_id, s.asset_id])]),
+    [['v1/hotwatch/activation-requests', [['A', 'A'], ['B', 'B']]]]);
+}
+
 async function main() {
+  for (const submit of [false, true]) {
+    for (const explicitFirst of [false, true]) await checkExplicitChoiceDuringAction(explicitFirst, submit);
+  }
+  await checkExplicitChoiceDuringAction(true, false, true);
+  await checkVerifiedBatchDuringSelection();
+  for (const outcome of ['choices', 'error']) await checkSupersededRequest(outcome);
+  for (const action of ['submit', 'batch']) {
+    await checkQuoteAction(action, null, 'success');
+    for (const outcome of ['success', 'error']) await checkQuoteAction(action, 'ABA', outcome);
+  }
+  await checkQuoteAction('submit', 'preflight');
+  for (const change of ['ABA', 'candidate', 'epoch', 'owner', 'mode', 'detached', 'replaced', null]) {
+    for (const outcome of ['success', 'choices', 'error']) await checkQuote(change, outcome);
+  }
   for (const change of ['epoch', 'owner', 'mode', 'newer', 'detached', 'replaced', null]) {
     await checkManualSearch(change, false);
     await checkManualSearch(change, true);
@@ -708,4 +942,4 @@ async function main() {
   assert.equal(root.textContent, 'Motorstatus kunne ikke hentes: offline');
 }
 
-main().catch(error => { console.error(error); process.exitCode = 1; });
+main().then(() => console.log('PASS: engine load, interaction and quote regressions')).catch(error => { console.error(error); process.exitCode = 1; });
