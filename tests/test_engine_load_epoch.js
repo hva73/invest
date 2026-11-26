@@ -8,12 +8,13 @@ const source = fs.readFileSync(path.join(__dirname, '../static/engine-ui.js'), '
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
 function fixture() {
-  const root = {isConnected: true, innerHTML: '', textContent: '', querySelector: () => null, querySelectorAll: () => []};
+  const historyGroup = {open: false};
+  const root = {isConnected: true, innerHTML: '', textContent: '', querySelector: selector => selector === 'details[data-engine-group=history]' ? historyGroup : null, querySelectorAll: () => []};
   const context = {window: {}, document: {getElementById: id => id === 'engine-root' ? root : null},
     setTimeout() {}, clearTimeout() {}};
   vm.runInNewContext(source, context);
   const requests = [];
-  const session = {epoch: 1};
+  const session = {epoch: 1, owner: 'same-owner', history: [], older: []};
   const ui = context.window.EngineUI;
   ui.setup({
     api(url) {
@@ -22,16 +23,60 @@ function fixture() {
           succeed: () => resolve({sessions: [], kill_switch: {}}), reject
         }));
       }
-      if (url.includes('view=history')) return {sessions: [], next_cursor: 'older'};
+      if (url.includes('view=history&before=older')) return {sessions: session.older, next_cursor: null};
+      if (url.includes('view=history')) return {sessions: session.history, next_cursor: 'older'};
       assert.match(url, /^reports\/candidate-registry\?/);
       return {candidates: []};
     },
-    escape: String, isAdmin: () => false, owner: () => 'same-owner', sessionEpoch: () => session.epoch
+    escape: String, isAdmin: () => false, owner: () => session.owner, sessionEpoch: () => session.epoch
   });
-  return {root, session, mount(mode = false) { ui.mount(mode); return requests.shift(); }};
+  return {root, session, click: ui.click, mount(mode = false) { ui.mount(mode); return requests.shift(); }};
+}
+
+async function checkHistoryScope(change, freshHistory) {
+  const {root, session, click, mount} = fixture();
+  const row = (watch_id, status) => ({watch_id, status, request: {ticker: watch_id}});
+  const button = (dataset, attribute) => ({dataset, isConnected: true, hasAttribute: name => name === attribute});
+  const refresh = async (mode = false) => {
+    mount(mode).succeed();
+    await settle();
+    assert.equal(root.textContent, '');
+    assert.ok(root.innerHTML.includes(mode ? 'Testdata' : 'Driftsdata'));
+  };
+
+  session.history = [row('prior-completed', 'COMPLETED')];
+  session.older = [row('prior-expired', 'EXPIRED')];
+  await refresh();
+  await click(button({}, 'data-engine-history-more'));
+  await click(button({engineOwn: 'toggle'}));
+  await click(button({engineFilter: 'BUY'}));
+  await refresh();
+  for (const id of ['prior-completed', 'prior-expired']) {
+    assert.ok(root.innerHTML.includes('data-engine-detail="' + id + '"'), 'missing cached ' + id);
+  }
+  assert.match(root.innerHTML, /data-engine-own="toggle" aria-pressed="true"/);
+  assert.match(root.innerHTML, /data-engine-filter="BUY" aria-pressed="true"/);
+
+  if (change === 'epoch') session.epoch++;
+  if (change === 'owner') session.owner = 'other-owner';
+  session.history = freshHistory ? [row('fresh-completed', 'COMPLETED')] : [];
+  await refresh(change === 'mode');
+  assert.ok(!root.innerHTML.includes('prior-completed'), change + ' retained completed history');
+  assert.ok(!root.innerHTML.includes('prior-expired'), change + ' retained paginated history');
+  if (freshHistory) assert.match(root.innerHTML, /data-engine-detail="fresh-completed"/);
+  else assert.doesNotMatch(root.innerHTML, /data-engine-group="history"/);
+  if (change !== 'mode') {
+    assert.match(root.innerHTML, /data-engine-own="toggle" aria-pressed="false"/);
+    assert.match(root.innerHTML, /data-engine-filter="all" aria-pressed="true"/);
+  }
 }
 
 async function main() {
+  await checkHistoryScope('epoch', false);
+  await checkHistoryScope('epoch', true);
+  await checkHistoryScope('owner', true);
+  await checkHistoryScope('mode', true);
+
   const {root, session, mount} = fixture();
   const oldSession = mount();
   session.epoch++;
