@@ -23,14 +23,14 @@ function fixture() {
           succeed: () => resolve({sessions: [], kill_switch: {}}), reject
         }));
       }
-      if (url.includes('view=history&before=older')) return {sessions: session.older, next_cursor: null};
+      if (url.includes('view=history&before=older')) return session.page ? session.page() : {sessions: session.older, next_cursor: null};
       if (url.includes('view=history')) return {sessions: session.history, next_cursor: 'older'};
       assert.match(url, /^reports\/candidate-registry\?/);
       return {candidates: []};
     },
     escape: String, isAdmin: () => false, owner: () => session.owner, sessionEpoch: () => session.epoch
   });
-  return {root, session, click: ui.click, mount(mode = false) { ui.mount(mode); return requests.shift(); }};
+  return {root, historyGroup, session, click: ui.click, mount(mode = false) { ui.mount(mode); return requests.shift(); }};
 }
 
 async function checkHistoryScope(change, freshHistory) {
@@ -71,7 +71,52 @@ async function checkHistoryScope(change, freshHistory) {
   }
 }
 
+async function checkPagination(change, rejectPage) {
+  const {root, session, historyGroup, mount, click} = fixture();
+  const row = watch_id => ({watch_id, status: 'COMPLETED', request: {ticker: watch_id}});
+  const more = () => click({dataset: {}, isConnected: true, hasAttribute: name => name === 'data-engine-history-more'});
+  session.history = [row('first')];
+  mount().succeed();
+  await settle();
+
+  let resolve, reject;
+  session.page = () => new Promise((yes, no) => { resolve = yes; reject = no; });
+  const pending = more();
+  if (change === 'epoch' || change === 'login') session.epoch++;
+  if (change === 'owner') session.owner = 'new-owner';
+  if (['login', 'refresh', 'mode'].includes(change)) {
+    session.history = [row('fresh')];
+    mount(change === 'mode').succeed();
+    await settle();
+  }
+  if (change === 'cursor') {
+    session.page = () => ({sessions: [row('winner')], next_cursor: null});
+    await more();
+    historyGroup.open = false;
+  }
+  const before = root.innerHTML;
+  const error = new Error('page offline');
+  if (rejectPage) reject(error);
+  else resolve({sessions: [row('first'), row('older-page')], next_cursor: null});
+
+  if (!change && rejectPage) await assert.rejects(pending, e => e === error);
+  else assert.equal(await pending, true);
+  if (change || rejectPage) {
+    assert.equal(root.innerHTML, before, 'unexpected pagination repaint: ' + change);
+    assert.equal(historyGroup.open, false);
+  } else {
+    assert.equal(root.innerHTML.match(/class="engine-list-identity" data-engine-detail="first"/g).length, 1);
+    assert.match(root.innerHTML, /data-engine-detail="older-page"/);
+    assert.doesNotMatch(root.innerHTML, /data-engine-history-more/);
+    assert.equal(historyGroup.open, true);
+  }
+}
+
 async function main() {
+  for (const change of ['login', 'epoch', 'owner', 'mode', 'refresh', 'cursor', null]) {
+    await checkPagination(change, false);
+    await checkPagination(change, true);
+  }
   await checkHistoryScope('epoch', false);
   await checkHistoryScope('epoch', true);
   await checkHistoryScope('owner', true);
