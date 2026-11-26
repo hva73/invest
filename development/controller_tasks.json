@@ -2740,5 +2740,25 @@
     "reserve_plan_id": "stabilization/desktop/closed-position-history-opens-from-report",
     "reserve_goal": "stabilization/desktop",
     "reserve_reassessment": "267:5@436e725211c2623f4d7c2c6c8f5f766a9c4d8198ca80840d9b34a5b4ab68d023"
+  },
+  {
+    "issue": 54,
+    "generation": 32,
+    "role": "desktop",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [],
+    "paths": [
+      "tests/browser_desktop_trade.py"
+    ],
+    "task": "Approved roadmap ui/desktop (Desktop 2.0). Exact existing source anchor: tests/browser_desktop_trade.py :: if(name === 'trade/preview') return {};. Implement only this bounded change: Afgr\u00e6ns genvurderingen af den bevarede 54:30-diff til rydningen af det forrige estimat i #preview-result. Mont\u00e9r det eksisterende TradeUI-panel i browserfixturen med et lokalt, uafsluttet preview-svar. Udfyld formularen og afslut felternes \u00e6ndringsh\u00e6ndelser, f\u00f8r resultatfeltet f\u00e5r teksten \u00abTidligere testestimat\u00bb. Indsend formularen og kontroll\u00e9r kun, at det gamle resultat forsvinder, mens preview-svaret stadig afventer.. Acceptance: Fixturen viser en synlig tidligere estimattekst umiddelbart f\u00f8r indsendelse. N\u00e5r stubben har modtaget trade/preview og svaret stadig afventer, er #preview-result tomt. De eksisterende k\u00f8b- og salgsdialogtests best\u00e5r.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_trade.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:30; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "ui/desktop/desktop-preview-clears-previous-result-while-pending",
+    "reserve_goal": "ui/desktop",
+    "reserve_reassessment": "54:30@83dc793d751010cf3f6bc04fc1b0d981e76b03a020386f4771043d50561470c3"
   }
 ]
