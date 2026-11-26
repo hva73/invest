@@ -91,6 +91,44 @@ class HoldingAutowatch(unittest.TestCase):
    return app.connect()
   self.assertEqual(service.reconcile_closed_holdings(racing_connect,self.now),0)
   with app.connect() as c:self.assertEqual(c.execute('SELECT status FROM hw_sessions').fetchone()[0],'CREATED')
+ def test_invalid_holding_prevents_reconciliation_even_after_watched_zero(self):
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  zero=dict(self.holding,quantity='0')
+  invalid=[{'asset_id':'other','quantity':q} for q in ('bad','NaN','sNaN','Infinity','-Infinity',None,True)]
+  invalid.extend({'asset_id':aid,'quantity':'1'} for aid in (None,'',' ',42,{'id':'other'},' synthetic-asset'))
+  for fields in invalid:
+   with self.subTest(fields=fields):
+    payload={'positions_complete':True,'observed':self.now.isoformat(),'positions':[zero,dict(self.holding,**fields)]}
+    with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),self.pid))
+    self.assertEqual(service.reconcile_closed_holdings(app.connect,self.now),0)
+    with app.connect() as c:
+     self.assertEqual(c.execute('SELECT status FROM hw_sessions').fetchone()[0],'CREATED')
+     self.assertEqual(c.execute('SELECT status FROM hw_holding_autowatch').fetchone()[0],'LINKED')
+     self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE event_type='HOLDING_NOT_PRESENT'").fetchone()[0],0)
+ def test_nonzero_json_quantity_below_float_range_keeps_watch_open(self):
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  payload='{"positions_complete":true,"observed":%s,"positions":[{"kind":"holding","asset_id":%s,"quantity":1e-400}]}'%(
+   json.dumps(self.now.isoformat()),json.dumps(self.holding['asset_id']))
+  with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(payload,self.pid))
+  self.assertEqual(service.reconcile_closed_holdings(app.connect,self.now),0)
+ def test_malformed_watch_asset_id_prevents_reconciliation(self):
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  with app.connect() as c:
+   request=json.loads(c.execute('SELECT request FROM hw_sessions').fetchone()[0])
+   request['asset_id']=42
+   c.execute('UPDATE hw_sessions SET request=?',(json.dumps(request),))
+  self.assertEqual(service.reconcile_closed_holdings(app.connect,self.now),0)
+ def test_watched_zero_with_valid_other_holding_closes_once(self):
+  self.assertEqual(self.tick(verify=self.verify,lookup=self.lookup),'LINKED')
+  positions=[dict(self.holding,quantity='-0.00'),dict(self.holding,asset_id='other',quantity=1.25)]
+  payload={'positions_complete':True,'observed':self.now.isoformat(),'positions':positions}
+  with app.connect() as c:c.execute('UPDATE portfolio_snapshots SET payload=? WHERE portfolio_id=?',(json.dumps(payload),self.pid))
+  self.assertEqual(service.reconcile_closed_holdings(app.connect,self.now),1)
+  self.assertEqual(service.reconcile_closed_holdings(app.connect,self.now),0)
+  with app.connect() as c:
+   self.assertEqual(c.execute('SELECT status FROM hw_sessions').fetchone()[0],'COMPLETED')
+   self.assertEqual(c.execute('SELECT status FROM hw_holding_autowatch').fetchone()[0],'POSITION_CLOSED')
+   self.assertEqual(c.execute("SELECT count(*) FROM hw_events WHERE event_type='HOLDING_NOT_PRESENT'").fetchone()[0],1)
  def test_full_capacity_prioritizes_verified_holding_over_unowned_idle_entry(self):
   with app.connect() as c:
    strategy=c.execute("SELECT payload FROM hw_strategies WHERE strategy_id='escape_momentum' LIMIT 1").fetchone()['payload']
