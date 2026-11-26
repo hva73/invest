@@ -153,7 +153,7 @@ window.EngineUI=(()=>{
  function localDeadline(){const d=new Date(Date.now()+8*3600000),local=new Date(d.getTime()-d.getTimezoneOffset()*60000);return local.toISOString().slice(0,16)}
  function candidatePortfolios(assetId){const snapshots=portfolios.map(p=>portfolioSnapshots[String(p.id)]);return {ids:portfolios.filter((p,i)=>snapshots[i]?.data?.positions_complete&&(snapshots[i].data.positions||[]).some(row=>row.kind==='holding'&&row.asset_id===assetId&&Number(row.quantity)>0)).map(p=>p.id),complete:snapshots.length>0&&snapshots.every(x=>x?.data?.positions_complete&&!x?.last_error)}}
  function formStatus(message){const n=document.getElementById('engine-form-status');if(n)n.textContent=message}
- let latestInstrumentRequest=0;
+ let latestInstrumentRequest=0,pendingAssetChoice=null;
  function captureInstrumentRequest(index,ticket=++latestInstrumentRequest){
   const item=candidates[index],form=document.getElementById('engine-create');
   const epoch=sessionEpoch(),user=owner(),test=mode,version=interaction;
@@ -162,8 +162,11 @@ window.EngineUI=(()=>{
    Number(form.elements.candidate.value)===index&&candidates[index]===item;
  }
  function captureImplicitInstrumentRequest(index){
-  const choice=document.getElementById('engine-create')?.pendingAssetChoice;
-  return choice?.()?choice:captureInstrumentRequest(index);
+  const choice=pendingAssetChoice;
+  if(!choice?.valid())return captureInstrumentRequest(index);
+  const current=()=>choice.action===current&&choice.valid();
+  choice.action=current;
+  return current;
  }
  async function resolveInstrument(index,assetId=null,valid=captureInstrumentRequest(index)){
   const item=candidates[index],form=document.getElementById('engine-create');
@@ -171,14 +174,20 @@ window.EngineUI=(()=>{
   if(!valid())return;
   // An overlapping batch or submit lookup still uses its original provider request.
   // Only the user's explicit choice may publish a result for this selection.
-  const deferredToChoice=!assetId&&form.pendingAssetChoice===valid;
-  if(!deferredToChoice)formStatus('Kontrollerer instrumentet hos Pluto …');
+  const choice=!assetId&&pendingAssetChoice?.action===valid?pendingAssetChoice:null;
+  if(!choice)formStatus('Kontrollerer instrumentet hos Pluto …');
   const args={report_id:item.report_id,candidate_id:item.candidate.candidate_id,is_test:mode};
   if(assetId)args.asset_id=assetId;
   let result;
-  try{result=await api('market/quote',args)}catch(error){if(!deferredToChoice&&valid())throw error;return}
-  // An obsolete lookup returns undefined. Null means the current lookup needs user input.
-  if(deferredToChoice||!valid())return;
+  try{result=await api('market/quote',args)}catch(error){
+   if(!valid())return;
+   if(!choice)throw error;
+  }
+  if(!valid())return;
+  if(choice){
+   // The choice handler reports its own errors. The caller checks validity again before acting.
+   try{return await choice.result}catch{return}
+  }
   if(result.selection_required){const choices=result.choices||[];const slot=document.getElementById('engine-instrument-choice');if(slot)slot.innerHTML=`<label>Vælg verificeret Pluto-instrument<select id="engine-asset-choice"><option value="">Vælg instrument</option>${choices.map(x=>`<option value="${esc(x.asset_id)}">${esc([x.ticker,x.exchange,x.currency,x.name].filter(Boolean).join(' · '))}</option>`).join('')}</select></label>`;item.resolution_choices=choices;formStatus('Flere Pluto-instrumenter matcher. Vælg det korrekte aktiv; intet er valgt automatisk.');return null}if(!result.asset_id||!result.currency||!result.exchange){formStatus('Pluto-opslaget mangler verificeret aktiv-ID, valuta eller børs. Sessionen kan ikke startes.');return null}item.instrument={asset_id:result.asset_id,currency:result.currency,exchange:result.exchange,name:result.name||null,isin:result.isin||null,provider_symbol:item.provider_symbol||item.candidate.provider_symbol||item.candidate.eodhd_symbol||null};const portfolioMatch=candidatePortfolios(result.asset_id);item.portfolio_ids=portfolioMatch.ids;item.portfolios_verified=portfolioMatch.complete;
   const fields=form.elements;
   fields.exchange.value=result.exchange;
@@ -337,9 +346,10 @@ window.EngineUI=(()=>{
   if(!valid())return true;
  }if(f?.elements.provider.value==='eodhd')await findEodhdSymbol();return true}if(e.target.id==='engine-asset-choice'){const form=document.getElementById('engine-create');
   const index=Number(new FormData(form).get('candidate')),valid=captureInstrumentRequest(index);
-  if(e.target.value)form.pendingAssetChoice=valid;
-  try{await resolveInstrument(index,e.target.value,valid)}catch(error){if(valid())notice(error.message,'error')}
-  finally{if(form.pendingAssetChoice===valid)delete form.pendingAssetChoice}
+  const result=resolveInstrument(index,e.target.value,valid);
+  if(e.target.value)pendingAssetChoice={valid,result};
+  try{await result}catch(error){if(valid())notice(error.message,'error')}
+  finally{if(pendingAssetChoice?.valid===valid)pendingAssetChoice=null}
   return true}if(e.target.id!=='engine-strategy-file')return false;const f=e.target.files[0];if(!f)return true;if(f.size>131072)throw Error('Strategifilen er for stor.');const valid=captureInteraction({begin:true}),input=e.target;const raw=await currentResult(f.text(),valid);if(raw===null||!input.isConnected)return true;const r=await currentResult(api(base+'/strategies',JSON.parse(raw)),valid);if(!r||!input.isConnected)return true;document.getElementById('engine-strategy-status').textContent='Strategiversionen er gemt inaktiv. Ingen algoritme er aktiveret. Checksum: '+r.checksum;return true}
  let externalTimer=null;
  function refreshExternal(wid){clearTimeout(externalTimer);externalTimer=setTimeout(async()=>{const d=document.getElementById('engine-dialog');if(!d?.open||d.dataset.watchId!==wid||root())return;if(!document.hidden)try{await detail(wid,true,true)}catch{}refreshExternal(wid)},15000)}

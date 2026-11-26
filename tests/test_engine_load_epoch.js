@@ -840,12 +840,22 @@ async function checkPendingSubmitLookup(sameCandidate, quoteFirst) {
   if (!sameCandidate) assert.equal(rows[0].instrument, undefined);
 }
 
-async function checkPendingAssetChoice(caller, explicitFirst, implicitOutcome) {
-  const {context, session, ui, rows, elements, form, status, slot, nodes, QuotePromise} = instrumentFixture();
+async function checkPendingAssetChoice(caller, explicitFirst, implicitOutcome, stale = false, repeat = false) {
+  const {context, session, ui, rows, elements, form, status, slot, nodes, requests, QuotePromise} = instrumentFixture();
   const quotes = [], notices = [];
   context.notice = message => notices.push(message);
   nodes['engine-batch-list'] = {textContent: ''};
+  const started = [];
+  context.crypto = {randomUUID: () => 'test-id'};
+  form.querySelector = () => ({});
+  nodes['engine-dialog'] = {close() { this.closed = true; }};
   session.creation = (url, body) => {
+    if (url === 'strategy-center') return {selection: {strategy_id: 'test', version: '1'}};
+    if (url === 'v1/hotwatch/sessions') {
+      started.push([body.candidate_id, body.asset_id, [...body.portfolio_ids]]);
+      session.creation = null;
+      return {};
+    }
     if (caller === 'submit' && url === 'v1/hotwatch/start-candidates?is_test=false') return {candidates: rows};
     assert.equal(url, 'market/quote');
     return new QuotePromise((resolve, reject) => quotes.push({body: {...body}, resolve, reject}));
@@ -863,29 +873,52 @@ async function checkPendingAssetChoice(caller, explicitFirst, implicitOutcome) {
   await settle();
   const args = {report_id: 'report', candidate_id: 'FIRST', is_test: false};
   assert.deepEqual(quotes.map(q => q.body), [args, {...args, asset_id: 'asset'}, args]);
+  let repeated;
+  if (repeat) {
+    repeated = dispatchInstrumentEvent(context, caller, form);
+    await settle();
+    assert.deepEqual(quotes[3].body, args);
+    quotes[3].resolve(choices);
+  }
   const finishChoice = async () => {
     quotes[1].resolve(verified);
     await explicit;
   };
-  if (explicitFirst) await finishChoice();
+  if (explicitFirst) {
+    await finishChoice();
+    assert.match(status.textContent, /1 matchende depot/);
+    if (stale) session.epoch++;
+  }
   if (implicitOutcome === 'error') quotes[2].reject(Error('implicit lookup failed'));
   else quotes[2].resolve(implicitOutcome === 'choices' ? choices : {...verified, asset_id: 'other'});
-  await implicit;
-  if (!explicitFirst) await finishChoice();
+  if (!explicitFirst) {
+    await settle();
+    assert.deepEqual(started, []);
+    assert.equal(nodes['engine-batch-list'].textContent, '');
+    await finishChoice();
+  }
+  await settle();
+  const submits = caller === 'submit' && !stale;
+  assert.deepEqual(started, submits ? [['FIRST', 'asset', [2]]] : []);
+  assert.equal(requests.length, submits ? 1 : 0);
+  if (submits) requests.shift().succeed();
+  await Promise.all([implicit, repeated]);
   assert.equal(elements.asset_id.value, 'asset');
   assert.equal(elements.exchange.value, 'NASDAQ');
   assert.equal(elements.quote_currency.value, 'USD');
   assert.equal(rows[0].instrument.asset_id, 'asset');
   assert.deepEqual([...rows[0].portfolio_ids], [2]);
   assert.deepEqual(elements.portfolios.options.map(option => option.selected), [false, true]);
-  assert.match(status.textContent, /1 matchende depot/);
   assert.deepEqual(notices, []);
-  assert.equal(nodes['engine-batch-list'].textContent, '');
+  assert.equal(nodes['engine-batch-list'].textContent, caller === 'batch' && !stale ? '1/40 kandidat(er) klar: FIRST · asset' : '');
+  assert.equal(Boolean(nodes['engine-dialog'].closed), submits);
 }
 
 async function main() {
   for (const caller of ['batch', 'submit']) {
-    for (const explicitFirst of [false, true]) {
+    await checkPendingAssetChoice(caller, true, 'choices', true);
+    await checkPendingAssetChoice(caller, false, 'choices', false, true);
+    for (const explicitFirst of [true, false]) {
       for (const outcome of ['choices', 'verified', 'error']) await checkPendingAssetChoice(caller, explicitFirst, outcome);
     }
   }
