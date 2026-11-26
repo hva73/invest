@@ -8,7 +8,7 @@ class PublicationError(ValueError):
     """Fixed safe reason, never raw agent output."""
 
 REPO = "hva73/invest"
-BASES = {"codex/escape-development", "codex/development-controller-pilot", "codex/issue57-combined-release-20261124", "codex/trading-engine-v2-integration"}
+BASES = {"codex/escape-development", "codex/development-controller-pilot", "codex/issue57-combined-release-20261124", "codex/trading-engine-v2-integration", "codex/architecture-reset-20261126"}
 # Review-only release fixes, explicitly enumerated. No workflows, runner provisioning,
 # credentials, arbitrary tools, or production access.
 RELEASE_TOOLS = {"tools/nordicway_app_release.py", "tools/nordicway_deploy_client.py", "tools/nordicway_release_preflight.py", "tools/nordicway_release_retention.py", "tests/test_nordicway_app_release.py", "tests/test_nordicway_deploy_client.py", "tests/test_nordicway_release_preflight.py", "tests/test_nordicway_release_retention.py"}
