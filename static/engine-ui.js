@@ -10,23 +10,53 @@ window.EngineUI=(()=>{
   const node=root()||document.getElementById('content')?.firstElementChild;
   return node?.tagName==='DIALOG'?null:node??null;
  }
- // A failed logout invalidates requests while leaving the mounted view in place.
- function captureView(){
+ function captureView(allowRepaint=false){
   const user=owner(),node=viewNode(),version=modeGeneration;
+  const title=allowRepaint&&!root()&&document.getElementById('title');
+  if(title){
+   const navigation=titleNavigation(title);
+   return ()=>Boolean(user)&&user===owner()&&!root()&&version===modeGeneration&&navigation();
+  }
   return ()=>Boolean(user)&&user===owner()&&node===viewNode()&&(!node||node.isConnected)&&version===modeGeneration;
  }
+ let observedTitle,titleObserver,navigationGeneration=0;
+ function recordNavigation(records){
+  for(const {removedNodes,addedNodes} of records){
+   if(removedNodes[0]?.textContent!==addedNodes[0]?.textContent)navigationGeneration++;
+  }
+ }
+ function titleNavigation(title){
+  // app.js replaces the title text on render. Only a changed title denotes navigation.
+  if(observedTitle!==title){
+   titleObserver?.disconnect();
+   observedTitle=title;
+   titleObserver=new MutationObserver(recordNavigation);
+   titleObserver.observe(title,{childList:true});
+  }
+  recordNavigation(titleObserver.takeRecords());
+  const version=navigationGeneration;
+  return ()=>{
+   recordNavigation(titleObserver.takeRecords());
+   return title===observedTitle&&title.isConnected&&version===navigationGeneration;
+  };
+ }
  function captureSession(){
+  // A failed logout invalidates requests while leaving the mounted view in place.
   const user=owner(),epoch=sessionEpoch(),authenticated=Boolean(user)&&!logoutRequests;
   return ()=>authenticated&&user===owner()&&!logoutRequests&&epoch===sessionEpoch();
  }
- function captureScope(){
-  const mounted=captureView(),session=captureSession();
+ function captureScope(allowRepaint=false){
+  const mounted=captureView(allowRepaint),session=captureSession();
   return ()=>session()&&mounted();
  }
- function captureDialog(modal=document.getElementById('engine-dialog')){
+ function openEngineDialog(){
+  const modal=document.getElementById('engine-dialog');
+  return modal?.open?modal:null;
+ }
+ function captureDialog(){
   // Native dismissal changes open synchronously, even before the close event.
-  const version=dialogGeneration,open=modal?.open;
-  return ()=>version===dialogGeneration&&modal===document.getElementById('engine-dialog')&&modal?.open===open;
+  const version=dialogGeneration,modal=openEngineDialog();
+  return ()=>version===dialogGeneration&&modal===openEngineDialog();
  }
  function captureForm(form,current=captureScope()){
   const modal=document.getElementById('engine-dialog');
@@ -158,10 +188,17 @@ window.EngineUI=(()=>{
  function sessionGroups(rows){const groups=[['critical','Kritiske driftsfejl',['ERROR']],['warning','Datakilde kræver kontrol',['DEGRADED']],['starting','Under opstart',['CREATED','VALIDATING']],['active','Aktiv overvågning',['ACTIVE']],['paused','Pauserede sessioner',['PAUSED']],['history','Afsluttede sessioner',['EXPIRED','COMPLETED']]];return groups.map(([key,title,states])=>{const items=rows.filter(r=>states.includes(r.status));if(!items.length)return '';const body=`<div class="engine-list">${items.map(sessionRow).join('')}</div>`;return ['paused','history'].includes(key)?`<details class="engine-session-group" data-engine-group="${key}"><summary>${title} · ${items.length}</summary>${body}</details>`:`<section class="engine-session-group ${key}" data-engine-group="${key}"><h3>${title} · ${items.length}</h3>${body}</section>`}).join('')}
  function candidatePanel(){const rows=(data.candidates||[]).filter(x=>showOwn||!x.has_confirmed_position);if(!rows.length)return '';return `<details class="engine-candidates"><summary>Om rapportkandidaterne · ${rows.length}</summary><p class="muted">Kandidater fra rapporterne. De kan afvente kontrol og er ikke nødvendigvis under aktiv overvågning. Tryk for at se forløbet.</p><div class="engine-candidate-list">${rows.map(x=>{const cid=x.candidate?.candidate_id,attempt=(data.discovery_attempts||[]).find(y=>y.candidate_id===cid),session=data.sessions.find(y=>(y.request?.candidate_id===cid||attempt?.watch_id===y.watch_id)&&['CREATED','VALIDATING','ACTIVE','PAUSED','DEGRADED'].includes(y.status)),states={PLUTO_IDENTITY_UNCERTAIN:'Instrumentet kræver valg',PLUTO_VERIFICATION_REQUIRED:'Instrumentet er ikke verificeret',EODHD_IDENTITY_UNCERTAIN:'Datakilden kræver kontrol',global_capacity_limit:'Afventer ledig kapacitet',DISCOVERY_VERIFICATION_FAILED:'Instrumentkontrol forsøges igen',NOT_NEW:'Tidligere afsluttet',IDENTITY_OR_DECISION_UNAVAILABLE:'Oplysninger mangler',REJECTED:'Fravalgt i rapporten',STRATEGY_UNQUALIFIED:'Strategien afventer kvalificering',STRATEGY_NOT_FOUND:'Den foreslåede strategi findes ikke',candidate_report_superseded:'En nyere rapport afventer kontrol',strategy_proposal_mismatch:'Strategiforslaget kræver ny kontrol'};return `<button class="engine-candidate-row" data-intel-history="${esc(cid)}" data-intel-test="${mode}"><span><strong>${esc(x.candidate?.ticker||'Ukendt instrument')}</strong><small>${session?'Overvågning: '+esc(labels[session.status]||session.status):esc(attempt?(states[attempt.status]||'Afventer kontrol'):'Afventer kontrol')}</small>${x.candidate?.strategy_proposal?`<small>Foreslået: ${esc(x.candidate.strategy_proposal.strategy_id)} v${esc(x.candidate.strategy_proposal.version)}${session&&session.request?.strategy_id!==x.candidate.strategy_proposal.strategy_id||session&&session.request?.strategy_version!==x.candidate.strategy_proposal.version?' · eksisterende overvågning beholder sin strategi':''}</small>`:''}</span><span>Se forløb →</span></button>`}).join('')}</div></details>`}
 
- function paint(){const n=root();if(!n||data?._owner!==owner()||data?._mode!==mode||data?._epoch!==sessionEpoch())return;const opened=[...n.querySelectorAll('details[data-engine-group][open]')].map(x=>x.dataset.engineGroup),candidatesOpen=!!n.querySelector('.engine-candidates[open]'),settingsOpen=!!n.querySelector('.engine-settings[open]');const allRows=data.sessions,isOwn=s=>s.watch_kind==='holding'||s.request?.purpose==='automatic holding watch'||s.request?.report_id==='automatic-holdings'||(data.candidates||[]).some(c=>c.has_confirmed_position&&c.candidate?.candidate_id&&(c.candidate.candidate_id===s.candidate_id||c.candidate.candidate_id===s.request?.candidate_id)),rows=allRows.filter(s=>showOwn||!isOwn(s)),hiddenOwn=allRows.length-rows.length,active=rows.filter(s=>['CREATED','VALIDATING','ACTIVE','DEGRADED'].includes(s.status));let beat='Motorstatus ukendt · heartbeat er ikke registreret';if(data.worker){const age=(Date.now()-Date.parse(data.worker.updated))/1000;beat=age>=0&&age<15&&data.worker.status==='running'?'Motor ONLINE · heartbeat frisk':data.worker.status==='run_once'?'Enkeltkørsel registreret · vedvarende drift ikke bekræftet':data.worker.status==='stopped'||age>=15?`Motor OFFLINE · seneste heartbeat ${date(data.worker.updated)}`:`Motorstatus ukendt · ${date(data.worker.updated)}`}
+ function paint(){const n=root();if(!n||data?._owner!==owner()||data?._mode!==mode||data?._epoch!==sessionEpoch())return;const opened=[...n.querySelectorAll('details[data-engine-group][open]')].map(x=>x.dataset.engineGroup),candidatesOpen=!!n.querySelector('.engine-candidates[open]'),settingsOpen=!!n.querySelector('.engine-settings[open]');const history=data.history,lastPage=history.tail||history.head;
+ const allRows=data.sessions.slice(),ids=new Set(allRows.map(s=>s.watch_id));
+ for(const row of [...(history.head?.sessions||[]),...(history.tail?.sessions||[])]){
+  if(ids.has(row.watch_id))continue;
+  ids.add(row.watch_id);
+  allRows.push(row);
+ }
+ const isOwn=s=>s.watch_kind==='holding'||s.request?.purpose==='automatic holding watch'||s.request?.report_id==='automatic-holdings'||(data.candidates||[]).some(c=>c.has_confirmed_position&&c.candidate?.candidate_id&&(c.candidate.candidate_id===s.candidate_id||c.candidate.candidate_id===s.request?.candidate_id)),rows=allRows.filter(s=>showOwn||!isOwn(s)),hiddenOwn=allRows.length-rows.length,active=rows.filter(s=>['CREATED','VALIDATING','ACTIVE','DEGRADED'].includes(s.status));let beat='Motorstatus ukendt · heartbeat er ikke registreret';if(data.worker){const age=(Date.now()-Date.parse(data.worker.updated))/1000;beat=age>=0&&age<15&&data.worker.status==='running'?'Motor ONLINE · heartbeat frisk':data.worker.status==='run_once'?'Enkeltkørsel registreret · vedvarende drift ikke bekræftet':data.worker.status==='stopped'||age>=15?`Motor OFFLINE · seneste heartbeat ${date(data.worker.updated)}`:`Motorstatus ukendt · ${date(data.worker.updated)}`}
  const pendingDiscovery=(data.discovery_attempts||[]).filter(x=>!['CREATED','ALREADY_ACTIVE','NOT_NEW','REJECTED'].includes(x.status)).length;const admin=isAdmin(),count=k=>active.filter(s=>signalCategory(s)===k).length;
  const filters=[['active','Åbne overvågninger',active.length],['BUY','Køb',count('BUY')],['WAIT','Afvent',count('WAIT')],['SELL','Sælg / reducér',count('SELL')],['NO_DATA','Afventer data',count('NO_DATA')],['critical','Kræver handling',rows.filter(s=>s.status==='ERROR'||s.latest_calculation?.risk_level==='critical').length]];
- n.innerHTML=`<section class="panel engine-overview"><div class="engine-hero"><div><small>DIT MARKEDSOVERBLIK</small><h2>Hold øje med mulighederne<span>.</span></h2><p>Se de instrumenter, motoren følger, og deres seneste signaler.</p><span class="engine-health">${window.ESCAPE_DEMO?'Demonstration · simulerede signaler':esc(beat)+' · '+(mode?'Testdata':'Driftsdata')}</span></div><button data-engine-new>Start overvågning →</button></div><div class="engine-section-heading"><div><small>OVERVÅGNING</small><h3>Hvad sker der lige nu?</h3><p>Vælg en status for at filtrere listen.</p></div></div><div class="engine-strategy-link"><button data-view="strategy-center">Strategy Center →</button></div><div class="engine-counts">${filters.map(([filter,title,count])=>`<button data-engine-filter="${filter}" aria-pressed="${activeFilter===filter}"><strong>${count}</strong><span>${esc(title)}</span></button>`).join('')}</div>${data.operator_kill_switch?'<p class="engine-alert">Serverens centrale nødstop er aktivt. Kun serveroperatøren kan ophæve det.</p>':''}${data.kill_switch.killed?`<p class="engine-alert">NØDSTOP AKTIVT · ${esc(data.kill_switch.reason)}</p>`:''}${pendingDiscovery?`<p class="dash-warning">${pendingDiscovery} rapportkandidater afventer kontrol eller ledig kapacitet.</p>`:''}<div class="engine-list-heading"><div><h3>Overvågninger</h3><p>Åbn et instrument for kurser, begrundelse og detaljer. ${showOwn?'Egne positioner er med.':'Egne positioner er skjult.'}</p></div><div class="actions engine-view-controls"><button data-engine-own="toggle" aria-pressed="${showOwn}">${showOwn?'Skjul egne positioner':'Vis egne positioner'}</button><button data-engine-filter="all" aria-pressed="${activeFilter==='all'}">Vis alle</button></div></div><div class="engine-cards">${sessionGroups(rows)||'<p class="engine-no-sessions">Ingen overvågninger i det valgte udvalg. '+(!showOwn&&hiddenOwn?'Vælg “Vis egne positioner” for også at se dine beholdninger.':'Start en overvågning, eller afvent automatisk opstart.')+'</p>'}</div>${data.history_cursor?'<button data-engine-history-more>Indlæs ældre afsluttede overvågninger →</button>':''}${data.current_truncated||data.history_truncated?'<p class="dash-warning">Listen er afgrænset. Indlæs ældre overvågninger for at se mere historik.</p>':''}<p class="engine-filter-empty" hidden>Ingen overvågninger matcher den valgte status.</p>${candidatePanel()}<details class="engine-settings"><summary>Indstillinger og datakilder</summary><p>Her kan du se datakilder og administrere motoren. Signaler opretter ikke ordrer.</p><div class="actions"><button data-engine-strategies>Strategier og datakilder →</button>${admin?`<button data-engine-kill="${data.kill_switch.killed?'off':'on'}">${data.kill_switch.killed?'Ophæv kontoens nødstop':'Kontoens nødstop · drift og test'}</button>`:''}</div></details></section>`;n.querySelectorAll('details[data-engine-group]').forEach(x=>{if(opened.includes(x.dataset.engineGroup))x.open=true});if(candidatesOpen&&n.querySelector('.engine-candidates'))n.querySelector('.engine-candidates').open=true;if(settingsOpen&&n.querySelector('.engine-settings'))n.querySelector('.engine-settings').open=true;applyFilter(activeFilter)}
+ n.innerHTML=`<section class="panel engine-overview"><div class="engine-hero"><div><small>DIT MARKEDSOVERBLIK</small><h2>Hold øje med mulighederne<span>.</span></h2><p>Se de instrumenter, motoren følger, og deres seneste signaler.</p><span class="engine-health">${window.ESCAPE_DEMO?'Demonstration · simulerede signaler':esc(beat)+' · '+(mode?'Testdata':'Driftsdata')}</span></div><button data-engine-new>Start overvågning →</button></div><div class="engine-section-heading"><div><small>OVERVÅGNING</small><h3>Hvad sker der lige nu?</h3><p>Vælg en status for at filtrere listen.</p></div></div><div class="engine-strategy-link"><button data-view="strategy-center">Strategy Center →</button></div><div class="engine-counts">${filters.map(([filter,title,count])=>`<button data-engine-filter="${filter}" aria-pressed="${activeFilter===filter}"><strong>${count}</strong><span>${esc(title)}</span></button>`).join('')}</div>${data.operator_kill_switch?'<p class="engine-alert">Serverens centrale nødstop er aktivt. Kun serveroperatøren kan ophæve det.</p>':''}${data.kill_switch.killed?`<p class="engine-alert">NØDSTOP AKTIVT · ${esc(data.kill_switch.reason)}</p>`:''}${pendingDiscovery?`<p class="dash-warning">${pendingDiscovery} rapportkandidater afventer kontrol eller ledig kapacitet.</p>`:''}<div class="engine-list-heading"><div><h3>Overvågninger</h3><p>Åbn et instrument for kurser, begrundelse og detaljer. ${showOwn?'Egne positioner er med.':'Egne positioner er skjult.'}</p></div><div class="actions engine-view-controls"><button data-engine-own="toggle" aria-pressed="${showOwn}">${showOwn?'Skjul egne positioner':'Vis egne positioner'}</button><button data-engine-filter="all" aria-pressed="${activeFilter==='all'}">Vis alle</button></div></div><div class="engine-cards">${sessionGroups(rows)||'<p class="engine-no-sessions">Ingen overvågninger i det valgte udvalg. '+(!showOwn&&hiddenOwn?'Vælg “Vis egne positioner” for også at se dine beholdninger.':'Start en overvågning, eller afvent automatisk opstart.')+'</p>'}</div>${lastPage?.next_cursor?'<button data-engine-history-more>Indlæs ældre afsluttede overvågninger →</button>':''}${data.truncated||lastPage?.truncated?'<p class="dash-warning">Listen er afgrænset. Indlæs ældre overvågninger for at se mere historik.</p>':''}<p class="engine-filter-empty" hidden>Ingen overvågninger matcher den valgte status.</p>${candidatePanel()}<details class="engine-settings"><summary>Indstillinger og datakilder</summary><p>Her kan du se datakilder og administrere motoren. Signaler opretter ikke ordrer.</p><div class="actions"><button data-engine-strategies>Strategier og datakilder →</button>${admin?`<button data-engine-kill="${data.kill_switch.killed?'off':'on'}">${data.kill_switch.killed?'Ophæv kontoens nødstop':'Kontoens nødstop · drift og test'}</button>`:''}</div></details></section>`;n.querySelectorAll('details[data-engine-group]').forEach(x=>{if(opened.includes(x.dataset.engineGroup))x.open=true});if(candidatesOpen&&n.querySelector('.engine-candidates'))n.querySelector('.engine-candidates').open=true;if(settingsOpen&&n.querySelector('.engine-settings'))n.querySelector('.engine-settings').open=true;applyFilter(activeFilter)}
 
  function listData(user=owner(),epoch=sessionEpoch()){
   return data?._owner===user&&data._mode===mode&&data._epoch===epoch?data:null;
@@ -181,59 +218,74 @@ window.EngineUI=(()=>{
   }
   return offset!==rows.length||cursor!==end;
  }
- let pendingHistory=null;
+ let pendingHistory=null,pendingArchive=null;
+ function resetHistory(history){
+  pendingHistory=null;
+  history.tail=null;
+  history.checkedAt=undefined;
+  history.recheck=false;
+ }
+ async function refreshHistory(history,scope){
+  if(pendingArchive?.()||Date.now()<history.retryAt)return;
+  const current=()=>scope()&&listData()?.history===history;
+  pendingArchive=current;
+  try{
+   const head=await api(historyPath(20));
+   if(!current())return;
+   const nextHead={sessions:head.sessions,next_cursor:head.next_cursor??null,truncated:head.truncated};
+   if((history.head?.next_cursor??null)!==nextHead.next_cursor)resetHistory(history);
+   const changed=JSON.stringify(history.head)!==JSON.stringify(nextHead);
+   history.head=nextHead;
+   if(changed)paint();
+
+   const tail=history.tail;
+   // Capped current lists can hide a closure anywhere in creation-ordered history.
+   if(!tail||(!history.recheck&&!(listData().truncated&&Date.now()-history.checkedAt>=archiveRecheckMs)))return;
+   history.checkedAt=Date.now();
+   history.recheck=false;
+   const changedTail=await archiveTailChanged(head.next_cursor,tail.sessions,tail.next_cursor,current);
+   if(!current())return;
+   if(history.tail!==tail){
+    // The user loaded more rows while the check was in flight.
+    if(history.tail)history.recheck=true;
+    return;
+   }
+   if(changedTail){resetHistory(history);paint()}
+  }catch{
+   if(current()){
+    history.retryAt=Date.now()+archiveRecheckMs;
+    if(history.tail)history.recheck=true;
+   }
+  }finally{if(pendingArchive===current)pendingArchive=null}
+ }
  async function load(){
   if(!root())return;
   const ticket=++generation,user=owner(),epoch=sessionEpoch(),scope=captureScope();
   const current=()=>scope()&&ticket===generation;
   if(!current())return;
   if(data&&data._owner!==user){showOwn=false;activeFilter='all'}
-  let r,h,registry;
-  try{[r,h,registry]=await Promise.all([api(base+'/sessions'+query()+'&limit=100&view=current'),api(historyPath(20)),api('reports/candidate-registry?is_test='+mode)])}
+  let r,registry;
+  try{[r,registry]=await Promise.all([api(base+'/sessions'+query()+'&limit=100&view=current'),api('reports/candidate-registry?is_test='+mode)])}
   catch(error){if(current())throw error;return}
   if(!current())return;
-  let previous=listData(user,epoch);
-  const ids=new Set([...r.sessions,...h.sessions].map(s=>s.watch_id));
-  const archiveTail=list=>list?.sessions.filter(s=>isArchived(s)&&!ids.has(s.watch_id))||[];
-  // A watch that disappears from a capped current list may still be open.
-  const headCursor=h.next_cursor??null;
-  let historyChanged=previous&&(previous.historyHeadCursor!==headCursor||
-   !r.truncated&&previous.sessions.some(s=>!isArchived(s)&&!ids.has(s.watch_id)));
-  const capEnded=previous?.current_truncated&&!r.truncated;
-  const checkAfterPage=capEnded||previous?.historyRequestOverlappedCap;
-  let historyCheckedAt=previous?.historyCheckedAt;
-  // A watch hidden by the cap can close anywhere in creation-ordered history.
-  // The paginated API has no archive revision, so check the loaded range less often than current data.
-  if(!historyChanged&&(checkAfterPage||r.truncated&&Date.now()-historyCheckedAt>=archiveRecheckMs)){
-   let checked;
-   while(previous?.historyPage&&previous.historyPage!==checked){
-    checked=previous.historyPage;
-    try{historyChanged=await archiveTailChanged(h.next_cursor,archiveTail(previous),checked.next_cursor,current)}
-    catch(error){if(current())throw error;return}
-    if(!current())return;
-    historyCheckedAt=Date.now();
-    previous=listData(user,epoch);
-    if(historyChanged)break;
-   }
+  const previous=listData(user,epoch),history=previous?.history||{head:null,tail:null,retryAt:0};
+  if(previous&&!r.truncated){
+   const ids=new Set([...r.sessions,...(history.head?.sessions||[])].map(s=>s.watch_id));
+   if(previous.sessions.some(s=>!isArchived(s)&&!ids.has(s.watch_id)))resetHistory(history);
+   else if(previous.truncated&&(history.tail||pendingHistory?.()))history.recheck=true;
   }
-  if(historyChanged)pendingHistory=null;
-  const page=historyChanged?null:previous?.historyPage;
-  const cached=historyChanged?[]:archiveTail(previous);
-  data={...r,sessions:[...r.sessions,...h.sessions,...cached],candidates:registry.candidates||[],historyPage:page,
-   historyHeadCursor:headCursor,historyCheckedAt:page?historyCheckedAt:undefined,
-   history_cursor:page?page.next_cursor:headCursor,history_truncated:page?page.truncated:h.truncated,
-   // Recheck a pending page even if the current list has dropped below the cap by then.
-   historyRequestOverlappedCap:checkAfterPage&&pendingHistory?.(),
-   current_truncated:r.truncated,_owner:user,_mode:mode,_epoch:epoch};
+  data={...r,candidates:registry.candidates||[],history,_owner:user,_mode:mode,_epoch:epoch};
   paint();
+  // Archive latency and retries must not hold the current-signal poll open.
+  void refreshHistory(history,scope);
  }
- function pollView(mounted,refresh){
+ function pollView(mounted,refresh,allowRepaint=false){
   let stopped=false,timer,busy;
   const current=()=>!stopped&&mounted();
   const tick=async()=>{
    if(!current())return;
    timer=setTimeout(tick,15000);
-   const scope=captureScope();
+   const scope=captureScope(allowRepaint);
    // A slow request from an invalidated epoch cannot block the next authenticated poll.
    if(!scope()||busy?.()||document.hidden)return;
    busy=scope;
@@ -270,7 +322,7 @@ window.EngineUI=(()=>{
  async function detail(wid,refresh=false,external=false,holdingKey=null){
   if((refresh&&pendingDetail?.())||(!root()&&!external))return;
   const modal=document.getElementById('engine-dialog');
-  const scope=captureScope(),sameDialog=captureDialog(modal),ticket=++detailRequest;
+  const scope=captureScope(external),sameDialog=captureDialog(),ticket=++detailRequest;
   const current=()=>scope()&&ticket===detailRequest&&sameDialog()&&
    (!refresh||(modal?.open&&!modal.querySelector('#engine-buy-plan')?.closest('details')?.open&&
     (holdingKey===null?modal.dataset.watchId===wid:modal.dataset.holdingKey===holdingKey)));
@@ -364,24 +416,20 @@ window.EngineUI=(()=>{
  function applyFilter(filter){const scope=root();if(!scope)return;let visible=0;scope.querySelectorAll('.engine-list-row').forEach(n=>{const state=n.dataset.engineState,open=['CREATED','VALIDATING','ACTIVE','DEGRADED'].includes(state),match=filter==='all'||filter==='critical'&&n.dataset.engineCritical==='true'||filter==='active'&&open||open&&n.dataset.engineCategory===filter;n.hidden=!match;if(match)visible++});scope.querySelectorAll('[data-engine-group]').forEach(group=>{group.hidden=!group.querySelector('.engine-list-row:not([hidden])');if(!group.hidden&&filter!=='all'&&group.tagName==='DETAILS')group.open=true});scope.querySelectorAll('[data-engine-filter]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.engineFilter===filter)));const empty=scope.querySelector('.engine-filter-empty');if(empty)empty.hidden=visible>0||!scope.querySelector('.engine-list-row')&&filter==='all'}
 
  async function moreHistory(){
-  const scope=captureScope(),cursor=listData()?.history_cursor;
+  const scope=captureScope(),history=listData()?.history;
+  const cursor=(history?.tail||history?.head)?.next_cursor;
   if(!scope()||!cursor||pendingHistory?.())return;
   pendingHistory=scope;
   const current=()=>pendingHistory===scope&&scope();
-  let history;
+  let page;
   try{
-   history=await api(historyPath(20,cursor));
+   page=await api(historyPath(20,cursor));
    if(!current())return;
   }catch(error){if(current())throw error;return}
   finally{if(pendingHistory===scope)pendingHistory=null}
-  const list=listData();
-  if(!list)return;
-  const ids=new Set(list.sessions.map(s=>s.watch_id));
-  list.sessions.push(...history.sessions.filter(s=>!ids.has(s.watch_id)));
-  list.historyCheckedAt??=Date.now();
-  list.historyPage={next_cursor:history.next_cursor,truncated:history.truncated};
-  list.history_cursor=history.next_cursor;
-  list.history_truncated=history.truncated;
+  history.checkedAt??=Date.now();
+  history.tail={next_cursor:page.next_cursor??null,truncated:page.truncated,
+   sessions:[...(history.tail?.sessions||[]),...page.sessions]};
   paint();
   const group=root().querySelector('details[data-engine-group=history]');
   if(group)group.open=true;
@@ -422,17 +470,17 @@ window.EngineUI=(()=>{
  async function change(e){if(e.target.id==='engine-eodhd-select'){const f=document.getElementById('engine-create'),item=candidates[Number(f.elements.candidate.value)];if(item){const choice=(item.eodhd_choices||[]).find(x=>x.symbol===e.target.value);const expectedCurrency=item.instrument?.currency||f.elements.quote_currency.value;if(e.target.value&&(!choice||!expectedCurrency||choice.currency!==expectedCurrency)){e.target.value='';item.provider_symbol=null;f.elements.provider_symbol.value='';if(item.instrument)item.instrument.provider_symbol=null;formStatus('EODHD-instrumentets valuta er ukendt eller stemmer ikke med Pluto. Vælg et dokumenteret match.');return true}item.provider_symbol=e.target.value||null;f.elements.provider_symbol.value=e.target.value;if(item.instrument)item.instrument.provider_symbol=item.provider_symbol}return true}if(e.target.name==='provider'){if(e.target.value==='eodhd')await findEodhdSymbol();return true}if(e.target.name==='provider_symbol'){const f=document.getElementById('engine-create'),item=candidates[Number(f.elements.candidate.value)];if(item)item.provider_symbol=e.target.value.trim();return true}if(e.target.name==='candidate'){const f=document.getElementById('engine-create');instrumentRequest++;if(f){f.elements.provider_symbol.value=candidates[Number(e.target.value)]?.provider_symbol||'';for(const id of ['engine-eodhd-choice','engine-instrument-choice']){const slot=document.getElementById(id);if(slot)slot.textContent=''}}if(!mode&&await resolveInstrument(Number(e.target.value))===undefined)return true;if(f?.elements.provider.value==='eodhd')await findEodhdSymbol();return true}if(e.target.id==='engine-asset-choice'){const index=Number(new FormData(document.getElementById('engine-create')).get('candidate'));await resolveInstrument(index,e.target.value);return true}if(e.target.id!=='engine-strategy-file')return false;const f=e.target.files[0];if(!f)return true;if(f.size>131072)throw Error('Strategifilen er for stor.');const r=await api(base+'/strategies',JSON.parse(await f.text()));document.getElementById('engine-strategy-status').textContent='Strategiversionen er gemt inaktiv. Ingen algoritme er aktiveret. Checksum: '+r.checksum;return true}
  let stopExternalPoll;
  function refreshExternal(wid){
-  const mounted=captureView(),d=document.getElementById('engine-dialog'),version=dialogGeneration;
+  const mounted=captureView(true),d=document.getElementById('engine-dialog'),version=dialogGeneration;
   stopExternalPoll?.();
   stopExternalPoll=pollView(
    ()=>mounted()&&!root()&&d?.isConnected&&d.open&&d.dataset.watchId===wid&&dialogGeneration===version,
-   ()=>detail(wid,true,true)
+   ()=>detail(wid,true,true),true
   );
  }
  function openHoldingStatus(item,refresh=false){const status=item.status||{},messages={IDENTITY_UNVERIFIED:'Instrumentets identitet kunne ikke bekræftes ud fra de seneste Pluto-oplysninger.',PLUTO_ASSET_METADATA_MISSING:'Pluto returnerede ikke genkendelige instrumentoplysninger.',PLUTO_ASSET_ID_MISMATCH:'Pluto-svaret passer ikke entydigt til beholdningens aktiv-ID.',PLUTO_CURRENCY_MISSING:'Pluto oplyste ikke en verificerbar valuta for instrumentet.',PLUTO_CURRENCY_MISMATCH:'Valutaen i Pluto-svaret og beholdningen stemmer ikke overens.',PLUTO_TICKER_MISSING:'Pluto oplyste ikke en ticker for instrumentet.',PLUTO_TICKER_MISMATCH:'Ticker i Pluto-svaret og beholdningen stemmer ikke overens.',EODHD_IDENTITY_UNCERTAIN:'Der er ikke fundet præcis ét sikkert EODHD-match med samme ISIN og valuta.',PROVIDER_RATE_BUDGET:'Motorens fælles budget for dataopslag er opbrugt.',EODHD_RATE_LIMIT:'EODHD har midlertidigt begrænset opslag.',EODHD_FEED_NOT_ENABLED:'EODHD er ikke aktiveret i motorens miljø.',EODHD_KEY_NOT_CONFIGURED:'EODHD-nøglen er ikke tilgængelig i motorens miljø.',holding_not_verified:'Et frisk, komplet Pluto-depot med denne beholdning mangler.',VERIFICATION_FAILED:'Instrumentkontrollen kunne ikke gennemføres.',CAPACITY_LIMIT:'Alle motorens sessionspladser er i brug.',global_capacity_limit:'Alle motorens sessionspladser er i brug.',AMBIGUOUS:'Flere sessioner matcher beholdningen. Vælg den ønskede session under HOT WATCH.',STOPPED:'Overvågningen er afsluttet og startes ikke automatisk igen.',VERIFYING:'Instrumentet kontrolleres mod Pluto og EODHD.'};const next=Number(status.next_attempt),retry=Number.isFinite(next)&&next>0&&!['STOPPED','AMBIGUOUS','LINKED'].includes(status.status);const d=dialog((item.ticker||'Beholdning')+' · HOT WATCH',`<p><strong>${esc(item.label)}</strong></p><p>${esc(messages[status.status]||'Der er endnu ikke en verificeret motorsession for denne beholdning. Når motoren har kontrolleret instrumentet, vises status her.')}</p>${status.updated?`<p>Seneste kontrol: ${date(status.updated)}</p>`:''}${retry?`<p>Næste forsøg tidligst: ${date(new Date(next*1000).toISOString())}</p>`:''}<p>Der er endnu ingen warmup-beregning for denne status.</p>${window.TradeUI.holdingActions(item.key)}`,refresh);d.dataset.holdingKey=item.key;if(!refresh)refreshHolding(item.key,d,dialogGeneration)}
  let stopHoldingPoll;
  function refreshHolding(key,d,version){
-  let mounted=captureView();
+  let mounted=captureView(true);
   stopHoldingPoll?.();
   stopHoldingPoll=pollView(
    ()=>mounted()&&d.isConnected&&d.open&&d.dataset.holdingKey===key&&dialogGeneration===version,
@@ -443,8 +491,8 @@ window.EngineUI=(()=>{
     if(row?.hot_watch?.session){
      const wid=row.hot_watch.session.watch_id;
      setMode(false);
-     mounted=captureView();
-     scope=captureScope();
+     mounted=captureView(true);
+     scope=captureScope(true);
      const opened=await detail(wid,true,true,key);
      if(!current()||!scope())return;
      if(opened){
@@ -454,11 +502,11 @@ window.EngineUI=(()=>{
      }
     }
     if(row)openHoldingStatus({key,ticker:row.ticker||row.name,label:window.DashboardUI.watchLabel(row.hot_watch||{},row),status:row.hot_watch?.auto_status||null},true);
-   }
+   },true
   );
  }
  async function openNotification(wid){
-  setMode(false);const scope=captureScope(),sameDialog=captureDialog(),ticket=++detailRequest;
+  setMode(false);const scope=captureScope(true),sameDialog=captureDialog(),ticket=++detailRequest;
   const current=()=>scope()&&sameDialog()&&ticket===detailRequest;
   if(!current())return;
   pendingDetail=current;
@@ -497,6 +545,6 @@ window.EngineUI=(()=>{
   const node=dialog(title,body);node.classList.add('signal-overview-dialog');window.MarketUI.mount();
  }
 
- return {openHoldingStatus,actionNotice,openNotification,async openDetail(wid){setMode(false);const scope=captureScope();if(await detail(wid,false,true)&&scope())refreshExternal(wid)},setup(d){({api,escape:esc,formatAmount:money,formatTime:time,owner,editing,isAdmin,state:getState}=d);if(d.session){sessionEpoch=d.session;observeLogout()}},mount(value){setMode(value);const scope=captureScope();load().catch(e=>{if(scope())root().textContent='Motorstatus kunne ikke hentes: '+reason(e.details?.code||e.message)});schedule()},click,submit,change};
+ return {openHoldingStatus,actionNotice,openNotification,async openDetail(wid){setMode(false);const scope=captureScope(true);if(await detail(wid,false,true)&&scope())refreshExternal(wid)},setup(d){({api,escape:esc,formatAmount:money,formatTime:time,owner,editing,isAdmin,state:getState}=d);if(d.session){sessionEpoch=d.session;observeLogout()}},mount(value){setMode(value);const scope=captureScope();load().catch(e=>{if(scope())root().textContent='Motorstatus kunne ikke hentes: '+reason(e.details?.code||e.message)});schedule()},click,submit,change};
 })();
 

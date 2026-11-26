@@ -8,6 +8,54 @@ from test_portfolio_value_chart import PortfolioValueChart
 from playwright.sync_api import sync_playwright,expect
 from browser_mobile_account_isolation import run_account_isolation
 
+CAPTURE_STORED_POLL = """() => {
+ const interval = window.setInterval;
+ window.setInterval = (callback, delay, ...args) => {
+  if (delay === 30000 && callback.toString().includes('storedPollBusy')) window.storedPoll = callback;
+  return interval(callback, delay, ...args);
+ };
+}"""
+
+CHECK_STORED_POLL = """async () => {
+ const originalFetch = window.fetch;
+ const watch = 'fixture-repaint-watch';
+ const session = {watch_id: watch, status: 'ACTIVE', signal: 'WAIT',
+   request: {ticker: 'FIXTURE', watch_mode: 'entry', portfolio_ids: []}};
+ const answer = data => Promise.resolve(new Response(JSON.stringify(data)));
+ try {
+  for (const action of ['dashboardWatch', 'dashboardDecision']) {
+   const dashboard = document.querySelector('.dashboard-v1');
+   const before = {...state};
+   delete before.automation;
+   delete before.report_desk;
+   let releaseState;
+   window.fetch = (url, options) => {
+    if (url === '/api/state') {
+     if (!releaseState) return new Promise(resolve => { releaseState = () => resolve(answer(before)); });
+     return answer({...before, fixture_repaint: action});
+    }
+    if (url.startsWith('/api/v1/hotwatch/sessions/' + watch)) {
+     return answer(url.includes('/samples?') || url.includes('/events?') ? {items: []} : {session});
+    }
+    return originalFetch(url, options);
+   };
+   const button = document.createElement('button');
+   button.dataset[action] = watch;
+   dashboard.append(button);
+   const opening = DashboardUI.click(button);
+   await window.storedPoll();
+   const repainted = !dashboard.isConnected && Boolean(document.querySelector('.dashboard-v1'));
+   releaseState();
+   await opening;
+   const dialog = document.getElementById('engine-dialog');
+   if (!repainted || !dialog?.open || !dialog.querySelector('h2').textContent.includes('FIXTURE')) {
+    throw Error(action + ' did not open after the stored-data poll repainted Overview');
+   }
+   dialog.close();
+  }
+ } finally { window.fetch = originalFetch; }
+}"""
+
 run_account_isolation()
 case=PortfolioValueChart();case.setUp()
 server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler)
@@ -18,6 +66,7 @@ try:
   for width in (320,390,768,1280):
    page=browser.new_page(viewport={'width':width,'height':844});errors=[]
    page.on('pageerror',lambda e:errors.append(str(e)))
+   if width==390:page.add_init_script(f"({CAPTURE_STORED_POLL})()")
    page.goto(f'http://127.0.0.1:{server.server_port}')
    page.locator('#login-form [name=password]').fill('test-password-long-enough')
    page.locator('#login-form button').click();expect(page.locator('.dashboard-v1')).to_be_visible()
@@ -55,6 +104,7 @@ try:
     page.locator('nav [data-view=overview]').click()
     before=nav.bounding_box();page.evaluate('window.scrollTo(0,document.body.scrollHeight)');after=nav.bounding_box()
     assert abs(before['y']-after['y'])<2,(width,before,after)
+    if width==390:page.evaluate(CHECK_STORED_POLL)
    else:
     expect(page.locator('#mobile-more')).to_be_hidden();assert page.locator('main > header #logout').count()==1;nav.locator('[data-view=trade]').click();expect(page.locator('.broker-trade')).to_be_visible()
    assert not errors,(width,errors)

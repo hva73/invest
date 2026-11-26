@@ -387,6 +387,47 @@ const run = async () => {
     take('state', 'beta').resolve(account('beta'));
     await currentDashboardDetail;
     assert(byId('engine-dialog')?.dataset.watchId === 'beta-holding', 'Current dashboard detail did not open');
+
+    // app.js replaces #content on every stored-data render and keeps the page title.
+    const title = document.createElement('h1');
+    title.id = 'title';
+    content.before(title);
+    const renderView = (name, html = overview) => {
+        title.textContent = name;
+        content.innerHTML = html;
+    };
+    window.MarketUI = {mount() {}};
+    for (const requestType of ['detail', 'signal']) {
+        const opening = () => requestType === 'detail'
+            ? openDashboardDetail() : EngineUI.openNotification('notification-repaint');
+        const settle = () => {
+            if (requestType === 'signal') take('/sessions/notification-repaint', 'beta').resolve({
+                session: session('notification-repaint')
+            });
+            return take('state', 'beta');
+        };
+        for (const destination of ['same view', 'Settings', 'Overview again']) {
+            renderView('Dit overblik');
+            if (destination === 'same view') {
+                // A previously closed dialog is also removed by the repaint.
+                await EngineUI.click({dataset: {engineNotice: JSON.stringify({
+                    watch_id: 'other', last_action_signal: {event_id: 'other', event_type: 'BUY_SIGNAL'}
+                })}});
+                byId('engine-dialog').close();
+            }
+            const pendingOpen = opening();
+            if (destination !== 'same view') renderView('Setup og forbindelser', settings);
+            if (destination !== 'Settings') renderView('Dit overblik', overview.replace('Overview', 'Changed data'));
+            settle().resolve(account('beta'));
+            await pendingOpen;
+            if (destination === 'same view') {
+                assert(byId('engine-dialog')?.open, 'Dashboard ' + requestType + ' was lost after a same-view repaint');
+            } else {
+                assert(!byId('engine-dialog'), 'Dashboard ' + requestType + ' survived navigation to ' + destination);
+            }
+        }
+    }
+    title.remove();
     content.innerHTML = '';
 
     const ack=document.createElement('button');
@@ -803,6 +844,59 @@ const run = async () => {
     check(archiveReads === readsAfterDisplacement && button(loadedArchiveRow),
         'Regular polling did not reuse the paginated archive');
 
+    const stableHistory = archiveFixture.autoHistory;
+    let failArchive, tailReads = 0;
+    archiveFixture.autoHistory = params => {
+        if (params.has('before') && ++tailReads === 1) {
+            return new Promise((_, reject) => { failArchive = reject; });
+        }
+        return stableHistory(params);
+    };
+    clock += 30000;
+    cappedCurrent[0] = {...cappedCurrent[0], signal: 'SELL', display_status: 'SÆLGSSIGNAL'};
+    const archivePoll = poll();
+    await flush();
+    const freshSignal = '[data-engine-signal=SELL] [data-engine-detail="new-current"]';
+    check(failArchive && button(freshSignal), 'A pending archive tail blocked fresh current signals');
+    check(button(loadedArchiveRow) && !button(history), 'A pending archive tail discarded loaded history');
+    cappedCurrent[0] = {...cappedCurrent[0], signal: 'BUY', display_status: 'KØBSSIGNAL'};
+    await poll();
+    check(button('[data-engine-signal=BUY] [data-engine-detail="new-current"]'),
+        'A pending archive tail blocked the next current poll');
+    failArchive?.(Error('Synthetic archive read failure'));
+    await archivePoll;
+    await flush();
+    await poll();
+    check(tailReads === 1 && button(loadedArchiveRow) && !button(history),
+        'Archive tail failure discarded history or was retried on the next tick');
+    await poll();
+    check(tailReads === 2 && button(loadedArchiveRow), 'Archive tail did not recover on the next scheduled retry');
+
+    let failHead;
+    archiveFixture.autoHistory = params => params.has('before') ? stableHistory(params)
+        : new Promise((_, reject) => { failHead = reject; });
+    cappedCurrent[0] = {...cappedCurrent[0], signal: 'WAIT', display_status: 'AFVENT'};
+    await poll();
+    check(failHead && button('[data-engine-signal=WAIT] [data-engine-detail="new-current"]') &&
+        button(loadedArchiveRow), 'A pending first archive page blocked current signals or hid loaded history');
+    failHead?.(Error('Synthetic first-page failure'));
+    await flush();
+    check(button(loadedArchiveRow) && !button(history), 'A failed first archive page discarded cached pagination');
+
+    let releaseHead;
+    archiveFixture.autoHistory = () => new Promise(resolve => { releaseHead = resolve; });
+    clock += 30000;
+    await poll();
+    assert(releaseHead, 'The archive head was not retried after backoff');
+    archiveFixture = null;
+    switchAccount('beta');
+    await flush();
+    check(button('[data-engine-detail="beta-closed"]'), 'A delayed alpha archive blocked beta history');
+    releaseHead({sessions: [session('alpha-obsolete-archive', 'COMPLETED')]});
+    await flush();
+    check(!button('[data-engine-detail="alpha-obsolete-archive"]') && button('[data-engine-detail="beta-closed"]'),
+        'A delayed alpha archive changed beta history');
+
     for (const [currentCount, archiveCount, delayPage] of [[101, 21, false], [102, 141, false], [101, 21, true]]) {
         const current = Array.from({length: currentCount}, (_, index) => ({
             id: 500 - index, ...session('capped-current-' + index)
@@ -855,6 +949,7 @@ const run = async () => {
             await firstPage;
         }
         await poll();
+        await flush();
         check(button(history), 'An unseen watch expiring with ' + currentCount + ' current watches did not restore pagination');
         if (button(history)) await readPages();
         check(button('[data-engine-group=history] ' + expiredButton) && !button(history),
