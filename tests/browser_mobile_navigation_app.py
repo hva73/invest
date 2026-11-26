@@ -56,6 +56,99 @@ CHECK_STORED_POLL = """async () => {
  } finally { window.fetch = originalFetch; }
 }"""
 
+CHECK_MANUAL_SALE_SESSION = """async () => {
+ const originalFetch = window.fetch;
+ const watch = 'fixture-manual-sale';
+ const user = state.user.username;
+ const portfolio = state.portfolios.find(p => p.source === 'pluto' && p.active && p.kind === 'portfolio');
+ const session = {watch_id: watch, status: 'DEGRADED', signal: 'SELL',
+   request: {ticker: 'FIXTURE', portfolio_ids: [portfolio.id]}};
+ const answer = (data, status = 200) => new Response(JSON.stringify(data), {status});
+ const check = (value, message) => { if (!value) throw Error(message); };
+ const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
+ let receiveRead;
+ window.fetch = (url, options) => {
+  if (url === '/api/v1/hotwatch/sessions/' + watch + '?is_test=false') {
+   return Promise.resolve(answer({session}));
+  }
+  if (url === '/api/state' && receiveRead) {
+   const receive = receiveRead;
+   receiveRead = null;
+   return new Promise(resolve => receive(resolve));
+  }
+  return originalFetch(url, options);
+ };
+ const manualButton = () => document.querySelector('#engine-dialog[open] [data-signal-manual-portfolio]');
+ function readManualSale(button = manualButton()) {
+  const pending = new Promise(resolve => { receiveRead = resolve; });
+  button.click();
+  return pending;
+ }
+ async function startManualSale() {
+  await EngineUI.openNotification(watch);
+  const button = manualButton();
+  check(button?.textContent.includes('Åbn depot for manuelt salg'), 'Missing the manual sale button');
+  return readManualSale(button);
+ }
+ const staleAccount = {
+  portfolios: [{...portfolio, name: 'Prior session portfolio'}],
+  dashboard: {...state.dashboard, positions: [{asset_id: 'prior-session-asset'}]},
+  portfolio_snapshots: {}
+ };
+ const notice = document.getElementById('notice');
+ try {
+  const failures = [];
+  for (const outcome of ['success', 'error']) {
+   const finish = await startManualSale();
+   const epoch = sessionEpoch;
+   await document.getElementById('logout').onclick();
+   check(!state, 'Logout did not clear the account');
+   const form = document.getElementById('login-form');
+   form.elements.username.value = user;
+   form.elements.password.value = 'test-password-long-enough';
+   await form.onsubmit({target: form, preventDefault() {}});
+   check(state?.user.username === user && sessionEpoch !== epoch && view === 'overview',
+    'Fixture did not log back into the same account on Overview');
+   const {portfolios, dashboard, portfolio_snapshots} = state;
+   notice.textContent = 'New session notice';
+   finish(outcome === 'success' ? answer(staleAccount) : answer({error: 'Prior session error'}, 500));
+   await nextTask();
+   if (view !== 'overview' || portfolios !== state.portfolios || dashboard !== state.dashboard ||
+       portfolio_snapshots !== state.portfolio_snapshots || notice.textContent !== 'New session notice') {
+    failures.push(outcome);
+    view = 'overview';
+    await refresh();
+   }
+  }
+  check(!failures.length, 'Prior-session manual sale changed the new session: ' + failures.join(', '));
+
+  const dismissed = await startManualSale();
+  manualButton().closest('dialog').close();
+  dismissed(answer({error: 'Dismissed manual sale error'}, 500));
+  await nextTask();
+  check(view === 'overview' && notice.textContent === 'New session notice',
+   'A dismissed manual sale reached the notice');
+
+  const superseded = await startManualSale();
+  const fail = await readManualSale();
+  superseded(answer(staleAccount));
+  await nextTask();
+  check(view === 'overview' && manualButton(), 'An older click opened a depot before the latest click resolved');
+  fail(answer({error: 'Current manual sale error'}, 500));
+  await nextTask();
+  check(notice.textContent === 'Current manual sale error' && manualButton(),
+   'Current manual sale failure did not leave the dialog retryable');
+  const finishRetry = await readManualSale();
+  const updated = {...portfolio, name: 'Current verified depot'};
+  finishRetry(answer({portfolios: [updated], dashboard: state.dashboard, portfolio_snapshots: state.portfolio_snapshots}));
+  await nextTask();
+  const holdings = portfolioSection === 'holdings' || document.activeElement?.dataset.portfolioSection === 'holdings';
+  check(view === 'portfolio-detail' && selectedPortfolio === Number(portfolio.id) && holdings &&
+   document.querySelector('.portfolio-detail-hero h2')?.textContent === updated.name,
+   'Current manual sale did not open the verified depot holdings');
+ } finally { window.fetch = originalFetch; }
+}"""
+
 run_account_isolation()
 case=PortfolioValueChart();case.setUp()
 server=app.ThreadingHTTPServer(('127.0.0.1',0),app.Handler)
@@ -104,7 +197,9 @@ try:
     page.locator('nav [data-view=overview]').click()
     before=nav.bounding_box();page.evaluate('window.scrollTo(0,document.body.scrollHeight)');after=nav.bounding_box()
     assert abs(before['y']-after['y'])<2,(width,before,after)
-    if width==390:page.evaluate(CHECK_STORED_POLL)
+    if width==390:
+     page.evaluate(CHECK_STORED_POLL)
+     page.evaluate(CHECK_MANUAL_SALE_SESSION)
    else:
     expect(page.locator('#mobile-more')).to_be_hidden();assert page.locator('main > header #logout').count()==1;nav.locator('[data-view=trade]').click();expect(page.locator('.broker-trade')).to_be_visible()
    assert not errors,(width,errors)

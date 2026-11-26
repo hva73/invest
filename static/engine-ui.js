@@ -570,6 +570,22 @@ window.EngineUI=(()=>{
   const node=dialog(title,body);node.classList.add('signal-overview-dialog');window.MarketUI.mount();
  }
 
- return {openHoldingStatus,actionNotice,openNotification,async openDetail(wid){setMode(false);const scope=captureScope(true);if(await detail(wid,false,true)&&scope())refreshExternal(wid)},setup(d){({api,escape:esc,formatAmount:money,formatTime:time,owner,editing,isAdmin,state:getState}=d);if(d.session){sessionEpoch=d.session;observeLogout()}},mount(value){setMode(value);const scope=captureScope();load().catch(e=>{if(scope())root().textContent='Motorstatus kunne ikke hentes: '+reason(e.details?.code||e.message)});schedule()},click,submit,change};
+ let manualPortfolioRequest=0;
+ async function openManualPortfolio(button,open,notice){
+  const scope=captureScope(),modal=button.closest('dialog');
+  if(!scope()||!button.isConnected||!modal?.open)return;
+  const ticket=++manualPortfolioRequest;
+  const current=()=>scope()&&modal.open&&button.isConnected&&ticket===manualPortfolioRequest;
+  const portfolioId=button.dataset.signalManualPortfolio;
+  let account;
+  try{account=await api('state')}
+  catch(error){if(current())notice(error.message,'error');return}
+  if(!current())return;
+  const portfolio=(account.portfolios||[]).find(p=>String(p.id)===portfolioId&&p.source==='pluto'&&p.active&&p.kind==='portfolio');
+  if(!portfolio){notice('Depotet kan ikke bekræftes. Opdatér porteføljer og prøv igen.','error');return}
+  open(account,portfolio);
+ }
+
+ return {openHoldingStatus,actionNotice,openNotification,openManualPortfolio,async openDetail(wid){setMode(false);const scope=captureScope(true);if(await detail(wid,false,true)&&scope())refreshExternal(wid)},setup(d){({api,escape:esc,formatAmount:money,formatTime:time,owner,editing,isAdmin,state:getState}=d);if(d.session){sessionEpoch=d.session;observeLogout()}},mount(value){setMode(value);const scope=captureScope();load().catch(e=>{if(scope())root().textContent='Motorstatus kunne ikke hentes: '+reason(e.details?.code||e.message)});schedule()},click,submit,change};
 })();
 
