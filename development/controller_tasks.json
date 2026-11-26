@@ -2060,5 +2060,27 @@
     "follow_base": true,
     "reserve_plan_id": "shared_data/scheduler/batch-exchange-status-due-lookups",
     "reserve_goal": "shared_data/scheduler"
+  },
+  {
+    "issue": 14,
+    "generation": 21,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "04cee36687e4d60bca0adbedf11acb4ed7224f74",
+    "dependencies": [
+      "14:15"
+    ],
+    "paths": [
+      "eodhd_capacity.py",
+      "tests/test_eodhd_capacity.py"
+    ],
+    "task": "Approved roadmap shared_data/scheduler (F\u00e6lles scheduler og budget). Exact existing source anchor: eodhd_capacity.py :: if state.get('ws_retry_at',0)>now:. Implement only this bounded change: In Capacity.websocket(), check the existing shared WebSocket cooldown on a read-only SQLite connection before attempting BEGIN IMMEDIATE. During an active cooldown, return the same EODHD_WS_CAPACITY error with the remaining retry_after_s. Keep the authoritative cooldown check inside the write transaction so a cooldown recorded after the preflight still prevents lease acquisition. Preserve the existing clock basis, slot limits, and lease cleanup.. Acceptance: Extend CapacityTests with real temporary SQLite and a fixed clock. Seed a cooldown, hold a competing writer, and verify the WebSocket attempt reports the expected retry delay with zero BEGIN IMMEDIATE attempts. In a separate case, record the cooldown between preflight and writer acquisition and verify the transactional check rejects the request without creating a lease. Confirm normal acquisition and cleanup after expiry and that the WebSocket cooldown still permits HTTP reservations.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_eodhd_capacity.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "shared_data/scheduler/skip-sqlite-writer-during-eodhd-websocket-cooldown",
+    "reserve_goal": "shared_data/scheduler"
   }
 ]
