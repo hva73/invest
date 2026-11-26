@@ -2026,7 +2026,7 @@
     "priority": 1,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "cbb37703356ffae9f3d2beba37265d17e0b706db",
+    "base_sha": "da3ed7fa0ffb6733ad555c3d8b7bddb21bbe2d1a",
     "dependencies": [],
     "paths": [
       "static/app.js",
