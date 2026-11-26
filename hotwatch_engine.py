@@ -1499,12 +1499,13 @@ def fault(connect,uid,wid,mode,code,now=None,lease=None,retry_after_s=None):
 
 def claim(connect,now=None,watch_id=None,exclude_ids=()):
  now=now or utc();owner=secrets.token_hex(16);excluded=json.dumps(list(exclude_ids))
- # Avoid competing for the SQLite writer lock when the queue is empty.
+ # Avoid competing for the SQLite writer lock when the queue is empty or killed.
  # The complete query and all kill switches are checked again under the
  # transaction below; this read-only preflight cannot claim a session.
  with connect() as c:
   pending=c.execute("SELECT 1 FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND s.next_due<=? AND s.lease_until<=? AND s.id NOT IN (SELECT value FROM json_each(?)) AND COALESCE(k.killed,0)=0 AND (? IS NULL OR s.watch_id=?) LIMIT 1",(now.timestamp(),now.timestamp(),excluded,watch_id,watch_id)).fetchone()
- if not pending:return None
+  if not pending:return None
+  if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
  with connect() as c:
   c.execute('BEGIN IMMEDIATE')
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
