@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T03:45:00Z",
+  "updated_at": "2026-11-26T04:51:00Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -409,7 +409,7 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "in_progress",
       "issue": 54,
-      "evidence": "#306 integreret; #300 aa05b49c CI 45737304161 chart/UI PASS, dedikerede mobile workflows 45737304211/45737304217 SKIPPED. Eksakt uafhængigt HOLD 7180092462 på dialog-epoch/fokus.",
+      "evidence": "#306 integreret; #300 aa05b49c CI 45737304161 chart/UI PASS, dedikerede mobile workflows 45737304211/45737304217 SKIPPED. Eksakt uafhængigt HOLD 7180092462 på dialog-epoch/fokus. Koordinator isoleret Chromium 390px: gammel guard 6/10, foreslået dialog-activity guard 10/10 (7182977486); endnu ikke indarbejdet eller fuldt testet.",
       "subgoals": [
         {
           "id": "reuse",
@@ -422,9 +422,9 @@
           "id": "mobile",
           "title": "Mobil 2.0",
           "status": "review",
-          "evidence": "#300 aa05b49c: regression PASS, HOLD 7180092462: åbning/lukning af anden beholdning og ny historikdialog skal invalidere gamle asynkrone resultater. Dedikeret mobiltest udestår.",
+          "evidence": "#300 aa05b49c: regression PASS, HOLD 7180092462: åbning/lukning af anden beholdning og ny historikdialog skal invalidere gamle asynkrone resultater. Dedikeret mobiltest udestår. Testet konkret rettelsesforslag i 7182977486; fuld browseraccept og faktisk controllerleverance udestår.",
           "owner_role": "mobile",
-          "updated_at": "2026-11-26T01:46:39Z"
+          "updated_at": "2026-11-26T04:51:00Z"
         },
         {
           "id": "desktop",
@@ -442,7 +442,7 @@
           "owner_role": "mobile"
         }
       ],
-      "updated_at": "2026-11-26T01:46:39Z"
+      "updated_at": "2026-11-26T04:51:00Z"
     },
     {
       "id": "load",
