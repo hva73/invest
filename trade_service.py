@@ -31,8 +31,17 @@ def structural(v):
     if isinstance(v,list):return [structural(x) for x in v]
     return v
 
-def client(connect,user_id,factory=None):
-    result=(factory or MCP)(oauth.access_token(connect,user_id));return result,{t['name']:t for t in result.tools()}
+def client(connect,user_id,factory=None,*,allow_token_refresh=True):
+    if allow_token_refresh:
+        token=oauth.access_token(connect,user_id)
+    else:
+        # Token rotation writes to SQLite. A read-only evidence lookup uses the current token only.
+        with connect() as c:
+            row=c.execute('SELECT payload FROM oauth_tokens WHERE user_id=? AND expires>?',(user_id,time.time())).fetchone()
+        if not row:raise oauth.SetupRequired('Ordreopslaget kræver en gyldig Pluto-forbindelse.')
+        token=oauth.unseal(user_id,row['payload'])['token']['access_token']
+    result=(factory or MCP)(token)
+    return result,{t['name']:t for t in result.tools()}
 
 def estimate_error(response,client):
     """Display only bounded provider error messages, never the response or credentials."""
@@ -158,6 +167,38 @@ def owned(connect,user_id,pid):
     with connect() as c:row=c.execute("SELECT * FROM portfolios WHERE id=? AND user_id=? AND source='pluto' AND active=1",(pid,user_id)).fetchone()
     if not row:raise TradeError('Vælg en aktiv Pluto-enhed på din egen konto.')
     return dict(row)
+
+def inactive_order_readback(connect,user_id,portfolio_id,factory=None):
+    """Read one bounded page of direct order records. INACTIVE alone says nothing about execution."""
+    portfolio=owned(connect,user_id,portfolio_id)
+    external_id=portfolio['external_id']
+    if portfolio['kind']!='portfolio' or not isinstance(external_id,str) or not external_id.startswith('portfolios:'):
+        raise TradeError('Vælg en Pluto-hovedportefølje med et gyldigt depot-ID.')
+    provider_id=external_id[len('portfolios:'):]
+    if not provider_id.strip():raise TradeError('Pluto-depotets ID mangler.')
+
+    scope={'portfolioId':provider_id,'statusGroup':'INACTIVE','scope':'DIRECT'}
+    limit=50
+    cl,tools=client(connect,user_id,factory,allow_token_refresh=False)
+    page=call(cl,tools,'list_orders',{**scope,'limit':limit})
+    rows=page
+    if isinstance(page,dict):
+        fields=[key for key in ('orders','items','data') if key in page]
+        if len(fields)!=1:
+            raise TradeError('Pluto returnerede ikke en entydig ordreliste.')
+        rows=page[fields[0]]
+    if not isinstance(rows,list) or len(rows)>limit:
+        raise TradeError('Plutos ordreliste har et ukendt format eller overskrider grænsen.')
+    for record in ([page] if isinstance(page,dict) else []) + rows:
+        if not isinstance(record,dict) or record.get('isError') or record.get('error') or record.get('success') is False:
+            raise TradeError('Pluto returnerede en fejl eller en ugyldig ordrepost.')
+        if any(key in record and record[key]!=value for key,value in scope.items()) or record.get('collectionId') is not None:
+            raise TradeError('Plutos ordresvar stemmer ikke med det valgte depot eller opslag.')
+    for row in rows:
+        order_id=row.get('orderId',row.get('id'))
+        if not isinstance(order_id,str) or not order_id.strip():
+            raise TradeError('Plutos ordreliste indeholder en post uden gyldigt ordre-ID.')
+    return {'records':rows,'verified':False,'coverage':{**scope,'limit':limit,'complete':False}}
 
 def build(connect,user_id,data,preview=False):
     if preview:

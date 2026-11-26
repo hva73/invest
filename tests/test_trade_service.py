@@ -16,6 +16,7 @@ class Trading(unittest.TestCase):
   self.request={'report_id':'trade-source','candidate_id':self.report['candidates'][0]['candidate_id'],'portfolio_id':self.root,'kind':'direct','asset_id':'asset-test','size_mode':'shares','size':'2','currency':'DKK','order_type':'LIMIT','time_in_force':'DAY','limit_price':'100.50'}
   self.account_data={'accounts':[{'currency':'DKK','balance':'1000','buyingPower':'900','reservedForOrders':'100'}]};self.calls=[];self.can_trade=True;self.write_result={'orderIntentId':'synthetic-intent'};self.fail_send=False;self.changed=False
   self.intent_status={'orderIntentId':'synthetic-intent','status':'accepted'}
+  self.order_page={'orders':[]}
   case=self
   class Client:
    def __init__(self,token):assert token=='synthetic'
@@ -25,11 +26,12 @@ class Trading(unittest.TestCase):
     if case.changed:next(t for t in tools if t['name']=='propose_orders')['inputSchema']={'type':'object'}
     return tools
    def request(self,method,args):
+    case.assertEqual(method,'tools/call')
     case.calls.append(args);name=args['name']
     if name=='list_portfolios':result=[{'id':'root','name':'Root','canTrade':case.can_trade}]
     elif name=='list_collections':result=[{'id':'child','name':'Child','portfolioId':'root'}]
     elif name=='get_accounts':result=case.account_data
-    elif name=='list_orders':result={'orders':[]}
+    elif name=='list_orders':result=case.order_page
     elif name=='get_asset':result={'assetId':'asset-test','name':'Synthetic asset','currency':'USD'}
     elif name.startswith('estimate_'):result={'estimatedAmount':'201','currency':'DKK','commission':'0','note':'Synthetic estimate only'}
     elif name.startswith('propose_'):
@@ -44,6 +46,78 @@ class Trading(unittest.TestCase):
  def estimate(self,request=None):return trade.estimate(app.connect,1,request or self.request,self.factory)['proposal']
  def send(self,proposal):return trade.send(app.connect,1,{'id':proposal['id'],'review_token':proposal['review_token'],'confirm':True},self.factory)['proposal']
  def writes(self):return [c for c in self.calls if c['name'].startswith('propose_')]
+ def test_inactive_order_readback_preserves_raw_records_and_writes_nothing(self):
+  self.estimate()
+  with app.connect() as db:
+   db.execute("UPDATE portfolios SET name='Renamed',external_id='portfolios:root:stable',can_trade=0 WHERE id=?",(self.root,))
+  scope={'portfolioId':'root:stable','scope':'DIRECT','statusGroup':'INACTIVE','limit':50}
+  raw=[{'orderId':'one','status':'CANCELLED','filledQuantity':'0'},
+       {'id':'two','portfolioId':'root:stable','collectionId':None,'status':'FILLED','providerDetail':{'fee':None}}]
+  boundary=[{'orderId':str(i)} for i in range(50)]
+  with app.connect() as witness:
+   before=witness.execute('PRAGMA data_version').fetchone()[0]
+   for page,records in (({'orders':raw,'nextToken':'more'},raw),([],[]),({'items':boundary},boundary),({'data':raw},raw)):
+    with self.subTest(envelope=type(page),count=len(records)):
+     self.order_page=copy.deepcopy(page)
+     self.calls.clear()
+     readback=trade.inactive_order_readback(app.connect,1,self.root,self.factory)
+     self.assertEqual(self.calls,[{'name':'list_orders','arguments':scope}])
+     self.assertEqual(readback,{'records':records,'verified':False,'coverage':{**scope,'complete':False}})
+     self.assertEqual(witness.execute('PRAGMA data_version').fetchone()[0],before)
+ def test_inactive_order_readback_rejects_unowned_and_invalid_portfolios_before_client(self):
+  with patch.object(trade,'client') as client:
+   for uid,pid in ((2,self.root),(1,self.child),(1,'root')):
+    with self.subTest(uid=uid,pid=pid),self.assertRaises(trade.TradeError):
+     trade.inactive_order_readback(app.connect,uid,pid)
+   for source,active,identity in (('local',1,'portfolios:root'),('pluto',0,'portfolios:root'),
+                                  ('pluto',1,None),('pluto',1,'collections:root'),('pluto',1,'portfolios: ')):
+    with app.connect() as db:
+     db.execute('UPDATE portfolios SET source=?,active=?,external_id=? WHERE id=?',(source,active,identity,self.root))
+    with self.subTest(source=source,active=active,identity=identity),self.assertRaises(trade.TradeError):
+     trade.inactive_order_readback(app.connect,1,self.root)
+   client.assert_not_called()
+ def test_inactive_order_readback_rejects_contract_drift_before_tool_call(self):
+  specs=self.factory('synthetic').tools()
+  spec=next(tool for tool in specs if tool['name']=='list_orders')
+  changed_schema=copy.deepcopy(spec['inputSchema'])
+  changed_schema['properties']['limit']['maximum']=51
+  for listing in ([],[{**spec,'inputSchema':changed_schema}],[{**spec,'annotations':{'readOnlyHint':False}}]):
+   with self.subTest(listing=listing),patch.object(self.factory,'tools',return_value=listing),self.assertRaises(trade.TradeError):
+    trade.inactive_order_readback(app.connect,1,self.root,self.factory)
+  self.assertEqual(self.calls,[])
+ def test_inactive_order_readback_rejects_bad_pages_atomically(self):
+  order={'orderId':'one'}
+  invalid=[{},'unavailable',{'orders':None},{'orders':{}},{'unknown':[order]},{'orders':[order],'items':[]},
+           {'orders':[order],'error':'denied'},{'orders':[],'success':False},[order,None],[{}],[{'id':3}],
+           [{'id':'fallback','orderId':None}],[{**order,'isError':True}],[order]*51]
+  for field,value in (('portfolioId','other'),('scope','COLLECTION'),('collectionId','child'),('statusGroup','ACTIVE')):
+   invalid.extend([{'orders':[order],field:value},[order,{**order,field:value}]])
+  with app.connect() as witness:
+   before=witness.execute('PRAGMA data_version').fetchone()[0]
+   for page in invalid:
+    self.order_page=page
+    with self.subTest(page=page),self.assertRaises(trade.TradeError):
+     trade.inactive_order_readback(app.connect,1,self.root,self.factory)
+   self.assertEqual(witness.execute('PRAGMA data_version').fetchone()[0],before)
+  self.assertEqual([call['name'] for call in self.calls],['list_orders']*len(invalid))
+ def test_inactive_order_readback_rejects_mcp_errors_and_unreadable_content(self):
+  for reply in ({'isError':True,'structuredContent':{'orders':[]}},
+                {'content':[{'type':'text','text':'invalid JSON'}]}):
+   with self.subTest(reply=reply),patch.object(self.factory,'request',return_value=reply) as request:
+    with self.assertRaises(oauth.SetupRequired):
+     trade.inactive_order_readback(app.connect,1,self.root,self.factory)
+    request.assert_called_once_with('tools/call',{'name':'list_orders','arguments':{
+     'portfolioId':'root','statusGroup':'INACTIVE','scope':'DIRECT','limit':50}})
+ def test_inactive_order_readback_never_rotates_an_expired_token(self):
+  with app.connect() as db:
+   db.execute('UPDATE oauth_tokens SET expires=0 WHERE user_id=1')
+  with app.connect() as witness,patch.object(oauth,'access_token') as refresh:
+   before=witness.execute('PRAGMA data_version').fetchone()[0]
+   with self.assertRaises(oauth.SetupRequired):
+    trade.inactive_order_readback(app.connect,1,self.root,self.factory)
+   refresh.assert_not_called()
+   self.assertEqual(witness.execute('PRAGMA data_version').fetchone()[0],before)
+  self.assertEqual(self.calls,[])
  def test_buying_power_checked_per_currency_without_guessing(self):
   self.account_data={'accounts':[{'currency':'DKK','buyingPower':'100.127','cash':'500'},{'currency':'EUR','buyingPower':'25','cash':'100'},{'currency':'USD','cash':'200','withdrawalPower':'10'}]}
   request=dict(self.request,report_id='@manual-buy',candidate_id='',size_mode='amount',order_type='MARKET',currency='DKK',size='101')
