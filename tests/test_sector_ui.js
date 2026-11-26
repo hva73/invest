@@ -30,4 +30,56 @@ click({sectorScope:'all'});html=ui.render(state);assert.match(html,/DELVIS FORDE
 click({sectorScope:'1'});html=ui.render(state);assert.match(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);
 click({sectorScope:'2'});html=ui.render(state);assert.match(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);
 payload.dashboard.accounts[1].parent_external_id='andet';click({sectorScope:'1'});html=ui.render(state);assert.doesNotMatch(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);assert.doesNotMatch(html,/DELVIS FORDELING/);
+await testOwnerChanges();
 console.log('PASS: collection holdings included in total and parent scope; chart, drilldown and percentages work')})().catch(e=>{console.error(e);process.exit(1)});
+
+async function testOwnerChanges(){
+ const requests=[];
+ let refreshes=0;
+ ui.setup({
+  api:()=>new Promise((resolve,reject)=>requests.push({resolve,reject})),
+  refresh:()=>{refreshes++},
+  escape:String
+ });
+ const render=(username,dashboard)=>ui.render({user:{username},dashboard});
+ const tick=()=>new Promise(resolve=>setImmediate(resolve));
+ const snapshot='2026-11-27T10:00:00Z';
+ const result=marker=>({...payload,dashboard:{...payload.dashboard,marker,snapshot_at:snapshot}});
+
+ render('A');
+ render('B');
+ assert.equal(requests.length,2,'B must start immediately');
+ requests[0].resolve(result('stale A'));
+ await tick();
+ assert.match(render('B'),/Henter dine sektordata/);
+ assert.equal(requests.length,2,'stale completion must leave B busy');
+ assert.equal(refreshes,0);
+ requests[1].resolve(result('current B'));
+ await tick();
+ assert.match(render('B'),/FORSIDEGRAF current B/);
+ assert.equal(refreshes,1);
+
+ render('A');
+ render('B');
+ render('A');
+ assert.equal(requests.length,5,'returning to A starts a new request');
+ requests[4].resolve(result('new A'));
+ await tick();
+ assert.match(render('A'),/FORSIDEGRAF new A/);
+ assert.equal(refreshes,2);
+ requests[2].resolve(result('old A'));
+ requests[3].reject(new Error('old B'));
+ await tick();
+ assert.match(render('A'),/FORSIDEGRAF new A/);
+ assert.equal(refreshes,2);
+ assert.equal(requests.length,5);
+
+ const newer={snapshot_at:'2026-11-27T11:00:00Z'};
+ render('A',newer);
+ render('A',newer);
+ assert.equal(requests.length,6,'new snapshot refreshes once despite stale B error');
+ requests[5].resolve(result('refreshed A'));
+ await tick();
+ assert.match(render('A'),/FORSIDEGRAF refreshed A/);
+ assert.equal(refreshes,3);
+}
