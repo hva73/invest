@@ -3038,5 +3038,27 @@
     "follow_base": true,
     "reserve_plan_id": "shared_data/scheduler/pluto-saturated-minute-skips-sqlite-writer",
     "reserve_goal": "shared_data/scheduler"
+  },
+  {
+    "issue": 14,
+    "generation": 35,
+    "role": "data",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "18937bec961e351e338e303853ae18928e1b68c7",
+    "dependencies": [
+      "14:33"
+    ],
+    "paths": [
+      "tests/test_hotwatch_engine.py"
+    ],
+    "task": "Approved roadmap resources/scale (Worker- og k\u00f8kapacitet). Exact existing source anchor: tests/test_hotwatch_engine.py :: def test_leases_protect_pause_and_worker_restart(self):. Implement only this bounded change: Genvurd\u00e9r kun kapacitetsdelen af den bevarede 14:32-diff som \u00e9n selvst\u00e6ndig SQLite-accepttest af engine.claim(). Genbrug den eksisterende HotWatch-fixture med \u00e9n ledig, forfalden watch og s\u00e6t samtidighedsgr\u00e6nsen til \u00e9n. Opret tre andre watches, som ikke er forfaldne. Giv \u00e9n et token med fremtidig udl\u00f8bstid, \u00e9n et udl\u00f8bet token og \u00e9n en fremtidig lease_until uden token. Fors\u00f8g at claime den forfaldne watch. Fjern derefter kun tokenet fra den f\u00f8rste watch og gentag ved samme injicerede tidspunkt. Afgr\u00e6ns testen til opt\u00e6llingen af optagne pladser.. Acceptance: Det f\u00f8rste kald returnerer None og efterlader den forfaldne watch uden token. Det andet kald tildeler netop den forfaldne watch et token og rapporterer diagnostic_occupied_workers lig med 1. Testen bruger checkoutens eksisterende SQLite-skema og kr\u00e6ver hverken indeks\u00e6ndringen eller det blokerede arbejde fra 14:32.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_hotwatch_engine.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 14:32; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "resources/scale/hotwatch-capacity-counts-only-current-owned-leases",
+    "reserve_goal": "resources/scale",
+    "reserve_reassessment": "14:32@f51acb8cab8424be939239ec7463608815fe05ad54a7d1da1a517a70a98941a2"
   }
 ]
