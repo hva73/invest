@@ -67,6 +67,13 @@ def cost(url):
  if endpoint in ('search','exchanges-list','exchange-details','exchange-symbol-list','calendar','eod','splits','div'):return 1
  return None
 
+def _check_http_cooldown(state,now):
+ retry_at=state.get('http_retry_at',0)
+ if retry_at>now:
+  error=EngineError('PROVIDER_RATE_BUDGET',429)
+  error.retry_after_s=retry_at-now
+  raise error
+
 def _check_ws_cooldown(state,now):
  retry_at=state.get('ws_retry_at',0)
  if retry_at>now:
@@ -80,9 +87,10 @@ class Capacity:
  def reserve(self,units=None,now=None,endpoint=None,market=None):
   now=time.time() if now is None else now;window=int(now//60)
   with self.connect() as c:
-   c.execute('BEGIN IMMEDIATE');state=read(c);limit=configured_limit(state.get('http_provider_limit',DOCUMENTED_HTTP_LIMIT))
-   if state.get('http_retry_at',0)>now:
-    error=EngineError('PROVIDER_RATE_BUDGET',429);error.retry_after_s=state['http_retry_at']-now;raise error
+   _check_http_cooldown(read(c),now)
+   c.execute('BEGIN IMMEDIATE');state=read(c)
+   _check_http_cooldown(state,now)
+   limit=configured_limit(state.get('http_provider_limit',DOCUMENTED_HTTP_LIMIT))
    row=c.execute("SELECT used FROM hw_request_budget WHERE user_id=0 AND source='eodhd' AND window=?",(window,)).fetchone();used=row['used'] if row else 0
    if used>=limit:raise EngineError('PROVIDER_RATE_BUDGET',429)
    # The provider's remaining count also includes requests from other clients.
