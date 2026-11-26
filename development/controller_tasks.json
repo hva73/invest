@@ -2571,5 +2571,25 @@
     "follow_base": true,
     "reserve_plan_id": "ui/desktop/desktop-preview-search-discards-outdated-query",
     "reserve_goal": "ui/desktop"
+  },
+  {
+    "issue": 54,
+    "generation": 30,
+    "role": "desktop",
+    "priority": 1,
+    "status": "ready",
+    "base_branch": "codex/architecture-reset-20261126",
+    "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+    "dependencies": [],
+    "paths": [
+      "tests/browser_desktop_trade.py"
+    ],
+    "task": "Approved roadmap ui/desktop (Desktop 2.0). Exact existing source anchor: tests/browser_desktop_trade.py :: if(name === 'trade/preview') return {};. Implement only this bounded change: Genvurd\u00e9r kun ventetilstanden fra den bevarede 54:27-diff. Mont\u00e9r det eksisterende TradeUI-panel p\u00e5 en separat side i browserfixturen, v\u00e6lg fixturens aktiv og depot, og indsend \u00e9t testestimat p\u00e5 150 DKK. Hold det stubbede preview-svar tilbage, mens testen kontrollerer status, knap og kaldsliste. Afslut den separate side efter kontrollen. Opdelingen kr\u00e6ver ingen fixtur for et vellykket svar og \u00e6ndrer ingen produktkode.. Acceptance: Mens svaret afventer, vises \u00abHenter testestimat fra Pluto\u2026\u00bb, estimatknappen er deaktiveret, og resultatfeltet er tomt. Kaldslisten indeholder pr\u00e6cis \u00e9t trade/preview-kald med det valgte aktiv og depot samt 150 DKK. De eksisterende k\u00f8b- og salgsscenarier best\u00e5r.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_trade.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:27; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+    "local_review": true,
+    "local_repair": true,
+    "follow_base": true,
+    "reserve_plan_id": "ui/desktop/desktop-read-only-estimate-shows-pending-state",
+    "reserve_goal": "ui/desktop",
+    "reserve_reassessment": "54:27@dcc9e6346d890f6b48e8d60a464d817da4e4c8e900a934aeb820c36f1909fc3e"
   }
 ]
