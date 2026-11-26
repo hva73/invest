@@ -136,6 +136,23 @@ class Jobs(unittest.TestCase):
    pid=c.execute("INSERT INTO portfolios(user_id,name,source,updated) VALUES(?,'Fixture','pluto',0)",(self.uid,)).lastrowid
    jobs.enqueue(c,'pluto_data',self.uid,'pluto-fixture',0,pid)
   return pid
+ def test_late_pluto_success_preserves_reclaimed_success(self):
+  pid=self.enqueue_pluto()
+  reclaimed={'observed':'2026-01-02T12:00:00+00:00','errors':[]}
+  delayed={'observed':'2026-01-02T12:01:00+00:00','errors':['positions: fixture']}
+  claims=[]
+  def delayed_read(connect,user_id,portfolio_id):
+   with patch('portfolio_data.read',return_value=reclaimed):
+    claims.append(jobs.run_one(connect,at=601))
+   return delayed
+  with patch('portfolio_data.read',side_effect=delayed_read):
+   self.assertTrue(jobs.run_one(app.connect,at=0))
+  self.assertEqual(claims,[True])
+  with app.connect() as c:
+   self.assertEqual(portfolio_data.snapshots(c,self.uid),{
+    str(pid):{'data':reclaimed,'last_error':None,'last_attempt':reclaimed['observed']}})
+   job=c.execute('SELECT status,attempts,result,lease,lease_until FROM jobs').fetchone()
+   self.assertEqual(tuple(job),('done',2,'Pluto-data hentet',None,None))
  def test_late_pluto_failure_preserves_reclaimed_success(self):
   pid=self.enqueue_pluto()
   fresh={'observed':'2026-01-02T12:00:00+00:00','errors':[]}
