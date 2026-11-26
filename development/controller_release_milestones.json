@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-26T12:01:00Z",
+  "updated_at": "2026-11-26T13:10:36Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -409,7 +409,7 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "in_progress",
       "issue": 54,
-      "evidence": "Ny ejer-godkendt resetopgave #54:3 på b84679a6: STARTED/WORKING, incomplete 7186623292, efterfølgende TESTING/CONTINUING 7186847306. Tidligere #300 ae7c2724 bevaret, dedikeret mobil CI 45777839331 SKIPPED; ingen samlet browseraccept.",
+      "evidence": "#54:3 bevaret blocked; ejerafgrænset #54:4 på f18e9198 nåede WORKING/TESTING/CONTINUING, men terminal blocked:incomplete 7192238064. Ingen ny PR eller samlet browseraccept; bevar begge worktrees. Ældre #300 ae7c2724 ikke integreret.",
       "subgoals": [
         {
           "id": "reuse",
@@ -421,10 +421,10 @@
         {
           "id": "mobile",
           "title": "Mobil 2.0",
-          "status": "in_progress",
-          "evidence": "#54:3 på resetbase b84679a6 er genoptaget efter incomplete receipt (CONTINUING 7186847306). Tidligere #300 ae7c2724 bevaret; ikke integreret og mobil CI skipped. Ingen ny generation.",
+          "status": "blocked",
+          "evidence": "#54:4 blocked:incomplete 7192238064 efter TESTING 7192124503; ingen ny PR. #54:3 bevaret, ingen blind genstart eller dublet.",
           "owner_role": "mobile",
-          "updated_at": "2026-11-26T09:12:00Z"
+          "updated_at": "2026-11-26T13:10:36Z"
         },
         {
           "id": "desktop",
@@ -442,7 +442,7 @@
           "owner_role": "mobile"
         }
       ],
-      "updated_at": "2026-11-26T09:12:00Z"
+      "updated_at": "2026-11-26T13:10:36Z"
     },
     {
       "id": "load",
@@ -450,7 +450,7 @@
       "title": "100 brugere og skaleringsmåling",
       "status": "in_progress",
       "issue": 14,
-      "evidence": "#315:1 arbejder på ren resetbase b84679a6 med samme krav til korrekthed/SQLite-arbejde; blocked:incomplete receipt 7186621071. Ingen ny PR eller målt accept. Tidligere #311 b10c3145 HOLD og isoleret read-path proof 7183673346 bevares.",
+      "evidence": "#315:1 genoptaget, draft #317 cc44d938 på f18e9198, exact CI 45825719688 motor PASS. Uafhængig lokal HOLD 7192983957: tværtenant aktiveringsrækkefølge og SQLite-work regression. Koordinator reproducerede rækkefølge og testede afgrænset simplere alternativ, kommentar 7193043758. Ikke integreret eller kapacitetsaccept.",
       "subgoals": [
         {
           "id": "adapter",
@@ -462,10 +462,10 @@
         {
           "id": "queue",
           "title": "100 brugere og fair køer",
-          "status": "blocked",
-          "evidence": "#315:1 incomplete 7186621071, HANDOVER 7186629068; bevaret lokalt arbejde, ingen blind genstart. Tidligere #311 b10c3145 CI 45723415514 PASS, HOLD 7178220845; forsøgsindeks 7183673346 ikke integreret.",
+          "status": "review",
+          "evidence": "#317 cc44d938 CI 45825719688 SUCCESS, men HOLD 7192983957. Isoleret SQLite-reproduktion: base vælger tenant 2, draft tenant 3 ved close/reopen før første write; simplere per-position alternativ vælger tenant 2 og reducerer VM-arbejde i 100-bruger normaltilfælde. Kodevej/7 scenarier afleveret 7193043758; fuld test udestår.",
           "owner_role": "data",
-          "updated_at": "2026-11-26T09:12:00Z"
+          "updated_at": "2026-11-26T13:10:36Z"
         },
         {
           "id": "resources",
@@ -482,7 +482,7 @@
           "owner_role": "data"
         }
       ],
-      "updated_at": "2026-11-26T09:12:00Z"
+      "updated_at": "2026-11-26T13:10:36Z"
     },
     {
       "id": "release",
@@ -490,15 +490,15 @@
       "title": "Samlet releasekandidat, backup og migration",
       "status": "blocked",
       "issue": 57,
-      "evidence": "Kontrolleret reset #315. Ejer har efter DRAIN bekræftet genstart af A #315:1 og B #54:3. Faktisk købase b84679a6 på codex/architecture-reset-20261126. Begge leverancer har incomplete-receipts; B efterfølgende CONTINUING. Ingen fælles kandidat eller produktions-GO. Tidligere accepterede dele bevares som kilder.",
+      "evidence": "Godkendt reset #315: CI-rettelse #316 integreret f18e9198; A #315:1 leveret draft #317 cc44d938, review-HOLD; B #54:4 terminal incomplete, bevaret. Ældre accepterede V2-dele forbliver kilder, ikke fælles release. Ingen ejer-GO.",
       "subgoals": [
         {
           "id": "integrate",
           "title": "Samlet releasegren",
           "status": "in_progress",
-          "evidence": "Aktuel resetbase b84679a6 vs v2 e4b59436: 14 V2-only/11 reset-only commits. Eksakt blob-afstemning #315 kommentar 7187616065: Strategy Lab og dens test har uændret fælles base; market UI, chart-test og CI kræver afgrænset integration. Ingen merge eller samlet CI endnu.",
+          "evidence": "Ny aktiv resetbase f18e91982e3d5aba97e39a0e51e3c76376e73746 (#316 merged). Tidligere reuse-afstemning #315 7187616065: Strategy Lab + tests kan genbruges med runtime-module manifest, market UI/chart-test/CI kræver afgrænset integration. #317 ikke integreret.",
           "owner_role": "release",
-          "updated_at": "2026-11-26T09:12:00Z"
+          "updated_at": "2026-11-26T13:10:36Z"
         },
         {
           "id": "preflight",
@@ -511,12 +511,12 @@
           "id": "ci",
           "title": "Samlet regression og rollback",
           "status": "review",
-          "evidence": "PR #316 exact 3062ad97, run 45790780479/job 139808958011 SUCCESS: 682 unittest-kørsler (ikke unikke), chart/desktop/mobilnavigation browser PASS, eksakt checkout. Account-isolation fixture findes ikke endnu. CI-rettelsen afventer sikker integration; ingen fælles produkt-CI eller ny base mens A/B har bevaret incomplete-worktrees. #314 90a17fce offline CI 45794329945: 106 PASS; disjoint recovery-rettelse i kilde, faktisk Mac-genoptagelse ikke verificeret. Ny uafhængig review-HOLD på #314 90a17fce: 4/4 ændrede terminalstatusser efter incomplete recovery bevarer fejlagtigt gammel receipt; samme-state retry korrekt. Reproduktion og konkret rettelse på #314 kommentar 7190288043. Ingen ny Mac-installation. Koordinatorens konkrete receipt-transition kodeforslag fra eksakt blob 0c688587: 9/9 isolerede unittest PASS, herunder tabt POST-svar og senere draft-promotion; afleveret på #314 kommentar 7191460933. Dispatcher-integration, fuld CI og lokal recovery udestår.",
+          "evidence": "#316 exact 3062ad97 integreret f18e9198; run 45818341794 job 139903784282 motor og UI-regression faktisk PASS. #317 cc44d938 run 45825719688 job 139929222813 motor PASS, review HOLD 7192983957; ikke samlet produktaccept. #314 90a17fce offline CI 45794329945 106 PASS, receipt-transition HOLD 7190288043 og testet rettelsesforslag 9/9 i 7191460933, ikke verificeret installeret. Account-isolation og fælles release-CI udestår.",
           "owner_role": "release",
-          "updated_at": "2026-11-26T12:01:00Z"
+          "updated_at": "2026-11-26T13:10:36Z"
         }
       ],
-      "updated_at": "2026-11-26T12:01:00Z"
+      "updated_at": "2026-11-26T13:10:36Z"
     },
     {
       "id": "go",
