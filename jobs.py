@@ -114,10 +114,12 @@ def run_one(connect,fetcher=None,at=None):
     except Exception:
         # Never persist exception text: network/library errors may include credentials.
         with connect() as c:
-            if job['kind']=='pluto_data':
+            updated=c.execute("""UPDATE jobs SET status=?,result='Kørslen fejlede; kontrollér datakilde og serveropsætning',
+                                 available=?,lease=NULL,lease_until=NULL WHERE id=? AND lease=? AND status='running'""",
+                              ('failed' if job['attempts']+1>=3 else 'queued',stamp+900,job['id'],lease))
+            if updated.rowcount==1 and job['kind']=='pluto_data':
                 import portfolio_data
                 portfolio_data.mark_failed(c,job['user_id'],job['portfolio_id'],'Automatisk Pluto-læsning fejlede; gemte data kan være forældede')
-            c.execute("UPDATE jobs SET status=?,result='Kørslen fejlede; kontrollér datakilde og serveropsætning',available=?,lease=NULL,lease_until=NULL WHERE id=? AND lease=?",('failed' if job['attempts']+1>=3 else 'queued',stamp+900,job['id'],lease))
     return True
 
 def status(connect,user_id):
