@@ -363,7 +363,95 @@ async function checkValidation(change, outcome) {
   assert.equal(button.textContent, change ? label : expected[outcome], String(change));
 }
 
+async function checkManualStart(change, stage, fail) {
+  const {context, session, requests, click, mount, dialog, records} = settingsFixture();
+  const status = {}, results = {};
+  const button = {dataset: {engineManual: '0'}, isConnected: true, closest: () => dialog};
+  let activeDialog = dialog;
+  const lookup = context.document.getElementById;
+  context.document.getElementById = id => ({
+    'engine-dialog': activeDialog, 'engine-manual-results': results, 'engine-manual-status': status
+  })[id] || lookup(id);
+  dialog.contains = node => node === button;
+  const query = dialog.querySelector;
+  dialog.querySelector = selector => selector === '#engine-manual-status' ? status : query(selector);
+  const toggle = open => {
+    dialog.open = open;
+    records.push({type: 'attributes', target: {matches: selector => selector === 'dialog'}});
+  };
+  let closes = 0;
+  dialog.close = () => { closes++; toggle(false); };
+  dialog.open = true;
+  context.FormData = class { get() { return 'TEST'; } };
+  const calls = [];
+  let resolve, reject;
+  session.control = (url, body) => {
+    calls.push([url, {...body}]);
+    if (url.includes('/manual-search?')) return {assets: [{asset_id: 'asset/1', ticker: 'TEST'}]};
+    return new Promise((yes, no) => { resolve = yes; reject = no; });
+  };
+  await context.window.EngineUI.submit({target: {id: 'engine-manual-search', isConnected: true}, preventDefault() {}});
+  assert.match(results.innerHTML, /data-engine-manual="0"/);
+  const detailReads = [];
+  session.detail = url => {
+    detailReads.push(url);
+    if (url.includes('/samples?') || url.includes('/events?')) return {items: []};
+    if (url === 'state') return {portfolios: []};
+    if (stage === 'detail' && fail) throw new Error('manual offline');
+    return {session: {request: {ticker: 'TEST'}, status: 'ACTIVE'}};
+  };
+  const pending = click(button);
+  assert.deepEqual(calls, [
+    ['v1/hotwatch/manual-search?is_test=false', {query: 'TEST'}],
+    ['v1/hotwatch/manual-start?is_test=false', {asset_id: 'asset/1', ticker: 'TEST'}]
+  ]);
+  assert.equal(button.disabled, true);
+  const busy = status.textContent;
+  const response = {session: {watch_id: 'manual/1'}};
+  let reload;
+  if (stage !== 'start') {
+    resolve(response);
+    await settle();
+    assert.equal(closes, 1);
+    assert.equal(requests.length, 1);
+    reload = requests.shift();
+  }
+  if (change === 'epoch') session.epoch++;
+  if (change === 'owner') session.owner = 'other-owner';
+  if (change === 'mode') mount(true).succeed();
+  if (change === 'detached') button.isConnected = false;
+  if (change === 'replaced') activeDialog = {open: true};
+  if (change === 'dialog') toggle(!dialog.open);
+  const error = new Error('manual offline');
+  if (reload) {
+    if (stage === 'reload' && fail) reload.reject(error);
+    else reload.succeed();
+  } else if (fail) reject(error);
+  else resolve(response);
+  await settle();
+  const success = !change && !fail;
+  assert.equal(requests.length, Number(success && stage === 'start'));
+  if (requests.length) requests.shift().succeed();
+  assert.equal(await pending, true);
+  assert.equal(closes, Number(stage !== 'start' || success));
+  assert.equal(status.textContent, !change && fail ? error.message : busy);
+  assert.equal(button.disabled, Boolean(change) || !fail);
+  assert.equal(detailReads.length, stage === 'detail' && fail ? 1 : success ? 4 : 0);
+  if (success) {
+    assert.equal(detailReads[0], 'v1/hotwatch/sessions/manual%2F1?is_test=false');
+    assert.match(dialog.innerHTML, /TEST · motorforløb/);
+    assert.equal(dialog.open, true);
+  }
+}
+
 async function main() {
+  await checkManualStart(null, 'detail', true);
+  for (const stage of ['start', 'reload']) {
+    for (const change of ['epoch', 'owner', 'mode', 'dialog', 'replaced', 'detached', null]) {
+      await checkManualStart(change, stage, false);
+      await checkManualStart(change, stage, true);
+    }
+  }
   for (const change of ['epoch', 'owner', 'mode', 'detached', null]) {
     await checkValidation(change, 'valid');
     await checkValidation(change, 'error');
