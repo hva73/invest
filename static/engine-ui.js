@@ -154,8 +154,8 @@ window.EngineUI=(()=>{
  function candidatePortfolios(assetId){const snapshots=portfolios.map(p=>portfolioSnapshots[String(p.id)]);return {ids:portfolios.filter((p,i)=>snapshots[i]?.data?.positions_complete&&(snapshots[i].data.positions||[]).some(row=>row.kind==='holding'&&row.asset_id===assetId&&Number(row.quantity)>0)).map(p=>p.id),complete:snapshots.length>0&&snapshots.every(x=>x?.data?.positions_complete&&!x?.last_error)}}
  function formStatus(message){const n=document.getElementById('engine-form-status');if(n)n.textContent=message}
  let latestInstrumentRequest=0;
- function captureInstrumentRequest(index){
-  const item=candidates[index],form=document.getElementById('engine-create'),ticket=++latestInstrumentRequest;
+ function captureInstrumentRequest(index,ticket=++latestInstrumentRequest){
+  const item=candidates[index],form=document.getElementById('engine-create');
   const epoch=sessionEpoch(),user=owner(),test=mode,version=interaction;
   return ()=>ticket===latestInstrumentRequest&&epoch===sessionEpoch()&&user===owner()&&
    test===mode&&version===interaction&&form?.isConnected&&document.getElementById('engine-create')===form&&
@@ -231,7 +231,13 @@ window.EngineUI=(()=>{
    if(valid())status.textContent='Pluto-søgningen kunne ikke gennemføres. Prøv igen.';
   }
   return true;
- }if(e.target.id!=='engine-create')return false;e.preventDefault();const ticketOwner=owner(),ticketMode=mode;const form=e.target,f=new FormData(form),selected=candidates[Number(f.get('candidate'))];if(!selected)throw Error('Vælg en kandidat.');const latestChoices=await api(base+'/start-candidates'+query());if(owner()!==ticketOwner||mode!==ticketMode||!form.isConnected)return true;const availableIds=new Set(latestChoices.candidates.map(x=>x.candidate.candidate_id));if((batchCandidates.length?batchCandidates:[selected]).some(x=>!availableIds.has(x.candidate.candidate_id))){formStatus('En valgt kandidat har nu en åben eller pauseret HOT WATCH, eller er ikke længere aktiv. Luk vinduet og vælg igen.');return true}selected.provider_symbol=String(f.get('provider_symbol')||'').trim()||selected.provider_symbol||null;let items=batchCandidates.length?batchCandidates.slice():[selected];for(const item of items)if(!mode&&!item.instrument){const index=candidates.indexOf(item),valid=captureInstrumentRequest(index);
+ }if(e.target.id!=='engine-create')return false;e.preventDefault();const ticketOwner=owner(),ticketMode=mode;const form=e.target,f=new FormData(form),index=Number(f.get('candidate')),selected=candidates[index];
+ if(!selected)throw Error('Vælg en kandidat.');
+ // Checking availability must not supersede an instrument lookup.
+ const selectionCurrent=captureInstrumentRequest(index,latestInstrumentRequest);
+ const latestChoices=await api(base+'/start-candidates'+query());
+ if(!selectionCurrent()||!form.isConnected)return true;
+ const availableIds=new Set(latestChoices.candidates.map(x=>x.candidate.candidate_id));if((batchCandidates.length?batchCandidates:[selected]).some(x=>!availableIds.has(x.candidate.candidate_id))){formStatus('En valgt kandidat har nu en åben eller pauseret HOT WATCH, eller er ikke længere aktiv. Luk vinduet og vælg igen.');return true}selected.provider_symbol=String(f.get('provider_symbol')||'').trim()||selected.provider_symbol||null;let items=batchCandidates.length?batchCandidates.slice():[selected];for(const item of items)if(!mode&&!item.instrument){const index=candidates.indexOf(item),valid=captureInstrumentRequest(index);
   let instrument;
   try{instrument=await resolveInstrument(index,null,valid)}catch(error){
    if(valid())notice(error.details?.code||error.message,'error');

@@ -810,7 +810,40 @@ async function checkInstrumentCaller(caller, stale, outcome) {
   if (stale) assert.equal(JSON.stringify([nodes, rows]), before);
 }
 
+async function checkPendingSubmitLookup(sameCandidate, quoteFirst) {
+  const {ui, rows, elements, form, status, session, QuotePromise} = instrumentFixture();
+  const calls = [];
+  session.creation = (url, body) => new QuotePromise(resolve => calls.push({url, body, resolve}));
+  const submit = ui.submit({target: form, preventDefault() {}});
+  const index = sameCandidate ? 0 : 1;
+  elements.candidate.value = String(index);
+  const target = sameCandidate ? {id: 'engine-asset-choice', value: 'asset'} : elements.candidate;
+  const lookup = ui.change({target});
+  assert.deepEqual(calls.map(call => call.url), ['v1/hotwatch/start-candidates?is_test=false', 'market/quote']);
+  assert.deepEqual({...calls[1].body}, {report_id: 'report', candidate_id: rows[index].candidate.candidate_id,
+    is_test: false, ...(sameCandidate ? {asset_id: 'asset'} : {})});
+  const finishLookup = async () => {
+    calls[1].resolve({asset_id: 'asset', currency: 'USD', exchange: 'NASDAQ'});
+    await lookup;
+  };
+  if (quoteFirst) await finishLookup();
+  calls[0].resolve({candidates: rows});
+  await settle();
+  assert.equal(calls.length, 2, 'obsolete submit started another request');
+  assert.equal(await submit, true);
+  if (!quoteFirst) await finishLookup();
+  assert.match(status.textContent, /1 matchende depot/);
+  assert.deepEqual([elements.asset_id.value, elements.exchange.value, elements.quote_currency.value],
+    ['asset', 'NASDAQ', 'USD']);
+  assert.deepEqual([...rows[index].portfolio_ids], [2]);
+  assert.deepEqual(elements.portfolios.options.map(option => option.selected), [false, true]);
+  if (!sameCandidate) assert.equal(rows[0].instrument, undefined);
+}
+
 async function main() {
+  for (const sameCandidate of [false, true]) {
+    for (const quoteFirst of [false, true]) await checkPendingSubmitLookup(sameCandidate, quoteFirst);
+  }
   for (const caller of ['batch', 'submit', 'asset']) {
     await checkInstrumentCaller(caller, 'after-caller', 'error');
     if (caller === 'submit') await checkInstrumentCaller(caller, 'after-caller', 'choices');
