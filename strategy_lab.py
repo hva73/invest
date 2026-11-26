@@ -48,13 +48,13 @@ def compare(connect,uid,data):
     if not rows:raise ValueError('Der er endnu ingen gemte observationer at sammenligne.')
     truncated=len(rows)>MAX_CALCULATIONS;rows=rows[:MAX_CALCULATIONS]
     outcomes=[{'strategy_id':s['strategy_id'],'version':s['version'],'checksum':checksum(s),'counts':{'BUY':0,'SELL':0,'REDUCE':0,'WAIT':0,'NO_DATA':0,'PAUSE':0},'missing_indicators':set(),'timeline':[],'early_watch':{'met':0,'not_met':0,'unknown':0,'first_met_at':None} if s['schema_version']==2 else None,'first_buy_at':None} for s in specs]
-    states=[{} for _ in specs];window=[];previous_id=None;previous_time=None;skipped=0
+    states=[{} for _ in specs];window=[];previous_id=None;last_evaluated_at=None;skipped=0
     from hotwatch_engine import sample_errors
     for r in rows:
         try:
             calc=json.loads(r['calculation']);sample=json.loads(r['sample']);at=stamp(r['calculated'])
             if checksum(sample)!=r['sample_digest']:raise ValueError('Observation checksum mismatch')
-            if not r['received'] or stamp(r['received'])>at or previous_time and at<previous_time:raise ValueError('Chronology unavailable')
+            if not r['received'] or stamp(r['received'])>at or (last_evaluated_at is not None and at<last_evaluated_at):raise ValueError('Chronology unavailable')
             if not isinstance(calc.get('risk_parameters'),dict) or not isinstance(calc.get('position_context'),dict) or type(calc.get('new_market_observation')) is not bool:raise ValueError('Historical context unavailable')
             sample['context']=copy.deepcopy(calc['position_context']);sample_errors(sample,request,at)
             new=bool(calc['new_market_observation'])
@@ -62,7 +62,7 @@ def compare(connect,uid,data):
             if new:
                 if previous_id==r['sample_row_id']:raise ValueError('Duplicate market observation')
                 window.append(sample);window=window[-120:]
-            previous_id=r['sample_row_id'];previous_time=at
+            previous_id=r['sample_row_id']
             bars=verified_bar_samples(sample,request,at) if sample.get('bar_history') else None
             evaluated=[]
             for i,spec in enumerate(specs):
@@ -91,7 +91,8 @@ def compare(connect,uid,data):
                     if watch_status=='met' and out['early_watch']['first_met_at'] is None:out['early_watch']['first_met_at']=r['calculated']
                 if result['signal']=='BUY' and out['first_buy_at'] is None:out['first_buy_at']=r['calculated']
                 out['timeline'].append({'at':r['calculated'],'signal':result['signal'],'reason_codes':result['reason_codes'],'missing':sorted(missing),'early_watch':watch_status})
+            last_evaluated_at=at
         except (ValueError,TypeError,KeyError,ArithmeticError,AttributeError,IndexError):
-            skipped+=1;states=[{} for _ in specs];window=[];previous_id=None;previous_time=None
+            skipped+=1;states=[{} for _ in specs];window=[];previous_id=None
     for out in outcomes:out['missing_indicators']=sorted(out['missing_indicators']);out['timeline']=out['timeline'][-12:]
     return {'watch_id':data['watch_id'],'ticker':request['ticker'],'is_test':data['is_test'],'evaluated':len(rows)-skipped,'skipped':skipped,'truncated':truncated,'limit':MAX_CALCULATIONS,'from':rows[0]['calculated'],'to':rows[-1]['calculated'],'strategies':outcomes,'limitations':['Kun gemte observationer og tidligere risikokontekst er anvendt.','Historisk warmup, nyhedsdata og alle hændelser er ikke fuldt rekonstrueret.','Ingen handler, afkast, omkostninger eller faktisk eksekvering er simuleret.']}
