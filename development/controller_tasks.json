@@ -1746,7 +1746,7 @@
     "generation": 16,
     "role": "data",
     "priority": 1,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "cbb37703356ffae9f3d2beba37265d17e0b706db",
     "dependencies": [],
