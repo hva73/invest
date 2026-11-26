@@ -271,6 +271,7 @@ class Trading(unittest.TestCase):
   item={**root,'assetId':order['assetId'],'side':order['side'],'orderType':order['orderType'],'timeInForce':order['timeInForce']}
   depot={'portfolioId':proposal['payload']['portfolioId']}
   for identity in (root,{**root,'orderIntents':[]},{'orderIntents':[item]},{**root,'orderIntents':[item]},item,
+                   {'orderIntentId':None,'orderIntents':[item]},
                    {**root,**depot},{'orderIntents':[{**item,**depot}]},{**root,**depot,'orderIntents':[{**item,**depot}]},
                    {**root,'collectionId':'extra-root','orderIntents':[{**item,'collectionId':'extra-item'}]}):
    with self.subTest(identity=identity):
@@ -278,6 +279,7 @@ class Trading(unittest.TestCase):
     self.calls.clear()
     refreshed=trade.check(app.connect,1,proposal['id'],self.factory)['proposal']
     self.assertEqual(refreshed['response'],self.intent_status)
+    self.assertEqual(json.loads(trade.get(app.connect,1,proposal['id'])['response']),self.intent_status)
     self.assertEqual((refreshed['intent_id'],refreshed['status']),(reference,'sent'))
     self.assertEqual(self.calls,[{'name':'get_order_intent','arguments':root}])
  def test_check_collection_sell_matches_saved_collection_id(self):
@@ -335,11 +337,14 @@ class Trading(unittest.TestCase):
   root={'orderIntentId':proposal['intent_id']}
   item={**proposal['payload']['orders'][0],**root}
   foreign={'orderIntentId':'foreign'}
+  null_root={'orderIntentId':None}
   depot={'portfolioId':proposal['payload']['portfolioId']}
   other_depot={'portfolioId':'other-root'}
   invalid=[
    [],'accepted',{'status':'accepted'},foreign,{'orderIntents':[]},
-   {**foreign,'orderIntents':[item]},{'orderIntentId':None,'orderIntents':[item]},
+   {**foreign,'orderIntents':[item]},{'orderIntentId':'','orderIntents':[item]},null_root,{**null_root,'orderIntents':[]},
+   {**null_root,'side':'SELL','orderIntents':[item]},
+   {**null_root,**other_depot,'orderIntents':[item]},{**null_root,'orderIntents':[{**item,**other_depot}]},
    {**root,'assetId':'other'},{**root,'side':'SELL'},
    {**root,**other_depot},{'orderIntents':[{**item,**other_depot}]},
    {**root,**depot,'orderIntents':[{**item,**other_depot}]},
@@ -348,7 +353,7 @@ class Trading(unittest.TestCase):
   for nested in (None,{},[None],[item,item],[{**item,**foreign}],
                  [proposal['payload']['orders'][0]],[root],[{**item,'assetId':'other'}],
                  [{**item,'side':'SELL'}],[{**item,'orderType':'MARKET'}],[{**item,'timeInForce':'GTC'}]):
-   invalid.extend([{'orderIntents':nested},{**root,'orderIntents':nested}])
+   invalid.extend([{**identity,'orderIntents':nested} for identity in ({},root,null_root)])
   before=tuple(trade.get(app.connect,1,proposal['id']))
   for reply in invalid:
    with self.subTest(reply=reply):
