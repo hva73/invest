@@ -191,14 +191,18 @@ def inactive_order_readback(connect,user_id,portfolio_id,factory=None):
     if not isinstance(rows,list) or len(rows)>limit:
         raise TradeError('Plutos ordreliste har et ukendt format eller overskrider grænsen.')
     for record in ([page] if isinstance(page,dict) else []) + rows:
-        if not isinstance(record,dict) or record.get('isError') or record.get('error') or record.get('success') is False:
+        if (not isinstance(record,dict) or record.get('isError') or record.get('error')
+                or record.get('success',True) is not True):
             raise TradeError('Pluto returnerede en fejl eller en ugyldig ordrepost.')
         collection=record.get('collection')
-        if collection is not None and not isinstance(collection,dict):
-            raise TradeError('Plutos ordresvar har et ukendt Collection-format.')
-        for key in ('status','orderStatus','state'):
-            if key in record:
-                status=record[key]
+        # A terminal status can resolve a type hint, but cannot override an explicit active status.
+        for part in (record,record.get('holding'),collection):
+            if part is None:continue
+            if not isinstance(part,dict):
+                raise TradeError('Plutos ordresvar har et ukendt format.')
+            for key in ('status','orderStatus','state'):
+                if key not in part:continue
+                status=part[key]
                 if not isinstance(status,str) or not status.strip():
                     raise TradeError('Pluto returnerede en ugyldig ordrestatus.')
                 if status.strip().upper() in ('ACTIVE','ACTIVE_BUY'):

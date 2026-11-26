@@ -54,11 +54,12 @@ class Trading(unittest.TestCase):
   raw=[{'orderId':'one','status':'CANCELLED','filledQuantity':'0'},
        {'id':'two','portfolioId':'root:stable','collectionId':None,'collection':{'id':None,'collectionId':None},'status':'FILLED','providerDetail':{'fee':None}},
        {'orderId':'three','collection':None},
-       {'orderId':'four','type':'ACTIVE_BUY','status':'FILLED'}]
+       {'orderId':'four','type':'ACTIVE_BUY','status':'FILLED'},
+       {'orderId':'five','success':True,'status':'FILLED','holding':{'status':'FILLED'}}]
   boundary=[{'orderId':str(i)} for i in range(50)]
   with app.connect() as witness:
    before=witness.execute('PRAGMA data_version').fetchone()[0]
-   for page,records in (({'orders':raw,'nextToken':'more'},raw),([],[]),({'items':boundary},boundary),({'data':raw},raw)):
+   for page,records in (({'orders':raw,'success':True,'nextToken':'more'},raw),([],[]),({'items':boundary},boundary),({'data':raw},raw)):
     with self.subTest(envelope=type(page),count=len(records)):
      self.order_page=copy.deepcopy(page)
      self.calls.clear()
@@ -94,12 +95,17 @@ class Trading(unittest.TestCase):
            [{'id':'fallback','orderId':None}],[{**order,'isError':True}],[order]*51,
            {'orders':[{**order,'status':'ACTIVE_BUY'}]},
            {'orders':[{**order,'status':'ACTIVE_BUY','orderStatus':'FILLED'}]}]
+  for container in ('holding','collection'):
+   for status_key in ('status','orderStatus','state'):
+    conflicting={'orderId':'two','status':'FILLED',container:{status_key:'ACTIVE_BUY'}}
+    invalid.append({'orders':[order,conflicting]})
   for field,value in (('portfolioId','other'),('scope','COLLECTION'),('collectionId','child'),
                       ('collection',{'id':'child'}),('collection',{'collectionId':'child'}),
                       ('collection',{'id':None,'collectionId':'child'}),('collection','child'),('statusGroup','ACTIVE'),
                       ('status','ACTIVE_BUY'),('orderStatus','active_buy'),('state','ACTIVE'),
                       ('status',None),('status',{}),('status',' '),
-                      ('holding',{'type':'ACTIVE_BUY'})):
+                      ('holding',{'type':'ACTIVE_BUY'}),('holding','invalid'),
+                      ('success','false'),('success',1),('success',None)):
    conflicting={'orderId':'two','portfolioId':'root','collectionId':None,field:value}
    invalid.extend([{'orders':[order],field:value},[order,conflicting],{'orders':[order,conflicting]}])
   with app.connect() as witness:
