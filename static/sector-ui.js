@@ -1,6 +1,6 @@
 /* Sector analytics are display-only. Quotes and classifications retain their source. */
 window.SectorUI=(()=>{
- let api,esc,refresh,data=null,owner=null,loading=false,loadedAt=0,error='',scope='all',period='30',region='USA',selected='',chartMetric='amount',rotationMode='market',holdingsLimit=20,holdingsRequests={},holdingsTimer=null,holdingsOpen=false;
+ let api,esc,refresh,data=null,owner=null,ownerGeneration=0,loading=false,loadedAt=0,error='',scope='all',period='30',region='USA',selected='',chartMetric='amount',rotationMode='market',holdingsLimit=20,holdingsRequests={},holdingsTimer=null,holdingsOpen=false;
  const txt=v=>esc(v==null?'—':String(v));
  const amount=v=>v==null?'—':new Intl.NumberFormat('da-DK',{style:'currency',currency:'DKK'}).format(v);
  const pct=v=>v==null?'—':(v>0?'+':'')+new Intl.NumberFormat('da-DK',{minimumFractionDigits:2,maximumFractionDigits:2}).format(v)+' %';
@@ -17,7 +17,26 @@ window.SectorUI=(()=>{
  function fxInfo(currency){if(typeof currency!=='string'||!/^[A-Z]{3}$/.test(currency))return null;if(currency==='DKK')return {rate:1,source:'DKK'};const fx=data?.fx,age=fx?.source_date?Date.now()-Date.parse(fx.source_date+'T00:00:00Z'):NaN;if(age>=0&&age<=7*864e5){const rates=fx.rates||{},from=currency==='EUR'?1:number(rates[currency]),to=number(rates.DKK);if(from&&to)return {rate:to/from,source:'ECB'}}const q=(data?.fx_quotes||[]).find(x=>x.currency===currency&&x.event_time&&Date.now()-Date.parse(x.event_time)>=0&&Date.now()-Date.parse(x.event_time)<=7*864e5&&number(x.rate)>0);if(q)return {rate:Number(q.rate),source:'EODHD'};const inferred=plutoFx(currency);return inferred?{rate:inferred,source:'Pluto-estimat'}:null}
  function converted(m){if(!m)return null;const n=number(m.amount),info=fxInfo(m.currency);return n===null||!info?null:n*info.rate}
  function isCurrencyEstimate(m){return Boolean(m?.currency&&m.currency!=='DKK'&&fxInfo(m.currency))}
- function load(user,latestSnapshot){if(owner!==user){data=null;owner=user;error='';scope='all';selected='';holdingsRequests={};if(holdingsTimer)clearTimeout(holdingsTimer)}const newer=latestSnapshot&&data?.dashboard?.snapshot_at&&Date.parse(latestSnapshot)>Date.parse(data.dashboard.snapshot_at);if(loading||error||(data&&!newer&&Date.now()-loadedAt<60000))return;loading=true;const requested=owner;api('sector-intelligence').then(d=>{if(owner===requested){data=d;loadedAt=Date.now()}}).catch(()=>{if(owner===requested)error='Data kunne ikke hentes. Prøv at åbne siden igen.'}).finally(()=>{loading=false;if(owner===requested)refresh()})}
+ function load(user,latestSnapshot){
+  if(owner!==user){
+   ownerGeneration++;
+   loading=false;
+   data=null;owner=user;error='';scope='all';selected='';holdingsRequests={};if(holdingsTimer)clearTimeout(holdingsTimer)
+  }
+  const newer=latestSnapshot&&data?.dashboard?.snapshot_at&&Date.parse(latestSnapshot)>Date.parse(data.dashboard.snapshot_at);
+  if(loading||error||(data&&!newer&&Date.now()-loadedAt<60000))return;
+  loading=true;
+  const generation=ownerGeneration;
+  api('sector-intelligence').then(d=>{
+   if(generation!==ownerGeneration)return;
+   data=d;loadedAt=Date.now()
+  }).catch(()=>{
+   if(generation===ownerGeneration)error='Data kunne ikke hentes. Prøv at åbne siden igen.'
+  }).finally(()=>{
+   if(generation!==ownerGeneration)return;
+   loading=false;refresh()
+  })
+ }
  function scopeIds(){const accounts=data?.dashboard?.accounts||[];if(scope==='all')return null;const account=accounts.find(a=>String(a.id)===scope);if(!account)return new Set([scope]);const ids=new Set([scope]);if(account.kind==='portfolio'&&account.external_id)for(const child of accounts)if(child.kind==='collection'&&child.parent_external_id===account.external_id)ids.add(String(child.id));return ids}
  function scopedRows(){const ids=scopeIds();return (data?.dashboard?.positions||[]).filter(r=>!ids||ids.has(String(r.portfolio_id)))}
  function allocationCash(){
