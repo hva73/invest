@@ -35,7 +35,7 @@ jobs:
           assert subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip() == head
           paths = subprocess.check_output(['git','diff','--name-only','-z',base+'...'+head]).decode().split('\0')
           workflow_changed = '.github/workflows/escape-controller-regression.yml' in paths
-          ui = workflow_changed or any(p.startswith(('static/','templates/','tests/browser_','tests/test_chart','tests/test_holding_chart')) or p in ('dashboard_projection.py','market_data.py') for p in paths)
+          ui = workflow_changed or any(p.startswith(('static/','templates/','tests/browser_','tests/test_chart','tests/test_holding_chart','tests/test_engine_load_epoch')) or p in ('dashboard_projection.py','market_data.py') for p in paths)
           motor = workflow_changed or any(p.startswith(('hotwatch','eodhd','intel_workflows','trading_engine_v2','strategy_lab','long_term_watch','trade_service','tests/test_hotwatch','tests/test_eodhd','tests/test_trading_engine_v2','tests/test_strategy_lab','tests/test_trade_service')) or p in ('app.py','jobs.py','portfolio_data.py','tests/test_jobs.py','tests/test_portfolio_data.py') for p in paths)
           with open(os.environ['GITHUB_OUTPUT'],'a') as f:
               f.write(f'ui={str(ui).lower()}\nmotor={str(motor).lower()}\n')
@@ -50,13 +50,14 @@ jobs:
         if: steps.scope.outputs.motor == 'true'
         run: |
           python -m unittest tests.test_eodhd_feeds tests.test_feed_reuse tests.test_queue_recovery tests.test_hotwatch_holdings_auto tests.test_hotwatch_warmup tests.test_signal_readiness tests.test_sparse_feed_recovery tests.test_hotwatch_engine tests.test_hotwatch_bar_evidence
-          python -m unittest tests.test_admin_diagnostics tests.test_hotwatch_supervisor tests.test_trade_service tests.test_strategy_lab tests.test_jobs
+          python -m unittest tests.test_admin_diagnostics tests.test_hotwatch_supervisor tests.test_trade_service tests.test_strategy_lab tests.test_jobs tests.test_portfolio_data
           if test -f tests/test_trading_engine_v2.py; then python -m unittest discover -s tests -p test_trading_engine_v2.py; fi
       - name: Chart and UI regression
         if: steps.scope.outputs.ui == 'true'
         run: |
           python -m unittest tests.test_market_data tests.test_portfolio_value_chart
           node tests/test_holding_chart_marker.cjs
+          node tests/test_engine_load_epoch.js
           if test -f tests/test_chart_source_selection.cjs; then node tests/test_chart_source_selection.cjs; fi
           python -m pip install playwright==1.56.0
           python -m playwright install --with-deps chromium
