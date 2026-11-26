@@ -764,7 +764,41 @@ async function checkSupersededRequest(outcome) {
   assert.deepEqual(providers, []);
 }
 
+async function checkExplicitChoiceDuringBatch(explicitFirst) {
+  const {ui, form, items, status, quotes, select} = quoteFixture();
+  form.elements.provider.value = 'pluto';
+  const chosen = {asset_id: 'chosen', exchange: 'XCSE', currency: 'DKK'};
+  const ambiguous = {selection_required: true, choices: [chosen, {...chosen, asset_id: 'other'}]};
+  const initial = select(0);
+  quotes[0].resolve(ambiguous);
+  await initial;
+
+  const explicit = ui.change({target: {id: 'engine-asset-choice', value: chosen.asset_id}});
+  const add = () => ui.click({dataset: {}, hasAttribute: name => name === 'data-engine-batch-add'});
+  const batch = add();
+  assert.equal(quotes[1].args.asset_id, chosen.asset_id);
+  assert.equal(quotes[2].args.asset_id, undefined);
+  if (explicitFirst) {
+    quotes[1].resolve(chosen);
+    await explicit;
+    quotes[2].resolve(ambiguous);
+    await batch;
+  } else {
+    quotes[2].resolve(ambiguous);
+    await batch;
+    quotes[1].resolve(chosen);
+    await explicit;
+  }
+  assert.equal(form.elements.asset_id.value, chosen.asset_id);
+  assert.equal(items[0].instrument.asset_id, chosen.asset_id);
+  assert.match(status.textContent, /Pluto bekræftede A/);
+  await add();
+  assert.match(status.textContent, /Kandidat føjet til batch/);
+  assert.equal(quotes.length, 3);
+}
+
 async function main() {
+  for (const explicitFirst of [false, true]) await checkExplicitChoiceDuringBatch(explicitFirst);
   for (const outcome of ['choices', 'error']) await checkSupersededRequest(outcome);
   for (const action of ['submit', 'batch']) {
     await checkQuoteAction(action, null, 'success');
