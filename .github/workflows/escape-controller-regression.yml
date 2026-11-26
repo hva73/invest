@@ -35,8 +35,8 @@ jobs:
           assert subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip() == head
           paths = subprocess.check_output(['git','diff','--name-only','-z',base+'...'+head]).decode().split('\0')
           workflow_changed = '.github/workflows/escape-controller-regression.yml' in paths
-          ui = workflow_changed or any(p.startswith(('static/','templates/','tests/browser_','tests/test_chart','tests/test_holding_chart','tests/test_engine_load_epoch')) or p in ('dashboard_projection.py','market_data.py') for p in paths)
-          motor = workflow_changed or any(p.startswith(('hotwatch','eodhd','intel_workflows','trading_engine_v2','strategy_lab','long_term_watch','trade_service','tests/test_hotwatch','tests/test_eodhd','tests/test_trading_engine_v2','tests/test_strategy_lab','tests/test_trade_service')) or p in ('app.py','jobs.py','portfolio_data.py','tests/test_jobs.py','tests/test_portfolio_data.py') for p in paths)
+          ui = workflow_changed or any(p.startswith(('static/','templates/','tests/browser_','tests/test_chart','tests/test_holding_chart','tests/test_engine_load_epoch','tests/test_market_open_explanation_ui','tests/test_signal_direction_guard')) or p in ('dashboard_projection.py','market_data.py') for p in paths)
+          motor = workflow_changed or any(p.startswith(('hotwatch','eodhd','intel_workflows','trading_engine_v2','strategy_lab','long_term_watch','trade_service','tests/test_hotwatch','tests/test_eodhd','tests/test_trading_engine_v2','tests/test_strategy_lab','tests/test_trade_service')) or p in ('app.py','jobs.py','portfolio_data.py','tests/test_jobs.py','tests/test_portfolio_data.py','tests/test_app.py') for p in paths)
           with open(os.environ['GITHUB_OUTPUT'],'a') as f:
               f.write(f'ui={str(ui).lower()}\nmotor={str(motor).lower()}\n')
           print('Pinned reviewed head:', head, 'UI:', ui, 'motor:', motor)
@@ -50,8 +50,9 @@ jobs:
         if: steps.scope.outputs.motor == 'true'
         run: |
           python -m unittest tests.test_eodhd_feeds tests.test_feed_reuse tests.test_queue_recovery tests.test_hotwatch_holdings_auto tests.test_hotwatch_warmup tests.test_signal_readiness tests.test_sparse_feed_recovery tests.test_hotwatch_engine tests.test_hotwatch_bar_evidence
-          python -m unittest tests.test_admin_diagnostics tests.test_hotwatch_supervisor tests.test_trade_service tests.test_strategy_lab tests.test_jobs tests.test_portfolio_data
+          python -m unittest tests.test_admin_diagnostics tests.test_hotwatch_supervisor tests.test_trade_service tests.test_strategy_lab tests.test_jobs tests.test_portfolio_data tests.test_eodhd_capacity
           if test -f tests/test_trading_engine_v2.py; then python -m unittest discover -s tests -p test_trading_engine_v2.py; fi
+          if git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" | grep -Fxq tests/test_app.py; then python -m unittest tests.test_app; fi
       - name: Chart and UI regression
         if: steps.scope.outputs.ui == 'true'
         run: |
@@ -65,6 +66,14 @@ jobs:
           python tests/browser_desktop_experience.py
           python tests/browser_mobile_navigation_app.py
           if test -f tests/browser_mobile_account_isolation.py; then python tests/browser_mobile_account_isolation.py; fi
+          # Execute the additional focused fixtures when a reviewed change touches them.
+          changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}")"
+          for fixture in tests/test_market_open_explanation_ui.cjs tests/test_signal_direction_guard.cjs; do
+            if printf '%s\n' "$changed" | grep -Fxq "$fixture"; then node "$fixture"; fi
+          done
+          for fixture in tests/browser_design_v1.py tests/browser_desktop_trade.py tests/browser_hotwatch_engine.py tests/browser_positions.py; do
+            if printf '%s\n' "$changed" | grep -Fxq "$fixture"; then python "$fixture"; fi
+          done
       - name: Baseline smoke and scope confirmation
         run: |
           python -m unittest tests.test_market_data tests.test_hotwatch_engine
