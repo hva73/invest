@@ -840,7 +840,7 @@ async function checkPendingSubmitLookup(sameCandidate, quoteFirst) {
   if (!sameCandidate) assert.equal(rows[0].instrument, undefined);
 }
 
-async function checkPendingAssetChoice(caller, explicitFirst, implicitOutcome, stale = false, repeat = false) {
+async function checkOverlappingQuotes(callers, verificationFirst, implicitOutcome, {stale, repeat, candidateLookup} = {}) {
   const {context, session, ui, rows, elements, form, status, slot, nodes, requests, QuotePromise} = instrumentFixture();
   const quotes = [], notices = [];
   context.notice = message => notices.push(message);
@@ -856,53 +856,64 @@ async function checkPendingAssetChoice(caller, explicitFirst, implicitOutcome, s
       session.creation = null;
       return {};
     }
-    if (caller === 'submit' && url === 'v1/hotwatch/start-candidates?is_test=false') return {candidates: rows};
+    if (callers.includes('submit') && url === 'v1/hotwatch/start-candidates?is_test=false') return {candidates: rows};
     assert.equal(url, 'market/quote');
     return new QuotePromise((resolve, reject) => quotes.push({body: {...body}, resolve, reject}));
   };
   const verified = {asset_id: 'asset', currency: 'USD', exchange: 'NASDAQ'};
   const choices = {selection_required: true, choices: [verified]};
   const initial = ui.change({target: elements.candidate});
-  quotes[0].resolve(choices);
-  await initial;
-  assert.match(slot.innerHTML, /value="asset"/);
-  const explicit = dispatchInstrumentEvent(context, 'asset', form);
-  await settle();
-  assert.equal(quotes.length, 2);
-  const implicit = dispatchInstrumentEvent(context, caller, form);
-  await settle();
+  let verification = initial;
+  if (!candidateLookup) {
+    quotes[0].resolve(choices);
+    await initial;
+    assert.match(slot.innerHTML, /value="asset"/);
+    verification = dispatchInstrumentEvent(context, 'asset', form);
+    await settle();
+  }
+  const primary = quotes.at(-1);
+  const actions = [];
+  for (const action of callers) {
+    actions.push(dispatchInstrumentEvent(context, action, form));
+    await settle();
+  }
+  const duplicates = quotes.slice(quotes.indexOf(primary) + 1);
   const args = {report_id: 'report', candidate_id: 'FIRST', is_test: false};
-  assert.deepEqual(quotes.map(q => q.body), [args, {...args, asset_id: 'asset'}, args]);
+  assert.deepEqual(quotes.map(q => q.body), [args, ...(candidateLookup ? [] : [{...args, asset_id: 'asset'}]),
+    ...callers.map(() => args)]);
   let repeated;
   if (repeat) {
-    repeated = dispatchInstrumentEvent(context, caller, form);
+    repeated = dispatchInstrumentEvent(context, callers[0], form);
     await settle();
     assert.deepEqual(quotes[3].body, args);
     quotes[3].resolve(choices);
   }
-  const finishChoice = async () => {
-    quotes[1].resolve(verified);
-    await explicit;
+  const finishVerification = async () => {
+    primary.resolve(verified);
+    await verification;
   };
-  if (explicitFirst) {
-    await finishChoice();
+  if (verificationFirst) {
+    await finishVerification();
     assert.match(status.textContent, /1 matchende depot/);
     if (stale) session.epoch++;
   }
-  if (implicitOutcome === 'error') quotes[2].reject(Error('implicit lookup failed'));
-  else quotes[2].resolve(implicitOutcome === 'choices' ? choices : {...verified, asset_id: 'other'});
-  if (!explicitFirst) {
+  for (const duplicate of duplicates) {
+    if (implicitOutcome === 'error') duplicate.reject(Error('implicit lookup failed'));
+    else if (implicitOutcome === 'pending') duplicate.resolve({pending: true, retry_after: 2});
+    else duplicate.resolve(implicitOutcome === 'choices' ? choices : {...verified, asset_id: 'other'});
+  }
+  if (!verificationFirst) {
     await settle();
     assert.deepEqual(started, []);
     assert.equal(nodes['engine-batch-list'].textContent, '');
-    await finishChoice();
+    await finishVerification();
   }
   await settle();
-  const submits = caller === 'submit' && !stale;
+  const submits = callers.includes('submit') && !stale;
   assert.deepEqual(started, submits ? [['FIRST', 'asset', [2]]] : []);
   assert.equal(requests.length, submits ? 1 : 0);
   if (submits) requests.shift().succeed();
-  await Promise.all([implicit, repeated]);
+  await Promise.all([...actions, repeated]);
   assert.equal(elements.asset_id.value, 'asset');
   assert.equal(elements.exchange.value, 'NASDAQ');
   assert.equal(elements.quote_currency.value, 'USD');
@@ -910,16 +921,20 @@ async function checkPendingAssetChoice(caller, explicitFirst, implicitOutcome, s
   assert.deepEqual([...rows[0].portfolio_ids], [2]);
   assert.deepEqual(elements.portfolios.options.map(option => option.selected), [false, true]);
   assert.deepEqual(notices, []);
-  assert.equal(nodes['engine-batch-list'].textContent, caller === 'batch' && !stale ? '1/40 kandidat(er) klar: FIRST · asset' : '');
+  assert.equal(nodes['engine-batch-list'].textContent, callers.includes('batch') && !stale ? '1/40 kandidat(er) klar: FIRST · asset' : '');
   assert.equal(Boolean(nodes['engine-dialog'].closed), submits);
 }
 
 async function main() {
+  for (const first of [true, false]) {
+    for (const caller of ['batch', 'submit']) await checkOverlappingQuotes([caller], first, 'pending', {candidateLookup: true});
+    for (const callers of [['batch', 'submit'], ['submit', 'batch']]) await checkOverlappingQuotes(callers, first, 'verified');
+  }
   for (const caller of ['batch', 'submit']) {
-    await checkPendingAssetChoice(caller, true, 'choices', true);
-    await checkPendingAssetChoice(caller, false, 'choices', false, true);
+    await checkOverlappingQuotes([caller], true, 'choices', {stale: true});
+    await checkOverlappingQuotes([caller], false, 'choices', {repeat: true});
     for (const explicitFirst of [true, false]) {
-      for (const outcome of ['choices', 'verified', 'error']) await checkPendingAssetChoice(caller, explicitFirst, outcome);
+      for (const outcome of ['choices', 'verified', 'error']) await checkOverlappingQuotes([caller], explicitFirst, outcome);
     }
   }
   for (const sameCandidate of [false, true]) {
