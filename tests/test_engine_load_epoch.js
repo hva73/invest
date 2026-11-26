@@ -268,7 +268,7 @@ function settingsFixture() {
   return {...engine, button, dialog, records};
 }
 
-async function checkKillWhileOpeningSettings(fail) {
+async function checkKillWhileOpeningDialog(fail, manualSearch = false) {
   const {session, context, requests, click, button, dialog} = settingsFixture();
   context.confirm = () => true;
   let resolve, reject;
@@ -279,7 +279,26 @@ async function checkKillWhileOpeningSettings(fail) {
   };
   const pending = click({dataset: {engineKill: 'on'}, hasAttribute: () => false});
   session.settings = url => url.endsWith('/strategies') ? {strategies: []} : {providers: {}};
-  assert.equal(await click(button), true);
+  if (manualSearch) {
+    context.document.querySelector = () => null;
+    await click({dataset: {}, hasAttribute: name => name === 'data-engine-new'});
+    assert.match(dialog.innerHTML, /id="engine-manual-search"/);
+    const form = {id: 'engine-manual-search', isConnected: true};
+    const status = {}, results = {};
+    const nodes = {[form.id]: form, 'engine-manual-status': status, 'engine-manual-results': results};
+    const lookup = context.document.getElementById;
+    context.document.getElementById = id => nodes[id] || lookup(id);
+    context.FormData = class { get() { return 'TEST'; } };
+    session.control = (url, body) => {
+      assert.equal(url, 'v1/hotwatch/manual-search?is_test=false');
+      assert.deepEqual({...body}, {query: 'TEST'});
+      return {assets: []};
+    };
+    assert.equal(await context.window.EngineUI.submit({target: form, preventDefault() {}}), true);
+    assert.match(results.innerHTML, /Ingen resultater/);
+  } else {
+    assert.equal(await click(button), true);
+  }
   assert.equal(dialog.open, true);
   if (fail) {
     const error = new Error('kill switch offline');
@@ -363,10 +382,71 @@ async function checkValidation(change, outcome) {
   assert.equal(button.textContent, change ? label : expected[outcome], String(change));
 }
 
+async function checkManualSearch(change, fail) {
+  const {context, session, mount, dialog, click} = settingsFixture();
+  const form = {id: 'engine-manual-search', isConnected: true, query: 'FIRST'};
+  const status = {}, results = {};
+  const nodes = {[form.id]: form, 'engine-manual-status': status, 'engine-manual-results': results};
+  const lookup = context.document.getElementById;
+  context.document.getElementById = id => nodes[id] || lookup(id);
+  context.FormData = class {
+    constructor(target) { this.target = target; }
+    get(key) { assert.equal(key, 'query'); return this.target.query; }
+  };
+  const calls = [], pending = [];
+  session.control = (url, body) => {
+    calls.push([url, {...body}]);
+    return new Promise((resolve, reject) => pending.push({resolve, reject}));
+  };
+  const submit = () => context.window.EngineUI.submit({target: form, preventDefault() {}});
+  const asset = ticker => ({asset_id: 'asset-' + ticker, ticker});
+  const first = submit();
+  const endpoint = 'v1/hotwatch/manual-search?is_test=false';
+  assert.deepEqual(calls, [[endpoint, {query: 'FIRST'}]]);
+  assert.equal(status.textContent, 'Søger hos Pluto …');
+  assert.equal(results.innerHTML, '');
+  if (change === 'epoch') session.epoch++;
+  if (change === 'owner') session.owner = 'other-owner';
+  if (change === 'mode') mount(true).succeed();
+  if (change === 'detached') form.isConnected = false;
+  if (change === 'replaced') nodes[form.id] = {...form};
+  if (change === 'newer') {
+    form.query = 'SECOND';
+    const second = submit();
+    assert.deepEqual(calls[1], [endpoint, {query: 'SECOND'}]);
+    pending[1].resolve({assets: [asset('SECOND')]});
+    assert.equal(await second, true);
+    assert.match(results.innerHTML, /<strong>SECOND<\/strong>/);
+  }
+  const before = [results.innerHTML, status.textContent];
+  if (fail) pending[0].reject(new Error('offline'));
+  else pending[0].resolve({assets: [asset('FIRST')]});
+  assert.equal(await first, true);
+  if (change) assert.deepEqual([results.innerHTML, status.textContent], before, change);
+  else if (fail) {
+    assert.equal(results.innerHTML, '');
+    assert.equal(status.textContent, 'Pluto-søgningen kunne ikke gennemføres. Prøv igen.');
+  } else {
+    assert.match(results.innerHTML, /data-engine-manual="0"><strong>FIRST<\/strong>/);
+    assert.equal(status.textContent, 'Vælg det instrument, der skal overvåges.');
+  }
+
+  // Exercise the same index lookup as a tap on the first result.
+  const selected = [];
+  session.control = (url, body) => { selected.push([url, {...body}]); throw new Error('fixture'); };
+  dialog.open = true;
+  dialog.contains = () => true;
+  dialog.querySelector = () => status;
+  await click({dataset: {engineManual: '0'}, isConnected: true, closest: () => dialog});
+  const ticker = change === 'newer' ? 'SECOND' : !change && !fail ? 'FIRST' : null;
+  assert.deepEqual(selected, ticker ? [['v1/hotwatch/manual-start?is_test=false', asset(ticker)]] : []);
+}
+
 async function checkManualStart(change, stage, fail) {
   const {context, session, requests, click, mount, dialog, records, root} = settingsFixture();
   const status = {}, results = {};
   const button = {dataset: {engineManual: '0'}, isConnected: true, closest: () => dialog};
+  const form = {id: 'engine-manual-search', isConnected: true};
   let activeDialog = dialog;
   const lookup = context.document.getElementById;
   let activeRoot = root;
@@ -374,7 +454,7 @@ async function checkManualStart(change, stage, fail) {
     if (id === 'engine-root') return activeRoot;
     if (id === 'engine-dialog') return activeDialog;
     if (id === 'content') return {append(node) { activeDialog = node; }};
-    return {'engine-manual-results': results, 'engine-manual-status': status}[id] || lookup(id);
+    return {[form.id]: form, 'engine-manual-results': results, 'engine-manual-status': status}[id] || lookup(id);
   };
   context.document.createElement = tag => {
     assert.equal(tag, 'dialog');
@@ -398,7 +478,7 @@ async function checkManualStart(change, stage, fail) {
     if (url.includes('/manual-search?')) return {assets: [{asset_id: 'asset/1', ticker: 'TEST'}]};
     return new Promise((yes, no) => { resolve = yes; reject = no; });
   };
-  await context.window.EngineUI.submit({target: {id: 'engine-manual-search', isConnected: true}, preventDefault() {}});
+  await context.window.EngineUI.submit({target: form, preventDefault() {}});
   assert.match(results.innerHTML, /data-engine-manual="0"/);
   const detailReads = [];
   session.detail = url => {
@@ -552,6 +632,10 @@ async function checkPolling(change) {
 }
 
 async function main() {
+  for (const change of ['epoch', 'owner', 'mode', 'newer', 'detached', 'replaced', null]) {
+    await checkManualSearch(change, false);
+    await checkManualSearch(change, true);
+  }
   for (const change of ['epoch', 'owner', 'mode', 'closed', 'reopened', 'replaced', 'watch', null]) {
     await checkPolling(change);
   }
@@ -572,8 +656,10 @@ async function main() {
     await checkValidation(change, 'error');
   }
   await checkValidation(null, 'invalid');
-  await checkKillWhileOpeningSettings(true);
-  await checkKillWhileOpeningSettings(false);
+  for (const fail of [false, true]) {
+    await checkKillWhileOpeningDialog(fail);
+    await checkKillWhileOpeningDialog(fail, true);
+  }
   for (const change of ['epoch', 'owner', 'mode', 'dialog', 'newer', 'detached', null]) {
     await checkSettings(change, false);
     await checkSettings(change, true);
