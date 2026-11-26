@@ -1479,7 +1479,7 @@
     "task": "Only engine-ui.js schedule() polling path: guard continuation from load() to detail() against changed session epoch/owner/mode and replaced dialog/watch. Preserve normal polling, do not introduce extra requests. Actual-source Node VM regression, node syntax and focused test. No unrelated changes, live calls or production. ESCAPE_DRAFT_READY."
   },
   {
-    "status": "ready",
+    "status": "done",
     "priority": 0,
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "1a7b5305267efe4197495550452de1db58beb563",
