@@ -43,9 +43,12 @@ window.MarketUI=(()=>{
  }
  function chart(data,period,markers){
   const day=period==='day'?dayDomain(data):null;
-  const rows=(data.series||[]).filter(p=>p.epoch!=null&&Number.isFinite(Number(p.epoch))&&
-   Number.isFinite(Date.parse(p.timestamp))&&Number(p.price)>0&&Number.isFinite(Number(p.price))&&
-   (!Number.isFinite(day?.asOf)||p.epoch*1000<=day.asOf)).sort((a,b)=>a.epoch-b.epoch);
+  const rows=(data.series||[]).filter(p=>{
+   const ms=Date.parse(p.timestamp),epoch=Number(p.epoch);
+   // Pluto's normalized timestamp truncates to milliseconds; epoch retains microseconds.
+   return p.epoch!=null&&epoch>=ms/1000&&epoch<(ms+1)/1000&&
+    Number(p.price)>0&&Number.isFinite(Number(p.price))&&(!Number.isFinite(day?.asOf)||epoch*1000<=day.asOf);
+  }).sort((a,b)=>a.epoch-b.epoch);
   const bounds=day?.bounds;
   if(bounds){
    const {start,end}=bounds;
