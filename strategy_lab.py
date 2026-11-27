@@ -6,7 +6,7 @@ historical backtest. It never changes sessions or communicates with brokers.
 import copy,json
 from hotwatch_contract import checksum,stamp
 from hotwatch_features import features,verified_bar_samples
-from hotwatch_strategy import calculate,validate_strategy,early_watch
+from hotwatch_strategy import calculate,validate_strategy,rule_state
 
 MAX_CALCULATIONS=240
 
@@ -79,13 +79,14 @@ def compare(connect,uid,data):
                 if spec['schema_version']==2:necessary|=required(spec['watch_rules'])
                 if spec['schema_version']==2 and spec['parameters']['use_macd_confirmation']:necessary.add('macd_histogram')
                 missing={key for key in necessary if metrics.get(key) is None}
-                watch_met=early_watch(spec,metrics) if spec['schema_version']==2 else None
-                watch_missing=any(metrics.get(key) is None for key in required(spec['watch_rules'])) if spec['schema_version']==2 else False
+                watch_status=None
+                if spec['schema_version']==2:
+                    watch_state=rule_state(spec['watch_rules'],metrics,spec['parameters'])
+                    watch_status={True:'met',False:'not_met',None:'unknown'}[watch_state]
                 result,new_state=calculate(sample,metrics,spec,calc['risk_parameters'],states[i],at,new_market_event=new)
-                evaluated.append((result,new_state,missing,watch_met,watch_missing))
-            for i,(result,new_state,missing,watch_met,watch_missing) in enumerate(evaluated):
+                evaluated.append((result,new_state,missing,watch_status))
+            for i,(result,new_state,missing,watch_status) in enumerate(evaluated):
                 states[i]=new_state;out=outcomes[i];out['counts'][result['signal']]+=1;out['missing_indicators'].update(missing)
-                watch_status=('met' if watch_met else 'unknown' if watch_missing else 'not_met') if watch_met is not None else None
                 if watch_status:
                     out['early_watch'][watch_status]+=1
                     if watch_status=='met' and out['early_watch']['first_met_at'] is None:out['early_watch']['first_met_at']=r['calculated']

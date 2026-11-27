@@ -3,6 +3,7 @@ import json,tempfile,unittest
 from datetime import datetime,timedelta,timezone
 import app,report_ingest,hotwatch_engine as engine,strategy_lab
 from hotwatch_contract import checksum
+from hotwatch_strategy import EARLY_CATALYST_V1
 from test_intel_workflows import merc_report
 from test_hotwatch_engine import request,tick
 
@@ -29,6 +30,50 @@ class Lab(unittest.TestCase):
   with app.connect() as c:rows=c.execute('SELECT calculated,payload FROM hw_calculations ORDER BY id DESC LIMIT 12').fetchall()
   actual=[(r['calculated'],json.loads(r['payload'])['signal']) for r in reversed(rows)]
   self.assertEqual([(x['at'],x['signal']) for x in replay],actual)
+ def test_watch_truth_tables_and_signals_on_the_same_replay(self):
+  leaves=[{'metric':key,'operator':'==','value':True} for key in ('ordinary_share','pluto_tradable')]
+  strategies=[]
+  for operator in ('all','any'):
+   spec={**EARLY_CATALYST_V1,'strategy_id':'test_'+operator,'watch_rules':{operator:leaves},
+         'entry_rules':{'metric':'price','operator':'>','value':'0'}}
+   engine.upload_strategy(app.connect,1,'test',spec)
+   strategies.append({'strategy_id':spec['strategy_id'],'version':spec['version']})
+
+  # The first 29 observations have no captured catalyst evidence.
+  cases=[
+   # share, tradable, all status and signal, any status and signal
+   (None,None,'unknown','NO_DATA','unknown','NO_DATA'),
+   (None,False,'not_met','WAIT','unknown','NO_DATA'),
+   (None,True,'unknown','NO_DATA','met','WAIT'),
+   (False,None,'not_met','WAIT','unknown','NO_DATA'),
+   (False,False,'not_met','WAIT','not_met','WAIT'),
+   (False,True,'not_met','WAIT','met','WAIT'),
+   (True,None,'unknown','NO_DATA','met','BUY'),
+   (True,False,'not_met','WAIT','met','BUY'),
+   (True,True,'met','WAIT','met','BUY'),
+  ]
+  with app.connect() as c:
+   rows=list(reversed(c.execute('SELECT id,calculated,payload FROM hw_calculations ORDER BY id DESC LIMIT 9').fetchall()))
+   for row,(share,tradable,*_) in zip(rows,cases):
+    calc=json.loads(row['payload'])
+    calc['early_catalyst']={}
+    calc['supporting_metrics'].update(ordinary_share=share,pluto_tradable=tradable)
+    c.execute('UPDATE hw_calculations SET payload=? WHERE id=?',(json.dumps(calc),row['id']))
+
+  result=strategy_lab.compare(app.connect,1,{**self.data,'strategies':strategies})
+  self.assertEqual((result['evaluated'],result['skipped']),(38,0))
+  for outcome,column in zip(result['strategies'],(2,4)):
+   statuses=[case[column] for case in cases]
+   signals=[case[column+1] for case in cases]
+   times=[row['calculated'] for row in rows]
+   with self.subTest(strategy=outcome['strategy_id']):
+    timeline=outcome['timeline'][-len(cases):]
+    self.assertEqual([(t['at'],t['signal']) for t in timeline],list(zip(times,signals)))
+    self.assertEqual([t['early_watch'] for t in timeline],statuses)
+    for point,case in zip(timeline,cases):
+     self.assertEqual(point['missing'],[leaf['metric'] for leaf,value in zip(leaves,case[:2]) if value is None])
+    self.assertEqual(outcome['early_watch'],{'met':statuses.count('met'),'not_met':statuses.count('not_met'),
+                     'unknown':29+statuses.count('unknown'),'first_met_at':times[statuses.index('met')]})
  def test_no_lookahead_when_new_observation_arrives(self):
   first=strategy_lab.compare(app.connect,1,self.data)
   at=self.base+timedelta(minutes=38);engine.ingest(app.connect,1,self.req['watch_id'],True,tick(at,38,price='101.2'),at)
