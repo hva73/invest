@@ -3464,7 +3464,7 @@
     "priority": 3,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "e7f80b2fc235545cfe3ec1799711d758bb0467db",
+    "base_sha": "7b86cfb8c545ca7846698ca6b71f93a616e89402",
     "dependencies": [],
     "paths": [
       "static/dashboard-ui.js",
