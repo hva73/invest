@@ -10,8 +10,27 @@ window.OverviewUI=(()=>{
  const icon={red:'!',yellow:'◷',green:'✓'};
  const brief=(v,n=210)=>v?esc(String(v).slice(0,n))+(String(v).length>n?'…':''):'Ikke oplyst';
  const trigger=(kind,index='')=>`data-overview-detail="${kind}" data-overview-index="${esc(index)}"`;
- const shortTime=v=>new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(v));
- function movement(delta,compact=false){if(!delta)return '<small class="overview-change-unknown">Ændring ikke oplyst</small>';const t=tone(delta.amount),arrow=t==='positive'?'↑':t==='negative'?'↓':'→';return `<small class="overview-movement market-${t}">${arrow} ${t==='positive'?'+':''}${money(delta)}${compact?'':`<span>Værdiændring siden ${shortTime(delta.from)}</span>`}</small>`}
+ function shortTime(v){
+  if(typeof v!=='string'&&typeof v!=='number')return null;
+  const date=new Date(v);
+  if(!Number.isFinite(date.getTime()))return null;
+  // Check the written calendar day before an offset can shift it to another day.
+  if(typeof v==='string'){
+   const calendarDay=/^\d{4}-\d{2}-(\d{2})(?=[T\s]|$)/i.exec(v.trim());
+   if(calendarDay&&new Date(calendarDay[0]).getUTCDate()!==Number(calendarDay[1]))return null;
+  }
+  return new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(date);
+ }
+ function movement(delta,compact=false){
+  if(!delta)return '<small class="overview-change-unknown">Ændring ikke oplyst</small>';
+  const t=tone(delta.amount),arrow=t==='positive'?'↑':t==='negative'?'↓':'→';
+  let period='';
+  if(!compact){
+   const from=shortTime(delta.from);
+   period=from?`<span>Værdiændring siden ${from}</span>`:'<span>Værdiændring · periode ikke oplyst</span>';
+  }
+  return `<small class="overview-movement market-${t}">${arrow} ${t==='positive'?'+':''}${money(delta)}${period}</small>`;
+ }
  function figure(value,delta,attrs,label,result=null,basisCurrency=null){if(result&&result.currency===basisCurrency&&delta&&tone(delta.amount)==='neutral')delta=null;return `<button class="overview-value-link market-neutral" ${attrs} aria-label="${esc(label)}"><strong>${value}</strong>${delta?movement(delta):result?`<small class="overview-movement market-${tone(result.amount)}">${tone(result.amount)==='positive'?'↑ +':tone(result.amount)==='negative'?'↓ ':'→ '}${money(result)}<span>Oplyst resultat · periode ikke oplyst</span></small>`:movement(null)}<small class="overview-link-hint">Se datagrundlag →</small></button>`}
  function metric(value,delta,kind,index,label,result=null,basisCurrency=null){return figure(value,delta,trigger(kind,index),label,result,basisCurrency)}
 
