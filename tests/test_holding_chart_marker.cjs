@@ -6,6 +6,18 @@ const row={key:'p',ticker:'TEST',name:'Test',portfolio_id:7,portfolio_name:'Test
 const state={user:{username:'test'},dashboard:{positions:[row],accounts:[],totals:[],warnings:[],orders:[],critical_sessions:[]}};
 const ctx={window,document,Intl,Number,String,Date,console};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../static/dashboard-ui.js'),'utf8'),ctx);
 const ui=window.DashboardUI;ui.setup({api(){},escape:v=>String(v),formatTime:v=>v||'Ukendt',formatQuantity:String,state:()=>state});
+const validStamp='2026-07-01T23:45:00Z';
+for(const [price_time,snapshot_at,expected] of [
+  ['invalid',validStamp,'—'],
+  [null,'invalid','Hentet —'],
+  [validStamp,null,'02.07.2026, 01.45'],
+  [null,validStamp,'Hentet 02.07.2026, 01.45'],
+  [null,null,'Kurstid ukendt'],
+]){
+  const dashboard={...state.dashboard,positions:[{...row,price_time,snapshot_at}]};
+  const markup=ui.render({...state,dashboard});
+  assert.equal(markup.match(/<td class="dash-price">.*?<small title="[^"]*">([^<]*)<\/small>/)?.[1],expected);
+}
 function testObservationNote(session){
   function render(change_pct, window_minutes, kind='RISING'){
     session.market_observation={kind,change_pct,window_minutes};
