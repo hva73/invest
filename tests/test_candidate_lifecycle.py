@@ -1,5 +1,5 @@
 """Permanent lifecycle, recommendation and broker-confirmed execution, separately."""
-import copy,json,tempfile,unittest
+import copy,json,sqlite3,tempfile,unittest
 from datetime import datetime,timezone,timedelta
 import app,report_ingest,intel_workflows,candidate_lifecycle as model
 from test_intel_workflows import merc_report,decision
@@ -7,8 +7,17 @@ from test_hotwatch_engine import tick
 
 class CandidateStatus(unittest.TestCase):
  def setUp(self):
-  self.old=app.DB;self.tmp=tempfile.TemporaryDirectory();app.DB=self.tmp.name+'/db';app.init();app.create_user('test-password-long-enough');self.d=merc_report(True);self.cid=self.d['candidates'][0]['candidate_id'];self.at=datetime(2026,11,3,10,tzinfo=timezone.utc)
- def tearDown(self):app.DB=self.old;self.tmp.cleanup()
+  tmp=tempfile.TemporaryDirectory()
+  self.addCleanup(tmp.cleanup)
+  self.addCleanup(setattr,app,'DB',app.DB)
+  app.DB=tmp.name+'/db'
+  with app.connect() as c:
+   c.execute('CREATE TABLE users(id INTEGER PRIMARY KEY)')
+   c.execute('INSERT INTO users VALUES(1)')
+   report_ingest.init(c)
+   # A rejected candidate reconciles any active watches. These reports have none.
+   c.execute('CREATE TABLE hw_sessions(id INTEGER PRIMARY KEY,status TEXT NOT NULL)')
+  self.d=merc_report(True);self.cid=self.d['candidates'][0]['candidate_id'];self.at=datetime(2026,11,3,10,tzinfo=timezone.utc)
  def report(self,status,minute,cycle='synthetic-cycle-1',reactivation=None):
   d=copy.deepcopy(self.d);at=(self.at+timedelta(minutes=minute)).isoformat();d.update(report_id='status-report-'+str(minute),generated_at=at);c=d['candidates'][0];c['lifecycle']={'status':status,'changed_at':at,'reason':'Syntetisk begrundelse '+status,'source_ids':['synthetic-source'],'trade_cycle_id':cycle};c['reactivation_reason']=reactivation;return d
  def state(self):
@@ -97,3 +106,60 @@ class CandidateStatus(unittest.TestCase):
    put(2,[dict(ref,kind='holding',quantity='2')],now)
    proof=model.position_proof(db,1,candidate,now)
    self.assertEqual((proof['portfolio_id'],proof['quantity'],proof['stale']),(2,'2',False))
+
+
+class ExecutionProjection(unittest.TestCase):
+ def setUp(self):
+  tmp=tempfile.TemporaryDirectory()
+  self.addCleanup(tmp.cleanup)
+  self.db=sqlite3.connect(tmp.name+'/events.db')
+  self.addCleanup(self.db.close)
+  self.db.row_factory=sqlite3.Row
+  self.db.execute('CREATE TABLE ingested_reports(id INTEGER PRIMARY KEY,user_id INTEGER,generated_epoch REAL,payload TEXT)')
+  model.init(self.db)
+  self.db.executemany('''INSERT INTO candidate_execution_events
+      (user_id,is_test,candidate_id,cycle_id,order_id,event_key,status,occurred,
+       occurred_at,origin,verification,payload) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)''',self.events())
+  self.db.commit()
+
+ @staticmethod
+ def events():
+  instants=[*range(13),20,20,1]  # A tie followed by a late-arriving older event.
+  for uid in range(1,101):
+   for mode in (0,1):
+    for cid in ('candidate-a','candidate-b'):
+     for order,offset,cycle in [('alpha',1,None),('beta',0,'cycle-1'),('gamma',0,'cycle-2')]:
+      for revision,instant in enumerate(instants):
+       at=instant+offset
+       payload=json.dumps([uid,mode,cid,order,revision])
+       status='PARTIALLY_FILLED' if revision==14 else 'SUBMITTED'
+       yield (uid,mode,cid,cycle,order,f'{order}-{revision}',status,at,
+              f'2026-11-03T10:00:{at:02d}Z','fixture','synthetic_test' if mode else 'pluto',payload)
+
+ def test_only_latest_payload_per_scoped_order_crosses_sql_boundary(self):
+  db=self.db
+  for uid in range(1,101):
+   for mode in (False,True):
+    for cid in ('candidate-a','candidate-b'):
+     with self.subTest(uid=uid,mode=mode,cid=cid):
+      # Original projection: sort all scoped events, keep the first per order.
+      expected={}
+      for e in db.execute('''SELECT * FROM candidate_execution_events
+          WHERE user_id=? AND is_test=? AND candidate_id=? ORDER BY occurred DESC,id DESC''',(uid,mode,cid)):
+       if e['order_id'] not in expected:
+        expected[e['order_id']]={'order_id':e['order_id'],'trade_cycle_id':e['cycle_id'],
+                                 'status':e['status'],'verification':e['verification'],
+                                 'as_of':e['occurred_at'],'data':json.loads(e['payload'])}
+      transferred=[]
+      def track_rows(cursor,values):
+       row=sqlite3.Row(cursor,values)
+       if 'order_id' in row.keys():
+        transferred.append(row['order_id'])
+       return row
+      db.row_factory=track_rows
+      try:
+       actual=model.projection(db,uid,mode,{'candidate_id':cid})['execution']
+      finally:
+       db.row_factory=sqlite3.Row
+      self.assertEqual(actual,list(expected.values()))
+      self.assertEqual(transferred,['alpha','gamma','beta'])

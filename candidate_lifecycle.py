@@ -12,6 +12,8 @@ def init(c):
  c.execute('CREATE TABLE IF NOT EXISTS candidate_lifecycle_events(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL,is_test INTEGER NOT NULL,candidate_id TEXT NOT NULL,event_key TEXT NOT NULL,status TEXT NOT NULL,reported_status TEXT,occurred REAL NOT NULL,occurred_at TEXT NOT NULL,reason TEXT NOT NULL,cycle_id TEXT,origin TEXT NOT NULL,evidence TEXT NOT NULL,payload TEXT NOT NULL,UNIQUE(user_id,is_test,candidate_id,event_key))')
  c.execute('CREATE INDEX IF NOT EXISTS candidate_lifecycle_time ON candidate_lifecycle_events(user_id,is_test,candidate_id,occurred,id)')
  c.execute('CREATE TABLE IF NOT EXISTS candidate_execution_events(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL,is_test INTEGER NOT NULL,candidate_id TEXT NOT NULL,cycle_id TEXT,order_id TEXT NOT NULL,event_key TEXT NOT NULL,status TEXT NOT NULL,occurred REAL NOT NULL,occurred_at TEXT NOT NULL,origin TEXT NOT NULL,verification TEXT NOT NULL,payload TEXT NOT NULL,UNIQUE(user_id,is_test,candidate_id,event_key))')
+ c.execute('''CREATE INDEX IF NOT EXISTS candidate_execution_order_latest
+              ON candidate_execution_events(user_id,is_test,candidate_id,order_id,occurred DESC,id DESC)''')
  if not old:
   for row in c.execute('SELECT user_id,payload FROM ingested_reports ORDER BY generated_epoch,id'):
    d=json.loads(row['payload'])
@@ -137,10 +139,20 @@ def observe_pluto(c,uid,mode,cid,context,at,origin,cycle,signal=None,synthetic=F
 
 def projection(c,uid,mode,candidate,decision=None):
  cid=candidate['candidate_id'];row=latest(c,uid,mode,cid);lifecycle={'status':row['status'],'reported_status':row['reported_status'],'changed_at':row['occurred_at'],'reason':row['reason'],'trade_cycle_id':row['cycle_id'],'evidence':row['evidence']} if row else {'status':'DISCOVERED','reported_status':None,'changed_at':None,'reason':'Historisk kandidat; ingen eksplicit statusændring','trade_cycle_id':None,'evidence':'historical'}
- executions=[];seen=set()
- for e in c.execute('SELECT * FROM candidate_execution_events WHERE user_id=? AND is_test=? AND candidate_id=? ORDER BY occurred DESC,id DESC',(uid,int(mode),cid)):
-  if e['order_id'] in seen:continue
-  seen.add(e['order_id']);executions.append({'order_id':e['order_id'],'trade_cycle_id':e['cycle_id'],'status':e['status'],'verification':e['verification'],'as_of':e['occurred_at'],'data':json.loads(e['payload'])})
+ executions=[]
+ for e in c.execute('''
+     WITH orders AS (
+       SELECT DISTINCT order_id FROM candidate_execution_events
+       WHERE user_id=?1 AND is_test=?2 AND candidate_id=?3
+     )
+     SELECT e.order_id,e.cycle_id,e.status,e.verification,e.occurred_at,e.payload
+     FROM orders JOIN candidate_execution_events AS e ON e.id=(
+       SELECT id FROM candidate_execution_events
+       WHERE user_id=?1 AND is_test=?2 AND candidate_id=?3 AND order_id=orders.order_id
+       ORDER BY occurred DESC,id DESC LIMIT 1
+     )
+     ORDER BY e.occurred DESC,e.id DESC''',(uid,int(mode),cid)):
+  executions.append({'order_id':e['order_id'],'trade_cycle_id':e['cycle_id'],'status':e['status'],'verification':e['verification'],'as_of':e['occurred_at'],'data':json.loads(e['payload'])})
  proof=None if mode else position_proof(c,uid,candidate)
  broker_states={}
  for event in c.execute("SELECT * FROM candidate_lifecycle_events WHERE user_id=? AND is_test=? AND candidate_id=? AND evidence IN ('pluto','pluto_snapshot','synthetic_test') ORDER BY occurred DESC,id DESC",(uid,int(mode),cid)):
