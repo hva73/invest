@@ -3604,7 +3604,7 @@
     "priority": 3,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "b0e8c3c7bbec2cacfeab2e47abe4a6e054a0a2de",
+    "base_sha": "9ce3c2aab33edbf4bb35ab8d2bc925f3b8f8683d",
     "dependencies": [],
     "paths": [
       "static/sector-ui.js",
