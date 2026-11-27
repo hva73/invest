@@ -90,7 +90,28 @@ window.SectorUI=(()=>{
  function groups(){const rows=scopedRows(),group={};for(const row of rows){const a=row.sector_intelligence||{},key=a.sector||'Ikke klassificeret';const g=group[key]||(group[key]={name:key,rows:[],value:0,pnl:0,cost:0,nv:0,np:0,nc:0,valueEstimated:false,pnlEstimated:false});g.rows.push(row);const v=converted(row.value),p=converted(row.unrealized),c=converted(row.cost_basis);if(v!==null){g.value+=v;g.nv++;g.valueEstimated=g.valueEstimated||isCurrencyEstimate(row.value)}if(p!==null){g.pnl+=p;g.np++;g.pnlEstimated=g.pnlEstimated||isCurrencyEstimate(row.unrealized)||Boolean(row.unrealized_estimated)}if(c!==null&&c>0){g.cost+=c;g.nc++}}for(const g of Object.values(group))g.percent=sectorPercent(g.rows);return Object.values(group).sort((a,b)=>a.percent==null?(b.percent==null?0:1):b.percent==null?-1:b.percent.value-a.percent.value)}
  function changes(row){if(period==='all')return null;const a=row.series||[];if(a.length<2)return null;const last=a[a.length-1],days=period==='1'?1:Number(period);let first;if(period==='1')first=a[a.length-2];else{const target=Date.parse(last.date+'T00:00Z')-days*864e5;first=[...a].reverse().find(x=>Date.parse(x.date+'T00:00Z')<=target)}if(!first||!first.close)return null;return {value:(last.close/first.close-1)*100,from:first.date,to:last.date}}
  function chart(series){if(!series||series.length<2)return '<p class="muted">Der er endnu ikke nok faktiske observationer til en graf.</p>';const values=series.map(x=>x.close),min=Math.min(...values),max=Math.max(...values),span=max-min||1;const points=values.map((v,i)=>`${(i/(values.length-1)*100).toFixed(2)},${(90-(v-min)/span*80).toFixed(2)}`).join(' ');return `<svg class="sector-chart" viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="Historisk udvikling fra ${txt(displayDate(series[0].date))} til ${txt(displayDate(series[series.length-1].date))}"><polyline fill="none" vector-effect="non-scaling-stroke" stroke="currentColor" stroke-width="2" points="${points}"/></svg><div class="sector-chart-axis"><span>${txt(displayDate(series[0].date))}</span><span>${txt(displayDate(series[series.length-1].date))}</span></div>`}
- function holdingHistory(focus){if(scope==='all'||scopeIds()?.size>1)return '<p class="muted">Samlet sektorhistorik vises, når sammenlignelige observationer for alle positionerne er tilgængelige.</p>';const ids=new Set(focus.rows.map(r=>r.asset_id)),cut=period==='all'?0:Date.now()-Number(period)*864e5;const points=[];for(const snap of data.history||[]){if(String(snap.portfolio_id)!==scope||Date.parse(snap.observed)<cut)continue;const rows=(snap.positions||[]).filter(x=>ids.has(x.asset_id));if(!rows.length)continue;let sum=0,valid=true;for(const r of rows){const m=r.value_in_portfolio_currency?.currency==='DKK'?r.value_in_portfolio_currency:r.value;if(m?.currency!=='DKK'||number(m.amount)===null){valid=false;break}sum+=Number(m.amount)}if(valid)points.push({date:snap.observed.slice(0,16).replace('T',' '),close:sum})}return '<h3>Registreret sektorværdi</h3>'+chart(points)+'<p class="muted">Kun faktiske DKK-snapshots; udvalg følger de nuværende positioner. Ændringer kan skyldes handler og er ikke afkast.</p>'}
+ function holdingHistory(focus){
+  if(scope==='all'||scopeIds()?.size>1)return '<p class="muted">Samlet sektorhistorik vises, når sammenlignelige observationer for alle positionerne er tilgængelige.</p>';
+  const ids=new Set(focus.rows.map(r=>r.asset_id));
+  const cut=period==='all'?0:Date.now()-Number(period)*864e5;
+  const points=[];
+  for(const snap of data.history||[]){
+   if(String(snap.portfolio_id)!==scope||typeof snap.observed!=='string')continue;
+   const observed=Date.parse(snap.observed);
+   if(!Number.isFinite(observed)||observed<cut)continue;
+   const rows=(snap.positions||[]).filter(row=>row.asset_id&&ids.has(row.asset_id));
+   if(!rows.length||rows.length!==ids.size||new Set(rows.map(row=>row.asset_id)).size!==ids.size)continue;
+   let sum=0;
+   for(const row of rows){
+    const money=row.value_in_portfolio_currency?.currency==='DKK'?row.value_in_portfolio_currency:row.value;
+    const value=money?.currency==='DKK'?number(money.amount):null;
+    if(value===null){sum=NaN;break}
+    sum+=value;
+   }
+   if(Number.isFinite(sum))points.push({date:snap.observed.slice(0,16).replace('T',' '),close:sum})
+  }
+  return '<h3>Registreret sektorværdi</h3>'+chart(points)+'<p class="muted">Kun faktiske DKK-snapshots; udvalg følger de nuværende positioner. Ændringer kan skyldes handler og er ikke afkast.</p>'
+ }
  const palette=['#63d9bc','#78b7fa','#c9a5f7','#f3ba7c','#78c5c5','#ef8fa3','#cadb92','#9aacf5','#dbbbdf','#a7bbc4'];
  const share=n=>new Intl.NumberFormat('da-DK',{maximumFractionDigits:1}).format(n)+' %';
  function donut(gs,total,partial=false){
