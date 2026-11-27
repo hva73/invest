@@ -24,7 +24,13 @@ window.SectorUI=(()=>{
    if(Number.isFinite(rate)&&rate>0)return {rate,source:'ECB'}
   }}
   const q=(data?.fx_quotes||[]).find(x=>x.currency===currency&&x.event_time&&Date.now()-Date.parse(x.event_time)>=0&&Date.now()-Date.parse(x.event_time)<=7*864e5&&number(x.rate)>0);if(q)return {rate:Number(q.rate),source:'EODHD'};const inferred=plutoFx(currency);return inferred?{rate:inferred,source:'Pluto-estimat'}:null}
- function converted(m){if(!m)return null;const n=number(m.amount),info=fxInfo(m.currency);return n===null||!info?null:n*info.rate}
+ function converted(m){
+  if(!m)return null;
+  const n=number(m.amount),info=fxInfo(m.currency);
+  if(n===null||!info)return null;
+  const value=n*info.rate;
+  return Number.isFinite(value)?value:null
+ }
  function isCurrencyEstimate(m){return Boolean(m?.currency&&m.currency!=='DKK'&&fxInfo(m.currency))}
  function load(user,latestSnapshot){
   if(owner!==user){

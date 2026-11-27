@@ -31,6 +31,7 @@ click({sectorScope:'1'});html=ui.render(state);assert.match(html,/Positioner for
 click({sectorScope:'2'});html=ui.render(state);assert.match(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);
 payload.dashboard.accounts[1].parent_external_id='andet';click({sectorScope:'1'});html=ui.render(state);assert.doesNotMatch(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);assert.doesNotMatch(html,/DELVIS FORDELING/);
 testAllocationAmounts();
+testConversionOverflow();
 testEcbConversion();
 await testOwnerChanges();
 for(const outcome of ['success','error'])await testHoldingsOwnerChanges(outcome);
@@ -52,6 +53,28 @@ function testAllocationAmounts(){
   check([...valid,invalid],'DELVIS FORDELING','30,50 kr.');
  }
  check([...valid,0,'0'],'REGISTRERET VÆRDI','30,50 kr.');
+}
+
+function testConversionOverflow(){
+ const usd=amount=>({currency:'USD',amount});
+ const position=(value,pnl)=>({portfolio_id:1,value:usd(value),unrealized:usd(pnl),sector_intelligence:{sector:'Teknologi'}});
+ payload.fx={source_date:new Date().toISOString().slice(0,10),rates:{USD:1,DKK:2}};
+ const cash=[usd(5)];
+ payload.dashboard.accounts=[{id:1,kind:'portfolio',cash_status:'available',cash_accounts:cash}];
+ payload.dashboard.positions=[position(10,-3),position(0,0)];
+ click({sectorScope:'all'});
+ click({sectorDonut:'Teknologi'});
+ const render=()=>ui.render(state).replace(/\s/g,' ');
+ let html=render();
+ assert.match(html,/VÆRDI · ESTIMAT<\/small><strong>30,00 kr\./);
+ assert.match(html,/UREALISERET RESULTAT<\/small><strong class="negative">-6,00 kr\. · estimat<\/strong>/);
+ payload.dashboard.positions.push(position(Number.MAX_VALUE,-Number.MAX_VALUE));
+ cash.push(usd(Number.MAX_VALUE));
+ html=render();
+ assert.match(html,/DELVIS FORDELING<\/small><strong>30,00 kr\./);
+ assert.match(html,/VÆRDI<\/small><strong>20,00 kr\. · delvist · estimat<\/strong>/);
+ assert.match(html,/UREALISERET RESULTAT<\/small><strong class="negative">-6,00 kr\. · delvist · estimat<\/strong>/);
+ assert.match(html,/Kontanter er ikke tilgængelige for alle valgte konti/);
 }
 
 function testEcbConversion(){
