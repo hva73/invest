@@ -3542,7 +3542,7 @@
     "generation": 50,
     "role": "data",
     "priority": 3,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "9ce3c2aab33edbf4bb35ab8d2bc925f3b8f8683d",
     "dependencies": [],
