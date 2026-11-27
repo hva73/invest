@@ -30,10 +30,52 @@ click({sectorScope:'all'});html=ui.render(state);assert.match(html,/DELVIS FORDE
 click({sectorScope:'1'});html=ui.render(state);assert.match(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);
 click({sectorScope:'2'});html=ui.render(state);assert.match(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);
 payload.dashboard.accounts[1].parent_external_id='andet';click({sectorScope:'1'});html=ui.render(state);assert.doesNotMatch(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);assert.doesNotMatch(html,/DELVIS FORDELING/);
+testAllocationAmounts();
+testConversionOverflow();
 testEcbConversion();
 await testOwnerChanges();
 for(const outcome of ['success','error'])await testHoldingsOwnerChanges(outcome);
 console.log('PASS: collection holdings included in total and parent scope; chart, drilldown and percentages work')})().catch(e=>{console.error(e);process.exit(1)});
+
+function testAllocationAmounts(){
+ click({sectorScope:'all'});
+ payload.dashboard.accounts=[{id:1,kind:'portfolio',cash_status:'available',cash_accounts:[]}];
+ const position=amount=>({portfolio_id:1,value:{currency:'DKK',amount},sector_intelligence:{sector:'Teknologi'}});
+ const check=(amounts,label,total)=>{
+  payload.dashboard.positions=amounts.map(position);
+  const rendered=ui.render(state).match(/class="si-donut">.*?<small>([^<]+)<\/small><strong>([^<]+)<\/strong>/);
+  assert.ok(rendered);
+  assert.equal(rendered[1],label);
+  assert.equal(rendered[2].replace(/\s/g,' '),total);
+ };
+ const valid=[' +20.75 ', '-.50', 10.25];
+ for(const invalid of [' \t',true,false,'',[],[3],{},'0x10','0b10','12kr',Infinity,NaN]){
+  check([...valid,invalid],'DELVIS FORDELING','30,50 kr.');
+ }
+ check([...valid,0,'0'],'REGISTRERET VÆRDI','30,50 kr.');
+}
+
+function testConversionOverflow(){
+ const usd=amount=>({currency:'USD',amount});
+ const position=(value,pnl)=>({portfolio_id:1,value:usd(value),unrealized:usd(pnl),sector_intelligence:{sector:'Teknologi'}});
+ payload.fx={source_date:new Date().toISOString().slice(0,10),rates:{USD:1,DKK:2}};
+ const cash=[usd(5)];
+ payload.dashboard.accounts=[{id:1,kind:'portfolio',cash_status:'available',cash_accounts:cash}];
+ payload.dashboard.positions=[position(10,-3),position(0,0)];
+ click({sectorScope:'all'});
+ click({sectorDonut:'Teknologi'});
+ const render=()=>ui.render(state).replace(/\s/g,' ');
+ let html=render();
+ assert.match(html,/VÆRDI · ESTIMAT<\/small><strong>30,00 kr\./);
+ assert.match(html,/UREALISERET RESULTAT<\/small><strong class="negative">-6,00 kr\. · estimat<\/strong>/);
+ payload.dashboard.positions.push(position(Number.MAX_VALUE,-Number.MAX_VALUE));
+ cash.push(usd(Number.MAX_VALUE));
+ html=render();
+ assert.match(html,/DELVIS FORDELING<\/small><strong>30,00 kr\./);
+ assert.match(html,/VÆRDI<\/small><strong>20,00 kr\. · delvist · estimat<\/strong>/);
+ assert.match(html,/UREALISERET RESULTAT<\/small><strong class="negative">-6,00 kr\. · delvist · estimat<\/strong>/);
+ assert.match(html,/Kontanter er ikke tilgængelige for alle valgte konti/);
+}
 
 function testEcbConversion(){
  const now=new Date().toISOString();
