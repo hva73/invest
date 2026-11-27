@@ -105,6 +105,44 @@ class CapacityTests(unittest.TestCase):
   with self.assertRaises(EngineError) as caught:capacity.Capacity(connect).reserve(1,self.now)
   self.assertEqual((caught.exception.code,caught.exception.retry_after_s),('PROVIDER_RATE_BUDGET',11))
   with app.connect() as c:self.assertEqual(capacity.snapshot(c,self.now)['http_used_this_minute'],0)
+ def test_full_http_minute_under_competing_writer_and_at_rollover(self):
+  statements=[]
+  def connect():
+   c=app.connect()
+   c.execute('PRAGMA busy_timeout=0')
+   c.set_trace_callback(statements.append)
+   return c
+  client=capacity.Capacity(connect)
+  self.cap.observe(200,{'X-RateLimit-Limit':'2'},0,self.now) # Effective limit is one.
+  self.cap.reserve(1,self.now)
+  with app.connect() as writer:
+   writer.execute('BEGIN IMMEDIATE')
+   with self.assertRaises(EngineError) as caught:client.reserve(5,self.now+59)
+  self.assertEqual((caught.exception.code,caught.exception.status),('PROVIDER_RATE_BUDGET',429))
+  self.assertFalse(any(sql.strip().upper().startswith(('BEGIN IMMEDIATE','BEGIN EXCLUSIVE','INSERT','UPDATE','DELETE')) for sql in statements))
+  self.cap.observe(429,{'Retry-After':'5'},0,self.now+54)
+  with self.assertRaises(EngineError) as caught:client.reserve(5,self.now+55)
+  self.assertEqual(caught.exception.retry_after_s,4)
+  client.reserve(5,self.now+60)
+  with app.connect() as c:
+   for now in (self.now,self.now+60):
+    self.assertEqual(capacity.snapshot(c,now)['http_used_this_minute'],1)
+   state=capacity.read(c)
+   self.assertEqual((state['requests'],state['known_units']),(2,6))
+ @patch.dict(os.environ,{'ESCAPE_HW_EODHD_REQUESTS_PER_MINUTE':'1'})
+ def test_last_http_slot_reserved_between_preflight_and_write(self):
+  def before_statement(sql):
+   if sql.strip().upper()=='BEGIN IMMEDIATE':
+    self.cap.reserve(1,self.now)
+  def connect():
+   c=app.connect()
+   c.set_trace_callback(before_statement)
+   return c
+  with self.assertRaises(EngineError) as caught:capacity.Capacity(connect).reserve(5,self.now)
+  self.assertEqual((caught.exception.code,caught.exception.status),('PROVIDER_RATE_BUDGET',429))
+  with app.connect() as c:
+   state=capacity.snapshot(c,self.now)
+   self.assertEqual((state['http_used_this_minute'],state['requests'],state['known_units']),(1,1,1))
  def test_same_minute_headers_preserve_charged_reservations(self):
   other=capacity.Capacity(app.connect)
   cases=[(21,1,21,20),(21,1,90,20),(25,2,24,23),(25,2,21,21)]
