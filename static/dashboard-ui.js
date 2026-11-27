@@ -15,14 +15,27 @@ window.DashboardUI=(()=>{
  }
  const shortStamp=v=>v?new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(v)):'—';
  const reasons={NOT_FETCHED:'Ikke hentet',NOT_PROVIDED:'Ikke leveret af kilden',SOURCE_ERROR:'Datakilden kunne ikke opdateres',INCOMPLETE_SNAPSHOT:'Ufuldstændigt opslag · tidligere beholdninger bevaret',STALE:'Forældede data',sample_identity_mismatch:'Aktividentitet kræver kontrol',DATA_STALE:'Markedsdata er for gamle',PLUTO_QUOTE_TIME_UNKNOWN:'Kilden leverer ikke et faktisk kurstidspunkt',EODHD_FEED_NOT_ENABLED:'EODHD-feed er ikke aktiveret'};
- const percent=v=>v===null||v===undefined?'—':(Number(v)>0?'+':'')+new Intl.NumberFormat('da-DK',Number(v)!==0&&Math.abs(Number(v))<.005?{maximumSignificantDigits:2}:{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(v))+' %';
+ function percent(v){
+  if(typeof v!=='number'&&(typeof v!=='string'||v.trim()===''))return '—';
+  const n=Number(v);
+  if(!Number.isFinite(n))return '—';
+  const precision=n!==0&&Math.abs(n)<.005?{maximumSignificantDigits:2}:{minimumFractionDigits:2,maximumFractionDigits:2};
+  return (n>0?'+':'')+new Intl.NumberFormat('da-DK',precision).format(n)+' %';
+ }
  function resultShare(result,base,label='af depotværdi'){
   if(!result||!base||!result.currency||result.currency!==base.currency||result.amount===null||result.amount===undefined||result.amount===''||base.amount===null||base.amount===undefined||base.amount==='')return '';
   const n=Number(result.amount),denom=Number(base.amount);if(!Number.isFinite(n)||!Number.isFinite(denom)||denom<=0)return '';
   return `<span class="dash-result-share ${tone(n)}">${percent(n/denom*100)} <span>${esc(label)}</span></span>`;
  }
- function change(v){if(!v)return '<span class="dash-neutral">—</span>';const sign=tone(v.percent);return `<span class="dash-change ${sign}" title="${text(v.reference_note||v.basis)} · ${time(v.from)} → ${time(v.to)}">${sign==='positive'?'↑':sign==='negative'?'↓':'→'} ${percent(v.percent)}</span>`}
- function profit(v,pct){if(!v||v.amount===null)return '<span class="dash-neutral">—</span>';const t=tone(v.amount);return `<span class="dash-change ${t}">${Number(v.amount)>0?'+':''}${amount(v)}</span>${pct!==null&&pct!==undefined?`<small class="dash-profit-percent ${t}">${percent(pct)}</small>`:''}`}
+ function change(v){
+  if(!v)return '<span class="dash-neutral">—</span>';
+  const title=text(v.reference_note||v.basis)+' · '+time(v.from)+' → '+time(v.to);
+  const label=percent(v.percent);
+  if(label==='—')return `<span class="dash-neutral" title="${title}">—</span>`;
+  const sign=tone(v.percent);
+  return `<span class="dash-change ${sign}" title="${title}">${sign==='positive'?'↑':sign==='negative'?'↓':'→'} ${label}</span>`;
+ }
+ function profit(v,pct){if(!v||v.amount===null)return '<span class="dash-neutral">—</span>';const t=tone(v.amount),label=percent(pct);return `<span class="dash-change ${t}">${Number(v.amount)>0?'+':''}${amount(v)}</span>${pct!==null&&pct!==undefined?`<small class="dash-profit-percent ${label==='—'?'neutral':t}">${label}</small>`:''}`}
  function age(r){const f=r.price_freshness,state=f?.state||'unknown',label={fresh:'Aktuel',stale:'Forældet',unknown:'Kurstid ukendt',error:'Kilde fejl',session_close:'Seneste session'}[state]||'Ukendt';return `<span class="dash-age ${state}" title="${time(r.price_time)} · hentet ${time(r.snapshot_at)}">${esc(label)}</span>`}
  function sorted(input){return input.slice().sort((a,b)=>{
   const sign=sortDirection==='asc'?1:-1,missing=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v));
