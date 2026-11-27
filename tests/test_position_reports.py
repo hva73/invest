@@ -1,5 +1,6 @@
 """Synthetic 12-position snapshots; no actual portfolios, quotes or trades."""
-import copy,json,tempfile,unittest
+import copy,json,sqlite3,tempfile,unittest
+from contextlib import closing
 from pathlib import Path
 import app,report_ingest,report_validation,position_reports,market_data
 
@@ -15,6 +16,81 @@ def full_positions(rid='synthetic-positions',at='2026-11-02T15:00:00Z'):
    p=copy.deepcopy(template);p.update(position_id=pid+'.'+ticker,portfolio_id=pid,asset_id='synthetic-asset-'+ticker,asset_name='Syntetisk '+ticker,ticker=ticker,candidate_id='synthetic-candidate-'+ticker if ticker in ['GMAB','MDLZ','FCX'] else None,quantity='2',value={'amount':'100','currency':'DKK'},unrealized_pnl={'amount':'10','currency':'DKK'},as_of=at,position_status='open',assessment={'action':'BEHOLD','reason':'Syntetisk individuel analyse af '+pid+' '+ticker,'risk_level':'medium','next_action':'Kontrollér nye officielle oplysninger; ingen faktisk handel','assessed_at':at,'source_ids':['synthetic-source'],'data_quality':{'status':'mixed','as_of':at,'note':'Syntetisk analyse, ikke et reelt råd'}})
    d['positions'].append(p)
  d['orders']=[];d['journal']=[];return d
+
+class PositionBackfill(unittest.TestCase):
+    def test_reverse_index_on_existing_reports(self):
+        index_name = 'report_position_by_report_row'
+        with tempfile.TemporaryDirectory() as tmp, closing(sqlite3.connect(
+                Path(tmp) / 'reports.db', cached_statements=0)) as db:
+            db.row_factory = sqlite3.Row
+            db.execute('PRAGMA foreign_keys=ON')
+            db.execute('CREATE TABLE users(id INTEGER PRIMARY KEY)')
+            db.execute('CREATE TABLE ingested_reports(id INTEGER PRIMARY KEY, user_id INTEGER, payload TEXT)')
+            statements = []
+            db.set_trace_callback(statements.append)
+            position_reports.init(db)
+            db.set_trace_callback(None)
+            probe, = (sql for sql in statements if sql.startswith('SELECT'))
+
+            expected_links = []
+            missing = []
+            for user in range(1, 101):
+                db.execute('INSERT INTO users VALUES(?)', (user,))
+                for is_test in (False, True):
+                    for linked in (True, False):
+                        data = dict(schema_version=2, generated_at='2026-01-01T00:00:00Z',
+                                    is_test=is_test, positions=[dict(portfolio_id=p, position_id='BTC')
+                                                               for p in ('main', 'child')])
+                        report = db.execute('INSERT INTO ingested_reports(user_id,payload) VALUES(?,?)',
+                                            (user, json.dumps(data))).lastrowid
+                        for position in data['positions']:
+                            expected_links.append((user, is_test, position['portfolio_id'], 'BTC',
+                                                   report, 1767225600))
+                        if linked:
+                            position_reports.index(db, user, report, data)
+                        else:
+                            missing.append(report)
+            db.commit()
+
+            def measure_probe():
+                steps = 0
+                def count_step():
+                    nonlocal steps
+                    steps += 1
+                    return 0
+                db.set_progress_handler(count_step, 1)
+                try:
+                    result = sorted(row['id'] for row in db.execute(probe))
+                finally:
+                    db.set_progress_handler(None, 0)
+                self.assertEqual(result, missing)
+                return steps
+
+            plan = [row['detail'] for row in db.execute('EXPLAIN QUERY PLAN ' + probe)]
+            self.assertTrue(any(f'SEARCH l USING COVERING INDEX {index_name} (report_row_id=?)'
+                                in detail for detail in plan), plan)
+            indexed_steps = measure_probe()
+            db_bytes = (Path(tmp) / 'reports.db').stat().st_size
+            page_size = db.execute('PRAGMA page_size').fetchone()[0]
+            free_pages = db.execute('PRAGMA freelist_count').fetchone()[0]
+            # Recreate the legacy schema on the same rows for a like-for-like comparison.
+            db.execute('DROP INDEX ' + index_name)
+            index_bytes = (db.execute('PRAGMA freelist_count').fetchone()[0] - free_pages) * page_size
+            self.assertTrue(0 < index_bytes < db_bytes)
+            self.assertLess(indexed_steps, measure_probe())
+
+            statements.clear()
+            db.set_trace_callback(statements.append)
+            position_reports.init(db)
+            db.set_trace_callback(None)
+            create_index, = (sql for sql in statements if sql.startswith('CREATE INDEX') and index_name in sql)
+            self.assertLess(statements.index(create_index), statements.index(probe))
+            self.assertEqual(sorted(tuple(row) for row in db.execute('SELECT * FROM report_position_links')),
+                             sorted(expected_links))
+            writes = db.total_changes
+            position_reports.init(db)
+            self.assertEqual(db.total_changes, writes)
+
 
 class Positions(unittest.TestCase):
  def setUp(self):

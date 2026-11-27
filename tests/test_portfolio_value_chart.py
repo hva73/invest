@@ -104,4 +104,54 @@ class PortfolioValueChart(unittest.TestCase):
    history=dashboard.portfolio_value_history(c,1,self.now)
   self.assertEqual([p['amount'] for p in history['periods']['week']],['1000']);self.assertIsNone(history['reported_result']);self.assertIsNone(history['current_value'])
 
+class OverviewPositionSnapshots(unittest.TestCase):
+ def member(self,key,quantity,amount,**fields):
+  return dict(key=key,asset_id='asset-1',name=key,quantity=quantity,
+              value={'amount':amount,'currency':'DKK'},**fields)
+
+ def test_mixed_offsets_select_latest_member_and_oldest_snapshot(self):
+  earlier=self.member('first','0.1','10.01',snapshot_at='2026-07-01T10:00:00+02:00')
+  later=self.member('second','0.2','20.02',snapshot_at='2026-07-01T09:00:00Z',
+                    portfolio_id=2,hot_watch={'watch_id':'second'},action='SÆLG',
+                    daily={'percent':'2'},since_last={'percent':'1'})
+  for members in ([earlier,later],[later,earlier]):
+   with self.subTest(first=members[0]['key']):
+    combined,=dashboard.overview_positions(members)
+    self.assertEqual(combined['name'],'second')
+    self.assertEqual(combined['snapshot_at'],earlier['snapshot_at'])
+    self.assertEqual(combined['member_keys'],[m['key'] for m in members])
+    self.assertEqual(combined['quantity'],'0.3')
+    self.assertEqual(combined['value'],{'amount':'30.03','currency':'DKK'})
+    self.assertEqual(combined['hot_watch'],{})
+    for field in ('portfolio_id','action','daily','since_last'):
+     self.assertIsNone(combined[field],field)
+
+ def test_equivalent_instants_keep_first_member_and_source_spelling(self):
+  utc=self.member('utc','1','10',snapshot_at='2026-07-01T08:00:00Z')
+  offset=self.member('offset','1','10',snapshot_at='2026-07-01T10:00:00+02:00')
+  for members in ([utc,offset],[offset,utc]):
+   with self.subTest(first=members[0]['key']):
+    combined,=dashboard.overview_positions(members)
+    self.assertEqual(combined['name'],members[0]['name'])
+    self.assertEqual(combined['snapshot_at'],members[0]['snapshot_at'])
+
+ def test_missing_or_invalid_member_time_withholds_combined_time(self):
+  valid=self.member('dated','1','10',snapshot_at='2026-07-01T09:00:00Z')
+  for fields in ({},{'snapshot_at':None},{'snapshot_at':'not-a-time'},
+                 {'snapshot_at':'2026-07-01T12:00:00'}):
+   with self.subTest(fields=fields):
+    unknown=self.member('unknown','1','20',**fields)
+    combined,=dashboard.overview_positions([unknown,valid])
+    self.assertEqual(combined['name'],'dated')
+    self.assertIsNone(combined['snapshot_at'])
+    self.assertEqual(combined['member_keys'],['unknown','dated'])
+    self.assertEqual(combined['value'],{'amount':'30','currency':'DKK'})
+
+ def test_no_parseable_members_keep_first_member_without_snapshot_time(self):
+  first=self.member('first','1','10')
+  second=self.member('second','1','10',snapshot_at='not-a-time')
+  combined,=dashboard.overview_positions([first,second])
+  self.assertEqual(combined['name'],'first')
+  self.assertIsNone(combined['snapshot_at'])
+
 if __name__=='__main__':unittest.main()
