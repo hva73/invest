@@ -3424,7 +3424,7 @@
     "priority": 3,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "e7f80b2fc235545cfe3ec1799711d758bb0467db",
+    "base_sha": "d0526092a50db208b8890ae0f2fee7cb8c7eab36",
     "dependencies": [],
     "paths": [
       "static/overview-ui.js",
