@@ -196,7 +196,11 @@ window.SectorUI=(()=>{
   let dialog=document.getElementById('si-summary-dialog');if(!dialog){dialog=document.createElement('dialog');dialog.id='si-summary-dialog';dialog.className='si-summary-dialog';document.body.append(dialog)}
   dialog.innerHTML=`<div class="si-summary-head"><div><small class="si-eyebrow">DIT INVESTERINGSOVERBLIK</small><h2 id="si-summary-title">${txt(title)}</h2></div><form method="dialog"><button aria-label="Luk vindue">✕</button></form></div><div class="si-summary-body">${body}</div>`;dialog.setAttribute('aria-labelledby','si-summary-title');if(!dialog.open)dialog.showModal();dialog.querySelector('button')?.focus();
  }
- function radar(user){load(user);if(!data)return ''; const rows=comparable(data.markets.filter(x=>x.region==='USA').map(x=>({...x,change:changes(x)})).filter(x=>x.change&&Date.now()-Date.parse(x.change.to+'T00:00Z')<7*864e5)).sort((a,b)=>b.change.value-a.change.value);return rows.length>1?`<section class="panel"><small>SECTOR INTELLIGENCE · ETF-PROXIES</small><h2>Relativ sektorstyrke</h2><p>${txt(rows[0].sector)} ${pct(rows[0].change.value)} · ${txt(rows.at(-1).sector)} ${pct(rows.at(-1).change.value)}. Historisk kursudvikling, ingen handelsordre.</p><button data-view="sectors">Åbn sektoroverblik →</button></section>`:''}
+ function radar(user){load(user);if(!data)return ''; const rows=comparable(data.markets.filter(x=>x.region==='USA').map(x=>({...x,change:changes(x)})).filter(x=>{
+   if(!x.change)return false;
+   const age=Date.now()-Date.parse(x.change.to+'T00:00Z');
+   return Number.isFinite(age)&&age>=0&&age<7*864e5;
+  })).sort((a,b)=>b.change.value-a.change.value);return rows.length>1?`<section class="panel"><small>SECTOR INTELLIGENCE · ETF-PROXIES</small><h2>Relativ sektorstyrke</h2><p>${txt(rows[0].sector)} ${pct(rows[0].change.value)} · ${txt(rows.at(-1).sector)} ${pct(rows.at(-1).change.value)}. Historisk kursudvikling, ingen handelsordre.</p><button data-view="sectors">Åbn sektoroverblik →</button></section>`:''}
  function highlightDonutSector(target,active){
   const item=target?.closest?.('[data-sector-donut], .si-bar-column[data-sector-select], .sector-row[data-sector-select]');if(!item)return;
   const shell=item.closest('.sector-shell');if(!shell)return;
