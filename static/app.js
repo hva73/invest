@@ -260,7 +260,31 @@ async function loadStrategyCenter(){
 }
 let pushConfig=null,pushSubscription=null,pushBusy=false;
 async function pushWorkerReady(){return Promise.race([navigator.serviceWorker.ready,new Promise((_,reject)=>setTimeout(()=>reject(Error('Appens notifikationstjeneste svarer ikke. Genindlæs siden, og prøv igen.')),5000))])}
-async function loadPushSettings(){const box=$('#push-settings-content'),user=state?.user.username;if(!box)return;try{const cfg=await api('push/config');if(!box.isConnected||state?.user.username!==user)return;pushConfig=cfg;const supported='serviceWorker'in navigator&&'PushManager'in window&&'Notification'in window&&isSecureContext;let device={subscribed:false};pushSubscription=null;if(supported){const reg=await pushWorkerReady();pushSubscription=await reg.pushManager.getSubscription();if(pushSubscription)device=await api('push/device',{endpoint:pushSubscription.endpoint})}if(!box.isConnected||state?.user.username!==user)return;const ready=cfg.available&&supported;box.innerHTML=`<p>${device.subscribed?'Notifikationer er slået til på denne enhed.':!cfg.available?escape(cfg.message||'Serveren er ikke klar til notifikationer.'):!supported?'Denne browser understøtter ikke web-push her. På iPhone skal ESCAPE åbnes fra hjemmeskærmen.':Notification.permission==='denied'?'Notifikationer er blokeret på enheden. Åbn telefonens indstillinger for at tillade dem.':'Vælg hvilke signaler du vil modtage på denne enhed.'}</p><div class="push-options"><label><input type="checkbox" id="push-buy" ${!device.subscribed||device.buy?'checked':''}> Købssignaler</label><label><input type="checkbox" id="push-sell" ${!device.subscribed||device.sell?'checked':''}> Salgssignaler</label></div><div class="actions"><button type="button" class="primary" data-push-action="enable" ${!ready||Notification.permission==='denied'?'disabled':''}>${device.subscribed?'Gem valg':'Aktivér på denne enhed'}</button>${device.subscribed?'<button type="button" data-push-action="test">Send testbesked</button><button type="button" data-push-action="disable">Slå fra på denne enhed</button>':''}</div><p class="muted">Beskeder viser ingen depotbeløb og kræver, at HOT WATCH-motoren kører. Åbn ESCAPE for den aktuelle status. På iPhone skal appen være føjet til hjemmeskærmen.</p><p id="push-message" class="form-status" role="status" aria-live="polite"></p>`}catch(error){if(box.isConnected)box.textContent='Notifikationer kunne ikke kontrolleres: '+error.message}}
+async function loadPushSettings(){
+ const box=$('#push-settings-content'),user=state?.user.username,epoch=sessionEpoch;
+ if(!box)return;
+ const current=()=>epoch===sessionEpoch&&box.isConnected&&state?.user.username===user;
+ try{
+  const cfg=await api('push/config');
+  if(!current())return;
+  const supported='serviceWorker'in navigator&&'PushManager'in window&&'Notification'in window&&isSecureContext;
+  let device={subscribed:false},subscription=null;
+  if(supported){
+   const reg=await pushWorkerReady();
+   if(!current())return;
+   subscription=await reg.pushManager.getSubscription();
+   if(!current())return;
+   if(subscription)device=await api('push/device',{endpoint:subscription.endpoint});
+  }
+  if(!current())return;
+  pushConfig=cfg;
+  pushSubscription=subscription;
+  const ready=cfg.available&&supported;
+  box.innerHTML=`<p>${device.subscribed?'Notifikationer er slået til på denne enhed.':!cfg.available?escape(cfg.message||'Serveren er ikke klar til notifikationer.'):!supported?'Denne browser understøtter ikke web-push her. På iPhone skal ESCAPE åbnes fra hjemmeskærmen.':Notification.permission==='denied'?'Notifikationer er blokeret på enheden. Åbn telefonens indstillinger for at tillade dem.':'Vælg hvilke signaler du vil modtage på denne enhed.'}</p><div class="push-options"><label><input type="checkbox" id="push-buy" ${!device.subscribed||device.buy?'checked':''}> Købssignaler</label><label><input type="checkbox" id="push-sell" ${!device.subscribed||device.sell?'checked':''}> Salgssignaler</label></div><div class="actions"><button type="button" class="primary" data-push-action="enable" ${!ready||Notification.permission==='denied'?'disabled':''}>${device.subscribed?'Gem valg':'Aktivér på denne enhed'}</button>${device.subscribed?'<button type="button" data-push-action="test">Send testbesked</button><button type="button" data-push-action="disable">Slå fra på denne enhed</button>':''}</div><p class="muted">Beskeder viser ingen depotbeløb og kræver, at HOT WATCH-motoren kører. Åbn ESCAPE for den aktuelle status. På iPhone skal appen være føjet til hjemmeskærmen.</p><p id="push-message" class="form-status" role="status" aria-live="polite"></p>`
+ }catch(error){
+  if(current())box.textContent='Notifikationer kunne ikke kontrolleres: '+error.message;
+ }
+}
 function pushPublicKey(value){const s=value.replace(/-/g,'+').replace(/_/g,'/'),raw=atob(s+'='.repeat((4-s.length%4)%4));return Uint8Array.from(raw,c=>c.charCodeAt(0))}
 function pushStatus(message,kind='loading'){const box=$('#push-message');if(box){box.textContent=message;box.dataset.kind=kind}}
 function pushWait(promise,ms,message){let timer;return Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(message)),ms)})]).finally(()=>clearTimeout(timer))}
