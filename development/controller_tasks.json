@@ -2804,7 +2804,7 @@
     "priority": 3,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "97c5dedf8f011f44b223897474050e6cd14a7d11",
+    "base_sha": "ec9220f4ff531f1964574cc16efbf02a8fcdf85d",
     "dependencies": [],
     "paths": [
       "sector_intelligence.py",
