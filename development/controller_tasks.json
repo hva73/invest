@@ -2944,7 +2944,7 @@
     "priority": 3,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "ec9220f4ff531f1964574cc16efbf02a8fcdf85d",
+    "base_sha": "57d37377d54dcd7524a5347eb5baa63b89069ef8",
     "dependencies": [],
     "paths": [
       "hotwatch_features.py",
