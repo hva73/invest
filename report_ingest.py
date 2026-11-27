@@ -221,14 +221,6 @@ def desk(connect,user_id):
         if main:
             prior=c.execute("SELECT id,received,payload FROM ingested_reports WHERE user_id=? AND is_test=0 AND report_type!='deep_analysis' AND generated_epoch<? ORDER BY generated_epoch DESC,id DESC LIMIT 1",(user_id,datetime.fromisoformat(main['data']['generated_at'].upper().replace('Z','+00:00')).timestamp())).fetchone()
             previous=row_view(prior) if prior else None
-            base=main['data']
-            for index,candidate in enumerate(base['candidates']):
-                source=main;chosen=candidate
-                if base['schema_version']==2:
-                    row=c.execute('SELECT r.id,r.received,r.payload FROM report_candidate_links l JOIN ingested_reports r ON r.id=l.report_row_id WHERE l.user_id=? AND l.is_test=0 AND l.candidate_id=? ORDER BY l.generated DESC,r.id DESC LIMIT 1',(user_id,candidate['candidate_id'])).fetchone()
-                    if row:
-                        source=row_view(row);chosen=next(c for c in source['data']['candidates'] if c['candidate_id']==candidate['candidate_id'])
-                candidates.append({'candidate':chosen,'report_id':source['data']['report_id'],'generated_at':source['data']['generated_at'],'received':source['received'],'schema_version':source['data']['schema_version'],'quality':source['data'].get('data_quality',{}).get('status','unknown'),'index':index})
         import position_reports
         positions=position_reports.projection(c,user_id,main,previous)
         import intel_workflows
@@ -254,6 +246,12 @@ def desk(connect,user_id):
         # v1 stays unchanged; modern candidates persist independently of a single report.
         if main and main['data']['schema_version']==2:candidates=[x for x in registry if x['active']]
         elif main:
+            base=main['data']
+            for index,candidate in enumerate(base['candidates']):
+                candidates.append({'candidate':candidate,'report_id':base['report_id'],
+                                   'generated_at':base['generated_at'],'received':main['received'],
+                                   'schema_version':base['schema_version'],
+                                   'quality':base.get('data_quality',{}).get('status','unknown'),'index':index})
             reset=c.execute('SELECT report_cutoff FROM radar_resets WHERE user_id=?',(user_id,)).fetchone()
             if reset:
                 if main['id']<=reset['report_cutoff']:candidates=[]
