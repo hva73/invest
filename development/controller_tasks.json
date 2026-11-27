@@ -2682,7 +2682,7 @@
     "generation": 46,
     "role": "mobile",
     "priority": 3,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "7f427e855d5bb9eef7d95ad42332c8381526b12b",
     "dependencies": [],
