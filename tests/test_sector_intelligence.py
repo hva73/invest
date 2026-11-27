@@ -472,4 +472,25 @@ class SectorIntelligenceTest(unittest.TestCase):
   result=sector._series([{'date':'2026-10-02','close':4},{'date':'invalid','close':7},{'date':'2026-10-01','close':2},{'date':'2026-10-03','close':-1}])
   self.assertEqual([x['date'] for x in result],['2026-10-01','2026-10-02'])
 
+ def test_series_excludes_conflicts_on_selected_basis_in_either_order(self):
+  rows=[
+   {'date':'2020-01-03','close':110,'adjusted_close':55},
+   {'date':'2020-01-01','close':100,'adjusted_close':40},
+   {'date':'2020-01-02','close':80,'adjusted_close':50},
+   {'date':'2020-01-01','close':100,'adjusted_close':60},
+   {'date':'2020-01-02','close':120,'adjusted_close':50},
+   {'date':'2020-01-03','close':110,'adjusted_close':55},
+   {'date':'9999-12-31','close':130,'adjusted_close':65},
+  ]
+  for basis in ('adjusted_close','close'):
+   observations=[row.copy() for row in rows]
+   if basis=='close':
+    del observations[0]['adjusted_close']
+    expected=[{'date':'2020-01-01','close':100},{'date':'2020-01-03','close':110}]
+   else:
+    expected=[{'date':'2020-01-02','close':50},{'date':'2020-01-03','close':55}]
+   for reverse in (False,True):
+    with self.subTest(basis=basis,reverse=reverse):
+     self.assertEqual(sector._series(observations[::-1] if reverse else observations),expected)
+
 if __name__=='__main__':unittest.main()
