@@ -2662,7 +2662,7 @@
     "generation": 45,
     "role": "desktop",
     "priority": 3,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "da51de591546f297370dbf52189e79baac3f341d",
     "dependencies": [],
