@@ -48,4 +48,33 @@ class Lab(unittest.TestCase):
   with app.connect() as c:
    row=c.execute('SELECT id,payload FROM hw_samples ORDER BY id LIMIT 1').fetchone();x=json.loads(row['payload']);x['event_time']=(self.now+timedelta(days=1)).isoformat();c.execute('UPDATE hw_samples SET payload=?,digest=? WHERE id=?',(json.dumps(x),checksum(x),row['id']))
   result=strategy_lab.compare(app.connect,1,self.data);self.assertEqual(result['skipped'],1);self.assertEqual(result['evaluated'],37)
+ def test_chronology_survives_skips_and_advances_only_after_all_strategies(self):
+  self.data['strategies'][1]={'strategy_id':'escape_early_catalyst','version':'1.0.0'}
+  with app.connect() as c:
+   resumed,older,gap,accepted=c.execute(
+    'SELECT id,calculated,payload FROM hw_calculations ORDER BY id DESC LIMIT 4'
+   ).fetchall()
+   # In insertion order: accepted boundary, failed later attempt, older row, recovery.
+   boundary=(datetime.fromisoformat(older['calculated'])+timedelta(seconds=1)).isoformat()
+   failed_at=(datetime.fromisoformat(resumed['calculated'])+timedelta(seconds=1)).isoformat()
+   c.execute('UPDATE hw_calculations SET calculated=? WHERE id=?',(boundary,accepted['id']))
+  for failure in ('missing context','invalid second strategy input'):
+   with self.subTest(failure=failure):
+    payload=json.loads(gap['payload'])
+    if failure=='missing context':
+     del payload['position_context']
+    else:
+     payload.update(early_catalyst={},supporting_metrics=['invalid'])
+    with app.connect() as c:
+     c.execute('UPDATE hw_calculations SET calculated=?,payload=? WHERE id=?',
+               (failed_at,json.dumps(payload),gap['id']))
+    before=self.snapshot()
+    result=strategy_lab.compare(app.connect,1,self.data)
+    self.assertEqual(before,self.snapshot())
+    self.assertEqual((result['skipped'],result['evaluated']),(2,36))
+    for outcome in result['strategies']:
+     times=[entry['at'] for entry in outcome['timeline']]
+     self.assertEqual(times,sorted(times))
+     self.assertEqual(times[-2:],[boundary,resumed['calculated']])
+     self.assertEqual(sum(outcome['counts'].values()),36)
 if __name__=='__main__':unittest.main()
