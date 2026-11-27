@@ -103,9 +103,9 @@ def changes(main,previous,assessment_before=None):
                 if change is not None and abs(change)>=5:add('price_changed',p,'Rapporteret kurs ændret '+format(change,'.2f')+' % siden sammenligningsrapporten')
     for k,p in before.items():
         if k not in after and not closed(p):add('not_reported',p,'Ikke længere med i den seneste positionsliste; et salg er ikke bekræftet')
-    old_orders={o['order_id']:o for o in old['orders']}
+    old_orders={(o['portfolio_id'],o['order_id']):o for o in old['orders']}
     for o in data['orders']:
-        prior=old_orders.get(o['order_id']);filled=o['filled_quantity']
+        prior=old_orders.get((o['portfolio_id'],o['order_id']));filled=o['filled_quantity']
         if o.get('order_type') not in ['STOP','STOP_LIMIT'] or o['lifecycle'] not in ['filled','partial'] or filled is None or Decimal(filled)<=0:continue
         if prior and prior['lifecycle']==o['lifecycle'] and prior['filled_quantity'] is not None and Decimal(prior['filled_quantity'])==Decimal(filled):continue
         p=next((p for p in data['positions'] if order_matches(p,o)),None)
