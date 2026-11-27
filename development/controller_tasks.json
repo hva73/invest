@@ -3582,7 +3582,7 @@
     "generation": 69,
     "role": "mobile",
     "priority": 3,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "d2d381649b00d38f5122228ffd0ae40e5882f25e",
     "dependencies": [],
