@@ -121,21 +121,26 @@ def projection(c,user_id,main,previous=None,overlay_assessments=True):
     if not main or main['data']['schema_version']!=2:return {'groups':[],'count':0,'missing':0,'changes':[],'report_id':main['data']['report_id'] if main else None}
     data=main['data'];groups={p['portfolio_id']:{'portfolio':p,'positions':[]} for p in data['portfolios']};current=[]
     cache={}
+    def decoded_report(row):
+        row_id = row['id']
+        if row_id not in cache:
+            cache[row_id] = json.loads(row['payload'])
+        return cache[row_id]
+
     for p in data['positions']:
         if closed(p):continue
         item={'position':p,'assessment':p.get('assessment'),'assessment_report_id':data['report_id'],'assessment_generated_at':data['generated_at'],'sources':[s for s in data['sources'] if s['source_id'] in p['source_ids']+(p.get('market') or {}).get('source_ids',[])],'assessment_sources':[s for s in data['sources'] if s['source_id'] in (p.get('assessment') or {}).get('source_ids',[])],'orders':[o for o in data['orders'] if order_matches(p,o)]}
         # Only a later deep analysis can replace the assessment of a current holding.
         deep=c.execute("SELECT r.id,r.payload FROM report_position_links l JOIN ingested_reports r ON r.id=l.report_row_id WHERE l.user_id=? AND l.is_test=? AND l.portfolio_id=? AND l.position_id=? AND r.report_type='deep_analysis' AND l.generated>=? ORDER BY l.generated DESC,r.id DESC LIMIT 1",(user_id,int(data['is_test']),p['portfolio_id'],p['position_id'],stamp(data['generated_at']).timestamp())).fetchone() if overlay_assessments else None
         if deep:
-            if deep['id'] not in cache:cache[deep['id']]=json.loads(deep['payload'])
-            detail=cache[deep['id']];observed=next(x for x in detail['positions'] if key(x)==key(p));a=observed.get('assessment')
+            detail=decoded_report(deep);observed=next(x for x in detail['positions'] if key(x)==key(p));a=observed.get('assessment')
             if a and same_asset(p,observed) and (not item['assessment'] or stamp(a['assessed_at'])>=stamp(item['assessment']['assessed_at'])):item.update(assessment=a,assessment_report_id=detail['report_id'],assessment_generated_at=detail['generated_at'],assessment_sources=[s for s in detail['sources'] if s['source_id'] in a['source_ids']])
         item['assessment_status']=assessment_state({'assessment':item['assessment']});groups[p['portfolio_id']]['positions'].append(item);current.append(item)
     assessment_before={}
     for p in data['positions']:
-        refs=c.execute('SELECT r.payload FROM report_position_links l JOIN ingested_reports r ON r.id=l.report_row_id WHERE l.user_id=? AND l.is_test=? AND l.portfolio_id=? AND l.position_id=? AND l.generated<? ORDER BY l.generated DESC,l.report_row_id DESC LIMIT 20',(user_id,int(data['is_test']),p['portfolio_id'],p['position_id'],stamp(data['generated_at']).timestamp())).fetchall()
+        refs=c.execute('SELECT r.id,r.payload FROM report_position_links l JOIN ingested_reports r ON r.id=l.report_row_id WHERE l.user_id=? AND l.is_test=? AND l.portfolio_id=? AND l.position_id=? AND l.generated<? ORDER BY l.generated DESC,l.report_row_id DESC LIMIT 20',(user_id,int(data['is_test']),p['portfolio_id'],p['position_id'],stamp(data['generated_at']).timestamp())).fetchall()
         for ref in refs:
-            prior=next(x for x in json.loads(ref['payload'])['positions'] if key(x)==key(p))
+            prior=next(x for x in decoded_report(ref)['positions'] if key(x)==key(p))
             if prior.get('assessment') and same_asset(p,prior):assessment_before[key(p)]=prior['assessment'];break
     events=changes(main,previous,assessment_before)
     for item in current:
@@ -149,7 +154,7 @@ def projection(c,user_id,main,previous=None,overlay_assessments=True):
         k=(ref['portfolio_id'],ref['position_id'])
         if k in present:continue
         saved=c.execute('SELECT r.id,r.payload FROM report_position_links l JOIN ingested_reports r ON r.id=l.report_row_id WHERE l.user_id=? AND l.is_test=? AND l.portfolio_id=? AND l.position_id=? AND l.generated<=? ORDER BY l.generated DESC,r.id DESC LIMIT 1',(user_id,int(data['is_test']),*k,stamp(data['generated_at']).timestamp())).fetchone()
-        d=json.loads(saved['payload']);p=next(p for p in d['positions'] if key(p)==k)
+        d=decoded_report(saved);p=next(p for p in d['positions'] if key(p)==k)
         past.append({'position':p,'report_id':d['report_id'],'generated_at':d['generated_at'],'status':'Lukket' if closed(p) else 'Ikke længere rapporteret'})
     return {'groups':[g for g in groups.values() if g['positions']],'past':past,'past_truncated':len(refs)>150,'count':len(current),'missing':sum(i['assessment_status'] in ['DATA MANGLER','IKKE VURDERET'] for i in current),'changes':events,'report_id':data['report_id'],'generated_at':data['generated_at'],'is_test':data['is_test']}
 
