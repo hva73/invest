@@ -36,13 +36,16 @@ window.MarketUI=(()=>{
   return {bounds:calendar||verified?bounds:null,asOf,calendar,
    label:(verified?labels[domain?.phase||(crypto?'continuous':'unknown')]:null)||'Markedsstatus ukendt'};
  }
+ function validPrice(value){
+  return (typeof value==='number'||typeof value==='string')&&Number.isFinite(Number(value))&&Number(value)>0;
+ }
  function chart(data,period,markers){
   const day=period==='day'?dayDomain(data):null;
   const rows=(data.series||[]).filter(p=>{
    const ms=Date.parse(p.timestamp),epoch=Number(p.epoch);
    // Pluto's normalized timestamp truncates to milliseconds; epoch retains microseconds.
    return p.epoch!=null&&epoch>=ms/1000&&epoch<(ms+1)/1000&&
-    Number(p.price)>0&&Number.isFinite(Number(p.price))&&(!Number.isFinite(day?.asOf)||epoch*1000<=day.asOf);
+    validPrice(p.price)&&(!Number.isFinite(day?.asOf)||epoch*1000<=day.asOf);
   }).sort((a,b)=>a.epoch-b.epoch);
   const bounds=day?.bounds;
   if(bounds){
@@ -56,7 +59,7 @@ window.MarketUI=(()=>{
  }
  function geometry(rows,day,start,end,markers,currency){
   const values=rows.map(p=>Number(p.price));
-  const entries=markers.filter(m=>m?.kind==='entry'&&m.currency===currency&&Number.isFinite(Number(m.value))&&Number(m.value)>0);
+  const entries=markers.filter(m=>m?.kind==='entry'&&m.currency===currency&&validPrice(m.value));
   const levels=[...values,...entries.map(m=>Number(m.value))];
   const min=Math.min(...levels),max=Math.max(...levels),mid=min+(max-min)/2,range=Math.max((max-min)*1.2,mid*.01);
   const lo=mid-range/2,hi=mid+range/2;
@@ -65,6 +68,10 @@ window.MarketUI=(()=>{
   const label=day?clock:dayDate;
   const axis=day?.bounds?(day.calendar?['00.00','24.00']:[clock(start*1000),clock(end*1000)]):
    rows.length?[label(rows[0].timestamp),label(rows.at(-1).timestamp)]:[];
+  // Padding can overflow near MAX_VALUE or collapse for subnormal prices.
+  if(!(hi>lo&&Number.isFinite(hi-lo)&&Number.isFinite(range))){
+   return {rows:[],values:[],day,axis};
+  }
   return {rows,day,values,lo,hi,x,y,axis,entries};
  }
  function plot(data,markers,g){
@@ -77,13 +84,13 @@ window.MarketUI=(()=>{
    x(p.epoch).toFixed(3)+','+y(values[i]).toFixed(3)).join(' ');
   const isolated=day?rows.slice(0,-1).map((p,i)=>joinsPrevious[i]||joinsPrevious[i+1]?'':`<circle class="market-last" cx="${x(p.epoch)}" cy="${y(values[i])}" r="1.6"/>`).join(''):'';
   const last=rows.at(-1),high=Math.max(...values),top=rows[values.indexOf(high)];
-  const levels=[...entries,...markers.filter(m=>m?.kind==='stop'&&m.currency===data.currency&&Number.isFinite(Number(m.value))&&Number(m.value)>0)];
+  const levels=[...entries,...markers.filter(m=>m?.kind==='stop'&&m.currency===data.currency&&validPrice(m.value))];
   const signal=markers.find(m=>m?.kind==='signal'&&Date.parse(m.at)/1000>=rows[0].epoch&&Date.parse(m.at)/1000<=last.epoch&&last.epoch>rows[0].epoch);
   const signalX=signal?x(Date.parse(signal.at)/1000):null;
   const change=values.length>1?(values.at(-1)/values[0]-1)*100:null,color=tone(change);
   const axisPrice=v=>new Intl.NumberFormat('da-DK',{maximumSignificantDigits:5}).format(v);
   const levelLabel=m=>`${m.kind==='stop'?'Analytisk stop':'Gns. købskurs'} ${esc(m.value)} ${esc(m.currency)}`;
-  return `<div class="market-plot market-${color}" data-market-plot><div class="market-sample-change">Udsnit: ${change===null?'ét punkt':percent(change)}</div><div class="market-scale">Skala ${axisPrice(lo)}–${axisPrice(hi)} ${esc(data.currency)}</div><svg viewBox="0 0 240 62" preserveAspectRatio="none" role="img" aria-label="${esc('Kursudsnit fra '+stamp(rows[0].timestamp)+' til '+stamp(last.timestamp)+', '+rows.length+' observerede punkter')}"><path class="market-guide" d="M5,57 L235,57"/>${levels.filter(m=>Number(m.value)>=lo&&Number(m.value)<=hi).map(m=>`<line class="market-marker market-marker-${m.kind}" x1="5" x2="235" y1="${y(m.value)}" y2="${y(m.value)}"><title>${levelLabel(m)}</title></line>`).join('')}${signalX===null?'':`<line class="market-marker-signal" x1="${signalX}" x2="${signalX}" y1="5" y2="57"><title>Signalets datatid · ikke signalpris</title></line>`}<path class="market-line" d="${path}"/>${isolated}<circle class="market-last" cx="${x(last.epoch)}" cy="${y(values.at(-1))}" r="2.8"/><text x="${x(top.epoch)}" y="${Math.max(9,y(high)-4)}" text-anchor="${x(top.epoch)>215?'end':x(top.epoch)<25?'start':'middle'}" fill="currentColor" font-size="8"><title>Top ${esc(top.price)} ${esc(data.currency)}</title>Top</text><circle class="market-focus" r="3" hidden/></svg>${levels.length||signal?`<div class="market-marker-legend">${levels.map(m=>levelLabel(m)+(Number(m.value)<lo||Number(m.value)>hi?' · uden for skala':'')).join(' · ')}${signal?' · Signalets datatid (ikke kurs)':''}</div>`:''}<output class="market-hover" hidden></output>${axisMarkup}</div>`;
+  return `<div class="market-plot market-${color}" data-market-plot><div class="market-sample-change">Udsnit: ${change===null?'ét punkt':Number.isFinite(change)?percent(change):'—'}</div><div class="market-scale">Skala ${axisPrice(lo)}–${axisPrice(hi)} ${esc(data.currency)}</div><svg viewBox="0 0 240 62" preserveAspectRatio="none" role="img" aria-label="${esc('Kursudsnit fra '+stamp(rows[0].timestamp)+' til '+stamp(last.timestamp)+', '+rows.length+' observerede punkter')}"><path class="market-guide" d="M5,57 L235,57"/>${levels.filter(m=>Number(m.value)>=lo&&Number(m.value)<=hi).map(m=>`<line class="market-marker market-marker-${m.kind}" x1="5" x2="235" y1="${y(m.value)}" y2="${y(m.value)}"><title>${levelLabel(m)}</title></line>`).join('')}${signalX===null?'':`<line class="market-marker-signal" x1="${signalX}" x2="${signalX}" y1="5" y2="57"><title>Signalets datatid · ikke signalpris</title></line>`}<path class="market-line" d="${path}"/>${isolated}<circle class="market-last" cx="${x(last.epoch)}" cy="${y(values.at(-1))}" r="2.8"/><text x="${x(top.epoch)}" y="${Math.max(9,y(high)-4)}" text-anchor="${x(top.epoch)>215?'end':x(top.epoch)<25?'start':'middle'}" fill="currentColor" font-size="8"><title>Top ${esc(top.price)} ${esc(data.currency)}</title>Top</text><circle class="market-focus" r="3" hidden/></svg>${levels.length||signal?`<div class="market-marker-legend">${levels.map(m=>levelLabel(m)+(Number(m.value)<lo||Number(m.value)>hi?' · uden for skala':'')).join(' · ')}${signal?' · Signalets datatid (ikke kurs)':''}</div>`:''}<output class="market-hover" hidden></output>${axisMarkup}</div>`;
  }
  function sync(k){document.querySelectorAll('.market-slot').forEach(node=>{if(key(node)===k)paint(node,record(node))})}
  function paint(node,r){
