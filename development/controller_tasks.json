@@ -3164,7 +3164,7 @@
     "priority": 3,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "e7f80b2fc235545cfe3ec1799711d758bb0467db",
+    "base_sha": "8a43f8923fa009968679ac1cc274b251a97bf378",
     "dependencies": [],
     "paths": [
       "report_ingest.py",
