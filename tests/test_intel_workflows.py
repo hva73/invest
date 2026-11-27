@@ -1,5 +1,5 @@
 """V2.2 synthetic acceptance scenarios. All databases are disposable."""
-import copy,hashlib,json,tempfile,unittest
+import copy,hashlib,json,sqlite3,tempfile,unittest
 from unittest.mock import patch
 import app,report_ingest,report_validation,mcp_reports,intel_workflows as flow,report_v2
 from test_position_reports import full_positions
@@ -130,6 +130,57 @@ class Workflows(unittest.TestCase):
   with patch('mcp_client.MCP',side_effect=AssertionError('Broker must not be accessed')):
    result=mcp_reports.rpc(app.connect,identity,{'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':'record_hot_watch','arguments':args}})[1]['result'];self.assertFalse(result['isError']);self.assertTrue(result['structuredContent']['ok'])
   names={t['name'] for t in mcp_reports.tools('reports:read')};self.assertIn('get_hot_watch',names);self.assertNotIn('record_hot_watch',names)
+
+class OrderQuantities(unittest.TestCase):
+ def test_order_state_requires_report_quantity_format(self):
+  order = dict(status='FILLED', lifecycle='filled', filled_quantity='1', requested_quantity='1')
+  for field in ('filled_quantity', 'requested_quantity'):
+   for value in ('NaN', 'sNaN', 'Infinity', '-Infinity', '-1', '1e0', ' 1', '1_0',
+                 '9' * 19, '0.' + '1' * 13, True, 1, 1.0, [], {}):
+    with self.subTest(field=field, value=value):
+     self.assertEqual(flow.order_state({**order, field: value}), 'Ukendt status')
+  for filled, requested, status, expected in (
+      (None, '1', 'CANCELLED', 'Annulleret'),
+      ('0', '1', 'EXPIRED', 'Udløbet'),
+      ('NaN', '1', 'REJECTED', 'Afvist'),
+      ('1', None, 'FILLED', 'Fyldning oplyst · slutstatus ukendt'),
+      ('999999999999999999.000000000001', '999999999999999999.000000000002', 'CANCELLED', 'Delvist udført'),
+      ('1.000000000000', '1', 'FILLED', 'Fuldt udført')):
+   with self.subTest(filled=filled, requested=requested, status=status):
+    self.assertEqual(flow.order_state(dict(order, filled_quantity=filled, requested_quantity=requested,
+                                           status=status)), expected)
+
+ def test_watch_projects_archived_order_quantities_without_changing_evidence(self):
+  report = merc_report(mode=True)
+  template = report['orders'][0]
+  cases = [
+      ('nan', 'NaN', '1', 'EXPIRED', 'Udløbet'),
+      ('infinite', 'Infinity', 'Infinity', 'FILLED', 'Ukendt status'),
+      ('boolean', True, '1', 'ACCEPTED', 'Accepteret / aktiv · ingen bekræftet fyldning'),
+      ('partial', '0.5', '1', 'CANCELLED', 'Delvist udført'),
+      ('full', '1.00', '1', 'FILLED', 'Fuldt udført'),
+  ]
+  report['orders'] = [dict(template, order_id=oid, filled_quantity=filled, requested_quantity=requested,
+                           status=status, lifecycle='filled') for oid, filled, requested, status, _ in cases]
+  # Seed a historical payload directly in the disposable DB, bypassing current ingest validation.
+  payload = flow.canonical(report)
+  c = sqlite3.connect(':memory:')
+  self.addCleanup(c.close)
+  c.row_factory = sqlite3.Row
+  report_ingest.init(c)
+  with c:
+   c.execute('INSERT INTO ingested_reports(user_id,report_id,received,payload,digest,is_test,generated_epoch,report_type) '
+             'VALUES(?,?,?,?,?,?,?,?)', (1, report['report_id'], AT, payload, hashlib.sha256(payload.encode()).hexdigest(),
+                                         1, flow.stamp(AT).timestamp(), report['report_type']))
+  observed = observation(report)
+  observed['order_ids'] = [order['order_id'] for order in report['orders']]
+  self.assertEqual(flow.record(lambda: c, 1, observed)[0], 201)
+  before = c.total_changes
+  orders = flow.watch(lambda: c, 1, is_test=True)['groups'][0]['orders']
+  displayed = {o['order_id']: o for o in orders}
+  for order, case in zip(report['orders'], cases):
+   self.assertEqual(displayed[order['order_id']], dict(order, display_status=case[-1], report_id=report['report_id']))
+  self.assertEqual(c.total_changes, before)
 
 class HotWatchHTTP(unittest.TestCase):
  def setUp(self):
