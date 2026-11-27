@@ -3062,7 +3062,7 @@
     "generation": 56,
     "role": "desktop",
     "priority": 3,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "57d37377d54dcd7524a5347eb5baa63b89069ef8",
     "dependencies": [],
