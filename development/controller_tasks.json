@@ -2724,7 +2724,7 @@
     "priority": 3,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "696041c7c49cddb1e170751f483240045a7d4ab4",
+    "base_sha": "8aa3df377da9839412f18b4b1b4d30bec7c2bdea",
     "dependencies": [],
     "paths": [
       "static/intel-ui.js",
