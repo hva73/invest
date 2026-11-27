@@ -3364,7 +3364,7 @@
     "priority": 3,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "e7f80b2fc235545cfe3ec1799711d758bb0467db",
+    "base_sha": "9ce3c2aab33edbf4bb35ab8d2bc925f3b8f8683d",
     "dependencies": [],
     "paths": [
       "intel_workflows.py",
