@@ -1,4 +1,4 @@
-import tempfile,time,unittest
+import sqlite3,tempfile,time,unittest
 from datetime import datetime,timezone
 from unittest.mock import patch
 import app,jobs,portfolio_data
@@ -204,3 +204,29 @@ class Jobs(unittest.TestCase):
   jobs.run_one(app.connect,at=0)
   self.assertEqual(len(jobs.status(app.connect,1)['reports']),1);self.assertEqual(jobs.status(app.connect,2)['reports'],[])
   self.assertIn('ikke en markedsanalyse',jobs.status(app.connect,1)['reports'][0]['body'])
+
+class ReportHistory(unittest.TestCase):
+ def test_status_searches_owner_history_for_latest_twenty_reports(self):
+  c=sqlite3.connect(':memory:')
+  self.addCleanup(c.close)
+  c.row_factory=sqlite3.Row
+  jobs.init(c)
+  expected=[]
+  for i in range(25):
+   created=f'2026-01-{25-i:02d}'
+   for uid in (1,2):
+    body=f'Report {i} for owner {uid}'
+    c.execute('INSERT INTO reports(user_id,slot,created,body) VALUES(?,?,?,?)',(uid,str(i),created,body))
+    if uid==1:
+     expected.append({'created':created,'body':body})
+
+  statements=[]
+  c.set_trace_callback(statements.append)
+  reports=jobs.status(lambda: c,1)['reports']
+  c.set_trace_callback(None)
+  self.assertEqual(reports,list(reversed(expected[-20:])))
+  self.assertEqual(jobs.status(lambda: c,3)['reports'],[])
+  query,=[sql for sql in statements if 'FROM reports ' in sql]
+  plan='\n'.join(row['detail'] for row in c.execute('EXPLAIN QUERY PLAN '+query))
+  self.assertRegex(plan,r'SEARCH reports USING INDEX reports_user_id_id_desc \(user_id=\?\)')
+  self.assertNotIn('TEMP B-TREE',plan)
