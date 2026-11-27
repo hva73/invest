@@ -2704,7 +2704,7 @@
     "priority": 3,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "7f427e855d5bb9eef7d95ad42332c8381526b12b",
+    "base_sha": "8aa3df377da9839412f18b4b1b4d30bec7c2bdea",
     "dependencies": [],
     "paths": [
       "static/engine-ui.js",
