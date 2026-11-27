@@ -2584,7 +2584,7 @@
     "priority": 3,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "696041c7c49cddb1e170751f483240045a7d4ab4",
+    "base_sha": "d0a6181d2f6e43e40ef7675ca59f952f79b654d2",
     "dependencies": [],
     "paths": [
       "display_policy.py",
