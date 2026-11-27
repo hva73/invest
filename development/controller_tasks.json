@@ -2882,7 +2882,7 @@
     "generation": 51,
     "role": "desktop",
     "priority": 3,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "d01b358f32d8bcb23ce04f63eddbf1f0726b7205",
     "dependencies": [],
