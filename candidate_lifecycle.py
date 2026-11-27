@@ -5,12 +5,17 @@ from decimal import Decimal
 from report_validation import stamp,issue
 from report_v2 import CANDIDATE_LIFECYCLE as LIFECYCLE,LIFECYCLE_STATUSES as STATUSES
 DECISIONS={'KØB':'BUY','AFVENT':'WAIT','FRAVÆLG':'REJECT'}
+BROKER_EVIDENCE_SQL = "evidence IN ('pluto','pluto_snapshot','synthetic_test')"
 def canonical(d):return json.dumps(d,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False)
 def init(c):
  old=c.execute("SELECT 1 FROM sqlite_master WHERE name='candidate_lifecycle_events'").fetchone()
  c.execute('CREATE TABLE IF NOT EXISTS candidate_trade_cycles(user_id INTEGER NOT NULL,is_test INTEGER NOT NULL,candidate_id TEXT NOT NULL,cycle_id TEXT NOT NULL,created TEXT NOT NULL,reason TEXT NOT NULL,origin TEXT NOT NULL,PRIMARY KEY(user_id,is_test,candidate_id,cycle_id))')
  c.execute('CREATE TABLE IF NOT EXISTS candidate_lifecycle_events(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL,is_test INTEGER NOT NULL,candidate_id TEXT NOT NULL,event_key TEXT NOT NULL,status TEXT NOT NULL,reported_status TEXT,occurred REAL NOT NULL,occurred_at TEXT NOT NULL,reason TEXT NOT NULL,cycle_id TEXT,origin TEXT NOT NULL,evidence TEXT NOT NULL,payload TEXT NOT NULL,UNIQUE(user_id,is_test,candidate_id,event_key))')
  c.execute('CREATE INDEX IF NOT EXISTS candidate_lifecycle_time ON candidate_lifecycle_events(user_id,is_test,candidate_id,occurred,id)')
+ # The implicit rowid suffix breaks time ties when the lookup scans backwards.
+ c.execute(f'''CREATE INDEX IF NOT EXISTS candidate_lifecycle_broker_cycle
+               ON candidate_lifecycle_events(user_id,is_test,candidate_id,cycle_id,occurred)
+               WHERE {BROKER_EVIDENCE_SQL}''')
  c.execute('CREATE TABLE IF NOT EXISTS candidate_execution_events(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL,is_test INTEGER NOT NULL,candidate_id TEXT NOT NULL,cycle_id TEXT,order_id TEXT NOT NULL,event_key TEXT NOT NULL,status TEXT NOT NULL,occurred REAL NOT NULL,occurred_at TEXT NOT NULL,origin TEXT NOT NULL,verification TEXT NOT NULL,payload TEXT NOT NULL,UNIQUE(user_id,is_test,candidate_id,event_key))')
  if not old:
   for row in c.execute('SELECT user_id,payload FROM ingested_reports ORDER BY generated_epoch,id'):
@@ -111,7 +116,7 @@ def observe_pluto(c,uid,mode,cid,context,at,origin,cycle,signal=None,synthetic=F
  if context['status']!='verified' or not context['as_of'] or not 0<=stamp(at).timestamp()-stamp(context['as_of']).timestamp()<=300:return
  evidence='synthetic_test' if synthetic and mode else 'pluto'
  previous=latest(c,uid,mode,cid)
- last_broker=c.execute("SELECT * FROM candidate_lifecycle_events WHERE user_id=? AND is_test=? AND candidate_id=? AND cycle_id IS ? AND evidence IN ('pluto','pluto_snapshot','synthetic_test') ORDER BY occurred DESC,id DESC LIMIT 1",(uid,int(mode),cid,cycle)).fetchone()
+ last_broker=c.execute(f"SELECT * FROM candidate_lifecycle_events WHERE user_id=? AND is_test=? AND candidate_id=? AND cycle_id IS ? AND {BROKER_EVIDENCE_SQL} ORDER BY occurred DESC,id DESC LIMIT 1",(uid,int(mode),cid,cycle)).fetchone()
  if context['position']=='none' and last_broker and last_broker['status'] in ['POSITION_OPEN','EXIT_WATCH']:
   target=previous['status'] if previous and previous['status'] in ['CLOSED','ARCHIVED'] else 'WAITING_TRIGGER'
   record(c,uid,mode,cid,target,at,'Pluto viser ingen position i konteksten; salg udledes ikke uden fyldningsbevis',origin,cycle,evidence,details={'position_state':'none','quantity':'0','as_of':context['as_of']})
@@ -135,6 +140,20 @@ def observe_pluto(c,uid,mode,cid,context,at,origin,cycle,signal=None,synthetic=F
   if context['position']=='none' and status=='FILLED' and order['side']=='SELL' and assigned_cycle==cycle:
    record(c,uid,mode,cid,'CLOSED',at,'Pluto bekræfter udført salg og ingen position i den kontrollerede depotkontekst',origin,cycle,evidence,details={'order_id':order['order_id'],'filled_quantity':order['filled_quantity']})
 
+def _latest_broker_events(c,uid,mode,cid):
+ return c.execute(f'''
+  WITH cycles AS (
+   SELECT DISTINCT cycle_id FROM candidate_lifecycle_events
+   WHERE user_id=?1 AND is_test=?2 AND candidate_id=?3 AND {BROKER_EVIDENCE_SQL}
+  )
+  SELECT event.status,event.payload FROM cycles
+  JOIN candidate_lifecycle_events AS event ON event.id=(
+   SELECT id FROM candidate_lifecycle_events
+   WHERE user_id=?1 AND is_test=?2 AND candidate_id=?3 AND cycle_id IS cycles.cycle_id
+     AND {BROKER_EVIDENCE_SQL}
+   ORDER BY occurred DESC,id DESC LIMIT 1
+  )''',(uid,int(mode),cid))
+
 def projection(c,uid,mode,candidate,decision=None):
  cid=candidate['candidate_id'];row=latest(c,uid,mode,cid);lifecycle={'status':row['status'],'reported_status':row['reported_status'],'changed_at':row['occurred_at'],'reason':row['reason'],'trade_cycle_id':row['cycle_id'],'evidence':row['evidence']} if row else {'status':'DISCOVERED','reported_status':None,'changed_at':None,'reason':'Historisk kandidat; ingen eksplicit statusændring','trade_cycle_id':None,'evidence':'historical'}
  executions=[];seen=set()
@@ -142,11 +161,11 @@ def projection(c,uid,mode,candidate,decision=None):
   if e['order_id'] in seen:continue
   seen.add(e['order_id']);executions.append({'order_id':e['order_id'],'trade_cycle_id':e['cycle_id'],'status':e['status'],'verification':e['verification'],'as_of':e['occurred_at'],'data':json.loads(e['payload'])})
  proof=None if mode else position_proof(c,uid,candidate)
- broker_states={}
- for event in c.execute("SELECT * FROM candidate_lifecycle_events WHERE user_id=? AND is_test=? AND candidate_id=? AND evidence IN ('pluto','pluto_snapshot','synthetic_test') ORDER BY occurred DESC,id DESC",(uid,int(mode),cid)):
-  if event['cycle_id'] in broker_states:continue
-  detail=json.loads(event['payload'])['details'];broker_states[event['cycle_id']]=event['status'] in ['POSITION_OPEN','EXIT_WATCH'] and detail.get('position_state')!='none'
- historical_position=any(broker_states.values())
+ historical_position=False
+ for event in _latest_broker_events(c,uid,mode,cid):
+  detail=json.loads(event['payload'])['details']
+  if event['status'] in ('POSITION_OPEN','EXIT_WATCH') and detail.get('position_state')!='none':
+   historical_position=True
  cycles=[dict(r) for r in c.execute('SELECT cycle_id,created,reason,origin FROM candidate_trade_cycles WHERE user_id=? AND is_test=? AND candidate_id=? ORDER BY created',(uid,int(mode),cid))]
  return {'lifecycle':lifecycle,'normalized_decision':DECISIONS.get((decision or {}).get('status')),'execution':executions,'has_confirmed_position':bool(proof or historical_position),'position_proof':proof,'trade_cycles':cycles}
 
