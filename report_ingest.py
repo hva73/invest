@@ -190,8 +190,10 @@ def overview_changes(current,previous):
         before=old.get(p['portfolio_id'])
         if not before or any(p[k]!=before[k] for k in ['kind','parent_portfolio_id','includes_collections']):continue
         try:
-            if stamp(p['as_of'])<=stamp(before['as_of']):continue
-        except (ValueError,TypeError):continue
+            current_time = stamp(p['as_of']).astimezone(timezone.utc)
+            previous_time = stamp(before['as_of']).astimezone(timezone.utc)
+            if current_time <= previous_time:continue
+        except (ValueError,TypeError,OverflowError):continue
         def change(value,prior):
             if not value or not prior or value['currency']!=prior['currency']:return None
             with localcontext() as context:
