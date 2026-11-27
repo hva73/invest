@@ -6,6 +6,41 @@ const row={key:'p',ticker:'TEST',name:'Test',portfolio_id:7,portfolio_name:'Test
 const state={user:{username:'test'},dashboard:{positions:[row],accounts:[],totals:[],warnings:[],orders:[],critical_sessions:[]}};
 const ctx={window,document,Intl,Number,String,Date,console};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../static/dashboard-ui.js'),'utf8'),ctx);
 const ui=window.DashboardUI;ui.setup({api(){},escape:v=>String(v),formatTime:v=>v||'Ukendt',formatQuantity:String,state:()=>state});
+for(const amount of [null,undefined,'','  ',false,true,[],[1],{},NaN,Infinity,'abc']){
+  assert.strictEqual(ui.amount({amount,currency:'DKK'}),'—',`invalid amount: ${String(amount)}`);
+}
+for(const currency of [null,undefined,'','DK','DKK ',123,['DKK']]){
+  assert.strictEqual(ui.amount({amount:1,currency}),'—',`invalid currency: ${String(currency)}`);
+}
+for(const [amount,currency,price,precision] of [
+  [0,'DKK',false,{minimumFractionDigits:2,maximumFractionDigits:2}],
+  ['0','USD',false,{minimumFractionDigits:2,maximumFractionDigits:2}],
+  ['12.3456','USD',true,{minimumFractionDigits:2,maximumFractionDigits:4}],
+  ['0.0000123456789','DKK',true,{maximumSignificantDigits:8}]
+]){
+  const expected=new Intl.NumberFormat('da-DK',{style:'currency',currency,...precision}).format(Number(amount));
+  assert.strictEqual(ui.amount({amount,currency},price),expected);
+}
+assert.strictEqual(ui.amount({amount:'1e-400',currency:'USD'},true),'1e-400 USD');
+function renderPercent(percent){
+  const position={...row,daily:{percent,reference_note:'Pluto',from:'start',to:'slut'},unrealized:{amount:2,currency:'DKK'},unrealized_percent:percent};
+  return ui.render({...state,dashboard:{...state.dashboard,positions:[position]}});
+}
+for(const value of ['', ' \t',false,true,null,undefined,NaN,Infinity,-Infinity,'Infinity','abc',[],[1],{}]){
+  const markup=renderPercent(value);
+  assert.match(markup,/<td class="dash-daily"[^>]*><button[^>]*><span class="dash-neutral" title="Pluto · start → slut">—<\/span>/,`invalid daily percent: ${String(value)}`);
+  if(value!=null)assert.match(markup,/<small class="dash-profit-percent neutral">—<\/small>/);
+}
+for(const [value,tone,label] of [
+  [0,'neutral','→ 0,00 %'],['0','neutral','→ 0,00 %'],
+  [1.25,'positive','↑ +1,25 %'],['-1.25','negative','↓ -1,25 %'],
+  ['0.000012345','positive','↑ +0,000012 %']
+]){
+  const markup=renderPercent(value);
+  assert.ok(markup.includes(`<small class="dash-profit-percent positive">${label.slice(2)}</small>`));
+  const cell=markup.match(/<td class="dash-daily"[^>]*>(.*?)<\/td>/)[1];
+  assert.ok(cell.includes(`class="dash-change ${tone}"`) && cell.includes(`>${label}</span>`),cell);
+}
 function testObservationNote(session){
   function render(change_pct, window_minutes, kind='RISING'){
     session.market_observation={kind,change_pct,window_minutes};

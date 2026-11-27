@@ -14,7 +14,11 @@ window.SectorUI=(()=>{
   for(const row of rows){if(row.verification==='last_known')continue;const observed=Date.parse(row.snapshot_at||'');if(!Number.isFinite(observed)||Math.abs(reference-observed)>900000)continue;const foreign=row.original_value||row.raw?.value,local=row.raw?.value_in_portfolio_currency;if(foreign?.currency!==currency||local?.currency!=='DKK')continue;const a=number(foreign.amount),b=number(local.amount);if(a!==null&&b!==null&&a>0&&b>0)rates.push(b/a)}
   if(!rates.length)return null;rates.sort((a,b)=>a-b);if(rates.at(-1)/rates[0]>1.05)return null;const mid=Math.floor(rates.length/2);return rates.length%2?rates[mid]:(rates[mid-1]+rates[mid])/2
  }
- function fxInfo(currency){if(typeof currency!=='string'||!/^[A-Z]{3}$/.test(currency))return null;if(currency==='DKK')return {rate:1,source:'DKK'};const fx=data?.fx,age=fx?.source_date?Date.now()-Date.parse(fx.source_date+'T00:00:00Z'):NaN;if(age>=0&&age<=7*864e5){const rates=fx.rates||{},from=currency==='EUR'?1:number(rates[currency]),to=number(rates.DKK);if(from&&to)return {rate:to/from,source:'ECB'}}const q=(data?.fx_quotes||[]).find(x=>x.currency===currency&&x.event_time&&Date.now()-Date.parse(x.event_time)>=0&&Date.now()-Date.parse(x.event_time)<=7*864e5&&number(x.rate)>0);if(q)return {rate:Number(q.rate),source:'EODHD'};const inferred=plutoFx(currency);return inferred?{rate:inferred,source:'Pluto-estimat'}:null}
+ function fxInfo(currency){if(typeof currency!=='string'||!/^[A-Z]{3}$/.test(currency))return null;if(currency==='DKK')return {rate:1,source:'DKK'};const fx=data?.fx,age=fx?.source_date?Date.now()-Date.parse(fx.source_date+'T00:00:00Z'):NaN;if(age>=0&&age<=7*864e5){const rates=fx.rates||{},from=currency==='EUR'?1:number(rates[currency]),to=number(rates.DKK);if(from>0&&to>0){
+   const rate=to/from;
+   if(Number.isFinite(rate)&&rate>0)return {rate,source:'ECB'}
+  }}
+  const q=(data?.fx_quotes||[]).find(x=>x.currency===currency&&x.event_time&&Date.now()-Date.parse(x.event_time)>=0&&Date.now()-Date.parse(x.event_time)<=7*864e5&&number(x.rate)>0);if(q)return {rate:Number(q.rate),source:'EODHD'};const inferred=plutoFx(currency);return inferred?{rate:inferred,source:'Pluto-estimat'}:null}
  function converted(m){if(!m)return null;const n=number(m.amount),info=fxInfo(m.currency);return n===null||!info?null:n*info.rate}
  function isCurrencyEstimate(m){return Boolean(m?.currency&&m.currency!=='DKK'&&fxInfo(m.currency))}
  function load(user,latestSnapshot){

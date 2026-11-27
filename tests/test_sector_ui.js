@@ -30,9 +30,36 @@ click({sectorScope:'all'});html=ui.render(state);assert.match(html,/DELVIS FORDE
 click({sectorScope:'1'});html=ui.render(state);assert.match(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);
 click({sectorScope:'2'});html=ui.render(state);assert.match(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);
 payload.dashboard.accounts[1].parent_external_id='andet';click({sectorScope:'1'});html=ui.render(state);assert.doesNotMatch(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);assert.doesNotMatch(html,/DELVIS FORDELING/);
+testEcbConversion();
 await testOwnerChanges();
 for(const outcome of ['success','error'])await testHoldingsOwnerChanges(outcome);
 console.log('PASS: collection holdings included in total and parent scope; chart, drilldown and percentages work')})().catch(e=>{console.error(e);process.exit(1)});
+
+function testEcbConversion(){
+ const now=new Date().toISOString();
+ click({sectorScope:'all'});
+ payload.dashboard.snapshot_at=now;
+ payload.dashboard.positions=[];
+ function check(currency,rates,expected){
+  payload.fx={source_date:now.slice(0,10),rates};
+  payload.dashboard.portfolio_value_history.reported_result={currency,amount:'10'};
+  const html=ui.render(state);
+  const result=html.match(/RESULTAT OPLYST AF PLUTO<\/small><strong class="[^"]*">([^<]+)<\/strong>/);
+  assert.ok(result);
+  assert.equal(result[1].replace(/\s/g,' '),expected);
+ }
+ check('EUR',{DKK:-7.5},'—');
+ check('EUR',{DKK:0},'—');
+ check('EUR',{DKK:7.5},'75,00 kr.');
+ for(const [USD,DKK] of [[-2,15],[-2,-15],[0,15],[Number.MIN_VALUE,15],[Number.MAX_VALUE,Number.MIN_VALUE]]){
+  check('USD',{USD,DKK},'—');
+ }
+ payload.dashboard.positions=[{portfolio_id:1,snapshot_at:now,original_value:{currency:'USD',amount:'1'},raw:{value_in_portfolio_currency:{currency:'DKK',amount:'6'}}}];
+ check('USD',{USD:-2,DKK:15},'60,00 kr.');
+ payload.fx_quotes=[{currency:'USD',event_time:now,rate:7}];
+ check('USD',{USD:Number.MIN_VALUE,DKK:15},'70,00 kr.');
+ check('USD',{USD:2,DKK:15},'75,00 kr.');
+}
 
 async function testOwnerChanges(){
  const requests=[];
