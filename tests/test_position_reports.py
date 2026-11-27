@@ -2,6 +2,7 @@
 import copy,json,sqlite3,tempfile,unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 import app,report_ingest,report_validation,position_reports,market_data
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -90,6 +91,75 @@ class PositionBackfill(unittest.TestCase):
             writes = db.total_changes
             position_reports.init(db)
             self.assertEqual(db.total_changes, writes)
+
+
+class ProjectionCache(unittest.TestCase):
+    def test_shared_reports_decoded_once_per_scoped_projection(self):
+        old = full_positions('old', '2026-11-02T12:00:00Z')
+        old['positions'] = old['positions'][:3]
+        old['positions'][1]['assessment']['action'] = 'REDUCÉR'
+        main = full_positions('main')
+        main['positions'] = main['positions'][:2]
+        intermediate = full_positions('intermediate', '2026-11-02T14:00:00Z')
+        deep = full_positions('deep', '2026-11-02T16:00:00Z')
+        for report in (intermediate, deep):
+            report['report_type'] = 'deep_analysis'
+            report['positions'] = report['positions'][:2]
+            # Legacy snapshot reuses the position key and ticker for a different asset.
+            report['positions'][0]['asset_id'] = 'other-asset'
+            report['positions'][0]['assessment']['action'] = 'SÆLG'
+        intermediate['positions'][1]['assessment'] = None
+        deep['positions'][1]['assessment']['action'] = 'OVERVÅG'
+
+        with closing(sqlite3.connect(':memory:')) as db:
+            db.row_factory = sqlite3.Row
+            db.execute('CREATE TABLE ingested_reports(id INTEGER PRIMARY KEY, user_id INTEGER, report_type TEXT, payload TEXT)')
+            position_reports.init(db)
+
+            def store(owner, report):
+                row = db.execute('INSERT INTO ingested_reports(user_id,report_type,payload) VALUES(?,?,?)',
+                                 (owner, report['report_type'], json.dumps(report)))
+                position_reports.index(db, owner, row.lastrowid, report)
+
+            for report in (old, intermediate, main, deep):
+                store(1, report)
+            for owner, test in ((2, False), (1, True)):
+                for hour in (14, 17):
+                    other = full_positions(f'outside-{owner}-{hour}', f'2026-11-02T{hour}:30:00Z')
+                    other.update(is_test=test, report_type='deep_analysis')
+                    store(owner, other)
+
+            for overlay in (True, False):
+                items = []
+                for i, position in enumerate(main['positions']):
+                    source = deep if overlay and i == 1 else main
+                    assessment = source['positions'][i]['assessment']
+                    items.append(dict(position=position, assessment=assessment, assessment_status=assessment['action'],
+                                      assessment_report_id=source['report_id'], assessment_generated_at=source['generated_at'],
+                                      assessment_sources=source['sources'], sources=main['sources'], orders=[]))
+                removed = old['positions'][2]
+                absent = dict(kind='not_reported', portfolio_id=removed['portfolio_id'], position_id=removed['position_id'],
+                              ticker=removed['ticker'], report_id='main', message='Ikke længere med i den seneste positionsliste; et salg er ikke bekræftet')
+                btc = main['positions'][1]
+                changed = dict(kind='assessment_changed', portfolio_id=btc['portfolio_id'], position_id=btc['position_id'],
+                               ticker=btc['ticker'], report_id='deep' if overlay else 'main',
+                               message='BEHOLD → OVERVÅG' if overlay else 'REDUCÉR → BEHOLD')
+                expected = dict(groups=[dict(portfolio=main['portfolios'][0], positions=items)],
+                                past=[dict(position=removed, report_id='old', generated_at=old['generated_at'], status='Ikke længere rapporteret')],
+                                past_truncated=False, count=2, missing=0, changes=[absent, changed] if overlay else [changed, absent],
+                                report_id='main', generated_at=main['generated_at'], is_test=False)
+                decoded = []
+                loads = json.loads
+
+                def track(payload):
+                    report = loads(payload)
+                    decoded.append(report['report_id'])
+                    return report
+
+                with self.subTest(overlay=overlay), patch.object(position_reports.json, 'loads', side_effect=track):
+                    result = position_reports.projection(db, 1, {'data': main}, {'data': old}, overlay)
+                    self.assertEqual(result, expected)
+                    self.assertCountEqual(decoded, ['intermediate', 'old'] + (['deep'] if overlay else []))
 
 
 class Positions(unittest.TestCase):
