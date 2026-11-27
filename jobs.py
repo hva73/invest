@@ -18,6 +18,7 @@ def init(c):
     c.execute('CREATE INDEX IF NOT EXISTS jobs_user_id_id_desc ON jobs(user_id, id DESC)')
     c.execute('CREATE TABLE IF NOT EXISTS fx_snapshots(id INTEGER PRIMARY KEY, source_date TEXT NOT NULL, observed TEXT NOT NULL, payload TEXT NOT NULL, digest TEXT NOT NULL UNIQUE)')
     c.execute('CREATE TABLE IF NOT EXISTS reports(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), slot TEXT NOT NULL, created TEXT NOT NULL, body TEXT NOT NULL, UNIQUE(user_id,slot))')
+    c.execute('CREATE INDEX IF NOT EXISTS reports_user_id_id_desc ON reports(user_id, id DESC)')
     c.execute('CREATE TABLE IF NOT EXISTS news_items(id INTEGER PRIMARY KEY,title TEXT NOT NULL,url TEXT NOT NULL,published TEXT NOT NULL,summary TEXT NOT NULL,observed TEXT NOT NULL,digest TEXT NOT NULL UNIQUE)')
     c.execute('CREATE TABLE IF NOT EXISTS worker_state(id INTEGER PRIMARY KEY CHECK(id=1), heartbeat REAL NOT NULL)')
 
