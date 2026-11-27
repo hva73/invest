@@ -74,6 +74,15 @@ def _check_http_cooldown(state,now):
   error.retry_after_s=retry_at-now
   raise error
 
+def _check_http_minute(c,now,window):
+ state=read(c)
+ _check_http_cooldown(state,now)
+ limit=configured_limit(state.get('http_provider_limit',DOCUMENTED_HTTP_LIMIT))
+ row=c.execute("SELECT used FROM hw_request_budget WHERE user_id=0 AND source='eodhd' AND window=?",(window,)).fetchone()
+ used=row['used'] if row else 0
+ if used>=limit:raise EngineError('PROVIDER_RATE_BUDGET',429)
+ return state,used,limit
+
 def _available_ws_leases(state,now,count):
  retry_at=state.get('ws_retry_at',0)
  if retry_at>now:
@@ -91,12 +100,11 @@ class Capacity:
  def reserve(self,units=None,now=None,endpoint=None,market=None):
   now=time.time() if now is None else now;window=int(now//60)
   with self.connect() as c:
-   _check_http_cooldown(read(c),now)
-   c.execute('BEGIN IMMEDIATE');state=read(c)
-   _check_http_cooldown(state,now)
-   limit=configured_limit(state.get('http_provider_limit',DOCUMENTED_HTTP_LIMIT))
-   row=c.execute("SELECT used FROM hw_request_budget WHERE user_id=0 AND source='eodhd' AND window=?",(window,)).fetchone();used=row['used'] if row else 0
-   if used>=limit:raise EngineError('PROVIDER_RATE_BUDGET',429)
+   c.execute('BEGIN') # Read the provider limit and usage from the same snapshot.
+   _check_http_minute(c,now,window)
+  with self.connect() as c:
+   c.execute('BEGIN IMMEDIATE')
+   state,used,limit=_check_http_minute(c,now,window)
    # The provider's remaining count also includes requests from other clients.
    if state.get('header_window')==window and state.get('header_remaining') is not None:
     remaining=state['header_remaining']-max(0,used-state.get('header_local_used',0))
