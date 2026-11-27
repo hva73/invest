@@ -30,10 +30,27 @@ click({sectorScope:'all'});html=ui.render(state);assert.match(html,/DELVIS FORDE
 click({sectorScope:'1'});html=ui.render(state);assert.match(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);
 click({sectorScope:'2'});html=ui.render(state);assert.match(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);
 payload.dashboard.accounts[1].parent_external_id='andet';click({sectorScope:'1'});html=ui.render(state);assert.doesNotMatch(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);assert.doesNotMatch(html,/DELVIS FORDELING/);
+testRadarDates();
 await testOwnerChanges();
 for(const outcome of ['success','error'])await testHoldingsOwnerChanges(outcome);
 console.log('PASS: collection holdings included in total and parent scope; chart, drilldown and percentages work')})().catch(e=>{console.error(e);process.exit(1)});
 
+function testRadarDates(){
+ const today=Date.parse(new Date().toISOString().slice(0,10)+'T00:00Z');
+ const dateAt=days=>new Date(today+days*864e5).toISOString().slice(0,10);
+ function radarAt(days){
+  payload.markets=[['Svag',90],['Stærk',120]].map(([sector,close])=>({
+   symbol:sector,sector,region:'USA',benchmark_currency:'USD',price_basis:'adjusted_close',
+   series:[{date:dateAt(days-30),close:100},{date:dateAt(days),close}]
+  }));
+  return ui.radar(state.user.username);
+ }
+ const saved=payload.markets;
+ assert.match(radarAt(0),/Stærk \+20,00 % · Svag -10,00 %/);
+ assert.equal(radarAt(-7),'','Seven-day-old series must be excluded');
+ assert.equal(radarAt(2),'','Future series must be excluded');
+ payload.markets=saved;
+}
 async function testOwnerChanges(){
  const requests=[];
  let refreshes=0;
