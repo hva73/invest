@@ -153,6 +153,26 @@ class SectorIntelligenceTest(unittest.TestCase):
   self.assertEqual(row['status'],'OK');payload=json.loads(row['payload'])
   self.assertEqual([x['ticker'] for x in payload['rows']],['HIGH','LOW']);self.assertEqual(payload['total_reported'],2)
   self.assertEqual(sector.request_benchmark_holdings(self.connect,1,'XLK.US')['status'],'OK')
+ def test_holding_rows_exclude_only_conflicting_weights_in_either_order(self):
+  stock={'Code':'ABC','Name':'Example','Exchange':'US','Assets_%':4}
+  conflict={**stock,'Code':'abc','Exchange':'us','Assets_%':7}
+  other_exchange={**stock,'Exchange':'TO','Assets_%':2}
+  other_stock={**stock,'Code':'XYZ','Assets_%':5}
+  expected=[('XYZ','US',5),('ABC','TO',2)]
+  for duplicates in ([stock,conflict],[conflict,stock],[stock,conflict,stock],[stock,stock,conflict]):
+   with self.subTest(duplicates=duplicates):
+    rows=sector._holding_rows([other_exchange,*duplicates,other_stock])
+    self.assertEqual([(r['ticker'],r['exchange'],r['weight']) for r in rows],expected)
+
+ def test_holding_rows_collapse_equal_weights_and_ignore_invalid_weights(self):
+  stock={'Code':'ABC','Name':'Example','Exchange':'US','Assets_%':4}
+  equal={**stock,'Code':'abc','Exchange':'us','Assets_%':'4.0'}
+  invalid={**stock,'Assets_%':101}
+  for holdings in ([invalid,stock,equal],[stock,equal,invalid]):
+   with self.subTest(holdings=holdings):
+    rows=sector._holding_rows({'ETF_Data':{'Top_10_Holdings':holdings}})
+    self.assertEqual(rows,[{'ticker':'ABC','name':'Example','exchange':'US','weight':4}])
+
  def test_benchmark_holdings_fall_back_to_top_10(self):
   now=time.time()
   with self.connect() as c:
