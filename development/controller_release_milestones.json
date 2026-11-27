@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-27T16:32:05Z",
+  "updated_at": "2026-11-27T18:20:00Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -382,7 +382,7 @@
       "title": "Hvordan står det til? – herkomst og statistik",
       "status": "in_progress",
       "issue": 114,
-      "evidence": "#321 8ea81200, motor-CI 45849602834 PASS, integreret 6c574c65. Matchende Pluto-reference før DB-write. #323 143c914b6, motor-CI 45852442040 PASS for direkte depotidentitet; afventer lokal uafhængig review/merge. Ældre #309 bevaret. #358 integreret 4d273261 (smoke-only 45901556811); #364 6dfd2260 → cb7e93de (smoke-only 45909678518), rækkeautoritative ordre-/kandidat-/cyklusidentiteter. #365 d06bd245 draft, CI smoke-only 45910076364. #374 under HOLD, ingen fuld fillaccept.",
+      "evidence": "#321 8ea81200, motor-CI 45849602834 PASS, integreret 6c574c65. Matchende Pluto-reference før DB-write. #323 143c914b6, motor-CI 45852442040 PASS for direkte depotidentitet; afventer lokal uafhængig review/merge. Ældre #309 bevaret. #358 integreret 4d273261 (smoke-only 45901556811); #364 6dfd2260 → cb7e93de (smoke-only 45909678518), rækkeautoritative ordre-/kandidat-/cyklusidentiteter. #365 d06bd245 draft, CI smoke-only 45910076364. #374 under HOLD, ingen fuld fillaccept.\n#114 7225392784: exact common 7b86cfb8 / donor 3cc0c7be. Concrete statistics route/navigation/bundles/refresh/manifest port: 13 in-memory replacements, 20/20 structural checks, 4/4 isolated endpoint cases, 6/6 real disposable SQLite budget scenarios (shared cap starves scan/statistics in both directions; donor bucket restoration fixes). Gateway session cache and combined API budget, full projection and mobile/desktop browser acceptance still outstanding. No product integration or new dispatch.",
       "subgoals": [
         {
           "id": "provenance",
@@ -404,12 +404,12 @@
           "id": "ui",
           "title": "Godkendt statistikvisning",
           "status": "blocked",
-          "evidence": "Samlet 2.0-accept udestår. 27/11 06:52 CET: Fælles Git-tree 9ce3c2aa mangler realized_statistics.py, static/statistics-ui.js, static/statistics.css, statistik-tests, API og navigation. Frozen #232 3cc0c7be indeholder slice. #114 7211033164 præciserer port + eksisterende E2E tests; #408 motor PASS 45943567311 er ikke UI. 27/11: donorens provenance-migration og statistik-gateway reuse mangler også på produktbase. #114 7212413646. UI-port alene utilstrækkelig.",
+          "evidence": "Samlet 2.0-accept udestår. 27/11 06:52 CET: Fælles Git-tree 9ce3c2aa mangler realized_statistics.py, static/statistics-ui.js, static/statistics.css, statistik-tests, API og navigation. Frozen #232 3cc0c7be indeholder slice. #114 7211033164 præciserer port + eksisterende E2E tests; #408 motor PASS 45943567311 er ikke UI. 27/11: donorens provenance-migration og statistik-gateway reuse mangler også på produktbase. #114 7212413646. UI-port alene utilstrækkelig.\n#114 7225392784: exact common 7b86cfb8 / donor 3cc0c7be. Concrete statistics route/navigation/bundles/refresh/manifest port: 13 in-memory replacements, 20/20 structural checks, 4/4 isolated endpoint cases, 6/6 real disposable SQLite budget scenarios (shared cap starves scan/statistics in both directions; donor bucket restoration fixes). Gateway session cache and combined API budget, full projection and mobile/desktop browser acceptance still outstanding. No product integration or new dispatch.",
           "owner_role": "desktop",
-          "updated_at": "2026-11-27T07:22:57Z"
+          "updated_at": "2026-11-27T18:20:00Z"
         }
       ],
-      "updated_at": "2026-11-27T11:46:19Z"
+      "updated_at": "2026-11-27T18:20:00Z"
     },
     {
       "id": "ui",
@@ -499,7 +499,7 @@
       "title": "Samlet releasekandidat, backup og migration",
       "status": "in_progress",
       "issue": 57,
-      "evidence": "Produktgren cb7e93deb46cd236fb30d4902a5964d2a68314f2. #355/#357/#358/#359/#360/#361/#362/#363/#364 integreret efter seneste status; #355/#358/#361/#364 smoke-only. #348 dbba5ef1 faktisk motor+UI PASS 45891686618 (754 unittest-kørsler), stadig separat og ikke integreret. #232 frozen 3cc0c7be fortsat draft. Projects-inventory 45910583448/job 140217698622 SUCCESS, samme modstridende Backlog for #225/#267/#268/#273/#315; ingen blind gentagelse. Samlet releaseaccept udestår. Produktgren 97c5dedf; 10 nye konkrete A/B scopes, CAS 463e151a med verificeret readback, 145 rækker. Projects inventory 45921483721/job 140252994924 SUCCESS; samme modstridende Backlog for #225/#267/#268/#273/#315, ingen blind gentagelse af writes. Ingen release-GO. 27/11: reserve CAS 85b5ad687a8f5fbc986d7bcf4e7c8e1c1b319d3b, immutable/fresh readback, 154 rækker/297223 tegn; historiske rows bevaret i denne ændring. Projects-inventory 45924428725/job 140262359412 SUCCESS, samme kendte Backlog-afvigelser, ingen gentagne writes. Ingen release-GO. 27/11: reserve CAS bb0ff4b5d7de5b3baf3b0ef413ce74e5e0723799, 164 rækker/311981 tegn, fem nye A og fem B scopes; historiske rows bevaret og immutable/fresh readback verificeret. Projects-inventory 45930492229/job 140281734341 SUCCESS, samme kendte Backlog-afvigelser, ingen blind retry. Ingen ejer-GO. 27/11: #348 6e0da956 PASS 45938741755 på e7f80b2f snapshot, ikke aktuel produktbase. Aktuel b0e8c3c7, kø 025c51d5, 182 rækker. Projects-inventory 45943092376/job 140321595542 SUCCESS; samme kendte Backlog-afvigelser #225/#267/#268/#273/#315; ingen usikre gentagelser. Ingen ejer-GO. 27/11: Projects-inventory 45958053793/job 140369040197 SUCCESS, kendte modstridende Backlog #225/#267/#268/#273/#315 uændret; ingen blind write. Kø 09bacecb 182 rækker genlæst, ingen mutation. 27/11: Projects inventory 45983729171/job 140453866106 SUCCESS; previously conflicting Backlog #225/#267/#268/#273/#315 unchanged; no blind retry. Queue blob 0532c09c, 182 rows read only. No queue mutation, competing merge, production or GO. 27/11: Projects inventory 46019079722/job 140573699596 SUCCESS; same known Backlog discrepancies, no blind writes. Queue read-only 3d0effd9, no dispatch, competing merge, production or GO. 27/11: Projects inventory 46034409476/job 140626059912 SUCCESS; same known conflicting Backlog #225/#267/#268/#273/#315; no blind retries. Queue blob 3d0effd9 read only, no mutation or competing merge.",
+      "evidence": "Produktgren cb7e93deb46cd236fb30d4902a5964d2a68314f2. #355/#357/#358/#359/#360/#361/#362/#363/#364 integreret efter seneste status; #355/#358/#361/#364 smoke-only. #348 dbba5ef1 faktisk motor+UI PASS 45891686618 (754 unittest-kørsler), stadig separat og ikke integreret. #232 frozen 3cc0c7be fortsat draft. Projects-inventory 45910583448/job 140217698622 SUCCESS, samme modstridende Backlog for #225/#267/#268/#273/#315; ingen blind gentagelse. Samlet releaseaccept udestår. Produktgren 97c5dedf; 10 nye konkrete A/B scopes, CAS 463e151a med verificeret readback, 145 rækker. Projects inventory 45921483721/job 140252994924 SUCCESS; samme modstridende Backlog for #225/#267/#268/#273/#315, ingen blind gentagelse af writes. Ingen release-GO. 27/11: reserve CAS 85b5ad687a8f5fbc986d7bcf4e7c8e1c1b319d3b, immutable/fresh readback, 154 rækker/297223 tegn; historiske rows bevaret i denne ændring. Projects-inventory 45924428725/job 140262359412 SUCCESS, samme kendte Backlog-afvigelser, ingen gentagne writes. Ingen release-GO. 27/11: reserve CAS bb0ff4b5d7de5b3baf3b0ef413ce74e5e0723799, 164 rækker/311981 tegn, fem nye A og fem B scopes; historiske rows bevaret og immutable/fresh readback verificeret. Projects-inventory 45930492229/job 140281734341 SUCCESS, samme kendte Backlog-afvigelser, ingen blind retry. Ingen ejer-GO. 27/11: #348 6e0da956 PASS 45938741755 på e7f80b2f snapshot, ikke aktuel produktbase. Aktuel b0e8c3c7, kø 025c51d5, 182 rækker. Projects-inventory 45943092376/job 140321595542 SUCCESS; samme kendte Backlog-afvigelser #225/#267/#268/#273/#315; ingen usikre gentagelser. Ingen ejer-GO. 27/11: Projects-inventory 45958053793/job 140369040197 SUCCESS, kendte modstridende Backlog #225/#267/#268/#273/#315 uændret; ingen blind write. Kø 09bacecb 182 rækker genlæst, ingen mutation. 27/11: Projects inventory 45983729171/job 140453866106 SUCCESS; previously conflicting Backlog #225/#267/#268/#273/#315 unchanged; no blind retry. Queue blob 0532c09c, 182 rows read only. No queue mutation, competing merge, production or GO. 27/11: Projects inventory 46019079722/job 140573699596 SUCCESS; same known Backlog discrepancies, no blind writes. Queue read-only 3d0effd9, no dispatch, competing merge, production or GO. 27/11: Projects inventory 46034409476/job 140626059912 SUCCESS; same known conflicting Backlog #225/#267/#268/#273/#315; no blind retries. Queue blob 3d0effd9 read only, no mutation or competing merge. 27/11: Projects inventory 46048485725/job 140673600138 SUCCESS; same known conflicting Backlog #225/#267/#268/#273/#315; no blind writes. Queue blob 3d0effd9 read only. #348 2c576b88 still separate from 7b86cfb8; #412 526822d7 actual CI 45963921645 (403+83+195 unittest runs incl strategy_lab), isolated PR only. No queue mutation, competing merge, production or GO.",
       "subgoals": [
         {
           "id": "integrate",
@@ -525,7 +525,7 @@
           "updated_at": "2026-11-27T16:32:05Z"
         }
       ],
-      "updated_at": "2026-11-27T16:32:05Z"
+      "updated_at": "2026-11-27T18:20:00Z"
     },
     {
       "id": "go",
