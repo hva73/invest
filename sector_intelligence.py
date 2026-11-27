@@ -100,6 +100,7 @@ def _num(v):
 
 def _series(payload):
  out={}
+ conflicting_dates=set()
  rows=payload if isinstance(payload,list) else []
  # Never mix adjusted and unadjusted prices within the same return series.
  use_adjusted=bool(rows) and all(_num(row.get('adjusted_close')) is not None and _num(row.get('adjusted_close'))>0 for row in rows if isinstance(row,dict))
@@ -108,8 +109,13 @@ def _series(payload):
   try:d=datetime.strptime(row.get('date',''),'%Y-%m-%d').date()
   except (TypeError,ValueError):continue
   v=_num(row.get('adjusted_close' if use_adjusted else 'close'))
-  if v and v>0 and d<=datetime.now(timezone.utc).date():out[d.isoformat()]=v
- return [{'date':d,'close':out[d]} for d in sorted(out)]
+  if v and v>0 and d<=datetime.now(timezone.utc).date():
+   day=d.isoformat()
+   if day in out and out[day]!=v:
+    conflicting_dates.add(day)
+   else:
+    out[day]=v
+ return [{'date':d,'close':out[d]} for d in sorted(out) if d not in conflicting_dates]
 
 def _pluto_candidate(connect,now):
  with connect() as c:
