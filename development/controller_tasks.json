@@ -3104,7 +3104,7 @@
     "priority": 3,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "608458bbf22825989edac2b06800a91089d178e9",
+    "base_sha": "7b86cfb8c545ca7846698ca6b71f93a616e89402",
     "dependencies": [],
     "paths": [
       "static/market-ui.js",
