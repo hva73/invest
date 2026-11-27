@@ -1,9 +1,85 @@
 """Synthetic proposal responses only. Never accesses a broker."""
-import copy,json,tempfile,time,unittest
+import copy,json,sqlite3,tempfile,time,unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 import app,oauth,portfolio_data,portfolios,report_ingest,trade_service as trade
 ROOT=Path(__file__).resolve().parents[1]
+
+
+class ProposalHistoryIndex(unittest.TestCase):
+    def test_migration_preserves_bounded_reads_and_reduces_work(self):
+        index = 'broker_proposals_user_id_id'
+        with closing(sqlite3.connect(':memory:', cached_statements=0)) as db:
+            db.row_factory = sqlite3.Row
+            trade.init(db)
+            # Recreate the pre-index schema in this private database.
+            db.execute('DROP INDEX IF EXISTS ' + index)
+            expected_ids = {owner: [] for owner in range(1, 101)}
+            for sequence in range(1000):
+                for owner, ids in expected_ids.items():
+                    if sequence < (1000 if owner == 1 else owner):
+                        row = db.execute(
+                            'INSERT INTO broker_proposals(user_id,fingerprint,report_id,candidate_id,kind,'
+                            'portfolio_id,payload,status,created,intent_id,response) '
+                            """VALUES(?,?,?,?,'direct',?,'{}','sent',?,?,'{"status":"accepted"}')""",
+                            (owner, str(sequence), 'report', 'candidate', owner, sequence,
+                             f'intent-{owner}-{sequence}'))
+                        ids.append(row.lastrowid)
+            db.commit()
+
+            def read(reader, owner):
+                steps = 0
+                def count_step():
+                    nonlocal steps
+                    steps += 1
+                    return 0
+
+                queries = []
+                db.set_trace_callback(queries.append)
+                db.set_progress_handler(count_step, 1)
+                try:
+                    rows = reader(lambda: db, owner)
+                finally:
+                    db.set_progress_handler(None, 0)
+                    db.set_trace_callback(None)
+                query, = queries
+                plan = ' '.join(r['detail'] for r in db.execute('EXPLAIN QUERY PLAN ' + query))
+                self.assertEqual([r['id'] for r in rows], expected_ids.get(owner, [])[-50:][::-1])
+                return rows, plan, steps
+
+            cases = [(reader, owner) for reader in (trade.history, trade.summaries)
+                     for owner in (1, 2, 100, 101)]
+            baseline = {case: read(*case) for case in cases}
+            all_proposals = 'SELECT * FROM broker_proposals ORDER BY id'
+            original_rows = db.execute(all_proposals).fetchall()
+
+            def used_pages():
+                return (db.execute('PRAGMA page_count').fetchone()[0]
+                        - db.execute('PRAGMA freelist_count').fetchone()[0])
+
+            pages = used_pages()
+            writes = db.total_changes
+            trade.init(db)
+            index_pages = used_pages() - pages
+            index_bytes = index_pages * db.execute('PRAGMA page_size').fetchone()[0]
+            self.assertGreater(index_bytes, 0)
+            version = db.execute('PRAGMA schema_version').fetchone()[0]
+            trade.init(db)
+            self.assertEqual(db.execute('PRAGMA schema_version').fetchone()[0], version)
+            self.assertEqual(db.total_changes, writes)
+            self.assertEqual(db.execute(all_proposals).fetchall(), original_rows)
+            for case, (old_rows, old_plan, old_steps) in baseline.items():
+                with self.subTest(reader=case[0].__name__, owner=case[1]):
+                    rows, plan, steps = read(*case)
+                    self.assertEqual(rows, old_rows)
+                    self.assertIn(index, plan)
+                    self.assertNotIn('TEMP B-TREE', plan)
+                    if case[1] == 1:
+                        self.assertIn('TEMP B-TREE', old_plan)
+                        self.assertLess(steps, old_steps)
+
+
 class Trading(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.previous=app.DB;app.DB=self.tmp.name+'/db';app.init();app.create_user('test-password-long-enough')
