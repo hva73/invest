@@ -35,7 +35,7 @@ jobs:
           assert subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip() == head
           paths = subprocess.check_output(['git','diff','--name-only','-z',base+'...'+head]).decode().split('\0')
           workflow_changed = '.github/workflows/escape-controller-regression.yml' in paths
-          ui = workflow_changed or any(p.startswith(('static/','templates/','tests/browser_','tests/test_chart','tests/test_holding_chart','tests/test_engine_load_epoch','tests/test_market_open_explanation_ui','tests/test_signal_direction_guard','tests/test_sector_ui','tests/test_intel_detail_epoch','tests/test_market_expansion','tests/test_report_portfolio_epoch','tests/test_push_settings_epoch','tests/test_engine_timer_epoch','tests/test_intel_load_epoch','tests/test_report_pending_focus_epoch')) or p in ('dashboard_projection.py','market_data.py','display_policy.py','tests/test_market_data.py','tests/test_portfolio_value_chart.py') for p in paths)
+          ui = workflow_changed or any(p.startswith(('static/','templates/','tests/browser_','tests/test_chart','tests/test_holding_chart','tests/test_engine_load_epoch','tests/test_market_open_explanation_ui','tests/test_signal_direction_guard','tests/test_sector_ui','tests/test_intel_detail_epoch','tests/test_market_expansion','tests/test_report_portfolio_epoch','tests/test_push_settings_epoch','tests/test_engine_timer_epoch','tests/test_intel_load_epoch','tests/test_report_pending_focus_epoch','tests/test_position_display_evidence','tests/test_overview_display_evidence','tests/test_market_display_evidence')) or p in ('dashboard_projection.py','market_data.py','display_policy.py','tests/test_market_data.py','tests/test_portfolio_value_chart.py') for p in paths)
           motor = workflow_changed or any(p.startswith(('hotwatch','eodhd','intel_workflows','trading_engine_v2','strategy_lab','long_term_watch','trade_service','tests/test_hotwatch','tests/test_eodhd','tests/test_trading_engine_v2','tests/test_strategy_lab','tests/test_trade_service')) or p in ('app.py','jobs.py','portfolio_data.py','journal_projection.py','display_policy.py','tests/test_jobs.py','tests/test_portfolio_data.py','tests/test_app.py','sector_intelligence.py','tests/test_sector_intelligence.py','report_validation.py','tests/test_report_validation.py') for p in paths)
           with open(os.environ['GITHUB_OUTPUT'],'a') as f:
               f.write(f'ui={str(ui).lower()}\nmotor={str(motor).lower()}\n')
@@ -45,7 +45,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install test dependencies
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements.txt jsonschema==4.23.0
       - name: Motor and data-path regression
         if: steps.scope.outputs.motor == 'true'
         run: |
@@ -60,7 +60,7 @@ jobs:
           node tests/test_holding_chart_marker.cjs
           node tests/test_engine_load_epoch.js
           # Existing local-review regressions must also execute in integrated CI.
-          for fixture in tests/test_sector_ui.js tests/test_intel_detail_epoch.cjs tests/test_market_expansion.cjs tests/test_report_portfolio_epoch.cjs tests/test_push_settings_epoch.cjs tests/test_engine_timer_epoch.cjs tests/test_intel_load_epoch.cjs tests/test_report_pending_focus_epoch.cjs; do
+          for fixture in tests/test_sector_ui.js tests/test_intel_detail_epoch.cjs tests/test_market_expansion.cjs tests/test_report_portfolio_epoch.cjs tests/test_push_settings_epoch.cjs tests/test_engine_timer_epoch.cjs tests/test_intel_load_epoch.cjs tests/test_report_pending_focus_epoch.cjs tests/test_position_display_evidence.cjs tests/test_overview_display_evidence.cjs tests/test_market_display_evidence.cjs; do
             if test -f "$fixture"; then node "$fixture"; fi
           done
           if test -f tests/test_chart_source_selection.cjs; then node tests/test_chart_source_selection.cjs; fi
