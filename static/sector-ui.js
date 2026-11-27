@@ -11,8 +11,11 @@ window.SectorUI=(()=>{
  const number=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:Number(v);
  function plutoFx(currency){
   const rows=data?.dashboard?.positions||[],reference=Date.parse(data?.dashboard?.snapshot_at||'');if(!Number.isFinite(reference)||Date.now()-reference<0||Date.now()-reference>86400000)return null;const rates=[];
-  for(const row of rows){if(row.verification==='last_known')continue;const observed=Date.parse(row.snapshot_at||'');if(!Number.isFinite(observed)||Math.abs(reference-observed)>900000)continue;const foreign=row.original_value||row.raw?.value,local=row.raw?.value_in_portfolio_currency;if(foreign?.currency!==currency||local?.currency!=='DKK')continue;const a=number(foreign.amount),b=number(local.amount);if(a!==null&&b!==null&&a>0&&b>0)rates.push(b/a)}
-  if(!rates.length)return null;rates.sort((a,b)=>a-b);if(rates.at(-1)/rates[0]>1.05)return null;const mid=Math.floor(rates.length/2);return rates.length%2?rates[mid]:(rates[mid-1]+rates[mid])/2
+  for(const row of rows){if(row.verification==='last_known')continue;const observed=Date.parse(row.snapshot_at||'');if(!Number.isFinite(observed)||Math.abs(reference-observed)>900000)continue;const foreign=row.original_value||row.raw?.value,local=row.raw?.value_in_portfolio_currency;if(foreign?.currency!==currency||local?.currency!=='DKK')continue;const a=number(foreign.amount),b=number(local.amount);if(!(a>0&&b>0))continue;
+   const rate=b/a;if(Number.isFinite(rate)&&rate>0)rates.push(rate)
+  }
+  if(!rates.length)return null;rates.sort((a,b)=>a-b);if(rates.at(-1)/rates[0]>1.05)return null;const mid=Math.floor(rates.length/2);const median=rates.length%2?rates[mid]:(rates[mid-1]+rates[mid])/2;
+  return Number.isFinite(median)&&median>0?median:null
  }
  function fxInfo(currency){if(typeof currency!=='string'||!/^[A-Z]{3}$/.test(currency))return null;if(currency==='DKK')return {rate:1,source:'DKK'};const fx=data?.fx,age=fx?.source_date?Date.now()-Date.parse(fx.source_date+'T00:00:00Z'):NaN;if(age>=0&&age<=7*864e5){const rates=fx.rates||{},from=currency==='EUR'?1:number(rates[currency]),to=number(rates.DKK);if(from>0&&to>0){
    const rate=to/from;
