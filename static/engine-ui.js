@@ -2,17 +2,24 @@
 window.EngineUI=(()=>{
  let api,esc,money,time,owner,editing,isAdmin,getState,sessionEpoch=()=>0,mode=false,generation=0,timer=null,data=null,candidates=[],portfolios=[],portfolioSnapshots={},batchCandidates=[],pending=null,activeFilter='all',showOwn=false,manualChoices=[];
  let interaction=0,dialogActivity=0,observer;
+ const dialogOpenVersions=new WeakMap();
  let latestSettingsRequest=0;
  function recordDialogs(records){
   for(const r of records){
-   if(r.type==='attributes'&&r.target.matches('dialog'))dialogActivity++;
+   if(r.type==='attributes'&&r.target.matches('dialog')){
+    dialogActivity++;
+    dialogOpenVersions.set(r.target,(dialogOpenVersions.get(r.target)||0)+1);
+   }
    else if(r.type==='childList'&&[...r.addedNodes,...r.removedNodes].some(n=>n.nodeType===1&&(n.matches('dialog[open]')||n.querySelector('dialog[open]'))))dialogActivity++;
   }
  }
- function captureInteraction({begin=false,dialogBound=true}={}){
-  if(begin)interaction++;
+ function flushDialogRecords(){
   if(!observer){observer=new MutationObserver(recordDialogs);observer.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['open']});}
   recordDialogs(observer.takeRecords());
+ }
+ function captureInteraction({begin=false,dialogBound=true}={}){
+  if(begin)interaction++;
+  flushDialogRecords();
   const epoch=sessionEpoch(),user=owner(),test=mode,version=interaction,activity=dialogActivity;
   return ()=>{recordDialogs(observer.takeRecords());return epoch===sessionEpoch()&&user===owner()&&test===mode&&version===interaction&&(!dialogBound||activity===dialogActivity);};
  }
@@ -273,11 +280,54 @@ window.EngineUI=(()=>{
   return true
  }return false}
  async function change(e){if(e.target.id==='engine-eodhd-select'){const f=document.getElementById('engine-create'),item=candidates[Number(f.elements.candidate.value)];if(item){const choice=(item.eodhd_choices||[]).find(x=>x.symbol===e.target.value);const expectedCurrency=item.instrument?.currency||f.elements.quote_currency.value;if(e.target.value&&(!choice||!expectedCurrency||choice.currency!==expectedCurrency)){e.target.value='';item.provider_symbol=null;f.elements.provider_symbol.value='';if(item.instrument)item.instrument.provider_symbol=null;formStatus('EODHD-instrumentets valuta er ukendt eller stemmer ikke med Pluto. Vælg et dokumenteret match.');return true}item.provider_symbol=e.target.value||null;f.elements.provider_symbol.value=e.target.value;if(item.instrument)item.instrument.provider_symbol=item.provider_symbol}return true}if(e.target.name==='provider'){if(e.target.value==='eodhd')await findEodhdSymbol();return true}if(e.target.name==='provider_symbol'){const f=document.getElementById('engine-create'),item=candidates[Number(f.elements.candidate.value)];if(item)item.provider_symbol=e.target.value.trim();return true}if(e.target.name==='candidate'){const f=document.getElementById('engine-create');if(f){f.elements.provider_symbol.value=candidates[Number(e.target.value)]?.provider_symbol||'';const slot=document.getElementById('engine-eodhd-choice');if(slot)slot.textContent=''}if(!mode)await resolveInstrument(Number(e.target.value)).catch(error=>formStatus(reason(error.details?.code||error.message)));if(f?.elements.provider.value==='eodhd')await findEodhdSymbol();return true}if(e.target.id==='engine-asset-choice'){const index=Number(new FormData(document.getElementById('engine-create')).get('candidate'));await resolveInstrument(index,e.target.value);return true}if(e.target.id!=='engine-strategy-file')return false;const f=e.target.files[0];if(!f)return true;if(f.size>131072)throw Error('Strategifilen er for stor.');const valid=captureInteraction({begin:true}),input=e.target;const raw=await currentResult(f.text(),valid);if(raw===null||!input.isConnected)return true;const r=await currentResult(api(base+'/strategies',JSON.parse(raw)),valid);if(!r||!input.isConnected)return true;document.getElementById('engine-strategy-status').textContent='Strategiversionen er gemt inaktiv. Ingen algoritme er aktiveret. Checksum: '+r.checksum;return true}
+ function captureTimerDialog(d){
+  flushDialogRecords();
+  const version=dialogOpenVersions.get(d),epoch=sessionEpoch(),user=owner(),test=mode;
+  return ()=>{
+   flushDialogRecords();
+   return dialogOpenVersions.get(d)===version&&sessionEpoch()===epoch&&owner()===user&&mode===test&&document.getElementById('engine-dialog')===d&&d.open;
+  };
+ }
  let externalTimer=null;
- function refreshExternal(wid){clearTimeout(externalTimer);externalTimer=setTimeout(async()=>{const d=document.getElementById('engine-dialog');if(!d?.open||d.dataset.watchId!==wid||root())return;if(!document.hidden)try{await detail(wid,true,true)}catch{}refreshExternal(wid)},15000)}
- function openHoldingStatus(item,refresh=false){const status=item.status||{},messages={IDENTITY_UNVERIFIED:'Instrumentets identitet kunne ikke bekræftes ud fra de seneste Pluto-oplysninger.',PLUTO_ASSET_METADATA_MISSING:'Pluto returnerede ikke genkendelige instrumentoplysninger.',PLUTO_ASSET_ID_MISMATCH:'Pluto-svaret passer ikke entydigt til beholdningens aktiv-ID.',PLUTO_CURRENCY_MISSING:'Pluto oplyste ikke en verificerbar valuta for instrumentet.',PLUTO_CURRENCY_MISMATCH:'Valutaen i Pluto-svaret og beholdningen stemmer ikke overens.',PLUTO_TICKER_MISSING:'Pluto oplyste ikke en ticker for instrumentet.',PLUTO_TICKER_MISMATCH:'Ticker i Pluto-svaret og beholdningen stemmer ikke overens.',EODHD_IDENTITY_UNCERTAIN:'Der er ikke fundet præcis ét sikkert EODHD-match med samme ISIN og valuta.',PROVIDER_RATE_BUDGET:'Motorens fælles budget for dataopslag er opbrugt.',EODHD_RATE_LIMIT:'EODHD har midlertidigt begrænset opslag.',EODHD_FEED_NOT_ENABLED:'EODHD er ikke aktiveret i motorens miljø.',EODHD_KEY_NOT_CONFIGURED:'EODHD-nøglen er ikke tilgængelig i motorens miljø.',holding_not_verified:'Et frisk, komplet Pluto-depot med denne beholdning mangler.',VERIFICATION_FAILED:'Instrumentkontrollen kunne ikke gennemføres.',CAPACITY_LIMIT:'Alle motorens sessionspladser er i brug.',global_capacity_limit:'Alle motorens sessionspladser er i brug.',AMBIGUOUS:'Flere sessioner matcher beholdningen. Vælg den ønskede session under HOT WATCH.',STOPPED:'Overvågningen er afsluttet og startes ikke automatisk igen.',VERIFYING:'Instrumentet kontrolleres mod Pluto og EODHD.'};const next=Number(status.next_attempt),retry=Number.isFinite(next)&&next>0&&!['STOPPED','AMBIGUOUS','LINKED'].includes(status.status);const d=dialog((item.ticker||'Beholdning')+' · HOT WATCH',`<p><strong>${esc(item.label)}</strong></p><p>${esc(messages[status.status]||'Der er endnu ikke en verificeret motorsession for denne beholdning. Når motoren har kontrolleret instrumentet, vises status her.')}</p>${status.updated?`<p>Seneste kontrol: ${date(status.updated)}</p>`:''}${retry?`<p>Næste forsøg tidligst: ${date(new Date(next*1000).toISOString())}</p>`:''}<p>Der er endnu ingen warmup-beregning for denne status.</p>${window.TradeUI.holdingActions(item.key)}`,refresh);d.dataset.holdingKey=item.key;if(!refresh)refreshHolding(item.key,owner())}
+ function refreshExternal(wid){
+  const d=document.getElementById('engine-dialog');
+  if(!d?.open||d.dataset.watchId!==wid||root())return;
+  const current=captureTimerDialog(d);
+  clearTimeout(externalTimer);
+  const ticket=externalTimer=setTimeout(async()=>{
+   const valid=()=>ticket===externalTimer&&current()&&d.dataset.watchId===wid&&!root();
+   if(!valid())return;
+   if(!document.hidden)try{await detail(wid,true,true)}catch{}
+   if(valid())refreshExternal(wid);
+  },15000);
+ }
+ function openHoldingStatus(item,refresh=false){const status=item.status||{},messages={IDENTITY_UNVERIFIED:'Instrumentets identitet kunne ikke bekræftes ud fra de seneste Pluto-oplysninger.',PLUTO_ASSET_METADATA_MISSING:'Pluto returnerede ikke genkendelige instrumentoplysninger.',PLUTO_ASSET_ID_MISMATCH:'Pluto-svaret passer ikke entydigt til beholdningens aktiv-ID.',PLUTO_CURRENCY_MISSING:'Pluto oplyste ikke en verificerbar valuta for instrumentet.',PLUTO_CURRENCY_MISMATCH:'Valutaen i Pluto-svaret og beholdningen stemmer ikke overens.',PLUTO_TICKER_MISSING:'Pluto oplyste ikke en ticker for instrumentet.',PLUTO_TICKER_MISMATCH:'Ticker i Pluto-svaret og beholdningen stemmer ikke overens.',EODHD_IDENTITY_UNCERTAIN:'Der er ikke fundet præcis ét sikkert EODHD-match med samme ISIN og valuta.',PROVIDER_RATE_BUDGET:'Motorens fælles budget for dataopslag er opbrugt.',EODHD_RATE_LIMIT:'EODHD har midlertidigt begrænset opslag.',EODHD_FEED_NOT_ENABLED:'EODHD er ikke aktiveret i motorens miljø.',EODHD_KEY_NOT_CONFIGURED:'EODHD-nøglen er ikke tilgængelig i motorens miljø.',holding_not_verified:'Et frisk, komplet Pluto-depot med denne beholdning mangler.',VERIFICATION_FAILED:'Instrumentkontrollen kunne ikke gennemføres.',CAPACITY_LIMIT:'Alle motorens sessionspladser er i brug.',global_capacity_limit:'Alle motorens sessionspladser er i brug.',AMBIGUOUS:'Flere sessioner matcher beholdningen. Vælg den ønskede session under HOT WATCH.',STOPPED:'Overvågningen er afsluttet og startes ikke automatisk igen.',VERIFYING:'Instrumentet kontrolleres mod Pluto og EODHD.'};const next=Number(status.next_attempt),retry=Number.isFinite(next)&&next>0&&!['STOPPED','AMBIGUOUS','LINKED'].includes(status.status);const d=dialog((item.ticker||'Beholdning')+' · HOT WATCH',`<p><strong>${esc(item.label)}</strong></p><p>${esc(messages[status.status]||'Der er endnu ikke en verificeret motorsession for denne beholdning. Når motoren har kontrolleret instrumentet, vises status her.')}</p>${status.updated?`<p>Seneste kontrol: ${date(status.updated)}</p>`:''}${retry?`<p>Næste forsøg tidligst: ${date(new Date(next*1000).toISOString())}</p>`:''}<p>Der er endnu ingen warmup-beregning for denne status.</p>${window.TradeUI.holdingActions(item.key)}`,refresh);d.dataset.holdingKey=item.key;if(!refresh)refreshHolding(item.key,d)}
  let holdingTimer=null;
- function refreshHolding(key,user){clearTimeout(holdingTimer);holdingTimer=setTimeout(async()=>{const d=document.getElementById('engine-dialog');if(!d?.open||d.dataset.holdingKey!==key||owner()!==user)return;if(!document.hidden)try{const data=await api('state');if(!d.open||d.dataset.holdingKey!==key||owner()!==user)return;const row=data.dashboard?.positions?.find(x=>x.key===key);if(row?.hot_watch?.session){const wid=row.hot_watch.session.watch_id;d.dataset.watchId=wid;mode=false;await detail(wid,true,true);if(!d.open||d.dataset.holdingKey!==key||d.dataset.watchId!==wid)return;delete d.dataset.holdingKey;refreshExternal(wid);return}if(row)openHoldingStatus({key,ticker:row.ticker||row.name,label:window.DashboardUI.watchLabel(row.hot_watch||{},row),status:row.hot_watch?.auto_status||null},true)}catch{}refreshHolding(key,user)},15000)}
+ function refreshHolding(key,d){
+  let current=captureTimerDialog(d);
+  clearTimeout(holdingTimer);
+  const ticket=holdingTimer=setTimeout(async()=>{
+   const valid=()=>ticket===holdingTimer&&current()&&d.dataset.holdingKey===key;
+   if(!valid())return;
+   if(!document.hidden)try{
+    const data=await api('state');
+    if(!valid())return;
+    const row=data.dashboard?.positions?.find(x=>x.key===key);
+    if(row?.hot_watch?.session){
+     const wid=row.hot_watch.session.watch_id;
+     d.dataset.watchId=wid;
+     if(mode){mode=false;current=captureTimerDialog(d)}
+     await detail(wid,true,true);
+     if(!valid()||d.dataset.watchId!==wid)return;
+     delete d.dataset.holdingKey;
+     refreshExternal(wid);
+     return;
+    }
+    if(row)openHoldingStatus({key,ticker:row.ticker||row.name,label:window.DashboardUI.watchLabel(row.hot_watch||{},row),status:row.hot_watch?.auto_status||null},true);
+   }catch{}
+   if(valid())refreshHolding(key,d);
+  },15000);
+ }
  async function openNotification(wid){
   mode=false;const valid=captureInteraction({begin:true});const result=await currentResult(Promise.all([api(base+'/sessions/'+encodeURIComponent(wid)+'?is_test=false'),api('state').catch(()=>null)]),valid);if(!result)return;const [r,account]=result;
   const s=r.session,a=s.last_action_signal,c=s.latest_calculation||{},d=s.data_status||{},req=s.request||{},context=s.latest_context||{};

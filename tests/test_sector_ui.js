@@ -31,6 +31,7 @@ click({sectorScope:'1'});html=ui.render(state);assert.match(html,/Positioner for
 click({sectorScope:'2'});html=ui.render(state);assert.match(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);
 payload.dashboard.accounts[1].parent_external_id='andet';click({sectorScope:'1'});html=ui.render(state);assert.doesNotMatch(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);assert.doesNotMatch(html,/DELVIS FORDELING/);
 await testOwnerChanges();
+for(const outcome of ['success','error'])await testHoldingsOwnerChanges(outcome);
 console.log('PASS: collection holdings included in total and parent scope; chart, drilldown and percentages work')})().catch(e=>{console.error(e);process.exit(1)});
 
 async function testOwnerChanges(){
@@ -82,4 +83,89 @@ async function testOwnerChanges(){
  await tick();
  assert.match(render('A'),/FORSIDEGRAF refreshed A/);
  assert.equal(refreshes,3);
+}
+
+async function testHoldingsOwnerChanges(outcome){
+ const requests=[],timers=[];
+ let refreshes=0;
+ const symbol='FUND.US';
+ const markets=[{symbol,sector:'Test',region:'USA',series:[]}];
+ ctx.setTimeout=(run,delay)=>{
+  assert.equal(delay,6000);
+  const timer={run,cancelled:false};
+  timers.push(timer);
+  return timer;
+ };
+ ctx.clearTimeout=timer=>{timer.cancelled=true};
+ ui.setup({
+  escape:String,
+  refresh:()=>{refreshes++},
+  api:(path,options)=>{
+   if(path==='sector-intelligence')return Promise.resolve({...payload,markets});
+   assert.equal(path,'sector-intelligence/holdings');
+   return new Promise((resolve,reject)=>requests.push({...options,resolve,reject}));
+  }
+ });
+ const render=username=>ui.render({user:{username}});
+ const tick=()=>new Promise(resolve=>setImmediate(resolve));
+ const a='A-'+outcome;
+ render(a);
+ await tick();
+ click({sectorMarket:symbol});
+ assert.match(render(a),/Henter fondens beholdninger/);
+ const oldTimer=timers.at(-1);
+ render('B');
+ render(a);
+ await tick();
+ click({sectorMarket:symbol});
+ assert.match(render(a),/Henter fondens beholdninger/);
+ const currentTimer=timers.at(-1);
+ const before=refreshes,timerCount=timers.length;
+ oldTimer.run();
+ assert.equal(refreshes,before,'old owner timer must ignore the new A');
+ if(outcome==='success')requests[0].resolve({status:'PENDING',updated:1});
+ else requests[0].reject(new Error('old A'));
+ await tick();
+ assert.equal(refreshes,before,'late '+outcome+' must leave the new A alone');
+ assert.equal(timers.length,timerCount);
+ assert.equal(currentTimer.cancelled,false);
+ click({sectorHoldingsLimit:'30'});
+ assert.equal(requests.length,2,'current same-symbol request remains in flight');
+
+ requests[1].resolve({status:'PENDING',updated:2});
+ const beforeSuccess=refreshes;
+ await tick();
+ assert.equal(refreshes,beforeSuccess+1);
+ const pendingTimer=timers.at(-1);
+ const beforePoll=refreshes;
+ assert.equal(currentTimer.cancelled,true);
+ currentTimer.run();
+ assert.equal(refreshes,beforePoll,'superseded timer leaves the active poll alone');
+ pendingTimer.run();
+ assert.equal(refreshes,beforePoll+1,'current pending request polls');
+ assert.match(render(a),/Henter fondens beholdninger/);
+ const priorRequestTimer=timers.at(-1);
+ click({sectorHoldingsLimit:'50'});
+ const afterLimitChange=refreshes;
+ priorRequestTimer.run();
+ assert.equal(refreshes,afterLimitChange,'prior request cannot poll for a new limit on the same symbol');
+ assert.deepEqual(requests.map(r=>[r.symbol,r.limit]),[[symbol,20],[symbol,20],[symbol,50]]);
+ const requestTimerCount=timers.length;
+ assert.match(render(a),/Henter fondens beholdninger/);
+ assert.equal(timers.length,requestTimerCount+1);
+ const closingTimer=timers.at(-1);
+ click({sectorHoldingsClose:'yes'});
+ const afterClose=refreshes;
+ closingTimer.run();
+ assert.equal(refreshes,afterClose,'closed panel timer cannot refresh');
+ click({sectorMarket:symbol});
+ const afterReopen=refreshes;
+ closingTimer.run();
+ assert.equal(refreshes,afterReopen,'reopening an in-flight request cannot revive the cancelled timer');
+ click({sectorHoldingsClose:'yes'});
+ const closedCount=timers.length;
+ requests[2].resolve({status:'PENDING',updated:3});
+ await tick();
+ assert.equal(timers.length,closedCount,'late pending response cannot restart closed panel polling');
+ assert.doesNotMatch(render(a),/si-etf-overlay/);
 }
