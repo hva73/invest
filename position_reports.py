@@ -9,6 +9,7 @@ from report_validation import stamp,issue
 def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS report_position_links(user_id INTEGER NOT NULL REFERENCES users(id),is_test INTEGER NOT NULL,portfolio_id TEXT NOT NULL,position_id TEXT NOT NULL,report_row_id INTEGER NOT NULL REFERENCES ingested_reports(id),generated REAL NOT NULL,PRIMARY KEY(user_id,is_test,portfolio_id,position_id,report_row_id))')
     c.execute('CREATE INDEX IF NOT EXISTS report_position_history ON report_position_links(user_id,is_test,portfolio_id,position_id,generated)')
+    c.execute('CREATE INDEX IF NOT EXISTS report_position_by_report_row ON report_position_links(report_row_id)')
     for row in c.execute('SELECT r.id,r.user_id,r.payload FROM ingested_reports r WHERE NOT EXISTS(SELECT 1 FROM report_position_links l WHERE l.report_row_id=r.id)').fetchall():
         data=json.loads(row['payload'])
         if data.get('schema_version')==2:index(c,row['user_id'],row['id'],data)
