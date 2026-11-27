@@ -30,10 +30,29 @@ click({sectorScope:'all'});html=ui.render(state);assert.match(html,/DELVIS FORDE
 click({sectorScope:'1'});html=ui.render(state);assert.match(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);
 click({sectorScope:'2'});html=ui.render(state);assert.match(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);
 payload.dashboard.accounts[1].parent_external_id='andet';click({sectorScope:'1'});html=ui.render(state);assert.doesNotMatch(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);assert.doesNotMatch(html,/DELVIS FORDELING/);
+testAllocationAmounts();
 testEcbConversion();
 await testOwnerChanges();
 for(const outcome of ['success','error'])await testHoldingsOwnerChanges(outcome);
 console.log('PASS: collection holdings included in total and parent scope; chart, drilldown and percentages work')})().catch(e=>{console.error(e);process.exit(1)});
+
+function testAllocationAmounts(){
+ click({sectorScope:'all'});
+ payload.dashboard.accounts=[{id:1,kind:'portfolio',cash_status:'available',cash_accounts:[]}];
+ const position=amount=>({portfolio_id:1,value:{currency:'DKK',amount},sector_intelligence:{sector:'Teknologi'}});
+ const check=(amounts,label,total)=>{
+  payload.dashboard.positions=amounts.map(position);
+  const rendered=ui.render(state).match(/class="si-donut">.*?<small>([^<]+)<\/small><strong>([^<]+)<\/strong>/);
+  assert.ok(rendered);
+  assert.equal(rendered[1],label);
+  assert.equal(rendered[2].replace(/\s/g,' '),total);
+ };
+ const valid=[' +20.75 ', '-.50', 10.25];
+ for(const invalid of [' \t',true,false,'',[],[3],{},'0x10','0b10','12kr',Infinity,NaN]){
+  check([...valid,invalid],'DELVIS FORDELING','30,50 kr.');
+ }
+ check([...valid,0,'0'],'REGISTRERET VÆRDI','30,50 kr.');
+}
 
 function testEcbConversion(){
  const now=new Date().toISOString();
