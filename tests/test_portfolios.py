@@ -1,9 +1,40 @@
+import sqlite3
 import tempfile,unittest
+from contextlib import closing
+from unittest.mock import patch
 import app,portfolios
+
+
+def measure_owned_listing(c, user_id):
+    statements = []
+    steps = 0
+
+    def count_step():
+        nonlocal steps
+        steps += 1
+        return 0
+
+    c.set_trace_callback(statements.append)
+    c.set_progress_handler(count_step, 1)
+    try:
+        rows = portfolios.list_owned(c, user_id)
+    finally:
+        c.set_progress_handler(None, 0)
+        c.set_trace_callback(None)
+    query, = statements
+    plan = [row['detail'] for row in c.execute('EXPLAIN QUERY PLAN ' + query)]
+    return rows, plan, steps
+
+
 class Portfolios(unittest.TestCase):
  def setUp(self):
-  self.tmp=tempfile.TemporaryDirectory();self.previous=app.DB;app.DB=self.tmp.name+'/p.db';app.init();app.create_user('a-test-password-long')
-  with app.connect() as c:c.execute("INSERT INTO users(username,salt,hash) VALUES('other','test','test')")
+  self.tmp=tempfile.TemporaryDirectory();self.previous=app.DB;app.DB=self.tmp.name+'/p.db'
+  # Exercise the app's portfolio and proposal migrations independently of HOT WATCH.
+  with patch('hotwatch_engine.init'):
+   app.init()
+  with app.connect() as c:
+   c.executemany('INSERT INTO users(username,role) VALUES(?,?)',
+                 [('owner','admin'),('other','member')])
  def tearDown(self):app.DB=self.previous;self.tmp.cleanup()
  def test_empty_by_default_and_isolated(self):
   with app.connect() as c:
@@ -36,3 +67,47 @@ class Portfolios(unittest.TestCase):
    portfolios.replace_pluto(c,1,[{'id':'a','name':'Existing'}])
    with self.assertRaises(ValueError):portfolios.replace_pluto(c,1,[{'id':'x','name':'X'},{'id':'x','name':'Y'}])
    self.assertEqual(portfolios.list_owned(c,1)[0]['active'],1)
+
+
+class OwnedListingIndex(unittest.TestCase):
+    def test_owned_listing_index_on_existing_portfolios(self):
+        with closing(sqlite3.connect(":memory:")) as c:
+            c.row_factory = sqlite3.Row
+            c.execute('PRAGMA foreign_keys=ON')
+            c.execute('CREATE TABLE users(id INTEGER PRIMARY KEY)')
+            c.execute('CREATE TABLE proposals(user_id INTEGER, portfolio TEXT)')
+            portfolios.init(c)
+            # Model an existing installation before the listing index was added.
+            c.execute('DROP INDEX IF EXISTS portfolios_owner_order')
+            c.executemany('INSERT INTO users VALUES(?)', ((i,) for i in range(1, 101)))
+            owner = 61
+            expected = []
+            records = []
+            for i in range(1, 101):
+                for j in range(32):
+                    pid = len(records) + 1
+                    name = ('a', 'A', 'B', 'b')[j % 4]
+                    active = int(j % 3 != 0)
+                    source = 'pluto' if j % 2 else 'local'
+                    external_id = str(j) if source == 'pluto' else None
+                    records.append((pid, i, name, active, source, external_id))
+                    if i == owner:
+                        expected.append((-active, name, pid))
+            c.executemany('INSERT INTO portfolios(id,user_id,name,active,source,external_id,updated) '
+                          'VALUES(?,?,?,?,?,?,0)', records)
+
+            before, old_plan, old_steps = measure_owned_listing(c, owner)
+            self.assertEqual([r['id'] for r in before], [pid for _, _, pid in sorted(expected)])
+            self.assertIn('TEMP B-TREE', ' '.join(old_plan))
+
+            portfolios.init(c)
+            after, plan, steps = measure_owned_listing(c, owner)
+            self.assertEqual(after, before)
+            self.assertIn('USING INDEX portfolios_owner_order', ' '.join(plan))
+            self.assertNotIn('TEMP B-TREE', ' '.join(plan))
+            self.assertLess(steps, old_steps)
+
+            version = c.execute('PRAGMA schema_version').fetchone()[0]
+            portfolios.init(c)
+            self.assertEqual(c.execute('PRAGMA schema_version').fetchone()[0], version)
+            self.assertEqual(portfolios.list_owned(c, owner), after)
