@@ -272,15 +272,19 @@ def _holding_rows(payload):
   for key in ('Holdings','Top_10_Holdings'):
    if isinstance(payload.get(key),(dict,list)):payload=payload[key];break
  rows=list(payload.values()) if isinstance(payload,dict) else payload
- result=[];seen=set()
+ by_identity={}
  for row in rows:
   if not isinstance(row,dict):continue
   code=row.get('Code');name=row.get('Name');exchange=row.get('Exchange');weight=_num(row.get('Assets_%'))
   if not isinstance(code,str) or not code.strip() or not isinstance(name,str) or not name.strip() or weight is None or not 0<=weight<=100:continue
   identity=(code.casefold(),str(exchange or '').casefold())
-  if identity in seen:continue
-  seen.add(identity);result.append({'ticker':code[:40],'name':name[:200],'exchange':exchange[:40] if isinstance(exchange,str) else None,'weight':weight})
- return sorted(result,key=lambda r:(-r['weight'],r['ticker']))
+  if identity in by_identity:
+   previous=by_identity[identity]
+   if previous is not None and previous['weight']!=weight:
+    by_identity[identity]=None  # A later repeat cannot resolve a conflicting weight.
+   continue
+  by_identity[identity]={'ticker':code[:40],'name':name[:200],'exchange':exchange[:40] if isinstance(exchange,str) else None,'weight':weight}
+ return sorted((r for r in by_identity.values() if r is not None),key=lambda r:(-r['weight'],r['ticker']))
 
 def _holding_changes(series):
  if len(series)<2:return {}
