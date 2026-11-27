@@ -3,6 +3,8 @@ import time
 
 def init(c):
     c.execute("CREATE TABLE IF NOT EXISTS portfolios(id INTEGER PRIMARY KEY,user_id INTEGER NOT NULL REFERENCES users(id),name TEXT NOT NULL,source TEXT NOT NULL,external_id TEXT,active INTEGER NOT NULL DEFAULT 1,updated REAL NOT NULL,UNIQUE(user_id,source,external_id))")
+    # SQLite appends the rowid (id) to break ties in list_owned order.
+    c.execute('CREATE INDEX IF NOT EXISTS portfolios_owner_order ON portfolios(user_id,active DESC,name)')
     for name,definition in [('kind',"TEXT NOT NULL DEFAULT 'portfolio'"),('parent_external_id','TEXT'),('can_trade','INTEGER')]:
         if name not in {r['name'] for r in c.execute('PRAGMA table_info(portfolios)')}:c.execute(f'ALTER TABLE portfolios ADD COLUMN {name} {definition}')
     if 'portfolio_id' not in {r['name'] for r in c.execute('PRAGMA table_info(proposals)')}:
