@@ -70,9 +70,19 @@ window.SectorUI=(()=>{
   const observations=[];
   for(const a of accounts)if(a.cash_status==='available'&&Array.isArray(a.cash_accounts))observations.push(a.snapshot_at);
   for(const row of scopedRows())if(converted(row.value)!==null)observations.push(row.snapshot_at);
-  const times=observations.map(v=>typeof v==='string'?Date.parse(v):NaN),valid=times.filter(Number.isFinite);
   if(!observations.length)return '';
-  const unknown=times.length!==valid.length;
+  const now=Date.now(),valid=[];
+  for(const value of observations){
+   const match=typeof value==='string'&&/^(\d{4}-\d{2}-\d{2})T(?:[01]\d|2[0-3]):\d{2}(?::\d{2}(?:\.(\d+))?)?(?:Z|[+-]\d{2}:?\d{2})$/i.exec(value);
+   if(!match)continue;
+   const time=Date.parse(value);
+   if(!Number.isFinite(time)||time>now)continue;
+   // ISO snapshots can carry finer precision than Date.parse retains.
+   if(time===now&&/[1-9]/.test((match[2]||'').slice(3)))continue;
+   // Date.parse normalizes impossible calendar dates such as February 30.
+   if(new Date(match[1]+'T00:00:00Z').toISOString().slice(0,10)===match[1])valid.push(time);
+  }
+  const unknown=observations.length!==valid.length;
   if(!valid.length)return 'Tidspunktet for fordelingen er ukendt.';
   const oldest=Math.min(...valid),newest=Math.max(...valid);
   let note='Fordelingens datagrundlag: '+(oldest===newest?'opdateret '+stamp(oldest/1000):'ældste '+stamp(oldest/1000)+' · seneste '+stamp(newest/1000));
