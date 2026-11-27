@@ -1,6 +1,7 @@
 """Permanent lifecycle, recommendation and broker-confirmed execution, separately."""
-import copy,json,tempfile,unittest
+import copy,json,sqlite3,tempfile,unittest
 from datetime import datetime,timezone,timedelta
+from unittest.mock import patch
 import app,report_ingest,intel_workflows,candidate_lifecycle as model
 from test_intel_workflows import merc_report,decision
 from test_hotwatch_engine import tick
@@ -72,12 +73,13 @@ class CandidateStatus(unittest.TestCase):
   report_ingest.save(app.connect,1,self.report('HOT_WATCH',0));bad=self.report('ANALYZING',0);bad['report_id']='conflicting-state';self.assertIn('lifecycle_time_conflict',{e['code'] for e in report_ingest.validation(app.connect,1,bad)['errors']});bad=self.report('WRONG',1);self.assertIn('candidates[0].lifecycle.status',{e['path'] for e in report_ingest.validation(app.connect,1,bad)['errors']})
 
  def test_position_proof_requires_holding_and_nonfuture_timestamp(self):
-  import sqlite3
   db=sqlite3.connect(':memory:');self.addCleanup(db.close);db.row_factory=sqlite3.Row
+  db.execute('CREATE TABLE ingested_reports(id, user_id, generated_epoch, payload)')
+  model.init(db)
   db.execute('CREATE TABLE portfolios(id INTEGER,user_id INTEGER,source TEXT,active INTEGER)')
   db.execute('CREATE TABLE portfolio_snapshots(user_id INTEGER,portfolio_id INTEGER,last_error TEXT,payload TEXT)')
   db.execute("INSERT INTO portfolios VALUES(1,1,'pluto',1)")
-  now=datetime.now(timezone.utc);candidate={'asset_id':'asset','ticker':'TSM'}
+  now=datetime.now(timezone.utc);candidate={'candidate_id':'proof-only','asset_id':'asset','ticker':'TSM'}
   ref={'kind':'collection','asset_id':'asset','ticker':'TSM','quantity':'3'}
   def put(pid,positions,when):
    payload={'observed':when.isoformat(),'positions_complete':True,'positions':positions}
@@ -92,8 +94,116 @@ class CandidateStatus(unittest.TestCase):
   self.assertTrue(model.position_proof(db,1,candidate,now)['stale'])
   put(2,[dict(ref,kind='holding',quantity='2')],now-timedelta(seconds=301))
   self.assertTrue(model.position_proof(db,1,candidate,now)['stale'])
+  for observed, stale in ((now, False), (now-timedelta(seconds=301), True)):
+   put(2,[dict(ref,kind='holding',quantity='2')],observed)
+   live=model.projection(db,1,False,candidate)
+   self.assertTrue(live['has_confirmed_position'])
+   self.assertEqual(live['position_proof'],model.position_proof(db,1,candidate,now))
+   self.assertEqual(live['position_proof']['stale'],stale)
+   test=model.projection(db,1,True,candidate)
+   self.assertFalse(test['has_confirmed_position'])
+   self.assertIsNone(test['position_proof'])
   for observed in (now+timedelta(seconds=1),now-timedelta(seconds=301)):
    put(1,[dict(ref,kind='holding',quantity='1')],observed)
    put(2,[dict(ref,kind='holding',quantity='2')],now)
    proof=model.position_proof(db,1,candidate,now)
    self.assertEqual((proof['portfolio_id'],proof['quantity'],proof['stale']),(2,'2',False))
+
+
+class BrokerCycleProjection(unittest.TestCase):
+    @staticmethod
+    def legacy_events(db, owner, mode, cid):
+        events = db.execute("""
+            SELECT * FROM candidate_lifecycle_events
+            WHERE user_id=? AND is_test=? AND candidate_id=?
+              AND evidence IN ('pluto','pluto_snapshot','synthetic_test')
+            ORDER BY occurred DESC,id DESC""", (owner, int(mode), cid))
+        seen = set()
+        for event in events:
+            if event['cycle_id'] not in seen:
+                seen.add(event['cycle_id'])
+                yield event
+
+    def test_projection_on_existing_broker_history(self):
+        db = sqlite3.connect(':memory:')
+        self.addCleanup(db.close)
+        db.row_factory = sqlite3.Row
+        db.execute('CREATE TABLE ingested_reports(id, user_id, generated_epoch, payload)')
+        model.init(db)
+        # Start with the installed schema, then upgrade this same populated fixture.
+        db.execute('DROP INDEX candidate_lifecycle_broker_cycle')
+        cycles = (None, 'first', 'second')
+        def events():
+            for owner in range(1, 101):
+                for mode in (False, True):
+                    open_cycle = (owner + mode) % 4  # 3 means all cycles are flat.
+                    for number, cycle in enumerate(cycles):
+                        broker = ('pluto', 'pluto_snapshot', 'synthetic_test')[number] if mode else 'pluto'
+                        def row(key, occurred, status, evidence, state):
+                            identity = f'{owner}/{mode}/{number}/{key}'
+                            payload = json.dumps({'details': {'event': identity, 'position_state': state}})
+                            return owner, mode, 'shared', identity, cycle, occurred, status, evidence, payload
+                        for i in range(24):
+                            yield row(i, i, 'POSITION_OPEN', broker, 'held')
+                        yield row('tie', 30, 'POSITION_OPEN', broker, 'held')
+                        status = ('POSITION_OPEN','EXIT_WATCH','POSITION_OPEN')[number]
+                        if number != open_cycle and number == 1:
+                            status = 'CLOSED'
+                        yield row('winner', 30, status, broker, 'held' if number == open_cycle else 'none')
+                        yield row('late-arrival', 29, 'EXIT_WATCH', broker, 'held')
+                        yield row('newer-analysis', 31, 'ARCHIVED', 'analysis', 'none')
+                    yield owner, mode, 'shared', 'analysis-only', 'unverified', 32, 'POSITION_OPEN', 'reported_unconfirmed', '{"details":{}}'
+                    yield owner, mode, 'other', 'other', None, 40, 'POSITION_OPEN', 'pluto', '{"details":{}}'
+
+        db.executemany("""INSERT INTO candidate_lifecycle_events
+            (user_id,is_test,candidate_id,event_key,cycle_id,occurred,status,evidence,payload,occurred_at,reason,origin)
+            VALUES (?,?,?,?,?,?,?,?,?,'2026-11-03T10:00:00Z','fixture','fixture')""", events())
+        candidate = {'candidate_id': 'shared'}
+        def measure():
+            steps = reads = 0
+            def step():
+                nonlocal steps
+                steps += 1
+                return 0
+            def read(cursor, values):
+                nonlocal reads
+                reads += 1
+                return sqlite3.Row(cursor, values)
+            db.row_factory = read
+            db.set_progress_handler(step, 1)
+            try:
+                with patch.object(json, 'loads', wraps=json.loads) as decode:
+                    result = model.projection(db, 1, True, candidate)
+                    payloads = sorted(call.args[0] for call in decode.call_args_list)
+            finally:
+                db.set_progress_handler(None, 0)
+                db.row_factory = sqlite3.Row
+            return result, payloads, steps, reads
+
+        def used_bytes():
+            pages = db.execute('PRAGMA page_count').fetchone()[0]
+            free = db.execute('PRAGMA freelist_count').fetchone()[0]
+            return (pages - free) * db.execute('PRAGMA page_size').fetchone()[0]
+
+        with patch.object(model, '_latest_broker_events', self.legacy_events):
+            baseline, old_payloads, old_steps, old_reads = measure()
+        old_size = used_bytes()
+        model.init(db)
+        index_bytes = used_bytes() - old_size
+        result, payloads, steps, reads = measure()
+        self.assertEqual(result, baseline)
+        self.assertEqual(payloads, old_payloads)
+        self.assertEqual(len(payloads), len(cycles))
+        self.assertEqual((old_reads, reads), (1 + 27 * len(cycles), 1 + len(cycles)))
+        self.assertLess(steps, old_steps)
+        self.assertTrue(0 < index_bytes < old_size)
+
+        for owner in range(1, 101):
+            for mode in (False, True):
+                with self.subTest(owner=owner, mode=mode):
+                    expected = sorted(r['payload'] for r in self.legacy_events(db, owner, mode, 'shared'))
+                    actual = sorted(r['payload'] for r in model._latest_broker_events(db, owner, mode, 'shared'))
+                    self.assertEqual(actual, expected)
+                    state = model.projection(db, owner, mode, candidate)
+                    self.assertEqual(state['has_confirmed_position'], (owner + mode) % 4 != 3)
+                    self.assertIsNone(state['position_proof'])
