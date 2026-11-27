@@ -3,7 +3,7 @@ import hashlib,json
 from datetime import datetime,timezone,timedelta
 from decimal import Decimal,localcontext
 from report_validation import issue,stamp,schema_errors,ReportValidationError
-from report_v2 import OBSERVATION,DECISION
+from report_v2 import OBSERVATION,DECISION,NUM
 
 def canonical(data):return json.dumps(data,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False)
 def now():return datetime.now(timezone.utc).isoformat()
@@ -206,11 +206,16 @@ def record(connect,uid,data):
 def order_state(o):
     """Explicit precedence; execution quantity is required before a filled label."""
     status=(o.get('status') or '').upper();life=o.get('lifecycle');approval=o.get('approval_status')
-    try:filled=Decimal(o['filled_quantity']) if o.get('filled_quantity') is not None else None;requested=Decimal(o['requested_quantity']) if o.get('requested_quantity') is not None else None
-    except ArithmeticError:filled=requested=None
-    if filled is not None and filled>0:
-        if life=='filled' and requested is not None and requested>0 and filled==requested:return 'Fuldt udført'
-        return 'Delvist udført' if requested is not None and filled<requested else 'Fyldning oplyst · slutstatus ukendt'
+    filled = o.get('filled_quantity')
+    requested = o.get('requested_quantity')
+    if filled is not None and not schema_errors(filled, NUM) and not schema_errors(requested, NUM):
+        filled = Decimal(filled)
+        if filled > 0:
+            if requested is not None:
+                requested = Decimal(requested)
+                if life == 'filled' and filled == requested:return 'Fuldt udført'
+                if filled < requested:return 'Delvist udført'
+            return 'Fyldning oplyst · slutstatus ukendt'
     if life=='expired' or status in ['EXPIRED','UDLØBET']:return 'Udløbet'
     if life=='cancelled' or status in ['CANCELLED','CANCELED']:return 'Annulleret'
     if life=='rejected' or status=='REJECTED' or approval=='rejected':return 'Afvist'
