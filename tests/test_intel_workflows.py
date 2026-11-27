@@ -1,5 +1,6 @@
 """V2.2 synthetic acceptance scenarios. All databases are disposable."""
 import copy,hashlib,json,tempfile,unittest
+import sqlite3
 from unittest.mock import patch
 import app,report_ingest,report_validation,mcp_reports,intel_workflows as flow,report_v2
 from test_position_reports import full_positions
@@ -14,6 +15,107 @@ def merc_report(mode=False):
 
 def observation(report=None,oid='SYNTHETIC-MERC-OBS-1',at='2026-11-03T10:05:00Z'):
  r=report or merc_report();return {'observation_id':oid,'report_id':r['report_id'],'candidate_id':r['candidates'][0]['candidate_id'],'is_test':r['is_test'],'observed_at':at,'deadline':'2099-11-03T11:00:00Z','instrument':{'ticker':'MERC','exchange':'NASDAQ','asset_id':'synthetic-MERC'},'market':{'price':{'amount':'7.5','currency':'USD'},'price_at':at,'bid':{'amount':'7.4','currency':'USD'},'bid_at':at,'ask':{'amount':'7.6','currency':'USD'},'ask_at':at,'spread':{'amount':'0.2','currency':'USD'},'spread_percent':'2.6667','volume':'1000','volume_at':at,'volume_basis':'session cumulative · synthetic','intraday_percent':'1.5','momentum':'unknown','venue':'SYNTHETIC','feed_type':'synthetic fixture','delay_seconds':None,'verification':'verified','price_source':'pluto','source_ids':['synthetic-source']},'recent_trades':[],'decision':None,'next_trigger':'Syntetisk nyhedskontrol','position_ref':{'portfolio_id':'test-main','position_id':'test-main.TSLA'},'order_ids':['synthetic-merc-stop'],'position_action':None,'sources':copy.deepcopy(r['sources']),'note':'KUN SYNTETISK ACCEPTTEST I MIDLERTIDIG DATABASE. Ingen reel MERC-kurs eller handel.'}
+
+class CandidateReportReads(unittest.TestCase):
+    @staticmethod
+    def measure(db, read):
+        # Count actual UTF-8 text crossing SQLite's result boundary and the input
+        # to Python's real JSON decoder. No timing or estimated report sizes.
+        transferred = decoded = 0
+        loads = json.loads
+
+        def transfer(raw):
+            nonlocal transferred
+            transferred += len(raw)
+            return raw.decode()
+
+        def decode(raw):
+            nonlocal decoded
+            decoded += len(raw.encode())
+            return loads(raw)
+
+        factory = db.text_factory
+        try:
+            db.text_factory = transfer
+            with patch.object(json, 'loads', decode):
+                rows = read()
+            return rows, transferred, decoded
+        finally:
+            db.text_factory = factory
+
+    @staticmethod
+    def original_endpoints(db, owner, mode, ids):
+        query = ('SELECT r.payload,r.received FROM report_candidate_links l '
+                 'JOIN ingested_reports r ON r.id=l.report_row_id '
+                 'WHERE l.user_id=? AND l.is_test=? AND l.candidate_id=? ')
+        rows = {}
+        for cid in ids:
+            args = (owner, mode, cid)
+            latest = db.execute(query + 'ORDER BY l.generated DESC,r.id DESC LIMIT 1', args).fetchone()
+            oldest = db.execute(query + 'ORDER BY l.generated,r.id LIMIT 1', args).fetchone()
+            last, first = json.loads(latest['payload']), json.loads(oldest['payload'])
+            candidate = next(x for x in last['candidates'] if x['candidate_id'] == cid)
+            initial = next(x for x in first['candidates'] if x['candidate_id'] == cid)
+            rows[cid] = (candidate, first['generated_at'], initial['market']['price'],
+                         last['report_id'], latest['received'], last['generated_at'],
+                         last.get('data_quality', {}).get('status', 'unknown'))
+        return rows
+
+    def setUp(self):
+        db = sqlite3.connect(':memory:')
+        self.db = db
+        self.addCleanup(db.close)
+        db.row_factory = sqlite3.Row
+        db.execute('PRAGMA foreign_keys=ON')
+        db.execute('CREATE TABLE users(id INTEGER PRIMARY KEY)')
+        report_ingest.init(db)
+        self.ids = [f'candidate-{i:02d}' for i in range(60)]
+        for owner in range(1, 101):
+            db.execute('INSERT INTO users VALUES(?)', (owner,))
+            for mode in (False, True):
+                # Interleaved insertion order exercises both timestamp and row-ID ties.
+                for version, hour in enumerate((11, 10, 11, 10)):
+                    at = f'2026-11-03T{hour}:00:00Z'
+                    rid = f'shared-{int(mode)}-{version}'
+                    members = self.ids if version == 2 else self.ids[:-1]
+                    candidates = [
+                        dict(candidate_id=cid, ticker=cid, market=dict(
+                            verification='verified', as_of=at, price=dict(
+                                amount=f'{owner}.{int(mode)}{version}{i:02d}', currency='DKK')))
+                        for i, cid in enumerate(members)]
+                    report = dict(report_id=rid, generated_at=at, candidates=candidates)
+                    if mode:
+                        report['data_quality'] = {'status': 'mixed'}
+                    payload = flow.canonical(report)
+                    epoch = flow.stamp(at).timestamp()
+                    row_id = db.execute(
+                        'INSERT INTO ingested_reports(user_id,is_test,report_id,received,payload,digest,generated_epoch,report_type) '
+                        'VALUES(?,?,?,?,?,?,?,?)',
+                        (owner, mode, rid, at, payload, hashlib.sha256(payload.encode()).hexdigest(),
+                         epoch, 'radar')).lastrowid
+                    db.executemany('INSERT INTO report_candidate_links VALUES(?,?,?,?,?)',
+                                   ((owner, mode, cid, row_id, epoch) for cid in members))
+
+    def test_shared_reports_reduce_transfer_and_decode_with_identical_endpoints(self):
+        db, ids = self.db, self.ids
+        fields = ('candidate', 'first_seen', 'first_price', 'report_id', 'received', 'generated_at', 'quality')
+        for owner in range(1, 101):
+            for mode in (False, True):
+                with self.subTest(owner=owner, mode=mode):
+                    expected, old_transfer, old_decode = self.measure(
+                        db, lambda: self.original_endpoints(db, owner, mode, ids))
+                    rows, transfer, decode = self.measure(
+                        db, lambda: flow.candidates(db, owner, mode, include_history_market=False))
+                    self.assertEqual([row['candidate']['candidate_id'] for row in rows], ids)
+                    for cid, row in zip(ids, rows):
+                        self.assertEqual(tuple(row[field] for field in fields), expected[cid])
+                    self.assertLess(transfer, old_transfer)
+                    self.assertLess(decode, old_decode)
+                    # The last candidate has only one snapshot. Its opening price
+                    # remains independent of its current price in the returned view.
+                    self.assertIsNot(rows[-1]['first_price'], rows[-1]['candidate']['market']['price'])
+                    self.assertEqual(flow.candidates(db, owner, mode, 'absent'), [])
+
 
 class Workflows(unittest.TestCase):
  def setUp(self):
