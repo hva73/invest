@@ -2,17 +2,40 @@
 window.DashboardUI=(()=>{
  let api,esc,time,quantity,getState,rows=[],sort='pnl',sortDirection='desc',chartPeriod='day',mobileFilter='all',mobileExpanded=false;
  const text=v=>v===null||v===undefined?'—':esc(v),tone=v=>v===null||v===undefined?'neutral':Number(v)>0?'positive':Number(v)<0?'negative':'neutral';
- function amount(v,price=false){if(!v||!v.currency||v.amount===null||v.amount===undefined||!Number.isFinite(Number(v.amount)))return '—';const n=Number(v.amount);if(n===0&&/[1-9]/.test(v.amount))return text(v.amount)+' '+text(v.currency);const options={style:'currency',currency:v.currency||'XXX'};if(n!==0&&Math.abs(n)<.01){options.maximumSignificantDigits=8}else{options.minimumFractionDigits=2;options.maximumFractionDigits=price?4:2}return esc(new Intl.NumberFormat('da-DK',options).format(n))}
+ function amount(v,price=false){
+  if(typeof v?.currency!=='string'||!/^[A-Za-z]{3}$/.test(v.currency))return '—';
+  const raw=v.amount;
+  if(typeof raw!=='number'&&(typeof raw!=='string'||raw.trim()===''))return '—';
+  const n=Number(raw);
+  if(!Number.isFinite(n))return '—';
+  if(n===0&&/[1-9]/.test(raw))return text(raw)+' '+text(v.currency);
+  const options={style:'currency',currency:v.currency};
+  if(n!==0&&Math.abs(n)<.01){options.maximumSignificantDigits=8}else{options.minimumFractionDigits=2;options.maximumFractionDigits=price?4:2}
+  return esc(new Intl.NumberFormat('da-DK',options).format(n))
+ }
  const shortStamp=v=>v?new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(v)):'—';
  const reasons={NOT_FETCHED:'Ikke hentet',NOT_PROVIDED:'Ikke leveret af kilden',SOURCE_ERROR:'Datakilden kunne ikke opdateres',INCOMPLETE_SNAPSHOT:'Ufuldstændigt opslag · tidligere beholdninger bevaret',STALE:'Forældede data',sample_identity_mismatch:'Aktividentitet kræver kontrol',DATA_STALE:'Markedsdata er for gamle',PLUTO_QUOTE_TIME_UNKNOWN:'Kilden leverer ikke et faktisk kurstidspunkt',EODHD_FEED_NOT_ENABLED:'EODHD-feed er ikke aktiveret'};
- const percent=v=>v===null||v===undefined?'—':(Number(v)>0?'+':'')+new Intl.NumberFormat('da-DK',Number(v)!==0&&Math.abs(Number(v))<.005?{maximumSignificantDigits:2}:{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(v))+' %';
+ function percent(v){
+  if(typeof v!=='number'&&(typeof v!=='string'||v.trim()===''))return '—';
+  const n=Number(v);
+  if(!Number.isFinite(n))return '—';
+  const precision=n!==0&&Math.abs(n)<.005?{maximumSignificantDigits:2}:{minimumFractionDigits:2,maximumFractionDigits:2};
+  return (n>0?'+':'')+new Intl.NumberFormat('da-DK',precision).format(n)+' %';
+ }
  function resultShare(result,base,label='af depotværdi'){
   if(!result||!base||!result.currency||result.currency!==base.currency||result.amount===null||result.amount===undefined||result.amount===''||base.amount===null||base.amount===undefined||base.amount==='')return '';
   const n=Number(result.amount),denom=Number(base.amount);if(!Number.isFinite(n)||!Number.isFinite(denom)||denom<=0)return '';
   return `<span class="dash-result-share ${tone(n)}">${percent(n/denom*100)} <span>${esc(label)}</span></span>`;
  }
- function change(v){if(!v)return '<span class="dash-neutral">—</span>';const sign=tone(v.percent);return `<span class="dash-change ${sign}" title="${text(v.reference_note||v.basis)} · ${time(v.from)} → ${time(v.to)}">${sign==='positive'?'↑':sign==='negative'?'↓':'→'} ${percent(v.percent)}</span>`}
- function profit(v,pct){if(!v||v.amount===null)return '<span class="dash-neutral">—</span>';const t=tone(v.amount);return `<span class="dash-change ${t}">${Number(v.amount)>0?'+':''}${amount(v)}</span>${pct!==null&&pct!==undefined?`<small class="dash-profit-percent ${t}">${percent(pct)}</small>`:''}`}
+ function change(v){
+  if(!v)return '<span class="dash-neutral">—</span>';
+  const title=text(v.reference_note||v.basis)+' · '+time(v.from)+' → '+time(v.to);
+  const label=percent(v.percent);
+  if(label==='—')return `<span class="dash-neutral" title="${title}">—</span>`;
+  const sign=tone(v.percent);
+  return `<span class="dash-change ${sign}" title="${title}">${sign==='positive'?'↑':sign==='negative'?'↓':'→'} ${label}</span>`;
+ }
+ function profit(v,pct){if(!v||v.amount===null)return '<span class="dash-neutral">—</span>';const t=tone(v.amount),label=percent(pct);return `<span class="dash-change ${t}">${Number(v.amount)>0?'+':''}${amount(v)}</span>${pct!==null&&pct!==undefined?`<small class="dash-profit-percent ${label==='—'?'neutral':t}">${label}</small>`:''}`}
  function age(r){const f=r.price_freshness,state=f?.state||'unknown',label={fresh:'Aktuel',stale:'Forældet',unknown:'Kurstid ukendt',error:'Kilde fejl',session_close:'Seneste session'}[state]||'Ukendt';return `<span class="dash-age ${state}" title="${time(r.price_time)} · hentet ${time(r.snapshot_at)}">${esc(label)}</span>`}
  function sorted(input){return input.slice().sort((a,b)=>{
   const sign=sortDirection==='asc'?1:-1,missing=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v));
@@ -51,7 +74,13 @@ window.DashboardUI=(()=>{
   return ''
  }
  function openingLabel(next,status){if(next?.kind!=='REGULAR'||!next.expected_at)return '';const at=new Date(next.expected_at);if(!Number.isFinite(at.getTime()))return '';const opts={timeZone:'Europe/Copenhagen',hour:'2-digit',minute:'2-digit',hourCycle:'h23',...(next.same_day_copenhagen?{}:{day:'2-digit',month:'2-digit'})};const prefix=status==='REVURDERING FORFALDET'?'REVURDÉR':status==='MANGLER VURDERING'?'MANGLER VURDERING':status==='KURSKILDE IKKE BEKRÆFTET'?'KILDE IKKE BEKRÆFTET':'AFVENT';return prefix+' · ÅBNER '+new Intl.DateTimeFormat('da-DK',opts).format(at)}
- function observationNote(o){return o?.kind==='RISING'&&Number.isFinite(Number(o.change_pct))&&Number.isInteger(o.window_minutes)?`<small class="market-observation">Stiger ${percent(o.change_pct)} på ${text(o.window_minutes)} min. · observation</small>`:''}
+ function observationNote(o){
+  if(o?.kind!=='RISING'||!Number.isInteger(o.window_minutes)||o.window_minutes<=0)return '';
+  if(typeof o.change_pct!=='number'&&typeof o.change_pct!=='string')return '';
+  const change=Number(o.change_pct);
+  if(!Number.isFinite(change)||change<=0)return '';
+  return `<small class="market-observation">Stiger ${percent(change)} på ${text(o.window_minutes)} min. · observation</small>`;
+ }
  function watchControl(s,ticker){return `<span class="signal-control"><button class="dash-action-badge${watchColor(s)}" data-signal-help-attached="true" ${actionableWatch(s)?'data-trade-watch':'data-dashboard-watch'}="${text(s.watch_id)}"${actionableWatch(s)?` data-trade-signal="${text(s.signal)}"${s.last_action_signal?.event_id?` data-trade-event="${text(s.last_action_signal.event_id)}"`:""}`:''}>${text(openingLabel(s.next_market_session,watchStatus(s))||watchStatus(s))} →</button><button type="button" class="signal-help" data-explain-watch="${text(s.watch_id)}" aria-label="Hvorfor denne status?">?</button>${window.EngineUI?.actionNotice?.({...s,ticker})||''}</span>${signalTiming(s)}${observationNote(s.market_observation)}`}/** Shared server action history; never promote it to a trade button. */
  function signalTiming(s){if(!s)return '';const live=actionableWatch(s);const last=s.last_action_signal||{},labels={BUY_SIGNAL:'Køb',SELL_SIGNAL:'Salg',REDUCE_SIGNAL:'Reducér'};if(live)return `<small class="signal-timing">${window.ESCAPE_DEMO?'Simuleret':'Aktuelt'} · beregnet ${text(s.last_calculation_at?shortStamp(s.last_calculation_at):'tidspunkt mangler')}</small>`;if(last.event_type&&labels[last.event_type]&&last.created)return `<small class="signal-timing">Tidligere ${text(labels[last.event_type])} · ${text(shortStamp(last.created))} · ikke aktuelt</small>`;return ''}
  // Mobile overview uses the same position objects and detail handler as the desktop table.

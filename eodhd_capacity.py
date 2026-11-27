@@ -67,15 +67,34 @@ def cost(url):
  if endpoint in ('search','exchanges-list','exchange-details','exchange-symbol-list','calendar','eod','splits','div'):return 1
  return None
 
+def _check_http_cooldown(state,now):
+ retry_at=state.get('http_retry_at',0)
+ if retry_at>now:
+  error=EngineError('PROVIDER_RATE_BUDGET',429)
+  error.retry_after_s=retry_at-now
+  raise error
+
+def _available_ws_leases(state,now,count):
+ retry_at=state.get('ws_retry_at',0)
+ if retry_at>now:
+  error=EngineError('EODHD_WS_CAPACITY',429)
+  error.retry_after_s=retry_at-now
+  raise error
+ leases={k:v for k,v in state.get('ws_leases',{}).items() if v['until']>now}
+ if len(leases)>=64*UTILIZATION//100 or sum(v['symbols'] for v in leases.values())+count>50*UTILIZATION//100:
+  raise EngineError('EODHD_WS_CAPACITY',429)
+ return leases
+
 class Capacity:
  def __init__(self,connect,priority='routine'):
   self.connect=connect;self.priority='essential' if priority=='essential' else 'routine'
  def reserve(self,units=None,now=None,endpoint=None,market=None):
   now=time.time() if now is None else now;window=int(now//60)
   with self.connect() as c:
-   c.execute('BEGIN IMMEDIATE');state=read(c);limit=configured_limit(state.get('http_provider_limit',DOCUMENTED_HTTP_LIMIT))
-   if state.get('http_retry_at',0)>now:
-    error=EngineError('PROVIDER_RATE_BUDGET',429);error.retry_after_s=state['http_retry_at']-now;raise error
+   _check_http_cooldown(read(c),now)
+   c.execute('BEGIN IMMEDIATE');state=read(c)
+   _check_http_cooldown(state,now)
+   limit=configured_limit(state.get('http_provider_limit',DOCUMENTED_HTTP_LIMIT))
    row=c.execute("SELECT used FROM hw_request_budget WHERE user_id=0 AND source='eodhd' AND window=?",(window,)).fetchone();used=row['used'] if row else 0
    if used>=limit:raise EngineError('PROVIDER_RATE_BUDGET',429)
    # The provider's remaining count also includes requests from other clients.
@@ -148,16 +167,20 @@ class Capacity:
   # consume HTTP requests or daily call units. Expiry handles a killed worker.
   token=secrets.token_hex(12);now=time.time()
   with self.connect() as c:
+   c.execute('PRAGMA query_only=ON')
+   _available_ws_leases(read(c),now,count)
+  with self.connect() as c:
    c.execute('BEGIN IMMEDIATE');state=read(c)
-   if state.get('ws_retry_at',0)>now:
-    error=EngineError('EODHD_WS_CAPACITY',429);error.retry_after_s=state['ws_retry_at']-now;raise error
-   leases={k:v for k,v in state.get('ws_leases',{}).items() if v['until']>now}
-   if len(leases)>=64*UTILIZATION//100 or sum(v['symbols'] for v in leases.values())+count>50*UTILIZATION//100:raise EngineError('EODHD_WS_CAPACITY',429)
+   leases=_available_ws_leases(state,now,count)
    leases[token]={'until':now+30,'symbols':count};state['ws_leases']=leases;write(c,state,now)
   try:yield
   finally:
    with self.connect() as c:
-    c.execute('BEGIN IMMEDIATE');state=read(c);state.get('ws_leases',{}).pop(token,None);write(c,state,time.time())
+    if token in read(c).get('ws_leases',{}):
+     c.execute('BEGIN IMMEDIATE')
+     state=read(c)
+     if state.get('ws_leases',{}).pop(token,None) is not None:
+      write(c,state,time.time())
  def ws_limited(self,headers=None):
   now=time.time();seconds=retry_seconds(headers,now)
   with self.connect() as c:
@@ -193,6 +216,9 @@ def refresh_account(connect,opener=None):
   if result['status']=='OK' and isinstance(data,dict) and all(_integer(data.get(k)) is not None for k in ('apiRequests','dailyRateLimit','extraLimit')) and isinstance(data.get('apiRequestsDate'),str):
    # Do not persist name, email, API key, payment or invitation fields.
    state['account']={k:_integer(data[k]) for k in ('apiRequests','dailyRateLimit','extraLimit')}
-   state['account']['apiRequestsDate']=data['apiRequestsDate'][:10];state['units_at_account']=state.get('known_units',0);state['unknown_at_account']=state.get('unknown_cost_requests',0)
+   state['account']['apiRequestsDate']=data['apiRequestsDate'][:10]
+   same_day=state.get('local_day')==state['account']['apiRequestsDate']
+   state['units_at_account']=state.get('known_units',0) if same_day else 0
+   state['unknown_at_account']=state.get('unknown_cost_requests',0) if same_day else 0
   elif result['status']=='OK':state['account_status']='INVALID_RESPONSE'
   write(c,state,time.time())

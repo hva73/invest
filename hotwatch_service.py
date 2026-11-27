@@ -910,29 +910,23 @@ def exchange_status_tick(connect,client_factory=None,now=None):
  """Refresh one EODHD exchange status; this is not instrument tradability."""
  now=now or engine.utc();epoch=now.timestamp()
  if os.environ.get('ESCAPE_HW_EODHD_REST_ENABLED')!='1' or not os.environ.get('ESCAPE_EODHD_API_KEY','').strip():return None
- def candidates(c):
+ def next_due_exchange(c):
   rows=c.execute("SELECT s.request FROM hw_sessions s JOIN users u ON u.id=s.user_id AND u.active=1 LEFT JOIN hw_control k ON k.user_id=s.user_id WHERE s.is_test=0 AND s.status IN ('CREATED','VALIDATING','ACTIVE','DEGRADED') AND COALESCE(k.killed,0)=0 AND json_extract(s.request,'$.provider')='eodhd'").fetchall()
-  return sorted({v.rsplit('.',1)[-1].upper() for row in rows if isinstance((v:=json.loads(row['request']).get('provider_symbol')),str) and '.' in v and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',v.rsplit('.',1)[-1])})
+  exchanges={v.rsplit('.',1)[-1].upper() for row in rows if isinstance((v:=json.loads(row['request']).get('provider_symbol')),str) and '.' in v and re.fullmatch(r'[A-Za-z0-9_-]{1,16}',v.rsplit('.',1)[-1])}
+  if not exchanges:return None
+  row=c.execute('''SELECT e.value FROM json_each(?) AS e
+                   LEFT JOIN hw_exchange_status AS s ON s.exchange=e.value
+                   WHERE COALESCE(s.next_attempt,0)<=?
+                   ORDER BY COALESCE(s.next_attempt,0),e.value LIMIT 1''',(json.dumps(list(exchanges)),epoch)).fetchone()
+  return row[0] if row else None
  # Avoid a writer lock on the frequent idle path; every condition is checked
  # again under the existing transaction before reserving an exchange.
  with connect() as c:
-  due=False
-  for item in candidates(c):
-   prior=c.execute('SELECT next_attempt FROM hw_exchange_status WHERE exchange=?',(item,)).fetchone()
-   if not prior or prior['next_attempt']<=epoch:due=True;break
- if not due:return None
+  if next_due_exchange(c) is None:return None
  with connect() as c:
   c.execute('BEGIN IMMEDIATE')
   if c.execute('SELECT killed FROM hw_system_control WHERE id=1').fetchone()[0]:return None
-  exchanges=candidates(c)
-  # A slow maintenance loop can leave every exchange due on every pass.
-  # Choose the most overdue (including never checked), not alphabetically.
-  pending=[]
-  for item in exchanges:
-   prior=c.execute('SELECT next_attempt FROM hw_exchange_status WHERE exchange=?',(item,)).fetchone()
-   due=prior['next_attempt'] if prior else 0
-   if due<=epoch:pending.append((due,item))
-  exchange=min(pending)[1] if pending else None
+  exchange=next_due_exchange(c)
   if exchange:c.execute('INSERT INTO hw_exchange_status(exchange,next_attempt) VALUES(?,?) ON CONFLICT(exchange) DO UPDATE SET next_attempt=excluded.next_attempt',(exchange,epoch+60))
  if not exchange:return None
  try:

@@ -186,13 +186,20 @@ def overview_positions(positions):
   value=summed(members,'value','original_value');pnl=summed(members,'unrealized','original_unrealized');cost=summed(members,'cost_basis')
   original_pnl=summed(members,'original_unrealized');basis_pnl=pnl if pnl and cost and pnl['currency']==cost['currency'] else original_pnl
   percent=str(Decimal(basis_pnl['amount'])/Decimal(cost['amount'])*100) if cost and basis_pnl and cost['currency']==basis_pnl['currency'] and Decimal(cost['amount'])>0 else None
-  latest=max(members,key=lambda r:r.get('snapshot_at') or '')
-  times=[r.get('snapshot_at') for r in members]
+  dated=[]
+  for member in members:
+   instant=policy.stamp(member.get('snapshot_at'))
+   if instant is not None:dated.append((instant,member))
+  latest=max(dated,key=lambda entry:entry[0])[1] if dated else members[0]
+  snapshot_at=None
+  if len(dated)==len(members):
+   _,oldest=min(dated,key=lambda entry:entry[0])
+   snapshot_at=oldest['snapshot_at']
   combined=dict(latest,key='asset:'+aid,portfolio_id=None,portfolio_name='Samlet · '+str(len(members))+' depoter',portfolio_kind='combined',external_id=None,
    member_keys=[r['key'] for r in members],quantity=str(quantity) if quantity is not None else None,value=value,cost_basis=cost,average_entry=average,
    unrealized=pnl,unrealized_percent=percent,unrealized_estimated=any(r.get('unrealized_estimated') or r.get('raw',{}).get('unrealized_basis')=='calculated_value_cost' and pnl and (r.get('original_unrealized') or {}).get('currency')==pnl['currency'] for r in members),
    original_value=summed(members,'original_value'),original_unrealized=original_pnl,
-   snapshot_at=min(times) if all(times) else None,verification='broker_snapshot' if all(r.get('verification')=='broker_snapshot' for r in members) else 'last_known',
+   snapshot_at=snapshot_at,verification='broker_snapshot' if all(r.get('verification')=='broker_snapshot' for r in members) else 'last_known',
    # A combined row never borrows one account's order/signal/history identity.
    hot_watch={},assessment=None,assessment_report_id=None,reported_position=None,action=None,
    critical=any(r.get('critical') for r in members),conflicts=list(dict.fromkeys(x for r in members for x in r.get('conflicts',[]))),raw={})
@@ -246,11 +253,14 @@ def build(connect,uid,owned,snapshots,now=None):
     if row.get('unrealized_basis') and pnl is raw_pnl and not estimated:pnl=None
     if pnl and policy.decimal(pnl.get('amount')) is None:pnl=None
     cost=row.get('cost_basis') or {};pnl_percent=None
-    if pnl and pnl.get('currency')==cost.get('currency') and policy.decimal(cost.get('amount')) is not None and Decimal(cost['amount'])>0:pnl_percent=str(Decimal(pnl['amount'])/Decimal(cost['amount'])*100)
-    # Percentage uses the original-currency broker P/L and cost when the displayed
-    # DKK result has a different currency from the supplied cost basis.
-    if pnl_percent is None and (not row.get('unrealized_basis') or estimated) and raw_pnl.get('currency')==cost.get('currency') and policy.decimal(raw_pnl.get('amount')) is not None and policy.decimal(cost.get('amount')) is not None and Decimal(cost['amount'])>0:
-     pnl_percent=str(Decimal(raw_pnl['amount'])/Decimal(cost['amount'])*100)
+    cost_currency=cost.get('currency')
+    cost_amount=policy.decimal(cost.get('amount'))
+    if cost_currency and cost_amount is not None and cost_amount>0:
+     if pnl and pnl.get('currency')==cost_currency:
+      pnl_percent=str(Decimal(pnl['amount'])/cost_amount*100)
+     # Use the original P/L when the displayed DKK amount cannot be compared.
+     elif (not row.get('unrealized_basis') or estimated) and raw_pnl.get('currency')==cost_currency and policy.decimal(raw_pnl.get('amount')) is not None:
+      pnl_percent=str(Decimal(raw_pnl['amount'])/cost_amount*100)
     obs=observation(row,position_data.get('observed'));since=None
     if aid and obs.get('received_at') and not failed and data.get('positions_complete'):
      previous=c.execute('SELECT payload FROM display_price_observations WHERE user_id=? AND portfolio_id=? AND asset_id=? ORDER BY id DESC LIMIT 120',(uid,p['id'],aid)).fetchall()

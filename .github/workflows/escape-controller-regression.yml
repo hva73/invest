@@ -36,7 +36,8 @@ jobs:
           paths = subprocess.check_output(['git','diff','--name-only','-z',base+'...'+head]).decode().split('\0')
           workflow_changed = '.github/workflows/escape-controller-regression.yml' in paths
           ui = workflow_changed or any(p.startswith(('static/','templates/','tests/browser_','tests/test_chart','tests/test_holding_chart','tests/test_engine_load_epoch','tests/test_market_open_explanation_ui','tests/test_signal_direction_guard','tests/test_sector_ui','tests/test_intel_detail_epoch','tests/test_market_expansion','tests/test_report_portfolio_epoch','tests/test_push_settings_epoch','tests/test_engine_timer_epoch','tests/test_intel_load_epoch','tests/test_report_pending_focus_epoch','tests/test_position_display_evidence','tests/test_overview_display_evidence','tests/test_market_display_evidence')) or p in ('dashboard_projection.py','market_data.py','display_policy.py','tests/test_market_data.py','tests/test_portfolio_value_chart.py') for p in paths)
-          motor = workflow_changed or any(p.startswith(('hotwatch','eodhd','intel_workflows','trading_engine_v2','strategy_lab','long_term_watch','trade_service','tests/test_hotwatch','tests/test_eodhd','tests/test_trading_engine_v2','tests/test_strategy_lab','tests/test_trade_service')) or p in ('app.py','jobs.py','portfolio_data.py','journal_projection.py','display_policy.py','tests/test_jobs.py','tests/test_portfolio_data.py','tests/test_app.py','sector_intelligence.py','tests/test_sector_intelligence.py','report_validation.py','tests/test_report_validation.py') for p in paths)
+          ui = ui or any(re.fullmatch(r'tests/test_[A-Za-z0-9_]+\.(?:js|cjs)', p) for p in paths)
+          motor = workflow_changed or any(p.startswith(('hotwatch','eodhd','intel_workflows','trading_engine_v2','strategy_lab','long_term_watch','trade_service','tests/test_hotwatch','tests/test_eodhd','tests/test_trading_engine_v2','tests/test_strategy_lab','tests/test_trade_service')) or p in ('app.py','jobs.py','portfolio_data.py','journal_projection.py','display_policy.py','tests/test_jobs.py','tests/test_portfolio_data.py','tests/test_app.py','sector_intelligence.py','tests/test_sector_intelligence.py','report_validation.py','tests/test_report_validation.py','portfolios.py','tests/test_portfolios.py','position_reports.py','tests/test_position_reports.py','report_ingest.py','tests/test_report_ingest.py','candidate_lifecycle.py','tests/test_candidate_lifecycle.py','tests/test_intel_workflows.py') for p in paths)
           with open(os.environ['GITHUB_OUTPUT'],'a') as f:
               f.write(f'ui={str(ui).lower()}\nmotor={str(motor).lower()}\n')
           print('Pinned reviewed head:', head, 'UI:', ui, 'motor:', motor)
@@ -50,20 +51,32 @@ jobs:
         if: steps.scope.outputs.motor == 'true'
         run: |
           python -m unittest tests.test_eodhd_feeds tests.test_feed_reuse tests.test_queue_recovery tests.test_hotwatch_holdings_auto tests.test_hotwatch_warmup tests.test_signal_readiness tests.test_sparse_feed_recovery tests.test_hotwatch_engine tests.test_hotwatch_bar_evidence
-          python -m unittest tests.test_admin_diagnostics tests.test_hotwatch_supervisor tests.test_trade_service tests.test_strategy_lab tests.test_jobs tests.test_portfolio_data tests.test_eodhd_capacity tests.test_sector_intelligence tests.test_report_validation
+          python -m unittest tests.test_admin_diagnostics tests.test_hotwatch_supervisor tests.test_trade_service tests.test_strategy_lab tests.test_jobs tests.test_portfolio_data tests.test_eodhd_capacity tests.test_sector_intelligence tests.test_report_validation tests.test_portfolios tests.test_position_reports tests.test_report_ingest tests.test_candidate_lifecycle tests.test_intel_workflows
           if test -f tests/test_trading_engine_v2.py; then python -m unittest discover -s tests -p test_trading_engine_v2.py; fi
           if git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" | grep -Eq '^(tests/test_app\.py|journal_projection\.py|\.github/workflows/escape-controller-regression\.yml)$'; then python -m unittest tests.test_app; fi
       - name: Chart and UI regression
         if: steps.scope.outputs.ui == 'true'
+        env:
+          REVIEW_BASE: ${{ github.event.pull_request.base.sha }}
+          REVIEW_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           python -m unittest tests.test_market_data tests.test_portfolio_value_chart
           node tests/test_holding_chart_marker.cjs
           node tests/test_engine_load_epoch.js
           # Existing local-review regressions must also execute in integrated CI.
-          for fixture in tests/test_sector_ui.js tests/test_intel_detail_epoch.cjs tests/test_market_expansion.cjs tests/test_report_portfolio_epoch.cjs tests/test_push_settings_epoch.cjs tests/test_engine_timer_epoch.cjs tests/test_intel_load_epoch.cjs tests/test_report_pending_focus_epoch.cjs tests/test_position_display_evidence.cjs tests/test_overview_display_evidence.cjs tests/test_market_display_evidence.cjs; do
+          for fixture in tests/test_sector_ui.js tests/test_intel_detail_epoch.cjs tests/test_market_expansion.cjs tests/test_report_portfolio_epoch.cjs tests/test_push_settings_epoch.cjs tests/test_engine_timer_epoch.cjs tests/test_intel_load_epoch.cjs tests/test_report_pending_focus_epoch.cjs tests/test_position_display_evidence.cjs tests/test_overview_display_evidence.cjs tests/test_market_display_evidence.cjs tests/test_intel_observation_evidence.cjs tests/test_intel_numeric_evidence.cjs; do
             if test -f "$fixture"; then node "$fixture"; fi
           done
           if test -f tests/test_chart_source_selection.cjs; then node tests/test_chart_source_selection.cjs; fi
+          # Newly added focused Node regressions must run even before their name is in the baseline list.
+          python3 - <<'PY'
+          import os, re, subprocess
+          from pathlib import Path
+          base, head = os.environ['REVIEW_BASE'], os.environ['REVIEW_HEAD']
+          for path in subprocess.check_output(['git','diff','--name-only','-z',base+'...'+head]).decode().split('\0'):
+              if re.fullmatch(r'tests/test_[A-Za-z0-9_]+\.(?:js|cjs)', path) and Path(path).is_file():
+                  subprocess.run(['node',path], check=True)
+          PY
           python -m pip install playwright==1.56.0
           python -m playwright install --with-deps chromium
           python tests/browser_market_charts.py

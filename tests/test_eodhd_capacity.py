@@ -1,8 +1,12 @@
 """Provider limits are exercised against real temporary SQLite connections."""
 import json,os,time,unittest,urllib.error
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import patch
+from contextlib import ExitStack
+from datetime import datetime,timezone
+from io import BytesIO
+from unittest.mock import Mock,patch
 import app,eodhd_capacity as capacity,eodhd_feeds
+import hotwatch_engine
 import test_hotwatch_engine as fixtures
 from hotwatch_contract import EngineError
 
@@ -14,6 +18,24 @@ class CapacityTests(unittest.TestCase):
  def tearDown(self):self.env.stop();self.f.tearDown()
  def state(self):
   with app.connect() as c:return capacity.read(c)
+ def test_reservation_uses_window_index_and_preserves_budget_boundary(self):
+  window=self.now//60
+  cutoff=window-2
+  rows=[(uid,source,minute,7) for uid in range(100) for source in ('pluto','eodhd')
+        for minute in range(cutoff-1,window+2)]
+  with app.connect() as c:
+   c.executemany('INSERT INTO hw_request_budget VALUES(?,?,?,?)',rows)
+   hotwatch_engine.init(c)
+   plan=c.execute('EXPLAIN QUERY PLAN DELETE FROM hw_request_budget WHERE window<?',(cutoff,)).fetchall()
+   self.assertRegex(' '.join(row['detail'] for row in plan),
+                    r'SEARCH hw_request_budget USING INDEX \w+ \(window<\?\)')
+  self.cap.reserve(1,self.now)
+  expected={(uid,source,minute):used for uid,source,minute,used in rows if minute>=cutoff}
+  expected[0,'eodhd',window]+=1
+  with app.connect() as c:
+   actual={(uid,source,minute):used for uid,source,minute,used in
+           c.execute('SELECT user_id,source,window,used FROM hw_request_budget')}
+  self.assertEqual(actual,expected)
  def test_eighty_percent_no_compounded_buffer_and_parallel_shared_budget(self):
   started=time.perf_counter()
   def send(_):
@@ -52,6 +74,37 @@ class CapacityTests(unittest.TestCase):
   self.assertEqual(caught.exception.retry_after_s,60)
   self.cap.reserve(1,self.now+120)
   self.assertEqual(self.state()['http_429'],1)
+ def test_http_cooldown_under_competing_writer_and_at_expiry(self):
+  def connect():
+   c=app.connect()
+   c.execute('PRAGMA busy_timeout=0')
+   return c
+  def counters():
+   with app.connect() as c:
+    state=capacity.snapshot(c,self.now)
+   return (state['http_used_this_minute'],state['requests'],state['known_units'],state['unknown_cost_requests'])
+  other=capacity.Capacity(connect)
+  self.cap.reserve(1,self.now)
+  self.cap.observe(429,{'Retry-After':'7'},2,now=self.now)
+  with app.connect() as writer:
+   writer.execute('BEGIN IMMEDIATE')
+   with self.assertRaises(EngineError) as caught:other.reserve(5,self.now+2.5)
+   self.assertEqual((caught.exception.code,caught.exception.status,caught.exception.retry_after_s),
+                    ('PROVIDER_RATE_BUDGET',429,4.5))
+   self.assertEqual(counters(),(1,1,1,0))
+  other.reserve(5,self.now+7)
+  self.assertEqual(counters(),(2,2,6,0))
+ def test_http_cooldown_committed_between_preflight_and_write(self):
+  def before_statement(sql):
+   if sql.strip().upper()=='BEGIN IMMEDIATE':
+    self.cap.observe(429,{'Retry-After':'11'},2,now=self.now)
+  def connect():
+   c=app.connect()
+   c.set_trace_callback(before_statement)
+   return c
+  with self.assertRaises(EngineError) as caught:capacity.Capacity(connect).reserve(1,self.now)
+  self.assertEqual((caught.exception.code,caught.exception.retry_after_s),('PROVIDER_RATE_BUDGET',11))
+  with app.connect() as c:self.assertEqual(capacity.snapshot(c,self.now)['http_used_this_minute'],0)
  def test_same_minute_headers_preserve_charged_reservations(self):
   other=capacity.Capacity(app.connect)
   cases=[(21,1,21,20),(21,1,90,20),(25,2,24,23),(25,2,21,21)]
@@ -91,6 +144,31 @@ class CapacityTests(unittest.TestCase):
    state=capacity.read(c);state.update(local_day='2026-11-10',known_units=0,unknown_cost_requests=0,unknown_at_account=0,account={'apiRequests':79,'dailyRateLimit':100,'apiRequestsDate':'2026-11-10'},units_at_account=0);capacity.write(c,state,now)
   self.cap.reserve(None,now)
   with self.assertRaisesRegex(EngineError,'EODHD_DAILY_BUDGET'):self.cap.reserve(None,now+1)
+ def check_account_refresh_daily_boundary(self,started,received):
+  self.cap.reserve(5,started.timestamp())
+  self.cap.reserve(None,started.timestamp())
+  payload={'apiRequests':77,'dailyRateLimit':100,'extraLimit':0,'apiRequestsDate':received.isoformat()}
+  with patch('eodhd_capacity.time.time',return_value=started.timestamp()) as clock:
+   def respond(request,timeout):
+    clock.return_value=received.timestamp()
+    return BytesIO(json.dumps(payload).encode())
+   opener=Mock()
+   opener.open.side_effect=respond
+   capacity.refresh_account(app.connect,opener)
+   opener.open.assert_called_once()
+   state=self.state()
+   self.assertEqual(state['account']['apiRequestsDate'],received.date().isoformat())
+   self.assertEqual(state['local_day'],started.date().isoformat())
+   self.assertEqual((state['known_units'],state['unknown_cost_requests'],state['requests']),(5,1,3))
+   self.cap.reserve(2)
+   self.cap.reserve(None)
+   with self.assertRaisesRegex(EngineError,'EODHD_DAILY_BUDGET'):self.cap.reserve(1)
+ def test_account_refresh_crossing_utc_midnight_counts_new_day_charges(self):
+  self.check_account_refresh_daily_boundary(datetime(2026,11,25,23,59,59,tzinfo=timezone.utc),
+                                            datetime(2026,11,26,0,0,1,tzinfo=timezone.utc))
+ def test_account_refresh_same_day_counts_only_subsequent_charges(self):
+  self.check_account_refresh_daily_boundary(datetime(2026,11,26,12,0,0,tzinfo=timezone.utc),
+                                            datetime(2026,11,26,12,0,2,tzinfo=timezone.utc))
  def test_realtime_history_breakdown_does_not_expose_symbol_or_token(self):
   class Response:
    status=200;headers={}
@@ -111,6 +189,86 @@ class CapacityTests(unittest.TestCase):
   with self.assertRaises(ValueError):
    with self.cap.websocket(40):raise ValueError('test release')
   self.assertFalse(self.state()['ws_leases'])
+ def test_websocket_saturation_under_competing_writer_and_at_expiry(self):
+  statements=[]
+  def connect():
+   c=app.connect()
+   c.execute('PRAGMA busy_timeout=0')
+   c.set_trace_callback(statements.append)
+   return c
+  client=capacity.Capacity(connect)
+  for minute,(limit,counts) in enumerate([('symbols',[20,20]),('connections',[0]*51)]):
+   now=self.now+minute*60
+   with self.subTest(limit=limit),patch('eodhd_capacity.time.time',return_value=now) as clock,ExitStack() as held:
+    for count in counts:held.enter_context(self.cap.websocket(count))
+    leases=self.state()['ws_leases']
+    for cooldown in (False,True):
+     if cooldown:
+      self.cap.ws_limited({'Retry-After':'7'})
+      clock.return_value=now+2.5
+     statements.clear()
+     with app.connect() as writer:
+      writer.execute('BEGIN IMMEDIATE')
+      with self.assertRaises(EngineError) as caught,client.websocket(1):
+       self.fail('lease granted at capacity')
+     self.assertEqual((caught.exception.code,caught.exception.status),('EODHD_WS_CAPACITY',429))
+     if cooldown:self.assertEqual(caught.exception.retry_after_s,4.5)
+     self.assertFalse(any(sql.lstrip().upper().startswith('BEGIN') for sql in statements))
+     self.assertEqual(self.state()['ws_leases'],leases)
+    clock.return_value=now+30
+    with client.websocket(40):
+     self.assertEqual(list(self.state()['ws_leases'].values()),[{'symbols':40,'until':now+60}])
+    self.assertEqual(self.state()['ws_leases'],{})
+ def test_websocket_saturation_committed_between_preflight_and_write(self):
+  with patch('eodhd_capacity.time.time',return_value=self.now) as clock,ExitStack() as held:
+   def before_statement(sql):
+    if sql=='BEGIN IMMEDIATE':
+     held.enter_context(self.cap.websocket(40))
+     clock.return_value=self.now+30
+   def connect():
+    c=app.connect()
+    c.set_trace_callback(before_statement)
+    return c
+   with self.assertRaises(EngineError) as caught,capacity.Capacity(connect).websocket(1):
+    self.fail('concurrent reservation exceeded capacity')
+   self.assertEqual(caught.exception.code,'EODHD_WS_CAPACITY')
+   self.assertEqual(list(self.state()['ws_leases'].values()),[{'symbols':40,'until':self.now+30}])
+ def test_websocket_cleanup_of_pruned_lease_under_competing_writer(self):
+  statements=[]
+  def connect():
+   c=app.connect()
+   c.execute('PRAGMA busy_timeout=0')
+   c.set_trace_callback(statements.append)
+   return c
+  with patch('eodhd_capacity.time.time',return_value=self.now) as clock,ExitStack() as old:
+   old.enter_context(capacity.Capacity(connect).websocket(40))
+   clock.return_value=self.now+30
+   with self.cap.websocket(3):
+    replacement=self.state()['ws_leases']
+    self.assertEqual(list(replacement.values()),[{'symbols':3,'until':self.now+60}])
+    statements.clear()
+    with app.connect() as writer:
+     writer.execute('BEGIN IMMEDIATE')
+     old.close()
+    self.assertFalse(any(sql.lstrip().upper().startswith('BEGIN') for sql in statements))
+    self.assertEqual(self.state()['ws_leases'],replacement)
+   self.assertEqual(self.state()['ws_leases'],{})
+ def test_websocket_cleanup_rechecks_lease_under_write_lock(self):
+  statements=[]
+  with patch('eodhd_capacity.time.time',return_value=self.now) as clock,ExitStack() as newer:
+   def trace(sql):
+    statements.append(sql)
+    if sql=='BEGIN IMMEDIATE' and clock.return_value==self.now+30:
+     newer.enter_context(self.cap.websocket(3))
+   def connect():
+    c=app.connect()
+    c.set_trace_callback(trace)
+    return c
+   with capacity.Capacity(connect).websocket(40):
+    statements.clear()
+    clock.return_value=self.now+30
+   self.assertFalse(any(sql.lstrip().upper().startswith(('INSERT','UPDATE')) for sql in statements))
+   self.assertEqual(list(self.state()['ws_leases'].values()),[{'symbols':3,'until':self.now+60}])
  @patch('eodhd_capacity.TEMPORARY_DAILY_LIMIT_DAY','')
  def test_account_refresh_sanitized_and_daily_budget_does_not_stop_websockets(self):
   from datetime import datetime,timezone
@@ -188,3 +346,44 @@ class CapacityTests(unittest.TestCase):
    with capacity.Capacity(app.connect).websocket(1):self.fail('must honor shared cooldown')
   self.cap.reserve(1)
   self.assertEqual(self.state()['ws_429'],1)
+ def test_websocket_cooldown_under_competing_writer_and_at_expiry(self):
+  statements=[]
+  def connect():
+   c=app.connect()
+   c.execute('PRAGMA busy_timeout=0')
+   c.set_trace_callback(statements.append)
+   return c
+  client=capacity.Capacity(connect)
+  with patch('eodhd_capacity.time.time',return_value=self.now) as clock:
+   self.cap.ws_limited({'Retry-After':'7'})
+   clock.return_value=self.now+2.5
+   with app.connect() as writer:
+    writer.execute('BEGIN IMMEDIATE')
+    with self.assertRaises(EngineError) as caught,client.websocket(40):
+     self.fail('lease granted during cooldown')
+   self.assertEqual((caught.exception.code,caught.exception.status,caught.exception.retry_after_s),
+                    ('EODHD_WS_CAPACITY',429,4.5))
+   self.assertNotIn('BEGIN IMMEDIATE',[sql.strip().upper() for sql in statements])
+   self.cap.reserve(1)
+   self.assertEqual(self.state()['requests'],1)
+   clock.return_value=self.now+7
+   with client.websocket(40):
+    self.assertEqual(list(self.state()['ws_leases'].values()),[{'symbols':40,'until':self.now+37}])
+   self.assertEqual(self.state()['ws_leases'],{})
+ def test_websocket_cooldown_committed_between_preflight_and_write(self):
+  def before_statement(sql):
+   # SQLite traces BEGIN before taking the writer lock.
+   if sql.strip().upper()=='BEGIN IMMEDIATE':
+    self.cap.ws_limited({'Retry-After':'11'})
+  def connect():
+   c=app.connect()
+   c.set_trace_callback(before_statement)
+   return c
+  with patch('eodhd_capacity.time.time',return_value=self.now):
+   with self.assertRaises(EngineError) as caught,capacity.Capacity(connect).websocket(1):
+    self.fail('lease granted after another worker recorded a cooldown')
+  self.assertEqual((caught.exception.code,caught.exception.status,caught.exception.retry_after_s),
+                   ('EODHD_WS_CAPACITY',429,11))
+  state=self.state()
+  self.assertEqual(state['ws_retry_at'],self.now+11)
+  self.assertFalse(state.get('ws_leases'))

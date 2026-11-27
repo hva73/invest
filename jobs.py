@@ -13,6 +13,9 @@ def init(c):
     c.execute('CREATE TABLE IF NOT EXISTS news_refresh(id INTEGER PRIMARY KEY CHECK(id=1),attempted REAL NOT NULL,succeeded REAL,error TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS jobs(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, user_id INTEGER NOT NULL REFERENCES users(id), dedupe TEXT NOT NULL UNIQUE, status TEXT NOT NULL, available REAL NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, lease TEXT, lease_until REAL, result TEXT, created REAL NOT NULL)')
     if 'portfolio_id' not in {r['name'] for r in c.execute('PRAGMA table_info(jobs)')}:c.execute('ALTER TABLE jobs ADD COLUMN portfolio_id INTEGER REFERENCES portfolios(id)')
+    c.execute("CREATE INDEX IF NOT EXISTS jobs_queued_available ON jobs(available) WHERE status='queued'")
+    c.execute("CREATE INDEX IF NOT EXISTS jobs_running_lease_until ON jobs(lease_until) WHERE status='running'")
+    c.execute('CREATE INDEX IF NOT EXISTS jobs_user_id_id_desc ON jobs(user_id, id DESC)')
     c.execute('CREATE TABLE IF NOT EXISTS fx_snapshots(id INTEGER PRIMARY KEY, source_date TEXT NOT NULL, observed TEXT NOT NULL, payload TEXT NOT NULL, digest TEXT NOT NULL UNIQUE)')
     c.execute('CREATE TABLE IF NOT EXISTS reports(id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), slot TEXT NOT NULL, created TEXT NOT NULL, body TEXT NOT NULL, UNIQUE(user_id,slot))')
     c.execute('CREATE TABLE IF NOT EXISTS news_items(id INTEGER PRIMARY KEY,title TEXT NOT NULL,url TEXT NOT NULL,published TEXT NOT NULL,summary TEXT NOT NULL,observed TEXT NOT NULL,digest TEXT NOT NULL UNIQUE)')
@@ -62,6 +65,11 @@ def schedule(connect,at=None):
 def run_one(connect,fetcher=None,at=None):
     stamp=time.time() if at is None else at;lease=uuid.uuid4().hex
     with connect() as c:
+        pending=c.execute("""SELECT 1 FROM jobs
+                             WHERE (status='queued' AND available<=?)
+                                OR (status='running' AND lease_until<?)
+                             LIMIT 1""",(stamp,stamp)).fetchone()
+        if not pending:return False
         c.execute('BEGIN IMMEDIATE')
         # Expired work can be retried after a process crash. Old completions cannot commit.
         c.execute("UPDATE jobs SET status=CASE WHEN attempts>=3 THEN 'failed' ELSE 'queued' END,lease=NULL,lease_until=NULL WHERE status='running' AND lease_until<?",(stamp,))
@@ -114,10 +122,12 @@ def run_one(connect,fetcher=None,at=None):
     except Exception:
         # Never persist exception text: network/library errors may include credentials.
         with connect() as c:
-            if job['kind']=='pluto_data':
+            updated=c.execute("""UPDATE jobs SET status=?,result='Kørslen fejlede; kontrollér datakilde og serveropsætning',
+                                 available=?,lease=NULL,lease_until=NULL WHERE id=? AND lease=? AND status='running'""",
+                              ('failed' if job['attempts']+1>=3 else 'queued',stamp+900,job['id'],lease))
+            if updated.rowcount==1 and job['kind']=='pluto_data':
                 import portfolio_data
                 portfolio_data.mark_failed(c,job['user_id'],job['portfolio_id'],'Automatisk Pluto-læsning fejlede; gemte data kan være forældede')
-            c.execute("UPDATE jobs SET status=?,result='Kørslen fejlede; kontrollér datakilde og serveropsætning',available=?,lease=NULL,lease_until=NULL WHERE id=? AND lease=?",('failed' if job['attempts']+1>=3 else 'queued',stamp+900,job['id'],lease))
     return True
 
 def status(connect,user_id):

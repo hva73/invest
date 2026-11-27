@@ -30,4 +30,211 @@ click({sectorScope:'all'});html=ui.render(state);assert.match(html,/DELVIS FORDE
 click({sectorScope:'1'});html=ui.render(state);assert.match(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);
 click({sectorScope:'2'});html=ui.render(state);assert.match(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);
 payload.dashboard.accounts[1].parent_external_id='andet';click({sectorScope:'1'});html=ui.render(state);assert.doesNotMatch(html,/Positioner for et eller flere valgte depoter er ufuldstændige/);assert.doesNotMatch(html,/DELVIS FORDELING/);
+testAllocationAmounts();
+testConversionOverflow();
+testEcbConversion();
+await testOwnerChanges();
+for(const outcome of ['success','error'])await testHoldingsOwnerChanges(outcome);
 console.log('PASS: collection holdings included in total and parent scope; chart, drilldown and percentages work')})().catch(e=>{console.error(e);process.exit(1)});
+
+function testAllocationAmounts(){
+ click({sectorScope:'all'});
+ payload.dashboard.accounts=[{id:1,kind:'portfolio',cash_status:'available',cash_accounts:[]}];
+ const position=amount=>({portfolio_id:1,value:{currency:'DKK',amount},sector_intelligence:{sector:'Teknologi'}});
+ const check=(amounts,label,total)=>{
+  payload.dashboard.positions=amounts.map(position);
+  const rendered=ui.render(state).match(/class="si-donut">.*?<small>([^<]+)<\/small><strong>([^<]+)<\/strong>/);
+  assert.ok(rendered);
+  assert.equal(rendered[1],label);
+  assert.equal(rendered[2].replace(/\s/g,' '),total);
+ };
+ const valid=[' +20.75 ', '-.50', 10.25];
+ for(const invalid of [' \t',true,false,'',[],[3],{},'0x10','0b10','12kr',Infinity,NaN]){
+  check([...valid,invalid],'DELVIS FORDELING','30,50 kr.');
+ }
+ check([...valid,0,'0'],'REGISTRERET VÆRDI','30,50 kr.');
+}
+
+function testConversionOverflow(){
+ const usd=amount=>({currency:'USD',amount});
+ const position=(value,pnl)=>({portfolio_id:1,value:usd(value),unrealized:usd(pnl),sector_intelligence:{sector:'Teknologi'}});
+ payload.fx={source_date:new Date().toISOString().slice(0,10),rates:{USD:1,DKK:2}};
+ const cash=[usd(5)];
+ payload.dashboard.accounts=[{id:1,kind:'portfolio',cash_status:'available',cash_accounts:cash}];
+ payload.dashboard.positions=[position(10,-3),position(0,0)];
+ click({sectorScope:'all'});
+ click({sectorDonut:'Teknologi'});
+ const render=()=>ui.render(state).replace(/\s/g,' ');
+ let html=render();
+ assert.match(html,/VÆRDI · ESTIMAT<\/small><strong>30,00 kr\./);
+ assert.match(html,/UREALISERET RESULTAT<\/small><strong class="negative">-6,00 kr\. · estimat<\/strong>/);
+ payload.dashboard.positions.push(position(Number.MAX_VALUE,-Number.MAX_VALUE));
+ cash.push(usd(Number.MAX_VALUE));
+ html=render();
+ assert.match(html,/DELVIS FORDELING<\/small><strong>30,00 kr\./);
+ assert.match(html,/VÆRDI<\/small><strong>20,00 kr\. · delvist · estimat<\/strong>/);
+ assert.match(html,/UREALISERET RESULTAT<\/small><strong class="negative">-6,00 kr\. · delvist · estimat<\/strong>/);
+ assert.match(html,/Kontanter er ikke tilgængelige for alle valgte konti/);
+}
+
+function testEcbConversion(){
+ const now=new Date().toISOString();
+ click({sectorScope:'all'});
+ payload.dashboard.snapshot_at=now;
+ payload.dashboard.positions=[];
+ function check(currency,rates,expected){
+  payload.fx={source_date:now.slice(0,10),rates};
+  payload.dashboard.portfolio_value_history.reported_result={currency,amount:'10'};
+  const html=ui.render(state);
+  const result=html.match(/RESULTAT OPLYST AF PLUTO<\/small><strong class="[^"]*">([^<]+)<\/strong>/);
+  assert.ok(result);
+  assert.equal(result[1].replace(/\s/g,' '),expected);
+ }
+ check('EUR',{DKK:-7.5},'—');
+ check('EUR',{DKK:0},'—');
+ check('EUR',{DKK:7.5},'75,00 kr.');
+ for(const [USD,DKK] of [[-2,15],[-2,-15],[0,15],[Number.MIN_VALUE,15],[Number.MAX_VALUE,Number.MIN_VALUE]]){
+  check('USD',{USD,DKK},'—');
+ }
+ payload.dashboard.positions=[{portfolio_id:1,snapshot_at:now,original_value:{currency:'USD',amount:'1'},raw:{value_in_portfolio_currency:{currency:'DKK',amount:'6'}}}];
+ check('USD',{USD:-2,DKK:15},'60,00 kr.');
+ payload.fx_quotes=[{currency:'USD',event_time:now,rate:7}];
+ check('USD',{USD:Number.MIN_VALUE,DKK:15},'70,00 kr.');
+ check('USD',{USD:2,DKK:15},'75,00 kr.');
+}
+
+async function testOwnerChanges(){
+ const requests=[];
+ let refreshes=0;
+ ui.setup({
+  api:()=>new Promise((resolve,reject)=>requests.push({resolve,reject})),
+  refresh:()=>{refreshes++},
+  escape:String
+ });
+ const render=(username,dashboard)=>ui.render({user:{username},dashboard});
+ const tick=()=>new Promise(resolve=>setImmediate(resolve));
+ const snapshot='2026-11-27T10:00:00Z';
+ const result=marker=>({...payload,dashboard:{...payload.dashboard,marker,snapshot_at:snapshot}});
+
+ render('A');
+ render('B');
+ assert.equal(requests.length,2,'B must start immediately');
+ requests[0].resolve(result('stale A'));
+ await tick();
+ assert.match(render('B'),/Henter dine sektordata/);
+ assert.equal(requests.length,2,'stale completion must leave B busy');
+ assert.equal(refreshes,0);
+ requests[1].resolve(result('current B'));
+ await tick();
+ assert.match(render('B'),/FORSIDEGRAF current B/);
+ assert.equal(refreshes,1);
+
+ render('A');
+ render('B');
+ render('A');
+ assert.equal(requests.length,5,'returning to A starts a new request');
+ requests[4].resolve(result('new A'));
+ await tick();
+ assert.match(render('A'),/FORSIDEGRAF new A/);
+ assert.equal(refreshes,2);
+ requests[2].resolve(result('old A'));
+ requests[3].reject(new Error('old B'));
+ await tick();
+ assert.match(render('A'),/FORSIDEGRAF new A/);
+ assert.equal(refreshes,2);
+ assert.equal(requests.length,5);
+
+ const newer={snapshot_at:'2026-11-27T11:00:00Z'};
+ render('A',newer);
+ render('A',newer);
+ assert.equal(requests.length,6,'new snapshot refreshes once despite stale B error');
+ requests[5].resolve(result('refreshed A'));
+ await tick();
+ assert.match(render('A'),/FORSIDEGRAF refreshed A/);
+ assert.equal(refreshes,3);
+}
+
+async function testHoldingsOwnerChanges(outcome){
+ const requests=[],timers=[];
+ let refreshes=0;
+ const symbol='FUND.US';
+ const markets=[{symbol,sector:'Test',region:'USA',series:[]}];
+ ctx.setTimeout=(run,delay)=>{
+  assert.equal(delay,6000);
+  const timer={run,cancelled:false};
+  timers.push(timer);
+  return timer;
+ };
+ ctx.clearTimeout=timer=>{timer.cancelled=true};
+ ui.setup({
+  escape:String,
+  refresh:()=>{refreshes++},
+  api:(path,options)=>{
+   if(path==='sector-intelligence')return Promise.resolve({...payload,markets});
+   assert.equal(path,'sector-intelligence/holdings');
+   return new Promise((resolve,reject)=>requests.push({...options,resolve,reject}));
+  }
+ });
+ const render=username=>ui.render({user:{username}});
+ const tick=()=>new Promise(resolve=>setImmediate(resolve));
+ const a='A-'+outcome;
+ render(a);
+ await tick();
+ click({sectorMarket:symbol});
+ assert.match(render(a),/Henter fondens beholdninger/);
+ const oldTimer=timers.at(-1);
+ render('B');
+ render(a);
+ await tick();
+ click({sectorMarket:symbol});
+ assert.match(render(a),/Henter fondens beholdninger/);
+ const currentTimer=timers.at(-1);
+ const before=refreshes,timerCount=timers.length;
+ oldTimer.run();
+ assert.equal(refreshes,before,'old owner timer must ignore the new A');
+ if(outcome==='success')requests[0].resolve({status:'PENDING',updated:1});
+ else requests[0].reject(new Error('old A'));
+ await tick();
+ assert.equal(refreshes,before,'late '+outcome+' must leave the new A alone');
+ assert.equal(timers.length,timerCount);
+ assert.equal(currentTimer.cancelled,false);
+ click({sectorHoldingsLimit:'30'});
+ assert.equal(requests.length,2,'current same-symbol request remains in flight');
+
+ requests[1].resolve({status:'PENDING',updated:2});
+ const beforeSuccess=refreshes;
+ await tick();
+ assert.equal(refreshes,beforeSuccess+1);
+ const pendingTimer=timers.at(-1);
+ const beforePoll=refreshes;
+ assert.equal(currentTimer.cancelled,true);
+ currentTimer.run();
+ assert.equal(refreshes,beforePoll,'superseded timer leaves the active poll alone');
+ pendingTimer.run();
+ assert.equal(refreshes,beforePoll+1,'current pending request polls');
+ assert.match(render(a),/Henter fondens beholdninger/);
+ const priorRequestTimer=timers.at(-1);
+ click({sectorHoldingsLimit:'50'});
+ const afterLimitChange=refreshes;
+ priorRequestTimer.run();
+ assert.equal(refreshes,afterLimitChange,'prior request cannot poll for a new limit on the same symbol');
+ assert.deepEqual(requests.map(r=>[r.symbol,r.limit]),[[symbol,20],[symbol,20],[symbol,50]]);
+ const requestTimerCount=timers.length;
+ assert.match(render(a),/Henter fondens beholdninger/);
+ assert.equal(timers.length,requestTimerCount+1);
+ const closingTimer=timers.at(-1);
+ click({sectorHoldingsClose:'yes'});
+ const afterClose=refreshes;
+ closingTimer.run();
+ assert.equal(refreshes,afterClose,'closed panel timer cannot refresh');
+ click({sectorMarket:symbol});
+ const afterReopen=refreshes;
+ closingTimer.run();
+ assert.equal(refreshes,afterReopen,'reopening an in-flight request cannot revive the cancelled timer');
+ click({sectorHoldingsClose:'yes'});
+ const closedCount=timers.length;
+ requests[2].resolve({status:'PENDING',updated:3});
+ await tick();
+ assert.equal(timers.length,closedCount,'late pending response cannot restart closed panel polling');
+ assert.doesNotMatch(render(a),/si-etf-overlay/);
+}
