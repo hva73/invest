@@ -42,7 +42,9 @@ window.DashboardUI=(()=>{
  function profit(v,pct){if(!v||v.amount===null)return '<span class="dash-neutral">—</span>';const t=tone(v.amount),label=percent(pct);return `<span class="dash-change ${t}">${Number(v.amount)>0?'+':''}${amount(v)}</span>${pct!==null&&pct!==undefined?`<small class="dash-profit-percent ${label==='—'?'neutral':t}">${label}</small>`:''}`}
  function age(r){const f=r.price_freshness,state=f?.state||'unknown',label={fresh:'Aktuel',stale:'Forældet',unknown:'Kurstid ukendt',error:'Kilde fejl',session_close:'Seneste session'}[state]||'Ukendt';return `<span class="dash-age ${state}" title="${time(r.price_time)} · hentet ${time(r.snapshot_at)}">${esc(label)}</span>`}
  function sorted(input){return input.slice().sort((a,b)=>{
-  const sign=sortDirection==='asc'?1:-1,missing=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v));
+  const sign=sortDirection==='asc'?1:-1;
+  const missing=v=>typeof v==='number'?!Number.isFinite(v):
+   typeof v!=='string'||!/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?$/i.test(v.trim())||!Number.isFinite(Number(v));
   const number=r=>({daily:r.daily?.percent,since:r.since_last?.percent,pnl:r.unrealized_percent,value:r.value?.amount,price:r.price?.amount})[sort];
   if(['daily','since','pnl','value','price'].includes(sort)){
    const x=number(a),y=number(b);if(missing(x))return missing(y)?0:1;if(missing(y))return -1;
