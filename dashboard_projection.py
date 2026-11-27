@@ -30,7 +30,7 @@ def portfolio_value_snapshot(c,uid,allow_failed=False):
   if (row['last_error'] and not allow_failed) or not row['payload']:return None
   try:
    payload=json.loads(row['payload']);value=payload.get('value') or {};money=value.get('value') or {};amount=policy.decimal(money.get('amount'));code=money.get('currency');observed=policy.stamp(row['observed'])
-   if amount is None or not isinstance(code,str) or not observed or currency and currency!=code:return None
+   if amount is None or not isinstance(code,str) or not code.strip() or not observed or currency and currency!=code:return None
    currency=code;amounts.append(amount);times.append(observed)
    source=policy.stamp(value.get('source_time'));source_times.append(source)
    profit=value.get('reported_result') or {};p=policy.decimal(profit.get('amount'))

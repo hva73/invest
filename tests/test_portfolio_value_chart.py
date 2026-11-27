@@ -4,9 +4,14 @@ import app,portfolios,portfolio_data,dashboard_projection as dashboard
 
 class PortfolioValueChart(unittest.TestCase):
  def setUp(self):
-  self.old=app.DB;self.temp=tempfile.TemporaryDirectory();app.DB=self.temp.name+'/db';app.init();app.create_user('test-password-long-enough')
+  self.old=app.DB;self.temp=tempfile.TemporaryDirectory();app.DB=self.temp.name+'/db'
   self.now=datetime.now(timezone.utc).replace(microsecond=0)
   with app.connect() as c:
+   c.execute('CREATE TABLE users(id INTEGER PRIMARY KEY)')
+   c.execute('INSERT INTO users VALUES(1)')
+   c.execute('CREATE TABLE proposals(user_id INTEGER,portfolio TEXT)')
+   portfolios.init(c)
+   portfolio_data.init(c)
    portfolios.replace_pluto(c,1,[{'id':'portfolios:root','name':'Root','kind':'portfolio'},{'id':'collections:ai','name':'AI','kind':'collection','parent_external_id':'portfolios:root'}])
    owned=portfolios.list_owned(c,1);self.root=next(p['id'] for p in owned if p['kind']=='portfolio');self.child=next(p['id'] for p in owned if p['kind']=='collection')
  def tearDown(self):app.DB=self.old;self.temp.cleanup()
@@ -45,6 +50,30 @@ class PortfolioValueChart(unittest.TestCase):
   with app.connect() as c:
    history=dashboard.portfolio_value_history(c,1,self.now);total=c.execute('SELECT count(*) FROM display_portfolio_values').fetchone()[0]
   self.assertEqual(total,2);self.assertEqual([p['amount'] for p in history['periods']['week']],['1000','1100']);self.assertEqual(history['reported_result'],{'amount':'30','currency':'DKK'});self.assertEqual(history['current_value'],{'amount':'1100','currency':'DKK'});self.assertEqual([p['reported_result'] for p in history['periods']['week']],['20','30'])
+ def assert_no_portfolio_aggregate(self):
+  with app.connect() as c:
+   history=dashboard.portfolio_value_history(c,1,self.now)
+   self.assertIsNone(history.get('current_value'))
+   self.assertIsNone(history['reported_result'])
+   self.assertEqual(c.execute('SELECT count(*) FROM display_portfolio_values').fetchone()[0],0)
+ def test_blank_root_currency_prevents_aggregate(self):
+  for code in ('',' \t '):
+   with self.subTest(currency=code):
+    self.save(self.root,'1000',self.now,currency=code,result='20')
+    self.assert_no_portfolio_aggregate()
+ def test_second_root_cannot_supply_first_roots_missing_currency(self):
+  self.save(self.root,'1000',self.now,currency='',result='20')
+  with app.connect() as c:
+   portfolios.replace_pluto(c,1,[{'id':'portfolios:root','name':'Root','kind':'portfolio'},{'id':'portfolios:other','name':'Other','kind':'portfolio'}])
+   other=next(p['id'] for p in portfolios.list_owned(c,1) if p['name']=='Other')
+  self.save(other,'100',self.now,result='3')
+  self.assert_no_portfolio_aggregate()
+  self.save(self.root,'1000',self.now,result='20')
+  with app.connect() as c:
+   history=dashboard.portfolio_value_history(c,1,self.now)
+  self.assertEqual(history['current_value'],{'amount':'1100','currency':'DKK'})
+  self.assertEqual(history['reported_result'],{'amount':'23','currency':'DKK'})
+  self.assertEqual([p['amount'] for p in history['periods']['day']],['1100'])
  def test_missing_currency_mixed_roots_and_failed_snapshots_do_not_fabricate_totals(self):
   self.save(self.root,'1000',self.now)
   with app.connect() as c:
