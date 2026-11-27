@@ -7,6 +7,32 @@ import test_trade_service as fixtures
 import app,market_data,report_ingest,trade_service
 
 SAMPLE=Path(__file__).parent/'fixtures/pluto-series-synthetic.json'
+class TimestampNormalization(unittest.TestCase):
+ def setUp(self):
+  self.raw=json.loads(SAMPLE.read_text())
+  self.fixed=datetime(2026,11,2,12,tzinfo=timezone.utc)
+ def test_unrepresentable_utc_history_preserves_quote(self):
+  self.raw['price']['timestamp']=self.fixed.isoformat()
+  for timestamp in ('0001-01-01T00:00:00+00:01','9999-12-31T23:59:59-00:01'):
+   with self.subTest(timestamp=timestamp,operation='stamp'):
+    with self.assertRaises(market_data.MarketError):
+     market_data.stamp(timestamp)
+   with self.subTest(timestamp=timestamp,operation='normalized'):
+    self.raw['performance']['series'][-1]['timestamp']=timestamp
+    result=market_data.normalized(self.raw,'synthetic-chart-asset',self.fixed)
+    self.assertEqual(result['series'],[])
+    self.assertEqual(result['series_error'],'Kurshistorikken indeholder et ukendt tidspunkt.')
+    self.assertEqual(result['price'],'18.636')
+    self.assertEqual(result['price_time'],self.fixed.isoformat(timespec='milliseconds'))
+ def test_offset_with_nanoseconds_preserves_chart_precision_and_source(self):
+  timestamp='2026-10-26T10:30:00.123456789+02:30'
+  self.assertEqual(market_data.stamp(timestamp).isoformat(),'2026-10-26T08:00:00.123456+00:00')
+  self.raw['performance']['series'][0]['timestamp']=timestamp
+  result=market_data.normalized(self.raw,'synthetic-chart-asset',self.fixed)
+  self.assertIsNone(result['series_error'])
+  self.assertEqual(result['series'][0]['timestamp'],'2026-10-26T08:00:00.123Z')
+  self.assertEqual(result['series'][0]['source_timestamp'],timestamp)
+
 class Quotes(unittest.TestCase):
  def setUp(self):
   self.case=fixtures.Trading();self.case.setUp();self.raw=json.loads(SAMPLE.read_text());self.fixed=datetime(2026,11,2,12,tzinfo=timezone.utc);self.calls=[];self.fail_read=False;self.multiple=False

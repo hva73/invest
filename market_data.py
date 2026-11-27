@@ -40,7 +40,7 @@ def stamp(value):
         dt=datetime.fromisoformat(iso.replace('Z','+00:00'))
         if dt.tzinfo is None:raise ValueError()
         return dt.astimezone(timezone.utc)
-    except ValueError:raise MarketError('Kurshistorikken indeholder et ukendt tidspunkt.')
+    except (ValueError,OverflowError):raise MarketError('Kurshistorikken indeholder et ukendt tidspunkt.')
 
 def copenhagen_day(now):
     local=now.astimezone(COPENHAGEN)
