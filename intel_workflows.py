@@ -1,7 +1,9 @@
 """Append-only observation and delivery evidence. Never imports broker clients."""
 import hashlib,json
+from copy import copy
 from datetime import datetime,timezone,timedelta
 from decimal import Decimal,localcontext
+from functools import lru_cache
 from report_validation import issue,stamp,schema_errors,ReportValidationError
 from report_v2 import OBSERVATION,DECISION
 
@@ -302,14 +304,23 @@ def candidates(c,uid,mode=False,candidate_id=None,include_history_market=True):
             old={r[0] for r in c.execute('SELECT DISTINCT candidate_id FROM report_candidate_links WHERE user_id=? AND is_test=0 AND report_row_id<=?',(uid,reset['report_cutoff']))}
             ids=[cid for cid in ids if cid not in old or radar_reassessed_after_reset(c,uid,cid,reset)]
     result=[]
-    query='SELECT r.payload,r.report_id,r.received,l.generated FROM report_candidate_links l JOIN ingested_reports r ON r.id=l.report_row_id WHERE l.user_id=? AND l.is_test=? AND l.candidate_id=? '
+    # Candidates in the same snapshot usually share both history endpoints.
+    @lru_cache(maxsize=2)
+    def report(row_id):
+        row=c.execute('SELECT payload FROM ingested_reports WHERE id=? AND user_id=? AND is_test=?',
+                      (row_id,uid,int(mode))).fetchone()
+        return json.loads(row['payload'])
+
+    query=('SELECT r.id,r.received FROM report_candidate_links l JOIN ingested_reports r '
+           'ON r.id=l.report_row_id AND r.user_id=l.user_id AND r.is_test=l.is_test '
+           'WHERE l.user_id=? AND l.is_test=? AND l.candidate_id=? ')
     for cid in ids:
         args=(uid,int(mode),cid)
         latest=c.execute(query+'ORDER BY l.generated DESC,r.id DESC LIMIT 1',args).fetchone()
         if not latest:continue
         oldest=c.execute(query+'ORDER BY l.generated,r.id LIMIT 1',args).fetchone()
-        d=json.loads(latest['payload']);candidate=next(x for x in d['candidates'] if x['candidate_id']==cid);current_decision=prior_decision(c,uid,mode,cid)
-        first=json.loads(oldest['payload']);initial=next(x for x in first['candidates'] if x['candidate_id']==cid)
+        d=report(latest['id']);candidate=next(x for x in d['candidates'] if x['candidate_id']==cid);current_decision=prior_decision(c,uid,mode,cid)
+        first=report(oldest['id']);initial=next(x for x in first['candidates'] if x['candidate_id']==cid)
         observations=c.execute('SELECT payload FROM hot_watch_observations WHERE user_id=? AND is_test=? AND candidate_id=? ORDER BY observed DESC,id DESC LIMIT 1',args).fetchone()
         observed=json.loads(observations['payload']) if observations else None
         markets=[]
@@ -332,7 +343,7 @@ def candidates(c,uid,mode=False,candidate_id=None,include_history_market=True):
         import display_policy
         status['display_group']=display_policy.candidate_group(status)
         currentness=candidate_currentness(c,uid,mode,cid)
-        result.append({**status,'currentness':currentness,'latest_verified_market':latest_market,'candidate':candidate,'decision':current_decision[1] if current_decision else None,'decision_origin':current_decision[2] if current_decision else None,'active':status['lifecycle']['status'] not in ['CLOSED','ARCHIVED'] and currentness['status']!='COLD','first_seen':first['generated_at'],'last_seen':last_seen,'first_price':initial['market']['price'],'report_id':d['report_id'],'received':latest['received'],'generated_at':d['generated_at'],'schema_version':2,'quality':d.get('data_quality',{}).get('status','unknown')})
+        result.append({**status,'currentness':currentness,'latest_verified_market':latest_market,'candidate':candidate,'decision':current_decision[1] if current_decision else None,'decision_origin':current_decision[2] if current_decision else None,'active':status['lifecycle']['status'] not in ['CLOSED','ARCHIVED'] and currentness['status']!='COLD','first_seen':first['generated_at'],'last_seen':last_seen,'first_price':copy(initial['market']['price']),'report_id':d['report_id'],'received':latest['received'],'generated_at':d['generated_at'],'schema_version':2,'quality':d.get('data_quality',{}).get('status','unknown')})
     return result
 
 def account_projection(report):
