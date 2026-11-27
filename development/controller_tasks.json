@@ -2922,7 +2922,7 @@
     "generation": 53,
     "role": "mobile",
     "priority": 3,
-    "status": "ready",
+    "status": "done",
     "base_branch": "codex/architecture-reset-20261126",
     "base_sha": "251f77ca5982bf9feee39d5bf47fbee7d2b6d291",
     "dependencies": [],
