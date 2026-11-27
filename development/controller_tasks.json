@@ -2664,7 +2664,7 @@
     "priority": 3,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "696041c7c49cddb1e170751f483240045a7d4ab4",
+    "base_sha": "da51de591546f297370dbf52189e79baac3f341d",
     "dependencies": [],
     "paths": [
       "static/report-ui.js",
