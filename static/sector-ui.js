@@ -21,7 +21,7 @@ window.SectorUI=(()=>{
   if(owner!==user){
    ownerGeneration++;
    loading=false;
-   data=null;owner=user;error='';scope='all';selected='';holdingsRequests={};if(holdingsTimer)clearTimeout(holdingsTimer)
+   data=null;owner=user;error='';scope='all';selected='';holdingsRequests={};cancelHoldingsPoll()
   }
   const newer=latestSnapshot&&data?.dashboard?.snapshot_at&&Date.parse(latestSnapshot)>Date.parse(data.dashboard.snapshot_at);
   if(loading||error||(data&&!newer&&Date.now()-loadedAt<60000))return;
@@ -89,10 +89,34 @@ window.SectorUI=(()=>{
   return `<section class="panel sector-panel si-results"><div class="sector-heading"><div><small class="si-eyebrow">RESULTAT SIDEN KØB</small><h2>Sektorernes resultater</h2><p>Gevinst og tab på dine positioner i alle valgte depoter.</p></div><div class="sector-tabs"><button data-sector-metric="amount" class="${chartMetric==='amount'?'active':''}">Gevinst/tab i kr.</button><button data-sector-metric="percent" class="${chartMetric==='percent'?'active':''}">Afkast i %</button></div></div>${valid.length?`<div class="si-bars" role="group" aria-label="Sektorernes urealiserede resultat siden køb"><div class="si-zero-line"><span>0</span></div>${valid.map(g=>{const h=Math.max(2,Math.round(Math.abs(g.metric)/max*76));return `<button class="si-bar-column ${selected===g.name?'active':''}" data-sector-select="${txt(g.name)}" aria-pressed="${selected===g.name}" title="${txt(g.name)}: ${chartMetric==='amount'?txt(amount(g.metric)):pct(g.metric)}"><span class="si-bar-value ${sign(g.metric)}">${chartMetric==='amount'?amount(g.metric):pct(g.metric)}${chartMetric==='amount'&&g.np<g.rows.length?' · delvist':chartMetric==='amount'&&g.pnlEstimated||chartMetric==='percent'&&g.percent?.estimated?' · estimat':''}</span><span class="si-bar-plot"><i class="si-bar ${g.metric>=0?'up':'down'} si-h-${h}"></i></span><strong>${txt(g.name)}</strong></button>`}).join('')}</div>`:'<div class="si-empty"><span>◫</span><div><strong>Resultater afventes</strong><p>Grafen vises, når resultat og valuta er tilgængelige for positionerne.</p></div></div>'}<p class="si-chart-note">${excluded?`${excluded} ${excluded===1?'gruppe er udeladt':'grupper er udeladt'}, fordi resultat${chartMetric==='percent'?' eller kostpris':''} mangler. `:''}Søjlerne viser positionsresultater siden køb; delvise beløb og beregnet kostpris er mærket. De kan afvige fra Plutos samlede depotresultat.</p></section>`
  }
  function queueHoldings(symbol){
-  if(holdingsRequests[symbol]?.status==='REQUESTING')return;const account=owner;holdingsRequests[symbol]={status:'REQUESTING',version:null};
-  api('sector-intelligence/holdings',{symbol,limit:holdingsLimit}).then(result=>{if(owner!==account)return;holdingsRequests[symbol]={status:result.status,version:number(result.updated)};loadedAt=0;refresh();if(['PENDING','TRY_TOP10','TRY_ISSUER','TRY_ISHARES','TRY_ISHARES_EU'].includes(result.status))pollHoldings(symbol)}).catch(()=>{if(owner===account){holdingsRequests[symbol]={status:'REQUEST_FAILED',version:null};refresh()}})
+  if(holdingsRequests[symbol]?.status==='REQUESTING')return;
+  const generation=ownerGeneration,request={status:'REQUESTING',version:null};
+  holdingsRequests[symbol]=request;
+  const current=()=>generation===ownerGeneration&&holdingsRequests[symbol]===request;
+  api('sector-intelligence/holdings',{symbol,limit:holdingsLimit}).then(result=>{
+   if(!current())return;
+   request.status=result.status;request.version=number(result.updated);
+   loadedAt=0;refresh();
+   if(['PENDING','TRY_TOP10','TRY_ISSUER','TRY_ISHARES','TRY_ISHARES_EU'].includes(result.status))pollHoldings(symbol,generation,request)
+  }).catch(()=>{
+   if(!current())return;
+   request.status='REQUEST_FAILED';request.version=null;refresh()
+  })
  }
- function pollHoldings(symbol){if(holdingsTimer)clearTimeout(holdingsTimer);holdingsTimer=setTimeout(()=>{holdingsTimer=null;if(selected===symbol){loadedAt=0;refresh()}},6000)}
+ function cancelHoldingsPoll(){
+  if(holdingsTimer!==null)clearTimeout(holdingsTimer);
+  holdingsTimer=null
+ }
+ function pollHoldings(symbol,generation=ownerGeneration,request=holdingsRequests[symbol]){
+  const current=()=>holdingsOpen&&selected===symbol&&generation===ownerGeneration&&holdingsRequests[symbol]===request;
+  if(!current())return;
+  cancelHoldingsPoll();
+  const timer=setTimeout(()=>{
+   if(holdingsTimer!==timer||!current())return;
+   holdingsTimer=null;loadedAt=0;refresh()
+  },6000);
+  holdingsTimer=timer
+ }
  function benchmarkHoldings(){
   if(!holdingsOpen)return '';
   const market=(data.markets||[]).find(x=>x.symbol===selected&&x.region===region);if(!market)return '';
@@ -183,7 +207,7 @@ window.SectorUI=(()=>{
  document.addEventListener('pointerout',e=>highlightDonutSector(e.target,false));
  document.addEventListener('focusin',e=>highlightDonutSector(e.target,true));
  document.addEventListener('focusout',e=>highlightDonutSector(e.target,false));
- document.addEventListener('click',e=>{const b=e.target.closest('button, [data-sector-donut]');if(!b)return;if(b.dataset.sectorSummary!==undefined){openSummary(b.dataset.sectorSummary);return}for(const [key,fn] of [['sectorHoldingsClose',()=>{holdingsOpen=false;if(holdingsTimer)clearTimeout(holdingsTimer)}],['sectorHoldingsLimit',v=>{const n=Number(v);if([20,30,50].includes(n)){holdingsLimit=n;if(holdingsOpen&&selected)queueHoldings(selected)}}],['sectorRotation',v=>rotationMode=v],['sectorDonut',v=>selected=v],['sectorMetric',v=>chartMetric=v],['sectorRetry',()=>{error='';data=null}],['sectorScope',v=>scope=v],['sectorPeriod',v=>period=v],['sectorRegion',v=>{region=v;holdingsOpen=false}],['sectorSelect',v=>selected=v],['sectorMarket',v=>{selected=v;holdingsLimit=20;holdingsOpen=true;queueHoldings(v)}]])if(b.dataset[key]!==undefined){fn(b.dataset[key]);refresh();if(key==='sectorSelect'&&b.matches?.('.si-bar-column'))requestAnimationFrame(()=>document.querySelector('.sector-layout .si-detail')?.scrollIntoView({behavior:'smooth',block:'nearest'}));break}});
- document.addEventListener('keydown',e=>{if(e.key==='Escape'&&holdingsOpen){holdingsOpen=false;if(holdingsTimer)clearTimeout(holdingsTimer);refresh();return}if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-sector-donut]')){e.preventDefault();selected=e.target.dataset.sectorDonut;refresh()}});
+ document.addEventListener('click',e=>{const b=e.target.closest('button, [data-sector-donut]');if(!b)return;if(b.dataset.sectorSummary!==undefined){openSummary(b.dataset.sectorSummary);return}for(const [key,fn] of [['sectorHoldingsClose',()=>{holdingsOpen=false;cancelHoldingsPoll()}],['sectorHoldingsLimit',v=>{const n=Number(v);if([20,30,50].includes(n)){holdingsLimit=n;if(holdingsOpen&&selected)queueHoldings(selected)}}],['sectorRotation',v=>rotationMode=v],['sectorDonut',v=>selected=v],['sectorMetric',v=>chartMetric=v],['sectorRetry',()=>{error='';data=null}],['sectorScope',v=>scope=v],['sectorPeriod',v=>period=v],['sectorRegion',v=>{region=v;holdingsOpen=false;cancelHoldingsPoll()}],['sectorSelect',v=>selected=v],['sectorMarket',v=>{selected=v;holdingsLimit=20;holdingsOpen=true;queueHoldings(v)}]])if(b.dataset[key]!==undefined){fn(b.dataset[key]);refresh();if(key==='sectorSelect'&&b.matches?.('.si-bar-column'))requestAnimationFrame(()=>document.querySelector('.sector-layout .si-detail')?.scrollIntoView({behavior:'smooth',block:'nearest'}));break}});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&holdingsOpen){holdingsOpen=false;cancelHoldingsPoll();refresh();return}if((e.key==='Enter'||e.key===' ')&&e.target.matches('[data-sector-donut]')){e.preventDefault();selected=e.target.dataset.sectorDonut;refresh()}});
  return {setup(x){({api,escape:esc,refresh}=x)},render,radar};
 })();
