@@ -51,6 +51,29 @@ class Positions(unittest.TestCase):
   old=full_positions('old','2026-11-02T14:00:00Z');old['orders']=[stop('pending','0')];self.save(old);self.d['orders']=[stop('pending','0')];self.save();self.assertEqual(self.view()['count'],12);self.assertFalse(any(e['kind']=='stop_fill_reported' for e in self.view()['changes']));self.assertEqual(self.flat()[0]['position']['quantity'],'2')
   next=copy.deepcopy(self.d);next.update(report_id='partial',generated_at='2026-11-02T16:00:00Z');next['orders']=[stop('partial','1')];self.save(next);self.assertEqual(self.view()['count'],12);self.assertIn('stop_fill_reported',{e['kind'] for e in self.view()['changes']})
   again=copy.deepcopy(next);again.update(report_id='unchanged-fill',generated_at='2026-11-02T17:00:00Z');self.save(again);self.assertFalse(any(e['kind']=='stop_fill_reported' for e in self.view()['changes']))
+ def test_partial_stop_with_reused_order_id_across_portfolio_snapshots(self):
+  old=full_positions('old','2026-11-02T14:00:00Z')
+  stop={'order_id':'shared-stop','portfolio_id':'test-main','candidate_id':None,
+        'asset_id':'synthetic-asset-BTC','ticker':'BTC','side':'SELL','order_type':'STOP',
+        'status':'ACTIVE_STOP','lifecycle':'partial','requested_quantity':'2','filled_quantity':'1',
+        'allocated':None,'as_of':old['generated_at'],'source_ids':['synthetic-source'],
+        'note':'Syntetisk ordre','stop_price':{'amount':'20','currency':'USD'}}
+  old['orders']=[stop]
+  self.save(old)
+  child_stop=dict(stop,portfolio_id='test-child',as_of=self.d['generated_at'])
+  self.d['orders']=[stop,child_stop]
+  errors=report_ingest.validation(app.connect,1,self.d)['errors']
+  self.assertEqual([(e['path'],e['code']) for e in errors],[('orders[1].order_id','duplicate_id')])
+
+  self.d['orders']=[child_stop]
+  self.save()
+  fills=[e for e in self.view()['changes'] if e['kind']=='stop_fill_reported']
+  self.assertEqual([(e['portfolio_id'],e['position_id']) for e in fills],[('test-child','test-child.BTC')])
+
+  again=copy.deepcopy(self.d)
+  again.update(report_id='unchanged-child-fill',generated_at='2026-11-02T16:00:00Z')
+  self.save(again)
+  self.assertFalse(any(e['kind']=='stop_fill_reported' for e in self.view()['changes']))
  def test_unchanged_actions_are_not_events_and_changed_actions_are(self):
   self.save(full_positions('old','2026-11-02T14:00:00Z'));self.save();self.assertEqual(self.view()['changes'],[])
   new=copy.deepcopy(self.d);new.update(report_id='changed',generated_at='2026-11-02T16:00:00Z');new['positions'][0]['assessment'].update(action='REDUCÉR',assessed_at=new['generated_at']);self.save(new);self.assertEqual(self.view()['changes'][0]['message'],'BEHOLD → REDUCÉR')
