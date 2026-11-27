@@ -23,9 +23,13 @@ window.DashboardUI=(()=>{
   return (n>0?'+':'')+new Intl.NumberFormat('da-DK',precision).format(n)+' %';
  }
  function resultShare(result,base,label='af depotværdi'){
-  if(!result||!base||!result.currency||result.currency!==base.currency||result.amount===null||result.amount===undefined||result.amount===''||base.amount===null||base.amount===undefined||base.amount==='')return '';
+  if(!result?.currency||result.currency!==base?.currency)return '';
+  const numericInput=v=>typeof v==='number'||(typeof v==='string'&&v.trim()!=='');
+  if(!numericInput(result.amount)||!numericInput(base.amount))return '';
   const n=Number(result.amount),denom=Number(base.amount);if(!Number.isFinite(n)||!Number.isFinite(denom)||denom<=0)return '';
-  return `<span class="dash-result-share ${tone(n)}">${percent(n/denom*100)} <span>${esc(label)}</span></span>`;
+  const ratio=n/denom*100;
+  if(!Number.isFinite(ratio))return '';
+  return `<span class="dash-result-share ${tone(n)}">${percent(ratio)} <span>${esc(label)}</span></span>`;
  }
  function change(v){
   if(!v)return '<span class="dash-neutral">—</span>';
