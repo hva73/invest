@@ -14,6 +14,11 @@ window.OverviewUI=(()=>{
   if(typeof v!=='string'&&typeof v!=='number')return null;
   const date=new Date(v);
   if(!Number.isFinite(date.getTime()))return null;
+  // Check the written calendar day before an offset can shift it to another day.
+  if(typeof v==='string'){
+   const calendarDay=/^\d{4}-\d{2}-(\d{2})(?=[T\s]|$)/i.exec(v.trim());
+   if(calendarDay&&new Date(calendarDay[0]).getUTCDate()!==Number(calendarDay[1]))return null;
+  }
   return new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(date);
  }
  function movement(delta,compact=false){

@@ -20,9 +20,14 @@ test('dated change retains the amount and Copenhagen local date and time', () =>
   assert.doesNotMatch(html, /Oplyst resultat/);
 });
 
+test('valid leap day retains its Copenhagen time across an offset boundary', () => {
+  const html = figure({...change, from: '2024-02-29T23:30:00-02:00'});
+  assert.match(html, /market-positive">↑ \+25 DKK<span>Værdiændring siden 01\.03\.2024,? 02\.30<\/span>/);
+});
+
 for (const [name, period] of Object.entries({
   omitted: {}, null: {from: null}, empty: {from: ''}, invalid: {from: 'ugyldig'},
-  boolean: {from: false}
+  boolean: {from: false}, impossibleDay: {from: '2026-02-30T12:00:00Z'}
 })) {
   test(name + ' timestamp retains the change with an unknown period', () => {
     const html = figure({...change, ...period});
