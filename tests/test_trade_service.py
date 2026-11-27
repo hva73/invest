@@ -16,6 +16,7 @@ class Trading(unittest.TestCase):
   self.request={'report_id':'trade-source','candidate_id':self.report['candidates'][0]['candidate_id'],'portfolio_id':self.root,'kind':'direct','asset_id':'asset-test','size_mode':'shares','size':'2','currency':'DKK','order_type':'LIMIT','time_in_force':'DAY','limit_price':'100.50'}
   self.account_data={'accounts':[{'currency':'DKK','balance':'1000','buyingPower':'900','reservedForOrders':'100'}]};self.calls=[];self.can_trade=True;self.write_result={'orderIntentId':'synthetic-intent'};self.fail_send=False;self.changed=False
   self.intent_status={'orderIntentId':'synthetic-intent','status':'accepted'}
+  self.order_page={'orders':[]}
   case=self
   class Client:
    def __init__(self,token):assert token=='synthetic'
@@ -25,11 +26,12 @@ class Trading(unittest.TestCase):
     if case.changed:next(t for t in tools if t['name']=='propose_orders')['inputSchema']={'type':'object'}
     return tools
    def request(self,method,args):
+    case.assertEqual(method,'tools/call')
     case.calls.append(args);name=args['name']
     if name=='list_portfolios':result=[{'id':'root','name':'Root','canTrade':case.can_trade}]
     elif name=='list_collections':result=[{'id':'child','name':'Child','portfolioId':'root'}]
     elif name=='get_accounts':result=case.account_data
-    elif name=='list_orders':result={'orders':[]}
+    elif name=='list_orders':result=case.order_page
     elif name=='get_asset':result={'assetId':'asset-test','name':'Synthetic asset','currency':'USD'}
     elif name.startswith('estimate_'):result={'estimatedAmount':'201','currency':'DKK','commission':'0','note':'Synthetic estimate only'}
     elif name.startswith('propose_'):
@@ -44,6 +46,205 @@ class Trading(unittest.TestCase):
  def estimate(self,request=None):return trade.estimate(app.connect,1,request or self.request,self.factory)['proposal']
  def send(self,proposal):return trade.send(app.connect,1,{'id':proposal['id'],'review_token':proposal['review_token'],'confirm':True},self.factory)['proposal']
  def writes(self):return [c for c in self.calls if c['name'].startswith('propose_')]
+ def test_inactive_order_readback_preserves_raw_records_and_writes_nothing(self):
+  self.estimate()
+  with app.connect() as db:
+   db.execute("UPDATE portfolios SET name='Renamed',external_id='portfolios:root:stable',can_trade=0 WHERE id=?",(self.root,))
+  scope={'portfolioId':'root:stable','scope':'DIRECT','statusGroup':'INACTIVE','limit':50}
+  matching={'portfolioId':'root:stable','scope':'DIRECT','statusGroup':'INACTIVE','collectionId':None}
+  raw=[{'orderId':'one','status':'CANCELLED','filledQuantity':'0'},
+       {'id':'two','portfolioId':'root:stable','collectionId':None,'collection':{'id':None,'collectionId':None},'status':'FILLED','providerDetail':{'fee':None}},
+       {'orderId':'three','collection':None},
+       {'orderId':'four','type':'ACTIVE_BUY','status':'FILLED'},
+       {'orderId':'five','success':True,'status':'FILLED','holding':{'status':'FILLED'}},
+       {'orderId':'six','id':'six','tradeId':'trade-six','isError':False,
+        'holding':{**matching,'id':'holding-six','orderId':'six','tradeId':'trade-six','success':True},
+        'collection':{**matching,'id':None,'orderId':'six','isError':False}},
+       {'id':'seven','orderStatus':'CANCELED','state':'CANCELLED','filledQuantity':'1','holding':None},
+       {'tradeId':'one','holding':{'type':'ACTIVE_BUY','status':'FILLED'}},
+       {'tradeId':'trade-six','state':'EXECUTED'},
+       {'id':'six','tradeId':'another-trade','holding':{'kind':'ACTIVE_BUY','orderStatus':'COMPLETED'}},
+       {'orderId':'four','state':'FILLED'},
+       {'tradeId':'trade-only'},
+       {'orderId':'historical','holding':{'type':'ACTIVE_BUY','status':'FILLED'}},
+       {'orderId':'sale','holding':{'kind':'ACTIVE_SELL'},'status':'FILLED'},
+       {'orderId':'stop','type':'ACTIVE_STOP','collection':{'state':'CANCELLED'}}]
+  boundary=[{'orderId':str(i)} for i in range(50)]
+  with app.connect() as witness:
+   before=witness.execute('PRAGMA data_version').fetchone()[0]
+   for page,records in (({'orders':raw,'success':True,'nextToken':'more'},raw),([],[]),({'items':boundary},boundary),
+                        ({'data':raw},raw),({'orders':raw,'data':None},raw),({'items':None,'data':{'orders':raw,**matching}},raw),
+                        ({'data':{'orders':raw,**matching}},raw),({'data':{'data':{'items':[]}}},[]),
+                        ({'orderId':'six','data':{'tradeId':'trade-six','orders':[raw[5]]}},[raw[5]])):
+    with self.subTest(page=page):
+     self.order_page=copy.deepcopy(page)
+     self.calls.clear()
+     readback=trade.inactive_order_readback(app.connect,1,self.root,self.factory)
+     self.assertEqual(self.calls,[{'name':'list_orders','arguments':scope}])
+     self.assertEqual(readback,{'records':records,'verified':False,'coverage':{**scope,'complete':False}})
+     self.assertEqual(witness.execute('PRAGMA data_version').fetchone()[0],before)
+ def test_inactive_order_readback_rejects_unowned_and_invalid_portfolios_before_client(self):
+  with app.connect() as db:
+   other=db.execute("INSERT INTO users(username,salt,hash) VALUES('other','test','test')").lastrowid
+   portfolios.replace_pluto(db,other,[{'id':'portfolios:root','name':'Root'}])
+   other_root=db.execute('SELECT id FROM portfolios WHERE user_id=?',(other,)).fetchone()[0]
+  with patch.object(trade,'client') as client:
+   for uid,pid in ((other,self.root),(1,other_root),(1,self.child),(1,'root')):
+    with self.subTest(uid=uid,pid=pid),self.assertRaises(trade.TradeError):
+     trade.inactive_order_readback(app.connect,uid,pid)
+   for source,active,identity in (('local',1,'portfolios:root'),('pluto',0,'portfolios:root'),
+                                  ('pluto',1,None),('pluto',1,'collections:root'),('pluto',1,'portfolios: ')):
+    with app.connect() as db:
+     db.execute('UPDATE portfolios SET source=?,active=?,external_id=? WHERE id=?',(source,active,identity,self.root))
+    with self.subTest(source=source,active=active,identity=identity),self.assertRaises(trade.TradeError):
+     trade.inactive_order_readback(app.connect,1,self.root)
+   client.assert_not_called()
+ def test_inactive_order_readback_rejects_contract_drift_before_tool_call(self):
+  specs=self.factory('synthetic').tools()
+  spec=next(tool for tool in specs if tool['name']=='list_orders')
+  changed_schema=copy.deepcopy(spec['inputSchema'])
+  changed_schema['properties']['limit']['maximum']=51
+  for listing in ([],[{**spec,'inputSchema':changed_schema}],[{**spec,'annotations':{'readOnlyHint':False}}]):
+   with self.subTest(listing=listing),patch.object(self.factory,'tools',return_value=listing),self.assertRaises(trade.TradeError):
+    trade.inactive_order_readback(app.connect,1,self.root,self.factory)
+  self.assertEqual(self.calls,[])
+ def test_inactive_order_readback_rejects_bad_pages_atomically(self):
+  order={'orderId':'one'}
+  invalid=[{},'unavailable',{'orders':None},{'orders':{}},{'unknown':[order]},{'orders':[order],'items':[]},
+           {'orders':[order],'error':'denied'},{'orders':[],'success':False},[order,None],[{}],[{'id':3}],
+           [{'id':'fallback','orderId':None}],[{**order,'isError':True}],[order]*51,
+           {'data':{'orders':[order],'items':[]}}, {'data':{'orders':[order]*51}},
+           {'data':{'data':{'data':{'orders':[order]}}}}, {'data':{'orders':[order],'portfolioId':'other'}},
+           {'orderId':'other','data':{'orders':[order]}},{'tradeId':'a','data':{'tradeId':'b','orders':[]}},
+           {'orders':[{**order,'status':'ACTIVE_BUY'}]},
+           {'orders':[{**order,'status':'ACTIVE_BUY','orderStatus':'FILLED'}]},
+           [{**order,'status':'FILLED'},{'id':'one','state':'CANCELLED'}],
+           [{'tradeId':'t','status':'FILLED'},{'tradeId':'t','state':'CANCELLED'}],
+           [{'tradeId':'t','status':'FILLED'},{**order,'state':'CANCELLED'},{**order,'holding':{'tradeId':'t'}}],
+           [{'orderId':'a','tradeId':'t'},{'orderId':'b','tradeId':'t'}],
+           {'orderId':'one','status':'FILLED','data':{'orders':[{**order,'state':'CANCELLED'}]}},
+           {'status':'FILLED','data':{'holding':{'orderStatus':'REJECTED'},'orders':[]}}]
+  for fields in ({'id':'other'},{'id':{}},{'orderId':' '},{'tradeId':{}},{'tradeId':' '},
+                 {'holding':{'orderId':'other'}},{'collection':{'orderId':'other'}},
+                 {'holding':{'orderId':None}},{'holding':{'id':{}}},{'tradeId':'trade-two','holding':{'tradeId':'other'}},
+                 {'holding':{'tradeId':'trade-two'},'collection':{'tradeId':'other'}},
+                 {'type':'HOLDING','kind':'COLLECTION'},{'kind':{}},
+                 {'status':'FILLED','holding':{'state':'REJECTED'}}):
+   invalid.append({'data':{'orders':[order,{'orderId':'two',**fields}]}})
+  for container in ('holding','collection'):
+   for field,value in (('portfolioId','other'),('scope','COLLECTION'),('statusGroup','ACTIVE'),('collectionId','child'),
+                       ('success',False),('isError',0),('error',{}),('tradeId',{}),
+                       ('kind','COLLECTION'),('type','collection')):
+    nested={container:{field:value}}
+    conflicting={'orderId':'two','portfolioId':'root','scope':'DIRECT','statusGroup':'INACTIVE',**nested}
+    invalid.extend([{'orders':[order],**nested},{'orders':[order,conflicting]}])
+   for status_key in ('status','orderStatus','state'):
+    for active in ('ACTIVE_BUY','PARTIALLY_FILLED','OPEN','SUBMITTED','AWAITING_APPROVAL','PROPOSED','WAITING'):
+     conflicting={'orderId':'two','status':'FILLED',container:{status_key:active}}
+     invalid.append({'orders':[order,conflicting]})
+  for field,value in (('portfolioId','other'),('scope','COLLECTION'),('collectionId','child'),
+                      ('collection',{'id':'child'}),('collection',{'collectionId':'child'}),
+                      ('collection',{'id':None,'collectionId':'child'}),('collection','child'),('statusGroup','ACTIVE'),
+                      ('kind','COLLECTION'),('type','collection'),
+                      ('status','ACTIVE_BUY'),('orderStatus','active_buy'),('state','ACTIVE'),('state','ACTIVE_STOP'),
+                      ('status',None),('status',{}),('status',' '),
+                      ('holding',{'type':'ACTIVE_BUY'}),('holding','invalid'),
+                      ('success','false'),('success',1),('success',None),('isError',0)):
+   conflicting={'orderId':'two','portfolioId':'root','collectionId':None,field:value}
+   invalid.extend([{'orders':[order],field:value},[order,conflicting],{'orders':[order,conflicting]},
+                   {'data':{'orders':[order],field:value}}])
+  for alias in ('orders','items','data'):
+   other='items' if alias=='orders' else 'orders'
+   for malformed in (True,False,'',0):
+    page={alias:malformed,other:[order]}
+    invalid.extend([page,{'data':page}])
+  for marker in ('ACTIVE_BUY','ACTIVE_SELL','ACTIVE_STOP'):
+   for key in ('type','kind'):
+    for context in ({key:marker},{'holding':{key:marker}},{'collection':{key:marker}}):
+     invalid.extend([{'orders':[order,{'orderId':'two',**context}]},{**context,'orders':[order]}])
+  with app.connect() as witness:
+   before=witness.execute('PRAGMA data_version').fetchone()[0]
+   for page in invalid:
+    self.order_page=page
+    with self.subTest(page=page),self.assertRaises(trade.TradeError):
+     trade.inactive_order_readback(app.connect,1,self.root,self.factory)
+   self.assertEqual(witness.execute('PRAGMA data_version').fetchone()[0],before)
+  self.assertEqual([call['name'] for call in self.calls],['list_orders']*len(invalid))
+ def test_inactive_order_readback_rejects_mcp_errors_and_unreadable_content(self):
+  rows={'orders':[{'orderId':'one'}]}
+  json_content={'content':[{'type':'text','text':json.dumps({'data':rows})}]}
+  def blocks(*texts):
+   return [{'type':'text','text':text} for text in texts]
+  for reply in ({'isError':True,'structuredContent':rows},{'isError':0,'structuredContent':rows},
+                {'success':False,'structuredContent':rows},{'success':'false',**json_content},
+                {'error':{},**json_content},{'portfolioId':'other',**json_content},
+                {'content':blocks('invalid JSON')},
+                {'structuredContent':rows,'content':blocks('{"success":false}')},
+                {'structuredContent':rows,'content':blocks('{"data":{"success":','false,"orders":[]}}')},
+                {'structuredContent':rows,'content':blocks('Ordreopslag','{"isError":true}')},
+                {'structuredContent':rows,'content':blocks('{"orders":[{"orderId":"one","holding":{"success":false}}]}')},
+                {'structuredContent':rows,'content':blocks('{"items":[{"orderId":"other"}]}')},
+                {'structuredContent':rows,'content':blocks('{"orders":[]}')},
+                {'structuredContent':rows,'content':blocks('{"orders":[{"id":"one"},{"id":"one"}]}')},
+                {'structuredContent':rows,'content':blocks('Ordreopslag','{"data":{"orders":','[{"id":"other"}]}}')},
+                {'structuredContent':rows,'content':blocks('{"items":[{"id":"one"}]}','{"orders":[{"id":"other"}]}')},
+                {'structuredContent':rows,'content':blocks('{"orders":')},
+                {'structuredContent':rows,'content':[{'type':'text','text':rows}]},
+                {'structuredContent':rows,'content':blocks('{"items":[{"id":"one"}],"orders":true}')}):
+   with self.subTest(reply=reply),patch.object(self.factory,'request',return_value=reply) as request:
+    with self.assertRaises(oauth.SetupRequired):
+     trade.inactive_order_readback(app.connect,1,self.root,self.factory)
+    request.assert_called_once_with('tools/call',{'name':'list_orders','arguments':{
+     'portfolioId':'root','statusGroup':'INACTIVE','scope':'DIRECT','limit':50}})
+  for raw in ('{"orders":[{"id":"one","holding":{"portfolioId":"other","portfolioId":"root"}}]}',
+              '{"isError":true,"isError":false,"orders":[{"id":"one"}]}',
+              '{"orders":[{"id":"other","id":"one"}]}'):
+   for envelope in ({},{'structuredContent':rows}):
+    with self.subTest(raw=raw,envelope=envelope),patch.object(self.factory,'request',return_value={
+      **envelope,'content':blocks(raw[:12],raw[12:])}),self.assertRaises(oauth.SetupRequired):
+     trade.inactive_order_readback(app.connect,1,self.root,self.factory)
+  for reply in ({**json_content,'success':True,'isError':False},{**json_content,'structuredContent':rows},
+                {'structuredContent':rows,'content':blocks('{"data":{"items":[{"id":"one","portfolioId":"root"}]}}')},
+                {'structuredContent':rows,'content':blocks('Ordreopslag','{"items":[','{"id":"one"}]}')},
+                {'structuredContent':rows,'content':blocks('Ordreopslag','{"success":true,"data":null}')}):
+   with self.subTest(reply=reply),patch.object(self.factory,'request',return_value=reply):
+    readback=trade.inactive_order_readback(app.connect,1,self.root,self.factory)
+    self.assertEqual(readback['records'],rows['orders'])
+    self.assertFalse(readback['verified'])
+ def test_inactive_order_copies_agree_on_broker_references_and_history(self):
+  row={'orderId':'one','tradeId':'t','state':'FILLED'}
+  primary=[row,{'orderId':'one'},{'tradeId':'other'}]
+  cases=[
+   (True,[{'tradeId':'other'},{'tradeId':'t','status':'EXECUTED'},{'id':'one','tradeId':'u'}]),
+   (False,[{'tradeId':'other'},{'tradeId':'t','status':'CANCELLED'},{'id':'one'}]),
+   (False,[{'tradeId':'other'},{'id':'one','tradeId':'u'},{'id':'one','tradeId':'v'}]),
+   (False,[{'id':'other'},{'id':'one'},{'tradeId':'t'}]),
+   (False,[{'tradeId':'other'},{'id':'one'},{'id':'other','tradeId':'t'}])]
+  with app.connect() as witness:
+   before=witness.execute('PRAGMA data_version').fetchone()[0]
+   for valid,records in cases:
+    reply={'structuredContent':{'orders':primary},'content':[{'type':'text','text':json.dumps({'data':records})}]}
+    with self.subTest(records=records),patch.object(self.factory,'request',return_value=reply) as request:
+     if valid:
+      result=trade.inactive_order_readback(app.connect,1,self.root,self.factory)
+      self.assertEqual(result['records'],primary)
+      self.assertFalse(result['verified'])
+     else:
+      with self.assertRaises((trade.TradeError,oauth.SetupRequired)):
+       trade.inactive_order_readback(app.connect,1,self.root,self.factory)
+     request.assert_called_once_with('tools/call',{'name':'list_orders','arguments':{
+      'portfolioId':'root','statusGroup':'INACTIVE','scope':'DIRECT','limit':50}})
+   self.assertEqual(witness.execute('PRAGMA data_version').fetchone()[0],before)
+ def test_inactive_order_readback_never_rotates_an_expired_token(self):
+  with app.connect() as db:
+   db.execute('UPDATE oauth_tokens SET expires=0 WHERE user_id=1')
+  with app.connect() as witness,patch.object(oauth,'access_token') as refresh:
+   before=witness.execute('PRAGMA data_version').fetchone()[0]
+   with self.assertRaises(oauth.SetupRequired):
+    trade.inactive_order_readback(app.connect,1,self.root,self.factory)
+   refresh.assert_not_called()
+   self.assertEqual(witness.execute('PRAGMA data_version').fetchone()[0],before)
+  self.assertEqual(self.calls,[])
  def test_buying_power_checked_per_currency_without_guessing(self):
   self.account_data={'accounts':[{'currency':'DKK','buyingPower':'100.127','cash':'500'},{'currency':'EUR','buyingPower':'25','cash':'100'},{'currency':'USD','cash':'200','withdrawalPower':'10'}]}
   request=dict(self.request,report_id='@manual-buy',candidate_id='',size_mode='amount',order_type='MARKET',currency='DKK',size='101')
