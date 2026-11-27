@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-27T19:31:25Z",
+  "updated_at": "2026-11-27T20:36:20Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -362,9 +362,9 @@
           "id": "shadow",
           "title": "Shadow-evaluering og sammenligning",
           "status": "pending",
-          "evidence": "Fuld parallel shadow og afkastaccept udestår. #273:19 afgrænset research-only tri-state replaydiagnostik ready; ingen ny live strategi eller fuld shadowaccept. #412 d25619b5 motor-CI 45946169051 PASS på draft; tri-state replay. Ingen samlet shadowaccept.",
+          "evidence": "Fuld parallel shadow og afkastaccept udestår. #273:19 afgrænset research-only tri-state replaydiagnostik ready; ingen ny live strategi eller fuld shadowaccept. #412 d25619b5 motor-CI 45946169051 PASS på draft; tri-state replay. Ingen samlet shadowaccept. 27/11: #412 exact 526822d7, four hunks apply uniquely to product 7b86cfb8 and both resulting blobs identical to PR; actual Python rule_state/matches independent 2/2 tests, 324 truth-table cases + five numeric controls PASS (old 76/324 mislabeled). CI 45963921645/job 140387961225 pinned 526822d7, actual strategy_lab included, 681 test runs PASS; UI skipped. Review comment 7227664029. Local integration outstanding; no full shadow/strategy/return acceptance.",
           "owner_role": "motor",
-          "updated_at": "2026-11-27T04:15:05Z"
+          "updated_at": "2026-11-27T20:36:20Z"
         },
         {
           "id": "metrics",
@@ -374,7 +374,7 @@
           "owner_role": "data"
         }
       ],
-      "updated_at": "2026-11-27T05:44:53Z"
+      "updated_at": "2026-11-27T20:36:20Z"
     },
     {
       "id": "statistics",
