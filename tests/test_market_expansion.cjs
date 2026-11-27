@@ -90,3 +90,40 @@ async function checkQuoteCallbacks() {
   console.log('PASS: stale quote completions and timers are isolated across A→B→A; current retries and period changes complete');
 }
 checkQuoteCallbacks().catch(error => { console.error(error); process.exitCode = 1; });
+
+async function checkChartTimes() {
+  const render = async (data, period = 'day') => {
+    const f = quoteFixture();
+    Object.assign(f.node, {closest: () => null, querySelector: () => null});
+    f.node.dataset.marketLayout = 'chart';
+    await f.select(period);
+    f.reads[0].resolve({currency: 'DKK', fetched_at: '2026-10-26T00:00:00Z', ...data});
+    await new Promise(resolve => setImmediate(resolve));
+    return f.node.html;
+  };
+  // Copenhagen's autumn clock change repeats 02:30 at two distinct instants.
+  const first = {timestamp: '2026-10-25T02:30:00.123+02:00', epoch: 1792888200.123999, price: 13};
+  const second = {timestamp: '2026-10-25T01:30:00Z', epoch: 1792891800, price: 14};
+  const wrongHour = {...first, epoch: second.epoch + 0.123999, price: 90};
+  const previousMillisecond = {...first, epoch: 1792888200.122999, price: 91};
+  const nextMillisecond = {...first, epoch: 1792888200.124, price: 92};
+  const invalid = [wrongHour, previousMillisecond, nextMillisecond];
+  const midnight = {timestamp: '2026-10-26T00:00:00+01:00', epoch: 1792969200, price: 99};
+  const series = [first, ...invalid, second, midnight];
+  const day = await render({asset_type: 'CRYPTO', fetched_at: midnight.timestamp,
+    chart_domain: {kind: 'calendar_day', start: '2026-10-25T00:00:00+02:00', end: midnight.timestamp,
+      as_of: midnight.timestamp}, series});
+  assert.match(day, /2 observerede punkter/);
+  assert.match(day, /Top 14 DKK/);
+  assert.match(day, /Gns\. købskurs 12 DKK/);
+  assert.match(day, /d="M28\.000,[\d.]+ L37\.200,/);
+  const session = await render({chart_domain: {start: first.timestamp, end: second.timestamp,
+    session_source: 'Pluto', session_source_time: second.timestamp}, series});
+  assert.match(session, /2 observerede punkter/);
+  assert.match(session, /Top 14 DKK/);
+  const empty = await render({series: invalid}, 'week');
+  assert.match(empty, /Ingen kurspunkter leveret/);
+  assert.doesNotMatch(empty, /data-market-plot/);
+  console.log('PASS: chart rejects conflicting times and preserves fractional points, DST bounds and markers');
+}
+checkChartTimes().catch(error => { console.error(error); process.exitCode = 1; });
