@@ -33,6 +33,7 @@ payload.dashboard.accounts[1].parent_external_id='andet';click({sectorScope:'1'}
 testAllocationAmounts();
 testConversionOverflow();
 testEcbConversion();
+testPlutoConversion();
 await testOwnerChanges();
 for(const outcome of ['success','error'])await testHoldingsOwnerChanges(outcome);
 console.log('PASS: collection holdings included in total and parent scope; chart, drilldown and percentages work')})().catch(e=>{console.error(e);process.exit(1)});
@@ -101,6 +102,34 @@ function testEcbConversion(){
  payload.fx_quotes=[{currency:'USD',event_time:now,rate:7}];
  check('USD',{USD:Number.MIN_VALUE,DKK:15},'70,00 kr.');
  check('USD',{USD:2,DKK:15},'75,00 kr.');
+}
+
+function testPlutoConversion(){
+ const now=new Date().toISOString();
+ const stale=new Date(Date.parse(now)-16*60000).toISOString();
+ payload.fx=null;
+ payload.fx_quotes=[];
+ payload.dashboard.snapshot_at=now;
+ payload.dashboard.portfolio_value_history.reported_result={currency:'USD',amount:'1'};
+ const row=(usd,dkk,snapshot_at=now)=>({portfolio_id:1,snapshot_at,
+  original_value:{currency:'USD',amount:usd},
+  raw:{value_in_portfolio_currency:{currency:'DKK',amount:dkk}}});
+ function check(rows,expected){
+  payload.dashboard.positions=rows;
+  const html=ui.render(state);
+  const result=html.match(/RESULTAT OPLYST AF PLUTO<\/small><strong class="[^"]*">([^<]+)<\/strong>/);
+  assert.ok(result);
+  assert.equal(result[1].replace(/\s/g,' '),expected);
+ }
+ const overflow=row(1e-300,1e300),underflow=row(1e300,1e-300);
+ check([overflow],'—');
+ check([underflow],'—');
+ check([row(1,1e308),row(1,1e308)],'—');
+ check([row(1,7,stale)],'—');
+ check([row(1,7)],'7,00 kr.');
+ check([underflow,row(1,7.2),overflow,row(1,100,stale),row(1,7)],'7,10 kr.');
+ check([row(1,7.3),row(1,7),row(1,7.1)],'7,10 kr.');
+ check([row(1,7),row(1,8)],'—');
 }
 
 async function testOwnerChanges(){
