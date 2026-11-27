@@ -2,11 +2,15 @@
 window.DashboardUI=(()=>{
  let api,esc,time,quantity,getState,rows=[],sort='pnl',sortDirection='desc',chartPeriod='day',mobileFilter='all',mobileExpanded=false;
  const text=v=>v===null||v===undefined?'—':esc(v),tone=v=>v===null||v===undefined?'neutral':Number(v)>0?'positive':Number(v)<0?'negative':'neutral';
+ function decimalNumber(v){
+  if(typeof v==='number')return v;
+  if(typeof v!=='string'||!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(v.trim()))return NaN;
+  return Number(v)
+ }
  function amount(v,price=false){
   if(typeof v?.currency!=='string'||!/^[A-Za-z]{3}$/.test(v.currency))return '—';
   const raw=v.amount;
-  if(typeof raw!=='number'&&(typeof raw!=='string'||raw.trim()===''))return '—';
-  const n=Number(raw);
+  const n=decimalNumber(raw);
   if(!Number.isFinite(n))return '—';
   if(n===0&&/[1-9]/.test(raw))return text(raw)+' '+text(v.currency);
   const options={style:'currency',currency:v.currency};
@@ -16,8 +20,7 @@ window.DashboardUI=(()=>{
  const shortStamp=v=>v?new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(v)):'—';
  const reasons={NOT_FETCHED:'Ikke hentet',NOT_PROVIDED:'Ikke leveret af kilden',SOURCE_ERROR:'Datakilden kunne ikke opdateres',INCOMPLETE_SNAPSHOT:'Ufuldstændigt opslag · tidligere beholdninger bevaret',STALE:'Forældede data',sample_identity_mismatch:'Aktividentitet kræver kontrol',DATA_STALE:'Markedsdata er for gamle',PLUTO_QUOTE_TIME_UNKNOWN:'Kilden leverer ikke et faktisk kurstidspunkt',EODHD_FEED_NOT_ENABLED:'EODHD-feed er ikke aktiveret'};
  function percent(v){
-  if(typeof v!=='number'&&(typeof v!=='string'||v.trim()===''))return '—';
-  const n=Number(v);
+  const n=decimalNumber(v);
   if(!Number.isFinite(n))return '—';
   const precision=n!==0&&Math.abs(n)<.005?{maximumSignificantDigits:2}:{minimumFractionDigits:2,maximumFractionDigits:2};
   return (n>0?'+':'')+new Intl.NumberFormat('da-DK',precision).format(n)+' %';
@@ -39,7 +42,12 @@ window.DashboardUI=(()=>{
   const sign=tone(v.percent);
   return `<span class="dash-change ${sign}" title="${title}">${sign==='positive'?'↑':sign==='negative'?'↓':'→'} ${label}</span>`;
  }
- function profit(v,pct){if(!v||v.amount===null)return '<span class="dash-neutral">—</span>';const t=tone(v.amount),label=percent(pct);return `<span class="dash-change ${t}">${Number(v.amount)>0?'+':''}${amount(v)}</span>${pct!==null&&pct!==undefined?`<small class="dash-profit-percent ${label==='—'?'neutral':t}">${label}</small>`:''}`}
+ function profit(v,pct){
+  const formatted=amount(v);
+  if(formatted==='—')return '<span class="dash-neutral">—</span>';
+  const t=tone(v.amount),label=percent(pct);
+  return `<span class="dash-change ${t}">${t==='positive'?'+':''}${formatted}</span>${pct!==null&&pct!==undefined?`<small class="dash-profit-percent ${label==='—'?'neutral':t}">${label}</small>`:''}`
+ }
  function age(r){const f=r.price_freshness,state=f?.state||'unknown',label={fresh:'Aktuel',stale:'Forældet',unknown:'Kurstid ukendt',error:'Kilde fejl',session_close:'Seneste session'}[state]||'Ukendt';return `<span class="dash-age ${state}" title="${time(r.price_time)} · hentet ${time(r.snapshot_at)}">${esc(label)}</span>`}
  function sorted(input){return input.slice().sort((a,b)=>{
   const sign=sortDirection==='asc'?1:-1,missing=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v));
