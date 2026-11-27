@@ -2744,7 +2744,7 @@
     "priority": 3,
     "status": "ready",
     "base_branch": "codex/architecture-reset-20261126",
-    "base_sha": "97c5dedf8f011f44b223897474050e6cd14a7d11",
+    "base_sha": "d9d36ed2400540629142d2e14f36fd7f63cd07dd",
     "dependencies": [],
     "paths": [
       "market_data.py",
