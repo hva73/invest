@@ -3,7 +3,12 @@ window.DashboardUI=(()=>{
  let api,esc,time,quantity,getState,rows=[],sort='pnl',sortDirection='desc',chartPeriod='day',mobileFilter='all',mobileExpanded=false;
  const text=v=>v===null||v===undefined?'—':esc(v),tone=v=>v===null||v===undefined?'neutral':Number(v)>0?'positive':Number(v)<0?'negative':'neutral';
  function amount(v,price=false){if(!v||!v.currency||v.amount===null||v.amount===undefined||!Number.isFinite(Number(v.amount)))return '—';const n=Number(v.amount);if(n===0&&/[1-9]/.test(v.amount))return text(v.amount)+' '+text(v.currency);const options={style:'currency',currency:v.currency||'XXX'};if(n!==0&&Math.abs(n)<.01){options.maximumSignificantDigits=8}else{options.minimumFractionDigits=2;options.maximumFractionDigits=price?4:2}return esc(new Intl.NumberFormat('da-DK',options).format(n))}
- const shortStamp=v=>v?new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(v)):'—';
+ function shortStamp(v){
+  if(!v)return '—';
+  const date=new Date(v);
+  if(!Number.isFinite(date.getTime()))return '—';
+  return new Intl.DateTimeFormat('da-DK',{timeZone:'Europe/Copenhagen',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(date);
+ }
  const reasons={NOT_FETCHED:'Ikke hentet',NOT_PROVIDED:'Ikke leveret af kilden',SOURCE_ERROR:'Datakilden kunne ikke opdateres',INCOMPLETE_SNAPSHOT:'Ufuldstændigt opslag · tidligere beholdninger bevaret',STALE:'Forældede data',sample_identity_mismatch:'Aktividentitet kræver kontrol',DATA_STALE:'Markedsdata er for gamle',PLUTO_QUOTE_TIME_UNKNOWN:'Kilden leverer ikke et faktisk kurstidspunkt',EODHD_FEED_NOT_ENABLED:'EODHD-feed er ikke aktiveret'};
  const percent=v=>v===null||v===undefined?'—':(Number(v)>0?'+':'')+new Intl.NumberFormat('da-DK',Number(v)!==0&&Math.abs(Number(v))<.005?{maximumSignificantDigits:2}:{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(v))+' %';
  function resultShare(result,base,label='af depotværdi'){
