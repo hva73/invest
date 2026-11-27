@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-27T21:42:08Z",
+  "updated_at": "2026-11-27T23:23:51Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -388,9 +388,9 @@
           "id": "provenance",
           "title": "Entry/exit-herkomst",
           "status": "in_progress",
-          "evidence": "#345 ac6360a7 CI 45891305020 faktisk motor PASS, sidste dokumenterede HOLD på a99aee5c (7202568558) om modstridende MCP-kopier, dublet-JSON-nøgler og aktiv ordrestatus; ny head afventer lokal uafhængig accept. #114:20 TESTING; ingen fill- eller liveaccept. 27/11 06:52 CET: #345 ac6360a7 uafhængig HOLD 7203034198 fortsat uafklaret; #408 55781132 motor PASS på draft kun order_state evidence. Faktisk buy/sell attribution udestår. 27/11: uafhængig eksakt SQLite JOIN/DDl på 9ce3c2aa viser manglende broker_proposals.signal_event_id; donor 3cc0c7be indeholder migration og selected-event persistence. Kolonne alene 0 matches, dokumenteret syntetisk link 1, fire negative scope cases PASS; historiske NULL forbliver ukendt. #114 7212413646.",
+          "evidence": "#345 ac6360a7 CI 45891305020 faktisk motor PASS, sidste dokumenterede HOLD på a99aee5c (7202568558) om modstridende MCP-kopier, dublet-JSON-nøgler og aktiv ordrestatus; ny head afventer lokal uafhængig accept. #114:20 TESTING; ingen fill- eller liveaccept. 27/11 06:52 CET: #345 ac6360a7 uafhængig HOLD 7203034198 fortsat uafklaret; #408 55781132 motor PASS på draft kun order_state evidence. Faktisk buy/sell attribution udestår. 27/11: uafhængig eksakt SQLite JOIN/DDl på 9ce3c2aa viser manglende broker_proposals.signal_event_id; donor 3cc0c7be indeholder migration og selected-event persistence. Kolonne alene 0 matches, dokumenteret syntetisk link 1, fire negative scope cases PASS; historiske NULL forbliver ukendt. #114 7212413646.\n28/11 CET: #345 exact ac6360a7 remains HOLD, existing 7203034198 now has concrete tested recovery proposal 7230134155. 8 isolated Python unittest methods PASS, exact source slices hash-matched: 30 unbound page-terminal active-type false acceptances fixed, 6 malformed blocks rejected, 8 duplicate raw JSON/SSE transport cases rejected for INACTIVE list_orders only, clean/ACTIVE and prior scope controls preserved. No broker access. Exact CI 45891305020/job 140154390162 actual 401+89+193 tests incl test_trade_service; does not include proposed repair. Full application/transport tests and local integration still outstanding. No attribution inferred, no verified milestone change.",
           "owner_role": "motor",
-          "updated_at": "2026-11-27T07:22:57Z"
+          "updated_at": "2026-11-27T23:23:51Z"
         },
         {
           "id": "fills",
@@ -409,7 +409,7 @@
           "updated_at": "2026-11-27T18:20:00Z"
         }
       ],
-      "updated_at": "2026-11-27T18:20:00Z"
+      "updated_at": "2026-11-27T23:23:51Z"
     },
     {
       "id": "ui",
