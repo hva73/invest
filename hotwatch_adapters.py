@@ -17,6 +17,8 @@ def local_budget_error(result):
  return failure
 
 _quote_cache={}
+_statistics_gateways={}
+_statistics_gateways_lock=threading.Lock()
 _quiet_intraday_empty={}
 _ws_batch_cache={}
 _ws_batch_lock=threading.Lock()
@@ -54,6 +56,7 @@ def reserve(connect,uid,source,now=None,purpose=None):
   except EngineError as error:raise DataUnavailable(error.code,error.status) from None
  uid=0 if source=='eodhd' else uid
  now=now or utc();window=int(now.timestamp()//60);limit=provider_request_limit(source)
+ if source=='pluto' and purpose=='statistics':source='pluto:statistics'
  with connect() as c:
   c.execute('BEGIN IMMEDIATE');c.execute('DELETE FROM hw_request_budget WHERE window<?',(window-2,))
   row=c.execute('SELECT used FROM hw_request_budget WHERE user_id=? AND source=? AND window=?',(uid,source,window)).fetchone()
@@ -157,16 +160,22 @@ class PlutoAdapter:
    if isinstance(error,oauth.SetupRequired):return unknown_context('BROKER_CONTEXT_SETUP_REQUIRED')
    return unknown_context('BROKER_CONTEXT_UNAVAILABLE')
  def factory(self,token):
-  if self.gateway and self.gateway.token==token:return self.gateway
+  if self.purpose!='statistics' and self.gateway and self.gateway.token==token:return self.gateway
   from mcp_client import MCP
   connect=self.connect;uid=self.uid;purpose=self.purpose
   class ReadOnlyGateway(MCP):
    allowed={'search_assets','get_asset','get_portfolio_value','get_accounts','get_positions','get_collection','list_orders','list_portfolios','list_collections','get_collection_activity','estimate_order'}
-   def __init__(self,token):super().__init__(token);self.catalog=None;self.read_cache={}
+   def __init__(self,token):super().__init__(token);self.catalog=None;self.read_cache={};self.session_lock=threading.RLock();self.broken=False
    def tools(self):
-    if self.catalog is None:self.catalog=super().tools()
-    return self.catalog
+    with self.session_lock:
+     if self.catalog is None:
+      try:self.catalog=super().tools()
+      except Exception:self.broken=True;raise
+     return self.catalog
    def request(self,method,params=None,notification=False):
+    with self.session_lock:
+     return self._request_locked(method,params,notification)
+   def _request_locked(self,method,params=None,notification=False):
     if method=='tools/call':
      name=(params or {}).get('name');metadata=next((t for t in self.catalog or [] if t['name']==name),None)
      if name not in self.allowed or not metadata or metadata.get('annotations',{}).get('readOnlyHint') is not True:raise DataUnavailable('PLUTO_WRITE_OR_UNKNOWN_TOOL_BLOCKED')
@@ -175,11 +184,24 @@ class PlutoAdapter:
     if method=='tools/call' and name in ('list_portfolios','list_collections') and not (params or {}).get('arguments'):
      key=name;cached=self.read_cache.get(key)
      if cached and 0<=utc().timestamp()-cached[0]<300:return copy.deepcopy(cached[1])
-    started=utc().timestamp();reserve(connect,uid,'pluto',purpose=purpose);result=super().request(method,params,notification)
+    started=utc().timestamp();reserve(connect,uid,'pluto',purpose=purpose)
+    try:result=super().request(method,params,notification)
+    except Exception:self.broken=True;raise
+    if isinstance(result,dict) and result.get('isError') is True:self.broken=True
     if key and isinstance(result,dict) and result.get('isError') is not True:self.read_cache[key]=(started,copy.deepcopy(result))
     return result
   if self.gateway is not None:self.order_cache.clear();self.permission_cache.clear()
-  self.gateway=ReadOnlyGateway(token);return self.gateway
+  if purpose=='statistics':
+   key=(connect,uid,hashlib.sha256(token.encode()).digest());now=time.monotonic()
+   with _statistics_gateways_lock:
+    cached=_statistics_gateways.get(key)
+    if cached and 0<=now-cached[0]<60 and not cached[1].broken:self.gateway=cached[1]
+    else:
+     self.gateway=ReadOnlyGateway(token)
+     if len(_statistics_gateways)>=32:_statistics_gateways.clear()
+     _statistics_gateways[key]=(now,self.gateway)
+  else:self.gateway=ReadOnlyGateway(token)
+  return self.gateway
  def permission_key(self,request,currency,portfolios):
   return (request['asset_id'],request['ticker'].casefold(),str(request.get('exchange') or '').casefold(),currency,tuple(sorted((p['id'],p.get('external_id'),p.get('parent_external_id'),p.get('kind')) for p in portfolios)),request.get('risk',{}).get('proposed_quantity') is not None)
  def tradability(self,request,currency,portfolios,diagnostics=None):

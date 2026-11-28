@@ -1,0 +1,13 @@
+'use strict';
+const assert=require('node:assert/strict'),{render}=require('../static/statistics-ui.js');
+const item=(ticker,currency,gross,dkk,origin='unknown')=>({ticker,name:ticker,currency,gross,display_gross_dkk:dkk,gross_percent:'10',quantity:'1',cost_basis:'10',sale_proceeds:'11',buy_price:'10',sell_price:'11',sell_origin:origin});
+const data={portfolios:[{portfolio_id:1,name:'Main',items:[item('USD','USD','3','20.4','signal'),item('LOSS','DKK','-4','-4','own')]},{portfolio_id:2,name:'Collection',items:[item('EUR','EUR','2','14.92')],unresolved_sales:[{ticker:'UNKNOWN',name:'Missing basis',currency:'USD',quantity:'1',sell_price:'4',sale_proceeds:'4'}]}]};
+let html=render(data);
+assert.match(html,/\+31,32 kr\./);assert.match(html,/\+35,32 kr\./);assert.match(html,/−4,00 kr\./);
+assert.match(html,/3 af 4 salg/);assert.match(html,/Alle depoter/);assert.doesNotMatch(html,/Alle valutaer|statistics-currency|Hvem stod bag salgene/);
+for(const group of ['all','wins','losses','signal','own','unknown','unresolved'])assert.match(html,new RegExp('data-statistics-show-group="'+group+'"'));
+assert.match(html,/ESCAPE-signal/);assert.match(html,/Egen beslutning/);assert.match(html,/Ikke afklaret/);
+html=render(data,{portfolio:1});assert.doesNotMatch(html,/data-statistics-detail="2"/);assert.match(html,/\+16,40 kr\./);
+html=render({portfolios:[{items:[item('<script>','USD','20',null)]}]});assert.doesNotMatch(html,/<script>/);assert.match(html,/&lt;script&gt;/);assert.match(html,/0 af 1 salg/);assert.doesNotMatch(html,/\+20,00 kr\./);assert.match(html,/\+20,00 USD/);assert.match(html,/uden fuldt DKK-resultat/);
+html=render({portfolios:[{items:[item('tiny','DKK','0.104','0.104'),item('tiny2','DKK','0.101','0.101')]}]});assert.match(html,/\+0,21 kr\./);
+console.log('PASS: compact DKK sum, source groups, depot isolation, missing FX, escaping and precision');
