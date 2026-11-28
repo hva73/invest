@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-28T03:16:49Z",
+  "updated_at": "2026-11-28T04:13:40Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -417,7 +417,7 @@
       "title": "Samlet mobil/desktop 2.0",
       "status": "in_progress",
       "issue": 54,
-      "evidence": "#339 07c146d8 → 04cee366, UI-CI 45873103144 faktisk PASS og uafhængigt review: manuel søgning isoleret uden at undertrykke nødstop. #344 1c5428f6 UI-CI 45883036051 PASS, review udestår; samlet konto-isolation/browseraccept udestår. #359 integreret med faktisk UI-CI; #356 fortsat under review. Tre nye små, uafhængige scopes køsat i 988a27b6 efter konkrete Node-reproduktioner. Fem nye afgrænsede UI-PR'er #369/#371/#373/#375/#376 integreret til 97c5dedf. Samlet accept udestår. Fem konkrete frontend scopes #54:49–53 tilføjet, CAS 463e151a. Produktgren ec9220f4: #377/#379/#381 integreret, de relevante UI-job gennemført; #378/#380 drafts. Ny reserve #54:54–58 i 85b5ad68, ikke påbegyndt/verificeret.",
+      "evidence": "#339 07c146d8 → 04cee366, UI-CI 45873103144 faktisk PASS og uafhængigt review: manuel søgning isoleret uden at undertrykke nødstop. #344 1c5428f6 UI-CI 45883036051 PASS, review udestår; samlet konto-isolation/browseraccept udestår. #359 integreret med faktisk UI-CI; #356 fortsat under review. Tre nye små, uafhængige scopes køsat i 988a27b6 efter konkrete Node-reproduktioner. Fem nye afgrænsede UI-PR'er #369/#371/#373/#375/#376 integreret til 97c5dedf. Samlet accept udestår. Fem konkrete frontend scopes #54:49–53 tilføjet, CAS 463e151a. Produktgren ec9220f4: #377/#379/#381 integreret, de relevante UI-job gennemført; #378/#380 drafts. Ny reserve #54:54–58 i 85b5ad68, ikke påbegyndt/verificeret. 28/11: parvis afstemning #403/#417 og #393/#418 dokumenteret på #54/7233822783; 322 isolerede assertions PASS, ikke fælles UI-accept.",
       "subgoals": [
         {
           "id": "reuse",
@@ -438,9 +438,9 @@
           "id": "desktop",
           "title": "Desktop 2.0",
           "status": "review",
-          "evidence": "#305/#306 tidligere integreret. #359 6297796a → da3ed7fa, faktisk UI-CI 45902005378 PASS. #54:41/43 køsat for verificeret sektor-/graf-race, ikke produktleverance. Samlet desktopaccept udestår. #366 06910515 → 468587e8 UI 45911349935 og #368 c5a49532 → 696041c7 UI 45912082327 integreret efter lokal review; tidligere #54:41/43 nu leveret. Specifikke Node fixtures lokalt kørt, eksisterende CI ikke dækkende. #369 f177e61b→da51de59 (UI 45917636633), #371 136408ce→7f427e85 (UI 45918071856) integreret efter lokal review; holdings timer og rapportdialog. #54:49–53 ready, ikke udført. #377 24942ade→d01b358f (UI 45921976664), #379 b7e49204→251f77ca (UI 45922557167) integreret. #378/#380 UI faktisk kørt, drafts afventer lokal accept. #383 0d6e8a34→57d37377 (UI 45925009551) og #385 6208a58e→8956f689 (UI 45926223069) integreret efter lokal review 7207639888/7207815795; #384 stadig draft, invalid-date HOLD. Ingen samlet desktopaccept. #391 212a2e94→edc1c467 og #394 cc2d0c3f→e7f80b2f integreret efter lokal uafhængig review 7208715960/7208910483; faktisk UI-CI 45932259990/45933626795. Ingen samlet desktopaccept. #401 98de5e7c→b0e8c3c7 integreret, faktisk UI-CI 45940941070; #402–405 fortsat drafts ved check. Ingen samlet UI-accept. #402 2485015f integreret 9ce3c2aa; UI-CI 45943309250 PASS (motor skipped). 27/11: #417 89729070 exact source/fixture 36/36 assertions PASS and #418 f509149d 8/8 scenarios, 16/16 assertions PASS with isolated JS module shims; comments 7222766614/7222767217, CI 46010923460/46011524492 UI/smoke. Drafts only; native Node/local review/integration pending.",
+          "evidence": "#305/#306 tidligere integreret. #359 6297796a → da3ed7fa, faktisk UI-CI 45902005378 PASS. #54:41/43 køsat for verificeret sektor-/graf-race, ikke produktleverance. Samlet desktopaccept udestår. #366 06910515 → 468587e8 UI 45911349935 og #368 c5a49532 → 696041c7 UI 45912082327 integreret efter lokal review; tidligere #54:41/43 nu leveret. Specifikke Node fixtures lokalt kørt, eksisterende CI ikke dækkende. #369 f177e61b→da51de59 (UI 45917636633), #371 136408ce→7f427e85 (UI 45918071856) integreret efter lokal review; holdings timer og rapportdialog. #54:49–53 ready, ikke udført. #377 24942ade→d01b358f (UI 45921976664), #379 b7e49204→251f77ca (UI 45922557167) integreret. #378/#380 UI faktisk kørt, drafts afventer lokal accept. #383 0d6e8a34→57d37377 (UI 45925009551) og #385 6208a58e→8956f689 (UI 45926223069) integreret efter lokal review 7207639888/7207815795; #384 stadig draft, invalid-date HOLD. Ingen samlet desktopaccept. #391 212a2e94→edc1c467 og #394 cc2d0c3f→e7f80b2f integreret efter lokal uafhængig review 7208715960/7208910483; faktisk UI-CI 45932259990/45933626795. Ingen samlet desktopaccept. #401 98de5e7c→b0e8c3c7 integreret, faktisk UI-CI 45940941070; #402–405 fortsat drafts ved check. Ingen samlet UI-accept. #402 2485015f integreret 9ce3c2aa; UI-CI 45943309250 PASS (motor skipped). 27/11: #417 89729070 exact source/fixture 36/36 assertions PASS and #418 f509149d 8/8 scenarios, 16/16 assertions PASS with isolated JS module shims; comments 7222766614/7222767217, CI 46010923460/46011524492 UI/smoke. Drafts only; native Node/local review/integration pending. 28/11: #403 b7f278c5 + #417 89729070 og #393 104aed3f + #418 f509149d afstemt parvis mod fælles 7b86cfb8 uden ændrings-overlap. Individuelle patches matcher eksakte head-blobs; fire faktiske PR-fixtures 322 assertions PASS på kombineret kilde i isoleret JS med Node-shims (#54/7233822783). CI 46010205334/46010923460/46010252202/46011524492 faktiske UI/smoke PASS, motor skipped. Lokal serialiseret integration, native Node og fælles browseraccept udestår.",
           "owner_role": "desktop",
-          "updated_at": "2026-11-27T05:00:00Z"
+          "updated_at": "2026-11-28T04:13:40Z"
         },
         {
           "id": "test",
@@ -451,7 +451,7 @@
           "updated_at": "2026-11-27T13:18:51.943Z"
         }
       ],
-      "updated_at": "2026-11-27T05:44:53Z"
+      "updated_at": "2026-11-28T04:13:40Z"
     },
     {
       "id": "load",
