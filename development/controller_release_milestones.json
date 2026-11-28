@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "release": "ESCAPE 2.0 · samlet release",
-  "updated_at": "2026-11-28T05:11:00Z",
+  "updated_at": "2026-11-28T05:47:14Z",
   "milestones": [
     {
       "id": "stabilization",
@@ -404,9 +404,9 @@
           "id": "ui",
           "title": "Godkendt statistikvisning",
           "status": "blocked",
-          "evidence": "Samlet 2.0-accept udestår. 27/11 06:52 CET: Fælles Git-tree 9ce3c2aa mangler realized_statistics.py, static/statistics-ui.js, static/statistics.css, statistik-tests, API og navigation. Frozen #232 3cc0c7be indeholder slice. #114 7211033164 præciserer port + eksisterende E2E tests; #408 motor PASS 45943567311 er ikke UI. 27/11: donorens provenance-migration og statistik-gateway reuse mangler også på produktbase. #114 7212413646. UI-port alene utilstrækkelig.\n#114 7225392784: exact common 7b86cfb8 / donor 3cc0c7be. Concrete statistics route/navigation/bundles/refresh/manifest port: 13 in-memory replacements, 20/20 structural checks, 4/4 isolated endpoint cases, 6/6 real disposable SQLite budget scenarios (shared cap starves scan/statistics in both directions; donor bucket restoration fixes). Gateway session cache and combined API budget, full projection and mobile/desktop browser acceptance still outstanding. No product integration or new dispatch.",
+          "evidence": "Samlet 2.0-accept udestår. 27/11 06:52 CET: Fælles Git-tree 9ce3c2aa mangler realized_statistics.py, static/statistics-ui.js, static/statistics.css, statistik-tests, API og navigation. Frozen #232 3cc0c7be indeholder slice. #114 7211033164 præciserer port + eksisterende E2E tests; #408 motor PASS 45943567311 er ikke UI. 27/11: donorens provenance-migration og statistik-gateway reuse mangler også på produktbase. #114 7212413646. UI-port alene utilstrækkelig.\n#114 7225392784: exact common 7b86cfb8 / donor 3cc0c7be. Concrete statistics route/navigation/bundles/refresh/manifest port: 13 in-memory replacements, 20/20 structural checks, 4/4 isolated endpoint cases, 6/6 real disposable SQLite budget scenarios (shared cap starves scan/statistics in both directions; donor bucket restoration fixes). Gateway session cache and combined API budget, full projection and mobile/desktop browser acceptance still outstanding. No product integration or new dispatch.\n28/11: #114 7234883888 exact donor factory 23877cb8, product 7b86cfb8. 10/10 isolated Python tests with synthetic MCP transport: same owner 40 parallel reads, 43 calls incl handshake, peak=1; bounded 32, owner/token/connect/purpose isolation, expiry/broken, read-only and no fill cache. Tested statistics-only fastpath correction. Gateway port evidence now available; actual app integration, global API budget, full projection and mobile/desktop browser acceptance still missing. Status remains blocked, no product merge.",
           "owner_role": "desktop",
-          "updated_at": "2026-11-27T18:20:00Z"
+          "updated_at": "2026-11-28T05:47:14Z"
         }
       ],
       "updated_at": "2026-11-27T23:23:51Z"
