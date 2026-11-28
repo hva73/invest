@@ -45,6 +45,23 @@ jobs:
               f.write(f'ui={str(ui).lower()}\nmotor={str(motor).lower()}\n')
           print('Pinned reviewed head:', head, 'UI:', ui, 'motor:', motor)
           PY
+      - name: Validate test paths before execution
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          root = Path('tests')
+          assert root.is_dir() and not root.is_symlink(), 'Unsafe tests directory'
+          for entry in subprocess.check_output(['git', 'ls-files', '--stage', '-z', '--', 'tests']).split(b'\0'):
+              if not entry:
+                  continue
+              metadata, name = entry.split(b'\t', 1)
+              mode, _, stage = metadata.split()
+              path = Path(name.decode('utf-8'))
+              assert mode in (b'100644', b'100755') and stage == b'0', 'Unsafe tracked test path: '+str(path)
+              assert path.is_file() and not path.is_symlink(), 'Missing or unsafe tracked test: '+str(path)
+              assert all(not parent.is_symlink() for parent in path.parents), 'Unsafe test parent: '+str(path)
+          PY
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.11'
@@ -71,15 +88,6 @@ jobs:
             if test -f "$fixture"; then node "$fixture"; fi
           done
           if test -f tests/test_chart_source_selection.cjs; then node tests/test_chart_source_selection.cjs; fi
-          # Newly added focused Node regressions must run even before their name is in the baseline list.
-          python3 - <<'PY'
-          import os, re, subprocess
-          from pathlib import Path
-          base, head = os.environ['REVIEW_BASE'], os.environ['REVIEW_HEAD']
-          for path in subprocess.check_output(['git','diff','--name-only','-z',base+'...'+head]).decode().split('\0'):
-              if re.fullmatch(r'tests/test_[A-Za-z0-9_]+\.(?:js|cjs)', path) and Path(path).is_file():
-                  subprocess.run(['node',path], check=True)
-          PY
           python -m pip install playwright==1.56.0
           python -m playwright install chromium
           if ! python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); b=p.chromium.launch(); b.close(); p.stop()'; then
@@ -90,14 +98,6 @@ jobs:
           python tests/browser_desktop_experience.py
           python tests/browser_mobile_navigation_app.py
           if test -f tests/browser_mobile_account_isolation.py; then python tests/browser_mobile_account_isolation.py; fi
-          # Execute the additional focused fixtures when a reviewed change touches them.
-          changed="$(git diff --name-only "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}")"
-          for fixture in tests/test_market_open_explanation_ui.cjs tests/test_signal_direction_guard.cjs; do
-            if printf '%s\n' "$changed" | grep -Fxq "$fixture"; then node "$fixture"; fi
-          done
-          for fixture in tests/browser_design_v1.py tests/browser_desktop_trade.py tests/browser_hotwatch_engine.py tests/browser_positions.py; do
-            if printf '%s\n' "$changed" | grep -Fxq "$fixture"; then python "$fixture"; fi
-          done
       - name: Focused changed regression
         env:
           REVIEW_BASE: ${{ github.event.pull_request.base.sha }}
@@ -109,7 +109,7 @@ jobs:
           base, head = os.environ['REVIEW_BASE'], os.environ['REVIEW_HEAD']
           assert all(re.fullmatch(r'[0-9a-f]{40}', value) for value in (base, head))
           assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == head
-          paths = set(subprocess.check_output(['git', 'diff', '--name-only', '-z', base+'...'+head]).decode().split('\0'))
+          paths = set(subprocess.check_output(['git', 'diff', '--no-renames', '--diff-filter=ACMRT', '--name-only', '-z', base+'...'+head]).decode().split('\0'))
           py = re.compile(r'tests/test_[A-Za-z0-9_]+\.py')
           js = re.compile(r'tests/test_[A-Za-z0-9_]+\.(?:js|cjs)')
           browser = re.compile(r'tests/browser_[A-Za-z0-9_]+\.py')
@@ -122,7 +122,9 @@ jobs:
           print('Focused regression paths:', sorted(tests), flush=True)
           for path in sorted(tests):
               candidate = Path(path)
-              assert candidate.is_file() and not candidate.is_symlink() and not candidate.parent.is_symlink(), 'Missing or unsafe changed test: '+path
+              assert candidate.is_file() and not candidate.is_symlink() and all(not parent.is_symlink() for parent in candidate.parents), 'Missing or unsafe changed test: '+path
+          for path in sorted(tests):
+              candidate = Path(path)
               if py.fullmatch(path):
                   cmd = [sys.executable, '-m', 'unittest', 'tests.'+candidate.stem]
               elif js.fullmatch(path):
