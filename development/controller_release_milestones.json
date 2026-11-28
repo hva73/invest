@@ -1,0 +1,555 @@
+{
+  "schema": 1,
+  "release": "ESCAPE 2.0 · samlet release",
+  "updated_at": "2026-11-28T13:13:28.042Z",
+  "milestones": [
+    {
+      "id": "stabilization",
+      "phase": 1,
+      "title": "Stabilisering og grafer",
+      "status": "verified",
+      "issue": 267,
+      "evidence": "PR #281 integreret i udviklingsgrenen 546dec64; samlet CI bestået.",
+      "subgoals": [
+        {
+          "id": "charts",
+          "title": "Godkendte grafer og positionstal",
+          "status": "verified",
+          "evidence": "PR #281 integreret på udviklingsgren.",
+          "owner_role": "mobile"
+        },
+        {
+          "id": "desktop",
+          "title": "Desktop-kontrol",
+          "status": "review",
+          "evidence": "267:3 afsluttet uden kodeændring; samlet browseraccept udestår.",
+          "owner_role": "desktop"
+        },
+        {
+          "id": "release",
+          "title": "Samlet releasekontrol",
+          "status": "pending",
+          "evidence": "Kontrolleres på fælles releasekandidat.",
+          "owner_role": "release"
+        }
+      ]
+    },
+    {
+      "id": "shared_data",
+      "phase": 1,
+      "title": "Fælles datamotor",
+      "status": "in_progress",
+      "issue": 14,
+      "evidence": "#350 70304ce1 → e611ee2a, #351 eb3fb68b → 18937bec, #352 54e392cf → 367601c6 og #354 47fec8e4 → 4530ff6f integreret efter lokal uafhængig review. #350/#351/#354 motor-CI faktisk kørt; #352 kun smoke og isoleret SQLite-evidens. Ingen fuld scheduler- eller hostingaccept. Efterfølgende #355/#357/#360/#361/#362/#363 integreret; seneste fælles produktbase cb7e93de. #14:36 blocked:incomplete, ingen blind genstart. #14:38 nu draft #370, #14:40–41 ready på 97c5dedf. Ingen ændring af parkerede opgaver. Nye uafhængige data scopes #14:42–43, #1:2, #114:33 på ec9220f4; ingen genstart af parkeret. #114:32 faktisk TESTING; #14:41 draft #382.",
+      "subgoals": [
+        {
+          "id": "feeds",
+          "title": "Genbrug af markedsfeeds",
+          "status": "verified",
+          "evidence": "PR #285/#287 integreret. #382 97d51f70 draft: 240/240 isolerede permutationer af faktisk _series helper, evidens 7207543208; CI 45924005879 begge regressionstrin SKIPPED. Ikke integreret/live feed accept. #382 af8efc83→608458bb integreret efter lokal uafhængig review 7207909350; CI 45926868087 smoke-only, separat permutationstest bevaret. #388 c6c7a286 draft, CI 45927397674 smoke-only; samlet sektor/live-feed accept udestår. 28/11: #413 fdc00e16, 3/3 diff hunks uniquely reconcile to actual common 7b86cfb8 with both files byte-identical to donor; independent Python 3/3 tests PASS (25+25 source pairs, 6 ambiguous/legacy sources, 3 controls). Candidate repair for ambiguous other/legacy source values documented 7230412331. Exact CI 45946736754/job 140333036256 actually 403+82+195 unit runs, but focused tests.test_intel_workflows not evidenced. Draft only; common source/native fixture and full feed acceptance still pending.",
+          "owner_role": "data",
+          "updated_at": "2026-11-27T02:49:00Z"
+        },
+        {
+          "id": "features",
+          "title": "Fælles featureberegning",
+          "status": "verified",
+          "evidence": "PR #289/#292 integreret; 1/10/100 simulerede overlap/disjoint; én validering per fælles capture, separate entitlement/parametre, ingen live gate.",
+          "updated_at": "2026-11-25T16:31:00Z",
+          "owner_role": "data"
+        },
+        {
+          "id": "optional",
+          "title": "Uafhængige valgfrie indikatorer",
+          "status": "verified",
+          "evidence": "PR #292: gyldig prishistorik bevares ved stale/ukendte valgfrie quotes; risikogate afviser stadig ukendt spread. 581 tests PASS.",
+          "updated_at": "2026-11-25T16:31:00Z",
+          "owner_role": "data"
+        },
+        {
+          "id": "scheduler",
+          "title": "Fælles scheduler og budget",
+          "status": "in_progress",
+          "evidence": "#350/#351/#352/#354 tidligere integreret. #355 33b4b1de → 8faa4ed9 (smoke 45899349827, isoleret 5/5 owner cases). #357 85099886 → 111e486c, motor 45901184468; #360 780c26cd → 68007963, motor 45903879690; #361 7b1f1c37 → bfaba494, smoke-only 45903366103; #362 02381859 → 5525176c, motor 45904436540; #363 614869da → 62a63d9c, motor 45905061570. Ikke fuld hostingaccept. #14:38 særskilt ready for mættet minut preflight; gamle terminale reservationer bevaret. #370 e2b278be draft, faktisk motor 45919173166/job 140245530162 PASS; koordinator 4/4 isolerede SQLite WAL scenarier, reviewbevis 7207135660. Ikke integreret/hostingaccept.",
+          "owner_role": "data",
+          "updated_at": "2026-11-27T01:16:13Z"
+        },
+        {
+          "id": "live",
+          "title": "Integreret datavej og belastning",
+          "status": "pending",
+          "evidence": "Udestår.",
+          "owner_role": "data"
+        }
+      ],
+      "updated_at": "2026-11-27T02:49:00Z"
+    },
+    {
+      "id": "candidate_rotation",
+      "phase": 1,
+      "title": "Dynamisk HOT WATCH",
+      "status": "in_progress",
+      "issue": 268,
+      "evidence": "PR #290/#291 integreret test-only. #268:4 lokal review_required uden PR; gemt arbejde skal bevares.",
+      "subgoals": [
+        {
+          "id": "expiry",
+          "title": "Udløb af gamle vurderinger",
+          "status": "verified",
+          "evidence": "PR #290 integreret, test-only.",
+          "owner_role": "motor"
+        },
+        {
+          "id": "dormancy",
+          "title": "NO_DATA og automatisk nedprioritering",
+          "status": "verified",
+          "evidence": "PR #291 integreret, test-only.",
+          "owner_role": "motor"
+        },
+        {
+          "id": "pool",
+          "title": "Fælles kandidatpulje og positionsbeskyttelse",
+          "status": "review",
+          "evidence": "#268:4 lokal review_required; PR mangler. 27/11 06:52 CET: Eksakt fælles HEAD 9ce3c2aa: global count af alle åbne sessions inkl. exit/test; isoleret SQLite på eksakt predicate afviser nye entry ved 7+53, 0+60 og 7+100, selv om entrypuljen har plads. #268 kommentar 7211032745. Fælles 60-entry-pulje + 100 private position scopes samt isolation/lease/manual/order/restart er konkret manglende funktionel accept. 27/11: d2d38164 hotwatch_engine.py 1cc412a3, exact branch-condition/write-path SQLite probe: COLD entry and expired exit deadline clear active lease despite pending signal, test-overdue guard prevents retirement. _can_retire_overdue_entry hardcodes test journal scope. #268 7213503963. Uniform protected admission/retirement acceptance outstanding. 27/11: actual 5395e615 holding admission branch + entry_for_holding exact SQLite isolation, 5/5 reproduced: 60 exit-only denies new verified holding even with zero entries; other-tenant idle entry and own leased entry cannot release slot; own idle verified entry does release. #268 comment 7216116646. Separate private position capacity from common entry instrument ceiling; preserve tenant/lease isolation; full create_holding/scheduler/restart acceptance pending. 27/11: frisk queue blob 59936a58: #268:4 (fælles entry/private exit capacity) fortsat blocked; #268:5 ready adresserer retained-exit ID collision, ikke kapacitetsmodellen. Bevar recovery-first og lokal patch; ingen ny generation/dispatch. Fælles SHA 7b86cfb8 ændrer report_ingest, ikke HOT WATCH. 27/11: #411 e4566fd7, 7/7 disposable SQLite tests on exact query/DDL, 100 synthetic owners × 2 modes valid controls unchanged. Corrupt but FK-valid cross-owner/mode candidate links contaminate history/reset/report-only fallback despite scoped endpoint JOIN; precise correction and tests documented #411 7226608407. No evidence of live leak, full app/tenant acceptance still pending. 28/11: #268 comment 7232942586 gives tested read-only shadow capacity accounting on exact current 7b86cfb8 (engine 1cc412a3/service 772d7a29). Actual disposable SQLite schema, 7/7 unittest PASS: 100 users/100 private entry+100 exit sessions→7 distinct entry instruments; overlap/disjoint cap, batch, both, invalid identity/mode, expiry/restart read-only. All create/batch/reopen/holding admission gates still use old total session count; full engine/worker/identity/entitlement/100-user resource acceptance remains pending. No new live rules, no integration or verified status. 28/11: #268 7234521952, concrete tested COLD entry protection on common 7b86cfb8 / engine 1cc412a3 / lifecycle cadec529. 14/14 isolated Python/SQLite tests on actual helper and projection/position proof bodies with synthetic history/snapshots; live holding/open order missed by test-only guard, wrong-mode false blocker, missing ticker KeyError reproduced; corrected scoped identity and mode preserve lease/pending/context, tenant/test isolation. Three exact reversible source replacements for helper/preflight/transaction, not integrated. No changes to explicit deadlines, combined/exit/manual policy or live mandate; full reconcile/worker/100-user pool acceptance still pending.\n28/11: #411/#408 exact e4566fd7/d387ffdd combined on common 7b86cfb8; source/test reconstruction identical regardless order with import normalization, FNV 013e30d6/094a9984. New scoped reset bug: FK-valid foreign-owner/mode old link suppresses legitimate new own candidate. 5/5 isolated Python/SQLite tests PASS; 100 owners × 2 modes, 400 valid result assertions. Corrected six scope predicates + fill-evidence fix; preview FNV b385a3df/b601cd04, #411 comment 7237121581. No live leak claim, no integrated motor/100-user pool acceptance.",
+          "owner_role": "motor",
+          "updated_at": "2026-11-28T09:13:46Z"
+        },
+        {
+          "id": "replace",
+          "title": "Dynamisk kandidatrotation",
+          "status": "pending",
+          "evidence": "Planlagt opfølgning.",
+          "owner_role": "motor"
+        },
+        {
+          "id": "tenants",
+          "title": "Belastningstest med 100 brugere",
+          "status": "pending",
+          "evidence": "Udestår.",
+          "owner_role": "data"
+        },
+        {
+          "id": "integrate",
+          "title": "Integration og funktionstest",
+          "status": "pending",
+          "evidence": "Ingen live aktivering. 27/11 06:52 CET: Explicit deadline retirement og report-only/backoff er test-only (_test_discovery_entry); eksisterende test_hotwatch_engine.py:1729ff giver testbevis, ikke live eller fælles pool-accept. Ingen ny TTL/mandat.",
+          "owner_role": "motor"
+        }
+      ],
+      "updated_at": "2026-11-28T09:13:46Z"
+    },
+    {
+      "id": "resources",
+      "phase": 1,
+      "title": "CPU/RAM, workers og serverdrift",
+      "status": "in_progress",
+      "issue": 14,
+      "evidence": "#342 bed96b65 → 0bcea2b3, CI 45869452962 motor/data og smoke PASS, uafhængigt review: eksisterende work_before_commit_ms eksponeres særskilt fra begin_wait_ms/sqlite_begin_ms; ingen ekstra queries/writes. Tidligere V2 #293/#296 er bevarede kilder; hostingmålinger og integration udestår.\n28/11: #407 b9912119 / #400 b57887c3 combined on 7b86cfb8, exact disjoint patches verified; #407 smoke-only 45964569392. #407 comment 7237544666 native SQLite/Python 2/2 tests: 600 disjoint report decodes, bounded per-request LRU 32 lowers Python allocation peak 38,094,401→4,389,094 B, shared case retains 20 decodes. Preview only, full regression/integration and 100-user hosting measurement outstanding.",
+      "subgoals": [
+        {
+          "id": "backend",
+          "title": "CPU/RAM-måling i backend",
+          "status": "verified",
+          "evidence": "Testet backend integreret #293 613123e0; ikke installeret eller full hosting entitlement.",
+          "updated_at": "2026-11-25T16:31:00Z",
+          "owner_role": "data"
+        },
+        {
+          "id": "display",
+          "title": "Adminvisning og historik",
+          "status": "verified",
+          "evidence": "#296 integreret 171dcc057; præcis CI 45655114007 og fokuseret admin-UI-test i QA #301 run 45662719831 bestået. Faktisk hostingmåling og release udestår.",
+          "updated_at": "2026-11-25T17:18:56.735Z",
+          "owner_role": "desktop"
+        },
+        {
+          "id": "baseline",
+          "title": "Faktisk måling på hosting",
+          "status": "in_progress",
+          "evidence": "#342 integreret 0bcea2b3; faktisk timingprojektion med scoped fixture, ikke live baseline. #14:12 måler SQLite i syntetisk 100-tenant fixture.",
+          "owner_role": "data"
+        },
+        {
+          "id": "scale",
+          "title": "Worker- og køkapacitet",
+          "status": "pending",
+          "evidence": "Udestår. #14:44 syntetisk 100-bruger SQLite reverse report_position_links index proof, 1.000 reports/9.000 links, identiske 100 unlinked; ca. 19.665.300→11.200 VM-instruktioner, 94.208 B indeks, kommentar 7208447565. Implementering køsat, ikke hostingaccept. #398 daab373f, 30.000 porteføljer/100 simulerede ejere, 4/4 owner-resultater identiske, ca. 8115→4214 VM-instruktioner, 385024 B indeks, idempotent migration, 7209647581; 45933909966 smoke-only. Ikke hostingaccept. #14:47–48 ready separat. #406 d794b1d5, faktisk motor-CI 45941078430 PASS; uafhængig SQLite 10.900 rækker/100 ejere, 5/5 identiske, 28.819→1.263 VM-instruktioner (ejer 1), indeks 135.168 B, kommentar 7210259912. Draft; ikke hostingaccept. #407 57143350 smoke-only. #14:49–51 særskilte konkrete scopes køsat i 025c51d5. #410 05e26c81, uafhængig isoleret SQLite 3.46.1: 606/606 identiske resultater ved 100.000 rækker/100 ejere; 9.575→367 VM-instruktioner, 339→5 rækker, indeks +1.265.664 bytes. PR-kommentar 7210940786; CI 45944610617 smoke-only, ikke integreret.\n28/11: #407 b9912119 / #400 b57887c3 combined on 7b86cfb8, exact disjoint patches verified; #407 smoke-only 45964569392. #407 comment 7237544666 native SQLite/Python 2/2 tests: 600 disjoint report decodes, bounded per-request LRU 32 lowers Python allocation peak 38,094,401→4,389,094 B, shared case retains 20 decodes. Preview only, full regression/integration and 100-user hosting measurement outstanding.",
+          "owner_role": "data",
+          "updated_at": "2026-11-27T05:00:00Z"
+        }
+      ],
+      "updated_at": "2026-11-27T05:44:53Z"
+    },
+    {
+      "id": "core",
+      "phase": 2,
+      "title": "Fælles beslutningskerne",
+      "status": "in_progress",
+      "issue": 273,
+      "evidence": "Første simuleringskerne integreret; ikke live handelsmotor.",
+      "subgoals": [
+        {
+          "id": "interface",
+          "title": "Beslutningsinterface og isoleret simulation",
+          "status": "review",
+          "evidence": "Første kerne integreret på v2-gren. 27/11 06:52 CET: Historisk isoleret v2-accept bevaret, men Git-tree 9ce3c2aa mangler trading_engine_v2.py og tests/test_trading_engine_v2.py. Ikke verificeret som del af nuværende fælles produkt; kræver port og fælles regression, ikke ny arkitektur.",
+          "owner_role": "motor"
+        },
+        {
+          "id": "live",
+          "title": "Kobling til samlet motor",
+          "status": "pending",
+          "evidence": "Udestår; denne del er ikke dækket af den godkendte fundamentmilepæl.",
+          "owner_role": "motor"
+        }
+      ]
+    },
+    {
+      "id": "strategies",
+      "phase": 2,
+      "title": "Strategy Center og strategier",
+      "status": "pending",
+      "issue": 273,
+      "evidence": "Swing, Recovery, Long-Term og fælles integration udestår.",
+      "subgoals": [
+        {
+          "id": "modes",
+          "title": "Momentum, Early Catalyst og Swing",
+          "status": "pending",
+          "evidence": "Samlet 2.0-integration udestår.",
+          "owner_role": "motor"
+        },
+        {
+          "id": "recovery",
+          "title": "Recovery og Long-Term",
+          "status": "pending",
+          "evidence": "Udestår.",
+          "owner_role": "motor"
+        },
+        {
+          "id": "crypto",
+          "title": "Krypto og 24/7-markedsstatus",
+          "status": "pending",
+          "evidence": "Samlet 2.0-accept udestår.",
+          "owner_role": "motor"
+        },
+        {
+          "id": "selection",
+          "title": "Valg, versionsstyring og test",
+          "status": "pending",
+          "evidence": "Udestår.",
+          "owner_role": "motor"
+        }
+      ]
+    },
+    {
+      "id": "position",
+      "phase": 2,
+      "title": "Position Watch og strategiskift",
+      "status": "in_progress",
+      "issue": 273,
+      "evidence": "#299 integreret 4f9acf2a og #307 integreret 2e02987c; begge 587 tests PASS på eksakte PR-heads, identiske produkt/testblobs. Simulation exit og readback kræver uafhængigt caller-attesteret journalanker; fuld restart-integration og UI udestår.",
+      "subgoals": [
+        {
+          "id": "switch",
+          "title": "Strategiskift i simulation",
+          "status": "review",
+          "evidence": "PR #286 integreret på v2-gren. 27/11 06:52 CET: Historisk #286 72733de5 testet på v2; de berørte trading_engine_v2.py/tests mangler i fælles Git-tree 9ce3c2aa. Kræver port og integreret accept, uden ændring af brokerstop.",
+          "owner_role": "motor"
+        },
+        {
+          "id": "storage",
+          "title": "Vedvarende positionstilstand",
+          "status": "review",
+          "evidence": "#298 integreret 33416f77; CI 45657292352 og uafhængigt review: SQLite append, reopen, scope og digest; afkortningssikker exitintegration er separat og udestår. 27/11 06:52 CET: Historisk #298 33416f77 testet på v2; de berørte trading_engine_v2.py/tests mangler i fælles Git-tree 9ce3c2aa. Ingen påstand om installeret eller samlet feature.",
+          "owner_role": "data",
+          "updated_at": "2026-11-25T17:43:00Z"
+        },
+        {
+          "id": "ui",
+          "title": "Visning og ændring af strategi",
+          "status": "pending",
+          "evidence": "Udestår.",
+          "owner_role": "mobile"
+        },
+        {
+          "id": "e2e",
+          "title": "Integreret positionsbeskyttelse",
+          "status": "review",
+          "evidence": "#299 3316310c (CI 45692797979), #307 5d950e70 (CI 45693798564): 587 tests hver, integreret. Verificeret scoped exit/readback; uafhængig vedvarende head-attestation og samlet positionsflow udestår. 27/11: on common product 5395e615 the actual holding capacity gate rejects exit-only load at 60 even with empty entry pool; isolated branch proof 5/5 in #268 7216116646. No full protected position admission/scheduler acceptance.",
+          "owner_role": "motor",
+          "updated_at": "2026-11-27T10:38:00Z"
+        }
+      ],
+      "updated_at": "2026-11-25T20:55:00Z"
+    },
+    {
+      "id": "longterm",
+      "phase": 2,
+      "title": "Long-Term Watch",
+      "status": "in_progress",
+      "issue": 12,
+      "evidence": "#310 9b8e605b CI 45720671047 PASS; HOLD 7177527235 på identitet og faktisk adapterbudget. #312 d6ed2519 tilføjer også manglende trading_engine_v2.py: 75/75 unikke manifestfiler i Git-træ, 9/9 isolerede updater-tests PASS dokumenteret 7181987892; CI 45750768317 SKIPPED. To fuld-checkout tests og uafhængig accept udestår; ingen integration. Koordinator har afleveret isoleret råidentitetsparser og eksisterende budget-SQL proof, 21/21 subcases i to unittest-metoder PASS, #310 kommentar 7184790342. Faktisk HTTP/gateway og integration udestår.",
+      "subgoals": [
+        {
+          "id": "watch",
+          "title": "Long-Term Watch-model",
+          "status": "review",
+          "evidence": "PR #308 integreret e4b59436; uafhængigt review af 9da02d3a og motor-CI 45708196119: 590 tests PASS. Kun tenant-isoleret observationsmodel. Historisk v2-accept bevaret; long_term_watch.py ikke fundet på aktuelle produktgren 696041c7, samlet integration udestår. 27/11 06:52 CET: Historisk #308 e4b59436 accepteret isoleret; long_term_watch.py er fortsat fraværende i fælles Git-tree 9ce3c2aa. Kræver port, API/manifest og integreret test.",
+          "owner_role": "motor",
+          "updated_at": "2026-11-25T23:08:54Z"
+        },
+        {
+          "id": "ui",
+          "title": "Brugerflade og genvurdering",
+          "status": "pending",
+          "evidence": "API #310 under reparation; UI afventer accepteret API.",
+          "owner_role": "desktop",
+          "updated_at": "2026-11-25T23:42:42Z"
+        },
+        {
+          "id": "test",
+          "title": "Integreret test",
+          "status": "review",
+          "evidence": "#312 d6ed2519: 9/9 faktiske fixture-tests PASS, inklusive manglende v2-modul; 75/75 filer statisk verificeret. Fuld manifest-importcheck og installeret-only Passenger/Strategy Lab-start udestår. #310 fortsat HOLD. #310: 6 positive og 15 negative råidentitetscases, midlertidig SQLite-budgetjournal korrekt; forslag ikke integreret (7184790342).",
+          "owner_role": "motor",
+          "updated_at": "2026-11-26T06:47:00Z"
+        }
+      ],
+      "updated_at": "2026-11-27T00:24:44Z"
+    },
+    {
+      "id": "replay",
+      "phase": 3,
+      "title": "Historisk replay – grundfunktion",
+      "status": "verified",
+      "issue": 273,
+      "evidence": "PR #283 og #284 integreret på v2-gren; begrænset historisk dækning.",
+      "subgoals": [
+        {
+          "id": "replay",
+          "title": "Historisk replay-grundfunktion",
+          "status": "verified",
+          "evidence": "PR #283/#284 integreret; begrænset dækning.",
+          "owner_role": "data"
+        }
+      ]
+    },
+    {
+      "id": "learning",
+      "phase": 3,
+      "title": "Trading Lab, læring og faktisk dækning",
+      "status": "in_progress",
+      "issue": 273,
+      "evidence": "#297 integreret f7a0861a: fælles historik i faktisk Strategy Lab replay, CI 45655349632; 36→24 featurekald i regression. Faktisk historisk dækning, shadow og afkast udestår.",
+      "subgoals": [
+        {
+          "id": "replay",
+          "title": "Replay-fundament",
+          "status": "verified",
+          "evidence": "#283/#284/#297 integreret; #297 f7a0861a, CI 45655349632, autoriseret causal SQLite replay og 36→24 kald; begrænset historisk dækning. #353 d644830a, CI 45897356401 faktisk motor PASS, replay-gap og bevaret sidste tidsstempel; ny afgrænset draft afventer lokal uafhængig review, ikke integreret.",
+          "owner_role": "data",
+          "updated_at": "2026-11-25T17:43:00Z"
+        },
+        {
+          "id": "coverage",
+          "title": "Faktisk historisk datadækning",
+          "status": "pending",
+          "evidence": "Udestår. 28/11: #353 d644830a and #412 526822d7 overlap two files; independent line-block reconciliation on common 7b86cfb8 in both orders yields identical source (FNV 20a1558a) and both fixtures (FNV a81f57b0). Native isolated Python exact combined loop FNV f6aca067 3/3 tests PASS (9 tri-state cases, chronology gap/recovery and equal time); synthetic feature/calculate/sample stubs, not engine accept. #353 actual CI 45897356401/job 140174453188 pinned HEAD, 403+83+195 unittest runs incl strategy_lab; #412 separate CI 45963921645. Handoff #353 comment 7231066742. Both drafts, full integrated replay/coverage acceptance pending.",
+          "owner_role": "data"
+        },
+        {
+          "id": "shadow",
+          "title": "Shadow-evaluering og sammenligning",
+          "status": "pending",
+          "evidence": "Fuld parallel shadow og afkastaccept udestår. #273:19 afgrænset research-only tri-state replaydiagnostik ready; ingen ny live strategi eller fuld shadowaccept. #412 d25619b5 motor-CI 45946169051 PASS på draft; tri-state replay. Ingen samlet shadowaccept. 27/11: #412 exact 526822d7, four hunks apply uniquely to product 7b86cfb8 and both resulting blobs identical to PR; actual Python rule_state/matches independent 2/2 tests, 324 truth-table cases + five numeric controls PASS (old 76/324 mislabeled). CI 45963921645/job 140387961225 pinned 526822d7, actual strategy_lab included, 681 test runs PASS; UI skipped. Review comment 7227664029. Local integration outstanding; no full shadow/strategy/return acceptance.",
+          "owner_role": "motor",
+          "updated_at": "2026-11-27T20:36:20Z"
+        },
+        {
+          "id": "metrics",
+          "title": "Dokumenterede resultater pr. strategi",
+          "status": "pending",
+          "evidence": "Udestår.",
+          "owner_role": "data"
+        }
+      ],
+      "updated_at": "2026-11-27T20:36:20Z"
+    },
+    {
+      "id": "statistics",
+      "phase": 3,
+      "title": "Hvordan står det til? – herkomst og statistik",
+      "status": "in_progress",
+      "issue": 114,
+      "evidence": "#321 8ea81200, motor-CI 45849602834 PASS, integreret 6c574c65. Matchende Pluto-reference før DB-write. #323 143c914b6, motor-CI 45852442040 PASS for direkte depotidentitet; afventer lokal uafhængig review/merge. Ældre #309 bevaret. #358 integreret 4d273261 (smoke-only 45901556811); #364 6dfd2260 → cb7e93de (smoke-only 45909678518), rækkeautoritative ordre-/kandidat-/cyklusidentiteter. #365 d06bd245 draft, CI smoke-only 45910076364. #374 under HOLD, ingen fuld fillaccept.\n#114 7225392784: exact common 7b86cfb8 / donor 3cc0c7be. Concrete statistics route/navigation/bundles/refresh/manifest port: 13 in-memory replacements, 20/20 structural checks, 4/4 isolated endpoint cases, 6/6 real disposable SQLite budget scenarios (shared cap starves scan/statistics in both directions; donor bucket restoration fixes). Gateway session cache and combined API budget, full projection and mobile/desktop browser acceptance still outstanding. No product integration or new dispatch.\n28/11: #114 7239780848, samlet isoleret reviewgren codex/review-statistics-114-20261128 exact db155d66 (parent 7b86cfb8, 25 files, 1 ahead/0 behind, readback). Port of API/navigation/UI/CSS/manifest, bounded read-only gateway/budget, selected-signal provenance, instrument identity/unresolved cost, and 15 regression fixtures. Four V8 suites with assertion shim, 97 assertions PASS. Native Node/Python/full browser and common SHA #348 CI not run on this artifact; no merge/dispatch. UI blocked on common integration; no verified status change.",
+      "subgoals": [
+        {
+          "id": "provenance",
+          "title": "Entry/exit-herkomst",
+          "status": "in_progress",
+          "evidence": "#345 ac6360a7 CI 45891305020 faktisk motor PASS, sidste dokumenterede HOLD på a99aee5c (7202568558) om modstridende MCP-kopier, dublet-JSON-nøgler og aktiv ordrestatus; ny head afventer lokal uafhængig accept. #114:20 TESTING; ingen fill- eller liveaccept. 27/11 06:52 CET: #345 ac6360a7 uafhængig HOLD 7203034198 fortsat uafklaret; #408 55781132 motor PASS på draft kun order_state evidence. Faktisk buy/sell attribution udestår. 27/11: uafhængig eksakt SQLite JOIN/DDl på 9ce3c2aa viser manglende broker_proposals.signal_event_id; donor 3cc0c7be indeholder migration og selected-event persistence. Kolonne alene 0 matches, dokumenteret syntetisk link 1, fire negative scope cases PASS; historiske NULL forbliver ukendt. #114 7212413646.\n28/11 CET: #345 exact ac6360a7 remains HOLD, existing 7203034198 now has concrete tested recovery proposal 7230134155. 8 isolated Python unittest methods PASS, exact source slices hash-matched: 30 unbound page-terminal active-type false acceptances fixed, 6 malformed blocks rejected, 8 duplicate raw JSON/SSE transport cases rejected for INACTIVE list_orders only, clean/ACTIVE and prior scope controls preserved. No broker access. Exact CI 45891305020/job 140154390162 actual 401+89+193 tests incl test_trade_service; does not include proposed repair. Full application/transport tests and local integration still outstanding. No attribution inferred, no verified milestone change.\n28/11: #114 7236127774, exact common 7b86cfb8 / donor 3cc0c7be. Three-file reversible provenance port (trade_service.py preview 32889788, app.js ae4b2f84, trade-ui.js f0637bf3): explicit selected signal event passes UI→estimate→nullable migrated DB, revalidated after read-only estimate. Native Python/SQLite 11/11 isolated tests PASS, including legacy NULL, BUY/SELL/REDUCE, scope/mode/changed event/duplicate and actual donor origin JOIN with synthetic accepted order references, separate buy own/sell signal. No fill or broker access; UI transport structural only. Full trade-service/route/browser/fill and integration on common SHA pending. #348 27fea5f1 CI 46091945351 exact job 140814641091 still all required steps success, not merged. No verified change.\n28/11: combined exact review artifact db155d66, #114 7239780848, includes previously tested selected-event migration/transport and instrument identity port. Not common SHA, no live/fill acceptance.",
+          "owner_role": "motor",
+          "updated_at": "2026-11-28T13:13:28.042Z"
+        },
+        {
+          "id": "fills",
+          "title": "Fills, kostpris og afstemning",
+          "status": "in_progress",
+          "evidence": "#364 integreret cb7e93de, uafhængig review 7205363307 men kun smoke-CI. #365 d06bd245, isoleret koordinator-test 10/10 SQLite/tidsstempel/identitetsscenarier, kommentar 7205444244. Job 140216037611 sprang motor/UI over. Fuld applikations-/fillaccept udestår. #365 nu integreret 5ccbe98a, lokal review og tidligere 10/10 isoleret bevis; CI 45910900938 smoke-only. #114:30/31 afgrænset ready. Ingen fuld fillaccept. #374 b4081dc5: 28 unit PASS men desktop browser FAIL, manglende ingested_reports efter fixture-reduktion. HOLD og præcis lokal reparationsinstruks 7207134963; ingen ny konkurrerende generation for samme rettelse. #114:31 terminal incomplete bevaret; #114:32 ready separat. #374 ny SHA 4750b63b CI 45929516083/job 140278634912 stadig browser FAIL på samme manglende ingested_reports, eksisterende HOLD bevares. #389 91780654 draft, faktisk UI-CI 45927883467 PASS; uafhængigt reproduceret OverflowError på begge UTC-datetime grænser, HOLD 7208460544; ingen ændring af parkeret #315:9. #389 f0f82112→50b75706 integreret efter lokal review 7208854509 og UI-CI 45933233896; fire lokale cases, eksisterende otte lokale tests begrænset af sandbox. #400 915f4152 draft, CI 45934658402 smoke-only; fuld fillaccept udestår. #114:36 køsat separat. #399 01725949→d0526092 integreret, CI 45940033574 smoke-only; #114:36 faktisk WORKING 7210255627. #400 fortsat draft. Ingen fuld fillaccept. #408 55781132 motor-CI 45943567311 PASS på draft; afventer lokal integration. 27/11: donor #232 realized_statistics.py d0c8fd2b discards explicit instrument IDs before cost-lot grouping (L143,250,287). Independent isolated donor-source projection: 8/8 scenarios yielded USD4, including four explicit conflicting-ID direct/Collection cases which must not be matched. #114 7214328197; preserve canonical identity, unresolved evidence and indicative legacy semantics. Functional acceptance blocked pending port and common SHA regression. 27/11: donor #232 _project isolated 6/6 branch tests: valid sale with missing/insufficient buy retained in direct unresolved_sales, lost entirely in Collection. #114 7215798276. Preserve known sold quantity/proceeds, unknown cost/P&L, no gain or double count. Product port/functional E2E outstanding. 27/11: konkret samlet donor-rettelsesdiff på #114 7217454942, exact d0c8fd2b (13.136 tegn, FNV-1a 61e08c3c). Isoleret Python 5 testmetoder PASS inkl. 22 direct/Collection delcases, separat instrument, verified proposal proof og efterfølgende unsafe Collection-salg. Ingen falsk gevinst ved ID-konflikt, dokumenteret salgsprovenu bevaret uden kostpris. Ikke integreret eller API/browser-accept. 27/11: #408 exact d387ffdd independent isolated Python 12/12 invalid-requested + valid-fill scenarios mask reported execution, 7/7 controls unchanged with narrow proposed repair; 2 unittest methods PASS. Evidence and specific correction #408 comment 7223369679. Do not equate reported positive fill with confirmed completion. Actual CI 45963266159/job 140385832341 ran 403+82+195 tests but omitted required tests.test_intel_workflows; repair and actual full module on common SHA pending. 27/11: #400 exact b57887c3 (base 7b86cfb8), isolated actual Python changes/order_matches 3 tests PASS (18 scope/type, 27 control, 2 repeated checks); corrected 12 cross-portfolio STOP observations, no confirmed brokerfill/P&L claim. Evidence 7228673222; exact CI 46008245051/job 140536784726 actual 195 smoke, motor/UI false, test_position_reports not executed. #374 exact b4431a6b run 46010057118/job 140542975222 again 32 unit PASS then browser FAIL no ingested_reports. Minimal restore of common fixture reconstructed 8/8 structural checks; 7228675973. No integrated acceptance.\n28/11: combined #408/#411 existing patches and prior fill-evidence/tenant repairs, #411 7237121581. Both regression classes preserved, exact source preview b385a3df; no application/fill acceptance on common SHA. Actual tests.test_intel_workflows and unified motor CI remain required.",
+          "owner_role": "data",
+          "updated_at": "2026-11-28T09:13:46Z"
+        },
+        {
+          "id": "ui",
+          "title": "Godkendt statistikvisning",
+          "status": "blocked",
+          "evidence": "Samlet 2.0-accept udestår. 27/11 06:52 CET: Fælles Git-tree 9ce3c2aa mangler realized_statistics.py, static/statistics-ui.js, static/statistics.css, statistik-tests, API og navigation. Frozen #232 3cc0c7be indeholder slice. #114 7211033164 præciserer port + eksisterende E2E tests; #408 motor PASS 45943567311 er ikke UI. 27/11: donorens provenance-migration og statistik-gateway reuse mangler også på produktbase. #114 7212413646. UI-port alene utilstrækkelig.\n#114 7225392784: exact common 7b86cfb8 / donor 3cc0c7be. Concrete statistics route/navigation/bundles/refresh/manifest port: 13 in-memory replacements, 20/20 structural checks, 4/4 isolated endpoint cases, 6/6 real disposable SQLite budget scenarios (shared cap starves scan/statistics in both directions; donor bucket restoration fixes). Gateway session cache and combined API budget, full projection and mobile/desktop browser acceptance still outstanding. No product integration or new dispatch.\n28/11: #114 7234883888 exact donor factory 23877cb8, product 7b86cfb8. 10/10 isolated Python tests with synthetic MCP transport: same owner 40 parallel reads, 43 calls incl handshake, peak=1; bounded 32, owner/token/connect/purpose isolation, expiry/broken, read-only and no fill cache. Tested statistics-only fastpath correction. Gateway port evidence now available; actual app integration, global API budget, full projection and mobile/desktop browser acceptance still missing. Status remains blocked, no product merge.\n28/11: #114 7235475992, exact donor 3cc0c7be / common 7b86cfb8. Native Node reproduced 3 stale legacy UI fixture failures; actual incomplete-history warning omission fixed in isolated donor preview d4301fdb. Four corrected/native Node suites PASS; Chromium component 5 widths PASS with group dialogs, missing cost/FX, filter/retry/focus, 20 ring geometry checks; missing-cost browser 2 widths PASS. Two legacy full-app browser fixture adaptations specified but not run. Approved compact UI retained; full port, API/SQLite/browser and common SHA regression still required. No integrated acceptance.\n28/11: #114 7239780848, samlet isoleret reviewgren codex/review-statistics-114-20261128 exact db155d66 (parent 7b86cfb8, 25 files, 1 ahead/0 behind, readback). Port of API/navigation/UI/CSS/manifest, bounded read-only gateway/budget, selected-signal provenance, instrument identity/unresolved cost, and 15 regression fixtures. Four V8 suites with assertion shim, 97 assertions PASS. Native Node/Python/full browser and common SHA #348 CI not run on this artifact; no merge/dispatch. UI blocked on common integration; no verified status change.",
+          "owner_role": "desktop",
+          "updated_at": "2026-11-28T13:13:28.042Z"
+        }
+      ],
+      "updated_at": "2026-11-28T13:13:28.042Z"
+    },
+    {
+      "id": "ui",
+      "phase": 3,
+      "title": "Samlet mobil/desktop 2.0",
+      "status": "in_progress",
+      "issue": 54,
+      "evidence": "#339 07c146d8 → 04cee366, UI-CI 45873103144 faktisk PASS og uafhængigt review: manuel søgning isoleret uden at undertrykke nødstop. #344 1c5428f6 UI-CI 45883036051 PASS, review udestår; samlet konto-isolation/browseraccept udestår. #359 integreret med faktisk UI-CI; #356 fortsat under review. Tre nye små, uafhængige scopes køsat i 988a27b6 efter konkrete Node-reproduktioner. Fem nye afgrænsede UI-PR'er #369/#371/#373/#375/#376 integreret til 97c5dedf. Samlet accept udestår. Fem konkrete frontend scopes #54:49–53 tilføjet, CAS 463e151a. Produktgren ec9220f4: #377/#379/#381 integreret, de relevante UI-job gennemført; #378/#380 drafts. Ny reserve #54:54–58 i 85b5ad68, ikke påbegyndt/verificeret. 28/11: parvis afstemning #403/#417 og #393/#418 dokumenteret på #54/7233822783; 322 isolerede assertions PASS, ikke fælles UI-accept.",
+      "subgoals": [
+        {
+          "id": "reuse",
+          "title": "Genbrug godkendt layout",
+          "status": "pending",
+          "evidence": "Samlet releasekontrol udestår.",
+          "owner_role": "desktop"
+        },
+        {
+          "id": "mobile",
+          "title": "Mobil 2.0",
+          "status": "in_progress",
+          "evidence": "#339 integreret 04cee366; #344 bevaret under HOLD. #356 f5c66ec6 draft, CI 45903686141 smoke-only; konkret stale cached-choice risiko reproduceret med Node og afgrænset rettelsesforslag 7205458904. #54:37–40 terminal incomplete; tre uafhængige næste opgaver #54:41–43 i verificeret kø 988a27b6. Ingen ny samlet UI-accept. #367 fe3ac78e → d10c447b, UI-job 45911751982 faktisk kørt; lokal uafhængig review 14 Node VM tests. #54:44–48 nye adskilte ready-scopes, ingen genstart af parkerede. #373 f74e9b67→8aa3df37 (UI 45918573847, 7 lokale Node-cases), #375 1cf985fe→d0a6181d (UI 45918957451, 18 VM-cases), #376 31c9553c→97c5dedf (UI 45919302802, 4 VM-cases), alle integreret efter lokal uafhængig review. Push-settings/session, refresh timer og intel stale-error afgrænset; ikke fuld mobilaccept. #381 b286f122→ec9220f4, UI 45923129265 gennemført, rapport pending-focus beskyttet. Specifikke nye fixtures ikke kørt i gammel CI. #386 363e8867→d9d36ed2 (UI 45927287427) integreret efter lokal review 7207970602. #387 b8cbae15 draft; UI 45926990865 PASS, men invalid calendar normalisering reproduceret og afleveret 7208460955. Nye konkrete scopes #54:59–63 køsat, ikke påbegyndt/verificeret. #397 2a27ceee CI 45933247979 fejler før browserassertion ved ekstern apt HTTP 403; præcis handover 7209647974, ingen blind genstart. #54:64–68 ny afgrænset reserve i 41bd063d, ikke bevis for opstart. #402/#404/#405 UI-step gennemført, men konkrete uafhængige Node-reproduktioner: hex/bin/oct accepteres som pris/ratio (#402/#404), endelige kursværdier 1.6e308 og 1.7e308 giver Infinity SVG i #405. Eksisterende reparationsforløb 7210253921/7210254291/7210254663, ingen ny generation for samme fejl. #54:69–73 nye uafhængige scopes. #414 2bbb27bd UI-CI 45946998185 PASS på draft, ikke integreret. #416 28b35a16: uafhængig afvikling af hele faktiske dashboard-script, 6/6 HTML-assertions PASS, 7219308241; CI 45972197334 UI PASS, fokuseret fixture ikke kørt i CI. Draft, ikke integreret. 27/11: #356 exact f5c66ec6 mergeable=false, 7 ahead/30 behind current 7b86cfb8. Independent in-memory reconciliation preserves 8/8 current and 5/5 draft source hunks, exact line matches, 93,626 chars FNV-1a 20e61410; tests unchanged on base side. Evidence 7221251106. Local runtime tests and existing cached-choice HOLD remain; no competing merge. 27/11: #356 reconciled preview FNV 20e61410: actual quote/batch/ABA regression fixture 179 assertions PASS with minimal JS module shims; full original and preview fail same acknowledgement assertion after 1,149 assertions (native Node required). New actual fixture proves stale old asset submitted in both response orders; minimal cache invalidation preview submits new in both. #356 comment 7222765868. Existing HOLD retained; no common product integration.\n28/11: local owner start_all receipt #225/7238392154 again explicitly fails safe reconciliation of #356 f5c66ec6 (mergeable=false), common HEAD 7b86cfb8 unchanged. Native Node 22.16 isolated request/action guard harness with stub quote/form adapter reproduced old cached asset and lost single-click; repaired single explicit promise plus cache invalidation and asset identity check 10/10 scenarios PASS. Concrete repair #356/7238431627, no full DOM or common CI acceptance. Local controller owns preserved reconciliation; no new generation.\n28/11: #225/7238638379 exact raw REST/ref/parents/blob proof: #54:36 queue pin da3ed7fa, #356 f5c66ec6 already rebased remotely onto bfaba494, live branch ref 7b86cfb8. Prior base-only delta tests/test_jobs.py; both scoped blobs preserved c1004a40→f5c66ec6. Local prior rebase journal not read; 15/15 isolated recovery preflight tests PASS with hypothetical matching receipt. Recover existing local transaction only on exact evidence; no remote queue change. #356 UI CI actually ran 26 tests + browser, targeted test_engine_load_epoch.js absent from log; no integrated acceptance.",
+          "owner_role": "mobile",
+          "updated_at": "2026-11-28T11:33:00Z"
+        },
+        {
+          "id": "desktop",
+          "title": "Desktop 2.0",
+          "status": "review",
+          "evidence": "#305/#306 tidligere integreret. #359 6297796a → da3ed7fa, faktisk UI-CI 45902005378 PASS. #54:41/43 køsat for verificeret sektor-/graf-race, ikke produktleverance. Samlet desktopaccept udestår. #366 06910515 → 468587e8 UI 45911349935 og #368 c5a49532 → 696041c7 UI 45912082327 integreret efter lokal review; tidligere #54:41/43 nu leveret. Specifikke Node fixtures lokalt kørt, eksisterende CI ikke dækkende. #369 f177e61b→da51de59 (UI 45917636633), #371 136408ce→7f427e85 (UI 45918071856) integreret efter lokal review; holdings timer og rapportdialog. #54:49–53 ready, ikke udført. #377 24942ade→d01b358f (UI 45921976664), #379 b7e49204→251f77ca (UI 45922557167) integreret. #378/#380 UI faktisk kørt, drafts afventer lokal accept. #383 0d6e8a34→57d37377 (UI 45925009551) og #385 6208a58e→8956f689 (UI 45926223069) integreret efter lokal review 7207639888/7207815795; #384 stadig draft, invalid-date HOLD. Ingen samlet desktopaccept. #391 212a2e94→edc1c467 og #394 cc2d0c3f→e7f80b2f integreret efter lokal uafhængig review 7208715960/7208910483; faktisk UI-CI 45932259990/45933626795. Ingen samlet desktopaccept. #401 98de5e7c→b0e8c3c7 integreret, faktisk UI-CI 45940941070; #402–405 fortsat drafts ved check. Ingen samlet UI-accept. #402 2485015f integreret 9ce3c2aa; UI-CI 45943309250 PASS (motor skipped). 27/11: #417 89729070 exact source/fixture 36/36 assertions PASS and #418 f509149d 8/8 scenarios, 16/16 assertions PASS with isolated JS module shims; comments 7222766614/7222767217, CI 46010923460/46011524492 UI/smoke. Drafts only; native Node/local review/integration pending. 28/11: #403 b7f278c5 + #417 89729070 og #393 104aed3f + #418 f509149d afstemt parvis mod fælles 7b86cfb8 uden ændrings-overlap. Individuelle patches matcher eksakte head-blobs; fire faktiske PR-fixtures 322 assertions PASS på kombineret kilde i isoleret JS med Node-shims (#54/7233822783). CI 46010205334/46010923460/46010252202/46011524492 faktiske UI/smoke PASS, motor skipped. Lokal serialiseret integration, native Node og fælles browseraccept udestår.",
+          "owner_role": "desktop",
+          "updated_at": "2026-11-28T04:13:40Z"
+        },
+        {
+          "id": "test",
+          "title": "Fælles browsertest",
+          "status": "review",
+          "evidence": "#348 dbba5ef1 eksakt CI 45891686618/job 140155642691: faktisk motor+UI, 754 unittest-kørsler og Node/browser PASS. Ikke integreret; test på senere fælles SHA udestår. #348 seneste aee5fc3f CI 45916990064 i gang: tilføjer konkrete sektor/intel/graf Node-fixtures og journal regression; ikke integreret. #348 aee5fc3f CI 45916990064/job 140238546115: faktisk motor+UI+smoke PASS, 760 unittest-kørsler (401+134+6+26+193), Node/browser. Ikke fælles produkt-SHA. #374 CI 45919771097: 28 unit PASS, desktop browser FAIL på manglende ingested_reports efter fixture-ændring; review HOLD 7207134963, genbrug fuld fixture-init. #348 fc936afa8d629b43c1ee88ed341467bc183a582b tilføjer konkrete sektor/report-validation suites og fem accepterede Node-fixtures; isoleret CI 45924303478 i gang. Ikke integreret. #348 fc936afa CI 45924303478 FAIL (manglende jsonschema). Rettet eksisterende CI-draft bfb41ee093f84b472b3f6197a4cacdbf1d214935; præcis 45930284860/job 140281073078 faktisk motor+UI+smoke PASS, 813 unittest-kørsler og Node/browser. Ikke fælles produkt-SHA; samlet regression udestår. #348 exact 6e0da956af1f38e317924de84b63eb09a82fa682 på faktisk produkt-snapshot e7f80b2f; merge-base, én workflow-fil og blob-readback verificeret, 45938741755/job 140307900016 motor faktisk startet; udvidet motor og Node-dækning. Ikke merge eller samlet releaseaccept. #348 exact 6e0da956af1f38e317924de84b63eb09a82fa682, 45938741755/job 140307900016 SUCCESS: checkout log pinned, 403+275+7+30+195=910 unittest-kørsler, Node og tre browserfixtures, faktisk motor/UI/smoke. På e7f80b2f snapshot, ikke nuværende produktgren. Afleveret 7210254978; CI-rettelsen stadig separat. 27/11: #411 exact e4566fd7, job 140387544967 udfører ikke krævet tests.test_intel_workflows; HOLD bekræftet. #348 fortsat separat, fælles HEAD 7b86cfb8. 28/11: #348 exact 27fea5f18913b65e56e69ba0c7cc93e414b2446c, compare 10 ahead/0 behind of actual 7b86cfb8, single workflow file. CI 46091945351/job 140814641091 pinned head, actual path validation, motor/UI/focused/smoke PASS (915 unittest runs; Node/browser); independent 7/7 real Git repo guard/rename/delete selector tests PASS; #348 comment 7231753357. No known CI-only blocker in this review, still separate draft; local integration and regression on resulting common SHA required.",
+          "owner_role": "mobile",
+          "updated_at": "2026-11-27T13:18:51.943Z"
+        }
+      ],
+      "updated_at": "2026-11-28T04:13:40Z"
+    },
+    {
+      "id": "load",
+      "phase": 4,
+      "title": "100 brugere og skaleringsmåling",
+      "status": "in_progress",
+      "issue": 14,
+      "evidence": "#319 optimering og #315:3–8 snapshotrobusthed integreret, senest #341 8be653c0 → 865be921, CI 45867598958 PASS og uafhængigt review. #342/#343 konkrete SQLite-måle- og lockrettelser integreret. 100-bruger hostingaccept udestår. #372 særskilt isoleret indekstest; hostingmåling fortsat udestår.",
+      "subgoals": [
+        {
+          "id": "adapter",
+          "title": "Genbrug af samme instrument",
+          "status": "verified",
+          "evidence": "Adaptertest med 1/10/100 syntetiske abonnenter bestået.",
+          "owner_role": "data"
+        },
+        {
+          "id": "queue",
+          "title": "100 brugere og fair køer",
+          "status": "review",
+          "evidence": "#352 integreret 367601c6, lokal uafhængig review 7203651050 og tidligere 24/24 SQL-case proof; CI 45897328590 kun smoke. #355 exact 33b4b1de: 5/5 owner-resultater identiske, 100000 jobs/100 syntetiske lejere, 6190→253 og absent 300009→12 SQLite-instruktioner; indekset 1.347.584 bytes, smoke 45899349827, kommentar 7203952506. Faktisk hosting/migrationspeak udestår. #355 nu integreret 8faa4ed9; #14:36 terminal incomplete (7205245419), afhængige generationer tælles ikke som klar reserve. 100-bruger hostingmåling fortsat uafklaret. Koordinator SQLite schema-equivalent 100.000 rapporter/100 ejere: 12.555→153 VM-instruktioner med owner/id-indeks; identiske resultater. #14:39 ready til produktkode/regression; ikke hostingbevis. #372 7cbb4b25 draft, CI 45917664523 smoke-only; 4/4 schema-equivalent SQLite scenarier, 100000 rapporter/100 ejere, 12555→153 VM-instruktioner (ejer1), indeksvækst 1347584 bytes, evidens 7207135260. Ikke faktisk hosting/peak eller integreret accept. 27/11: queue blob 59936a58, 182 rows (102 done/6 blocked/74 ready); sidste produktcommit 7b86cfb8 11:10Z, owner start_all 7216913851 11:18Z uden processed-kvittering. Lokal årsag ikke verificeret; kun read-only statusbehov. Ingen kømutation. 27/11: earlier stall superseded in part by actual #54:72/73 publications #417/#418 and local processed acknowledgement 7220236248 (start_all, #356 cannot be safely reconciled). Queue blob 3d0effd9, 182 rows, 102 done/6 blocked/74 ready; product HEAD remains 7b86cfb8. No claim of full recovery or integration.",
+          "owner_role": "data",
+          "updated_at": "2026-11-27T13:18:51.943Z"
+        },
+        {
+          "id": "resources",
+          "title": "CPU/RAM/API/DB/disk",
+          "status": "pending",
+          "evidence": "Faktiske målinger udestår.",
+          "owner_role": "data"
+        },
+        {
+          "id": "model",
+          "title": "1.000/10.000 kapacitetsmodel",
+          "status": "pending",
+          "evidence": "Arkitekturhorisont, ikke separat livekrav.",
+          "owner_role": "data"
+        }
+      ],
+      "updated_at": "2026-11-27T01:16:13Z"
+    },
+    {
+      "id": "release",
+      "phase": 4,
+      "title": "Samlet releasekandidat, backup og migration",
+      "status": "in_progress",
+      "issue": 57,
+      "evidence": "Produktgren cb7e93deb46cd236fb30d4902a5964d2a68314f2. #355/#357/#358/#359/#360/#361/#362/#363/#364 integreret efter seneste status; #355/#358/#361/#364 smoke-only. #348 dbba5ef1 faktisk motor+UI PASS 45891686618 (754 unittest-kørsler), stadig separat og ikke integreret. #232 frozen 3cc0c7be fortsat draft. Projects-inventory 45910583448/job 140217698622 SUCCESS, samme modstridende Backlog for #225/#267/#268/#273/#315; ingen blind gentagelse. Samlet releaseaccept udestår. Produktgren 97c5dedf; 10 nye konkrete A/B scopes, CAS 463e151a med verificeret readback, 145 rækker. Projects inventory 45921483721/job 140252994924 SUCCESS; samme modstridende Backlog for #225/#267/#268/#273/#315, ingen blind gentagelse af writes. Ingen release-GO. 27/11: reserve CAS 85b5ad687a8f5fbc986d7bcf4e7c8e1c1b319d3b, immutable/fresh readback, 154 rækker/297223 tegn; historiske rows bevaret i denne ændring. Projects-inventory 45924428725/job 140262359412 SUCCESS, samme kendte Backlog-afvigelser, ingen gentagne writes. Ingen release-GO. 27/11: reserve CAS bb0ff4b5d7de5b3baf3b0ef413ce74e5e0723799, 164 rækker/311981 tegn, fem nye A og fem B scopes; historiske rows bevaret og immutable/fresh readback verificeret. Projects-inventory 45930492229/job 140281734341 SUCCESS, samme kendte Backlog-afvigelser, ingen blind retry. Ingen ejer-GO. 27/11: #348 6e0da956 PASS 45938741755 på e7f80b2f snapshot, ikke aktuel produktbase. Aktuel b0e8c3c7, kø 025c51d5, 182 rækker. Projects-inventory 45943092376/job 140321595542 SUCCESS; samme kendte Backlog-afvigelser #225/#267/#268/#273/#315; ingen usikre gentagelser. Ingen ejer-GO. 27/11: Projects-inventory 45958053793/job 140369040197 SUCCESS, kendte modstridende Backlog #225/#267/#268/#273/#315 uændret; ingen blind write. Kø 09bacecb 182 rækker genlæst, ingen mutation. 27/11: Projects inventory 45983729171/job 140453866106 SUCCESS; previously conflicting Backlog #225/#267/#268/#273/#315 unchanged; no blind retry. Queue blob 0532c09c, 182 rows read only. No queue mutation, competing merge, production or GO. 27/11: Projects inventory 46019079722/job 140573699596 SUCCESS; same known Backlog discrepancies, no blind writes. Queue read-only 3d0effd9, no dispatch, competing merge, production or GO. 27/11: Projects inventory 46034409476/job 140626059912 SUCCESS; same known conflicting Backlog #225/#267/#268/#273/#315; no blind retries. Queue blob 3d0effd9 read only, no mutation or competing merge. 27/11: Projects inventory 46048485725/job 140673600138 SUCCESS; same known conflicting Backlog #225/#267/#268/#273/#315; no blind writes. Queue blob 3d0effd9 read only. #348 2c576b88 still separate from 7b86cfb8; #412 526822d7 actual CI 45963921645 (403+83+195 unittest runs incl strategy_lab), isolated PR only. No queue mutation, competing merge, production or GO. 27/11: Projects inventory 46050035132/job 140678774530 SUCCESS, same known contradictory Backlog #225/#267/#268/#273/#315; no blind retry. Queue 3d0effd9 read only. No competing merge, production or GO. 27/11: Projects inventory 46057279591/job 140702717319 SUCCESS, same known conflicting Backlog #225/#267/#268/#273/#315; no blind writes. Product HEAD 7b86cfb8 and #348 preview 2c576b88 unchanged; queue blob 3d0effd9 read only. No competing merge, production or GO. 28/11: Projects inventory 46084368344/job 140790366096 SUCCESS; known Backlog discrepancies #225/#267/#268/#273/#315 persist, no uncertain repeat writes. Product HEAD 7b86cfb8, queue blob 3d0effd9 read only; #348 2c576b88 still separate, #232 frozen 3cc0c7be, #208 abc5f281. No queue mutation, competing merge, production or GO. 28/11: Projects inventory 46088806833/job 140804597330 SUCCESS; #225/#267/#268/#273/#315 known Backlog discrepancies persist, no uncertain repeat writes. Common HEAD 7b86cfb8, queue 3d0effd9 unchanged read only; #348 2c576b88 separate. No merge, queue mutation or release GO. 28/11: Projects inventory 46093660738/job 140820052204 SUCCESS; same known Backlog discrepancies #225/#267/#268/#273/#315, no blind writes. Common HEAD 7b86cfb8, queue 3d0effd9 read-only; #348 new preview 27fea5f1 PASS, not integrated. No competing merge, queue mutation or release GO. 28/11: Projects inventory 46105142688/job 140856095746 SUCCESS; same known Backlog discrepancies, no blind writes. Common HEAD 7b86cfb8 unchanged. Local CI pin incompatibility #225/7233888490 blocks #348 integration if delivered controller source unchanged; owner-run scoped repair prepared, not installed. Queue 3d0effd9 read-only, no merge or GO.\n28/11: Projects inventory 46117676936/job 140895037585 SUCCESS, same previously documented Backlog discrepancies; no repeated writes. Common HEAD 7b86cfb8, queue blob 3d0effd9 read only; #348 27fea5f1 remains separate. No competing merge or GO.\n28/11: Projects inventory 46129467746/job 140931244568 SUCCESS, unchanged known Backlog discrepancies #225/#267/#268/#273/#315; no blind writes. Common HEAD 7b86cfb8, queue blob 3d0effd9 read only; #348 27fea5f1 still draft, exact 46091945351 SUCCESS, #232 3cc0c7be and #208 abc5f281 unchanged. No queue mutation, competing merge or GO.\n28/11: Projects inventory 46132558199/job 140940712145 SUCCESS; known Backlog discrepancies #225/#267/#268/#273/#315 persist, no blind writes. Common HEAD 7b86cfb8, queue 3d0effd9 read only. #348 27fea5f1 remains separate; no competing merge or GO.\n28/11: Projects inventory 46139045073/job 140960690943 SUCCESS; known inconsistent Backlog #225/#267/#268/#273/#315 persist, no uncertain repeat writes. Latest local start_all receipt #225/7238392154 blocked at #356; #348 exact 27fea5f1 still separate from 7b86cfb8, CI 46091945351 PASS. Queue 3d0effd9 read only. No competing merge, production or GO.\n28/11: Projects inventory 46140336997/job 140964633962 SUCCESS; known inconsistent Backlog persists, no blind writes. Common HEAD 7b86cfb8 and queue blob 3d0effd9 unchanged; #348 exact 27fea5f1 still separate. New transaction evidence #225/7238638379, no competing merge/production/GO.",
+      "subgoals": [
+        {
+          "id": "integrate",
+          "title": "Samlet releasegren",
+          "status": "in_progress",
+          "evidence": "Produktgren cb7e93de: #355→8faa4ed9, #357→111e486c, #358→4d273261, #359→da3ed7fa, #360→68007963, #361→bfaba494, #362→5525176c, #363→62a63d9c, #364→cb7e93de. #356/#365 draft. #348 separat CI-rettelse dbba5ef1; ingen konkurrerende merge. Aktuel produktgren 696041c7: #365→5ccbe98a, #366→468587e8, #367→d10c447b, #368→696041c7 integreret. #348 aee5fc3f separat draft. #356 fortsat åben. Aktuel produktgren 97c5dedf8f011f44b223897474050e6cd14a7d11. #369→da51de59, #371→7f427e85, #373→8aa3df37, #375→d0a6181d, #376→97c5dedf. #370/#372/#374 drafts. #208 nu abc5f281, #232 frozen 3cc0c7be. #348 stadig ikke integreret. Produktgren ec9220f4ff531f1964574cc16efbf02a8fcdf85d, #377→d01b358f, #379→251f77ca, #381→ec9220f4. #378/#380/#382 fortsat drafts. #348 fc936afa separat; #208 abc5f281, #232 frozen 3cc0c7be. Ikke samlet release. Verificerede nye merges #383→57d37377, #385→8956f689, #382→608458bb, #386→d9d36ed2. #374/#384/#387–390 åbne ved review. #208 abc5f281, #232 frozen 3cc0c7be. #348 stadig separat. Sidst genlæste produkt-HEAD d9d36ed2400540629142d2e14f36fd7f63cd07dd. Ingen samlet releaseaccept. Sidst verificerede produktbase e7f80b2fc235545cfe3ec1799711d758bb0467db, #391→edc1c467, #389→50b75706, #394→e7f80b2f. Separat integreret CI-preview #348, ikke produktmerge. Kø 41bd063d verificeret, 174 generationer; fem nye uafhængige scopes pr. A/B; gamle rækker og parkerede receipts bevaret. Produktgren b0e8c3c7bbec2cacfeab2e47abe4a6e054a0a2de, #399→d0526092 og #401→b0e8c3c7 integreret. #399 smoke-only, #401 UI faktisk kørt. #208 abc5f281, #232 frozen 3cc0c7be. #348 separat. Kø CAS 025c51d578b0cd398424d5c99a4533da9c9547e4, 182 rækker/339605 tegn, tre nye A og fem B scopes; immutable/fresh readback, historik bevaret. Faktisk opstart endnu ikke verificeret. 27/11 06:44: produkt-HEAD 9ce3c2aab33edbf4bb35ab8d2bc925f3b8f8683d; #402 integreret. #208 abc5f281 og #232 3cc0c7be fortsat åbne. Recovery-first: lokal controller eneste køskriver; 182 rækker læst, ingen køændring eller dispatch. #226 b0dbe82f offline-CI 45946775692 PASS; installation ikke verificeret. 27/11 06:52 CET: Fælles 9ce3c2aa diverged fra frozen #232 3cc0c7be, merge-base 2f2650df (102 ahead/509 behind). Aktuel 420-entry Git-tree er komplet og mangler statistik, Polymarket, trading_engine_v2 og long_term_watch. #57 7211033590. Ingen separat release, ingen køændring; lokal controller alene merge/recovery. 27/11: actual product HEAD d2d381649b00d38f5122228ffd0ae40e5882f25e, compare from 9ce3c2aa exactly one commit changing candidate_lifecycle.py and its tests only; no functional slice restored. #348 6e0da956 remains open. 27/11: exact product HEAD 5395e61532e4a5694e654cd68849501bec5c6ac2, #414 0d2a44ab merged; changes static/engine-ui.js and tests/test_engine_rising_observation.cjs only. No restored vertical slice. #348 6e0da956 still open; #232 3cc0c7be and #208 abc5f281 unchanged. 27/11: fælles HEAD 7b86cfb8c545ca7846698ca6b71f93a616e89402, #409 19ca0722 integreret, kun report_ingest.py/test; lokal review 7216758823 (6 fokuserede tests og 60 færre queries/decodes). #348 6e0da956 fortsat åben, #208 abc5f281, #232 3cc0c7be. Ingen vertikal accept. 27/11: #208 exact abc5f281 and frozen #232 donor; all five MCP/test patch hunks apply uniquely to product 7b86cfb8 and reverse byte-for-byte; resulting both files identical to #208 donor, 73→77 unique installer paths for Polymarket alone. 5/5 isolated Python RPC/throttle tests PASS, evidence #208 7225564283. Five missing paths still need actual port. No full OAuth/browser/runtime/installer acceptance.\n28/11: #225/7238638379 exact raw REST/ref/parents/blob proof: #54:36 queue pin da3ed7fa, #356 f5c66ec6 already rebased remotely onto bfaba494, live branch ref 7b86cfb8. Prior base-only delta tests/test_jobs.py; both scoped blobs preserved c1004a40→f5c66ec6. Local prior rebase journal not read; 15/15 isolated recovery preflight tests PASS with hypothetical matching receipt. Recover existing local transaction only on exact evidence; no remote queue change. #356 UI CI actually ran 26 tests + browser, targeted test_engine_load_epoch.js absent from log; no integrated acceptance.",
+          "owner_role": "release",
+          "updated_at": "2026-11-28T11:33:00Z"
+        },
+        {
+          "id": "preflight",
+          "title": "20 GB, migration og backup",
+          "status": "pending",
+          "evidence": "Verificeres på eksakt release-SHA.",
+          "owner_role": "release"
+        },
+        {
+          "id": "ci",
+          "title": "Samlet regression og rollback",
+          "status": "blocked",
+          "evidence": "#348 dbba5ef1 CI 45891686618/job 140155642691 faktisk motor+UI PASS (754 unittest-kørsler, Node og browser). #358/#361/#364/#365/#356 nyere runs sprang motor/UI over. #357/#360/#362/#363 motor og #359 UI faktisk kørt. Ingen samlet regression/migration/rollback på cb7e93de, CI-rettelse endnu ikke integreret. #365 CI 45910900938 smoke-only, #366–368 faktisk UI-step kørt (45911349935/45911751982/45912082327); specifikke nye Node-tests lokalt, ikke CI. #348 aee5fc3f run 45916990064 i gang, ingen samlet SHA accept. #348 aee5fc3f isoleret 45916990064 faktisk motor/UI/smoke PASS, 760 unittest-kørsler samt Node/browser. #369/#371/#373/#375/#376 UI faktisk kørt. #370 motor faktisk kørt, #372 smoke-only, #374 browser FAIL. Ingen samlet regression, migration, backup eller hostingaccept på 97c5dedf. #382 45924005879 smoke-only; #348 fc936afa reparerer konkret scope/testhul, CI 45924303478 i gang. #377/#379/#381 faktisk UI, ikke fuld samlet regression. #348 fc936afa CI 45924303478 FAIL (manglende jsonschema). Rettet eksisterende CI-draft bfb41ee093f84b472b3f6197a4cacdbf1d214935; præcis 45930284860/job 140281073078 faktisk motor+UI+smoke PASS, 813 unittest-kørsler og Node/browser. Ikke fælles produkt-SHA; samlet regression udestår. #348 exact 6e0da956af1f38e317924de84b63eb09a82fa682 på faktisk produkt-snapshot e7f80b2f; merge-base, én workflow-fil og blob-readback verificeret, 45938741755/job 140307900016 motor faktisk startet; udvidet motor og Node-dækning. Ikke merge eller samlet releaseaccept. #398/#399/#400 tidligere smoke-only (45933909966/45934113658/45934658402). #348 6e0da956 run 45938741755 faktisk motor/UI/smoke PASS på e7f80b2f snapshot, 910 unittest-kørsler plus Node og tre browserfixtures. Ikke nuværende b0e8c3c7, ingen migration/backup/hostingaccept. #407 smoke-only, #406 motor faktisk kørt; #402–405 UI faktisk kørt med tre konkrete reviewfund. Ingen release-GO. #409/410 smoke-only (45943980637/45944610617); #411/412/413 motorregression PASS (45945462995/45946169051/45946736754); #414 UI PASS. Alle drafts. #348 stadig separat CI-rettelse; samlet regression på nyeste produkt-SHA udestår. 27/11 06:52 CET: #348 6e0da956 fortsat åben separat; faktisk motor+UI CI 45938741755 på e7f80b2f, ikke 9ce3c2aa. #374 d7bb3a4c run 45932853799/job 140289223297 fortsat browser FAIL: no such table ingested_reports, 28 unit PASS. Ingen samlet regression. 27/11: #348 6e0da956 job 140307900016 genlæst SUCCESS; ny konkret coverage-mangel: realized_statistics.py/tests ikke klassificeret eller eksekveret, statistik-browserfixtures ikke kørt. #348 7212414212. Ingen fælles SHA-accept. #408 d387ffdd run 45963266159/job 140385832341 and #412 526822d7 run 45963921645/job 140387961225 motor steps actually PASS; #415 9292b86c run 45964033978/job 140388332879 UI step PASS; all drafts, no full product acceptance. #414 actual UI PASS 45971656844/job 140413285280; #416 28b35a16 UI PASS 45972197334/job 140415063628 draft; #409 19ca0722 run 45980147350/job 140441686088 smoke-only (both main steps skipped). #348 separate older snapshot e7f80b2f, no common SHA acceptance. 27/11: #409 19ca0722 job 140441686088 (45980147350) pinned head, UI=False motor=False, 195 smoke only. #416 28b35a16 job 140415063628 (45972197334) step summary says UI skipped but decoded log actually shows UI=True, 30 UI and 195 smoke tests; use actual log evidence, not summary alone. #412 526822d7 job 140387961225 motor PASS, still open. No common SHA regression. 27/11: #409 exact 19ca0722 run 45988220395/job 140469150277, checkout pinned og log UI=False motor=False, 195 smoke PASS. Lokal fokuseret review separat. #348 stadig ikke fælles SHA. Projects-inventory 45992858152/job 140484827108 SUCCESS, uændret modstridende Backlog #225/#267/#268/#273/#315; ingen usikre gentagelser. 27/11: #348 exact 2c576b881c442ad875ade67421dc15724a182479, merge-base NU produkt-HEAD 7b86cfb8c545ca7846698ca6b71f93a616e89402 (9 ahead/0 behind), diff én workflow-fil. Run 46006477613/job 140530792976 faktisk motor/UI/focused/smoke PASS, 915 unittest-kørsler; focused [] forventet ved workflow-only diff. Statistik-scope og obligatoriske fixtures nu dækket af workflow ved statistikmodulændring; produktfunktionen selv mangler. Reviewbevis #348 kommentar 7219564685. Lokal integration, fælles ny SHA, migration/rollback/hostingaccept udestår. Ingen køændring eller GO. 27/11: #417 89729070 run 46010923460/job 140545907076 and #418 f509149d run 46011524492/job 140547963130 pinned logs UI=True/motor=False; 30 UI+195 smoke tests PASS each. Specific newly added Node fixtures not shown executed in old CI; both draft. #348 2c576b88 still separate. 27/11: #408 actual log 45963266159/job 140385832341 confirms 403+82+195 tests PASS, but tests.test_intel_workflows omitted; independent fill-evidence HOLD 7223369679. #348 2c576b88 remains separate, product 7b86cfb8. No integrated acceptance. 27/11: #400 exact b57887c3 CI 46008245051/job 140536784726 pinned log motor/UI false, 195 smoke only; #374 b4431a6b exact CI 46010057118/job 140542975222 32 unittest PASS then desktop seed browser FAIL (ingested_reports missing); fixture repair 7228675973, full browser pending. #348 2c576b88 remains separate on product 7b86cfb8. Projects inventory 46071983901/job 140750856150 SUCCESS; #54/#67/#114/#14 In review, #57 In progress, #225/#268/#273 still Backlog despite previous bridge discrepancies; no repeated uncertain writes. No integrated CI/GO. 28/11: #348 exact 27fea5f18913b65e56e69ba0c7cc93e414b2446c, compare 10 ahead/0 behind of actual 7b86cfb8, single workflow file. CI 46091945351/job 140814641091 pinned head, actual path validation, motor/UI/focused/smoke PASS (915 unittest runs; Node/browser); independent 7/7 real Git repo guard/rename/delete selector tests PASS; #348 comment 7231753357. No known CI-only blocker in this review, still separate draft; local integration and regression on resulting common SHA required. 28/11: konkret lokal CI-pin-incompatibility i leveret 3.0.0 installer: coordinator beholdt BLOB 82659025316379461cc0fa1bf236884c6e1592e8 (11244 bytes, hash verified); #348 exact 27fea5f1 now workflow blob ab6f88325708ef1f59163096e673542a51e81fa6 (11052 bytes, hash verified), base exact 7b86cfb8, CI 46091945351 all required steps PASS. Existing gate rejects new blob if local source unchanged. Narrow owner-run two-literal repair prepared, 8/8 isolated tests PASS; actual Mac source/runtime readback and install pending, no weakening, no merge. #225/7233888490.\n28/11: #114 7235475992 documents three actual native Node fixture failures in donor and corrected previews 4/4 PASS; two full-app legacy browser fixtures still require contract alignment before integrated #348. Component browser success is not common SHA regression. No GO.",
+          "owner_role": "release",
+          "updated_at": "2026-11-28T06:40:45Z"
+        }
+      ],
+      "updated_at": "2026-11-28T09:13:46Z"
+    },
+    {
+      "id": "go",
+      "phase": 4,
+      "title": "Ejer-GO og verificeret drift",
+      "status": "pending",
+      "issue": 57,
+      "evidence": "Ingen ny installation eller ejer-GO endnu.",
+      "subgoals": [
+        {
+          "id": "approval",
+          "title": "Ejerens SHA-bundne GO",
+          "status": "pending",
+          "evidence": "Ikke anmodet.",
+          "owner_role": "release"
+        },
+        {
+          "id": "readback",
+          "title": "Installation og driftstest",
+          "status": "pending",
+          "evidence": "Ingen ny installation.",
+          "owner_role": "release"
+        }
+      ]
+    }
+  ]
+}

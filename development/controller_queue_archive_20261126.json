@@ -1,0 +1,1105 @@
+{
+  "schema": 1,
+  "source_blob": "db64c355b541c4355f21183d93f0302b5f75cca4",
+  "reason": "Retired obsolete work orders; not new accepted deliveries. Original product requirements remain in successor/roadmap. No deletion of local worktrees or PRs.",
+  "entries": [
+    {
+      "row": {
+        "issue": 273,
+        "generation": 1,
+        "role": "motor",
+        "priority": 1,
+        "status": "blocked",
+        "base_branch": "codex/escape-development",
+        "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
+        "dependencies": [],
+        "paths": [
+          "trading_engine_v2.py",
+          "tests/test_trading_engine_v2.py",
+          "docs/TRADING_ENGINE_V2_INTERFACE.md"
+        ],
+        "task": "First isolated vertical implementation of owner-approved #273, including #114 provenance. Read AGENTS.md, master contract, existing strategy catalog and position/candidate contracts. New standalone module only; no edits to existing motor or schema, no provider/production calls. Implement a minimal immutable decision/evidence interface and registry with explicit required vs optional inputs per strategy, pure evaluation with positive/negative synthetic tests (Momentum and Early Catalyst distinct; no invented live threshold, no live authority), stable instrument/strategy-version/time identity, structured observation/blocked/decision reasons, decision provenance including entry/exit origin and intent/order/fill references (not fabricated). Demonstrate one shared immutable input evaluated by both strategies, missing irrelevant indicator does not block Early Catalyst, missing mandatory data blocks, replay deterministic, no broker side effects. Compact interface note with migration seams and explicit integration follow-up; actual code/tests not just plan. Preserve existing rules; sample profiles simulated only. No changes to current production, no orders. Independent review before integration into separate v2 branch."
+      },
+      "replaced_by": [
+        "273:3"
+      ],
+      "classification": "superseded",
+      "product_acceptance": "not implied"
+    },
+    {
+      "row": {
+        "issue": 273,
+        "generation": 2,
+        "role": "motor",
+        "priority": 1,
+        "status": "blocked",
+        "base_branch": "codex/escape-development",
+        "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
+        "dependencies": [],
+        "paths": [
+          "trading_engine_v2.py",
+          "tests/test_trading_engine_v2.py",
+          "docs/TRADING_ENGINE_V2_INTERFACE.md"
+        ],
+        "task": "Implement concrete #275 review (review_id 6057099632, exact draft 3023e172356e250369d9d3c6b3ef013000045d72). This generation SUPERSEDES gen1; reuse its useful code by read-only GitHub/git fetch if available, do not merge both. Keep this module simple and pure; use the existing versioned strategy specs/evaluator (strategy_center.py, hotwatch_strategy.py, strategy_lab.py) rather than a parallel registry or risk framework. Demonstrate actual existing Momentum and Early Catalyst rule evaluation on same data, including missing optional MACD for Early Catalyst, causal event vs availability time (required unavailable blocks; optional future not used), one common gate only at action boundary, no live authority. Scope owner/test and position identity via existing contract/digest, separate decision origin from verified order/fill linkage with distinct entry/exit strategy version; do not build persistence or a new ledger. Use existing names/semver and narrow data interface; no speculative framework, duplicate schema, or over-validation. Keep changes to three files; no changes to existing live code or strategy. Focus tests on meaningful positive/negative, causal replay and provenance. Deliver implementation and actual local test result, not another architecture report."
+      },
+      "replaced_by": [
+        "273:3"
+      ],
+      "classification": "superseded",
+      "product_acceptance": "not implied"
+    },
+    {
+      "row": {
+        "issue": 273,
+        "generation": 4,
+        "role": "data",
+        "priority": 1,
+        "status": "blocked",
+        "base_branch": "codex/trading-engine-v2-integration",
+        "base_sha": "9a75db140d2b58be97b35131cf469aa616fe9c4b",
+        "dependencies": [
+          "273:3"
+        ],
+        "paths": [
+          "strategy_lab.py",
+          "tests/test_strategy_lab.py",
+          "docs/TRADING_ENGINE_V2_INTERFACE.md"
+        ],
+        "task": "Implement actual read-only vertical #273 replay adapter using accepted v2 evaluate at exact base 9a75db14. Extend existing strategy_lab.compare or a narrow explicit v2 comparison function in that module (no live route/schema/DB writes, no duplicate ledger). Reuse recorded hw_calculations/hw_samples, checksum, historical calculated/received timestamps, scope and strategy catalog; compare original recorded decision and new simulated decision on identical bounded chronological input, retain existing compare API behavior. Do not infer availability of inputs from later records or invent source IDs/positions; explicitly skip unverifiable historical data, count and explain coverage/first blocking reason. Reuse captured historical metrics/risk and context only with provenance, not current data. Show positive/negative causal examples using real persisted-schema test fixtures, multiple strategies same snapshot, no provider calls, tenant/test isolation, deterministic results, no brokerwrites. Report counts, latency and coverage; no fictional P/L without execution data. Keep bounded existing MAX_CALCULATIONS and avoid new disk/API load. Preserve existing legacy replay tests. Run actual tests, deliver draft on this separate integration base. Do not edit P0 live engine/chart files or add a production endpoint."
+      },
+      "replaced_by": [
+        "273:5"
+      ],
+      "classification": "superseded",
+      "product_acceptance": "not implied"
+    },
+    {
+      "row": {
+        "issue": 114,
+        "generation": 1,
+        "role": "motor",
+        "priority": 1,
+        "status": "blocked",
+        "base_branch": "codex/trading-engine-v2-integration",
+        "base_sha": "e4b59436f7abc5fc154a65c8fd9a9de65281e4a8",
+        "dependencies": [],
+        "paths": [
+          "trade_service.py",
+          "tests/test_trade_service.py",
+          "tests/test_hotwatch_engine.py"
+        ],
+        "local_review": true,
+        "local_repair": true,
+        "task": "Implement approved #114 trade-origin foundation in existing proposal status readback. Concrete flaw in trade_service.check(): get_order_intent response is stored as sent without verifying returned orderIntentId equals the owned proposal reference (cancel_intent already checks this). Verify exact returned identity and any available portfolio/order identity before persisting the response; conflicting or missing identity must not overwrite prior evidence or imply fill/accepted status. Reuse existing provider contract, do not invent fill linkage. Keep manual/signal provenance distinct and no inferred fills; no new API calls, order submissions or cancellation changes. Add direct tests in test_trade_service.py and a focused regression in the existing motor CI suite tests/test_hotwatch_engine.py only if it can exercise real proposal evidence without duplication; preserve tenant isolation, legitimate status refresh and existing valid formats. Test mismatched/absent identity, other user's reference and unchanged prior record. Scope is offline development, not activation. No overlap with #268 or #299.",
+        "follow_base": true
+      },
+      "replaced_by": [
+        "114:3",
+        "114:4",
+        "114:6",
+        "114:7"
+      ],
+      "classification": "superseded",
+      "product_acceptance": "not implied"
+    },
+    {
+      "row": {
+        "status": "blocked",
+        "priority": 0,
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "f18e91982e3d5aba97e39a0e51e3c76376e73746",
+        "dependencies": [],
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "issue": 54,
+        "generation": 5,
+        "role": "mobile",
+        "paths": [
+          "static/engine-ui.js",
+          "tests/browser_mobile_navigation_app.py",
+          "tests/browser_mobile_account_isolation.py"
+        ],
+        "task": "Owner-approved replacement of B after the preserved #54 generation 4 exhausted its budget. Do not resume any Sol session or edit prior worktrees. Deliver exactly ONE small vertical slice on the pinned architecture-reset base: in static/engine-ui.js, guard the load() async HOT WATCH session/history/registry read against a changed authenticated session epoch (including same-user relogin), mode or superseded load, including stale error rendering from the mount() continuation. Preserve normal same-account success, current/history pagination, existing polling and approved design. Reuse existing sessionEpoch/captureInteraction/currentResult where appropriate; no new framework, no unrelated dialog/manual-start/strategy-upload rewrite. First inspect only these functions and the existing real app browser navigation fixture. Implement a small regression in tests/browser_mobile_navigation_app.py or a focused new tests/browser_mobile_account_isolation.py using the real application fixture and delayed response, with same-user relogin or equivalent epoch change, stale rejection and normal success. No live broker or provider calls. Run node --check static/engine-ui.js and the focused real Chromium test with python3 tests/browser_mobile_account_isolation.py (or python3 tests/browser_mobile_navigation_app.py if extending it); never report a skipped test as passed. Existing local generation-4 checkout may be read only for this exact function if useful; preserve it and never import unrelated changes. Do not audit the entire frontend. Deliver a small tested change and the existing ESCAPE_DRAFT_READY marker. If baseline already satisfies the invariant, add genuinely missing regression only. No production, credentials, network, git commits/push, workflow edits, broker or strategy changes. Stop after the focused delivery; other #54 issues remain separate follow-ups."
+      },
+      "replaced_by": [
+        "54:6",
+        "54:7"
+      ],
+      "classification": "superseded",
+      "product_acceptance": "not implied"
+    },
+    {
+      "row": {
+        "status": "blocked",
+        "priority": 0,
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "367601c613cf364ee94fb26e7615d05bb23a5a20",
+        "dependencies": [
+          "54:16"
+        ],
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "issue": 54,
+        "generation": 17,
+        "role": "mobile",
+        "paths": [
+          "static/engine-ui.js",
+          "tests/test_engine_load_epoch.js"
+        ],
+        "task": "Only resolveInstrument() and its immediate caller error handling if needed: prevent deferred market/quote result or error from changing a newer candidate/form, session epoch, owner or mode. Preserve selection-required and verified instrument fields and portfolio matching; no changed provider requests or automatic selection. Extend focused actual-source Node VM tests in tests/test_engine_load_epoch.js with stale success/rejection and current positive case. Run node --check static/engine-ui.js and node tests/test_engine_load_epoch.js. Fix failures; ESCAPE_DRAFT_READY after pass. No live provider/broker calls, production, network, credentials, workflow or unrelated refactor."
+      },
+      "replaced_by": [
+        "54:36"
+      ],
+      "classification": "superseded",
+      "product_acceptance": "not implied"
+    },
+    {
+      "row": {
+        "issue": 57,
+        "role": "release",
+        "priority": 1,
+        "status": "blocked",
+        "paths": [
+          "tools/nordicway_release_retention.py",
+          "tests/test_nordicway_release_retention.py"
+        ],
+        "dependencies": [],
+        "generation": 4,
+        "base_branch": "codex/issue57-combined-release-20261124",
+        "base_sha": "3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65",
+        "task": "Concrete independent P0 release-space work, not another offline budget helper. Installed bridge manifest is now 81/81 verified by Actions 45496977779; DB 6759829504 B, free 12723731904 B. Owner wants to stay within 20 GB for now. Implement in the EXISTING post-success retention flow a separately checked archive-creation reserve before any new cPanel compression call, so we can subsequently review whether installation snapshot and archive maintenance can be budgeted separately without weakening backup/restore safety. Use a fresh conservative measured quota input and complete bounded raw-backup inventory including code/manifest/keys (metadata only), an explicit conservative tar+gzip upper bound with overhead, and fail closed if quota, bound or inventory is unknown, changed or insufficient; preserve raw and previous verified backups, no deletion, no compression in blocked cases. For existing archive preserve hash verification and current release/metadata checks. Preserve current verified successful behavior where all gates pass; report a distinct safe deferred maintenance result if appropriate, never claim release succeeded or space recovered. Do not modify legacy server quota gate, release branch, workflows, production, credentials, owner approval, retention policy for live database or broker. No network calls, no commits. Use only the two allowlisted files and existing quota helper if suitable; test mocks for unknown/insufficient/exact-bound/headroom/race, no compression/no delete on failure, successful path and existing regressions. Run python -B -m unittest tests.test_nordicway_release_retention, verify exact file scope. Deliver draft for independent review only. This is one practical prerequisite for a safe phase-separated backup architecture; it is not itself sufficient to authorize the frozen release. Agent 4 owns dbstat and retention of DB rows; agent 3 owns HOT WATCH writes. No overlap."
+      },
+      "replaced_by": [
+        "57:7"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Obsolete raw-archive reserve approach for the replaced release architecture; compressed-directory retention accepted; legacy raw maintenance safety remains a separate requirement if used."
+    },
+    {
+      "row": {
+        "issue": 57,
+        "role": "release",
+        "priority": 1,
+        "status": "blocked",
+        "paths": [
+          "tools/nordicway_release_retention.py",
+          "tests/test_nordicway_release_retention.py"
+        ],
+        "dependencies": [],
+        "generation": 5,
+        "base_branch": "codex/issue57-combined-release-20261124",
+        "base_sha": "3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65",
+        "task": "P0 unblock current release: follow up delivered gen4 draft #247 ee271a39257d3f8259a42f2d196db55b302162c7, not retry same generation. The draft was created by this Mac; reuse its two exact files via local git show if object exists, no fetch or network. If absent, use existing implementation and address only the concrete outstanding safety gaps. Owner terminal confirms filesystem 928G available but account cap 20GB, DB 6836097024, account used upper ~7826571264, quota free ~12.65GB, old 2.2x floor ~15.04GB. Owner bridge runner/sequence explicitly never restores old database; public apply_update.py makes one locked raw snapshot and verifies integrity. Separate post-success archive from install without weakening recovery. Implement/test a fail-closed safe maintenance deferral preserving fresh raw and prior verified archive whenever compression scratch/host bound or competing writer exclusion is unverified; fix last-read race (mutation during final quota call) and existing archive full nested inventory recheck identified in #247. Prefer no compression/delete on unproven conditions; explicit measured phase reserve proof and regression of safe paths. Do not lower actual private gate, no installation, no live DB, no FTP/API calls. No new helper or speculative claims. Use synthetic tests including strict 20GB cap, recovery backup preserved, quota race and existing archive mutation. Review-only isolated worktree, no production access, network, broker, orders, workflow, merge, credentials, deployment, or changes outside exact paths. Run relevant tests and fix actual failures. Do not invent code changes if acceptance already covered. Do not claim live or integrated candidate verification."
+      },
+      "replaced_by": [
+        "57:7"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Obsolete raw backup archive deferral attempt; phase-separated compressed snapshot architecture replaces this work order, not a claim that every legacy raw maintenance condition is implemented."
+    },
+    {
+      "row": {
+        "issue": 57,
+        "role": "release",
+        "priority": 1,
+        "status": "blocked",
+        "generation": 6,
+        "base_branch": "codex/issue57-combined-release-20261124",
+        "base_sha": "3cc0c7bec83c529b2c3bb1011e5fcd7011f6ee65",
+        "paths": [
+          "tools/nordicway_release_retention.py",
+          "tests/test_nordicway_release_retention.py"
+        ],
+        "dependencies": [],
+        "task": "P0 actual executable phase-separated backup implementation, not another deferral or quota estimator. New actual private source readback Actions 45577915186 job 139080324957: adapter sha256 65d1d5d5178d3afe5092f7e61ae39cc5aabb29948ed34def395ef8d883161ad3, estimate_required_bytes base=(DB+sidecars)*2+source*2+existing then +10%; sequence under lock authorize/preflight/check_quota/stage/stop/quiescence/backup_and_apply/verify_backup/verify_installed/start/health/cleanup; raw snapshot one verified copy, no automatic DB restore. DB 6839615488, free_lower 12644040128, used_upper 7834959872, owner cap 20GB, 928G physical host free. Concrete implementation in existing retention module: locally stream a verified private raw backup into tar+gzip directly (never intermediate tar), hard output byte ceiling from caller supplied verified available quota, fsync and verify complete manifest/file hashes by streaming decompression, preserve raw + previous backup, fail closed and remove only own incomplete temporary output if cap exceeded or corruption; no deletion of original in helper, no credentials/network. Test real synthetic tar+gzip, incompressible abort, corrupt output, unexpected member, source changes, exact cap, valid recovery hashes. Document integration requirements for actual private bridge, including raw backup verification/marker/resume and journal during restart; do not lower actual private gate or claim release-ready. Gen5 #256 review hold remains, no duplication of its guard code. No production actions, workflows, commit/push, extra files. This is a real functional bounded compression primitive for phase separation, not a standalone budget calculator."
+      },
+      "replaced_by": [
+        "57:7"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Standalone raw-to-tar compression primitive superseded by compressed snapshot architecture; no claim that old primitive was delivered."
+    },
+    {
+      "row": {
+        "status": "blocked",
+        "base_branch": "codex/escape-development",
+        "base_sha": "086354bf0f3989e8ab7c3cdee28eb4e952f7d8eb",
+        "dependencies": [],
+        "issue": 267,
+        "generation": 2,
+        "role": "mobile",
+        "priority": 2,
+        "paths": [
+          "static/overview-ui.js",
+          "static/dashboard-ui.js",
+          "static/market-ui.js",
+          "static/position-ui.js",
+          "static/engine-ui.js",
+          "static/trade-ui.js",
+          "tests/test_chart_source_selection.cjs",
+          "tests/test_holding_chart_marker.cjs",
+          "tests/browser_intraday_market_chart.py",
+          "tests/browser_portfolio_value_chart.py"
+        ],
+        "task": "Implement #267 approved graph behavior in existing shared renderers, no redesign. Full local 00\u201324 axis overview and crypto, actual full verified session for positions, draw only real points to latest observation, future blank. Show verified Marked \u00e5bent/Pre-market/Eftermarked/Marked lukket/24/7 or unknown. Preserve Top label actual high, dashed Gns. k\u00f8bskurs actual value/currency, no buy line on BUY without holding, same demo/live renderer and approved layout. Use actual backend contract from gen1 when available; do not guess market times. Ensure 11:40 portfolio ~49% width, European session fraction, US premarket and data gaps. Preserve tooltip behavior and existing period controls. Implement actual scoped code/test, no app.js overlap with #263. No production orders/deploy."
+      },
+      "replaced_by": [
+        "267:3",
+        "267:4"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Superseded by integrated chart implementation and independent desktop/mobile acceptance; no new acceptance claimed."
+    },
+    {
+      "row": {
+        "issue": 268,
+        "generation": 1,
+        "role": "motor",
+        "priority": 0,
+        "status": "blocked",
+        "base_branch": "codex/escape-development",
+        "base_sha": "546dec64a6f6e22253455145866604490945c271",
+        "dependencies": [
+          "8:2"
+        ],
+        "paths": [
+          "intel_workflows.py",
+          "hotwatch_engine.py",
+          "hotwatch_service.py",
+          "tests/test_hotwatch_engine.py",
+          "tests/test_hotwatch_holdings_auto.py",
+          "tests/test_hotwatch_e2e_contract.py"
+        ],
+        "task": "P0 owner-requested dynamic lifecycle rotation, concrete issue #268. After #8 gen2 review/integration, use its integrated source (coordinator refresh base before dispatch if changed). Live 60/60 incl 19 holding exits/41 entry, 18 REVIEW_DUE all 41 NO_DATA. Existing candidate_currentness grace24h; auto req end_at=None, REPORT_ONLY never COLD, reconcile expires only COLD. Implement actual expiry/retirement of intensive entry scanning with history preserved, protect holdings/orders/manual/leases; distinguish no data backoff from reject; finite report-only and candidate prioritization policy proposed explicitly for owner approval before live, no change to trade strategy or orders. Reuse existing reconciliation, not new motor. Tests exact overdue, report-only, no expiry extension by duplicate report, genuine reassessment, capacity frees new candidates, cap is not fill target, protected holdings/exit/tenant/test. Avoid overlaps with #8 gen2; dependency only to avoid conflicts, coordinator must release after actual integration review. No production/credentials/network/orders. Draft implementation + tests. Coordinator verified #281 838817f9 integrated to development 546dec64 (identical Git tree ebdd76d7). Work directly on this base; no importing old PRs or fetching other branches. Expiry/rotation must remain simulation/test or default-off where new TTL/ranking policy needs owner approval; do not enable production behavior or change live risk/strategy. Preserve existing currentness semantics for other readers where needed. Record proposed policy separately from verified expiry."
+      },
+      "replaced_by": [
+        "268:2",
+        "268:3"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Original broad lifecycle attempt replaced by accepted default-off lifecycle slices; live activation/policy remains separately gated."
+    },
+    {
+      "row": {
+        "issue": 14,
+        "generation": 8,
+        "role": "data",
+        "priority": 1,
+        "status": "blocked",
+        "base_branch": "codex/escape-development",
+        "base_sha": "99ba8ef656fa0386ee828d14d7b9c0bae158395a",
+        "dependencies": [
+          "14:7"
+        ],
+        "paths": [
+          "hotwatch_service.py",
+          "tests/test_hotwatch_holdings_auto.py"
+        ],
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "task": "Continue accepted #302 and #273 100-user performance acceptance. Concrete next bottleneck in auto_holdings_tick: per-position repeated user kill-switch, session and autowatch lookups, including a second query for the POSITION_CLOSED generation. Reduce duplicate reads using bounded per-user data and existing indexes, preserve exact semantics, one activation per tick, transaction and tenant boundaries, retry and protected holding/exit behavior. No live calls, schema, trade or strategy changes. Test actual SQLite 1/10/100 users with overlapping asset IDs and different portfolio IDs, paused/linked/closed cases, SQL count and unchanged decisions. Add regression to existing motor CI test_hotwatch_holdings_auto.py. Deliver scoped code/tests.",
+        "followups": [
+          {
+            "paths": [
+              "hotwatch_service.py",
+              "tests/test_hotwatch_holdings_auto.py"
+            ],
+            "task": "Measure and reduce repeated JSON parsing and unnecessary database writes in auto_holdings_tick on accepted prior base. Reuse existing per-position evidence only within one tick; do not reuse stale positions across ticks or change one activation per tick, retries or protection. Actual SQLite tests for 100 users and no extra writes for already-linked positions. Implement only verified remaining waste; if already fully met, return no_changes with evidence."
+          }
+        ]
+      },
+      "replaced_by": [
+        "315:2"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Rejected broad caching approach superseded by accepted narrow optimization; further measured performance gaps remain on #14 roadmap."
+    },
+    {
+      "row": {
+        "issue": 14,
+        "generation": 9,
+        "role": "data",
+        "priority": 0,
+        "status": "blocked",
+        "base_branch": "codex/escape-development",
+        "base_sha": "99ba8ef656fa0386ee828d14d7b9c0bae158395a",
+        "dependencies": [
+          "14:7"
+        ],
+        "paths": [
+          "hotwatch_service.py",
+          "tests/test_hotwatch_holdings_auto.py"
+        ],
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "task": "Continue accepted #302 and #273 100-user performance acceptance. Concrete next bottleneck in auto_holdings_tick: per-position repeated user kill-switch, session and autowatch lookups, including a second query for the POSITION_CLOSED generation. Reduce duplicate reads using bounded per-user data and existing indexes, preserve exact semantics, one activation per tick, transaction and tenant boundaries, retry and protected holding/exit behavior. No live calls, schema, trade or strategy changes. Test actual SQLite 1/10/100 users with overlapping asset IDs and different portfolio IDs, paused/linked/closed cases, SQL count and unchanged decisions. Add regression to existing motor CI test_hotwatch_holdings_auto.py. Deliver scoped code/tests.\n\nOwner-approved fresh generation after local repair exhaustion. FRESH IMPLEMENTATION: start from the approved clean base, inspect PR #304 read-only for useful tests, do not carry forward the rejected caching design. First measure actual SQLite VM steps, returned/decoded rows, statements including PRAGMA, and writer-lock work on baseline. Prefer minimal indexed lookup/query improvement and remove duplicate reads without caching mutable gate/session state across decisions. Preserve original activation order and concurrent visibility, especially kill-switch transitions, closure/reopen, deferred retries and unrelated writes. Test one and 26 holdings per tenant at 100 tenants (paused/linked, killed, deferred, thousands of histories), plus 1/10 tenants. Require measurable improvement on target workload and no material regression on other cases; report baseline/new measurements and run tests.test_hotwatch_holdings_auto. If optimization cannot preserve semantics, do not ship regression or claim acceptance.\nPrior independent review findings (evidence, not expanded permissions):\n- The per-user batch caches session and retry state before SQLite acquires the write lock on the first upsert. If reconciliation commits POSITION_CLOSED for a later holding in that gap, the scan can overwrite the closure using stale state or skip the new generation. Previously, reads for later holdings ran inside the transaction once the first upsert acquired the lock. The 1/10/100-user regression covers tenant scoping and SQL counts but misses this interleaving.\n- hotwatch_service.py:849 changes the writer-lock boundary. If another connection commits before BEGIN IMMEDIATE and the refreshed batch needs no write, the scan keeps the writer lock while processing every remaining tenant, even if the tick ultimately writes nothing. The old path acquired that lock only at the first upsert. The 1/10/100-user test covers SQL counts and tenant decisions, but the race test still writes after refresh and misses this contention regression.\n- auto_holdings_tick eagerly loads session and retry history for every holding of the current user before evaluating the first candidate. When the first holding can activate, the baseline reads only that holding\u2019s history, so the new path can do substantially more SQL and JSON work even with fewer statements. The 1/10/100-user test forces activation near the end and counts statements, leaving this early-activation regression unmeasured.\n- hotwatch_service.py:821\u2013840 regresses SQLite work under the writer lock. In the existing early-activation fixture, make holding 1 link to a PAUSED watch without a prior attempt, leave holding 2 eligible, and seed completed session history for holdings 3\u201325. The first link acquires the writer lock, then the batch fetches and decodes all later history before activating holding 2. The base skips those later rows. Expected: keep later-history reads bounded on early activation and verify rows read in CI, since statement counts miss this lock-time regression.\n- hotwatch_service.py:821\u2013839 adds a SQLite writer-lock regression. Seed one user with a first holding that needs a LINKED write, a second already linked, a third eligible to activate, and later holdings with session and retry history. The tick loads and decodes the entire remaining history while holding SQLite\u2019s writer lock, even though it stops at the third holding. The base stops reading holding history at that activation. Bound the lookahead under the writer lock and cover third-position activation in test_hotwatch_holdings_auto.py.\n- hotwatch_service.py:827\u2013863 can miss a concurrent stop. With five holdings whose autowatch rows already match their paused sessions, stop the fifth watch on another connection after the batch SELECTs finish and before the fifth holding is evaluated. The cached PAUSED row makes the scan keep LINKED and return without checking data_version. The base scan re-reads the fifth session, sees COMPLETED, and records STOPPED in that tick. Revalidate cached no-write decisions when the batch has changed and cover this interleaving in test_hotwatch_holdings_auto.py.\n- hotwatch_service.py regresses idle SQLite behavior. Seed holdings already LINKED to PAUSED watches with no writes due. During the scan, commit an unrelated row on a second connection, then hold BEGIN IMMEDIATE there through the scan's timeout. The database-wide data_version change makes the idle scan request the writer lock and raise SQLITE_BUSY. Expected behavior is to return None without waiting for the writer because no holding decision changed. The new idle test holds a writer without an intervening commit, so it misses this path.\n- hotwatch_service.py:809\u2013873 can retry the same tenant indefinitely. Seed tenant 1 with only already-linked holdings and tenant 2 with a due holding. Commit an unrelated row from a second SQLite connection after each tenant 1 batch read and before the end-of-scan data_version check. Each commit restarts tenant 1 without a retry bound, so tenant 2 and subsequent feed maintenance never run. The prior scan completed under the same schedule. Expected: bounded per-tick work under unrelated commits, while preserving revalidation before any write.\n- hotwatch_service.py, auto_holdings_tick: Give tenant A five already-linked PAUSED holdings. Commit an unrelated write after the first scan reads holdings 4\u20135, then complete holding 5's watch after the refresh reads that batch. The second data_version mismatch leaves holding 5 LINKED and advances to the next tenant. The original per-position loop sees COMPLETED when that commit lands before holding 5's individual lookup and records STOPPED in the same tick. The added tests cover a relevant commit on the first scan and repeated unrelated commits, leaving this regression uncovered.\n- hotwatch_service.py regresses the idle 100-user scan. Give each enabled user one fresh holding with a matching PAUSED watch and an existing LINKED record, with no concurrent writes. The base executes 302 scan statements. This change executes 403, including 101 PRAGMA data_version reads, while eliminating zero lookups. Expected: no extra scan statements for this idle workload. The SQL-count test in tests/test_hotwatch_holdings_auto.py counts SELECTs separately from PRAGMAs and starts with a LINKED write, so it misses this path.\n- hotwatch_service.py regresses idle-scan SQL work under concurrent writes. Extend test_repeated_unrelated_commits_do_not_starve_next_tenant to 100 tenants with one already-linked holding each and commit an unrelated row update after each autowatch read. The new scan executes 8 statements per tenant (three passes), versus 3 at the base commit, with identical decisions. Expect unrelated commits to preserve the idle-scan read budget while real session or autowatch changes still trigger revalidation.\n- hotwatch_service.py: auto_holdings_tick bounds asset keys but fetches and decodes every matching historical session while holding SQLite\u2019s writer lock. Reproduce with holding 1 creating a LINKED row, holdings 2\u20133 already linked, holding 4 due for activation, and thousands of completed sessions for holdings 5\u201327. The new scan materializes those later histories before activating holding 4. The base scan never returns or decodes them. Expected bounded work under the writer lock. The SQL-count tests miss this regression because their large batch contains minimal history.\n- hotwatch_service.py:899\u2013908 can skip the first eligible holding. Reproduce with an idle tenant whose fifth holding has a linked automatic watch and a later tenant with a due holding. Commit an unrelated update to trigger the idle refresh. After the refreshed batch containing holdings four and five is fetched, reconcile holding five as closed and restore it in the snapshot. The cached LINKED state skips its now-due POSITION_CLOSED generation, and the later tenant gets the tick\u2019s sole activation. The per-position path would see the closure before evaluating holding five and select its new generation first.\n- hotwatch_service.py:814\u2013914 changes activation order. Seed a killed user with two eligible holdings and clear the kill switch from a second SQLite connection immediately after the first gate read. The baseline skips the first holding and activates the second. The new loop restarts the tenant and activates the first, consuming the tick\u2019s only activation. Preserve the per-position resume order and test this case. The same idle rescan also raises reads from 3 to 5 per tenant with one retry-deferred holding, no active session, and an unrelated commit during the first pass.\n- hotwatch_service.py:882\u2013888 forces one batch per position on idle ticks, repeating tenant gate and session lookups. The deferred-history branch also probes the same autowatch key twice. In an in-memory SQLite comparison with 100 users, distinct portfolios, and 26 shared assets per user (one PAUSED/LINKED, 25 deferred), scan statements fell from 7,800 to 5,200, but VM instructions rose from 144,185 to 597,923. The idle regression test covers only one holding per user. Expected bounded tenant batching to reduce duplicate reads on multi-holding idle ticks while preserving decisions.\n- hotwatch_service.py:788,890\u2013897 regresses the 100-user scan. In an in-memory SQLite comparison of the changed lookup SQL against the base, 100 users with one shared asset, distinct portfolios and one paused/linked watch each went from 6,710 to 20,137 VM steps despite fewer statements. With 100 killed users and 26 holdings each, the gate still ran 2,600 times and steps rose from 26,000 to 213,240. Expected fewer duplicate reads and no material increase in lookup work, with link and kill-switch decisions preserved. The one-position regression test counts statements and misses the SQLite work increase.",
+        "followups": [
+          {
+            "paths": [
+              "hotwatch_service.py",
+              "tests/test_hotwatch_holdings_auto.py"
+            ],
+            "task": "Measure and reduce repeated JSON parsing and unnecessary database writes in auto_holdings_tick on accepted prior base. Reuse existing per-position evidence only within one tick; do not reuse stale positions across ticks or change one activation per tick, retries or protection. Actual SQLite tests for 100 users and no extra writes for already-linked positions. Implement only verified remaining waste; if already fully met, return no_changes with evidence."
+          }
+        ],
+        "pause_reason": "architecture_reset"
+      },
+      "replaced_by": [
+        "315:2"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Rejected retry of broad caching approach superseded by narrow integrated optimization; no claim all original benchmark targets met."
+    },
+    {
+      "row": {
+        "status": "blocked",
+        "priority": 0,
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "f18e91982e3d5aba97e39a0e51e3c76376e73746",
+        "dependencies": [],
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "issue": 315,
+        "generation": 1,
+        "role": "data",
+        "paths": [
+          "hotwatch_service.py",
+          "tests/test_hotwatch_holdings_auto.py"
+        ],
+        "task": "Implement first architecture-reset vertical slice, not documentation. On pinned clean base, simplify auto_holdings_tick by removing repeated reads only where proven safe; preserve original per-position activation order, early exit, idle no-write, tenant/test isolation, concurrent stop/kill/reopen and bounded work. Do not carry forward rejected batch-cache designs from #14. Measure SQLite VM steps and decoded rows on 1/10/100 users, one and 26 holdings, idle/killed/early-activation and thousands of historical rows. Prefer small readable functions and indexed exact lookups; no schema, strategy, mandate, new framework or external calls. Execute tests.test_hotwatch_holdings_auto and relevant existing regression tests, report exact before/after and actual counts. If optimization worsens a workload, simplify or revert it; deliver tested code, not a plan."
+      },
+      "replaced_by": [
+        "315:2"
+      ],
+      "classification": "retired obsolete historical work order",
+      "product_acceptance": "Rejected architecture-reset scanner replaced by accepted scoped optimization; residual measurable performance work remains under #14."
+    },
+    {
+      "row": {
+        "status": "ready",
+        "priority": 0,
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "1a7b5305267efe4197495550452de1db58beb563",
+        "dependencies": [
+          "14:11"
+        ],
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "issue": 14,
+        "generation": 12,
+        "role": "data",
+        "paths": [
+          "hotwatch_engine.py",
+          "tests/test_hotwatch_engine.py"
+        ],
+        "task": "Concrete #14 queue-capacity baseline: build a deterministic actual SQLite test fixture using existing engine.claim/release semantics with 100 tenant users, shared and disjoint assets, due sessions, and concurrency limit 2. Verify no cross-tenant lease mixup, earliest-due ordering and capacity, record observed queue waits and SQLITE_BUSY separately under controlled contention. No production code change unless the fixture demonstrates a concrete narrowly fixable defect; no fake live capacity claim. Prefer a reproducible focused regression to a new framework. Run existing engine tests and report actual counts. Bounded scope, existing tests, no credentials, network, production, workflow or broker mutations. ESCAPE_DRAFT_READY after actual pass."
+      },
+      "replaced_by": [
+        "14:36"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 14,
+        "generation": 13,
+        "role": "data",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "04cee36687e4d60bca0adbedf11acb4ed7224f74",
+        "dependencies": [],
+        "paths": [
+          "hotwatch_engine.py",
+          "tests/test_hotwatch_engine.py"
+        ],
+        "task": "Approved roadmap load/queue (100 brugere og fair k\u00f8er). Exact existing source anchor: hotwatch_engine.py :: def claim(connect,now=None,watch_id=None,exclude_ids=()):. Implement only this bounded change: Reassess only the dispatch-and-release portion of the preserved 14:12 diff. Adapt it into one deterministic SQLite acceptance test with 100 tenants, one due watch per tenant, a reused watch ID, and shared and distinct asset IDs. Insert rows in reverse deadline order and dispatch two per step with the injected clock. Omit the competing-writer scenario from this reassessment. Choose the step interval so released watches remain outside the test's dispatch window.. Acceptance: All 100 original deadlines are served in order. Each lease binds the expected tenant and watch, a third claim at the same instant returns no job, and a mismatched lease token releases neither job. Report queue wait from the injected clock as a fixture measurement.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_hotwatch_engine.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 14:12; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "load/queue/queue-two-leases-across-100-tenants",
+        "reserve_goal": "load/queue",
+        "reserve_reassessment": "14:12@f7c8b3ee6aa1c74efb3567346590f5d587c2269bdaf3463059f7edd10b377332"
+      },
+      "replaced_by": [
+        "14:36"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 14,
+        "generation": 18,
+        "role": "data",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "04cee36687e4d60bca0adbedf11acb4ed7224f74",
+        "dependencies": [],
+        "paths": [
+          "hotwatch_engine.py",
+          "tests/test_hotwatch_engine.py"
+        ],
+        "task": "Approved roadmap load/queue (100 brugere og fair k\u00f8er). Exact existing source anchor: hotwatch_engine.py :: def release(connect,job,now=None,sample=None,pending_feed=False):. Implement only this bounded change: Reassess only the stale-token release assertion from the preserved 14:13 diff. Add one SQLite regression with two tenants sharing a watch ID. Keep one tenant's lease current while the other tenant's lease expires and is reclaimed with a new token. Call normal release with the expired job object and compare both persisted rows before and after. Use staggered claims and the existing injected clock. This smaller test leaves the original checkout intact and needs neither the parked generation nor its 100-tenant dispatch fixture.. Acceptance: Reclaim returns the row for the correct tenant with a new token. Releasing the expired job changes neither tenant's lease, deadline, nor scheduling state. Releasing the reclaimed job with the new token clears and reschedules only its own row.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_hotwatch_engine.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 14:13; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "load/queue/expired-hotwatch-release-preserves-reclaimed-tenant-lease",
+        "reserve_goal": "load/queue",
+        "reserve_reassessment": "14:13@08389dcd8d305735ed0ea75bb26ccc8053b9b48efd0574b44f1b4bc5f4ceb47b"
+      },
+      "replaced_by": [
+        "14:36"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 14,
+        "generation": 22,
+        "role": "data",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+        "dependencies": [
+          "14:20"
+        ],
+        "paths": [
+          "hotwatch_engine.py",
+          "tests/test_hotwatch_engine.py"
+        ],
+        "task": "Approved roadmap load/queue (100 brugere og fair k\u00f8er). Exact existing source anchor: hotwatch_engine.py :: def release(connect,job,now=None,sample=None,pending_feed=False):. Implement only this bounded change: Reassess only the stale invocation from the preserved 14:18 diff. Use one due watch and the injected clock to claim it, advance to the original lease deadline, and reclaim the same row with a fresh token. Call normal release() with the original job object and compare the persisted row immediately before and after. This smaller regression omits the second tenant, the valid-token release branch and its scheduling assertions. The preserved checkout stays intact.. Acceptance: The reclaimed row has a different lease token. Calling release() with the expired job leaves the row byte-for-byte unchanged, including the new token, lease deadline, next_due and serialized state. The existing restart and pause lease checks still pass.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_hotwatch_engine.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 14:18; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "load/queue/reclaimed-lease-ignores-stale-release",
+        "reserve_goal": "load/queue",
+        "reserve_reassessment": "14:18@054cd6be238536e0d9ec7df4bddfb9704b98218f1dc68bf2619364db39063db0"
+      },
+      "replaced_by": [
+        "14:36"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 14,
+        "generation": 33,
+        "role": "data",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "367601c613cf364ee94fb26e7615d05bb23a5a20",
+        "dependencies": [],
+        "paths": [
+          "hotwatch_engine.py",
+          "tests/test_hotwatch_engine.py"
+        ],
+        "task": "Approved roadmap load/queue (100 brugere og fair k\u00f8er). Exact existing source anchor: tests/test_hotwatch_engine.py :: def test_leases_protect_pause_and_worker_restart(self):. Implement only this bounded change: Reassess only the exact-deadline reclaim setup from the preserved 14:22 diff. Add one SQLite test using the existing single-watch fixture and a concurrency limit of one. Claim the watch, read its persisted lease deadline, and call claim again for the same watch immediately before and exactly at that deadline. Leave the stale release call and whole-row comparison in the preserved checkout.. Acceptance: The watch cannot be claimed just before its persisted deadline. At the deadline, claim returns the same row ID with a fresh token even with one worker slot. The existing pause and restart regression still passes.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_hotwatch_engine.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 14:22; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "load/queue/hotwatch-exact-lease-deadline-permits-reclaim",
+        "reserve_goal": "load/queue",
+        "reserve_reassessment": "14:22@bc15154dadfb9eb86ca22514298a1d7f01878a7117943b012e2b8613c70d7dae"
+      },
+      "replaced_by": [
+        "14:36"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 54,
+        "generation": 20,
+        "role": "mobile",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "04cee36687e4d60bca0adbedf11acb4ed7224f74",
+        "dependencies": [],
+        "paths": [
+          "static/journal-ui.js",
+          "static/app.js",
+          "tests/browser_design_v1.py"
+        ],
+        "task": "Approved roadmap ui/test (F\u00e6lles browsertest). Exact existing source anchor: static/journal-ui.js :: async function load(append=false). Implement only this bounded change: Give JournalUI the existing app session epoch and apply one request-validity check to both load() outcomes. A success or error may update the journal only for the latest request, the originating epoch and owner, and the current connected results element. Keep the existing filters, cursor, current error message and read requests.. Acceptance: In the app browser fixture, delay a journal request, let a newer filter request render, then reject the old request. The newer results and pagination survive. An old same-owner session response is discarded, and an error for the current request still appears.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_design_v1.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "ui/test/journal-stale-fetch-cannot-replace-current-results",
+        "reserve_goal": "ui/test"
+      },
+      "replaced_by": [
+        "54:38"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 54,
+        "generation": 24,
+        "role": "mobile",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "cbb37703356ffae9f3d2beba37265d17e0b706db",
+        "dependencies": [],
+        "paths": [
+          "static/journal-ui.js",
+          "tests/browser_design_v1.py"
+        ],
+        "task": "Approved roadmap ui/test (F\u00e6lles browsertest). Exact existing source anchor: static/journal-ui.js :: async function load(append=false). Implement only this bounded change: Reassess only the old pagination rejection case from the preserved 54:20 diff. In JournalUI.load(), apply the existing success-path ticket, owner and connected-root checks before writing an error. In the browser fixture, enter the journal through the current Handelsmotor button and exercise one pending older-page request overtaken by a period change. This smaller split omits session-epoch wiring, root replacement and the broader race matrix. The preserved checkout stays intact.. Acceptance: After the new period renders, reject the previous period's older-page request. The rows, critical section, coverage and current pagination remain intact. A subsequent failure for the current request still displays the existing journal error.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_design_v1.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:20; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "ui/test/journal-filter-survives-old-page-rejection",
+        "reserve_goal": "ui/test",
+        "reserve_reassessment": "54:20@5a767fbab31132f71e353e55c0a7c3714eb7dc2e99644658c51627d271dd9f71"
+      },
+      "replaced_by": [
+        "54:38"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 54,
+        "generation": 23,
+        "role": "desktop",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "cbb37703356ffae9f3d2beba37265d17e0b706db",
+        "dependencies": [],
+        "paths": [
+          "static/trade-ui.js",
+          "tests/browser_desktop_trade.py"
+        ],
+        "task": "Approved roadmap ui/desktop (Desktop 2.0). Exact existing source anchor: static/trade-ui.js :: async function previewSubmit(event){. Implement only this bounded change: In previewSubmit(), capture the originating form and the submitted field values once. Before displaying the read-only estimate or its error, require the form to remain current and its values to match the submitted snapshot. For an edited current form, clear only the pending feedback from that request and restore submit availability. Keep the existing preview request and review layout.. Acceptance: In the desktop browser fixture, edit the amount while a stubbed preview is pending. Neither stale success nor stale rejection appears under the edited values, and submitting the edited form produces the matching read-only estimate. The fixture records only preview reads for this scenario.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_trade.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "ui/desktop/desktop-read-only-preview-matches-current-form-values",
+        "reserve_goal": "ui/desktop"
+      },
+      "replaced_by": [
+        "54:39"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 54,
+        "generation": 25,
+        "role": "desktop",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "d1f7bc0333c2cf9889ffb387469d635ecec3667c",
+        "dependencies": [],
+        "paths": [
+          "static/trade-ui.js",
+          "tests/browser_desktop_trade.py"
+        ],
+        "task": "Approved roadmap ui/desktop (Desktop 2.0). Exact existing source anchor: static/trade-ui.js :: async function previewSubmit(event){. Implement only this bounded change: Afgr\u00e6ns genvurderingen af den bevarede diff fra 54:23 til et vellykket estimatsvar efter redigering af bel\u00f8bet. Gem formularen og de v\u00e6rdier, der sendes med trade/preview. F\u00f8r resultatet vises, skal den eksisterende generationskontrol stadig g\u00e6lde, formularen skal v\u00e6re den aktuelle, og dens v\u00e6rdier skal svare til de indsendte. Hvis v\u00e6rdierne er \u00e6ndret i den samme formular, fjern kun denne foresp\u00f8rgsels ventebesked og lad den eksisterende oprydning genaktivere knappen. Bevar foresp\u00f8rgslen og visningen af et aktuelt estimat.. Acceptance: Udvid desktop-fixturen med det eksisterende TradeUI.panel og et forsinket, stubbet trade/preview-svar. Indsend 100 DKK, ret bel\u00f8bet til 150 DKK, og frigiv det f\u00f8rste svar. Resultatfeltet ved siden af formularen forbliver tomt, ventebeskeden forsvinder, og knappen kan bruges igen. En ny indsendelse viser estimatet for 150 DKK. Fixturens kaldsliste for scenariet indeholder pr\u00e6cis de to estimatopslag.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_trade.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:23; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "ui/desktop/desktop-preview-discards-success-after-amount-edit",
+        "reserve_goal": "ui/desktop",
+        "reserve_reassessment": "54:23@d934617933d15a484bf7d7884778297cd1006bda43022dc28918f43e6b1d7805"
+      },
+      "replaced_by": [
+        "54:39"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 54,
+        "generation": 27,
+        "role": "desktop",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+        "dependencies": [],
+        "paths": [
+          "tests/browser_desktop_trade.py"
+        ],
+        "task": "Approved roadmap ui/desktop (Desktop 2.0). Exact existing source anchor: tests/browser_desktop_trade.py :: if(name === 'trade/preview') return {};. Implement only this bounded change: Genvurd\u00e9r kun det positive renderingsscenarie fra den bevarede 54:25-diff som en selvst\u00e6ndig browsertest. Mont\u00e9r det eksisterende TradeUI.panel, \u00e5bn estimatsektionen, v\u00e6lg fixturens aktiv og depot, og indsend \u00e9t estimat p\u00e5 150 DKK. Frigiv det stub\u00adbede read-only-svar, mens formularen stadig viser de indsendte v\u00e6rdier. Afgr\u00e6ns arbejdet til fixturen og den ene indsendelse.. Acceptance: Ventebeskeden vises under opslaget. Efter svaret viser den eksisterende resultatboks 150 DKK og m\u00e6rket \u00abKun opslag \u00b7 ingen afsendelse\u00bb, og knappen er aktiv igen. Kaldslisten for scenariet indeholder pr\u00e6cis \u00e9t trade/preview-opslag. De eksisterende scenarier for k\u00f8b og salg k\u00f8rer videre.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_trade.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:25; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "ui/desktop/desktop-preview-renders-current-read-only-estimate",
+        "reserve_goal": "ui/desktop",
+        "reserve_reassessment": "54:25@ef3a7ca2b627962427160ed9a27d4feb2434dde6ed1c1cf4e05468eb1cab62ef"
+      },
+      "replaced_by": [
+        "54:39"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 54,
+        "generation": 30,
+        "role": "desktop",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+        "dependencies": [],
+        "paths": [
+          "tests/browser_desktop_trade.py"
+        ],
+        "task": "Approved roadmap ui/desktop (Desktop 2.0). Exact existing source anchor: tests/browser_desktop_trade.py :: if(name === 'trade/preview') return {};. Implement only this bounded change: Genvurd\u00e9r kun ventetilstanden fra den bevarede 54:27-diff. Mont\u00e9r det eksisterende TradeUI-panel p\u00e5 en separat side i browserfixturen, v\u00e6lg fixturens aktiv og depot, og indsend \u00e9t testestimat p\u00e5 150 DKK. Hold det stubbede preview-svar tilbage, mens testen kontrollerer status, knap og kaldsliste. Afslut den separate side efter kontrollen. Opdelingen kr\u00e6ver ingen fixtur for et vellykket svar og \u00e6ndrer ingen produktkode.. Acceptance: Mens svaret afventer, vises \u00abHenter testestimat fra Pluto\u2026\u00bb, estimatknappen er deaktiveret, og resultatfeltet er tomt. Kaldslisten indeholder pr\u00e6cis \u00e9t trade/preview-kald med det valgte aktiv og depot samt 150 DKK. De eksisterende k\u00f8b- og salgsscenarier best\u00e5r.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_trade.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:27; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "ui/desktop/desktop-read-only-estimate-shows-pending-state",
+        "reserve_goal": "ui/desktop",
+        "reserve_reassessment": "54:27@dcc9e6346d890f6b48e8d60a464d817da4e4c8e900a934aeb820c36f1909fc3e"
+      },
+      "replaced_by": [
+        "54:39"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 54,
+        "generation": 32,
+        "role": "desktop",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+        "dependencies": [],
+        "paths": [
+          "tests/browser_desktop_trade.py"
+        ],
+        "task": "Approved roadmap ui/desktop (Desktop 2.0). Exact existing source anchor: tests/browser_desktop_trade.py :: if(name === 'trade/preview') return {};. Implement only this bounded change: Afgr\u00e6ns genvurderingen af den bevarede 54:30-diff til rydningen af det forrige estimat i #preview-result. Mont\u00e9r det eksisterende TradeUI-panel i browserfixturen med et lokalt, uafsluttet preview-svar. Udfyld formularen og afslut felternes \u00e6ndringsh\u00e6ndelser, f\u00f8r resultatfeltet f\u00e5r teksten \u00abTidligere testestimat\u00bb. Indsend formularen og kontroll\u00e9r kun, at det gamle resultat forsvinder, mens preview-svaret stadig afventer.. Acceptance: Fixturen viser en synlig tidligere estimattekst umiddelbart f\u00f8r indsendelse. N\u00e5r stubben har modtaget trade/preview og svaret stadig afventer, er #preview-result tomt. De eksisterende k\u00f8b- og salgsdialogtests best\u00e5r.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_trade.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:30; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "ui/desktop/desktop-preview-clears-previous-result-while-pending",
+        "reserve_goal": "ui/desktop",
+        "reserve_reassessment": "54:30@83dc793d751010cf3f6bc04fc1b0d981e76b03a020386f4771043d50561470c3"
+      },
+      "replaced_by": [
+        "54:39"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 54,
+        "generation": 35,
+        "role": "desktop",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "367601c613cf364ee94fb26e7615d05bb23a5a20",
+        "dependencies": [],
+        "paths": [
+          "tests/browser_desktop_trade.py"
+        ],
+        "task": "Approved roadmap ui/desktop (Desktop 2.0). Exact existing source anchor: tests/browser_desktop_trade.py :: if(name === 'trade/preview') return {};. Implement only this bounded change: Reassess only the clearing order from the preserved 54:32 diff. In the existing browser fixture, mount the real trade panel, fill one valid preview form, and seed a recognizable old result after the form changes settle. Have the trade/preview stub record whether that result is present at the instant the stub receives the request. Return a local response immediately so this test needs neither a pending promise nor assertions about pending or completed rendering.. Acceptance: The old result is visible before submission and absent when the stub receives the single trade/preview call. No send call is recorded. The existing desktop buy and sell dialog checks still pass.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_trade.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:32; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "ui/desktop/desktop-preview-clears-old-result-before-request",
+        "reserve_goal": "ui/desktop",
+        "reserve_reassessment": "54:32@98be8dc6cf180281ca44ab0246f48ff21733ef21516f451095fd0a6c31e16528"
+      },
+      "replaced_by": [
+        "54:39"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 54,
+        "generation": 26,
+        "role": "mobile",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "d1f7bc0333c2cf9889ffb387469d635ecec3667c",
+        "dependencies": [],
+        "paths": [
+          "tests/browser_design_v1.py"
+        ],
+        "task": "Approved roadmap ui/test (F\u00e6lles browsertest). Exact existing source anchor: tests/browser_design_v1.py :: page.locator('nav [data-view='+target+']').click();page.wait_for_timeout(200). Implement only this bounded change: Split out only the navigation hunk from the preserved 54:24 diff. In the existing design browser fixture, use the Handelsmotor panel\u2019s \u00ab\u00c5bn handelsjournal\u00bb button for the journal step because the journal has no sidebar entry. Add a focused round-trip check through the journal\u2019s existing back button. Leave the pagination race, request handling and browser launch configuration outside this reassessment.. Acceptance: The browser enters Handelsjournal from Handelsmotor, observes the seven-day default and a populated coverage note, and returns to Handelsmotor through the visible back button. The navigation check is independent of asynchronous pagination.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_design_v1.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:24; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "ui/test/journal-navigation-roundtrip-through-trade-panel",
+        "reserve_goal": "ui/test",
+        "reserve_reassessment": "54:24@5108cf26399f15325a0547ecde9c390e4dff9538337c484b292c7ea8237172fe"
+      },
+      "replaced_by": [
+        "54:40"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 54,
+        "generation": 28,
+        "role": "mobile",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+        "dependencies": [],
+        "paths": [
+          "tests/browser_design_v1.py"
+        ],
+        "task": "Approved roadmap ui/test (F\u00e6lles browsertest). Exact existing source anchor: tests/browser_design_v1.py :: page.locator('nav [data-view='+target+']').click();page.wait_for_timeout(200). Implement only this bounded change: Reassess only the journal-entry selector hunk from the preserved 54:26 diff. In the existing responsive sweep, enter Handelsjournal from Handelsmotor through its visible \u00ab\u00c5bn handelsjournal\u00bb button, then wait for the journal heading before applying the existing width assertions. Limit this split to getting the responsive check onto the correct view. The original parked checkout stays preserved.. Acceptance: The browser reaches the actual Handelsjournal view through the trade panel and checks the journal for horizontal overflow at the nine existing widths. Back navigation, coverage text and pagination are outside this focused check.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_design_v1.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:26; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "ui/test/design-browser-reaches-journal-for-width-check",
+        "reserve_goal": "ui/test",
+        "reserve_reassessment": "54:26@6d23b3f4033d2d2a196d5fb698315db4b0baa9c69656cd4adf5f35f0c2f23857"
+      },
+      "replaced_by": [
+        "54:40"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 54,
+        "generation": 34,
+        "role": "mobile",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+        "dependencies": [],
+        "paths": [
+          "tests/browser_design_v1.py"
+        ],
+        "task": "Approved roadmap ui/test (F\u00e6lles browsertest). Exact existing source anchor: tests/browser_design_v1.py :: page.locator('nav [data-view='+target+']').click();page.wait_for_timeout(200). Implement only this bounded change: Reassess the journal navigation hunk from the preserved 54:28 diff as one mobile browser assertion. At the trade step of the existing fixture, set the viewport to 320 px, open Handelsjournal through its visible button in the trade panel, and wait for the journal heading before measuring document width. Replace the unreachable journal navigation step with this single-width check and retain the existing width sweep for the other sections.. Acceptance: At 320 px, clicking the trade panel button makes the Handelsjournal heading visible and the document fits the viewport within the existing one-pixel tolerance.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_design_v1.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 54:28; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "ui/test/mobile-journal-width-check-via-trade-panel-at-320",
+        "reserve_goal": "ui/test",
+        "reserve_reassessment": "54:28@921ffe68063cbcbfc4d2e228caecddb32436b893752feddb5b7e4e5c44769a13"
+      },
+      "replaced_by": [
+        "54:40"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 114,
+        "generation": 11,
+        "role": "data",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+        "dependencies": [],
+        "paths": [
+          "journal_projection.py",
+          "tests/test_app.py"
+        ],
+        "task": "Approved roadmap statistics/fills (Fills, kostpris og afstemning). Exact existing source anchor: journal_projection.py :: if r['verification']!='pluto':continue. Implement only this bounded change: Expose the already persisted order_id, candidate_id and nullable cycle_id as explicit journal provenance for owned Pluto-verified candidate execution events. Keep the normalized quantity and status evidence already in the event payload. Make the detail distinguish provider status-change time from receipt time and leave fill time, fill price, and cost basis unknown. Keep an accepted broker proposal as its own proposal event, even when it is near an execution event in time.. Acceptance: Seed normalized candidate execution events in the existing SQLite HTTP fixture. Assert that a verified filled-quantity record retains its order and cycle identity, an unlinked record has no invented cycle, and a record without status time uses observation time. Another user's events and test events stay out. A proposal marked accepted stays separate and carries proposal_not_fill.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_app.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "statistics/fills/journal-order-evidence-preserves-status-time-and-cycle",
+        "reserve_goal": "statistics/fills"
+      },
+      "replaced_by": [
+        "114:28"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 114,
+        "generation": 20,
+        "role": "data",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+        "dependencies": [],
+        "paths": [
+          "journal_projection.py",
+          "tests/test_app.py"
+        ],
+        "task": "Approved roadmap statistics/fills (Fills, kostpris og afstemning). Exact existing source anchor: journal_projection.py :: if r['verification']!='pluto':continue. Implement only this bounded change: Genvurd\u00e9r kun cycle_id-hunken i den bevarede 114:11-diff. S\u00e6t details.cycle_id p\u00e5 den eksisterende Pluto-ordrepost fra SQLite-r\u00e6kkens nullable cycle_id. Kolonnen har forrang, hvis et \u00e6ldre payload indeholder en anden v\u00e6rdi. Afgr\u00e6ns \u00e6ndringen til denne ene reference i journalens l\u00e6seprojektion.. Acceptance: L\u00e6s journalen fra den eksisterende midlertidige SQLite-fixture med \u00e9n verificeret observation med en lagret cyklus og \u00e9n med NULL. Begge payloads indeholder en vildledende cycle_id. Journalen viser henholdsvis den faktisk lagrede cyklus og null og bevarer den rapporterede m\u00e6ngde.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_app.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 114:11; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "statistics/fills/journal-uses-stored-cycle-link-for-pluto-order",
+        "reserve_goal": "statistics/fills",
+        "reserve_reassessment": "114:11@728bfd6b35c29f4f75a5fe15587c38560777d734c9c30bab67cb2522bbea4ea4"
+      },
+      "replaced_by": [
+        "114:28"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 114,
+        "generation": 22,
+        "role": "data",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+        "dependencies": [],
+        "paths": [
+          "journal_projection.py",
+          "tests/test_app.py"
+        ],
+        "task": "Approved roadmap statistics/fills (Fills, kostpris og afstemning). Exact existing source anchor: journal_projection.py :: if r['verification']!='pluto':continue. Implement only this bounded change: Genvurd\u00e9r kun NULL-tilf\u00e6ldet fra den bevarede 114:20-diff. N\u00e5r en Pluto-verificeret observations lagrede cycle_id er NULL, og dens gamle payload indeholder et cycle_id, skal l\u00e6seprojektionen erstatte den vildledende reference med null. Afgr\u00e6ns \u00e6ndringen til en journalpost uden lagret cyklustilknytning. Den bevarede checkout og det s\u00e6rskilte tilf\u00e6lde med en lagret cyklus indg\u00e5r ikke i denne genvurdering.. Acceptance: L\u00e6s \u00e9n verificeret ordreh\u00e6ndelse fra en midlertidig SQLite-fixture med NULL i kolonnen og en vildledende cyklus i payload. Forvent null i journalens details.cycle_id, samme rapporterede m\u00e6ngde og u\u00e6ndret lagret payload.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_app.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 114:20; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "statistics/fills/unlinked-pluto-observation-clears-legacy-cycle-claim",
+        "reserve_goal": "statistics/fills",
+        "reserve_reassessment": "114:20@0efdda3f19095bf15528e13f7a037769ffce2bf9bfb01bb78a1944426962ca76"
+      },
+      "replaced_by": [
+        "114:28"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 114,
+        "generation": 27,
+        "role": "data",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "da3ed7fa0ffb6733ad555c3d8b7bddb21bbe2d1a",
+        "dependencies": [],
+        "paths": [
+          "journal_projection.py",
+          "tests/test_app.py"
+        ],
+        "task": "Approved roadmap statistics/fills (Fills, kostpris og afstemning). Exact existing source anchor: journal_projection.py :: if r['verification']!='pluto':continue. Implement only this bounded change: Reassess the single conflicting legacy-payload case from the preserved 114:22 diff. When a Pluto-verified execution row has a NULL stored cycle_id and its decoded details already contain a cycle_id, clear that detail in the returned projection. Use one row in the app test's initialized temporary database and call journal_projection.read() directly with a fixed clock and Pluto/order filters. Leave the second fixture variant in the preserved checkout.. Acceptance: An owned partial-fill observation with NULL in the stored cycle column and an obsolete cycle ID in its payload remains visible with details.cycle_id set to null and its exact filled_quantity intact. The stored payload remains unchanged.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_app.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 114:22; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "statistics/fills/journal-ignores-legacy-cycle-when-stored-link-is-null",
+        "reserve_goal": "statistics/fills",
+        "reserve_reassessment": "114:22@9f0028d3a9d145c226d1020e17c6e608ed54f687d4a45c5558a2546375d26f38"
+      },
+      "replaced_by": [
+        "114:28"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 114,
+        "generation": 16,
+        "role": "desktop",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+        "dependencies": [],
+        "paths": [
+          "static/journal-ui.js",
+          "tests/browser_desktop_experience.py"
+        ],
+        "task": "Approved roadmap statistics/ui (Godkendt statistikvisning). Exact existing source anchor: static/journal-ui.js :: function event(e){return `<article class=\"journal-row. Implement only this bounded change: Vis \u00abUdf\u00f8rt antal\u00bb p\u00e5 Pluto-ordrer\u00e6kker fra journalens eksisterende execution-h\u00e6ndelser. Brug `details.filled_quantity` fra den normaliserede journalpost, og bevar decimalpr\u00e6cisionen som tekst. Vis \u00abIkke oplyst\u00bb ved null eller udeladt v\u00e6rdi, og vis eksplicit nul som nul. Bevar r\u00e6kkens status, tidsstempel og detaljevisning. Afgr\u00e6ns visningen til poster med execution-id, Pluto som kilde og ordre som type.. Acceptance: \u00c5bn Handelsjournal fra Handelsmotor i desktop-fixturen med et stubbet svar i appens eksisterende journalformat. En deludf\u00f8rt ordre viser 0.125, en observation med eksplicit nul viser 0, og en observation med null viser \u00abIkke oplyst\u00bb. Et godkendt forslag fra App/system har ingen udf\u00f8rt-m\u00e6ngde, og ordredetaljerne kan stadig \u00e5bnes.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_experience.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "statistics/ui/journal-shows-reported-filled-quantity",
+        "reserve_goal": "statistics/ui"
+      },
+      "replaced_by": [
+        "114:29"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 114,
+        "generation": 26,
+        "role": "desktop",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+        "dependencies": [
+          "114:23"
+        ],
+        "paths": [
+          "static/journal-ui.js",
+          "tests/browser_desktop_experience.py"
+        ],
+        "task": "Approved roadmap statistics/ui (Godkendt statistikvisning). Exact existing source anchor: static/journal-ui.js :: function event(e){return `<article class=\"journal-row. Implement only this bounded change: Genvurd\u00e9r kun visningen af en oplyst decimalstreng fra den bevarede 114:16-diff. Vis \u00abUdf\u00f8rt antal\u00bb p\u00e5 den eksisterende Pluto-ordrer\u00e6kke med numerisk execution-id, n\u00e5r detaljer indeholder en ikke-tom normaliseret filled_quantity-streng. Render den escapede streng direkte uden talkonvertering. Begr\u00e6ns browsertesten til \u00e9n stubbede deludf\u00f8rt ordreh\u00e6ndelse og dens eksisterende detaljevisning. Nul, manglende m\u00e6ngde og forslagsscenarier ligger uden for denne afgr\u00e6nsning.. Acceptance: Ved 1280 px \u00e5bnes Handelsjournal fra Handelsmotor. En normaliseret PARTIALLY_FILLED-h\u00e6ndelse viser hele decimalstrengen 0.12345678901234567890 under \u00abUdf\u00f8rt antal\u00bb, og den eksisterende detaljevisning kan stadig \u00e5bnes og viser den samme v\u00e6rdi.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_desktop_experience.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 114:16; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "statistics/ui/journal-renders-precise-partial-fill-quantity",
+        "reserve_goal": "statistics/ui",
+        "reserve_reassessment": "114:16@0026d194377affd9b55b4843e46847aa3ec751c7b27a1669caad24a8acda2c5b"
+      },
+      "replaced_by": [
+        "114:29"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 267,
+        "generation": 5,
+        "role": "desktop",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "200470416077bd32f9bbd6e75423acc66bc1e33b",
+        "dependencies": [],
+        "paths": [
+          "static/position-ui.js",
+          "tests/browser_positions.py"
+        ],
+        "task": "Approved roadmap stabilization/desktop (Desktop-kontrol). Exact existing source anchor: static/position-ui.js :: if(b.dataset.positionHistory){. Implement only this bounded change: Scope the asynchronous position-history result to the initiating report view, account, mode and history control. When the request starts inside the position dialog, also require the originating dialog contents to remain current and open. Use the same checks for failures so a late error cannot surface after closing the dialog or selecting another position.. Acceptance: Hold the first BTC depot's history response in the existing browser fixture. Close the dialog and open the second BTC depot before releasing the first response. The second depot remains selected. Cover stale rejection and confirm a current request still displays only its scoped history.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_positions.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "stabilization/desktop/position-history-cannot-reopen-superseded-dialog",
+        "reserve_goal": "stabilization/desktop"
+      },
+      "replaced_by": [
+        "267:10"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 267,
+        "generation": 8,
+        "role": "desktop",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "111e486c7e61cbe69f235e04165df62bcc24b596",
+        "dependencies": [],
+        "paths": [
+          "tests/browser_positions.py"
+        ],
+        "task": "Approved roadmap stabilization/desktop (Desktop-kontrol). Exact existing source anchor: tests/browser_positions.py :: assert 'Tidligere positionsposter' in page.locator('.positions-panel').inner_text(). Implement only this bounded change: Genvurd\u00e9r kun den afsluttende testhunk fra den bevarede 267:5-diff. Udvid det eksisterende browserforl\u00f8b efter den fulde rapport, der lukker test-main.TSLA. \u00c5bn \u00abTidligere positionsposter\u00bb, og brug den lukkede TSLA-positions egen historikknap. Afgr\u00e6ns testen til dette almindelige opslag fra rapporten.. Acceptance: TSLA er fjernet fra den aktive positionsliste. Historikdialogen viser den lukkede TSLA-post og den tidligere TSLA-post for test-main. Kontroll\u00e9r den pr\u00e6cise depot- og positionsidentitet i det lokale historikkald og bevar fixturens kontrol af, at ingen forslag blev oprettet.. Focused existing tests: Use the existing headless fixture entry point for tests/browser_positions.py; report missing browser prerequisites truthfully. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 267:5; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "stabilization/desktop/closed-position-history-opens-from-report",
+        "reserve_goal": "stabilization/desktop",
+        "reserve_reassessment": "267:5@436e725211c2623f4d7c2c6c8f5f766a9c4d8198ca80840d9b34a5b4ab68d023"
+      },
+      "replaced_by": [
+        "267:10"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 14,
+        "generation": 32,
+        "role": "data",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "e611ee2a2ed56720ae0324ede9f325ab004612ab",
+        "dependencies": [],
+        "paths": [
+          "hotwatch_engine.py",
+          "tests/test_hotwatch_engine.py"
+        ],
+        "task": "Approved roadmap resources/scale (Worker- og k\u00f8kapacitet). Exact existing source anchor: hotwatch_engine.py :: SELECT count(*) FROM hw_sessions WHERE lease_owner IS NOT NULL AND lease_until>?. Implement only this bounded change: Tilf\u00f8j \u00e9t idempotent partialindeks i hotwatch_engine.init() p\u00e5 hw_sessions(lease_until) med pr\u00e6dikatet lease_owner IS NOT NULL. P\u00e5 checkoutens SQLite-skema bruger claim() en fuld tabelskanning til at t\u00e6lle optagne leases, mens samme foresp\u00f8rgsel med indekset bruger et intervalopslag. Bevar den autoritative opt\u00e6lling i writer-transaktionen og dens strenge tidsgr\u00e6nse.. Acceptance: En SQLite-test med afsluttede historikr\u00e6kker og leases f\u00f8r, p\u00e5 og efter den injicerede tidsgr\u00e6nse viser, at opt\u00e6llingen kun omfatter r\u00e6kker med token og lease efter gr\u00e6nsen. EXPLAIN QUERY PLAN viser et intervalopslag via det nye indeks, og claim() returnerer fortsat ingen ny lease, n\u00e5r de eksisterende leases fylder kapaciteten.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_hotwatch_engine.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "resources/scale/index-hotwatch-occupied-lease-count",
+        "reserve_goal": "resources/scale"
+      },
+      "replaced_by": [
+        "14:37"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    },
+    {
+      "row": {
+        "issue": 14,
+        "generation": 35,
+        "role": "data",
+        "priority": 1,
+        "status": "ready",
+        "base_branch": "codex/architecture-reset-20261126",
+        "base_sha": "18937bec961e351e338e303853ae18928e1b68c7",
+        "dependencies": [
+          "14:33"
+        ],
+        "paths": [
+          "tests/test_hotwatch_engine.py"
+        ],
+        "task": "Approved roadmap resources/scale (Worker- og k\u00f8kapacitet). Exact existing source anchor: tests/test_hotwatch_engine.py :: def test_leases_protect_pause_and_worker_restart(self):. Implement only this bounded change: Genvurd\u00e9r kun kapacitetsdelen af den bevarede 14:32-diff som \u00e9n selvst\u00e6ndig SQLite-accepttest af engine.claim(). Genbrug den eksisterende HotWatch-fixture med \u00e9n ledig, forfalden watch og s\u00e6t samtidighedsgr\u00e6nsen til \u00e9n. Opret tre andre watches, som ikke er forfaldne. Giv \u00e9n et token med fremtidig udl\u00f8bstid, \u00e9n et udl\u00f8bet token og \u00e9n en fremtidig lease_until uden token. Fors\u00f8g at claime den forfaldne watch. Fjern derefter kun tokenet fra den f\u00f8rste watch og gentag ved samme injicerede tidspunkt. Afgr\u00e6ns testen til opt\u00e6llingen af optagne pladser.. Acceptance: Det f\u00f8rste kald returnerer None og efterlader den forfaldne watch uden token. Det andet kald tildeler netop den forfaldne watch et token og rapporterer diagnostic_occupied_workers lig med 1. Testen bruger checkoutens eksisterende SQLite-skema og kr\u00e6ver hverken indeks\u00e6ndringen eller det blokerede arbejde fra 14:32.. Focused existing tests: python3 -m unittest discover -s tests -p 'test_hotwatch_engine.py'. Inspect current integrated code before editing; preserve accepted behavior, tenant isolation, identity, risk gates, design and provider contracts. No production, broker mutation, credentials, network, deployment, workflow/controller changes or unrelated refactor. No fabricated provider evidence. ESCAPE_DRAFT_READY only after actual focused tests pass. This is a smaller independently testable reassessment of parked 14:32; original checkout/checkpoint remains intact and is not accepted or restarted by this generation.",
+        "local_review": true,
+        "local_repair": true,
+        "follow_base": true,
+        "reserve_plan_id": "resources/scale/hotwatch-capacity-counts-only-current-owned-leases",
+        "reserve_goal": "resources/scale",
+        "reserve_reassessment": "14:32@f51acb8cab8424be939239ec7463608815fe05ad54a7d1da1a517a70a98941a2"
+      },
+      "replaced_by": [
+        "14:37"
+      ],
+      "classification": "consolidated unresolved work order",
+      "product_acceptance": "Not accepted; all original requirements retained in replacement. Original local evidence preserved."
+    }
+  ],
+  "last_cleanup_source_blob": "81c08c84d841a87ac52830650290fd6c17b5a1d6"
+}
