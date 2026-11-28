@@ -1,5 +1,5 @@
 """V2.2 synthetic acceptance scenarios. All databases are disposable."""
-import copy,hashlib,json,tempfile,unittest
+import copy,hashlib,json,sqlite3,tempfile,unittest
 from unittest.mock import patch
 import app,report_ingest,report_validation,mcp_reports,intel_workflows as flow,report_v2
 from test_position_reports import full_positions
@@ -14,6 +14,55 @@ def merc_report(mode=False):
 
 def observation(report=None,oid='SYNTHETIC-MERC-OBS-1',at='2026-11-03T10:05:00Z'):
  r=report or merc_report();return {'observation_id':oid,'report_id':r['report_id'],'candidate_id':r['candidates'][0]['candidate_id'],'is_test':r['is_test'],'observed_at':at,'deadline':'2099-11-03T11:00:00Z','instrument':{'ticker':'MERC','exchange':'NASDAQ','asset_id':'synthetic-MERC'},'market':{'price':{'amount':'7.5','currency':'USD'},'price_at':at,'bid':{'amount':'7.4','currency':'USD'},'bid_at':at,'ask':{'amount':'7.6','currency':'USD'},'ask_at':at,'spread':{'amount':'0.2','currency':'USD'},'spread_percent':'2.6667','volume':'1000','volume_at':at,'volume_basis':'session cumulative · synthetic','intraday_percent':'1.5','momentum':'unknown','venue':'SYNTHETIC','feed_type':'synthetic fixture','delay_seconds':None,'verification':'verified','price_source':'pluto','source_ids':['synthetic-source']},'recent_trades':[],'decision':None,'next_trigger':'Syntetisk nyhedskontrol','position_ref':{'portfolio_id':'test-main','position_id':'test-main.TSLA'},'order_ids':['synthetic-merc-stop'],'position_action':None,'sources':copy.deepcopy(r['sources']),'note':'KUN SYNTETISK ACCEPTTEST I MIDLERTIDIG DATABASE. Ingen reel MERC-kurs eller handel.'}
+
+class ObservationTimeline(unittest.TestCase):
+ def test_timeline_price_delta_requires_matching_known_sources(self):
+  tmp=tempfile.TemporaryDirectory()
+  self.addCleanup(tmp.cleanup)
+  db=sqlite3.connect(tmp.name+'/observations.db')
+  self.addCleanup(db.close)
+  db.row_factory=sqlite3.Row
+  db.execute('PRAGMA foreign_keys=ON')
+  db.execute('CREATE TABLE users(id INTEGER PRIMARY KEY)')
+  db.execute('INSERT INTO users VALUES(1)')
+  report_ingest.init(db)
+  db.commit()
+  def connect():return db
+  report=merc_report(mode=True)
+  self.assertEqual(report_ingest.save(connect,1,report)[0],201)
+  sources=['pluto','eodhd','eodhd','other','unknown','unknown',None,None]
+  expected=[]
+  for i,source in enumerate(sources):
+   at=f'2026-11-03T10:{5+i:02d}:00Z'
+   d=observation(report,f'synthetic-price-source-{i}',at)
+   market=d['market']
+   market.update(price_source=source,volume=str(1000+100*i))
+   market['price']['amount']=str(8+i)
+   market['spread']['amount']=f'{i}.2'
+   market['ask']['amount']=f'{7+i}.6'
+   if source is None:
+    # Older stored payloads can lack a field required by current ingestion.
+    del market['price_source']
+    payload=flow.canonical(d)
+    with connect() as c:
+     c.execute('''INSERT INTO hot_watch_observations
+      (user_id,is_test,observation_id,candidate_id,report_row_id,observed,payload,digest,received)
+      SELECT user_id,is_test,?,?,id,?,?,?,? FROM ingested_reports WHERE user_id=1 AND report_id=?''',
+      (d['observation_id'],d['candidate_id'],flow.stamp(at).timestamp(),payload,
+       hashlib.sha256(payload.encode()).hexdigest(),at,d['report_id']))
+   else:
+    self.assertEqual(flow.record(connect,1,d)[0],201)
+   expected.append(d)
+
+  db.execute('PRAGMA query_only=ON')
+  timeline=flow.watch(connect,1,is_test=True)['groups'][0]['observations'][::-1]
+  self.assertEqual([row['data'] for row in timeline],expected)
+  for i,row in enumerate(timeline):
+   with self.subTest(previous=sources[i-1] if i else None,current=sources[i]):
+    changes=row['changes']
+    self.assertEqual(changes['price'],{'amount':'1','currency':'USD'} if i==2 else None)
+    self.assertEqual(changes['spread'],{'amount':'1.0','currency':'USD'} if i else None)
+    self.assertEqual(changes['volume'],'100' if i else None)
 
 class Workflows(unittest.TestCase):
  def setUp(self):

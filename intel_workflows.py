@@ -230,6 +230,9 @@ def observation_view(d,previous=None):
         for field,at in [('price','price_at'),('spread','bid_at')]:
             # Spread comparisons require paired bid/ask times; no interpolation.
             comparable=m['verification']==old['verification']=='verified' and m.get(at) and old.get(at) and stamp(m[at])>stamp(old[at])
+            if field=='price':
+                source=m.get('price_source')
+                comparable=comparable and source and source!='unknown' and source==old.get('price_source')
             if field=='spread':comparable=comparable and m['bid_at']==m['ask_at'] and old['bid_at']==old['ask_at']
             if comparable:changes[field]=delta(m[field],old[field])
         if m['verification']==old['verification']=='verified' and m['volume_basis'] and m['volume_basis']==old['volume_basis'] and m['volume'] is not None and old['volume'] is not None and m['volume_at'] and old['volume_at'] and stamp(m['volume_at'])>stamp(old['volume_at']):
